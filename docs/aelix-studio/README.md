@@ -71,3 +71,16 @@ not a bit-for-bit reproducible build across different uv releases.
 
 See [bootstrap-status.md](bootstrap-status.md) for the original preparation and
 [distribution-status.md](distribution-status.md) for this implementation's evidence.
+
+## Aelix brand preservation
+
+The home header uses the official `mark.svg` unchanged, beside the UI text
+`Aelix Studio`. The compact header uses the mark alone. No custom badge, black
+backplate, redrawn paths, recoloring, skew, crop, or effects are applied.
+The SVG is copied byte-for-byte to `packages/desktop/src/renderer/assets/logo.svg`.
+
+Canonical source: [aelix-ai/docs/assets/brand](https://github.com/handochan/aelix-ai/tree/7d0a2c0f74c542492f65f3a43965452c4333b8e6/docs/assets/brand).
+Follow its `BRAND.md`; preserve the supplied mark and wordmark geometry.
+Source `mark.svg` Git blob: `4973c209e572fcf4c52b0f3ece20689d455aeedc`.
+SHA-256: `db6ffcd9309bcf9ea704c75073941ca7463bba7b11f8ab0e17ea41d1e27c3a76`.
+Raster application/PWA assets are proportional renders of this same mark.

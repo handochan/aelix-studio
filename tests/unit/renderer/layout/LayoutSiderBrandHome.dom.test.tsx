@@ -199,10 +199,10 @@ describe('Layout sider brand Home button', () => {
   it('clicking the logo icon counts toward the devtools easter-egg and never navigates', () => {
     currentPathname = '/settings/about';
     sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
-    const { container } = renderLayout();
+    renderLayout();
 
-    // The icon is the SVG-wrapping div (bg-black), separate from the wordmark.
-    const icon = container.querySelector('.bg-black') as HTMLElement;
+    // Clicking the official mark bubbles to its existing devtools shortcut.
+    const icon = screen.getByRole('img', { name: 'common.appName' });
     expect(icon).toBeTruthy();
     for (let i = 0; i < 4; i++) fireEvent.click(icon);
     expect(openDevTools).toHaveBeenCalled();

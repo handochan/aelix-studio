@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import studioLogo from '@/renderer/assets/logos/brand/studio-home.svg';
+import studioLogo from '@/renderer/assets/logo.svg';
 import { ipcBridge } from '@/common';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
 import PwaPullToRefresh from '@/renderer/components/layout/PwaPullToRefresh';
@@ -400,7 +400,7 @@ const Layout: React.FC<{
                 )}
               >
                 <div
-                  className={classNames('bg-black shrink-0 size-32px relative rd-0.5rem', {
+                  className={classNames('shrink-0 size-32px relative', {
                     '!size-24px': collapsed,
                   })}
                   onClick={onClick}

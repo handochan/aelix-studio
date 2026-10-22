@@ -27,7 +27,7 @@ Verified 2026-10-23 (Asia/Seoul), macOS Apple Silicon.
   succeeds, including actual Aelix child startup and approval-bridge ready check.
 - Packaged runtime inside `out/mac-arm64/Aelix Studio.app/Contents/Resources`
   passes the same real session creation check.
-- Packaged app: centered Aelix Studio home badge, default selected Aelix, isolated test
+- Packaged app: unaltered official Aelix mark beside the Aelix Studio text, default selected Aelix, isolated test
   userData, app ID and ad-hoc signature (`codesign --verify --deep --strict`).
 - Packaged UI real model call: configured OpenRouter / DeepSeek V4.1 Flash 1017
   returned `STUDIO_RUNTIME_OK` through the bundled Aelix. Screenshot evidence:
