@@ -49,7 +49,7 @@ JavaScript; it does not produce an installer. `studio:dist` performs the native
 runtime preparation and distribution build. `afterPack` rejects a missing runtime.
 Cross compilation is intentionally unsupported for the Python bundle: build on
 each target host. macOS arm64 is the accepted target; macOS x64/Linux have native
-build paths but no packaged acceptance here. Windows needs a permission transport.
+build paths; see the updated verification record for local container evidence. Windows x64 has a native build/permission transport and installer CI path; actual Windows acceptance is pending.
 
 Generated runtimes stay in `resources/bundled-aelix/<platform>-<arch>` and ship
 outside ASAR. `manifest.json` records resolved versions, uv version and lock hash;
@@ -64,13 +64,17 @@ not a bit-for-bit reproducible build across different uv releases.
 - Development changes are on `chore/aelix-studio-bootstrap`. No main merge or tag
   release is implied by a branch push.
 - `node scripts/aelix-studio/checkUpstream.mjs` compares stable upstream tag/SHA.
-  The manual/PR workflow is read-only; there is no schedule or automatic merge.
+  The manual/PR workflow records a JSON report and fails on drift; there is no schedule or automatic merge.
 - Adopt upstream releases on review branches; keep AionCore unchanged initially.
 - Preserve upstream LICENSE/NOTICE. Signed/notarized installers and update release
   metadata require a separate release process and acceptance.
 
 See [bootstrap-status.md](bootstrap-status.md) for the original preparation and
 [distribution-status.md](distribution-status.md) for this implementation's evidence.
+
+See [Windows support](windows.md) and [self-hosting/network review](self-hosting.md)
+for the follow-up changes. [distribution-status.md](distribution-status.md) distinguishes
+implementation from actual platform acceptance.
 
 ## Aelix brand preservation
 

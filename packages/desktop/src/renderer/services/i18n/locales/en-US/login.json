@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Sign In",
   "brand": "Aelix Studio",
-  "subtitle": "Welcome back, please sign in to your account",
+  "subtitle": "Sign in to this self-hosted server. No external account required.",
   "username": "Username",
   "usernamePlaceholder": "Enter your username",
   "password": "Password",
@@ -13,8 +13,8 @@
   "showPassword": "Show password",
   "hidePassword": "Hide password",
   "languageToggle": "Change language",
-  "footerPrimary": "Transform your command-line AI",
-  "footerSecondary": "Modern & Efficient",
+  "footerPrimary": "Self-hosted workspace",
+  "footerSecondary": "Server authentication",
   "errors": {
     "empty": "Please enter username and password",
     "invalidCredentials": "Invalid username or password",

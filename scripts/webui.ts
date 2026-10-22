@@ -24,7 +24,10 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { startWebHost } from '@aionui/web-host';
+import { startBackend, startWebHost } from '@aionui/web-host';
+import rootPackage from '../package.json';
+import { bootstrapStudioRuntime } from '../packages/desktop/src/process/studio/runtime';
+import { ensureStudioAdmin } from '../packages/desktop/src/process/studio/standalone';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
 
 // Aligned with packages/desktop/src/common/config/constants.ts WEBUI_DEFAULT_PORT.
@@ -56,9 +59,9 @@ const getFlag = (name: string): string | undefined => {
  *
  *   --data-dir <path>       CLI override (highest priority)
  *   $AIONUI_DATA_DIR        env override (same effect)
- *   otherwise               ~/.aionui-web         (production)
- *                           ~/.aionui-web-dev     (dev, default)
- *                           ~/.aionui-web-dev-2   (dev + AIONUI_MULTI_INSTANCE=1)
+ *   otherwise               ~/.aelix-studio-web         (production)
+ *                           ~/.aelix-studio-web-dev     (dev, default)
+ *                           ~/.aelix-studio-web-dev-2   (dev + AIONUI_MULTI_INSTANCE=1)
  *
  * Why a dedicated `-web` name, not the same `~/.aionui[-dev]` that Electron
  * uses: on macOS, Electron's getDataPath() (packages/desktop/src/process/utils/
@@ -87,7 +90,7 @@ function resolveBackendDataDir(): string {
   }
   const suffix =
     process.env.NODE_ENV === 'production' ? '' : process.env.AIONUI_MULTI_INSTANCE === '1' ? '-dev-2' : '-dev';
-  const dir = path.join(os.homedir(), `.aionui-web${suffix}`);
+  const dir = path.join(os.homedir(), `.aelix-studio-web${suffix}`);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -183,22 +186,6 @@ function augmentPathWithNvm(): void {
   }
 }
 
-/**
- * Read the WebUI admin username from backend. Returns 'admin' as a best-effort
- * fallback — useful when the backend is unreachable or the SQLite users row
- * has not been seeded yet.
- */
-async function fetchAdminUsername(backendPort: number): Promise<string> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${backendPort}/api/auth/internal/users/system`);
-    if (!res.ok) return 'admin';
-    const json = (await res.json()) as { data?: { username?: string } };
-    return json.data?.username || 'admin';
-  } catch {
-    return 'admin';
-  }
-}
-
 async function main(): Promise<void> {
   augmentPathWithNvm();
   runPackageIfNeeded();
@@ -223,10 +210,32 @@ async function main(): Promise<void> {
   console.log('[webui] backend bin:', backendBin);
   console.log(`[webui] launching  : port=${port} allowRemote=${allowRemote}`);
 
+  // Provision on a private loopback backend, stop it, then expose authenticated APIs.
+  const setup = await startBackend({
+    app: { version: rootPackage.version, isPackaged: true, resourcesPath: repoRoot, userDataPath: workDir },
+    resolveBackend: () => backendBin,
+    dataDir: workDir,
+    logDir,
+    dirs: { cacheDir: workDir, workDir, logDir },
+    local: true,
+  });
+  try {
+    await bootstrapStudioRuntime(setup.port, path.join(repoRoot, 'resources'), workDir);
+    const admin = await ensureStudioAdmin(setup.port);
+    console.log(`Login username: ${admin.username}`);
+    if (admin.initialPassword) {
+      console.log(`Initial admin username: ${admin.username}`);
+      console.log(`Initial admin password: ${admin.initialPassword}`);
+      console.log('(change them after first login)');
+    }
+  } finally {
+    await setup.stop();
+  }
+
   const handle = await startWebHost({
     app: {
-      version: '0.0.0',
-      isPackaged: false,
+      version: rootPackage.version,
+      isPackaged: true,
       resourcesPath: repoRoot,
       userDataPath: workDir,
     },
@@ -250,47 +259,9 @@ async function main(): Promise<void> {
   });
 
   console.log('');
-  console.log('AionUi WebUI is ready');
+  console.log('Aelix Studio WebUI is ready');
   console.log(`  Local  : ${handle.localUrl}`);
   if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
-
-  // If SQLite has no admin yet (fresh install), seed one via backend and print
-  // the plaintext credentials. Mirrors webuiBridge.ts:maybeSeedInitialPassword
-  // for the Electron path — SQLite is now the single source of truth.
-  //
-  // Username is surfaced explicitly: legacy dev databases may have the seeded
-  // user as `system` instead of `admin`, and Electron users can rename it via
-  // Settings. Always read it from the backend rather than assuming a value.
-  try {
-    const statusRes = await fetch(`http://127.0.0.1:${handle.backendPort}/api/auth/status`);
-    if (statusRes.ok) {
-      const status = (await statusRes.json()) as { needs_setup?: boolean };
-      if (status.needs_setup === true) {
-        const resetRes = await fetch(`http://127.0.0.1:${handle.backendPort}/api/webui/reset-password`, {
-          method: 'POST',
-        });
-        if (resetRes.ok) {
-          const payload = (await resetRes.json()) as { data?: { new_password?: string } };
-          const initialPassword = payload.data?.new_password;
-          if (initialPassword) {
-            const adminUsername = await fetchAdminUsername(handle.backendPort);
-            console.log('');
-            console.log(`Initial admin username: ${adminUsername}`);
-            console.log(`Initial admin password: ${initialPassword}`);
-            console.log('(change them after first login)');
-          }
-        }
-      } else {
-        // Credentials already exist; just remind the user what username to use.
-        const adminUsername = await fetchAdminUsername(handle.backendPort);
-        console.log('');
-        console.log(`Login username: ${adminUsername}`);
-        console.log('(forgot the password? run `bun run resetpass` to generate a new one)');
-      }
-    }
-  } catch (err) {
-    console.warn('[webui] could not query admin credentials:', err);
-  }
 
   if (autoOpenBrowser) {
     const openResult = openBrowserUrl(handle.localUrl);

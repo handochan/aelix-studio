@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Iniciar sesión",
   "brand": "Aelix Studio",
-  "subtitle": "Bienvenido de nuevo, inicia sesión en tu cuenta",
+  "subtitle": "Inicia sesión en este servidor autoalojado. No se necesita una cuenta externa.",
   "username": "Usuario",
   "usernamePlaceholder": "Ingresa tu usuario",
   "password": "Contraseña",
@@ -13,8 +13,8 @@
   "showPassword": "Mostrar contraseña",
   "hidePassword": "Ocultar contraseña",
   "languageToggle": "Cambiar idioma",
-  "footerPrimary": "Transforma tu IA de línea de comandos",
-  "footerSecondary": "Moderno y eficiente",
+  "footerPrimary": "Espacio de trabajo autoalojado",
+  "footerSecondary": "Autenticación del servidor",
   "errors": {
     "empty": "Ingresa usuario y contraseña",
     "invalidCredentials": "Usuario o contraseña inválidos",

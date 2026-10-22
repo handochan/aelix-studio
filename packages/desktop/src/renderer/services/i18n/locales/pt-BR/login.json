@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Entrar",
   "brand": "Aelix Studio",
-  "subtitle": "Bem-vindo de volta, por favor entre na sua conta",
+  "subtitle": "Entre neste servidor auto-hospedado. Nenhuma conta externa é necessária.",
   "username": "Nome de usuário",
   "usernamePlaceholder": "Digite seu nome de usuário",
   "password": "Senha",
@@ -13,8 +13,8 @@
   "showPassword": "Mostrar senha",
   "hidePassword": "Ocultar senha",
   "languageToggle": "Mudar idioma",
-  "footerPrimary": "Transforme sua IA de linha de comando",
-  "footerSecondary": "Moderno e Eficiente",
+  "footerPrimary": "Espaço de trabalho auto-hospedado",
+  "footerSecondary": "Autenticação do servidor",
   "errors": {
     "empty": "Por favor, insira nome de usuário e senha",
     "invalidCredentials": "Nome de usuário ou senha inválidos",

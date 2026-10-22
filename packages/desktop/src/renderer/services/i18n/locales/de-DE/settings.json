@@ -830,7 +830,7 @@
   "bugReportSubmit": "Einreichen",
   "bugReportCancel": "Abbrechen",
   "bugReportSuccess": "Bericht eingereicht, vielen Dank für dein Feedback",
-  "bugReportError": "Einreichung fehlgeschlagen, bitte später erneut versuchen",
+  "bugReportError": "Online-Feedback ist in dieser selbst gehosteten Version deaktiviert. Diagnosedaten bleiben lokal.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote-Zugriff",
   "bugReportModuleMcp": "MCP & Tools",
@@ -1414,5 +1414,6 @@
   "crossSessionMessageDesc": "Erlaubt Agenten, Nachrichten an Ihre anderen Unterhaltungen zu senden. Beim Ausschalten wird auch die @@-Erwähnung im Eingabefeld deaktiviert.",
   "crossSessionMessageDisabledBanner": "Nachrichten zwischen Unterhaltungen sind aus, die @@-Erwähnung ist nicht verfügbar.",
   "crossSessionMessageResume": "Wieder einschalten",
-  "crossSessionMessageUpdateFailed": "Einstellung konnte nicht aktualisiert werden"
+  "crossSessionMessageUpdateFailed": "Einstellung konnte nicht aktualisiert werden",
+  "studioRemoteAccessDisabled": "Der Desktop-Backend-Zugriff ist auf diesen Computer beschränkt. Verwenden Sie für Fernzugriff das eigenständige Studio WebUI mit Authentifizierung."
 }

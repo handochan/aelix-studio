@@ -138,7 +138,8 @@
     "printedToConsole": "اطلاعات عنصر در کنسول ثبت شد",
     "inspectElement": "بازرسی عنصر",
     "inspectElementEnable": "فعال‌سازی بازرس عنصر",
-    "inspectElementDisable": "غیرفعال‌سازی بازرس عنصر"
+    "inspectElementDisable": "غیرفعال‌سازی بازرس عنصر",
+    "title": "پیش‌نمایش HTML"
   },
   "ppt": {
     "loading": "در حال شروع پیش‌نمایش PPT...",
@@ -176,5 +177,6 @@
   "zoomIn": "بزرگ‌نمایی",
   "zoomOut": "کوچک‌نمایی",
   "zoomReset": "بازنشانی نما",
-  "diagramZoomHint": "برای بزرگنمایی اسکرول کنید • برای جابهجایی بکشید • ESC برای بستن"
+  "diagramZoomHint": "برای بزرگنمایی اسکرول کنید • برای جابهجایی بکشید • ESC برای بستن",
+  "remoteImage": "باز کردن تصویر راه دور"
 }

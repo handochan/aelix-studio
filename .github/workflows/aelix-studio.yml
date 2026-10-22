@@ -25,17 +25,71 @@ jobs:
       - run: bun run test
       - run: bun run package
   native-runtime:
-    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, ubuntu-22.04, windows-2022]
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
       - uses: astral-sh/setup-uv@v6
         with:
           version: '0.11.19'
-      - run: python3 scripts/aelix-studio/prepareRuntime.py
+      - run: python scripts/aelix-studio/prepareRuntime.py
+      - run: python -m unittest discover -s tests/studio -p "test_*.py"
       - name: Relocate the complete runtime and open a real ACP session
+        run: python scripts/aelix-studio/smokeRuntime.py --relocate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: runtime-receipt-${{ matrix.os }}
+          path: resources/bundled-aelix/*/manifest.json
+  windows-package:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.19'
+      - run: bun install --frozen-lockfile
+      - run: bun run studio:dist
+      - name: Verify the packaged Windows runtime
+        run: python scripts/aelix-studio/smokeRuntime.py out/win-unpacked/resources/bundled-aelix/win32-x64 --relocate
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aelix-studio-windows-x64
+          path: out/*-win-*.exe
+  offline-webui:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t aelix-studio:test .
+      - name: Start with no external network and verify API authentication
         run: |
-          arch=$(uname -m)
-          if [ "$arch" = "aarch64" ]; then arch=arm64; fi
-          if [ "$arch" = "x86_64" ]; then arch=x64; fi
-          cp -R "resources/bundled-aelix/darwin-$arch" "$RUNNER_TEMP/Aelix Studio runtime"
-          python3 scripts/aelix-studio/smokeRuntime.py "$RUNNER_TEMP/Aelix Studio runtime"
+          docker run --detach --network none --name studio-offline aelix-studio:test
+          docker exec studio-offline bun -e '
+            let ready = false;
+            for (let i = 0; i < 90; i++) {
+              try { if ((await fetch("http://127.0.0.1:3000/")).ok) { ready = true; break; } } catch {}
+              await Bun.sleep(1000);
+            }
+            if (!ready) throw new Error("WebUI did not become ready");
+            const login = await fetch("http://127.0.0.1:3000/login");
+            const denied = await fetch("http://127.0.0.1:3000/api/agents/management", { headers: { "x-aionui-internal": "1" } });
+            if (login.status !== 200 || denied.status !== 401) throw new Error("WebUI authentication boundary failed");
+          '
+      - name: Open a real bundled ACP session without external networking
+        run: docker run --rm --network none --entrypoint /app/resources/bundled-aelix/linux-x64/python/bin/python3 aelix-studio:test /app/scripts/aelix-studio/smokeRuntime.py --relocate
+      - if: always()
+        run: docker rm --force studio-offline || true

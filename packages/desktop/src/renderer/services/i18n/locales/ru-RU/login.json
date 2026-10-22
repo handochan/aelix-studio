@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio — Вход",
   "brand": "Aelix Studio",
-  "subtitle": "Добро пожаловать! Войдите в свой аккаунт",
+  "subtitle": "Войдите на этот собственный сервер. Внешняя учётная запись не требуется.",
   "username": "Имя пользователя",
   "usernamePlaceholder": "Введите имя пользователя",
   "password": "Пароль",
@@ -13,8 +13,8 @@
   "showPassword": "Показать пароль",
   "hidePassword": "Скрыть пароль",
   "languageToggle": "Сменить язык",
-  "footerPrimary": "Преобразуйте свой ИИ командной строки",
-  "footerSecondary": "Современно и эффективно",
+  "footerPrimary": "Рабочая среда на своём сервере",
+  "footerSecondary": "Аутентификация на сервере",
   "errors": {
     "empty": "Введите имя пользователя и пароль",
     "invalidCredentials": "Неверное имя пользователя или пароль",

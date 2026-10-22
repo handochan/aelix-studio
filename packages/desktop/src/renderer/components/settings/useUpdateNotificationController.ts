@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 import type { AutoUpdateStatus, UpdateDownloadProgressEvent } from '@/common/update/updateTypes';
 import { uuid } from '@/common/utils';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
@@ -59,7 +60,7 @@ const reduceNotificationState = (
   event: UpdateNotificationEvent
 ): UpdateNotificationState => updateNotificationReducer(current, event).state;
 
-const RELEASES_PAGE_URL = 'https://github.com/iOfficeAI/AionUi/releases';
+const RELEASES_PAGE_URL = 'https://github.com/handochan/aelix-studio/releases';
 
 const getVersionLabelFromState = (state: UpdateNotificationState): string =>
   state.updateInfo?.version || state.autoUpdateInfo?.version || '';
@@ -68,7 +69,7 @@ export const useUpdateNotificationController = () => {
   const { t, i18n } = useTranslation();
   const [state, dispatchState] = useReducer(reduceNotificationState, undefined, createInitialState);
   const stateRef = useRef(state);
-  const restoreDownloadedPendingRef = useRef(true);
+  const restoreDownloadedPendingRef = useRef<boolean>(STUDIO_NETWORK_POLICY.automaticUpdates);
   const pendingAutoAvailableRef = useRef<AutoUpdateStatus | null>(null);
   const dispatch = useCallback((event: UpdateNotificationEvent) => {
     stateRef.current = reduceNotificationState(stateRef.current, event);
@@ -199,7 +200,7 @@ export const useUpdateNotificationController = () => {
   }, [dispatchAutoAvailable]);
 
   useEffect(() => {
-    void restoreDownloadedUpdate();
+    if (STUDIO_NETWORK_POLICY.automaticUpdates) void restoreDownloadedUpdate();
   }, [restoreDownloadedUpdate]);
 
   useEffect(() => {

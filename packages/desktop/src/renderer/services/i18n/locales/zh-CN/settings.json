@@ -840,7 +840,7 @@
   "bugReportSubmit": "提交",
   "bugReportCancel": "取消",
   "bugReportSuccess": "问题已提交，感谢反馈",
-  "bugReportError": "提交失败，请稍后重试",
+  "bugReportError": "此自托管版本已停用在线反馈，诊断信息保留在本地。",
   "bugReportModuleSkills": "Skills 与插件",
   "bugReportModuleWebui": "WebUI 与远程连接",
   "bugReportModuleMcp": "MCP 与工具",
@@ -1415,5 +1415,6 @@
   "crossSessionMessageDesc": "允许 Agent 向你的其他会话发送消息。关闭后，输入框的 @@ 会话提及与投递能力同时停用。",
   "crossSessionMessageDisabledBanner": "跨会话消息已关闭，输入框的 @@ 会话提及不可用。",
   "crossSessionMessageResume": "重新开启",
-  "crossSessionMessageUpdateFailed": "跨会话消息设置更新失败"
+  "crossSessionMessageUpdateFailed": "跨会话消息设置更新失败",
+  "studioRemoteAccessDisabled": "桌面后端仅限本机共享。远程访问请使用启用身份验证的独立 Studio WebUI。"
 }

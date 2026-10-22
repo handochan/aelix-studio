@@ -95,6 +95,8 @@ export type BackendLaunchOptions = {
    * process.env and will likely report wrong/empty dirs.
    */
   dirs?: BackendDirConfig;
+  /** Embedded desktop/bootstrap only. Public WebUI must use authenticated mode. */
+  local?: boolean;
 };
 
 export type BackendHandle = {
@@ -168,6 +170,7 @@ export type BackendStartupErrorDetails = {
 };
 
 export type BackendStartOptions = {
+  localMode?: boolean;
   allowPendingOnHealthTimeout?: boolean;
   onHealthTimeout?: (error: BackendStartupError) => Promise<void> | void;
   onPendingExit?: (error: BackendStartupError) => Promise<void> | void;
@@ -227,7 +230,12 @@ export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
   // CLIs spawned under aioncore (e.g. cursor-agent) ship natives under
   // build/Release only, and node-gyp-build skips that directory for any
   // non-empty value, aborting the agent before the ACP handshake (#4070).
-  const { PREBUILDS_ONLY: _prebuildsOnly, ...parentEnv } = process.env;
+  const {
+    PREBUILDS_ONLY: _prebuildsOnly,
+    SENTRY_DSN: _sentryDsn,
+    SENTRY_AUTH_TOKEN: _sentryToken,
+    ...parentEnv
+  } = process.env;
   if (!dirs) return parentEnv;
   return {
     ...parentEnv,
@@ -665,7 +673,7 @@ export class BackendLifecycleManager {
     const args = buildSpawnArgs({
       port: this._port,
       dbPath,
-      local: true,
+      local: options?.localMode ?? true,
       parentPid: process.pid,
       logDir,
       workDir: dirs?.workDir,
@@ -1081,7 +1089,7 @@ export async function startBackend(opts: BackendLaunchOptions): Promise<BackendH
   if (!dataDir) {
     throw new Error('startBackend: dataDir is required');
   }
-  const port = await manager.start(dataDir, opts.logDir, opts.dirs);
+  const port = await manager.start(dataDir, opts.logDir, opts.dirs, { localMode: opts.local ?? true });
   return {
     port,
     stop: () => manager.stop(),

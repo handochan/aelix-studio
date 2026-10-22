@@ -840,7 +840,7 @@
   "bugReportSubmit": "Submit",
   "bugReportCancel": "Cancel",
   "bugReportSuccess": "Report submitted, thank you for your feedback",
-  "bugReportError": "Submission failed, please try again later",
+  "bugReportError": "Online feedback is disabled in this self-hosted distribution. Diagnostics remain local.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",
   "bugReportModuleMcp": "MCP & Tools",
@@ -1414,5 +1414,6 @@
   "crossSessionMessageDesc": "Let agents send messages to your other conversations. Turning this off also disables the @@ conversation mention in the input box.",
   "crossSessionMessageDisabledBanner": "Cross-conversation messages are off, so the @@ conversation mention is unavailable.",
   "crossSessionMessageResume": "Turn back on",
-  "crossSessionMessageUpdateFailed": "Failed to update the cross-conversation message setting"
+  "crossSessionMessageUpdateFailed": "Failed to update the cross-conversation message setting",
+  "studioRemoteAccessDisabled": "Desktop backend sharing is restricted to this computer. Use the authenticated standalone Studio WebUI for remote access."
 }

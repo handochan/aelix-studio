@@ -66,6 +66,16 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('MarkdownView local file links', () => {
+  it('renders external image content as a link without fetching the image', () => {
+    const { container } = render(
+      <MarkdownView>{'![Private diagram](https://tracking.example/pixel.png)'}</MarkdownView>
+    );
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'Private diagram' })).toHaveAttribute(
+      'href',
+      'https://tracking.example/pixel.png'
+    );
+  });
   beforeEach(() => {
     copyTextMock.mockClear();
   });
@@ -196,13 +206,15 @@ describe('MarkdownView local file links', () => {
     expect(link).toHaveAttribute('href', 'https://aionui.com/docs#L10');
   });
 
-  it('adds empty alt text to external raw HTML images without alt text', () => {
+  it('keeps raw HTML remote images behind an explicit link even without alt text', () => {
     const { container } = render(
       <MarkdownView allowHtml>{'<img src="https://example.com/generated.png" />'}</MarkdownView>
     );
 
-    const image = container.querySelector('img');
-    expect(image).toHaveAttribute('src', 'https://example.com/generated.png');
-    expect(image).toHaveAttribute('alt', '');
+    expect(container.querySelector('img')).toBeNull();
+    expect(screen.getByRole('link', { name: 'preview.remoteImage' })).toHaveAttribute(
+      'href',
+      'https://example.com/generated.png'
+    );
   });
 });

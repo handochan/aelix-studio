@@ -8,13 +8,9 @@
  * `bun run webui` host (independent of Electron).
  *
  * After the M6 auth cleanup, SQLite `users` is the single source of truth.
- * Two paths:
- *   1. A `bun run webui` is already running on the default port → reach its
- *      reverse-proxied /api/webui/reset-password directly. Users don't have to
- *      stop the server first; the just-reset password can be used immediately.
- *   2. No webui running → spawn a short-lived aioncore against the same
- *      data-dir, POST /api/webui/reset-password, and stop the backend. This is
- *      the offline / cold-start path.
+ * Stop the authenticated standalone host before using this command. It starts a
+ * private, short-lived local backend, resets the system account, then stops it.
+ * A public host never exposes an unauthenticated password-reset operation.
  *
  * Usage:
  *   bun run resetpass                 # default work dir
@@ -29,6 +25,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { startBackend, stopBackend } from '@aionui/web-host';
+import rootPackage from '../package.json';
 
 const BACKEND_BINARY = process.platform === 'win32' ? 'aioncore.exe' : 'aioncore';
 
@@ -63,7 +60,7 @@ function getFlag(name: string): string | undefined {
 /**
  * Same resolution as scripts/webui.ts:resolveBackendDataDir — keep both in sync
  * so `bun run webui` and `bun run resetpass` always target the same SQLite DB.
- * See the comment there for why the default is `~/.aionui-web*` (not `~/.aionui*`).
+ * See the comment there for why the default is `~/.aelix-studio-web*` (not `~/.aionui*`).
  */
 function resolveWorkDir(): string {
   const override = getFlag('--data-dir') ?? process.env.AIONUI_DATA_DIR;
@@ -74,7 +71,7 @@ function resolveWorkDir(): string {
   }
   const suffix =
     process.env.NODE_ENV === 'production' ? '' : process.env.AIONUI_MULTI_INSTANCE === '1' ? '-dev-2' : '-dev';
-  const dir = path.join(os.homedir(), `.aionui-web${suffix}`);
+  const dir = path.join(os.homedir(), `.aelix-studio-web${suffix}`);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -175,20 +172,9 @@ async function main(): Promise<void> {
   // running server immediately sees the new password — no need for the user
   // to stop the server or deal with two backends fighting over the same db.
   if (await detectRunningWebUI(webuiPort)) {
-    log.info(`Detected running WebUI at http://127.0.0.1:${webuiPort} — reusing it`);
-    try {
-      const newPassword = await resetPasswordVia(`http://127.0.0.1:${webuiPort}/api/webui/reset-password`);
-      log.success('Password reset successfully.');
-      log.info('New password:');
-      log.highlight(newPassword);
-      log.info('');
-      log.warning('Please change this password after next login.');
-      return;
-    } catch (error) {
-      log.error(error instanceof Error ? error.message : 'Password reset failed');
-      process.exitCode = 1;
-      return;
-    }
+    log.error('Stop the authenticated WebUI before resetting its password, then restart it.');
+    process.exitCode = 1;
+    return;
   }
 
   // Slow path: no webui running. Spawn a short-lived backend against the same
@@ -202,8 +188,8 @@ async function main(): Promise<void> {
 
   const handle = await startBackend({
     app: {
-      version: '0.0.0',
-      isPackaged: false,
+      version: rootPackage.version,
+      isPackaged: true,
       resourcesPath: repoRoot,
       userDataPath: workDir,
     },

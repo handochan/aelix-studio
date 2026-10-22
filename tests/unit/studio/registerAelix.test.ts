@@ -12,12 +12,16 @@ function api(agents: Awaited<ReturnType<StudioApi['listAgents']>> = []): StudioA
 describe('Aelix Studio default registration', () => {
   it('does not hijack a user agent with the same display name', async () => {
     const client = api([{ id: 'user-agent', name: 'Aelix', agent_source: 'custom' }]);
-    await registerAelix(client, '/new app/bin/aelix-acp', '/data/acp');
+    await registerAelix(
+      client,
+      { command: '/new app/python/bin/python3', args: ['-I', '/new app/launch.py', 'acp'] },
+      '/data/acp'
+    );
     expect(client.updateAgent).not.toHaveBeenCalled();
     expect(client.createAgent).toHaveBeenCalledWith(
       expect.objectContaining({
-        command: '/bin/sh',
-        args: ['/new app/bin/aelix-acp', '--profile', 'coding', '--state-dir', '/data/acp'],
+        command: '/new app/python/bin/python3',
+        args: ['-I', '/new app/launch.py', 'acp', '--profile', 'coding', '--state-dir', '/data/acp'],
       })
     );
   });
@@ -25,12 +29,16 @@ describe('Aelix Studio default registration', () => {
     'refreshes relocated paths on the existing engine (%s)',
     async (description) => {
       const client = api([{ id: 'owned-agent', name: 'Aelix', agent_source: 'custom', description }]);
-      await registerAelix(client, '/moved app/bin/aelix-acp', '/data/acp');
+      await registerAelix(
+        client,
+        { command: '/moved app/python/bin/python3', args: ['-I', '/moved app/launch.py', 'acp'] },
+        '/data/acp'
+      );
       expect(client.updateAgent).toHaveBeenCalledWith(
         'owned-agent',
         expect.objectContaining({
-          command: '/bin/sh',
-          args: ['/moved app/bin/aelix-acp', '--profile', 'coding', '--state-dir', '/data/acp'],
+          command: '/moved app/python/bin/python3',
+          args: ['-I', '/moved app/launch.py', 'acp', '--profile', 'coding', '--state-dir', '/data/acp'],
         })
       );
       expect(client.createAgent).not.toHaveBeenCalled();
@@ -39,7 +47,31 @@ describe('Aelix Studio default registration', () => {
   it('propagates backend failure and does not mutate another engine', async () => {
     const client = api();
     vi.mocked(client.createAgent).mockRejectedValue(new Error('backend unavailable'));
-    await expect(registerAelix(client, '/app/bin/aelix-acp', '/data/acp')).rejects.toThrow('backend unavailable');
+    await expect(
+      registerAelix(client, { command: '/app/python/bin/python3', args: ['-I', '/app/launch.py', 'acp'] }, '/data/acp')
+    ).rejects.toThrow('backend unavailable');
     expect(client.updateAgent).not.toHaveBeenCalled();
+  });
+  it('launches Windows Python directly with separate arguments for spaces and non-ASCII paths', async () => {
+    const client = api();
+    await registerAelix(
+      client,
+      { command: 'C:\\Aelix Studio\\python\\python.exe', args: ['-I', 'C:\\Aelix Studio\\launch.py', 'acp'] },
+      'C:\\Users\\사용자\\Studio data'
+    );
+    expect(client.createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        command: 'C:\\Aelix Studio\\python\\python.exe',
+        args: [
+          '-I',
+          'C:\\Aelix Studio\\launch.py',
+          'acp',
+          '--profile',
+          'coding',
+          '--state-dir',
+          'C:\\Users\\사용자\\Studio data',
+        ],
+      })
+    );
   });
 });

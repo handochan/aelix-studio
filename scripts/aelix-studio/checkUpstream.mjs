@@ -17,9 +17,11 @@ async function github(path) {
 }
 
 try {
-  const args = process.argv.slice(2);
+  const failOnDrift = process.argv.includes('--fail-on-drift');
+  const args = process.argv.slice(2).filter((arg) => arg !== '--fail-on-drift');
   const fixture = args.length === 2 && args[0] === '--release-file';
-  if (args.length !== 0 && !fixture) throw new Error('Usage: checkUpstream.mjs [--release-file PATH]');
+  if (args.length !== 0 && !fixture)
+    throw new Error('Usage: checkUpstream.mjs [--release-file PATH] [--fail-on-drift]');
   const release = fixture ? JSON.parse(readFileSync(args[1], 'utf8')) : await github('releases/latest');
   const tag = release.tag_name;
   if (!/^v\d+\.\d+\.\d+$/.test(tag ?? '') || release.draft || release.prerelease) {
@@ -47,8 +49,11 @@ try {
     latestCommit: commit,
     releaseUrl: url,
     source: fixture ? 'local_fixture' : 'github',
+    compareUrl: `https://github.com/${repository}/compare/${manifest.upstream.commit}...${commit}`,
+    pinnedAioncore: manifest.aioncore.version,
   };
   console.log(JSON.stringify(result, null, 2));
+  if (failOnDrift && !current) process.exitCode = 2;
   if (process.env.GITHUB_STEP_SUMMARY) {
     appendFileSync(
       process.env.GITHUB_STEP_SUMMARY,

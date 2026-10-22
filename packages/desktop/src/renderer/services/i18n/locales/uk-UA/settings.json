@@ -1296,7 +1296,7 @@
   "bugReportSubmit": "Submit",
   "bugReportCancel": "Cancel",
   "bugReportSuccess": "Report submitted, thank you for your feedback",
-  "bugReportError": "Submission failed, please try again later",
+  "bugReportError": "У цій версії для власного сервера онлайн-звіти вимкнено. Діагностика залишається локальною.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",
   "bugReportModuleMcp": "MCP & Tools",
@@ -1429,5 +1429,6 @@
   "crossSessionMessageDesc": "Дозволяє агентам надсилати повідомлення до ваших інших розмов. Вимкнення також відключає згадку @@ у полі введення.",
   "crossSessionMessageDisabledBanner": "Повідомлення між розмовами вимкнено, згадка @@ недоступна.",
   "crossSessionMessageResume": "Увімкнути знову",
-  "crossSessionMessageUpdateFailed": "Не вдалося оновити налаштування повідомлень між розмовами"
+  "crossSessionMessageUpdateFailed": "Не вдалося оновити налаштування повідомлень між розмовами",
+  "studioRemoteAccessDisabled": "Доступ до настільного бекенду обмежений цим комп’ютером. Для віддаленого доступу використовуйте окремий Studio WebUI з автентифікацією."
 }

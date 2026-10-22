@@ -244,3 +244,7 @@ temp/
 
 # Generated host-native Python/Aelix/ACP bundle
 /resources/bundled-aelix/
+
+# Python runtime preparation and regression-test bytecode
+__pycache__/
+*.py[cod]

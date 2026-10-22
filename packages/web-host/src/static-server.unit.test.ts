@@ -56,6 +56,24 @@ describe('static-server', () => {
     const text = await r.text();
     expect(text).toContain('<title>root</title>');
   });
+  it('serves the login SPA on GET without consuming the backend login rate limit', async () => {
+    const backend = await startMockBackend((_req, res) => res.writeHead(405).end());
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await fetch(`${handle.localUrl}/login`);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toContain('<title>root</title>');
+  });
+
+  it('does not forward a browser-supplied internal trust header', async () => {
+    const backend = await startMockBackend((req, res) =>
+      res.end(req.headers['x-aionui-internal'] ? 'trusted' : 'public')
+    );
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await fetch(`${handle.localUrl}/api/test`, { headers: { 'x-aionui-internal': '1' } });
+    expect(await response.text()).toBe('public');
+  });
 
   it('SPA fallback: /chat/123 returns index.html', async () => {
     const backend = await startMockBackend((_req, res) => res.end('nope'));

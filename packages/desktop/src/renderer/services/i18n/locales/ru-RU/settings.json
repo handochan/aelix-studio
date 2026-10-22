@@ -832,7 +832,7 @@
   "bugReportSubmit": "Отправить",
   "bugReportCancel": "Отмена",
   "bugReportSuccess": "Отчёт отправлен, спасибо за обратную связь",
-  "bugReportError": "Не удалось отправить, попробуйте позже",
+  "bugReportError": "В этой версии для собственного сервера онлайн-отчёты отключены. Диагностика остаётся локальной.",
   "bugReportModuleSkills": "Skills и плагины",
   "bugReportModuleWebui": "WebUI и удаленный доступ",
   "bugReportModuleMcp": "MCP и инструменты",
@@ -1428,5 +1428,6 @@
   "crossSessionMessageDesc": "Разрешить агентам отправлять сообщения в ваши другие беседы. При отключении также отключается упоминание @@ в поле ввода.",
   "crossSessionMessageDisabledBanner": "Сообщения между беседами отключены, упоминание @@ недоступно.",
   "crossSessionMessageResume": "Включить снова",
-  "crossSessionMessageUpdateFailed": "Не удалось обновить настройку сообщений между беседами"
+  "crossSessionMessageUpdateFailed": "Не удалось обновить настройку сообщений между беседами",
+  "studioRemoteAccessDisabled": "Доступ к настольному бэкенду ограничен этим компьютером. Для удалённого доступа используйте отдельный Studio WebUI с аутентификацией."
 }

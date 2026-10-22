@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import React from 'react';
 
 const writeRendererLogInvoke = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -22,11 +22,16 @@ vi.mock('@/common', () => ({
   },
 }));
 
-vi.mock('@monaco-editor/react', () => ({
-  default: ({ value }: { value: string }) => <div data-testid='monaco-editor'>{value}</div>,
+vi.mock('@uiw/react-codemirror', () => ({
+  default: ({ value }: { value: string }) => <div data-testid='local-html-editor'>{value}</div>,
 }));
 
 vi.mock('@arco-design/web-react', () => ({
+  Button: ({ children, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement>) => (
+    <button type='button' {...props}>
+      {children}
+    </button>
+  ),
   Message: {
     useMessage: () => [{ info: vi.fn(), success: vi.fn(), error: vi.fn() }, null],
   },
@@ -63,6 +68,12 @@ function createConsoleMessageEvent({
 }
 
 describe('HTMLViewer', () => {
+  it('edits HTML with the bundled editor without loading a CDN editor', () => {
+    render(<HTMLViewer content='<h1>Offline editor</h1>' />);
+    fireEvent.click(screen.getByRole('button', { name: /common.edit/ }));
+    expect(screen.getByTestId('local-html-editor')).toHaveTextContent('<h1>Offline editor</h1>');
+    expect(document.querySelector('script[src*="cdn"]')).toBeNull();
+  });
   it('renders iframe with HTML content', () => {
     const { container } = render(<HTMLViewer content='<h1>Test</h1>' />);
     const iframe = container.querySelector('iframe');

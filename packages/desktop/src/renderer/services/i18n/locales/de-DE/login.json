@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Anmelden",
   "brand": "Aelix Studio",
-  "subtitle": "Willkommen zurück, bitte melde dich in deinem Konto an",
+  "subtitle": "Melden Sie sich an diesem selbst gehosteten Server an. Kein externes Konto erforderlich.",
   "username": "Benutzername",
   "usernamePlaceholder": "Benutzernamen eingeben",
   "password": "Passwort",
@@ -13,8 +13,8 @@
   "showPassword": "Passwort anzeigen",
   "hidePassword": "Passwort ausblenden",
   "languageToggle": "Sprache ändern",
-  "footerPrimary": "Verwandle deine Kommandozeilen-KI",
-  "footerSecondary": "Modern & Effizient",
+  "footerPrimary": "Selbst gehosteter Arbeitsbereich",
+  "footerSecondary": "Serverauthentifizierung",
   "errors": {
     "empty": "Bitte Benutzername und Passwort eingeben",
     "invalidCredentials": "Ungültiger Benutzername oder Passwort",

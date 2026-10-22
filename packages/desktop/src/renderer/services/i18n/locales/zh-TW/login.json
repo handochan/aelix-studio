@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - 登入",
   "brand": "Aelix Studio",
-  "subtitle": "歡迎回來，請登入您的帳號",
+  "subtitle": "登入此自架伺服器，無需外部帳號。",
   "username": "使用者名稱",
   "usernamePlaceholder": "請輸入使用者名稱",
   "password": "密碼",
@@ -13,8 +13,8 @@
   "showPassword": "顯示密碼",
   "hidePassword": "隱藏密碼",
   "languageToggle": "切換語言",
-  "footerPrimary": "命令列 AI 的現代化體驗",
-  "footerSecondary": "高效且優雅",
+  "footerPrimary": "自架工作區",
+  "footerSecondary": "伺服器驗證",
   "errors": {
     "empty": "請輸入使用者名稱與密碼",
     "invalidCredentials": "使用者名稱或密碼錯誤",

@@ -1,3 +1,9 @@
+// Exercise the retained upstream reporting path with diagnostics explicitly enabled.
+vi.mock('@/common/config/constants', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/common/config/constants')>()),
+  STUDIO_NETWORK_POLICY: { telemetry: true, automaticUpdates: false },
+}));
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { submitFeedbackReport } from '@/renderer/services/feedback/submitFeedbackReport';
 

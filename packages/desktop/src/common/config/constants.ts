@@ -8,6 +8,9 @@
  * AionUI应用程序共用常量
  */
 
+/** Studio distributions keep diagnostics local and check releases only on user request. */
+export const STUDIO_NETWORK_POLICY = { telemetry: false, automaticUpdates: false } as const;
+
 // ===== 应用内浏览器 / In-app browser =====
 
 /**

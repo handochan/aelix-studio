@@ -76,7 +76,7 @@
     "prepare": "husky",
     "postinstall": "node scripts/postinstall.js",
     "test:bun": "bun test packages/desktop/src/process/services/database/drivers/*.bun.test.ts",
-    "studio:runtime": "python3 scripts/aelix-studio/prepareRuntime.py",
+    "studio:runtime": "node scripts/aelix-studio/build.mjs --runtime-only",
     "studio:dist": "node scripts/aelix-studio/build.mjs"
   },
   "dependencies": {

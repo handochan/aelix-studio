@@ -828,7 +828,7 @@
   "bugReportSubmit": "Gönder",
   "bugReportCancel": "İptal",
   "bugReportSuccess": "Rapor gönderildi, geri bildiriminiz için teşekkürler",
-  "bugReportError": "Gönderilemedi, lütfen daha sonra tekrar deneyin",
+  "bugReportError": "Bu kendi barındırdığınız dağıtımda çevrimiçi geri bildirim devre dışıdır. Tanılama verileri yerel kalır.",
   "bugReportModuleSkills": "Skills ve Eklentiler",
   "bugReportModuleWebui": "WebUI ve Uzak Erişim",
   "bugReportModuleMcp": "MCP ve Araçlar",
@@ -1414,5 +1414,6 @@
   "crossSessionMessageDesc": "Aracıların diğer sohbetlerinize mesaj göndermesine izin verir. Kapatmak giriş alanındaki @@ sohbet etiketini de devre dışı bırakır.",
   "crossSessionMessageDisabledBanner": "Sohbetler arası mesajlar kapalı, @@ sohbet etiketi kullanılamıyor.",
   "crossSessionMessageResume": "Yeniden aç",
-  "crossSessionMessageUpdateFailed": "Sohbetler arası mesaj ayarı güncellenemedi"
+  "crossSessionMessageUpdateFailed": "Sohbetler arası mesaj ayarı güncellenemedi",
+  "studioRemoteAccessDisabled": "Masaüstü arka ucu yalnızca bu bilgisayarda paylaşılır. Uzak erişim için kimlik doğrulamalı bağımsız Studio WebUI kullanın."
 }

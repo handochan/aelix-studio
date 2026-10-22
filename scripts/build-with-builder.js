@@ -446,44 +446,14 @@ function tryRemoveDir(targetDir) {
   }
 }
 
-function isProcessRunningWindows(imageName) {
-  if (process.platform !== 'win32') return false;
-  try {
-    const result = execSync(`tasklist /FI "IMAGENAME eq ${imageName}"`, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return result.toString().toLowerCase().includes(imageName.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-function killWindowsProcesses(imageNames) {
-  if (process.platform !== 'win32') return;
-  for (const name of imageNames) {
-    try {
-      execSync(`taskkill /F /IM ${name}`, { stdio: 'ignore' });
-    } catch {}
-  }
-}
-
 function formatExecError(error) {
   return [error?.message, error?.stdout?.toString?.(), error?.stderr?.toString?.()].filter(Boolean).join('\n').trim();
-}
-
-function escapeNsisDefineValue(value) {
-  return String(value ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '$\\"');
 }
 
 function writeGeneratedSentryDsnInclude(projectRoot) {
   const generatedInclude = path.join(projectRoot, 'resources/windows/support/_sentry-dsn.generated.nsh');
   fs.mkdirSync(path.dirname(generatedInclude), { recursive: true });
-  fs.writeFileSync(
-    generatedInclude,
-    `!define AIONUI_SENTRY_DSN "${escapeNsisDefineValue(process.env.SENTRY_DSN || '')}"\n`
-  );
+  fs.writeFileSync(generatedInclude, '!define AIONUI_SENTRY_DSN ""\n');
 }
 
 function isValidPackageVersion(value) {
@@ -842,18 +812,8 @@ try {
 
   if (process.platform === 'win32' && builderArgs.includes('--win')) {
     const winUnpackedDir = path.join(outDir, 'win-unpacked');
-    let cleaned = tryRemoveDir(winUnpackedDir);
-    if (!cleaned) {
-      const aionRunning = isProcessRunningWindows('AionUi.exe');
-      const electronRunning = isProcessRunningWindows('electron.exe');
-      if (aionRunning || electronRunning) {
-        console.log('⚠️  Detected running AionUi/Electron process. Attempting to close...');
-        killWindowsProcesses(['AionUi.exe', 'electron.exe']);
-        cleaned = tryRemoveDir(winUnpackedDir);
-        if (!cleaned) {
-          console.log('⚠️  Directory still locked. Please close any running AionUi/Electron processes and retry.');
-        }
-      }
+    if (!tryRemoveDir(winUnpackedDir)) {
+      throw new Error('Windows output is locked. Close the Aelix Studio build from out/win-unpacked and retry.');
     }
   }
 
@@ -867,7 +827,7 @@ try {
   try {
     buildWithDmgRetry(builderCommand, targetArch);
   } catch (error) {
-    const winExePath = path.join(outDir, 'win-unpacked', 'AionUi.exe');
+    const winExePath = path.join(outDir, 'win-unpacked', `${require('../package.json').productName}.exe`);
     const firstError = formatExecError(error);
     const canRetryWithoutExecutableEdit =
       process.platform === 'win32' && isWindowsBuild && process.env.CI !== 'true' && fs.existsSync(winExePath);
@@ -876,7 +836,7 @@ try {
       throw error;
     }
 
-    console.log('⚠️  Windows local build failed after AionUi.exe was produced.');
+    console.log('⚠️  Windows local build failed after the Studio executable was produced.');
     if (firstError) {
       console.log('   First failure summary:');
       console.log(
@@ -889,7 +849,6 @@ try {
     }
     console.log('   Retrying local build with win.signAndEditExecutable=false...');
     console.log('   This fallback is intended for transient rcedit / file-lock failures on developer machines.');
-    killWindowsProcesses(['AionUi.exe', 'electron.exe']);
     cleanupWindowsPackOutput();
 
     try {

@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - ورود",
   "brand": "Aelix Studio",
-  "subtitle": "خوش آمدید، لطفاً به حساب خود وارد شوید",
+  "subtitle": "به این سرور خودمیزبان وارد شوید. حساب خارجی لازم نیست.",
   "username": "نام کاربری",
   "usernamePlaceholder": "نام کاربری خود را وارد کنید",
   "password": "رمز عبور",
@@ -13,8 +13,8 @@
   "showPassword": "نمایش رمز عبور",
   "hidePassword": "مخفی کردن رمز عبور",
   "languageToggle": "تغییر زبان",
-  "footerPrimary": "هوش مصنوعی خط فرمان خود را متحول کنید",
-  "footerSecondary": "مدرن و کارآمد",
+  "footerPrimary": "فضای کاری خودمیزبان",
+  "footerSecondary": "احراز هویت سرور",
   "errors": {
     "empty": "لطفاً نام کاربری و رمز عبور را وارد کنید",
     "invalidCredentials": "نام کاربری یا رمز عبور نامعتبر است",

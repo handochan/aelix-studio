@@ -2,7 +2,6 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 import { execSync } from 'child_process';
 import { readFileSync } from 'fs';
 import { resolve } from 'path';
-import { sentryVitePlugin } from '@sentry/vite-plugin';
 import UnoCSS from 'unocss/vite';
 import unoConfig from '../../uno.config.ts';
 import { viteStaticCopy } from 'vite-plugin-static-copy';
@@ -67,32 +66,6 @@ const mainAliases = {
 
 export default defineConfig(({ mode }) => {
   const isDevelopment = mode === 'development';
-  const enableSentrySourceMaps =
-    !isDevelopment &&
-    !!process.env.SENTRY_AUTH_TOKEN &&
-    (process.env.CI !== 'true' || process.env.SENTRY_UPLOAD_SOURCE_MAPS === 'true');
-  const sentryReleaseName = process.env.SENTRY_RELEASE ?? `v${rootPackageJson.version}`;
-
-  const sentryPluginOptions = {
-    org: process.env.SENTRY_ORG,
-    project: process.env.SENTRY_PROJECT,
-    authToken: process.env.SENTRY_AUTH_TOKEN,
-    release: {
-      name: sentryReleaseName,
-    },
-    errorHandler: (error: Error) => {
-      throw error;
-    },
-    sourcemaps: {
-      filesToDeleteAfterUpload: ['./out/**/*.map'],
-      rewriteSources: (source: string) => {
-        // Normalize Windows backslashes and strip leading relative prefixes
-        // so Sentry paths match the GitHub repo structure (e.g.
-        // packages/desktop/src/process/...)
-        return source.replace(/\\/g, '/').replace(/^(\.\.\/)+(packages\/desktop\/src\/)/, '$2');
-      },
-    },
-  };
 
   return {
     main: {
@@ -130,12 +103,11 @@ export default defineConfig(({ mode }) => {
               }),
             ]
           : []),
-        ...(enableSentrySourceMaps ? [sentryVitePlugin(sentryPluginOptions)] : []),
         ...(isDevelopment ? [buildMcpServersPlugin()] : []),
       ],
       resolve: { alias: mainAliases, extensions: ['.ts', '.tsx', '.js', '.json'] },
       build: {
-        sourcemap: enableSentrySourceMaps ? 'hidden' : isDevelopment,
+        sourcemap: isDevelopment,
         reportCompressedSize: false,
         rollupOptions: {
           input: {
@@ -152,7 +124,7 @@ export default defineConfig(({ mode }) => {
       define: {
         'process.env.NODE_ENV': JSON.stringify(mode),
         'process.env.env': JSON.stringify(process.env.env),
-        'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN ?? ''),
+        'process.env.SENTRY_DSN': JSON.stringify(''),
         // Discontinued-build fork flag (see discontinuedBuild.ts). Only AionUi's
         // final `-final` tag build sets IS_DISCONTINUED_BUILD=true in CI.
         'process.env.IS_DISCONTINUED_BUILD': JSON.stringify(process.env.IS_DISCONTINUED_BUILD === 'true'),
@@ -237,14 +209,10 @@ export default defineConfig(({ mode }) => {
           '@lezer/highlight',
         ],
       },
-      plugins: [
-        UnoCSS(unoConfig),
-        iconParkPlugin(),
-        ...(enableSentrySourceMaps ? [sentryVitePlugin(sentryPluginOptions)] : []),
-      ],
+      plugins: [UnoCSS(unoConfig), iconParkPlugin()],
       build: {
         target: 'es2022',
-        sourcemap: enableSentrySourceMaps ? 'hidden' : isDevelopment,
+        sourcemap: isDevelopment,
         minify: !isDevelopment,
         reportCompressedSize: false,
         chunkSizeWarningLimit: 1500,
@@ -315,7 +283,7 @@ export default defineConfig(({ mode }) => {
         'process.env.NODE_ENV': JSON.stringify(mode),
         'process.env.env': JSON.stringify(process.env.env),
         'process.env.AIONUI_MULTI_INSTANCE': JSON.stringify(process.env.AIONUI_MULTI_INSTANCE ?? ''),
-        'process.env.SENTRY_DSN': JSON.stringify(process.env.SENTRY_DSN ?? ''),
+        'process.env.SENTRY_DSN': JSON.stringify(''),
         // Inject the real AionUi version (root package.json) so renderer code
         // can show it without importing packages/desktop/package.json, which is
         // a workspace-internal placeholder frozen at "0.0.0".

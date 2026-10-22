@@ -28,7 +28,7 @@ import { resolveLocalFileLinkPath, resolveLocalFileLinkReference } from './markd
 import type { LocalFileLinkReference } from './markdownUtils';
 
 const isLocalFilePath = (src: string): boolean => {
-  if (src.startsWith('http://') || src.startsWith('https://')) return false;
+  if (/^(https?:)?\/\//i.test(src)) return false;
   if (src.startsWith('data:')) return false;
   return true;
 };
@@ -115,6 +115,14 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         td: MarkdownTd,
         img: ({ node: _node, ...rest }: Record<string, unknown>) => {
           const imgProps = rest as React.ImgHTMLAttributes<HTMLImageElement>;
+          const source = imgProps.src || '';
+          if (/^(https?:)?\/\//i.test(source)) {
+            return (
+              <a href={source} target='_blank' rel='noreferrer' onClick={handleLinkClick}>
+                {imgProps.alt || t('preview.remoteImage')}
+              </a>
+            );
+          }
           if (isLocalFilePath(imgProps.src || '')) {
             const src = decodeURIComponent(imgProps.src || '');
             return <LocalImageView src={src} alt={imgProps.alt || ''} className={imgProps.className} />;
@@ -122,7 +130,7 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
           return <img {...imgProps} alt={imgProps.alt || ''} />;
         },
       }),
-      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink]
+      [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink, t]
     );
 
     const rehypePlugins = useMemo(() => (allowHtml ? [rehypeRaw, rehypeKatex] : [rehypeKatex]), [allowHtml]);

@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Giriş Yap",
   "brand": "Aelix Studio",
-  "subtitle": "Tekrar hoş geldiniz, lütfen hesabınıza giriş yapın",
+  "subtitle": "Bu kendi barındırdığınız sunucuda oturum açın. Harici hesap gerekmez.",
   "username": "Kullanıcı Adı",
   "usernamePlaceholder": "Kullanıcı adınızı girin",
   "password": "Şifre",
@@ -13,8 +13,8 @@
   "showPassword": "Şifreyi göster",
   "hidePassword": "Şifreyi gizle",
   "languageToggle": "Dili değiştir",
-  "footerPrimary": "Komut satırı AI'nızı dönüştürün",
-  "footerSecondary": "Modern ve Verimli",
+  "footerPrimary": "Kendi barındırdığınız çalışma alanı",
+  "footerSecondary": "Sunucu kimlik doğrulaması",
   "errors": {
     "empty": "Lütfen kullanıcı adı ve şifre girin",
     "invalidCredentials": "Geçersiz kullanıcı adı veya şifre",

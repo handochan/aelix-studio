@@ -5,6 +5,7 @@
  */
 
 import * as Sentry from '@sentry/electron/main';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 import { app, type BrowserWindow } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -115,7 +116,8 @@ function isBackendStartupSecondaryEvent(event: { tags?: Record<string, unknown> 
 
 export function initSentry(): void {
   Sentry.init({
-    dsn: process.env.SENTRY_DSN,
+    enabled: STUDIO_NETWORK_POLICY.telemetry,
+    dsn: undefined,
     environment: app.isPackaged ? 'production' : 'development',
     beforeSend(event) {
       const haystacks = collectEventSearchText(event);
@@ -143,6 +145,7 @@ export function initSentry(): void {
  * a stable device identifier.
  */
 export function setSentryDeviceId(): void {
+  if (!STUDIO_NETWORK_POLICY.telemetry) return;
   const id = getOrCreateAnalyticsId();
   Sentry.setUser({ id });
   Sentry.setTag('device_id', id);
@@ -549,6 +552,7 @@ async function runStartupLogReport(): Promise<void> {
  * retries.
  */
 export function scheduleStartupLogReport(window: BrowserWindow): void {
+  if (!STUDIO_NETWORK_POLICY.telemetry) return;
   const trigger = () => {
     setTimeout(() => {
       runStartupLogReport().catch((err) => {

@@ -138,7 +138,8 @@
     "printedToConsole": "要素情報をコンソールに出力しました",
     "inspectElement": "要素を検証",
     "inspectElementEnable": "要素インスペクターを有効化",
-    "inspectElementDisable": "要素インスペクターを無効化"
+    "inspectElementDisable": "要素インスペクターを無効化",
+    "title": "HTML プレビュー"
   },
   "ppt": {
     "loading": "PPTプレビューを起動中...",
@@ -176,5 +177,6 @@
   "zoomIn": "拡大",
   "zoomOut": "縮小",
   "zoomReset": "表示をリセット",
-  "diagramZoomHint": "スクロールでズーム • ドラッグで移動 • ESC で閉じる"
+  "diagramZoomHint": "スクロールでズーム • ドラッグで移動 • ESC で閉じる",
+  "remoteImage": "外部画像を開く"
 }

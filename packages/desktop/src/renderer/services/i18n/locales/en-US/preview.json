@@ -138,7 +138,8 @@
     "printedToConsole": "Element info logged to console",
     "inspectElement": "Inspect element",
     "inspectElementEnable": "Enable element inspector",
-    "inspectElementDisable": "Disable element inspector"
+    "inspectElementDisable": "Disable element inspector",
+    "title": "HTML preview"
   },
   "ppt": {
     "loading": "Starting PPT preview...",
@@ -176,5 +177,6 @@
   "zoomIn": "Zoom in",
   "zoomOut": "Zoom out",
   "zoomReset": "Reset view",
-  "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close"
+  "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close",
+  "remoteImage": "Open remote image"
 }

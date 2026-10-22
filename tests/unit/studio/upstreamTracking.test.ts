@@ -26,4 +26,21 @@ describe('read-only upstream release tracking', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('Missing or invalid release commit');
   });
+  it('fails the opt-in CI gate when an upstream release needs review', () => {
+    const result = spawnSync(
+      process.execPath,
+      [
+        checker,
+        '--release-file',
+        fileURLToPath(new URL('./fixtures/new-release.json', import.meta.url)),
+        '--fail-on-drift',
+      ],
+      {
+        encoding: 'utf8',
+        env: { ...process.env, GITHUB_STEP_SUMMARY: '' },
+      }
+    );
+    expect(result.status).toBe(2);
+    expect(JSON.parse(result.stdout).status).toBe('review_required');
+  });
 });

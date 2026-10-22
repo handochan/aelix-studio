@@ -4,23 +4,26 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Message } from '@arco-design/web-react';
-import MonacoEditor from '@monaco-editor/react';
+import { Button, Message } from '@arco-design/web-react';
+import CodeMirror from '@uiw/react-codemirror';
+import { langs } from '@uiw/codemirror-extensions-langs';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
-interface HTMLPreviewProps {
+type HTMLPreviewProps = {
   content: string;
   file_path?: string;
   hideToolbar?: boolean;
-}
+};
 
-interface SelectedElement {
+const HTML_EXTENSIONS = [langs.html()];
+
+type SelectedElement = {
   path: string; // DOM 路径，如 "html > body > div:nth-child(2) > p:nth-child(1)"
   html: string; // 元素的 outerHTML
   startLine?: number; // 代码起始行（估算）
   endLine?: number; // 代码结束行（估算）
-}
+};
 
 /**
  * HTML 预览组件
@@ -323,21 +326,21 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
         <div className='flex items-center justify-between h-40px px-12px bg-bg-2 border-b border-border-base flex-shrink-0'>
           <div className='flex items-center gap-8px'>
             {/* 编辑按钮 */}
-            <button
+            <Button
               onClick={handleToggleEdit}
               className={`px-12px py-4px rd-4px text-12px transition-colors ${editMode ? 'bg-primary text-white' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
             >
               {editMode ? `💾 ${t('common.save')}` : `✏️ ${t('common.edit')}`}
-            </button>
+            </Button>
 
             {/* 元素选择器按钮 */}
-            <button
+            <Button
               onClick={handleToggleInspector}
               className={`px-12px py-4px rd-4px text-12px transition-colors ${inspectorMode ? 'bg-primary text-white' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
               title={t('preview.html.inspectorTooltip')}
             >
               🔍 {inspectorMode ? t('preview.html.inspecting') : t('preview.html.inspectorButton')}
-            </button>
+            </Button>
 
             {/* 选中的元素路径 */}
             {selectedElement && (
@@ -349,7 +352,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
 
           <div className='flex items-center gap-8px'>
             {/* 下载按钮 */}
-            <button
+            <Button
               onClick={handleDownload}
               className='flex items-center gap-4px px-8px py-4px rd-4px cursor-pointer hover:bg-bg-3 transition-colors'
               title={t('preview.html.downloadHtml')}
@@ -368,7 +371,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
                 <line x1='12' y1='15' x2='12' y2='3' />
               </svg>
               <span className='text-12px text-t-secondary'>{t('common.download')}</span>
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -378,22 +381,12 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
         {/* 左侧：代码编辑器（编辑模式时显示） */}
         {editMode && (
           <div className='flex-1 overflow-hidden border-e border-border-base'>
-            <MonacoEditor
+            <CodeMirror
               height='100%'
-              language='html'
-              theme={currentTheme === 'dark' ? 'vs-dark' : 'vs'}
+              extensions={HTML_EXTENSIONS}
+              theme={currentTheme}
               value={htmlCode}
               onChange={(value) => setHtmlCode(value || '')}
-              options={{
-                minimap: { enabled: false },
-                fontSize: 13,
-                lineNumbers: 'on',
-                wordWrap: 'on',
-                automaticLayout: true,
-                scrollBeyondLastLine: false,
-                formatOnPaste: true,
-                formatOnType: true,
-              }}
             />
           </div>
         )}
@@ -404,7 +397,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
             ref={iframeRef}
             className='w-full h-full border-0'
             sandbox='allow-scripts allow-same-origin'
-            title='HTML Preview'
+            title={t('preview.html.title')}
           />
         </div>
       </div>

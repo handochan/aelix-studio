@@ -229,6 +229,20 @@ describe('buildSpawnArgs', () => {
 });
 
 describe('buildSpawnEnv', () => {
+  it('does not pass diagnostics credentials to the backend or its agent children', () => {
+    const previous = { dsn: process.env.SENTRY_DSN, token: process.env.SENTRY_AUTH_TOKEN };
+    process.env.SENTRY_DSN = 'https://example.invalid/sentry';
+    process.env.SENTRY_AUTH_TOKEN = 'diagnostics-token';
+    try {
+      expect(buildSpawnEnv()).not.toHaveProperty('SENTRY_DSN');
+      expect(buildSpawnEnv()).not.toHaveProperty('SENTRY_AUTH_TOKEN');
+    } finally {
+      if (previous.dsn === undefined) delete process.env.SENTRY_DSN;
+      else process.env.SENTRY_DSN = previous.dsn;
+      if (previous.token === undefined) delete process.env.SENTRY_AUTH_TOKEN;
+      else process.env.SENTRY_AUTH_TOKEN = previous.token;
+    }
+  });
   it('merges process.env with AIONUI_* dir vars', () => {
     const env = buildSpawnEnv({
       cacheDir: '/c',

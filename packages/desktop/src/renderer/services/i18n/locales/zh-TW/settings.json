@@ -840,7 +840,7 @@
   "bugReportSubmit": "提交",
   "bugReportCancel": "取消",
   "bugReportSuccess": "問題已提交，感謝反饋",
-  "bugReportError": "提交失敗，請稍後重試",
+  "bugReportError": "此自架版本已停用線上意見回饋，診斷資訊保留在本機。",
   "bugReportModuleSkills": "Skills 與插件",
   "bugReportModuleWebui": "WebUI 與遠端連線",
   "bugReportModuleMcp": "MCP 與工具",
@@ -1416,5 +1416,6 @@
   "crossSessionMessageDesc": "允許 Agent 向你的其他對話傳送訊息。關閉後，輸入框的 @@ 對話提及與投遞功能會同時停用。",
   "crossSessionMessageDisabledBanner": "跨對話訊息已關閉，輸入框的 @@ 對話提及不可用。",
   "crossSessionMessageResume": "重新開啟",
-  "crossSessionMessageUpdateFailed": "跨對話訊息設定更新失敗"
+  "crossSessionMessageUpdateFailed": "跨對話訊息設定更新失敗",
+  "studioRemoteAccessDisabled": "桌面後端僅限本機共用。遠端存取請使用啟用驗證的獨立 Studio WebUI。"
 }

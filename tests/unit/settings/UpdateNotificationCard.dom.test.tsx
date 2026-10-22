@@ -15,6 +15,7 @@ import type {
 } from '@/common/update/updateTypes';
 
 const mocks = vi.hoisted(() => ({
+  networkPolicy: { automaticUpdates: true, telemetry: false },
   manualProgressHandler: null as ((evt: UpdateDownloadProgressEvent) => void) | null,
   autoStatusHandler: null as ((evt: AutoUpdateStatus) => void) | null,
   updateOpenHandler: null as ((evt: { source?: 'menu' | 'about' | 'tray' }) => void) | null,
@@ -31,6 +32,11 @@ const mocks = vi.hoisted(() => ({
   shellOpenExternalMock: vi.fn(),
   shellOpenFileMock: vi.fn(),
   shellShowItemInFolderMock: vi.fn(),
+}));
+
+vi.mock('@/common/config/constants', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/common/config/constants')>()),
+  STUDIO_NETWORK_POLICY: mocks.networkPolicy,
 }));
 
 vi.mock('react-i18next', () => ({
@@ -90,6 +96,7 @@ import UpdateNotificationCard from '@/renderer/components/settings/UpdateNotific
 
 describe('UpdateNotificationCard', () => {
   beforeEach(() => {
+    mocks.networkPolicy.automaticUpdates = true;
     vi.stubGlobal('__APP_VERSION__', '2.1.15');
     mocks.manualProgressHandler = null;
     mocks.autoStatusHandler = null;
@@ -170,6 +177,14 @@ describe('UpdateNotificationCard', () => {
     expect(screen.queryByText('notes')).not.toBeInTheDocument();
     fireEvent.click(screen.getByText('update.releaseLog'));
     expect(await screen.findByText('notes')).toBeInTheDocument();
+  });
+
+  it('does not check releases through cache restoration when background networking is disabled', async () => {
+    mocks.networkPolicy.automaticUpdates = false;
+    render(<UpdateNotificationCard />);
+    await waitFor(() => expect(mocks.consumeInstallerLastFailureMock).toHaveBeenCalled());
+    expect(mocks.autoUpdateRestoreDownloadedMock).not.toHaveBeenCalled();
+    expect(mocks.autoUpdateCheckMock).not.toHaveBeenCalled();
   });
 
   it('restores a cached completed auto-update on mount', async () => {

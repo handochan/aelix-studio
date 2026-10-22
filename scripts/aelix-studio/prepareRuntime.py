@@ -10,6 +10,7 @@ import sys
 import tarfile
 import tempfile
 import urllib.request
+import importlib.util
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG = json.loads((Path(__file__).with_name('runtime.json')).read_text())
@@ -18,10 +19,10 @@ def run(*args):
     subprocess.run([str(a) for a in args], check=True)
 
 def main():
-    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64'}.get(platform.machine())
+    arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine().lower())
     target = f'{sys.platform}-{arch}'
     if target not in CONFIG['supportedBuildTargets']:
-        raise SystemExit(f'Unsupported runtime target: {target}; Windows permission transport is pending.')
+        raise SystemExit(f'Unsupported runtime target: {target}; build on a supported native host.')
     uv = shutil.which('uv')
     if not uv:
         raise SystemExit('Build prerequisite missing: uv (not required by installed applications).')
@@ -38,7 +39,7 @@ def main():
         if len(installations) != 1:
             raise RuntimeError('Expected exactly one managed Python installation')
         shutil.move(installations[0], bundle/'python')
-        python = bundle/'python/bin/python3'
+        python = bundle/('python/python.exe' if sys.platform == 'win32' else 'python/bin/python3')
         run(uv, 'pip', 'install', '--python', python, '--target', bundle/'site', '--only-binary=:all:',
             '--require-hashes', '-r', Path(__file__).with_name('requirements.lock'))
         acp = CONFIG['acp']
@@ -60,9 +61,14 @@ def main():
                         dest = bundle/'licenses'/f'acp-{relative}'
                     dest.parent.mkdir(parents=True, exist_ok=True)
                     dest.write_bytes(content)
+        compatibility = Path(__file__).with_name('compatibility')
+        spec = importlib.util.spec_from_file_location('studio_compatibility', compatibility/'apply.py')
+        patcher = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(patcher)
+        patcher.apply(bundle/'site/aelix_acp')
         shutil.copy(Path(__file__).with_name('runtimeLauncher.py'), bundle/'launch.py')
         (bundle/'bin').mkdir()
-        for command, mode in [('aelix', 'aelix'), ('aelix-acp', 'acp')]:
+        for command, mode in ([] if sys.platform == 'win32' else [('aelix', 'aelix'), ('aelix-acp', 'acp')]):
             launcher = bundle/'bin'/command
             launcher.write_text('#!/bin/sh\nset -eu\nROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)\n'
                                 f'exec "$ROOT/python/bin/python3" -I "$ROOT/launch.py" {mode} "$@"\n')
@@ -70,11 +76,13 @@ def main():
         packages = json.loads(subprocess.check_output([str(python), '-I', '-c',
             'import importlib.metadata as m,json,sys; print(json.dumps(sorted([dict(name=d.metadata["Name"],version=d.version) for d in m.distributions(path=[sys.argv[1]])],key=lambda p:p["name"])))', str(bundle/'site')]))
         receipt = dict(CONFIG, target=target, packages=packages,
+                       compatibilitySha256={p.name: hashlib.sha256(p.read_bytes()).hexdigest()
+                                            for p in sorted(compatibility.glob('*.py'))},
                        uvVersion=subprocess.check_output([uv, '--version'], text=True).strip(),
                        dependencyLockSha256=hashlib.sha256(Path(__file__).with_name('requirements.lock').read_bytes()).hexdigest())
         (bundle/'manifest.json').write_text(json.dumps(receipt, indent=2)+'\n')
         # Inventory every shipped byte. License files from wheel .dist-info and Python stay in place.
-        inventory = {str(p.relative_to(bundle)): hashlib.sha256(p.read_bytes()).hexdigest()
+        inventory = {p.relative_to(bundle).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                      for p in sorted(bundle.rglob('*')) if p.is_file()}
         (bundle/'checksums.json').write_text(json.dumps(inventory, indent=2)+'\n')
         # Preserve the last good bundle until every preparation step succeeds.

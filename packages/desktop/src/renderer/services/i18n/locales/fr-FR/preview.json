@@ -138,7 +138,8 @@
     "printedToConsole": "Informations de l'élément enregistrées dans la console",
     "inspectElement": "Inspecter l'élément",
     "inspectElementEnable": "Activer l'inspecteur d'éléments",
-    "inspectElementDisable": "Désactiver l'inspecteur d'éléments"
+    "inspectElementDisable": "Désactiver l'inspecteur d'éléments",
+    "title": "Aperçu HTML"
   },
   "ppt": {
     "loading": "Démarrage de l'aperçu PPT...",
@@ -176,5 +177,6 @@
   "zoomIn": "Zoom avant",
   "zoomOut": "Zoom arrière",
   "zoomReset": "Réinitialiser la vue",
-  "diagramZoomHint": "Molette pour zoomer • Glisser pour déplacer • Échap pour fermer"
+  "diagramZoomHint": "Molette pour zoomer • Glisser pour déplacer • Échap pour fermer",
+  "remoteImage": "Ouvrir une image distante"
 }

@@ -1,4 +1,4 @@
-# AionUi Docs
+# Aelix Studio Docs
 
 Documentation is organized by reader intent, not by document type.
 
@@ -13,10 +13,14 @@ Documentation is organized by reader intent, not by document type.
 
 ## Quick pointers
 
+- Studio distribution: [`aelix-studio/README.md`](aelix-studio/README.md).
+- Windows: [`aelix-studio/windows.md`](aelix-studio/windows.md).
+- Self-hosting and network review: [`aelix-studio/self-hosting.md`](aelix-studio/self-hosting.md).
+
 - New to the project? Start with [`architecture/overview.md`](architecture/overview.md).
 - Setting up a dev environment? See [`contributing/development.md`](contributing/development.md).
 - Writing code? The entry point for code-style, linting, formatting, and commit rules is [`AGENTS.md`](../AGENTS.md) at the repo root.
-- Deploying a server? [`guides/deploy-server.md`](guides/deploy-server.md).
+- The other guides and PRDs retain upstream context; Studio deployment instructions above take precedence.
 
 ## Where to put new docs
 

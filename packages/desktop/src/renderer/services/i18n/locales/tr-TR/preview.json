@@ -138,7 +138,8 @@
     "printedToConsole": "Öğe bilgisi konsola yazıldı",
     "inspectElement": "Öğeyi İncele",
     "inspectElementEnable": "Öğe denetçisini etkinleştir",
-    "inspectElementDisable": "Öğe denetçisini devre dışı bırak"
+    "inspectElementDisable": "Öğe denetçisini devre dışı bırak",
+    "title": "HTML önizlemesi"
   },
   "ppt": {
     "loading": "PPT önizlemesi başlatılıyor...",
@@ -176,5 +177,6 @@
   "zoomIn": "Yakınlaştır",
   "zoomOut": "Uzaklaştır",
   "zoomReset": "Görünümü sıfırla",
-  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın"
+  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın",
+  "remoteImage": "Uzak görüntüyü aç"
 }

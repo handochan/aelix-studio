@@ -138,7 +138,8 @@
     "printedToConsole": "已在主控台輸出元素資訊",
     "inspectElement": "檢查元素",
     "inspectElementEnable": "啟用元素檢查",
-    "inspectElementDisable": "停用元素檢查"
+    "inspectElementDisable": "停用元素檢查",
+    "title": "HTML 預覽"
   },
   "ppt": {
     "loading": "正在啟動 PPT 預覽...",
@@ -176,5 +177,6 @@
   "zoomIn": "放大",
   "zoomOut": "縮小",
   "zoomReset": "重設視圖",
-  "diagramZoomHint": "滾輪縮放 • 拖曳平移 • ESC 關閉"
+  "diagramZoomHint": "滾輪縮放 • 拖曳平移 • ESC 關閉",
+  "remoteImage": "開啟遠端圖片"
 }

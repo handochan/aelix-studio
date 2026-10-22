@@ -840,7 +840,7 @@
   "bugReportSubmit": "Enviar",
   "bugReportCancel": "Cancelar",
   "bugReportSuccess": "Relatório enviado, obrigado pelo seu feedback",
-  "bugReportError": "Falha no envio, por favor tente novamente mais tarde",
+  "bugReportError": "O envio de feedback online está desativado nesta distribuição auto-hospedada. Os diagnósticos ficam locais.",
   "bugReportModuleSkills": "Habilidades e Plugins",
   "bugReportModuleWebui": "WebUI e Acesso Remoto",
   "bugReportModuleMcp": "MCP e Ferramentas",
@@ -1417,5 +1417,6 @@
   "crossSessionMessageDesc": "Permite que agentes enviem mensagens para suas outras conversas. Desativar também desliga a menção @@ na caixa de entrada.",
   "crossSessionMessageDisabledBanner": "As mensagens entre conversas estão desativadas, a menção @@ não está disponível.",
   "crossSessionMessageResume": "Ativar novamente",
-  "crossSessionMessageUpdateFailed": "Falha ao atualizar a configuração de mensagens entre conversas"
+  "crossSessionMessageUpdateFailed": "Falha ao atualizar a configuração de mensagens entre conversas",
+  "studioRemoteAccessDisabled": "O compartilhamento do backend desktop é limitado a este computador. Para acesso remoto, use o Studio WebUI independente com autenticação."
 }

@@ -840,7 +840,7 @@
   "bugReportSubmit": "ارسال",
   "bugReportCancel": "لغو",
   "bugReportSuccess": "گزارش ارسال شد، ممنون از بازخورد شما",
-  "bugReportError": "ارسال ناموفق بود، لطفاً بعداً دوباره تلاش کنید",
+  "bugReportError": "بازخورد آنلاین در این نسخه خودمیزبان غیرفعال است. داده‌های عیب‌یابی محلی می‌مانند.",
   "bugReportModuleSkills": "مهارت‌ها و پلاگین‌ها",
   "bugReportModuleWebui": "WebUI و دسترسی ریموت",
   "bugReportModuleMcp": "MCP و ابزارها",
@@ -1414,5 +1414,6 @@
   "crossSessionMessageDesc": "به عامل‌ها اجازه می‌دهد به گفتگوهای دیگر شما پیام بفرستند. با خاموش کردن، منشن @@ در کادر ورودی نیز غیرفعال می‌شود.",
   "crossSessionMessageDisabledBanner": "پیام‌های بین گفتگوها خاموش است، منشن @@ در دسترس نیست.",
   "crossSessionMessageResume": "روشن کردن دوباره",
-  "crossSessionMessageUpdateFailed": "به‌روزرسانی تنظیم پیام‌های بین گفتگوها ناموفق بود"
+  "crossSessionMessageUpdateFailed": "به‌روزرسانی تنظیم پیام‌های بین گفتگوها ناموفق بود",
+  "studioRemoteAccessDisabled": "اشتراک‌گذاری بک‌اند دسکتاپ به این رایانه محدود است. برای دسترسی از راه دور از Studio WebUI مستقل با احراز هویت استفاده کنید."
 }

@@ -1,7 +1,7 @@
 !ifndef AIONUI_INSTALLER_OBSERVABILITY_NSH
 !define AIONUI_INSTALLER_OBSERVABILITY_NSH
 
-!define AIONUI_APP_EXECUTABLE_FILENAME "AionUi.exe"
+!define AIONUI_APP_EXECUTABLE_FILENAME "${PRODUCT_FILENAME}.exe"
 !define AIONUI_FALLBACK_LOG "aionui-installer-${VERSION}-fallback-log.jsonl"
 
 !pragma warning disable 6001
@@ -106,16 +106,16 @@ Var /GLOBAL AionUiSessionLogPath
 !macroend
 
 !macro AIONUI_LOG_EXTRACT_RESULT _METHOD
-  ${IfNot} ${FileExists} "$INSTDIR\AionUi.exe"
+  ${IfNot} ${FileExists} "$INSTDIR\${AIONUI_APP_EXECUTABLE_FILENAME}"
     !insertmacro AIONUI_FAIL_UX \
       "${AIONUI_E_EXTRACT_FAILED}" \
-      "event=extract result=fail method=${_METHOD} missing=AionUi.exe" \
+      "event=extract result=fail method=${_METHOD} missing=${AIONUI_APP_EXECUTABLE_FILENAME}" \
       "${AIONUI_MSG_EXTRACT_FAILED_ZH}" \
       "${AIONUI_MSG_EXTRACT_FAILED_EN}" \
       "${AIONUI_MSG_EXTRACT_FAILED_ACTION_ZH}" \
       "${AIONUI_MSG_EXTRACT_FAILED_ACTION_EN}" \
-      "extract result=fail method=${_METHOD} missing=AionUi.exe instDir=$INSTDIR" \
-      "extract result=fail method=${_METHOD} missing=AionUi.exe instDir=$INSTDIR"
+      "extract result=fail method=${_METHOD} missing=${AIONUI_APP_EXECUTABLE_FILENAME} instDir=$INSTDIR" \
+      "extract result=fail method=${_METHOD} missing=${AIONUI_APP_EXECUTABLE_FILENAME} instDir=$INSTDIR"
   ${Else}
     !insertmacro AIONUI_SLOG "event=extract result=ok method=${_METHOD} detail=customFiles_${AIONUI_TARGET_ARCH}"
   ${EndIf}

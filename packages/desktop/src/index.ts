@@ -12,6 +12,7 @@ import { describeUncaughtError } from './process/utils/describeUncaughtError';
 import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtError';
 import { createRendererRecoveryPolicy } from './process/utils/rendererRecovery';
 import { captureBackendStartupFailure, initSentry, scheduleStartupLogReport, setSentryDeviceId } from './sentry';
+import { STUDIO_NETWORK_POLICY } from './common/config/constants';
 
 initSentry();
 
@@ -566,7 +567,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         // auto-checking, so startup stays silent. The flag is a compile-time
         // literal, so this branch is tree-shaken out of non-discontinued builds.
         // 3秒后检查更新。停更版启动静默，不做应用内检测。
-        if (!process.env.IS_DISCONTINUED_BUILD) {
+        if (STUDIO_NETWORK_POLICY.automaticUpdates && !process.env.IS_DISCONTINUED_BUILD) {
           setTimeout(() => {
             void autoUpdaterService.checkForUpdatesAndNotify();
           }, 3000);

@@ -7,9 +7,10 @@ export type StudioApi = {
   createAgent: (body: AgentRequest) => Promise<Agent>;
   updateAgent: (id: string, body: AgentRequest) => Promise<unknown>;
 };
+export type StudioCommand = { command: string; args: string[] };
 
 /** Register the owned engine; AionCore generates its assistant; refresh install paths after moves/upgrades, preserving user preferences. */
-export async function registerAelix(api: StudioApi, command: string, stateDir: string): Promise<void> {
+export async function registerAelix(api: StudioApi, launch: StudioCommand, stateDir: string): Promise<void> {
   const agents = await api.listAgents();
   const existing = agents.find(
     (agent) =>
@@ -18,8 +19,8 @@ export async function registerAelix(api: StudioApi, command: string, stateDir: s
   );
   const body: AgentRequest = {
     name: 'Aelix',
-    command: '/bin/sh',
-    args: [command, '--profile', 'coding', '--state-dir', stateDir],
+    command: launch.command,
+    args: [...launch.args, '--profile', 'coding', '--state-dir', stateDir],
     icon: '🧬',
     advanced: { description: OWNER_MARKER },
   };

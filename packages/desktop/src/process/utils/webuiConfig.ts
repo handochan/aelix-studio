@@ -216,6 +216,10 @@ const toDesktopHandle = (handle: WebHostHandle, allowRemote: boolean): DesktopWe
  * Settings → "Enable WebUI" IPC handler.
  */
 export async function startDesktopWebUI(opts: { port?: number; allowRemote?: boolean }): Promise<DesktopWebUIHandle> {
+  if (opts.allowRemote) {
+    const { default: i18n } = await import('../services/i18n');
+    throw new Error(i18n.t('settings.studioRemoteAccessDisabled'));
+  }
   // If already running, tear down first so we honour the new port / allowRemote.
   if (currentHandle) {
     await stopDesktopWebUI();

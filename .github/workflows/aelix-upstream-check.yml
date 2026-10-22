@@ -6,6 +6,8 @@ on:
     paths:
       - 'docs/aelix-studio/upstream.json'
       - 'scripts/aelix-studio/checkUpstream.mjs'
+      - 'tests/unit/studio/upstreamTracking.test.ts'
+      - 'tests/unit/studio/fixtures/**'
       - '.github/workflows/aelix-upstream-check.yml'
 
 permissions:
@@ -22,4 +24,9 @@ jobs:
       - name: Compare the pinned upstream with the latest stable release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: node scripts/aelix-studio/checkUpstream.mjs
+        run: node scripts/aelix-studio/checkUpstream.mjs --fail-on-drift > upstream-report.json
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: aionui-upstream-report
+          path: upstream-report.json

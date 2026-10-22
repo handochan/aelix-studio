@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - 登录",
   "brand": "Aelix Studio",
-  "subtitle": "欢迎回来，请登录您的账户",
+  "subtitle": "登录此自托管服务器，无需外部账号。",
   "username": "用户名",
   "usernamePlaceholder": "请输入用户名",
   "password": "密码",
@@ -13,8 +13,8 @@
   "showPassword": "显示密码",
   "hidePassword": "隐藏密码",
   "languageToggle": "切换语言",
-  "footerPrimary": "命令行 AI 的现代化体验",
-  "footerSecondary": "高效且优雅",
+  "footerPrimary": "自托管工作区",
+  "footerSecondary": "服务器身份验证",
   "errors": {
     "empty": "请输入用户名和密码",
     "invalidCredentials": "用户名或密码错误",

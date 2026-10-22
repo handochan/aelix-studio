@@ -138,7 +138,8 @@
     "printedToConsole": "已在控制台打印元素信息",
     "inspectElement": "审核元素",
     "inspectElementEnable": "开启审核元素",
-    "inspectElementDisable": "关闭审核元素"
+    "inspectElementDisable": "关闭审核元素",
+    "title": "HTML 预览"
   },
   "ppt": {
     "loading": "正在启动 PPT 预览...",
@@ -176,5 +177,6 @@
   "zoomIn": "放大",
   "zoomOut": "缩小",
   "zoomReset": "重置视图",
-  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭"
+  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭",
+  "remoteImage": "打开远程图片"
 }

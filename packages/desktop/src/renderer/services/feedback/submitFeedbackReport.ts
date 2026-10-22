@@ -1,5 +1,6 @@
 import type { FeedbackDiagnosticsContextInput } from '@/common/types/feedbackDiagnostics';
 import { httpRequest } from '@/common/adapter/httpBridge';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 
 const SUMMARY_PREVIEW_LENGTH = 60;
 const LOG_PREFIX = '[FeedbackReport]';
@@ -238,6 +239,7 @@ function buildSummary(moduleLabel: string, description: string): string {
 }
 
 export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Promise<void> {
+  if (!STUDIO_NETWORK_POLICY.telemetry) throw new Error('Online feedback is disabled in Aelix Studio');
   const attachments = [...(input.attachments ?? [])];
   let eventId: string | undefined;
   let logAttachmentStatus: FeedbackLogAttachmentStatus = input.collectLogs ? 'empty' : 'skipped';

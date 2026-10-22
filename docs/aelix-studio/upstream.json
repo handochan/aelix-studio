@@ -23,6 +23,6 @@
     "runtimeConfig": "../../scripts/aelix-studio/runtime.json",
     "acceptedTarget": "darwin-arm64",
     "adapterRepository": "https://github.com/handochan/aelix-acp",
-    "policy": "Build on the target host; runtime files are generated, verified, and shipped outside app.asar, not committed."
+    "policy": "Build on the target host; record the pinned ACP archive and downstream compatibility hashes. Runtime files are generated, verified, and shipped outside app.asar, not committed."
   }
 }

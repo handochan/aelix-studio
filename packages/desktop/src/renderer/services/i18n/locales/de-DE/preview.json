@@ -138,7 +138,8 @@
     "printedToConsole": "Element-Info in der Konsole ausgegeben",
     "inspectElement": "Element inspizieren",
     "inspectElementEnable": "Element-Inspektor aktivieren",
-    "inspectElementDisable": "Element-Inspektor deaktivieren"
+    "inspectElementDisable": "Element-Inspektor deaktivieren",
+    "title": "HTML-Vorschau"
   },
   "ppt": {
     "loading": "PPT-Vorschau wird gestartet...",
@@ -176,5 +177,6 @@
   "zoomIn": "Vergrößern",
   "zoomOut": "Verkleinern",
   "zoomReset": "Ansicht zurücksetzen",
-  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen"
+  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
+  "remoteImage": "Externes Bild öffnen"
 }

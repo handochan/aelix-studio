@@ -25,6 +25,11 @@ export type { BackendDirConfig, BackendLaunchOptions, BackendHandle, BackendStar
  * of truth (Electron ProcessConfig, CLI flags, env vars).
  */
 export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle> {
+  if (opts.allowRemote && opts.backend.kind === 'useExistingBackend') {
+    throw new Error(
+      'Embedded backend sharing cannot be exposed remotely. Use the authenticated standalone Studio host.'
+    );
+  }
   const { startBackend } = await import('./backend-launcher.js');
   const { startStaticServer } = await import('./static-server.js');
 
@@ -37,6 +42,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
       dataDir: opts.dataDir,
       logDir: opts.logDir,
       dirs: opts.dirs,
+      local: false,
     });
   } else {
     // useExistingBackend: create a fake handle

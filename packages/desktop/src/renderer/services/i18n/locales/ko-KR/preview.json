@@ -138,7 +138,8 @@
     "printedToConsole": "요소 정보가 콘솔에 기록되었습니다",
     "inspectElement": "요소 검사",
     "inspectElementEnable": "요소 검사기 활성화",
-    "inspectElementDisable": "요소 검사기 비활성화"
+    "inspectElementDisable": "요소 검사기 비활성화",
+    "title": "HTML 미리보기"
   },
   "ppt": {
     "loading": "PPT 미리보기 시작 중...",
@@ -176,5 +177,6 @@
   "zoomIn": "확대",
   "zoomOut": "축소",
   "zoomReset": "보기 재설정",
-  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기"
+  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기",
+  "remoteImage": "외부 이미지 열기"
 }

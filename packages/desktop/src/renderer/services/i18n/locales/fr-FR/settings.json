@@ -840,7 +840,7 @@
   "bugReportSubmit": "Soumettre",
   "bugReportCancel": "Annuler",
   "bugReportSuccess": "Rapport soumis, merci pour votre retour",
-  "bugReportError": "Échec de la soumission, veuillez réessayer plus tard",
+  "bugReportError": "Les rapports en ligne sont désactivés dans cette version auto-hébergée. Les diagnostics restent locaux.",
   "bugReportModuleSkills": "Compétences et plugins",
   "bugReportModuleWebui": "WebUI et accès distant",
   "bugReportModuleMcp": "MCP et outils",
@@ -1414,5 +1414,6 @@
   "crossSessionMessageDesc": "Permet aux agents d'envoyer des messages à vos autres conversations. La désactivation coupe aussi la mention @@ dans la zone de saisie.",
   "crossSessionMessageDisabledBanner": "Les messages entre conversations sont désactivés, la mention @@ est indisponible.",
   "crossSessionMessageResume": "Réactiver",
-  "crossSessionMessageUpdateFailed": "Échec de la mise à jour du réglage des messages entre conversations"
+  "crossSessionMessageUpdateFailed": "Échec de la mise à jour du réglage des messages entre conversations",
+  "studioRemoteAccessDisabled": "Le partage du backend de bureau est limité à cet ordinateur. Pour un accès distant, utilisez le Studio WebUI autonome avec authentification."
 }

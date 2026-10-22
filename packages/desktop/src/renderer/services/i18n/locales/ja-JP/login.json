@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - ログイン",
   "brand": "Aelix Studio",
-  "subtitle": "おかえりなさい。アカウントにサインインしてください",
+  "subtitle": "このセルフホストサーバーにログインしてください。外部アカウントは不要です。",
   "username": "ユーザー名",
   "usernamePlaceholder": "ユーザー名を入力してください",
   "password": "パスワード",
@@ -13,8 +13,8 @@
   "showPassword": "パスワードを表示",
   "hidePassword": "パスワードを隠す",
   "languageToggle": "言語を切り替える",
-  "footerPrimary": "コマンドラインAIをモダンに変革",
-  "footerSecondary": "効率的でエレガント",
+  "footerPrimary": "セルフホストのワークスペース",
+  "footerSecondary": "サーバー認証",
   "errors": {
     "empty": "ユーザー名とパスワードを入力してください",
     "invalidCredentials": "ユーザー名またはパスワードが正しくありません",

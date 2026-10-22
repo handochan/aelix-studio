@@ -1,7 +1,7 @@
 {
   "pageTitle": "Aelix Studio - Connexion",
   "brand": "Aelix Studio",
-  "subtitle": "Bienvenue, veuillez vous connecter à votre compte",
+  "subtitle": "Connectez-vous à ce serveur auto-hébergé. Aucun compte externe requis.",
   "username": "Nom d'utilisateur",
   "usernamePlaceholder": "Entrez votre nom d'utilisateur",
   "password": "Mot de passe",
@@ -13,8 +13,8 @@
   "showPassword": "Afficher le mot de passe",
   "hidePassword": "Masquer le mot de passe",
   "languageToggle": "Changer de langue",
-  "footerPrimary": "Transformez votre IA en ligne de commande",
-  "footerSecondary": "Moderne et efficace",
+  "footerPrimary": "Espace de travail auto-hébergé",
+  "footerSecondary": "Authentification du serveur",
   "errors": {
     "empty": "Veuillez entrer un nom d'utilisateur et un mot de passe",
     "invalidCredentials": "Nom d'utilisateur ou mot de passe invalide",
