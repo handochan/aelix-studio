@@ -405,7 +405,11 @@ const Layout: React.FC<{
                   })}
                   onClick={onClick}
                 >
-                  <img src={studioLogo} alt={t('common.appName')} className='size-full p-4px object-contain' />
+                  <img
+                    src={studioLogo}
+                    alt={t('common.appName')}
+                    className='absolute inset-0 m-auto size-full object-contain'
+                  />
                 </div>
                 {isSettingsRoute ? (
                   <Tooltip content={t('common.back', { defaultValue: 'Back to Chat' })} position='bottom'>
