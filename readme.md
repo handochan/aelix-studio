@@ -1,3 +1,16 @@
+# Aelix Studio
+
+A desktop and web workspace for Aelix, based on AionUi v2.2.2.
+The downstream implementation adds Aelix branding, an owned default Aelix Coding
+agent, separate application data/update identity, and a bundled Python/Aelix/ACP runtime.
+
+See [development and native distribution instructions](docs/aelix-studio/README.md)
+and [implementation evidence](docs/aelix-studio/distribution-status.md).
+The original upstream documentation follows; upstream release/download links below
+refer to AionUi and do not distribute Aelix Studio.
+
+---
+
 <p align="center">
   <img src="./resources/aionui-banner-1.png" alt="AionUi - Cowork with AI Agents" width="100%">
 </p>

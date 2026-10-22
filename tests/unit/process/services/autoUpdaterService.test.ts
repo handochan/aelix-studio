@@ -172,14 +172,13 @@ describe('AutoUpdaterService', () => {
 
   it('configures electron-updater to read stable metadata from the CDN', async () => {
     const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
-    const { CdnGenericProvider } = await import('@/process/services/cdnGenericProvider');
 
     autoUpdaterService.resetForTest();
 
     expect(autoUpdaterMock.setFeedURL).toHaveBeenCalledWith({
-      provider: 'custom',
-      url: 'https://static.aionui.com/releases',
-      updateProvider: CdnGenericProvider,
+      provider: 'github',
+      owner: 'handochan',
+      repo: 'aelix-studio',
     });
   });
 

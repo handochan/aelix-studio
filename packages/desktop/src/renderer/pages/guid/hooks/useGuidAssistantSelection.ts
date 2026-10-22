@@ -104,6 +104,12 @@ function persistGuidAssistantSelectionKey(assistantId: string): void {
 export function pickDefaultAssistantSelectionKey(assistants: Assistant[]): string | null {
   const enabledAssistants = assistants.filter((assistant) => assistant.enabled !== false);
   const preferred =
+    enabledAssistants.find(
+      (assistant) =>
+        assistant.source === 'generated' &&
+        assistant.agent?.source === 'custom' &&
+        assistant.description === 'Aelix Coding · Aelix Studio'
+    ) ??
     enabledAssistants.find((assistant) => assistant.source === 'generated' && isAionrsAssistant(assistant)) ??
     enabledAssistants.find((assistant) => isAionrsAssistant(assistant)) ??
     enabledAssistants[0];

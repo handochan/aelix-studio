@@ -1,12 +1,15 @@
 {
-  "name": "AionUi",
+  "name": "aelix-studio",
   "version": "2.2.2",
-  "description": "Transform your command-line AI agent into a modern, efficient AI Chat interface.",
+  "description": "Aelix Studio — desktop and web workspace for Aelix",
   "keywords": [],
   "license": "Apache-2.0",
   "author": {
-    "name": "AionUi",
-    "email": "service@aionui.com"
+    "name": "Aelix contributors"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/handochan/aelix-studio.git"
   },
   "workspaces": [
     "packages/*"
@@ -72,7 +75,9 @@
     "test:smoke:installer:rstrtmgr-ui": "node scripts/smoke-installer-rstrtmgr-ui.js",
     "prepare": "husky",
     "postinstall": "node scripts/postinstall.js",
-    "test:bun": "bun test packages/desktop/src/process/services/database/drivers/*.bun.test.ts"
+    "test:bun": "bun test packages/desktop/src/process/services/database/drivers/*.bun.test.ts",
+    "studio:runtime": "python3 scripts/aelix-studio/prepareRuntime.py",
+    "studio:dist": "node scripts/aelix-studio/build.mjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.2",
@@ -268,5 +273,5 @@
   "patchedDependencies": {
     "7zip-bin@5.2.0": "patches/7zip-bin@5.2.0.patch"
   },
-  "productName": "AionUi"
+  "productName": "Aelix Studio"
 }

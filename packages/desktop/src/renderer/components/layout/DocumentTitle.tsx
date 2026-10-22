@@ -18,7 +18,7 @@ import { useTranslation } from 'react-i18next';
  * navigation and language switches.
  */
 export function titleForPath(pathname: string, t: (key: string) => string): string {
-  return pathname.startsWith('/login') ? t('login.pageTitle') : 'AionUi';
+  return pathname.startsWith('/login') ? t('login.pageTitle') : t('common.appName');
 }
 
 const DocumentTitle: React.FC = () => {

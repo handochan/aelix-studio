@@ -24,7 +24,7 @@ import {
   recordAutoUpdateQuitAndInstall,
   recordAutoUpdateStatus,
 } from './autoUpdateDiagnostics';
-import { buildCdnFeedOptions } from './updateFeed';
+import { buildStudioFeedOptions } from './updateFeed';
 
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
@@ -131,7 +131,7 @@ class AutoUpdaterService extends EventEmitter {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = true;
     this.configureDevAutoUpdateDebug();
-    const cdnFeedOptions = buildCdnFeedOptions();
+    const cdnFeedOptions = buildStudioFeedOptions();
 
     // Set the correct update channel based on platform and architecture before
     // any update checks are performed
@@ -141,10 +141,10 @@ class AutoUpdaterService extends EventEmitter {
       log.info(`Update channel set to: ${channel}`);
     }
     autoUpdater.setFeedURL(cdnFeedOptions);
-    log.info('Update feed set to CDN provider');
+    log.info('Update feed set to Aelix Studio GitHub releases');
     log.debug('[auto-update] CDN feed configured', {
       provider: cdnFeedOptions.provider,
-      url: cdnFeedOptions.url,
+      repo: cdnFeedOptions.repo,
       channel: channel ?? 'latest',
       platform: process.platform,
       arch: process.arch,
@@ -194,11 +194,12 @@ class AutoUpdaterService extends EventEmitter {
    */
   private ensureDevUpdateConfig(): void {
     try {
-      const cdnFeedOptions = buildCdnFeedOptions();
+      const cdnFeedOptions = buildStudioFeedOptions();
       const devConfig = [
-        'provider: generic',
-        `url: ${cdnFeedOptions.url}`,
-        'updaterCacheDirName: com.aionui.app',
+        'provider: github',
+        `owner: ${cdnFeedOptions.owner}`,
+        `repo: ${cdnFeedOptions.repo}`,
+        'updaterCacheDirName: ai.aelix.studio',
         '',
       ].join('\n');
       const configPath = path.join(app.getPath('userData'), 'dev-app-update.yml');

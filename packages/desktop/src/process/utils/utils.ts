@@ -44,7 +44,7 @@ export const getTempPath = () => {
 const ensureCliSafeSymlink = (targetPath: string, symlinkName: string): string => {
   // Only needed when the platform explicitly requires CLI-safe symlinks
   // (Electron on macOS, where userData lives under "Application Support" which contains spaces)
-  if (!getPlatformServices().paths.needsCliSafeSymlinks()) {
+  if (process.env.AIONUI_E2E_TEST === '1' || !getPlatformServices().paths.needsCliSafeSymlinks()) {
     return targetPath;
   }
 
@@ -91,26 +91,26 @@ const ensureCliSafeSymlink = (targetPath: string, symlinkName: string): string =
 
 /**
  * Get data path, using CLI-safe symlink on macOS.
- * Release builds use ~/.aionui; dev builds use ~/.aionui-dev.
+ * Release builds use ~/.aelix-studio; dev builds use ~/.aelix-studio-dev.
  * 获取数据目录路径，macOS 上使用符号链接。
- * Release 使用 ~/.aionui，Dev 模式使用 ~/.aionui-dev。
+ * Release 使用 ~/.aelix-studio，Dev 模式使用 ~/.aelix-studio-dev。
  */
 export const getDataPath = (): string => {
   const rootPath = getElectronPathOrFallback('userData');
   const dataPath = path.join(rootPath, 'aionui');
-  return ensureCliSafeSymlink(dataPath, getEnvAwareName('.aionui'));
+  return ensureCliSafeSymlink(dataPath, getEnvAwareName('.aelix-studio'));
 };
 
 /**
  * Get config path, using CLI-safe symlink on macOS.
- * Release builds use ~/.aionui-config; dev builds use ~/.aionui-config-dev.
+ * Release builds use ~/.aelix-studio-config; dev builds use ~/.aelix-studio-config-dev.
  * 获取配置目录路径，macOS 上使用符号链接。
- * Release 使用 ~/.aionui-config，Dev 模式使用 ~/.aionui-config-dev。
+ * Release 使用 ~/.aelix-studio-config，Dev 模式使用 ~/.aelix-studio-config-dev。
  */
 export const getConfigPath = (): string => {
   const rootPath = getElectronPathOrFallback('userData');
   const configPath = path.join(rootPath, 'config');
-  return ensureCliSafeSymlink(configPath, getEnvAwareName('.aionui-config'));
+  return ensureCliSafeSymlink(configPath, getEnvAwareName('.aelix-studio-config'));
 };
 
 /**

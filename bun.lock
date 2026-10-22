@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "AionUi",
+      "name": "aelix-studio",
       "dependencies": {
         "@agentclientprotocol/sdk": "^0.18.2",
         "@aionui/web-host": "workspace:*",

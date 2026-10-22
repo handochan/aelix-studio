@@ -73,6 +73,12 @@ module.exports = async function afterPack(context) {
     }
 
     verifyBundledResources(resourcesDir, electronPlatformName, targetArch);
+    const studioRuntime = path.join(resourcesDir, 'bundled-aelix', `${electronPlatformName}-${targetArch}`);
+    for (const file of ['manifest.json', 'bin/aelix-acp', 'bin/aelix', 'python/bin/python3', 'launch.py']) {
+      if (!fs.existsSync(path.join(studioRuntime, file))) {
+        throw new Error(`Missing bundled Aelix runtime: ${file}; run studio:runtime on the target host first`);
+      }
+    }
   } else {
     throw new Error(`resources directory not found: ${resourcesDir}`);
   }

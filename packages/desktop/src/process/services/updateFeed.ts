@@ -1,22 +1,8 @@
 /**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
+ * Aelix Studio updates must never install an upstream AionUi binary.
  */
+import type { GithubOptions } from 'builder-util-runtime';
 
-import { CdnGenericProvider } from './cdnGenericProvider';
-import type { CdnGenericProviderConfiguration } from './cdnGenericProvider';
-
-export const CDN_UPDATE_BASE_URL = 'https://static.aionui.com/releases';
-
-export type CdnFeedOptions = CdnGenericProviderConfiguration & {
-  updateProvider: typeof CdnGenericProvider;
-};
-
-export function buildCdnFeedOptions(): CdnFeedOptions {
-  return {
-    provider: 'custom',
-    url: CDN_UPDATE_BASE_URL,
-    updateProvider: CdnGenericProvider,
-  };
+export function buildStudioFeedOptions(): GithubOptions {
+  return { provider: 'github', owner: 'handochan', repo: 'aelix-studio' };
 }

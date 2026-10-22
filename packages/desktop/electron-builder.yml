@@ -1,12 +1,12 @@
-appId: com.aionui.app
-productName: AionUi
-executableName: AionUi
+appId: ai.aelix.studio
+productName: Aelix Studio
+executableName: Aelix Studio
 copyright: Copyright © 2024 AionUi
 
 protocols:
-  - name: AionUi Protocol
+  - name: Aelix Studio Protocol
     schemes:
-      - aionui
+      - aelix-studio
 
 asar:
   smartUnpack: true
@@ -110,6 +110,8 @@ extraResources:
   # aioncore binary (pre-compiled per platform/arch, ships its own bun runtime)
   - from: resources/bundled-aioncore
     to: bundled-aioncore
+  - from: resources/bundled-aelix/${platform}-${arch}
+    to: bundled-aelix/${platform}-${arch}
   - from: resources/hub
     to: hub
 win:
@@ -169,17 +171,17 @@ linux:
   icon: resources/app.png
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
   category: Utility
-  maintainer: aionui
-  vendor: aionui
+  maintainer: handochan
+  vendor: Aelix
   synopsis: ${description}
   description: ${description}
   desktop:
     entry:
-      Name: AionUi
+      Name: Aelix Studio
       Comment: ${description}
-      Icon: AionUi
+      Icon: aelix-studio
       Categories: Office;Utility;
-      MimeType: x-scheme-handler/aionui;
+      MimeType: x-scheme-handler/aelix-studio;
 
 npmRebuild: false
 buildDependenciesFromSource: false
@@ -218,7 +220,7 @@ electronDownload:
 
 publish:
   provider: github
-  owner: iOfficeAI
-  repo: AionUi
+  owner: handochan
+  repo: aelix-studio
   publishAutoUpdate: true
   releaseType: release

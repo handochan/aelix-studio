@@ -238,3 +238,9 @@ graphify-out/
 .analysis/
 temp/
 .playwright-mcp/
+
+# Local Aelix Studio toolchains and development caches
+/.local/
+
+# Generated host-native Python/Aelix/ACP bundle
+/resources/bundled-aelix/

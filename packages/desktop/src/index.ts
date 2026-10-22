@@ -23,6 +23,7 @@ import * as path from 'path';
 import { initMainAdapterWithWindow } from './common/adapter/main';
 import { ipcBridge } from './common';
 import { initializeProcess } from './process';
+import { bootstrapAelixStudio } from './process/studio/bootstrap';
 import { startBackendOrExit } from './process/startup/backendStartup';
 import { assertStartupArchitectureCompatible } from './process/startup/architectureCompatibility';
 import { classifyBackendStartupFailure } from './process/startup/backendStartupFailure';
@@ -224,6 +225,7 @@ let disposeCronResumeListener: (() => void) | null = null;
 // Flag tracking whether the backend subprocess started successfully. Read by
 // the deferred runBackendMigrations trigger in createWindow().
 let backendStartedOk = false;
+let studioBootstrapPromise: Promise<void> | null = null;
 let backendStartupFailed = false;
 let backendStartupFailureInfo: BackendStartupFailureInfo | null = null;
 let rendererInitialLanguage: string | null = null;
@@ -382,18 +384,21 @@ function ensureAdminUserOnce(backendPort: number): Promise<void> {
 }
 
 function markBackendReady(backendPort: number, source: string): void {
-  if (backendStartedOk) return;
+  if (backendStartedOk || studioBootstrapPromise) return;
   console.log(`[AionUi] ${source} ready (port=${backendPort})`);
   exposeBackendPort(backendPort);
   registerCronResumeBridge(backendPort);
-  backendStartedOk = true;
-  backendStartupFailed = false;
-  backendStartupFailureInfo = null;
-  (globalThis as typeof globalThis & { __backendStartupFailed?: boolean }).__backendStartupFailed = false;
-  // Backend is ready: tell the renderer to drop any "starting" view and show the App.
-  broadcastBackendStartupState(null);
-  void ensureAdminUserOnce(backendPort);
-  scheduleBackendMigrations();
+  studioBootstrapPromise = bootstrapAelixStudio(backendPort)
+    .catch((error) => console.error('[Aelix Studio] Default agent setup failed:', error))
+    .then(() => {
+      backendStartedOk = true;
+      backendStartupFailed = false;
+      backendStartupFailureInfo = null;
+      (globalThis as typeof globalThis & { __backendStartupFailed?: boolean }).__backendStartupFailed = false;
+      broadcastBackendStartupState(null);
+      void ensureAdminUserOnce(backendPort);
+      scheduleBackendMigrations();
+    });
 }
 
 function resolveDebugBackendStartupFailure(): BackendStartupFailureInfo | null {
@@ -872,6 +877,7 @@ const handleAppReady = async (): Promise<void> => {
       exitOnFailure: isWebUIMode || isResetPasswordMode,
       logError: console.error,
     });
+    if (studioBootstrapPromise) await studioBootstrapPromise;
     if (!backendStartup.ok) {
       if (isWebUIMode || isResetPasswordMode) {
         return;

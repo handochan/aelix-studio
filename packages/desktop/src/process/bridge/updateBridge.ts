@@ -60,11 +60,11 @@ interface AutoUpdateCheckParams {
   includePrerelease?: boolean;
 }
 
-const DEFAULT_REPO = 'iOfficeAI/AionUi';
-const DEFAULT_USER_AGENT = 'AionUi';
+const DEFAULT_REPO = 'handochan/aelix-studio';
+const DEFAULT_USER_AGENT = 'Aelix-Studio';
 const ALLOWED_ASSET_EXTS = new Set(['.exe', '.msi', '.dmg', '.zip', '.deb', '.rpm']);
-const CDN_HOST = 'static.aionui.com';
-const CDN_BASE_URL = `https://${CDN_HOST}/releases`;
+const CDN_HOST = 'github.com';
+const CDN_BASE_URL = 'https://github.com/handochan/aelix-studio/releases/latest/download';
 const ALLOWED_DOWNLOAD_HOSTS = new Set<string>([
   CDN_HOST,
   'github.com',
@@ -93,7 +93,7 @@ const normalizeTagToSemver = (tag: string): string | null => {
  * matching electron-builder's artifactName output, so no name conversion is needed.
  */
 const rewriteAssetUrlToCDN = (assetName: string, version: string): string => {
-  return `${CDN_BASE_URL}/${version}/${assetName}`;
+  return `https://github.com/handochan/aelix-studio/releases/download/v${version}/${assetName}`;
 };
 
 type RuntimePlatformInfo = {

@@ -25,9 +25,9 @@ describe('titleForPath', () => {
 
   it('uses the login title on the login route only', () => {
     expect(titleForPath('/login', t)).toBe('t(login.pageTitle)');
-    expect(titleForPath('/guid', t)).toBe('AionUi');
-    expect(titleForPath('/conversation/abc', t)).toBe('AionUi');
-    expect(titleForPath('/settings/agent', t)).toBe('AionUi');
+    expect(titleForPath('/guid', t)).toBe('t(common.appName)');
+    expect(titleForPath('/conversation/abc', t)).toBe('t(common.appName)');
+    expect(titleForPath('/settings/agent', t)).toBe('t(common.appName)');
   });
 });
 
@@ -41,7 +41,7 @@ describe('DocumentTitle', () => {
         <DocumentTitle />
       </MemoryRouter>
     );
-    expect(document.title).toBe('AionUi');
+    expect(document.title).toBe('common.appName');
   });
 
   it('sets the localised login title on the login route', () => {

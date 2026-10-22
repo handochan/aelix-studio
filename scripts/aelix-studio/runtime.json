@@ -1,0 +1,13 @@
+{
+  "schema": "aelix-studio.runtime/1",
+  "python": "3.12.12",
+  "aelix": "0.1.0b2",
+  "acp": {
+    "version": "0.1.0",
+    "repository": "handochan/aelix-acp",
+    "commit": "71eabb42b3c97e089e7d8601bc32b310ee40dbea",
+    "archiveSha256": "ca6a45f1aabe226ea577ae446724b41ec1f6ae931d1197ea82fc4a3f10045089"
+  },
+  "supportedBuildTargets": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64"],
+  "acceptedTargets": ["darwin-arm64"]
+}

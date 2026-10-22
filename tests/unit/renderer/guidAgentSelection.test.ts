@@ -22,6 +22,19 @@ describe('guid assistant selection helpers', () => {
     expect(resolveAssistantSelectionKey('aionrs', assistants)).toBeUndefined();
   });
 
+  it('selects bundled Aelix first while respecting a disabled preset', () => {
+    const aelix = assistant({
+      id: 'bare:owned-aelix',
+      source: 'generated',
+      runtimeKey: 'custom',
+      sort_order: 30,
+      description: 'Aelix Coding · Aelix Studio',
+      agent: { type: 'acp', source: 'custom' },
+    });
+    expect(pickDefaultAssistantSelectionKey([...assistants, aelix])).toBe('bare:owned-aelix');
+    expect(pickDefaultAssistantSelectionKey([...assistants, { ...aelix, enabled: false }])).toBe('bare-aionrs');
+  });
+
   it('defaults to the generated aionrs assistant when available', () => {
     expect(pickDefaultAssistantSelectionKey(assistants)).toBe('bare-aionrs');
   });

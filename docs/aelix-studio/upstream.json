@@ -1,0 +1,28 @@
+{
+  "schema": "aelix-studio.upstream/1",
+  "product": "Aelix Studio",
+  "fork": "handochan/aelix-studio",
+  "upstream": {
+    "repository": "iOfficeAI/AionUi",
+    "tag": "v2.2.2",
+    "commit": "6744099b279b991c17e31c243f0920477bd31cb6"
+  },
+  "aioncore": {
+    "version": "v0.2.2",
+    "policy": "Use the upstream-pinned binary; no downstream backend fork during bootstrap."
+  },
+  "developmentToolchain": {
+    "platform": "darwin-arm64",
+    "node": "24.22.1",
+    "bun": "1.4.4",
+    "nodeArchiveSha256": "89c682593d76cd44233fa53b1563264e7de9cbb189cad169135c5b4fadfbc0a7",
+    "bunArchiveSha256": "c240d7f0ccb90c263a849fcdb09b7ee62630d921348ed6aafda86b9d577bc510"
+  },
+  "aelixBundle": {
+    "status": "implemented_native_build",
+    "runtimeConfig": "../../scripts/aelix-studio/runtime.json",
+    "acceptedTarget": "darwin-arm64",
+    "adapterRepository": "https://github.com/handochan/aelix-acp",
+    "policy": "Build on the target host; runtime files are generated, verified, and shipped outside app.asar, not committed."
+  }
+}

@@ -1,0 +1,7 @@
+
+Aelix Studio downstream distribution
+Copyright 2026 Aelix contributors
+Based on AionUi v2.2.2 by AionUi contributors (Apache-2.0).
+Aelix brand mark is from handochan/aelix-ai (Apache-2.0).
+Bundled Python and Python dependencies retain their license files and distribution metadata.
+Aelix ACP includes Plotly basic 3.7.0 under MIT; its license is retained in the runtime.

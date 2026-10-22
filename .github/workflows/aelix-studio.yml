@@ -1,0 +1,41 @@
+name: Aelix Studio checks
+on:
+  push:
+    branches: [chore/aelix-studio-bootstrap]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - run: bun install --frozen-lockfile
+      - run: bun run lint -- --quiet
+      - run: bun run format:check
+      - run: bun x tsc --noEmit
+      - run: bun run i18n:types && node scripts/check-i18n.js
+      - run: bun run test
+      - run: bun run package
+  native-runtime:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.19'
+      - run: python3 scripts/aelix-studio/prepareRuntime.py
+      - name: Relocate the complete runtime and open a real ACP session
+        run: |
+          arch=$(uname -m)
+          if [ "$arch" = "aarch64" ]; then arch=arm64; fi
+          if [ "$arch" = "x86_64" ]; then arch=x64; fi
+          cp -R "resources/bundled-aelix/darwin-$arch" "$RUNNER_TEMP/Aelix Studio runtime"
+          python3 scripts/aelix-studio/smokeRuntime.py "$RUNNER_TEMP/Aelix Studio runtime"
