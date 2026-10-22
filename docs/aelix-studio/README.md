@@ -74,13 +74,19 @@ See [bootstrap-status.md](bootstrap-status.md) for the original preparation and
 
 ## Aelix brand preservation
 
-The home header uses the official `mark.svg` unchanged, beside the UI text
-`Aelix Studio`. The compact header uses the mark alone. No custom badge, black
-backplate, redrawn paths, recoloring, skew, crop, or effects are applied.
-The SVG is copied byte-for-byte to `packages/desktop/src/renderer/assets/logo.svg`.
+The home header displays the official `lockup-light.svg` or `lockup-dark.svg`
+according to the active theme. These contain both the mark and the original
+Aelix wordmark, with their supplied geometry and spacing. The compact header
+uses the official `mark.svg` alone. There is no additional typeset brand name.
+All SVG files are copied byte-for-byte from the canonical source; no custom
+badge, backplate, recoloring, skew, crop, or effects are applied.
 
 Canonical source: [aelix-ai/docs/assets/brand](https://github.com/handochan/aelix-ai/tree/7d0a2c0f74c542492f65f3a43965452c4333b8e6/docs/assets/brand).
 Follow its `BRAND.md`; preserve the supplied mark and wordmark geometry.
-Source `mark.svg` Git blob: `4973c209e572fcf4c52b0f3ece20689d455aeedc`.
-SHA-256: `db6ffcd9309bcf9ea704c75073941ca7463bba7b11f8ab0e17ea41d1e27c3a76`.
-Raster application/PWA assets are proportional renders of this same mark.
+Source Git blobs:
+
+- `mark.svg`: `4973c209e572fcf4c52b0f3ece20689d455aeedc`
+- `lockup-light.svg`: `5c8da8643f1352236ab9c18a892c4ff362fce3ea`
+- `lockup-dark.svg`: `97d7e456f69c6f134206b0e2db500cab50c4d19b`
+
+Raster application/PWA assets remain proportional renders of the official mark.

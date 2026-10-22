@@ -16,7 +16,7 @@ Verified 2026-10-23 (Asia/Seoul), macOS Apple Silicon.
 
 ## Verification
 
-- Full Vitest suite: **523 files passed, 1 skipped; 4,992 tests passed, 5 skipped**.
+- Full Vitest suite: **523 files passed, 1 skipped; 4,995 tests passed, 5 skipped**.
 - TypeScript, lint (zero errors), formatting, i18n types/validation, production
   Electron main/preload/renderer build.
 - Real AionCore API: repeat registration leaves exactly one owned engine and
@@ -27,11 +27,15 @@ Verified 2026-10-23 (Asia/Seoul), macOS Apple Silicon.
   succeeds, including actual Aelix child startup and approval-bridge ready check.
 - Packaged runtime inside `out/mac-arm64/Aelix Studio.app/Contents/Resources`
   passes the same real session creation check.
-- Packaged app: unaltered official Aelix mark beside the Aelix Studio text, default selected Aelix, isolated test
+- Packaged app: unaltered official Aelix mark/wordmark lockup for the active theme, default selected Aelix, isolated test
   userData, app ID and ad-hoc signature (`codesign --verify --deep --strict`).
 - Packaged UI real model call: configured OpenRouter / DeepSeek V4.1 Flash 1017
   returned `STUDIO_RUNTIME_OK` through the bundled Aelix. Screenshot evidence:
   `.local/studio-packaged-response.png` (synthetic prompt, no tool call).
+- Official lockup UI verification: light/dark assets render identically to their
+  canonical SVGs at 140×40, preserving the 3.5 aspect ratio without CSS filters
+  or transforms. Evidence: `.local/wordmark-qa.json`,
+  `.local/aelix-wordmark-light.png`, `.local/aelix-wordmark-dark.png`.
 - ACP remote CI on the pinned commit passed macOS/Linux × Python 3.11/3.12:
   [run 39818697532](https://github.com/handochan/aelix-acp/actions/runs/39818697532).
 

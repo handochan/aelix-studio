@@ -13,6 +13,11 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k, i18n: { language: 'en' } }),
 }));
 
+const themeMocks = vi.hoisted(() => ({ theme: 'light' }));
+vi.mock('@/renderer/hooks/context/ThemeContext', () => ({
+  useThemeContext: () => themeMocks,
+}));
+
 // react-router-dom: control location, capture navigate.
 const navigate = vi.fn();
 let currentPathname = '/guid';
@@ -71,6 +76,9 @@ vi.mock('@renderer/pages/conversation/Preview/context/PreviewContext', () => ({
 }));
 
 import Layout from '@renderer/components/layout/Layout';
+import lightLockup from '@/renderer/assets/logos/brand/lockup-light.svg';
+import darkLockup from '@/renderer/assets/logos/brand/lockup-dark.svg';
+import officialMark from '@/renderer/assets/logo.svg';
 
 const renderLayout = () => render(<Layout sider={<div>sider</div>} />);
 
@@ -98,10 +106,27 @@ describe('Layout sider brand Home button', () => {
     featureMocks.teamModeEnabled = false;
     sessionStorage.clear();
     currentPathname = '/guid';
+    themeMocks.theme = 'light';
   });
 
   afterEach(() => {
     vi.clearAllMocks();
+  });
+
+  it.each(['light', 'dark'])('uses the official lockup for the %s appearance', (appearance) => {
+    themeMocks.theme = appearance;
+    renderLayout();
+    expect(screen.getByRole('img', { name: 'common.appName' })).toHaveAttribute(
+      'src',
+      appearance === 'dark' ? darkLockup : lightLockup
+    );
+  });
+
+  it('uses only the official mark when the sidebar collapses', () => {
+    renderLayout();
+    act(() => shortcutMocks.params?.toggleSider());
+    expect(screen.getByRole('img', { name: 'common.appName' })).toHaveAttribute('src', officialMark);
+    expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
   });
 
   it('navigates to the recorded last non-settings path when clicked in a settings route', () => {
@@ -155,11 +180,12 @@ describe('Layout sider brand Home button', () => {
 
   it('renders the wordmark as a non-actionable element in a non-settings route', () => {
     currentPathname = '/guid';
+    themeMocks.theme = 'light';
     renderLayout();
 
     // No actionable role/label in chat routes.
     expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
-    const wordmark = screen.getByText('common.appName');
+    const wordmark = screen.getByRole('img', { name: 'common.appName' });
     fireEvent.click(wordmark);
     expect(navigate).not.toHaveBeenCalled();
   });
@@ -168,7 +194,7 @@ describe('Layout sider brand Home button', () => {
     currentPathname = '/conversation/xyz';
     renderLayout();
 
-    fireEvent.click(screen.getByText('common.appName'));
+    fireEvent.click(screen.getByRole('img', { name: 'common.appName' }));
     expect(navigate).not.toHaveBeenCalled();
   });
 
@@ -202,7 +228,7 @@ describe('Layout sider brand Home button', () => {
     renderLayout();
 
     // Clicking the official mark bubbles to its existing devtools shortcut.
-    const icon = screen.getByRole('img', { name: 'common.appName' });
+    const icon = screen.getByTestId('brand-icon-shortcut');
     expect(icon).toBeTruthy();
     for (let i = 0; i < 4; i++) fireEvent.click(icon);
     expect(openDevTools).toHaveBeenCalled();

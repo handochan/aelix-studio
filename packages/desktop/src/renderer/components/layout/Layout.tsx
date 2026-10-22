@@ -5,6 +5,9 @@
  */
 
 import studioLogo from '@/renderer/assets/logo.svg';
+import lightLockup from '@/renderer/assets/logos/brand/lockup-light.svg';
+import darkLockup from '@/renderer/assets/logos/brand/lockup-dark.svg';
+import { useThemeContext } from '@/renderer/hooks/context/ThemeContext';
 import { ipcBridge } from '@/common';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
 import PwaPullToRefresh from '@/renderer/components/layout/PwaPullToRefresh';
@@ -145,7 +148,8 @@ const Layout: React.FC<{
     return () => setGlobalNavigate(null);
   }, [navigate]);
   const { t } = useTranslation();
-  // The "AionUi" wordmark acts as Home / Back-to-Chat, but only from settings routes.
+  const { theme } = useThemeContext();
+  // The official Aelix wordmark acts as Home / Back-to-Chat, but only from settings routes.
   // In non-settings routes the user is already "home", so it is a no-op (and not actionable).
   const isSettingsRoute = location.pathname.startsWith('/settings');
   // Only wired to the wordmark in the isSettingsRoute branch below, so the
@@ -399,39 +403,36 @@ const Layout: React.FC<{
                   }
                 )}
               >
-                <div
-                  className={classNames('shrink-0 size-32px relative', {
-                    '!size-24px': collapsed,
-                  })}
-                  onClick={onClick}
-                >
+                <div className={classNames('relative shrink-0', collapsed ? 'size-24px' : 'w-140px h-40px')}>
                   <img
-                    src={studioLogo}
+                    src={collapsed ? studioLogo : theme === 'dark' ? darkLockup : lightLockup}
                     alt={t('common.appName')}
-                    className='absolute inset-0 m-auto size-full object-contain'
+                    className='size-full object-contain pointer-events-none'
                   />
+                  {/* Keep the icon shortcut separate from wordmark navigation without altering the lockup. */}
+                  <div
+                    data-testid='brand-icon-shortcut'
+                    className={classNames('absolute inset-y-0 left-0', collapsed ? 'w-full' : 'w-40px')}
+                    onClick={onClick}
+                  />
+                  {!collapsed && isSettingsRoute && (
+                    <Tooltip content={t('common.back', { defaultValue: 'Back to Chat' })} position='bottom'>
+                      <div
+                        className='absolute inset-y-0 left-40px right-0 cursor-pointer'
+                        role='button'
+                        tabIndex={0}
+                        aria-label={t('common.back', { defaultValue: 'Back to Chat' })}
+                        onClick={handleBrandHome}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            handleBrandHome();
+                          }
+                        }}
+                      />
+                    </Tooltip>
+                  )}
                 </div>
-                {isSettingsRoute ? (
-                  <Tooltip content={t('common.back', { defaultValue: 'Back to Chat' })} position='bottom'>
-                    <div
-                      className='text-16px text-t-primary collapsed-hidden font-semibold cursor-pointer'
-                      role='button'
-                      tabIndex={0}
-                      aria-label={t('common.back', { defaultValue: 'Back to Chat' })}
-                      onClick={handleBrandHome}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter' || event.key === ' ') {
-                          event.preventDefault();
-                          handleBrandHome();
-                        }
-                      }}
-                    >
-                      {t('common.appName')}
-                    </div>
-                  </Tooltip>
-                ) : (
-                  <div className='text-16px text-t-primary collapsed-hidden font-semibold'>{t('common.appName')}</div>
-                )}
                 {isMobile && !collapsed && (
                   <button
                     type='button'
