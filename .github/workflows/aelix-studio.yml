@@ -1,7 +1,8 @@
 name: Aelix Studio checks
 on:
   push:
-    branches: [chore/aelix-studio-bootstrap]
+    branches: [main, chore/aelix-studio-bootstrap]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
 permissions:
@@ -28,7 +29,17 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-22.04, windows-2022]
+        include:
+          - os: macos-15
+            target: darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+          - os: windows-2022
+            target: win32-x64
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -44,10 +55,30 @@ jobs:
         run: python scripts/aelix-studio/smokeRuntime.py --relocate
       - uses: actions/upload-artifact@v4
         with:
-          name: runtime-receipt-${{ matrix.os }}
+          name: runtime-receipt-${{ matrix.target }}
           path: resources/bundled-aelix/*/manifest.json
-  windows-package:
-    runs-on: windows-2022
+  desktop-package:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-15
+            target: darwin-arm64
+            runtime: out/mac-arm64/Aelix Studio.app/Contents/Resources/bundled-aelix/darwin-arm64
+          - os: macos-15-intel
+            target: darwin-x64
+            runtime: out/mac/Aelix Studio.app/Contents/Resources/bundled-aelix/darwin-x64
+          - os: ubuntu-22.04
+            target: linux-x64
+            runtime: out/linux-unpacked/resources/bundled-aelix/linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+            runtime: out/linux-arm64-unpacked/resources/bundled-aelix/linux-arm64
+          - os: windows-2022
+            target: win32-x64
+            runtime: out/win-unpacked/resources/bundled-aelix/win32-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -63,13 +94,36 @@ jobs:
         with:
           version: '0.11.19'
       - run: bun install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        run: bun x playwright install-deps chromium
       - run: bun run studio:dist
-      - name: Verify the packaged Windows runtime
-        run: python scripts/aelix-studio/smokeRuntime.py out/win-unpacked/resources/bundled-aelix/win32-x64 --relocate
+      - name: Verify real host registration, team startup and offline Analytics
+        env:
+          STUDIO_REQUIRE_HOST_TEST: '1'
+        run: python -m unittest discover -s tests/studio -p "test_*.py"
+      - name: Verify both packaged agent profiles after relocation
+        env:
+          STUDIO_PACKAGED_RUNTIME: ${{ matrix.runtime }}
+        run: python scripts/aelix-studio/smokeRuntime.py --relocate
+      - name: Open the packaged desktop and check the renderer
+        if: runner.os != 'Linux'
+        env:
+          E2E_PACKAGED: '1'
+        run: bun x playwright test tests/e2e/specs/app-launch.e2e.ts
+      - name: Open the packaged Linux desktop under Xvfb
+        if: runner.os == 'Linux'
+        env:
+          E2E_PACKAGED: '1'
+        run: xvfb-run -a bun x playwright test tests/e2e/specs/app-launch.e2e.ts
       - uses: actions/upload-artifact@v4
         with:
-          name: aelix-studio-windows-x64
-          path: out/*-win-*.exe
+          name: aelix-studio-${{ matrix.target }}
+          path: |
+            out/*.exe
+            out/*.dmg
+            out/*.zip
+            out/*.deb
+            out/latest*.yml
   offline-webui:
     runs-on: ubuntu-22.04
     steps:
@@ -77,7 +131,8 @@ jobs:
       - run: docker build -t aelix-studio:test .
       - name: Start with no external network and verify API authentication
         run: |
-          docker run --detach --network none --name studio-offline aelix-studio:test
+          docker volume create studio-test-data
+          docker run --detach --network none --name studio-offline -v studio-test-data:/data -v "$PWD/tests:/app/tests:ro" -e STUDIO_PERSISTENCE_TEST=1 aelix-studio:test
           docker exec studio-offline bun -e '
             let ready = false;
             for (let i = 0; i < 90; i++) {
@@ -91,5 +146,22 @@ jobs:
           '
       - name: Open a real bundled ACP session without external networking
         run: docker run --rm --network none --entrypoint /app/resources/bundled-aelix/linux-x64/python/bin/python3 aelix-studio:test /app/scripts/aelix-studio/smokeRuntime.py --relocate
+      - name: Verify isolated offline analysis and real backend registration
+        run: docker run --rm --network none -v "$PWD/tests:/app/tests:ro" -e STUDIO_REQUIRE_HOST_TEST=1 --entrypoint /app/resources/bundled-aelix/linux-x64/python/bin/python3 aelix-studio:test -I -B -m unittest discover -s tests/studio -p 'test_*.py'
+      - name: Preserve settings and restore an actual session after container replacement
+        run: |
+          docker exec studio-offline /app/resources/bundled-aelix/linux-x64/python/bin/python3 -I /app/tests/studio/persistence.py record
+          docker rm --force studio-offline
+          docker run --detach --network none --name studio-offline -v studio-test-data:/data -v "$PWD/tests:/app/tests:ro" -e STUDIO_PERSISTENCE_TEST=1 aelix-studio:test
+          docker exec studio-offline bun -e '
+            for (let i = 0; i < 90; i++) {
+              try { if ((await fetch("http://127.0.0.1:3000/login")).ok) process.exit(0); } catch {}
+              await Bun.sleep(1000);
+            }
+            throw new Error("Recreated WebUI did not become ready");
+          '
+          docker exec studio-offline /app/resources/bundled-aelix/linux-x64/python/bin/python3 -I /app/tests/studio/persistence.py restore
       - if: always()
-        run: docker rm --force studio-offline || true
+        run: |
+          docker rm --force studio-offline || true
+          docker volume rm studio-test-data || true

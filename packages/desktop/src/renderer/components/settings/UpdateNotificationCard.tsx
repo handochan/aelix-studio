@@ -5,6 +5,7 @@
  */
 
 import MarkdownView from '@/renderer/components/Markdown';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 import { useFeedback } from '@/renderer/hooks/context/FeedbackContext';
 import { Button, Modal, Progress } from '@arco-design/web-react';
 import { CheckOne, Close, Download, Minus } from '@icon-park/react';
@@ -211,26 +212,28 @@ const UpdateNotificationCard: React.FC = () => {
               {t('update.installerLastFailure.viewLog')}
             </Button>
           )}
-          <Button
-            type='primary'
-            size='small'
-            className={ACTION_BTN_CLASS}
-            onClick={() =>
-              void openFeedback({
-                module: 'installer-update',
-                autoScreenshot: true,
-                tags: {
-                  kind: 'app-cannot-be-closed',
-                  message: 'installer-last-failure',
-                },
-                extra: {
-                  installerLastFailure: state.installerLastFailure,
-                },
-              })
-            }
-          >
-            {t('settings.oneClickFeedback')}
-          </Button>
+          {STUDIO_NETWORK_POLICY.telemetry && (
+            <Button
+              type='primary'
+              size='small'
+              className={ACTION_BTN_CLASS}
+              onClick={() =>
+                void openFeedback({
+                  module: 'installer-update',
+                  autoScreenshot: true,
+                  tags: {
+                    kind: 'app-cannot-be-closed',
+                    message: 'installer-last-failure',
+                  },
+                  extra: {
+                    installerLastFailure: state.installerLastFailure,
+                  },
+                })
+              }
+            >
+              {t('settings.oneClickFeedback')}
+            </Button>
+          )}
         </>
       );
     }

@@ -14,6 +14,8 @@ import type { WorkspaceStateDetail } from '@renderer/utils/workspace/workspaceEv
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { useNavigationHistory } from '@/renderer/hooks/context/NavigationHistoryContext';
 import { useFeedback } from '@/renderer/hooks/context/FeedbackContext';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
+import { Button } from '@arco-design/web-react';
 import { resolveFeedbackModule } from '@/renderer/services/feedback/resolveFeedbackModule';
 import { isElectronDesktop, isMacOS } from '@/renderer/utils/platform';
 import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
@@ -410,15 +412,19 @@ const Titlebar: React.FC<TitlebarProps> = ({ workspaceAvailable }) => {
       <div ref={toolbarRef} className='app-titlebar__toolbar'>
         {layout?.isMobile && <div id='app-titlebar-actions-slot' className='app-titlebar__actions-slot' />}
         {IS_DISCONTINUED_BUILD && <MigrationInviteCapsule />}
-        <button
-          type='button'
-          className={classNames('app-titlebar__button', layout?.isMobile && 'app-titlebar__button--mobile')}
-          onClick={() => void openFeedback({ autoScreenshot: true, module: resolveFeedbackModule(location.pathname) })}
-          aria-label={feedbackTooltip}
-          title={feedbackTooltip}
-        >
-          <FeedbackIcon size={iconSize} strokeWidth={desktopIconStroke} />
-        </button>
+        {STUDIO_NETWORK_POLICY.telemetry && (
+          <Button
+            type='text'
+            className={classNames('app-titlebar__button', layout?.isMobile && 'app-titlebar__button--mobile')}
+            onClick={() =>
+              void openFeedback({ autoScreenshot: true, module: resolveFeedbackModule(location.pathname) })
+            }
+            aria-label={feedbackTooltip}
+            title={feedbackTooltip}
+          >
+            <FeedbackIcon size={iconSize} strokeWidth={desktopIconStroke} />
+          </Button>
+        )}
         {showWorkspaceButton && (
           <button
             type='button'

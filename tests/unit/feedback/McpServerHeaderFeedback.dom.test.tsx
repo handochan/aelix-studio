@@ -11,6 +11,12 @@ import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+
+// Exercise opt-in wiring; default-off collection is covered by FeedbackButton/FeedbackContext tests.
+vi.mock('@/common/config/constants', async (original) => ({
+  ...(await original<typeof import('@/common/config/constants')>()),
+  STUDIO_NETWORK_POLICY: { telemetry: true, automaticUpdates: false },
+}));
 import { ConfigProvider } from '@arco-design/web-react';
 
 vi.mock('react-i18next', () => ({

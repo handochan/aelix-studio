@@ -148,6 +148,9 @@ async function resolveMainWindow(electronApp: ElectronApplication): Promise<Page
  */
 function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
   const projectRoot = path.resolve(__dirname, '../..');
+  const productName = (
+    JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as { productName: string }
+  ).productName;
   const outDir = path.join(projectRoot, 'out');
   if (!fs.existsSync(outDir)) return null;
 
@@ -156,7 +159,7 @@ function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
   if (platform === 'win32') {
     // out/win-unpacked/AionUi.exe  or  out/win-x64-unpacked/AionUi.exe
     for (const dir of ['win-unpacked', 'win-x64-unpacked', 'win-arm64-unpacked']) {
-      const exe = path.join(outDir, dir, 'AionUi.exe');
+      const exe = path.join(outDir, dir, `${productName}.exe`);
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: path.join(outDir, dir) };
     }
   } else if (platform === 'darwin') {
@@ -166,7 +169,7 @@ function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
       if (!fs.existsSync(macDir)) continue;
       const appBundle = fs.readdirSync(macDir).find((f) => f.endsWith('.app'));
       if (appBundle) {
-        const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'AionUi');
+        const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', productName);
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: macDir };
       }
     }
@@ -176,7 +179,7 @@ function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
       const dirPath = path.join(outDir, dir);
       if (!fs.existsSync(dirPath)) continue;
       // Try common executable names
-      for (const name of ['aionui', 'AionUi']) {
+      for (const name of [productName]) {
         const exe = path.join(dirPath, name);
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: dirPath };
       }

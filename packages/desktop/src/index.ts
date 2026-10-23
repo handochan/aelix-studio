@@ -279,7 +279,7 @@ ipcMain.handle('backend:recover-corrupted-database', async () => {
               await captureBackendStartupFailure(error);
             },
             onReady: (backendPort) => {
-              markBackendReady(backendPort, 'backendManager.recoverCorruptedDatabase.lateReady');
+              return markBackendReady(backendPort, 'backendManager.recoverCorruptedDatabase.lateReady');
             },
           },
           undefined,
@@ -384,13 +384,13 @@ function ensureAdminUserOnce(backendPort: number): Promise<void> {
   return ensureAdminUserPromise;
 }
 
-function markBackendReady(backendPort: number, source: string): void {
-  if (backendStartedOk || studioBootstrapPromise) return;
+function markBackendReady(backendPort: number, source: string): Promise<void> {
+  if (backendStartedOk) return Promise.resolve();
+  if (studioBootstrapPromise) return studioBootstrapPromise;
   console.log(`[AionUi] ${source} ready (port=${backendPort})`);
   exposeBackendPort(backendPort);
   registerCronResumeBridge(backendPort);
   studioBootstrapPromise = bootstrapAelixStudio(backendPort)
-    .catch((error) => console.error('[Aelix Studio] Default agent setup failed:', error))
     .then(() => {
       backendStartedOk = true;
       backendStartupFailed = false;
@@ -399,7 +399,13 @@ function markBackendReady(backendPort: number, source: string): void {
       broadcastBackendStartupState(null);
       void ensureAdminUserOnce(backendPort);
       scheduleBackendMigrations();
+    })
+    .catch((error: unknown) => {
+      studioBootstrapPromise = null;
+      markBackendStartupFailed(error);
+      throw error;
     });
+  return studioBootstrapPromise;
 }
 
 function resolveDebugBackendStartupFailure(): BackendStartupFailureInfo | null {
@@ -857,15 +863,15 @@ const handleAppReady = async (): Promise<void> => {
               await captureBackendStartupFailure(error);
             },
             onReady: (backendPort) => {
-              markBackendReady(backendPort, 'backendManager.lateReady');
+              return markBackendReady(backendPort, 'backendManager.lateReady');
             },
           }
         );
       },
-      onStarted: (backendPort) => {
+      onStarted: async (backendPort) => {
         exposeBackendPort(backendPort);
         if (backendManager.status === 'running') {
-          markBackendReady(backendPort, 'backendManager.start');
+          await markBackendReady(backendPort, 'backendManager.start');
           return;
         }
         mark(`backendManager.start pending health (port=${backendPort})`);

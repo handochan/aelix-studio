@@ -1,5 +1,41 @@
 # Aelix Studio distribution implementation
 
+## Review corrections — 2026-10-23
+
+See [review-fixes.md](review-fixes.md) for the corrected defects, required release
+scope and verification commands. This working-tree update adds Analytics and
+agent teams to Coding across all declared desktop targets and single-operator
+WebUI. Corporate IdP SSO is deferred. The records below describe earlier snapshots
+and do not replace verification of these corrections.
+
+### Local verification of the corrected working tree
+
+| Check                                                        | Result                                                                                                                                                                                                                            |
+| ------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Full Vitest suite                                            | **527 files passed, 1 skipped; 5,031 tests passed, 5 skipped**                                                                                                                                                                    |
+| Native Python/approval/Analytics/real-backend suite          | **24 passed** on macOS arm64                                                                                                                                                                                                      |
+| Actual backend profile/team integration                      | Both owned profiles are team-selectable; repeated startup skips PUT; relocation preserves user arguments and environment overrides; team creation, leader startup and Analytics teammate attach succeeded without a provider call |
+| Offline synthetic Analytics                                  | New isolated project, synthetic analyses and HTML rendering succeeded using the shipped uv cache                                                                                                                                  |
+| Relocated native runtime                                     | Both Coding and Analytics opened real ACP sessions with isolated state and unavailable external tools                                                                                                                             |
+| macOS arm64 distribution                                     | DMG and ZIP built; packaged app launch tests **3 passed**; post-launch `codesign --verify --deep --strict` passed, ad-hoc signature only                                                                                          |
+| Runtime provenance and notices                               | Compatibility hashes and Analytics lock receipt match current source; packaged ASAR contains LICENSE and NOTICE                                                                                                                   |
+| Linux arm64 Docker                                           | Built and ran with `--network none`; original account login succeeded, unauthenticated API returned 401, WebSocket returned `REALTIME_AUTH_MISSING` / close 1008; both profiles were team-selectable                              |
+| Docker container replacement                                 | Same-volume replacement retained a settings fixture and the original JSONL bytes; the existing ACP session loaded successfully; original account login still worked                                                               |
+| Offline Docker Python suite                                  | Passed, including real backend/team startup and isolated Analytics                                                                                                                                                                |
+| TypeScript, helper TypeScript, format, i18n, workflow syntax | Passed; lint has zero errors and existing warnings                                                                                                                                                                                |
+
+Evidence is ignored under `.local/studio-review-*`: command results, full unit and
+Python logs, packaged UI results, build logs, source receipts and Docker test JSON.
+The Docker image used here is `sha256:e2b57ef2bb533980a114a5ce0dbf69f75aafbbfc7c1da8b3a1cd742001dbd5f9`
+(Linux arm64). Disposable containers and their test volume were removed.
+
+These corrections have **not been pushed or run in remote CI**. Windows execution,
+macOS x64, Linux x64 and Linux desktop `.deb`/GUI acceptance require completed
+native jobs on the corrected commit. Native build/launch is not installer
+upgrade/uninstall acceptance. Provider-backed team delegation and customer data
+analysis are not established by the synthetic and startup checks above. No public
+release, Developer ID/notarization or update-install round trip is implied.
+
 ## Follow-up — 2026-10-23 (Asia/Seoul)
 
 Implemented locally on top of `b1287115cb16c596815da4a82f469277bcfadc2d`.

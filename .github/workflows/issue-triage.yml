@@ -19,6 +19,7 @@ permissions:
 
 jobs:
   triage:
+    if: github.repository == 'iOfficeAI/AionUi'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

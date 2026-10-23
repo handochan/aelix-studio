@@ -16,7 +16,7 @@ permissions:
 jobs:
   code-quality:
     name: Code Quality
-    if: github.event.pull_request.draft == false
+    if: github.repository == 'iOfficeAI/AionUi' && (github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -48,18 +48,21 @@ jobs:
         run: prek run --from-ref origin/${{ github.base_ref }} --to-ref HEAD
 
   unit-tests-ubuntu:
+    if: github.repository == 'iOfficeAI/AionUi'
     name: Unit Tests (ubuntu-latest)
     runs-on: ubuntu-latest
     steps:
       - run: echo "Docs-only PR, skipping unit tests."
 
   unit-tests-macos:
+    if: github.repository == 'iOfficeAI/AionUi'
     name: Unit Tests (macos-14)
     runs-on: ubuntu-latest
     steps:
       - run: echo "Docs-only PR, skipping unit tests."
 
   unit-tests-windows:
+    if: github.repository == 'iOfficeAI/AionUi'
     name: Unit Tests (windows-2022)
     runs-on: ubuntu-latest
     steps:

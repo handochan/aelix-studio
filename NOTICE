@@ -4,4 +4,6 @@ Copyright 2026 Aelix contributors
 Based on AionUi v2.2.2 by AionUi contributors (Apache-2.0).
 Aelix brand mark is used unmodified from handochan/aelix-ai/docs/assets/brand.
 Bundled Python and Python dependencies retain their license files and distribution metadata.
+Bundled Aelix Analytics 0.26.0 is Apache-2.0; its wheel retains the license.
+Bundled uv 0.11.19 is MIT OR Apache-2.0; both licenses are retained in the runtime.
 Aelix ACP includes Plotly basic 3.7.0 under MIT; its license is retained in the runtime.

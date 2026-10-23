@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { registerAelix, type StudioApi, type StudioCommand } from './registerAelix';
 
-/** Resolve a native Python command without a shell or PATH lookup. */
+/** Use the upstream managed Node resolver; executable and Python arguments never pass through a shell. */
 export function getStudioCommand(
   resourcesPath: string,
   platform = process.platform,
@@ -11,22 +11,28 @@ export function getStudioCommand(
   const paths = platform === 'win32' ? path.win32 : path.posix;
   const runtime = paths.join(resourcesPath, 'bundled-aelix', `${platform}-${arch}`);
   return {
-    command: paths.join(runtime, 'python', ...(platform === 'win32' ? ['python.exe'] : ['bin', 'python3'])),
-    args: ['-I', paths.join(runtime, 'launch.py'), 'acp'],
+    command: 'node',
+    args: [paths.join(runtime, 'launch.cjs'), 'acp'],
   };
 }
 
 /** Seed the bundled engine through the existing local API for desktop and standalone WebUI. */
 export async function bootstrapStudioRuntime(port: number, resourcesPath: string, dataPath: string): Promise<void> {
   const launch = getStudioCommand(resourcesPath);
-  fs.accessSync(launch.command, fs.constants.X_OK);
-  fs.accessSync(launch.args[1], fs.constants.R_OK);
+  const runtime = path.dirname(launch.args[0]);
+  fs.accessSync(
+    path.join(runtime, process.platform === 'win32' ? 'python/python.exe' : 'python/bin/python3'),
+    fs.constants.X_OK
+  );
+  for (const file of ['launch.cjs', 'launch.py', 'site/aelix_analytics/extension.py']) {
+    fs.accessSync(path.join(runtime, file), fs.constants.R_OK);
+  }
   async function request<T>(route: string, method = 'GET', body?: unknown): Promise<T> {
     const response = await fetch(`http://127.0.0.1:${port}${route}`, {
       method,
       headers: { 'Content-Type': 'application/json', 'x-aionui-internal': '1' },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-      signal: AbortSignal.timeout(15_000),
+      signal: AbortSignal.timeout(method === 'GET' ? 15_000 : 60_000),
     });
     if (!response.ok) {
       throw Object.assign(new Error(`Aelix registration ${route}: HTTP ${response.status}`), {

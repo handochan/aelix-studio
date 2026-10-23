@@ -4,7 +4,7 @@ export type RecoverCorruptedDatabaseDeps = {
   getFailure: () => BackendStartupFailureInfo | null;
   stopBackend: () => Promise<void>;
   startBackendWithRecovery: () => Promise<number>;
-  markReady: (port: number, source: string) => void;
+  markReady: (port: number, source: string) => Promise<void> | void;
   reloadMainWindow: () => void;
   logInfo: (message: string) => void;
   logWarn: (message: string) => void;
@@ -20,6 +20,6 @@ export async function recoverCorruptedDatabaseAfterUserConfirmation(deps: Recove
   deps.logInfo('[AionUi] User confirmed corrupted database backup and rebuild.');
   await deps.stopBackend();
   const port = await deps.startBackendWithRecovery();
-  deps.markReady(port, 'backendManager.recoverCorruptedDatabase');
+  await deps.markReady(port, 'backendManager.recoverCorruptedDatabase');
   deps.reloadMainWindow();
 }

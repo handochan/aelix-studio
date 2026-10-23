@@ -21,6 +21,10 @@ the backend login rate limit. Incoming `x-aionui-internal` headers are stripped.
 Desktop backend LAN sharing is disabled because that embedded backend uses local
 authentication bypass; use the standalone host for authenticated remote access.
 
+WebSocket handshakes now wait for the complete header block, reject client-supplied
+internal headers and non-upgrade requests, and withhold queued client bytes until
+the backend replies with 101. Failed upgrades cannot become raw HTTP tunnels.
+
 The login now explains local server authentication in every configured language.
 It uses Arco controls and theme tokens. Legacy reversible browser passwords are
 removed when the login page mounts; new credentials are never written to
@@ -82,9 +86,21 @@ docker load -i aelix-studio.tar
 Use your internal image registry/tag policy for deployment. A connected build is
 required for the base images, npm packages, Python wheels and pinned backend/ACP
 archives. Published Studio images are not provided by this repository change.
-The volume holds server data and ACP state. Aelix model configuration and provider
-credentials must be supplied separately using the operator's normal configuration;
-they are not bundled into the image or runtime.
+The volume holds server data, ACP indexes, Aelix settings and JSONL sessions:
+`AELIX_CODING_AGENT_DIR=/data/aelix/agent` and
+`AELIX_CODING_AGENT_SESSION_DIR=/data/aelix/sessions`. Keep these directories and
+the ACP indexes together when replacing a container or backing up its volume.
+Provider credentials must still be provisioned by the operator; none are shipped.
+
+Coding and Analytics are both seeded and team-enabled. Analytics uses its own
+project environment, bundled uv, and a private copy of the prepared dependency
+cache under app data. `UV_OFFLINE=1` is the default for that profile. Dependencies
+outside the prepared baseline require an operator-provisioned environment/cache
+or an explicit approved online configuration; this is not a complete egress sandbox.
+
+Agent Settings environment overrides use `/api/agents/{id}/overrides` and survive
+runtime relocation. The management catalog intentionally redacts base environment
+values; do not provision operator secrets by rewriting Studio-owned base metadata.
 
 ## External traffic inventory
 

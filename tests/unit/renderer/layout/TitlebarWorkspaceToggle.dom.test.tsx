@@ -2,7 +2,7 @@ import { act, render, screen } from '@testing-library/react';
 import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const platform = vi.hoisted(() => ({ desktop: true, mac: false }));
+const platform = vi.hoisted(() => ({ desktop: true, mac: false, telemetry: true }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
@@ -14,7 +14,14 @@ vi.mock('react-router-dom', () => ({
 vi.mock('@/common', () => ({
   ipcBridge: { conversation: { get: { invoke: vi.fn() } } },
 }));
-vi.mock('@/common/config/constants', () => ({ TEAM_MODE_ENABLED: false }));
+vi.mock('@/common/config/constants', () => ({
+  TEAM_MODE_ENABLED: false,
+  STUDIO_NETWORK_POLICY: {
+    get telemetry() {
+      return platform.telemetry;
+    },
+  },
+}));
 vi.mock('@renderer/pages/conversation/GroupedHistory/ConversationSearchPopover', () => ({ default: () => null }));
 vi.mock('@/renderer/components/layout/Titlebar/MobileConversationBrand', () => ({ default: () => null }));
 vi.mock('@/renderer/components/layout/WindowControls', () => ({
@@ -44,6 +51,14 @@ describe('Titlebar workspace toggle', () => {
   beforeEach(() => {
     platform.desktop = true;
     platform.mac = false;
+    platform.telemetry = true;
+  });
+
+  it('keeps workspace controls usable without a disabled feedback button', () => {
+    platform.telemetry = false;
+    render(<Titlebar workspaceAvailable />);
+    expect(screen.queryByRole('button', { name: 'conversation.welcome.quickActionFeedback' })).toBeNull();
+    expect(screen.getByRole('button', { name: 'common.expandMore' })).toBeInTheDocument();
   });
 
   it('places the Windows workspace toggle directly after Bug Report', () => {

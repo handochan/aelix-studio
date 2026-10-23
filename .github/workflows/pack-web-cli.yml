@@ -33,7 +33,7 @@ jobs:
   code-quality:
     name: Code Quality
     runs-on: ubuntu-latest
-    if: ${{ !inputs.skip_code_quality }}
+    if: github.repository == 'iOfficeAI/AionUi' && (!inputs.skip_code_quality)
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -72,7 +72,7 @@ jobs:
     name: Pack web-cli ${{ matrix.platform }}-${{ matrix.arch }}
     runs-on: ${{ matrix.os }}
     needs: code-quality
-    if: ${{ always() && (inputs.skip_code_quality || needs.code-quality.result == 'success') }}
+    if: github.repository == 'iOfficeAI/AionUi' && (always() && (inputs.skip_code_quality || needs.code-quality.result == 'success'))
     strategy:
       fail-fast: false
       matrix:
@@ -136,7 +136,7 @@ jobs:
     name: Prepare install-web.sh for release
     runs-on: ubuntu-latest
     needs: pack-web-cli
-    if: ${{ always() && needs.pack-web-cli.result == 'success' }}
+    if: github.repository == 'iOfficeAI/AionUi' && (always() && needs.pack-web-cli.result == 'success')
 
     steps:
       - name: Checkout code
@@ -179,7 +179,7 @@ jobs:
     name: Smoke test web-cli tarball (Linux x86_64)
     runs-on: ubuntu-latest
     needs: pack-web-cli
-    if: ${{ always() && needs.pack-web-cli.result == 'success' }}
+    if: github.repository == 'iOfficeAI/AionUi' && (always() && needs.pack-web-cli.result == 'success')
     container:
       image: debian:bookworm-slim
 
@@ -209,7 +209,7 @@ jobs:
     name: Smoke test install-web.sh (Linux x86_64)
     runs-on: ubuntu-latest
     needs: [pack-web-cli, prepare-install-script]
-    if: ${{ always() && needs.pack-web-cli.result == 'success' && needs.prepare-install-script.result == 'success' }}
+    if: github.repository == 'iOfficeAI/AionUi' && (always() && needs.pack-web-cli.result == 'success' && needs.prepare-install-script.result == 'success')
     container:
       image: debian:bookworm-slim
 

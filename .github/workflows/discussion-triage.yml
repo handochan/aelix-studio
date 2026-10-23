@@ -13,6 +13,7 @@ permissions:
 
 jobs:
   triage:
+    if: github.repository == 'iOfficeAI/AionUi'
     runs-on: ubuntu-latest
     steps:
       - name: Welcome comment with owner mention

@@ -4,6 +4,7 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import type { AddressInfo } from 'node:net';
+import net from 'node:net';
 import { startStaticServer, type StaticServerHandle } from './static-server.js';
 
 async function mkRendererFixture(): Promise<string> {
@@ -24,6 +25,29 @@ async function startMockBackend(
     port,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
+}
+
+async function rawRequest(port: number, parts: string[]): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let response = '';
+    const writes: ReturnType<typeof setTimeout>[] = [];
+    const socket = net.connect(port, '127.0.0.1', () => {
+      parts.forEach((part, index) => writes.push(setTimeout(() => socket.write(part), index * 5)));
+    });
+    const timeout = setTimeout(() => {
+      socket.destroy();
+      reject(new Error('raw request timed out'));
+    }, 4000);
+    socket.on('data', (chunk) => {
+      response += chunk.toString();
+    });
+    socket.on('error', reject);
+    socket.on('close', () => {
+      clearTimeout(timeout);
+      writes.forEach(clearTimeout);
+      resolve(response);
+    });
+  });
 }
 
 describe('static-server', () => {
@@ -73,6 +97,67 @@ describe('static-server', () => {
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
     const response = await fetch(`${handle.localUrl}/api/test`, { headers: { 'x-aionui-internal': '1' } });
     expect(await response.text()).toBe('public');
+  });
+
+  it('rejects an internal header arriving in a later WebSocket handshake chunk', async () => {
+    const seen: string[] = [];
+    const backend = await startMockBackend((req, res) => {
+      seen.push(req.url ?? '');
+      res.end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await rawRequest(handle.port, [
+      'GET /ws HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n',
+      'X-AionUi-Internal: 1\r\n\r\n',
+    ]);
+    expect(response).toContain('400 Bad Request');
+    expect(seen).toEqual([]);
+  });
+
+  it('does not tunnel pipelined API requests after a non-upgrade WebSocket request', async () => {
+    const seen: string[] = [];
+    const backend = await startMockBackend((req, res) => {
+      seen.push(req.url ?? '');
+      res.end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await rawRequest(handle.port, [
+      'GET /ws HTTP/1.1\r\nHost: test\r\n\r\nGET /api/agents/management HTTP/1.1\r\nHost: test\r\nx-aionui-internal: 1\r\n\r\n',
+    ]);
+    expect(response).toContain('400 Bad Request');
+    expect(seen).toEqual([]);
+  });
+
+  it('withholds queued client bytes when the backend refuses the WebSocket upgrade', async () => {
+    let received = '';
+    const backend = net.createServer((socket) => {
+      socket.on('data', (chunk) => {
+        received += chunk.toString();
+        if (received.includes('\r\n\r\n')) {
+          socket.write('HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: keep-alive\r\n\r\n');
+        }
+      });
+    });
+    await new Promise<void>((resolve) => backend.listen(0, '127.0.0.1', resolve));
+    stopBackend = () => new Promise<void>((resolve) => backend.close(() => resolve()));
+    handle = await startStaticServer({ staticDir, backendPort: (backend.address() as AddressInfo).port, port: 0 });
+    const response = await rawRequest(handle.port, [
+      'GET /ws HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\nGET /api/private HTTP/1.1\r\nHost: test\r\n\r\n',
+    ]);
+    expect(response).toContain('401 Unauthorized');
+    expect(received).not.toContain('/api/private');
+  });
+
+  it('rejects an oversized WebSocket header before connecting to the backend', async () => {
+    const backend = await startMockBackend((_req, res) => res.end());
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await rawRequest(handle.port, [
+      `GET /ws HTTP/1.1\r\nHost: test\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nCookie: ${'x'.repeat(20_000)}\r\n\r\n`,
+    ]);
+    expect(response).toContain('431 Request Header Fields Too Large');
   });
 
   it('SPA fallback: /chat/123 returns index.html', async () => {

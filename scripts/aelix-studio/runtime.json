@@ -2,6 +2,13 @@
   "schema": "aelix-studio.runtime/1",
   "python": "3.12.12",
   "aelix": "0.1.0b2",
+  "uv": "0.11.19",
+  "analytics": {
+    "version": "0.26.0",
+    "repository": "handochan/aelix-analytics",
+    "commit": "c73655b0a578e3d3ed05a21795f77928cb04a0bd",
+    "archiveSha256": "ce96d1b50ce8b72406b751ce7453f910b51f907f4576e69810fc9076d3a93bb2"
+  },
   "acp": {
     "version": "0.1.0",
     "repository": "handochan/aelix-acp",

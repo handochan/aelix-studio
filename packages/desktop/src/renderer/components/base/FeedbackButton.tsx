@@ -5,6 +5,8 @@
  */
 
 import { useFeedback } from '@/renderer/hooks/context/FeedbackContext';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
+import { Button, type ButtonProps } from '@arco-design/web-react';
 import { Comment } from '@icon-park/react';
 import classNames from 'classnames';
 import React, { useCallback } from 'react';
@@ -31,8 +33,8 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ module, feedbackTags, f
   const { t } = useTranslation();
   const { openFeedback } = useFeedback();
 
-  const handleClick = useCallback(
-    (event: React.MouseEvent<HTMLElement>) => {
+  const handleClick = useCallback<NonNullable<ButtonProps['onClick']>>(
+    (event) => {
       event.stopPropagation();
       openFeedback({ module, autoScreenshot: true, tags: feedbackTags, extra: feedbackExtra }).catch((err) => {
         console.error('[FeedbackButton] Failed to open feedback:', err);
@@ -41,10 +43,11 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ module, feedbackTags, f
     [feedbackExtra, feedbackTags, module, openFeedback]
   );
 
+  if (!STUDIO_NETWORK_POLICY.telemetry) return null;
+
   return (
-    <button
-      type='button'
-      role='button'
+    <Button
+      type='text'
       onClick={handleClick}
       className={classNames(
         'inline-flex items-center gap-3px cursor-pointer select-none b-none',
@@ -56,7 +59,7 @@ const FeedbackButton: React.FC<FeedbackButtonProps> = ({ module, feedbackTags, f
     >
       <Comment theme='outline' size='14' fill='currentColor' className='flex-shrink-0 pt-4px' />
       <span>{t('settings.oneClickFeedback')}</span>
-    </button>
+    </Button>
   );
 };
 

@@ -13,6 +13,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, render, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
+const networkPolicy = vi.hoisted(() => ({ telemetry: true }));
+vi.mock('@/common/config/constants', async (original) => ({
+  ...(await original<typeof import('@/common/config/constants')>()),
+  STUDIO_NETWORK_POLICY: networkPolicy,
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k, i18n: { language: 'en' } }),
   Trans: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -84,9 +90,21 @@ const renderWithProvider = (ui: React.ReactElement) => render(<FeedbackProvider>
 
 describe('FeedbackProvider / useFeedback', () => {
   beforeEach(() => {
+    networkPolicy.telemetry = true;
     modalSpy.mockClear();
     setElectronAPI(undefined);
     window.location.hash = '';
+  });
+
+  it('does not capture screenshots or mount a report form when online feedback is disabled', async () => {
+    networkPolicy.telemetry = false;
+    const capture = vi.fn().mockResolvedValue(null);
+    setElectronAPI(capture);
+    const user = userEvent.setup();
+    renderWithProvider(<Trigger autoScreenshot />);
+    await user.click(document.querySelector('button')!);
+    expect(capture).not.toHaveBeenCalled();
+    expect(modalSpy).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

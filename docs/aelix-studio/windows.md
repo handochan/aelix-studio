@@ -31,8 +31,9 @@ python scripts/aelix-studio/smokeRuntime.py out/win-unpacked/resources/bundled-a
 The Python tests require the prepared runtime and Python 3.12; alternatively run
 them with `resources/bundled-aelix/win32-x64/python/python.exe -I -m unittest ...`.
 
-The app registers `python/python.exe -I launch.py acp` as an executable plus an
-argument array. ACP launches its child with the same bundled Python. Spaces and
+The app registers the managed `node` command with `launch.cjs acp` arguments.
+That bridge launches `python/python.exe -I launch.py acp` with a native argument
+array, avoiding AionCore v0.2.2's whitespace-splitting command validation. Spaces and
 non-ASCII paths do not pass through a command shell. Trusted wheel `.pth` files
 are processed for pywin32 DLL/import paths; user Python environment variables are
 ignored. The universal dependency lock includes Windows-only colorama/pywin32.

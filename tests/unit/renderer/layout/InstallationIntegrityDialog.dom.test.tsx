@@ -114,15 +114,14 @@ describe('InstallationIntegrityDialog — recoverable_database_corruption recove
     expect(recoverMock).not.toHaveBeenCalled();
   });
 
-  it('AC-6: rebuild button is danger secondary (not a primary CTA); report stays neutral', () => {
+  it('AC-6: rebuild stays secondary while disabled online reports are hidden', () => {
     renderFooter();
 
     const rebuild = screen.getByTestId('recoverable-database-corruption-rebuild');
     expect(rebuild.className).not.toContain('arco-btn-primary');
     expect(rebuild.className).toContain('arco-btn-status-danger');
 
-    const report = screen.getByTestId('installation-integrity-report');
-    expect(report.className).not.toContain('arco-btn-primary');
+    expect(screen.queryByTestId('installation-integrity-report')).not.toBeInTheDocument();
   });
 
   it('AC-7: confirmDialog copy is wired through i18n (present, non-empty, not raw keys)', () => {

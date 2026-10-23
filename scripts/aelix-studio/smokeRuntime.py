@@ -19,13 +19,16 @@ def verify_inventory(runtime):
             raise RuntimeError(f'Runtime inventory mismatch: {name}')
 
 
-async def smoke(runtime, temporary):
+async def smoke(runtime, temporary, profile='coding'):
     python = runtime / ('python/python.exe' if sys.platform == 'win32' else 'python/bin/python3')
     env = {**os.environ, 'HOME': str(temporary), 'USERPROFILE': str(temporary),
            'APPDATA': str(temporary / 'appdata'), 'LOCALAPPDATA': str(temporary / 'local'),
+           'AELIX_CODING_AGENT_DIR': str(temporary / 'agent'),
+           'AELIX_CODING_AGENT_SESSION_DIR': str(temporary / 'sessions'), 'UV_OFFLINE': '1',
            'PATH': str(temporary), 'PYTHONPATH': '/invalid', 'PYTHONHOME': '/invalid'}
     proc = await asyncio.create_subprocess_exec(
-        str(python), '-I', str(runtime / 'launch.py'), 'acp', '--state-dir', str(temporary / 'state'),
+        str(python), '-I', str(runtime / 'launch.py'), 'acp', '--profile', profile,
+        '--state-dir', str(temporary / f'{profile}-state'),
         cwd=temporary, env=env, stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stderr_task = asyncio.create_task(proc.stderr.read())
@@ -50,7 +53,7 @@ async def smoke(runtime, temporary):
         if not new.get('sessionId'):
             raise RuntimeError('ACP did not create a session')
         print(json.dumps({'protocolVersion': init['protocolVersion'], 'agentInfo': init['agentInfo'],
-                          'sessionCreated': True, 'runtime': str(runtime)}))
+                          'sessionCreated': True, 'profile': profile, 'runtime': str(runtime)}))
     finally:
         proc.stdin.close()
         try:
@@ -67,8 +70,10 @@ def main():
     arch = {'aarch64': 'arm64', 'arm64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine().lower())
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('runtime', nargs='?', type=Path,
-                        default=Path(__file__).resolve().parents[2] / 'resources/bundled-aelix' / f'{sys.platform}-{arch}')
+                        default=Path(os.environ.get('STUDIO_PACKAGED_RUNTIME',
+                            Path(__file__).resolve().parents[2] / 'resources/bundled-aelix' / f'{sys.platform}-{arch}')))
     parser.add_argument('--relocate', action='store_true')
+    parser.add_argument('--profile', choices=['coding', 'analytics', 'all'], default='all')
     args = parser.parse_args()
     runtime = args.runtime.resolve()
     with tempfile.TemporaryDirectory(prefix='studio-smoke-') as tmp:
@@ -78,7 +83,8 @@ def main():
             shutil.copytree(runtime, relocated, symlinks=True)
             runtime = relocated
         verify_inventory(runtime)
-        asyncio.run(smoke(runtime, temporary))
+        for profile in (['coding', 'analytics'] if args.profile == 'all' else [args.profile]):
+            asyncio.run(smoke(runtime, temporary, profile))
 
 
 if __name__ == '__main__':

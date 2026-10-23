@@ -11,6 +11,11 @@
 /** Studio distributions keep diagnostics local and check releases only on user request. */
 export const STUDIO_NETWORK_POLICY = { telemetry: false, automaticUpdates: false } as const;
 
+export const STUDIO_AGENT_PROFILES = [
+  { profile: 'coding', name: 'Aelix', description: 'Aelix Coding · Aelix Studio' },
+  { profile: 'analytics', name: 'Aelix Analytics', description: 'Aelix Analytics · Aelix Studio' },
+] as const;
+
 // ===== 应用内浏览器 / In-app browser =====
 
 /**

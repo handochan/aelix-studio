@@ -15,6 +15,7 @@ import type {
   FeedbackDiagnosticsProfile,
 } from '@/common/types/feedbackDiagnostics';
 import { captureFeedbackRoute, feedbackDiagnosticsContextFromRoute } from '@/renderer/services/feedback/routeContext';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 
 type OpenFeedbackOptions = {
   module?: string;
@@ -63,6 +64,7 @@ export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   >(undefined);
 
   const openFeedback = useCallback(async (options?: OpenFeedbackOptions) => {
+    if (!STUDIO_NETWORK_POLICY.telemetry) return;
     const routeAtOpen = captureFeedbackRoute();
     const routeContext = feedbackDiagnosticsContextFromRoute(routeAtOpen);
     const explicitContext =
@@ -102,15 +104,17 @@ export const FeedbackProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   return (
     <FeedbackContext.Provider value={value}>
       {children}
-      <FeedbackReportModal
-        visible={visible}
-        onCancel={handleCancel}
-        defaultModule={defaultModule}
-        prefilledScreenshots={prefilledScreenshots}
-        feedbackTags={feedbackTags}
-        feedbackExtra={feedbackExtra}
-        feedbackDiagnosticsContext={feedbackDiagnosticsContext}
-      />
+      {STUDIO_NETWORK_POLICY.telemetry && (
+        <FeedbackReportModal
+          visible={visible}
+          onCancel={handleCancel}
+          defaultModule={defaultModule}
+          prefilledScreenshots={prefilledScreenshots}
+          feedbackTags={feedbackTags}
+          feedbackExtra={feedbackExtra}
+          feedbackDiagnosticsContext={feedbackDiagnosticsContext}
+        />
+      )}
     </FeedbackContext.Provider>
   );
 };

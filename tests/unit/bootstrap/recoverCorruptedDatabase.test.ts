@@ -15,6 +15,15 @@ function makeDeps(failure: BackendStartupFailureInfo | null) {
 }
 
 describe('recoverCorruptedDatabaseAfterUserConfirmation', () => {
+  it('does not reload the renderer if bundled agent setup fails after database recovery', async () => {
+    const deps = makeDeps({ reason: 'backend_recoverable_database_corruption' });
+    deps.markReady.mockImplementation(async () => {
+      throw new Error('agent setup failed');
+    });
+    await expect(recoverCorruptedDatabaseAfterUserConfirmation(deps)).rejects.toThrow('agent setup failed');
+    expect(deps.reloadMainWindow).not.toHaveBeenCalled();
+  });
+
   it('rejects when no recoverable startup failure is active', async () => {
     const deps = makeDeps(null);
 

@@ -15,6 +15,7 @@ env:
 
 jobs:
   e2e-artifacts:
+    if: github.repository == 'iOfficeAI/AionUi'
     name: E2E Artifacts (Linux)
     runs-on: ubuntu-latest
     timeout-minutes: 25

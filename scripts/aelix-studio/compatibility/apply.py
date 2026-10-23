@@ -19,6 +19,13 @@ def apply(package):
     changes = [
         ('from . import __version__', 'from . import __version__\nfrom .transport import start_permission_server\nimport secrets'),
         ('        self.socket_server = None', '        self.socket_server = None\n        self.permission_token = secrets.token_hex(32)'),
+        ('    async def permission(self, reader, writer):\n        allowed = False',
+         '    async def permission(self, reader, writer):\n        allowed = False\n        channel_error = None'),
+        ('        except (Exception, asyncio.CancelledError):\n            allowed = False',
+         '        except (Exception, asyncio.CancelledError) as exc:\n'
+         '            allowed = False\n            channel_error = type(exc).__name__'),
+        ('json.dumps({"allow": allowed and not self.cancelled})',
+         'json.dumps({"allow": allowed and not self.cancelled, "error": channel_error})'),
         ('        socket_path = str(Path(self.socket_dir) / "bridge.sock")\n'
          '        self.socket_server = await asyncio.start_unix_server(self.permission, path=socket_path)\n'
          '        os.chmod(socket_path, 0o600)',
@@ -76,6 +83,17 @@ def apply(package):
     bridge = replace_once(bridge, 'json.dumps({"toolCallId": event.tool_call_id,',
                           'json.dumps({"token": os.environ.get("AELIX_ACP_PERMISSION_TOKEN", ""),\n'
                           '                                      "toolCallId": event.tool_call_id,')
+    bridge = replace_once(bridge, '            await writer.wait_closed()',
+                          '            try:\n'
+                          '                await writer.wait_closed()\n'
+                          '            except ConnectionError:\n'
+                          '                pass')
+    bridge = replace_once(bridge, '        if answer.get("allow") is True:',
+                          '        if not isinstance(answer, dict) or not isinstance(answer.get("allow"), bool):\n'
+                          '            return ToolCallResult(block=True, reason="ACP permission channel returned an invalid response")\n'
+                          '        if answer.get("error"):\n'
+                          '            return ToolCallResult(block=True, reason="ACP permission unavailable: " + str(answer["error"]))\n'
+                          '        if answer.get("allow") is True:')
     bridge = bridge.replace('parent owns a private Unix socket;', 'parent owns a local, authenticated permission channel;')
     (package / 'server.py').write_text(server, encoding='utf-8')
     (package / 'bridge.py').write_text(bridge, encoding='utf-8')

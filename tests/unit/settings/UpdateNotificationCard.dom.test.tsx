@@ -97,6 +97,7 @@ import UpdateNotificationCard from '@/renderer/components/settings/UpdateNotific
 describe('UpdateNotificationCard', () => {
   beforeEach(() => {
     mocks.networkPolicy.automaticUpdates = true;
+    mocks.networkPolicy.telemetry = false;
     vi.stubGlobal('__APP_VERSION__', '2.1.15');
     mocks.manualProgressHandler = null;
     mocks.autoStatusHandler = null;
@@ -617,6 +618,7 @@ describe('UpdateNotificationCard', () => {
   });
 
   it('shows consumed silent installer failure marker with retry, log, and feedback actions', async () => {
+    mocks.networkPolicy.telemetry = true;
     const marker: InstallerLastFailureMarker = {
       schemaVersion: 1,
       kind: 'app-cannot-be-closed',

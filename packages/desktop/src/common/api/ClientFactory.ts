@@ -76,8 +76,8 @@ export class ClientFactory {
           baseURL: base_url,
           timeout: options.timeout,
           defaultHeaders: {
-            'HTTP-Referer': 'https://aionui.com',
-            'X-Title': 'AionUi',
+            'HTTP-Referer': 'https://github.com/handochan/aelix-studio',
+            'X-Title': 'Aelix Studio',
           },
           ...(options.baseConfig as OpenAIClientConfig),
         };
@@ -127,8 +127,8 @@ export class ClientFactory {
           baseURL: base_url,
           timeout: options.timeout,
           defaultHeaders: {
-            'HTTP-Referer': 'https://aionui.com',
-            'X-Title': 'AionUi',
+            'HTTP-Referer': 'https://github.com/handochan/aelix-studio',
+            'X-Title': 'Aelix Studio',
           },
           ...(options.baseConfig as OpenAIClientConfig),
         };

@@ -378,6 +378,14 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN || secrets.GITHUB_TOKEN }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: astral-sh/setup-uv@v6
+        if: github.repository == 'handochan/aelix-studio'
+        with:
+          version: '0.11.19'
+      - name: Prepare the native Studio Coding and Analytics bundle
+        if: github.repository == 'handochan/aelix-studio'
+        run: python scripts/aelix-studio/prepareRuntime.py
+
       - name: Build with electron-builder (Windows)
         if: startsWith(matrix.platform, 'windows')
         id: windows-build

@@ -24,6 +24,7 @@ defaults:
 
 jobs:
   assess:
+    if: github.repository == 'iOfficeAI/AionUi'
     runs-on: 'ubuntu-latest'
     timeout-minutes: 10
     permissions:

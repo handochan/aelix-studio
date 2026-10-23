@@ -13,6 +13,12 @@ import { cleanup, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfigProvider } from '@arco-design/web-react';
 
+const networkPolicy = vi.hoisted(() => ({ telemetry: true }));
+vi.mock('@/common/config/constants', async (original) => ({
+  ...(await original<typeof import('@/common/config/constants')>()),
+  STUDIO_NETWORK_POLICY: networkPolicy,
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (k: string) => k, i18n: { language: 'en' } }),
 }));
@@ -28,7 +34,15 @@ const renderButton = (ui: React.ReactElement) => render(<ConfigProvider>{ui}</Co
 
 describe('FeedbackButton', () => {
   beforeEach(() => {
+    networkPolicy.telemetry = true;
     openFeedbackMock.mockClear();
+  });
+
+  it('hides the report entry point when online feedback is disabled', () => {
+    networkPolicy.telemetry = false;
+    renderButton(<FeedbackButton />);
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+    expect(openFeedbackMock).not.toHaveBeenCalled();
   });
 
   afterEach(() => {

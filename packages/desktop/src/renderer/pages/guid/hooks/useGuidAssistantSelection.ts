@@ -6,6 +6,7 @@
 
 import { assistantRuntimeKey, isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
 import { configService } from '@/common/config/configService';
+import { STUDIO_AGENT_PROFILES } from '@/common/config/constants';
 import type { AcpModelInfo } from '../types';
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
 import {
@@ -108,7 +109,7 @@ export function pickDefaultAssistantSelectionKey(assistants: Assistant[]): strin
       (assistant) =>
         assistant.source === 'generated' &&
         assistant.agent?.source === 'custom' &&
-        assistant.description === 'Aelix Coding · Aelix Studio'
+        assistant.description === STUDIO_AGENT_PROFILES[0].description
     ) ??
     enabledAssistants.find((assistant) => assistant.source === 'generated' && isAionrsAssistant(assistant)) ??
     enabledAssistants.find((assistant) => isAionrsAssistant(assistant)) ??

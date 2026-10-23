@@ -86,6 +86,33 @@ class PermissionTests(unittest.IsolatedAsyncioTestCase):
             self.assertIsNone(await bridge.before_tool(event, None))
         self.assertEqual(len(self.requests), 1)
 
+    async def test_large_unicode_tool_input_reaches_consent_on_each_supported_transport(self):
+        for windows in ([True] if sys.platform == 'win32' else [True, False]):
+            with self.subTest(tcp=windows):
+                listener, endpoint = await start_permission_server(self.session.permission, self.tmp.name, windows)
+                try:
+                    event = SimpleNamespace(tool_call_id='large-tool', tool_name='write',
+                                            args={'path': 'large.txt', 'content': '한글' * 100_000})
+                    self.requests.clear()
+                    with patch.dict(os.environ, {'AELIX_ACP_SOCKET': endpoint,
+                                                'AELIX_ACP_PERMISSION_TOKEN': self.session.permission_token}):
+                        self.assertIsNone(await bridge.before_tool(event, None))
+                    self.assertEqual(len(self.requests), 1)
+                finally:
+                    listener.close()
+                    await listener.wait_closed()
+
+    async def test_client_failure_is_not_reported_as_a_user_rejection(self):
+        async def broken_client(_method, _params):
+            raise RuntimeError('client disconnected')
+        self.server.client_request = broken_client
+        event = SimpleNamespace(tool_call_id='tool-1', tool_name='write', args={})
+        with patch.dict(os.environ, {'AELIX_ACP_SOCKET': self.endpoint,
+                                    'AELIX_ACP_PERMISSION_TOKEN': self.session.permission_token}):
+            result = await bridge.before_tool(event, None)
+        self.assertTrue(result.block)
+        self.assertIn('ACP permission unavailable', result.reason)
+
     async def test_broken_channel_fails_closed(self):
         event = SimpleNamespace(tool_call_id='tool-1', tool_name='write', args={})
         with patch.dict(os.environ, {'AELIX_ACP_SOCKET': 'tcp:0'}):

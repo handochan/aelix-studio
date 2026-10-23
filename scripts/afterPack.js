@@ -75,7 +75,17 @@ module.exports = async function afterPack(context) {
     verifyBundledResources(resourcesDir, electronPlatformName, targetArch);
     const studioRuntime = path.join(resourcesDir, 'bundled-aelix', `${electronPlatformName}-${targetArch}`);
     const pythonPath = electronPlatformName === 'win32' ? 'python/python.exe' : 'python/bin/python3';
-    for (const file of ['manifest.json', 'checksums.json', pythonPath, 'launch.py', 'site/aelix_acp/transport.py']) {
+    for (const file of [
+      'manifest.json',
+      'checksums.json',
+      pythonPath,
+      'launch.py',
+      'launch.cjs',
+      'site/aelix_acp/transport.py',
+      'site/aelix_analytics/extension.py',
+      electronPlatformName === 'win32' ? 'bin/uv.exe' : 'bin/uv',
+      'analytics-cache',
+    ]) {
       if (!fs.existsSync(path.join(studioRuntime, file))) {
         throw new Error(`Missing bundled Aelix runtime: ${file}; run studio:runtime on the target host first`);
       }

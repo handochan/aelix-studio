@@ -8,7 +8,7 @@ type BackendStartupResult = { ok: true; port: number } | { ok: false };
 
 type StartBackendOrExitOptions = {
   startBackend: () => Promise<number>;
-  onStarted: (port: number) => void;
+  onStarted: (port: number) => Promise<void> | void;
   captureFailure: (error: unknown) => Promise<void> | void;
   exitApp: (code: number) => void;
   exitOnFailure?: boolean;
@@ -22,7 +22,7 @@ function isBackendStartupCancelledError(error: unknown): boolean {
 export async function startBackendOrExit(options: StartBackendOrExitOptions): Promise<BackendStartupResult> {
   try {
     const port = await options.startBackend();
-    options.onStarted(port);
+    await options.onStarted(port);
     return { ok: true, port };
   } catch (error) {
     if (isBackendStartupCancelledError(error)) {

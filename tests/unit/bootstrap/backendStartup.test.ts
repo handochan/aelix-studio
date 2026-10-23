@@ -8,6 +8,43 @@ import { describe, expect, it, vi } from 'vitest';
 import { startBackendOrExit } from '@/process/startup/backendStartup';
 
 describe('startBackendOrExit', () => {
+  it('does not report success until asynchronous runtime registration completes', async () => {
+    let release: () => void = () => {};
+    const registered = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const onStarted = vi.fn(() => registered);
+    const complete = vi.fn();
+    const task = startBackendOrExit({
+      startBackend: async () => 42123,
+      onStarted,
+      captureFailure: vi.fn(),
+      exitApp: vi.fn(),
+    }).then(complete);
+    await vi.waitFor(() => expect(onStarted).toHaveBeenCalled());
+    expect(complete).not.toHaveBeenCalled();
+    release();
+    await task;
+    expect(complete).toHaveBeenCalledWith({ ok: true, port: 42123 });
+  });
+
+  it('surfaces registration failure instead of opening an app without its bundled agents', async () => {
+    const error = new Error('bundled Analytics is missing');
+    const captureFailure = vi.fn();
+    const result = await startBackendOrExit({
+      startBackend: async () => 42123,
+      onStarted: async () => {
+        throw error;
+      },
+      captureFailure,
+      exitApp: vi.fn(),
+      exitOnFailure: false,
+      logError: vi.fn(),
+    });
+    expect(result).toEqual({ ok: false });
+    expect(captureFailure).toHaveBeenCalledWith(error);
+  });
+
   it('registers the backend port when startup succeeds', async () => {
     const onStarted = vi.fn();
     const captureFailure = vi.fn();

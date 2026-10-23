@@ -262,7 +262,7 @@ export const createOrUpdateTray = (): void => {
   try {
     const icon = getTrayIcon();
     tray = new Tray(icon);
-    tray.setToolTip('AionUi');
+    tray.setToolTip(i18n.t('common.tray.appName'));
     void buildTrayContextMenu().then((menu) => tray?.setContextMenu(menu));
 
     // Double-click: always show/focus (Windows/Linux; macOS rarely fires this).

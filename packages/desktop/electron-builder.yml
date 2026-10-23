@@ -24,6 +24,8 @@ files:
   # Static resources — use explicit directory inclusion to prevent resource loss
   - public/**/*
   - package.json
+  - LICENSE
+  - NOTICE
   # Native modules and their runtime dependencies
   - node_modules/better-sqlite3/**/*
   - node_modules/bcrypt/**/*

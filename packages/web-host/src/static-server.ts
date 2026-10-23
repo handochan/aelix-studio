@@ -105,6 +105,7 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
 // haven't seen a newline after 4 KB the client is sending something weird —
 // hand it to the internal HTTP server and let it return 400.
 const PEEK_LIMIT_BYTES = 4096;
+const MAX_WS_HEADER_BYTES = 16 * 1024;
 
 /**
  * Splice `client` to a TCP endpoint on `targetPort`. Any bytes already read
@@ -140,6 +141,53 @@ function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: B
   client.on('error', tearDown);
   upstream.on('close', tearDown);
   client.on('close', tearDown);
+}
+
+function spliceWebSocket(client: Socket, backendPort: number, request: Buffer): void {
+  const headerEnd = request.indexOf('\r\n\r\n') + 4;
+  const pending = request.subarray(headerEnd);
+  client.pause();
+  client.setNoDelay(true);
+  const upstream = net.connect({ host: '127.0.0.1', port: backendPort });
+  let response = Buffer.alloc(0);
+  const teardown = (): void => {
+    clearTimeout(timer);
+    client.destroy();
+    upstream.destroy();
+  };
+  const timer = setTimeout(teardown, 15_000);
+  upstream.once('connect', () => upstream.write(request.subarray(0, headerEnd)));
+  const onResponse = (chunk: Buffer): void => {
+    response = Buffer.concat([response, chunk]);
+    const end = response.indexOf('\r\n\r\n');
+    if (end < 0) {
+      if (response.length > MAX_WS_HEADER_BYTES) teardown();
+      return;
+    }
+    clearTimeout(timer);
+    upstream.removeListener('data', onResponse);
+    client.write(response);
+    upstream.pipe(client);
+    if (/^HTTP\/1\.[01] 101(?: |\r)/.test(response.toString('latin1', 0, end))) {
+      if (pending.length) upstream.write(pending);
+      client.pipe(upstream);
+    } else {
+      // Never send pipelined HTTP requests over a connection that failed to upgrade.
+      upstream.end();
+      upstream.setTimeout(5000, teardown);
+    }
+  };
+  upstream.on('data', onResponse);
+  upstream.on('error', teardown);
+  upstream.on('close', () => {
+    clearTimeout(timer);
+    client.destroy();
+  });
+  client.on('error', teardown);
+  client.on('close', () => {
+    clearTimeout(timer);
+    upstream.destroy();
+  });
 }
 
 /**
@@ -239,9 +287,33 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       peeked = Buffer.concat([peeked, chunk]);
       const decision = peekWsRoute(peeked);
       if (decision === null && peeked.length < PEEK_LIMIT_BYTES) return;
+      if (decision === true) {
+        const headerEnd = peeked.indexOf('\r\n\r\n');
+        if (headerEnd < 0 && peeked.length < MAX_WS_HEADER_BYTES) return;
+        if (headerEnd < 0 || headerEnd > MAX_WS_HEADER_BYTES) {
+          cleanup();
+          client.end('HTTP/1.1 431 Request Header Fields Too Large\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+          return;
+        }
+        const headers = peeked.toString('latin1', 0, headerEnd);
+        if (
+          /^x-aionui-internal\s*:/im.test(headers) ||
+          /\r\n[ \t]/.test(headers) ||
+          !/^upgrade:\s*websocket\s*\r?$/im.test(headers) ||
+          !/^connection:.*\bupgrade\b/im.test(headers) ||
+          /^transfer-encoding\s*:/im.test(headers) ||
+          /^content-length:\s*[1-9]/im.test(headers)
+        ) {
+          cleanup();
+          client.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n');
+          return;
+        }
+        cleanup();
+        spliceWebSocket(client, opts.backendPort, peeked);
+        return;
+      }
       cleanup();
-      const target = decision === true ? opts.backendPort : internalPort;
-      spliceToTcpEndpoint(client, target, peeked);
+      spliceToTcpEndpoint(client, internalPort, peeked);
     };
     const onEarlyError = (): void => {
       cleanup();

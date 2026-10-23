@@ -25,12 +25,13 @@ function killProcessByName(name) {
 }
 
 function resolvePackagedApp(projectRoot) {
+  const productName = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).productName;
   const outDir = path.join(projectRoot, 'out');
   if (!fs.existsSync(outDir)) return null;
 
   if (process.platform === 'win32') {
     for (const dir of ['win-unpacked', 'win-x64-unpacked', 'win-arm64-unpacked']) {
-      const exe = path.join(outDir, dir, 'AionUi.exe');
+      const exe = path.join(outDir, dir, `${productName}.exe`);
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: path.join(outDir, dir) };
     }
   } else if (process.platform === 'darwin') {
@@ -39,14 +40,14 @@ function resolvePackagedApp(projectRoot) {
       if (!fs.existsSync(macDir)) continue;
       const appBundle = fs.readdirSync(macDir).find((f) => f.endsWith('.app'));
       if (!appBundle) continue;
-      const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'AionUi');
+      const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', productName);
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: macDir };
     }
   } else {
     for (const dir of ['linux-unpacked', 'linux-x64-unpacked', 'linux-arm64-unpacked']) {
       const dirPath = path.join(outDir, dir);
       if (!fs.existsSync(dirPath)) continue;
-      for (const name of ['aionui', 'AionUi']) {
+      for (const name of [productName]) {
         const exe = path.join(dirPath, name);
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: dirPath };
       }
@@ -60,7 +61,8 @@ async function main() {
   const { flags, values } = parseArgs(process.argv.slice(2));
   const projectRoot = process.cwd();
   const dryRun = flags.has('--dry-run');
-  const shouldClean = !flags.has('--no-clean');
+  const shouldClean = flags.has('--clean');
+  const productName = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')).productName;
   const passthroughArgs = values;
 
   const packaged = resolvePackagedApp(projectRoot);
@@ -69,11 +71,9 @@ async function main() {
     process.exit(1);
   }
 
-  if (shouldClean) {
-    await killProcessByName('AionUi.exe');
-    await killProcessByName('AionUi');
-    await killProcessByName('electron.exe');
-    await killProcessByName('electron');
+  if (shouldClean && !dryRun) {
+    await killProcessByName(`${productName}.exe`);
+    await killProcessByName(productName);
   }
 
   const env = {

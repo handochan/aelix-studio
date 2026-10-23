@@ -13,6 +13,7 @@ import { useSettingsViewMode } from '../settingsViewContext';
 import { isElectronDesktop, openExternalUrl } from '@/renderer/utils/platform';
 import FeedbackReportModal from './FeedbackReportModal';
 import { ipcBridge } from '@/common';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 import { getIncludePrerelease, runUpdateCheck } from '@/renderer/components/settings/checkForUpdatesShared';
 import { UPDATE_AVAILABLE_EVENT } from '@/renderer/components/settings/useUpdateNotificationController';
 import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
@@ -112,7 +113,7 @@ const AboutModalContent: React.FC = () => {
   const linkItems: LinkItem[] = [
     {
       title: t('settings.helpDocumentation'),
-      url: 'https://github.com/iOfficeAI/AionUi/wiki',
+      url: 'https://github.com/handochan/aelix-studio#readme',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
@@ -120,14 +121,18 @@ const AboutModalContent: React.FC = () => {
       url: 'https://github.com/handochan/aelix-studio/releases',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
+    ...(STUDIO_NETWORK_POLICY.telemetry
+      ? [
+          {
+            title: t('settings.bugReport'),
+            onClick: () => setShowFeedbackModal(true),
+            icon: <Right theme='outline' size='16' className='rtl-mirror' />,
+          },
+        ]
+      : []),
     {
-      title: t('settings.bugReport'),
-      onClick: () => setShowFeedbackModal(true),
-      icon: <Right theme='outline' size='16' className='rtl-mirror' />,
-    },
-    {
-      title: t('settings.contactMe'),
-      url: 'https://github.com/handochan/aelix-studio/issues',
+      title: t('common.github'),
+      url: 'https://github.com/handochan/aelix-studio',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
@@ -225,7 +230,9 @@ const AboutModalContent: React.FC = () => {
           </div>
         </div>
       </div>
-      <FeedbackReportModal visible={showFeedbackModal} onCancel={() => setShowFeedbackModal(false)} />
+      {STUDIO_NETWORK_POLICY.telemetry && (
+        <FeedbackReportModal visible={showFeedbackModal} onCancel={() => setShowFeedbackModal(false)} />
+      )}
     </div>
   );
 };

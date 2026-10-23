@@ -65,10 +65,10 @@
   "more": "More",
   "refresh": "Refresh",
   "readOnly": "Read only",
-  "tray.showWindow": "Show AionUi",
+  "tray.showWindow": "Show Aelix Studio",
   "tray.newChat": "New Chat",
   "tray.closeToTray": "Hide to Tray",
-  "tray.about": "About AionUi",
+  "tray.about": "About Aelix Studio",
   "tray.restart": "Restart App",
   "tray.quit": "Quit",
   "tray.runningTasks": "Running Tasks",
@@ -79,39 +79,39 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "This system is not supported by the bundled backend",
-      "description": "AionUi opened, but the local AionCore backend cannot run on this Linux version. Please upgrade to a supported Linux distribution and restart AionUi.",
+      "description": "Aelix Studio opened, but the local AionCore backend cannot run on this Linux version. Please upgrade to a supported Linux distribution and restart Aelix Studio.",
       "requiredVersions": "Required runtime symbols: {{versions}}"
     },
     "incompleteInstallation": {
-      "title": "AionUi installation is incomplete",
-      "description": "This installation is missing required local resources, so AionCore cannot start. Please download and reinstall the latest AionUi. If the issue returns after reinstalling, check whether security or antivirus software quarantined AionCore.",
+      "title": "Aelix Studio installation is incomplete",
+      "description": "This installation is missing required local resources, so AionCore cannot start. Please download and reinstall the latest Aelix Studio. If the issue returns after reinstalling, check whether security or antivirus software quarantined AionCore.",
       "downloadLatest": "Download latest",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
       "diagnosticsReportFailed": "Failed to send diagnostics report",
-      "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Reinstall the latest AionUi package. If it still happens after reinstalling, check whether security or antivirus software quarantined AionUi components."
+      "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Reinstall the latest Aelix Studio package. If it still happens after reinstalling, check whether security or antivirus software quarantined Aelix Studio components."
     },
     "packageArchitectureMismatch": {
-      "title": "AionUi package architecture mismatch",
-      "description": "This AionUi package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
+      "title": "Aelix Studio package architecture mismatch",
+      "description": "This Aelix Studio package is for {{packageArch}}, but this Mac is {{deviceArch}}. You may have downloaded the wrong package. Please download and install the {{expectedArch}} package."
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Aelix Studio opened, but AionCore stopped while initializing local data. Reinstalling Aelix Studio may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
       "diagnosticsReportFailed": "Failed to send diagnostics report"
     },
     "databaseNewerThanApp": {
-      "title": "A newer version of AionUi is required",
-      "description": "Your local data was created by a newer version of AionUi, and this version can't open it. Update AionUi to the latest version to continue — your data is intact, and no reinstall or data reset is needed.",
-      "descriptionWithVersion": "Your local data was created by a version of AionUi newer than the one installed now (v{{currentVersion}}), so this version can't open it. Update AionUi to the latest version to continue — your data is intact, and no reinstall or data reset is needed."
+      "title": "A newer version of Aelix Studio is required",
+      "description": "Your local data was created by a newer version of Aelix Studio, and this version can't open it. Update Aelix Studio to the latest version to continue — your data is intact, and no reinstall or data reset is needed.",
+      "descriptionWithVersion": "Your local data was created by a version of Aelix Studio newer than the one installed now (v{{currentVersion}}), so this version can't open it. Update Aelix Studio to the latest version to continue — your data is intact, and no reinstall or data reset is needed."
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "AionUi opened, but AionCore stopped while preparing local startup data such as assistant or agent records. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "Aelix Studio opened, but AionCore stopped while preparing local startup data such as assistant or agent records. Reinstalling Aelix Studio may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -119,7 +119,7 @@
     },
     "startupDirectory": {
       "title": "Startup directory is unavailable",
-      "description": "AionUi opened, but AionCore could not start because the configured work or log directory is missing, unavailable, or blocked by permissions. Check that the configured directories exist and are writable, then restart AionUi.",
+      "description": "Aelix Studio opened, but AionCore could not start because the configured work or log directory is missing, unavailable, or blocked by permissions. Check that the configured directories exist and are writable, then restart Aelix Studio.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -127,7 +127,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "Local data is corrupted",
-      "description": "AionUi detected that the local database is corrupted and cannot continue startup. After confirmation, AionUi will back up the old database and create a new local database to continue startup. Past conversations will no longer be shown, and the old database will be kept as a backup file.",
+      "description": "Aelix Studio detected that the local database is corrupted and cannot continue startup. After confirmation, Aelix Studio will back up the old database and create a new local database to continue startup. Past conversations will no longer be shown, and the old database will be kept as a backup file.",
       "confirmRebuild": "Back up old DB and rebuild new DB",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsHint": "Sending diagnostics will not modify the local database.",
@@ -143,8 +143,8 @@
       }
     },
     "transientConcurrentStartup": {
-      "title": "AionUi is starting up",
-      "description": "Another AionUi startup was still using the local data when this window opened. This is temporary and your data is safe — no reinstall is needed. Please wait a moment and try again, or restart AionUi.",
+      "title": "Aelix Studio is starting up",
+      "description": "Another Aelix Studio startup was still using the local data when this window opened. This is temporary and your data is safe — no reinstall is needed. Please wait a moment and try again, or restart Aelix Studio.",
       "sendDiagnostics": "Send diagnostics",
       "diagnosticsSent": "Diagnostics sent",
       "diagnosticsReportSuccess": "Diagnostics report sent",
@@ -203,5 +203,6 @@
   "selectedCount": "Selected {{count}}",
   "selectedSkills": "Selected skills",
   "aiAssistant": "AI Assistant",
-  "appName": "Aelix Studio"
+  "appName": "Aelix Studio",
+  "tray.appName": "Aelix Studio"
 }

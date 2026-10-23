@@ -334,6 +334,7 @@ export type I18nKey =
   | 'common.system'
   | 'common.technical_details'
   | 'common.tray.about'
+  | 'common.tray.appName'
   | 'common.tray.checkUpdate'
   | 'common.tray.closeToTray'
   | 'common.tray.newChat'

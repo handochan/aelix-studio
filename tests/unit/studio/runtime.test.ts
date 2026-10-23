@@ -4,16 +4,16 @@ import { getStudioCommand, bootstrapStudioRuntime } from '@/process/studio/runti
 afterEach(() => vi.unstubAllGlobals());
 
 describe('Studio runtime resolution', () => {
-  it('resolves a Windows executable without a shell or a command string', () => {
+  it('passes Windows paths through the managed Node bridge without a shell', () => {
     expect(getStudioCommand('C:\\Aelix Studio 한글\\resources', 'win32', 'x64')).toEqual({
-      command: 'C:\\Aelix Studio 한글\\resources\\bundled-aelix\\win32-x64\\python\\python.exe',
-      args: ['-I', 'C:\\Aelix Studio 한글\\resources\\bundled-aelix\\win32-x64\\launch.py', 'acp'],
+      command: 'node',
+      args: ['C:\\Aelix Studio 한글\\resources\\bundled-aelix\\win32-x64\\launch.cjs', 'acp'],
     });
   });
 
-  it('uses isolated bundled Python on POSIX too', () => {
-    expect(getStudioCommand('/Studio resources', 'linux', 'arm64').command).toBe(
-      '/Studio resources/bundled-aelix/linux-arm64/python/bin/python3'
+  it('resolves the same bridge layout on POSIX', () => {
+    expect(getStudioCommand('/Studio resources', 'linux', 'arm64').args[0]).toBe(
+      '/Studio resources/bundled-aelix/linux-arm64/launch.cjs'
     );
   });
 

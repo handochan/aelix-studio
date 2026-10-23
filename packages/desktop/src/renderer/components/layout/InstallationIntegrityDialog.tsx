@@ -3,6 +3,7 @@ import type { TFunction } from 'i18next';
 import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { type FeedbackEventTags, submitFeedbackReport } from '@/renderer/services/feedback/submitFeedbackReport';
+import { STUDIO_NETWORK_POLICY } from '@/common/config/constants';
 
 const AIONUI_DOWNLOAD_URL = 'https://github.com/handochan/aelix-studio/releases';
 const INSTALLATION_INTEGRITY_REPORT_FLUSH_TIMEOUT_MS = 2000;
@@ -284,7 +285,7 @@ export const InstallationIntegrityFooter: React.FC<{
 
   return (
     <Space>
-      {actions.reportText ? (
+      {STUDIO_NETWORK_POLICY.telemetry && actions.reportText ? (
         <Button
           data-testid='installation-integrity-report'
           disabled={!diagnostics || reported}
