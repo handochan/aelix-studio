@@ -1,11 +1,26 @@
 {
-  "schema": "aelix-studio.upstream/1",
+  "schema": "aelix-studio.upstream/2",
   "product": "Aelix Studio",
-  "fork": "handochan/aelix-studio",
+  "repository": "handochan/aelix-studio",
+  "repositoryPolicy": {
+    "target": "standalone",
+    "preserveGitHistory": true,
+    "upstreamUpdates": "reviewed",
+    "automaticMerge": false
+  },
   "upstream": {
     "repository": "iOfficeAI/AionUi",
     "tag": "v2.2.2",
-    "commit": "6744099b279b991c17e31c243f0920477bd31cb6"
+    "commit": "6744099b279b991c17e31c243f0920477bd31cb6",
+    "license": "Apache-2.0",
+    "history": [
+      {
+        "tag": "v2.2.2",
+        "commit": "6744099b279b991c17e31c243f0920477bd31cb6",
+        "method": "baseline",
+        "description": "Original AionUi source baseline; preserve its commit history and attribution."
+      }
+    ]
   },
   "aioncore": {
     "version": "v0.2.2",

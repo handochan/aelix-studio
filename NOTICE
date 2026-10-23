@@ -2,6 +2,13 @@
 Aelix Studio downstream distribution
 Copyright 2026 Aelix contributors
 Based on AionUi v2.2.2 by AionUi contributors (Apache-2.0).
+Original source: https://github.com/iOfficeAI/AionUi
+Source baseline: 6744099b279b991c17e31c243f0920477bd31cb6 (v2.2.2).
+Aelix Studio is independently maintained; it modifies branding, runtime integration,
+packaging and self-hosting behavior. It is not an official AionUi distribution.
+The Apache-2.0 license and applicable upstream copyright and attribution notices
+are retained. Source provenance and reviewed upstream adoptions are recorded in
+docs/aelix-studio/upstream.json and Git history.
 Aelix brand mark is used unmodified from handochan/aelix-ai/docs/assets/brand.
 Bundled Python and Python dependencies retain their license files and distribution metadata.
 Bundled Aelix Analytics 0.26.0 is Apache-2.0; its wheel retains the license.

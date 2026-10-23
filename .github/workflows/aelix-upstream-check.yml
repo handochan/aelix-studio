@@ -2,6 +2,14 @@ name: Aelix Studio upstream check
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/aelix-studio/upstream.json'
+      - 'scripts/aelix-studio/checkUpstream.mjs'
+      - 'tests/unit/studio/upstreamTracking.test.ts'
+      - 'tests/unit/studio/fixtures/**'
+      - '.github/workflows/aelix-upstream-check.yml'
   pull_request:
     paths:
       - 'docs/aelix-studio/upstream.json'
@@ -30,3 +38,4 @@ jobs:
         with:
           name: aionui-upstream-report
           path: upstream-report.json
+          if-no-files-found: error

@@ -1,7 +1,8 @@
 # Aelix Studio
 
 **Aelix Coding과 Analytics를 위한 셀프 호스팅 데스크톱·웹 워크스페이스**입니다.
-[AionUi](https://github.com/iOfficeAI/AionUi)를 기반으로 필요한 변경만 유지합니다.
+[AionUi](https://github.com/iOfficeAI/AionUi)의 Apache-2.0 소스를 기반으로 독립적으로 개발합니다.
+원본 Git 이력과 저작자 고지를 보존하고, upstream 변경은 검토 후 반영합니다.
 
 [English](../../readme.md) · [개발·패키징](../aelix-studio/README.md) ·
 [Windows 지원](../aelix-studio/windows.md) · [셀프 호스팅·외부 통신 검토](../aelix-studio/self-hosting.md)
@@ -76,8 +77,11 @@ node scripts/aelix-studio/checkUpstream.mjs
 node scripts/aelix-studio/checkUpstream.mjs --fail-on-drift
 ```
 
-수동·PR 워크플로는 JSON 비교 보고서를 남기고 변경 발견 시 검토를 요구합니다.
-자동 병합·런타임 자동 업데이트는 수행하지 않습니다.
+[upstream.json](../aelix-studio/upstream.json)에 원본 저장소·정확한 기준 버전·반영 이력을 기록합니다.
+GitHub의 fork 연결 여부와 관계없이 추적할 수 있습니다. 관련 파일 변경 시 수동·PR·main push
+워크플로가 JSON 보고서를 남기며, 새 버전이나 같은 태그의 SHA 변경은 검토 대상으로 표시합니다.
+조회 실패는 오류로 구분합니다. 자동 병합·런타임 자동 업데이트는 수행하지 않습니다.
+[upstream 반영 정책](../aelix-studio/README.md#upstream-tracking-and-delivery)에 절차를 정리합니다.
 
 기여 규칙은 [CONTRIBUTING.md](../../CONTRIBUTING.md), 라이선스는
 [Apache-2.0](../../LICENSE), 원저작자 표시는 [NOTICE](../../NOTICE)를 참고하세요.

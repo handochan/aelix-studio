@@ -1,7 +1,8 @@
 # Aelix Studio
 
-A self-hosted desktop and web workspace for **Aelix Coding and Analytics**, maintained as a small
-downstream distribution of [AionUi](https://github.com/iOfficeAI/AionUi).
+A self-hosted desktop and web workspace for **Aelix Coding and Analytics**, independently maintained
+and derived from [AionUi](https://github.com/iOfficeAI/AionUi) under Apache-2.0.
+Original source history and attribution are preserved; upstream changes are reviewed before adoption.
 
 [한국어](docs/readme/readme_ko.md) · [Development and packaging](docs/aelix-studio/README.md) ·
 [Windows](docs/aelix-studio/windows.md) · [Self-hosting and network review](docs/aelix-studio/self-hosting.md)
@@ -86,8 +87,11 @@ node scripts/aelix-studio/checkUpstream.mjs
 node scripts/aelix-studio/checkUpstream.mjs --fail-on-drift
 ```
 
-[upstream.json](docs/aelix-studio/upstream.json) records provenance. The manual/PR
-workflow uploads a JSON report and never merges or updates installed software.
+[upstream.json](docs/aelix-studio/upstream.json) records the source repository, exact baseline and
+adoption history independently of GitHub's fork relationship. The manual/PR/main-push workflow
+uploads a JSON report; new releases and changed tag commits require review, while lookup failures
+are reported as errors. It never merges or updates installed software.
+See the [upstream adoption policy](docs/aelix-studio/README.md#upstream-tracking-and-delivery).
 Upstream adoption requires review of the diff, backend version, Windows packaging,
 local data compatibility and network behavior.
 

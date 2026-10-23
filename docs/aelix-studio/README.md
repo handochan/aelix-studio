@@ -1,6 +1,7 @@
 # Aelix Studio development
 
-Aelix Studio is a small downstream distribution of [AionUi](https://github.com/iOfficeAI/AionUi).
+Aelix Studio is independently maintained and derived from [AionUi](https://github.com/iOfficeAI/AionUi).
+Its repository policy is standalone operation with a small, reviewed downstream patch set.
 Baseline: **v2.2.2**, commit `6744099b279b991c17e31c243f0920477bd31cb6`, unchanged
 AionCore **v0.2.2**. See [upstream.json](upstream.json) for provenance.
 
@@ -72,14 +73,70 @@ not a bit-for-bit reproducible build across different uv releases.
 
 ## Upstream tracking and delivery
 
-- `origin`: `handochan/aelix-studio`; `upstream`: `iOfficeAI/AionUi` (push disabled).
-- Development changes are on `chore/aelix-studio-bootstrap`. No main merge or tag
-  release is implied by a branch push.
-- `node scripts/aelix-studio/checkUpstream.mjs` compares stable upstream tag/SHA.
-  The manual/PR workflow records a JSON report and fails on drift; there is no schedule or automatic merge.
-- Adopt upstream releases on review branches; keep AionCore unchanged initially.
-- Preserve upstream LICENSE/NOTICE. Signed/notarized installers and update release
-  metadata require a separate release process and acceptance.
+- `origin`: `handochan/aelix-studio`, the canonical Studio repository. `upstream`:
+  `iOfficeAI/AionUi`, with push disabled. This Git remote works with a standalone
+  repository and does not require GitHub's fork network.
+- Preserve the original Git commit history. Repository independence changes
+  hosting metadata; the product's AionUi source provenance remains explicit.
+  The live GitHub `fork` flag must be checked separately before claiming that
+  the repository has been detached. A branch push does not imply a main merge.
+- [upstream.json](upstream.json) records the source repository, Apache-2.0 license,
+  adopted tag/SHA and chronological adoption history. Its last history entry must
+  match the current pin. Studio app, Aelix runtime and AionCore versions are
+  separate records; changing one does not advance the others.
+- `node scripts/aelix-studio/checkUpstream.mjs` compares the latest stable release
+  and its resolved commit with the pin, including annotated tags. It emits source
+  links, adoption history and a compare URL. `current` means the tag and SHA both
+  match; `review_required` includes a changed SHA under an existing tag.
+  Network, API and invalid-metadata failures emit `error` and exit 1.
+  `--fail-on-drift` exits 2 for a review requirement.
+- The manual/PR workflow and relevant `main` pushes upload the JSON report.
+  There is no schedule or automatic merge. The workflow must be on the default
+  branch for manual dispatch; a local workflow change does not establish that
+  remote tracking is active. The checker is maintainer tooling, not application
+  telemetry or an automatic update check in closed-network deployments.
+
+### Adopting an upstream release
+
+1. Run the checker and review the release notes and source comparison. Fetch
+   upstream tags into a separate namespace so they cannot replace Studio tags:
+
+   ```sh
+   # Once per fresh clone; existing checkouts already have this remote.
+   git remote add upstream https://github.com/iOfficeAI/AionUi.git
+   git remote set-url --push upstream DISABLED
+   git fetch --no-tags upstream '+refs/tags/*:refs/upstream-tags/aionui/*'
+   git rev-parse 'refs/upstream-tags/aionui/vX.Y.Z^{commit}'
+   ```
+
+   Compare the resolved SHA with the report. A moved tag requires investigation;
+   never refresh the pin merely to make a check pass.
+
+2. Create a review branch from Studio `main` and merge the verified upstream
+   commit, retaining its ancestry. Resolve conflicts while preserving Studio
+   branding, runtime integration, authentication and offline behavior. Keep the
+   pinned AionCore binary unchanged unless its upgrade is explicitly reviewed.
+3. In the same change, update the pinned tag/SHA and append a `method: "merge"`
+   entry to `upstream.history`, describing the adoption. Update baseline mentions
+   in both READMEs and NOTICE. Earlier history entries remain intact.
+4. Validate the affected behavior and required repository checks on the proposed
+   head. Record the source comparison, conflicts, validation and deferred changes
+   in the PR. Merge and publish releases through their own delivery gates.
+
+Individual backports retain the full-release baseline. Record their source in
+the commit body with `Upstream-Repository: iOfficeAI/AionUi` and
+`Upstream-Commit: <full SHA>` so they remain traceable without claiming adoption
+of an entire release.
+
+### License and attribution
+
+Retain the upstream Apache-2.0 [LICENSE](../../LICENSE), applicable copyright
+headers and attribution notices. Modified upstream files must carry prominent
+change notices. [NOTICE](../../NOTICE) identifies the source repository, baseline
+and independently maintained Studio changes; do not remove these when detaching
+the GitHub fork relationship. Preserve applicable dependency licenses as well.
+Desktop packaging explicitly includes LICENSE and NOTICE. Signed/notarized
+installers and update release metadata require their own verification.
 
 See [bootstrap-status.md](bootstrap-status.md) for the original preparation and
 [distribution-status.md](distribution-status.md) for this implementation's evidence.
