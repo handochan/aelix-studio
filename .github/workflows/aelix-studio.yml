@@ -97,6 +97,8 @@ jobs:
       - if: runner.os == 'Linux'
         run: bun x playwright install-deps chromium
       - run: bun run studio:dist
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
       - name: Verify real host registration, team startup and offline Analytics
         env:
           STUDIO_REQUIRE_HOST_TEST: '1'

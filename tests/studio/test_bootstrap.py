@@ -55,7 +55,16 @@ class BootstrapTests(unittest.TestCase):
                     self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
                     self.assertTrue(json.loads(result.stdout.splitlines()[-1])['teamSessionInitialized'])
                 finally:
-                    process.terminate()
+                    if process.poll() is None:
+                        if os.name == 'nt':
+                            # Terminate the owned tree before its backend parent disappears.
+                            # TerminateProcess alone leaves agent descendants writing into tmp.
+                            stopped = subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                                capture_output=True, text=True, timeout=20)
+                            if stopped.returncode and process.poll() is None:
+                                self.fail('Could not stop the isolated backend tree: ' + stopped.stdout + stopped.stderr)
+                        else:
+                            process.terminate()
                     try:
                         process.wait(10)
                     except subprocess.TimeoutExpired:

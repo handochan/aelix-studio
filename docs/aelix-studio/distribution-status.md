@@ -29,12 +29,29 @@ Python logs, packaged UI results, build logs, source receipts and Docker test JS
 The Docker image used here is `sha256:e2b57ef2bb533980a114a5ce0dbf69f75aafbbfc7c1da8b3a1cd742001dbd5f9`
 (Linux arm64). Disposable containers and their test volume were removed.
 
-These corrections have **not been pushed or run in remote CI**. Windows execution,
-macOS x64, Linux x64 and Linux desktop `.deb`/GUI acceptance require completed
-native jobs on the corrected commit. Native build/launch is not installer
-upgrade/uninstall acceptance. Provider-backed team delegation and customer data
-analysis are not established by the synthetic and startup checks above. No public
-release, Developer ID/notarization or update-install round trip is implied.
+### Remote CI of the review corrections
+
+Commit `30e74b16c5ca270c0c1b50ac059361fbdf3f7344` was pushed. Its
+[completed run 39911177099](https://github.com/handochan/aelix-studio/actions/runs/39911177099)
+passed **9 of 12 jobs**:
+
+- Quality, all five native runtimes (including Windows and Intel macOS), both
+  Linux desktop packages/renderer smoke tests, and offline WebUI passed.
+- macOS arm64 and x64 desktop builds failed during Vite bundling at Node's default
+  approximately 2 GiB heap limit. They did not reach packaging or desktop checks.
+- Windows built the NSIS installer and completed the host assertions, but the
+  host test failed while deleting its temporary directory (`WinError 145`): the
+  backend's descendant processes could still write into Analytics state.
+
+The follow-up sets the desktop build's Node heap limit to 8 GiB, matching the
+existing reusable build workflow, and stops the isolated backend's complete
+Windows process tree before deleting test state. Passing these changes requires
+a new completed run; the original failure is not treated as a successful retry.
+
+Native build/launch is not installer upgrade/uninstall acceptance. Provider-backed
+team delegation and customer data analysis are not established by the synthetic
+and startup checks above. No public release, Developer ID/notarization or
+update-install round trip is implied.
 
 ## Follow-up — 2026-10-23 (Asia/Seoul)
 

@@ -68,9 +68,14 @@ bytes, and loads that session through the bundled adapter.
 The original exact-head remote run [39869539859](https://github.com/handochan/aelix-studio/actions/runs/39869539859)
 passed quality, macOS/Linux runtime and offline WebUI checks and failed both
 Windows jobs during Python preparation. That result does not validate these
-subsequent working-tree corrections. Local results are recorded in
-[distribution-status.md](distribution-status.md); new native CI results require
-an explicitly requested push and completed runs on the corrected commit.
+subsequent corrections. The corrected commit `30e74b16c` was pushed and its
+[run 39911177099](https://github.com/handochan/aelix-studio/actions/runs/39911177099)
+passed all five native-runtime jobs, both Linux desktop jobs, quality and offline
+WebUI. macOS packaging hit Node's default heap limit; Windows host-test cleanup
+left descendant processes writing into its temporary directory. The follow-up
+raises the build heap limit and stops the owned Windows process tree. See
+[distribution-status.md](distribution-status.md) for the exact evidence and
+remaining checks; these follow-up changes still require their own completed run.
 
 Installer upgrade/uninstall, signed public release/update installation, real
 provider-backed team delegation and customer data acceptance remain distinct
