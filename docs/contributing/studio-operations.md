@@ -3,6 +3,8 @@
 공통 운영 기준은 [Project 9 README](https://github.com/users/handochan/projects/9)에 둔다.
 정확한 ID는 `PVT_kwHOA-ATMs4BojoA`다. 이 문서는 로컬에서 같은 기준을 읽는 방법과
 진입 파일을 설명한다. 실행 상태는 로컬 세션 기억보다 실제 Issue/Project/PR·CI를 확인한다.
+공통 제품 설계는 [Preview/Beta 설계](../studio-release-train/README.md), 실제 착수 순서와
+선행 Issue는 [개발 착수 안내](../studio-release-train/readiness.md)를 읽는다.
 
 ## 작업 시작
 
