@@ -29,12 +29,12 @@ gh project item-list 9 --owner handochan --format json --limit 100
 
 - Codex: repository root `AGENTS.md`가 공통 운영 규칙과 repo 규칙을 연결한다.
 - Claude Code: root `CLAUDE.md`의 `@AGENTS.md`로 같은 파일을 읽는다. 기존 import를 유지한다.
-- ACP의 primary checkout과 현재 Codex worktree에도 같은 두 진입 파일을 둔다.
+- ACP도 저장소 root의 AGENTS/CLAUDE를 사용한다. 기존 branch/worktree에는 main 변경을 반영하며, 다른 세션의 작업 공간에 직접 복사하지 않는다.
 - Studio의 기존 코드 구조·i18n·검증·push 지침은 기존 AGENTS에 그대로 유지한다.
 - Preview는 공개 beta.2 native wheel 무수정이며 첫 Beta까지 Aion 표면 재사용이 우선이다.
   설정/분기 UI의 존재와 실제 native 적용·이력 복원을 구분한다.
 
-새 세션에서 시작하면 새 진입 파일을 기준으로 읽을 수 있다. 이미 열린 세션에서는
+새 세션에서 시작하면 진입 파일을 기준으로 읽을 수 있다. 이미 열린 세션에서는
 AGENTS/CLAUDE와 이 문서를 다시 읽는다. 지침 변경을 다른 머신/새 Git worktree/clone에도
 공유하려면 해당 지침을 commit하고 필요한 대상에 전달한다.
 지침 파일은 agent가 따를 작업 규약이며 별도 강제 hook이나 상시 동기화 서비스를 설치하지 않는다.
