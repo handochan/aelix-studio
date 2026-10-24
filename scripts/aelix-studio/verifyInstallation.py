@@ -81,6 +81,11 @@ def main():
             command = ['bun', 'x', 'playwright', 'test', 'tests/e2e/specs/app-launch.e2e.ts']
             run(command if sys.platform == 'win32' else ['xvfb-run', '-a', *command], cwd=ROOT, env=env)
             report['checks'].append('installed_renderer_launch')
+            inventory = json.loads((runtime/'checksums.json').read_text(encoding='utf-8'))
+            for relative, digest in inventory.items():
+                if hashlib.sha256((runtime/relative).read_bytes()).hexdigest() != digest:
+                    raise RuntimeError('Installed runtime changed during launch: ' + relative)
+            report['checks'].append('installed_bytes_unchanged_after_launch')
             if sys.platform == 'win32':
                 close_windows_app(executable, env)
                 windows_installer(package, location, env)

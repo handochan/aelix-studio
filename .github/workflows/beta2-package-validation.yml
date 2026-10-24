@@ -1,5 +1,7 @@
 name: Beta2 package acceptance
 on:
+  push:
+    branches: [codex/beta2-package-validation]
   workflow_dispatch:
 permissions:
   contents: read
