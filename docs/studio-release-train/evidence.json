@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "kind": "design-migration-provenance",
+  "originalDesignWindow": "2026-10-24/25 Asia/Seoul",
+  "sourceLocation": "ACP local docs/design/studio-release-train (uncommitted design audit snapshot)",
+  "originalDocumentSha256": {
+    "README.md": "565fbbe98e4aa89ab6ff6b966e6220ce6151d77a3f78ea0a50f06ad75687929b",
+    "beta2-public-surface.md": "d8a126ba7b81447474d9ff729501c5f1e1185f27de3512a9585f1127f5709a3d",
+    "decisions.md": "530db174cea9cb6ffc99ed28f9522456b5b86c4b8796ca8df48e7b0ff41ce677",
+    "delivery-plan.md": "5224f3ad158a60679f2f8135bfe9fb1bc7301f77f61ff36afb2052aa0032cfe6",
+    "operating-model.md": "d187193851acd9b9ab26d75dbf0cf19e590ea8c7f50e366ec789e22e8b61b667",
+    "review-synthesis.md": "24ed819afd05db63dae409209dcc36214853f58e48c4f152ad3f55e75b568323",
+    "session-and-management-contracts.md": "4dfb267f424107199de6dea7a31a179f98a1bb5aca6a97f58e8a63aaf21b9e2a",
+    "tui-coverage.md": "bf03db77a81a2cd55fbe67136b69ce71b53bbe8d1bdf79ed35e22a198f3cd604"
+  },
+  "reviewSummary": {
+    "requestedModel": "claude-opus-5-5",
+    "effort": "max",
+    "status": "completed",
+    "reportedModels": ["claude-opus-5-5"],
+    "isError": false,
+    "terminalReason": "completed",
+    "effortVerification": "requested CLI flag; output independently reports model identity only",
+    "resultSha256": "3f40366dcf2c4f98e021cc61c6c50ede5b0b7b6101afb694f03164f34a8496a2",
+    "permissionDenialCount": 0
+  },
+  "historicalSourceRefs": {
+    "acp": {
+      "head": "8deb482bcd53261762979cf0e6ce1302dcc821c1",
+      "branch": "(detached)"
+    },
+    "studio": {
+      "head": "3a8763cfd56acd52024b4a0634acaca7cedb48e4",
+      "branch": "codex/studio-runtime-controls"
+    },
+    "core": {
+      "head": "64b82af7ccbcb66e52eb9a1c2fca874508ee1cb0",
+      "branch": "main",
+      "publicBeta2": "1093cc2578e70500c91fe0a8d340b7db2528c8de",
+      "originMain": "3a841059ea518a0d849b912eb7ffd7d85bb87bcc"
+    },
+    "analytics": {
+      "head": "c73655b0a578e3d3ed05a21795f77928cb04a0bd",
+      "branch": "main"
+    }
+  },
+  "coverage": "Source/design review only; no new product, provider, installer or offline acceptance. Later user requirements have the review coverage stated in review-synthesis.md.",
+  "rawReportsPublished": false,
+  "rawLogsCredentialsUserDataPublished": false
+}

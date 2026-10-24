@@ -5,6 +5,9 @@
 Read [local operations](docs/contributing/studio-operations.md) and the README of
 [Project 9](https://github.com/users/handochan/projects/9) before choosing Studio work.
 Exact project ID: `PVT_kwHOA-ATMs4BojoA`; shared with `aelix-acp` and `aelix-ai`.
+Read the shared [Preview/Beta design](docs/studio-release-train/README.md) and
+[development readiness](docs/studio-release-train/readiness.md) for current source baselines,
+execution Issues, dependencies, and the boundary between accepted requirements and proposals.
 
 ```sh
 gh project view 9 --owner handochan --format json --jq .readme
