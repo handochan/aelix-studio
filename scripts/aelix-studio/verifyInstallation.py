@@ -24,8 +24,23 @@ def run(argv, **kwargs):
 
 def windows_installer(installer, destination, env):
     # NSIS /D consumes the unquoted remainder and must be the last switch.
-    line = subprocess.list2cmdline([str(installer), '/S']) + ' /D=' + str(destination)
-    subprocess.run(line, check=True, timeout=240, env=env)
+    line = subprocess.list2cmdline([str(installer), '/S', '/CURRENTUSER']) + ' /D=' + str(destination)
+    process = subprocess.Popen(line, env=env)
+    started = time.monotonic()
+    checkpoint = 0
+    while process.poll() is None and time.monotonic() - started < 240:
+        elapsed = time.monotonic() - started
+        if elapsed >= checkpoint:
+            output = ROOT/'out/installer-diagnostics'/f'{process.pid}-{checkpoint}'
+            subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).with_name('installerDiagnostics.ps1')),
+                            '-InstallerPid', str(process.pid), '-Output', str(output)], env=env, timeout=30, check=False)
+            checkpoint += 60
+        time.sleep(.5)
+    if process.poll() is None:
+        subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], check=False)
+        raise subprocess.TimeoutExpired('NSIS /S /CURRENTUSER in a Unicode path; diagnostics retained', 240)
+    if process.returncode:
+        raise subprocess.CalledProcessError(process.returncode, 'NSIS current-user install')
 
 
 def close_windows_app(executable, env):

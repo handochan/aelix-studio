@@ -1,0 +1,43 @@
+name: Windows installer diagnostics
+on:
+  push:
+    branches: [codex/windows-installer-diagnostics]
+permissions:
+  contents: read
+  actions: read
+jobs:
+  windows:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ github.token }}
+          run-id: 40075898423
+          name: beta2-package-win32-x64
+          path: package-artifact
+      - shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item 'package-artifact/out/*.exe' out/
+      - run: bun install --frozen-lockfile
+      - name: Installed current-user package acceptance with bounded diagnostics
+        run: python scripts/aelix-studio/verifyInstallation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: windows-installer-diagnostics
+          path: |
+            out/install-acceptance.json
+            out/installer-diagnostics/
+            test-results/
