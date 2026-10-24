@@ -759,6 +759,13 @@ try {
   // CI builds use 9 (maximum) for smallest size
   // Local builds use 7 (normal) for 30-50% faster ASAR packing
   const isCI = process.env.CI === 'true';
+  if (builderArgs.includes('--win') || builderArgs.includes('--all')) {
+    // 7za 24.09 auto-selects ARM64 for pip's bundled ARM launchers even in an
+    // x64 payload. The install-time Nsis7z 19.00 decoder cannot read that filter.
+    // Pin a supported filter for every Windows build, including ambient overrides.
+    // https://github.com/electron-userland/electron-builder/issues/9983
+    process.env.ELECTRON_BUILDER_7Z_FILTER = 'BCJ';
+  }
   if (!process.env.ELECTRON_BUILDER_COMPRESSION_LEVEL) {
     process.env.ELECTRON_BUILDER_COMPRESSION_LEVEL = isCI ? '9' : '7';
   }

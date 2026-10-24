@@ -1,7 +1,7 @@
 name: Beta2 package acceptance
 on:
   push:
-    branches: [codex/beta2-package-validation]
+    branches: [codex/beta2-package-validation, codex/windows-installer-fix]
   workflow_dispatch:
 permissions:
   contents: read
@@ -56,5 +56,6 @@ jobs:
             out/*.exe
             out/*.deb
             out/install-acceptance.json
+            out/installer-diagnostics/
             test-results/
             resources/bundled-aelix/*/manifest.json
