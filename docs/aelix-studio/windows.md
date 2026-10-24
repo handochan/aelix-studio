@@ -59,6 +59,19 @@ Installer reports receive an empty Sentry DSN even if a build shell has one set.
 The build script fails on locked output instead of killing all Electron/AionUi
 processes on the machine.
 
+Windows builds pin `ELECTRON_BUILDER_7Z_FILTER=BCJ`. The bundled 7za 24.09
+otherwise auto-selects ARM64 for pip's ARM launchers even inside an x64 runtime;
+the install-time Nsis7z 19.00 decoder cannot decode those entries. See
+[electron-builder #9983](https://github.com/electron-userland/electron-builder/issues/9983).
+Changing a shell's compression filter cannot override this compatibility setting.
+
+The package acceptance workflow installs into a path containing Korean and spaces,
+records process CPU/IO and temporary/destination file progress, then checks the
+installed runtime inventory and renderer before reinstalling and uninstalling.
+Its installer timeout is 15 minutes: the failed 240-second baseline was still
+actively copying over 18,000 files. Completion is required; a larger timeout alone
+does not constitute success. Uninstall waits for NSIS's relocated child process.
+
 Before release, run the actual installer with the following conditions: clean
 install, upgrade/reinstall, uninstall, installation path with spaces/non-ASCII
 characters, Aelix session creation and tool allow/reject/cancel. Verify that an
