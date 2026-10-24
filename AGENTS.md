@@ -1,5 +1,24 @@
 # AionUi - Project Guide
 
+## Aelix Studio shared delivery operations
+
+Read [local operations](docs/contributing/studio-operations.md) and the README of
+[Project 9](https://github.com/users/handochan/projects/9) before choosing Studio work.
+Exact project ID: `PVT_kwHOA-ATMs4BojoA`; shared with `aelix-acp` and `aelix-ai`.
+
+```sh
+gh project view 9 --owner handochan --format json --jq .readme
+gh project item-list 9 --owner handochan --format json --limit 100
+```
+
+- Follow the user's explicit task scope. For queued product work, take only an assigned Ready Issue after dependencies are satisfied; convert drafts before implementation.
+- One Issue, one owner, one branch/worktree. Preserve other agents' dirty work. Initial independent implementation concurrency is at most two; serialize shared contracts, manifests, lockfiles, and host composition changes.
+- Use one independent review from another session, then recheck affected validation. Claude/Codex may alternate implementation and review.
+- Update Issue/Project at start, review submission, blockage, and stop/completion. Handoff records current SHA/PR/worktree, verification, next action, and blockers.
+- Use `needs-decision` for product/compatibility/release choices and `blocked` for unmet dependencies. Done requires actual acceptance and relevant merge/verification evidence; one backend PR does not complete a cross-repository feature.
+- Preview keeps public beta.2 native wheels unmodified. Through the first Beta, reuse existing Aion UI surfaces; connect native state rather than replicate every slash command. New `/clear` implementation is excluded.
+- Preserve authorization boundaries and the push/PR rules below. This operations entrypoint grants no new push, merge, release, or publication permission.
+
 All contributors (human and AI) must follow [CONTRIBUTING.md](CONTRIBUTING.md) before opening a PR. ([Chinese version](CONTRIBUTING.zh.md))
 
 ## Code Conventions
