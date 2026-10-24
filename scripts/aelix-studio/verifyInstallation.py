@@ -19,7 +19,8 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def run(argv, **kwargs):
-    subprocess.run([str(a) for a in argv], check=True, timeout=240, **kwargs)
+    kwargs.setdefault('timeout', 240)
+    subprocess.run([str(a) for a in argv], check=True, **kwargs)
 
 
 def windows_installer(installer, destination, env):
@@ -27,8 +28,11 @@ def windows_installer(installer, destination, env):
     line = subprocess.list2cmdline([str(installer), '/S', '/CURRENTUSER']) + ' /D=' + str(destination)
     process = subprocess.Popen(line, env=env)
     started = time.monotonic()
+    # The measured baseline was still copying 18k files / 1.5 GiB at 180s.
+    # Retain the 240s failures; allow a bounded 15 minutes while collecting progress.
+    timeout = 900
     checkpoint = 0
-    while process.poll() is None and time.monotonic() - started < 240:
+    while process.poll() is None and time.monotonic() - started < timeout:
         elapsed = time.monotonic() - started
         if elapsed >= checkpoint:
             output = ROOT/'out/installer-diagnostics'/f'{process.pid}-{checkpoint}'
@@ -42,9 +46,10 @@ def windows_installer(installer, destination, env):
         time.sleep(.5)
     if process.poll() is None:
         subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'], check=False)
-        raise subprocess.TimeoutExpired('NSIS /S /CURRENTUSER in a Unicode path; diagnostics retained', 240)
+        raise subprocess.TimeoutExpired('NSIS /S /CURRENTUSER in a Unicode path; diagnostics retained', timeout)
     if process.returncode:
         raise subprocess.CalledProcessError(process.returncode, 'NSIS current-user install')
+    return {'durationSeconds': round(time.monotonic() - started, 2), 'timeoutSeconds': timeout}
 
 
 def close_windows_app(executable, env):
@@ -76,7 +81,8 @@ def main():
         try:
             if sys.platform == 'win32':
                 location = private/'Installed App'
-                windows_installer(package, location, env)
+                report['cleanInstall'] = windows_installer(package, location, env)
+                print('Clean install:', report['cleanInstall'], flush=True)
                 executable = location/'Aelix Studio.exe'
                 installed = True
             else:
@@ -112,7 +118,8 @@ def main():
             report['checks'].append('installed_bytes_unchanged_after_launch')
             if sys.platform == 'win32':
                 close_windows_app(executable, env)
-                windows_installer(package, location, env)
+                report['reinstall'] = windows_installer(package, location, env)
+                print('Reinstall:', report['reinstall'], flush=True)
             else:
                 run(['sudo', 'apt-get', 'install', '--reinstall', '-y', package])
             if fixture.read_text(encoding='utf-8') != 'PRESERVE_USER_DATA' or not executable.is_file():
@@ -123,7 +130,14 @@ def main():
                 uninstallers = list(location.glob('Uninstall*.exe'))
                 if len(uninstallers) != 1:
                     raise RuntimeError('Installed uninstaller is missing')
-                run([uninstallers[0], '/S'], env=env)
+                # NSIS relocates the uninstaller into TEMP and exits its launcher.
+                # PowerShell -Wait includes descendants, so acceptance waits for removal.
+                started = time.monotonic()
+                run(['powershell', '-NoProfile', '-Command',
+                     '$p = Start-Process -FilePath $env:STUDIO_ACCEPT_UNINSTALLER '
+                     '-ArgumentList /S,/CURRENTUSER -Wait -PassThru; exit $p.ExitCode'],
+                    env=dict(env, STUDIO_ACCEPT_UNINSTALLER=str(uninstallers[0])), timeout=900)
+                report['uninstall'] = {'durationSeconds': round(time.monotonic() - started, 2)}
             else:
                 run(['sudo', 'dpkg', '--remove', name])
             deadline = time.monotonic() + 60
