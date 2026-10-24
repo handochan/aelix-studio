@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import platform
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -64,8 +65,12 @@ def main():
                 installed = True
                 name = subprocess.check_output(['dpkg-deb', '-f', str(package), 'Package'], text=True).strip()
                 files = subprocess.check_output(['dpkg', '-L', name], text=True).splitlines()
-                executable, = [Path(p) for p in files if p.endswith('/Aelix Studio') and Path(p).is_file()]
+                executable, = [Path(p) for p in files if p.startswith('/opt/') and Path(p).name == 'aelix-studio' and Path(p).is_file()]
                 location = executable.parent
+                command = shutil.which('aelix-studio')
+                if not command or Path(command).resolve() != executable.resolve():
+                    raise RuntimeError('Installed desktop command is not registered')
+                report['checks'].append('desktop_command_registration')
             if not executable.is_file():
                 raise RuntimeError('Installed executable is missing')
             report['checks'].append('clean_install')
