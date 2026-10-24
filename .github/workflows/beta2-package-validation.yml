@@ -1,0 +1,58 @@
+name: Beta2 package acceptance
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: beta2-package-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  package:
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: win32-x64
+          - os: ubuntu-22.04
+            target: linux-x64
+          - os: ubuntu-24.04-arm
+            target: linux-arm64
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.4'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.11.19'
+      - run: bun install --frozen-lockfile
+      - if: runner.os == 'Linux'
+        run: bun x playwright install-deps chromium
+      - run: bun run studio:dist
+        env:
+          NODE_OPTIONS: '--max-old-space-size=8192'
+      - name: Validate prepared runtime and actual host integration
+        run: python -m unittest discover -s tests/studio -p "test_*.py"
+        env:
+          STUDIO_REQUIRE_HOST_TEST: '1'
+      - name: Actual installer lifecycle and installed application
+        run: python scripts/aelix-studio/verifyInstallation.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: beta2-package-${{ matrix.target }}
+          path: |
+            out/*.exe
+            out/*.deb
+            out/install-acceptance.json
+            test-results/
+            resources/bundled-aelix/*/manifest.json

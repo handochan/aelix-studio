@@ -10,10 +10,10 @@
     "archiveSha256": "ce96d1b50ce8b72406b751ce7453f910b51f907f4576e69810fc9076d3a93bb2"
   },
   "acp": {
-    "version": "0.1.0",
+    "version": "0.2.0a1",
     "repository": "handochan/aelix-acp",
-    "commit": "71eabb42b3c97e089e7d8601bc32b310ee40dbea",
-    "archiveSha256": "ca6a45f1aabe226ea577ae446724b41ec1f6ae931d1197ea82fc4a3f10045089"
+    "commit": "1555b92cd900cef2a8fd328a79fe1a13e1055940",
+    "archiveSha256": "7c8bf3c225565d89e827f94199d46a0d47a3919c348592e61febb1e930743cf3"
   },
   "supportedBuildTargets": ["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "win32-x64"],
   "acceptedTargets": ["darwin-arm64"]

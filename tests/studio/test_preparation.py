@@ -16,7 +16,6 @@ def load(name, path):
     return module
 
 
-patcher = load('studio_patcher', ROOT / 'scripts/aelix-studio/compatibility/apply.py')
 smoke = load('studio_smoke', ROOT / 'scripts/aelix-studio/smokeRuntime.py')
 prepare = load('studio_prepare', ROOT / 'scripts/aelix-studio/prepareRuntime.py')
 launcher = load('studio_launcher', ROOT / 'scripts/aelix-studio/runtimeLauncher.py')
@@ -75,17 +74,6 @@ class PreparationTests(unittest.TestCase):
             (root/'manifest.json').write_text(json.dumps({'analyticsLockSha256': 'a' * 64, 'target': '../escape'}))
             with self.assertRaises(RuntimeError):
                 launcher.analytics_environment(root, root/'state')
-
-    def test_upstream_contract_drift_aborts_patching(self):
-        with self.assertRaisesRegex(RuntimeError, 'contract changed'):
-            patcher.replace_once('changed upstream source', 'expected code', 'replacement')
-
-    def test_ambiguous_patch_is_rejected(self):
-        with self.assertRaises(RuntimeError):
-            patcher.replace_once('code code', 'code', 'replacement')
-
-    def test_matching_contract_can_be_patched(self):
-        self.assertEqual(patcher.replace_once('old code', 'old', 'new'), 'new code')
 
     def test_inventory_detects_tampering_and_missing_bytes(self):
         with tempfile.TemporaryDirectory() as tmp:

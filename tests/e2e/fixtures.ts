@@ -147,6 +147,11 @@ async function resolveMainWindow(electronApp: ElectronApplication): Promise<Page
  * Returns { executablePath, cwd } or null if not found.
  */
 function resolvePackagedApp(): { executablePath: string; cwd: string } | null {
+  const installedPath = process.env.E2E_PACKAGED_APP_PATH;
+  if (installedPath) {
+    if (!fs.existsSync(installedPath)) throw new Error('Installed package executable does not exist.');
+    return { executablePath: installedPath, cwd: path.dirname(installedPath) };
+  }
   const projectRoot = path.resolve(__dirname, '../..');
   const productName = (
     JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8')) as { productName: string }
