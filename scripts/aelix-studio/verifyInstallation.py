@@ -32,8 +32,12 @@ def windows_installer(installer, destination, env):
         elapsed = time.monotonic() - started
         if elapsed >= checkpoint:
             output = ROOT/'out/installer-diagnostics'/f'{process.pid}-{checkpoint}'
-            subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).with_name('installerDiagnostics.ps1')),
-                            '-InstallerPid', str(process.pid), '-Output', str(output)], env=env, timeout=30, check=False)
+            try:
+                subprocess.run(['powershell', '-NoProfile', '-File', str(Path(__file__).with_name('installerDiagnostics.ps1')),
+                                '-InstallerPid', str(process.pid), '-Output', str(output),
+                                '-InstallDir', str(destination)], env=env, timeout=30, check=False)
+            except subprocess.TimeoutExpired:
+                print('Optional installer diagnostic timed out:', output, flush=True)
             checkpoint += 60
         time.sleep(.5)
     if process.poll() is None:
