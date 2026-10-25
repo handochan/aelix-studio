@@ -1,0 +1,249 @@
+{
+  "schema": "aelix-studio.preview-acceptance/1",
+  "recordedAt": "2026-10-25T03:27:14.233843+00:00",
+  "status": "local_host_passed_delivery_pending",
+  "studioBase": "c47a346db8d0303bc64a1a0bf93b4b94cceb99df",
+  "pairing": {
+    "nativeSource": {
+      "repository": "https://github.com/handochan/aelix-ai",
+      "tag": "v0.1.0-beta.2",
+      "commit": "1093cc2578e70500c91fe0a8d340b7db2528c8de",
+      "relationship": "Public release source reference; wheel build provenance is not independently attested."
+    },
+    "nativeWheels": [
+      {
+        "distribution": "aelix",
+        "version": "0.1.0b2",
+        "sha256": "98a9201be2c84c96a1e3944bd003ba7b7346e6e0807dfbfaae3a00ef8e4994b7",
+        "wheelBytes": 21796,
+        "installedMembersVerified": 9
+      },
+      {
+        "distribution": "aelix-ai",
+        "version": "0.1.0b2",
+        "sha256": "5a8b03bdc87161ea17efd96500b13fd7627618c14b6402e9e46a20d6414f1552",
+        "wheelBytes": 392074,
+        "installedMembersVerified": 68
+      },
+      {
+        "distribution": "aelix-agent-core",
+        "version": "0.1.0b2",
+        "sha256": "f3fdabe25ed8e49aeed467a815fcfd4e5d18eedb4fb6d871649739220341b609",
+        "wheelBytes": 216721,
+        "installedMembersVerified": 42
+      },
+      {
+        "distribution": "aelix-coding-agent",
+        "version": "0.1.0b2",
+        "sha256": "60b19815c9355fa1a5d3c4f99e9d32ff53d4ad2522515038b76115273db8baf6",
+        "wheelBytes": 1361351,
+        "installedMembersVerified": 190
+      }
+    ],
+    "acp": {
+      "repository": "handochan/aelix-acp",
+      "commit": "c573b2cacc26b1b76e1377ceeaa1bd1bf6b3431e",
+      "version": "0.1.0",
+      "archiveSha256": "dd7dc00f54b264c238d2468ebd5cba0a99424f99376622f38de2d41e27db66ff"
+    },
+    "acpWheelSha256": "18a6aaa4e5f06d536a2fdef058e8a443f24d3e82fcf7dde4b11e8efb1de86e16",
+    "installedAcp": {
+      "version": "0.1.0",
+      "packageFiles": {
+        "aelix_acp/__init__.py": "079a74c70fb815a4e2b50f4888e7a131575448ad3ebf9040649bbc59414e2ea7",
+        "aelix_acp/assets/PLOTLY-LICENSE.txt": "8c45d9eaf50c2f72dd9c7ab9ef440788ba58a3538484b5c51c1f17d5128752e7",
+        "aelix_acp/assets/plotly-basic-3.7.0.min.js.gz": "d48da1a9aa08bc3b4d60241f2a261dc325fe8d0100b1841e4fecf97d0b265705",
+        "aelix_acp/bridge.py": "8725a79120291fe8591fd7d190a9c315373ad404b909189ffefb63ce2e7110dc",
+        "aelix_acp/preview.py": "b6ae954188204f66c3a28417bb31a3b57d036cd96ff8e9722f13fc7058ff8201",
+        "aelix_acp/profiles/analytics.md": "e730852acda1bc29f58478bc803d076f650de903e3fdc2aa22ff20803adde357",
+        "aelix_acp/profiles/coding.md": "e232e70bbc0898957fc0cd187de1aba86abd9f1eef4d2b63e4fbff86a24af12a",
+        "aelix_acp/server.py": "b8141bd6c584dbe4bf9fc562354d09497ff581a15c464c406bc9360da11c4076"
+      }
+    },
+    "aioncore": {
+      "repository": "iOfficeAI/AionCore",
+      "tag": "v0.2.2",
+      "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
+      "assets": {
+        "darwin-arm64": {
+          "filename": "aioncore-v0.2.2-aarch64-apple-darwin.tar.gz",
+          "sha256": "70c50b84be9e17ba574a2c74370e6d57a267f44bdd6ecf641740cf220737d5cb"
+        }
+      }
+    },
+    "aioncoreBinarySha256": "04404864ca622159ffcc79ef9cb468e82fc820b91f16d565c5a5efdb0b0c4cb1"
+  },
+  "platform": {
+    "target": "darwin-arm64",
+    "python": "3.12.13",
+    "nodeBuildAndHost": "26.0.0",
+    "bun": "1.4.4",
+    "uv": "uv 0.11.19 (Homebrew 2026-06-03 aarch64-apple-darwin)"
+  },
+  "preparationQualification": {
+    "status": "passed",
+    "nativeChecks": [
+      "native_cli_and_extension_start",
+      "classic_reasoning_set_and_get",
+      "actual_native_stream_with_synthetic_model",
+      "public_extension_registry_and_context_usage",
+      "public_extension_model_switch_preserves_native_history",
+      "native_abort_completes_held_turn"
+    ],
+    "adapterChecks": [
+      "installed_acp_start_and_approval_bridge",
+      "native_launch_model_selector",
+      "native_text_stream_through_acp",
+      "acp_stop_cancels_actual_native_turn"
+    ],
+    "importsVerified": 9,
+    "cliFlagsVerified": 11
+  },
+  "actualHost": {
+    "status": "passed",
+    "host": "actual built Electron renderer and AionCore",
+    "checks": [
+      "custom_agent_registration",
+      "basic_session",
+      "launch_model_selector",
+      "host_unavailable_model_rejected",
+      "ui_text_stream",
+      "ui_stop"
+    ],
+    "unsupportedModelHttpStatus": 400,
+    "configOptionIds": ["mode", "model"],
+    "liveModelSwitch": false,
+    "reasoningForwarded": false,
+    "contextForwarded": false,
+    "provider": "synthetic loopback",
+    "nativeModel": "one",
+    "providerRequests": 2,
+    "nativePatches": [],
+    "realProvider": false,
+    "installer": false,
+    "baselineSha256": "299f1014d27d4c73e2166de0269dbe85a3cd695d91cc46a2ed3fa77ee4525b31",
+    "aioncoreBinarySha256": "04404864ca622159ffcc79ef9cb468e82fc820b91f16d565c5a5efdb0b0c4cb1",
+    "harnessSourceSha256": {
+      "prepare.py": "efcc66706b4c9a7a5e2acfe144d7f8e31a0b125abb81c203991e871ffeafe78c",
+      "smoke.py": "2cfdc69d6c16d13e14ff60d9a83cb944a6a80652aeb47f3fe67790048aaa99a6",
+      "hostSmoke.mjs": "a4a07d29a35254691908ec1295c5da1253f122d57cde4940181c120bccacc1d7",
+      "launch.cjs": "5e89ad1cec9cd2bb343b3e94644c609b585c6bf18e9fd021748686eb417f6890"
+    },
+    "builtAppSha256": {
+      "out/main/index.js": "63fc0115bddd8f78782e2be59b9864644b03171c746aa84bbb4dd898c22535cb",
+      "out/preload/index.js": "07df4dbb468048276cf3d3b7de89d3e282a8e6bc671c2a432f48398e75f599de"
+    }
+  },
+  "identityUnchangedAcrossHostRun": true,
+  "resolvedNativeDependencies": {
+    "uvicorn": "0.54.0",
+    "mcp": "1.30.0",
+    "starlette": "1.10.0",
+    "click": "8.5.0",
+    "packaging": "26.3",
+    "cryptography": "48.0.1",
+    "Pygments": "2.21.0",
+    "jsonschema-specifications": "2025.9.1",
+    "requests": "2.34.2",
+    "google-auth": "2.62.0",
+    "aelix-ai": "0.1.0b2",
+    "certifi": "2026.10.23",
+    "websockets": "16.1.1",
+    "jsonschema": "4.26.0",
+    "PyJWT": "2.15.1",
+    "tree-sitter-bash": "0.25.1",
+    "docstring_parser": "0.18.0",
+    "tree-sitter-powershell": "0.26.4",
+    "tenacity": "9.1.4",
+    "jiter": "0.18.0",
+    "httpcore": "1.0.9",
+    "aelix-coding-agent": "0.1.0b2",
+    "pycparser": "3.12",
+    "tqdm": "4.70.1",
+    "openai": "1.109.1",
+    "urllib3": "2.8.0",
+    "h11": "0.16.0",
+    "sniffio": "1.3.1",
+    "pydantic_core": "2.50.1",
+    "tree-sitter": "0.25.2",
+    "pyasn1": "0.6.4",
+    "mdurl": "0.1.2",
+    "python-multipart": "0.0.32",
+    "PyYAML": "6.0.3",
+    "sse-starlette": "3.5.1",
+    "truststore": "0.10.5",
+    "python-dotenv": "1.2.4",
+    "cffi": "2.1.1",
+    "anthropic": "0.125.0",
+    "aelix": "0.1.0b2",
+    "google-genai": "1.75.0",
+    "annotated-types": "0.8.0",
+    "referencing": "0.37.0",
+    "pydantic-settings": "2.16.1",
+    "markdown-it-py": "4.2.0",
+    "typing-inspection": "0.4.4",
+    "distro": "1.9.0",
+    "rpds-py": "2026.9.1",
+    "attrs": "26.1.0",
+    "pathspec": "1.1.1",
+    "httpx": "0.28.1",
+    "typing_extensions": "4.16.0",
+    "aelix-agent-core": "0.1.0b2",
+    "pillow": "11.3.0",
+    "pyasn1_modules": "0.4.2",
+    "pydantic": "2.14.1",
+    "charset-normalizer": "3.5.2",
+    "httpx-sse": "0.4.3",
+    "anyio": "4.15.1",
+    "idna": "3.20"
+  },
+  "qualificationSha256": "1ae013a1e4e896407d3f00dee91e7b917cf4e65a21148665ef01b9caee989dc4",
+  "baselineSha256": "299f1014d27d4c73e2166de0269dbe85a3cd695d91cc46a2ed3fa77ee4525b31",
+  "entrypointSha256": {
+    "native/bin/aelix": "c679b7c6fa97c70490e2842a08b7f7183fba1fd015dd287dd7f23ca988e8e834",
+    "adapter/bin/aelix-acp": "6a60f10473b43b63e5336124c50e62e803cb00a062964516977d0c6ec39cd3b4"
+  },
+  "validation": {
+    "preparationRegressionTests": 6,
+    "typescript": "passed",
+    "javascriptSyntax": "passed",
+    "formatting": "passed",
+    "fullVitest": {
+      "status": "passed",
+      "node": "24.22.1",
+      "command": "bun run test --maxWorkers=8",
+      "filesPassed": 520,
+      "filesSkipped": 1,
+      "testsPassed": 4980,
+      "testsSkipped": 5,
+      "earlierAttempts": [
+        "missing nested serve-handler dependency link; worktree-only link restored",
+        "Node 26 Mermaid zoom overlay flake; no product/test source changed"
+      ]
+    }
+  },
+  "independentReview": {
+    "status": "no actionable findings after repairs",
+    "session": "review_studio4",
+    "focusedTestsPassed": 6,
+    "repaired": [
+      "bind original qualification and installed ACP hashes",
+      "reject stale success on failed rerun",
+      "bound owned-process timeout cleanup",
+      "assert host HTTP 400 without inferring ACP forwarding"
+    ]
+  },
+  "notAccepted": [
+    "live model switching",
+    "reasoning/context forwarding",
+    "real provider/OAuth",
+    "Windows/Linux/other macOS architecture",
+    "packaged app/installer lifecycle",
+    "authenticated WebUI/mobile",
+    "offline installation",
+    "Analytics/Team turns",
+    "remote CI/merge/release"
+  ],
+  "nativePatches": [],
+  "localArtifacts": ".local/studio-preview/"
+}

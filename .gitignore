@@ -238,3 +238,6 @@ graphify-out/
 .analysis/
 temp/
 .playwright-mcp/
+
+# Disposable qualification environments, immutable downloads and local receipts.
+/.local/
