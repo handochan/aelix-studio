@@ -64,6 +64,9 @@ jobs:
       - name: Prepare unchanged public native and ACP baseline
         run: python3 scripts/studio-preview/prepare.py
       - name: Build the relocatable Provider DMG without publication
+        env:
+          # The Preview builder fixes mac.identity to '-' and uses no signing secrets.
+          CSC_FOR_PULL_REQUEST: 'true'
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
       - name: Mount, install and verify the actual Provider UI
         run: >-

@@ -80,3 +80,11 @@ The separate reviewer found no actionable issue in this fix and independently
 passed all 12 Python preview tests, including ambiguous installations, the minor
 version symlink alias and an escaping interpreter. Remote CI is recorded on the
 PR checks; these local observations do not establish a successful remote rerun.
+
+The next remote run on `8993cfc57` passed preparation and DMG assembly, then
+strict signature verification rejected the installed app. electron-builder had
+skipped signing because it detected a pull request. The installer build step now
+enables signing for PRs explicitly. Its dedicated builder still fixes the
+identity to ad-hoc `-`, disables notarization/publication and uses no signing
+credentials; normal release/build jobs are unchanged. The acceptance script
+retains strict deep signature verification before launching the app.
