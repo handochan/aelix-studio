@@ -91,7 +91,7 @@ jobs:
           import fs from 'node:fs';
           import os from 'node:os';
           import path from 'node:path';
-          const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'Studio helper preflight 한글-'));
+          const sandbox = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Studio helper preflight 한글-')));
           Object.assign(process.env, {
             HOME: path.join(sandbox, 'home'), USERPROFILE: path.join(sandbox, 'home'),
             AELIX_STUDIO_RUNTIME: path.resolve('.local/studio-preview'),

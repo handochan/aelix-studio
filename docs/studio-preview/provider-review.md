@@ -171,3 +171,10 @@ bundled-helper qualification. The Windows fixture's named constant was in a
 different module, so the final fixture uses the verified minimal FILE_READ_DATA
 bit1 directly. No production ACL check was relaxed. Author Python23 tests passed;
 remote target reruns remain required.
+
+The new Windows preflight exposed8.3 versus long temporary-directory spellings:
+JavaScript's non-native realpath preserved the short spelling while Python
+resolved it. Both compared roots and the owned preflight sandbox now use the
+OS-native realpath binding. Independent review confirmed exact directory equality
+is retained; no product path or ACL boundary changed. Full5,015 tests passed.
+Actual Windows confirmation remains a remote-CI requirement.

@@ -90,7 +90,7 @@ function oauth(revision, polling = false, callback = false) {
 
 try {
   const first = await catalog();
-  assert.equal(fs.realpathSync(first.root), fs.realpathSync(root));
+  assert.equal(fs.realpathSync.native(first.root), fs.realpathSync.native(root));
   assert.equal(
     first.providers.some((item) => item.configured),
     false
