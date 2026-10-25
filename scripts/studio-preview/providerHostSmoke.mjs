@@ -8,13 +8,27 @@ import { startStaticServer } from '../../packages/web-host/src/static-server.ts'
 const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
 assert.ok(sandbox && output && process.env.PROVIDER_ENDPOINT);
-const app = await electron.launch({ args: ['.'], cwd: process.cwd(), env: process.env, timeout: 60000 });
+const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
+const appEnv = { ...process.env };
+if (executablePath) {
+  delete appEnv.AELIX_STUDIO_RUNTIME;
+  delete appEnv.AIONUI_BACKEND_BIN;
+}
+const app = await electron.launch({
+  ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
+  cwd: executablePath ? sandbox : process.cwd(),
+  env: appEnv,
+  timeout: 60000,
+});
 let page;
 let foreign;
 let webui;
 try {
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
+    timeout: 60000,
+  });
+  await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
     timeout: 60000,
   });
   await page.evaluate(() => {
@@ -187,7 +201,12 @@ try {
       {
         status: 'pending_payload_audit',
         platform: process.platform + '-' + process.arch,
-        host: 'actual built Electron / AionCore / installed ACP / public native wheel',
+        host: executablePath
+          ? 'installed macOS app / bundled AionCore / relocatable ACP and public native wheels'
+          : 'actual built Electron / AionCore / installed ACP / public native wheel',
+        webuiScope: executablePath
+          ? 'source-imported facade/helper with installed backend; compiled app-owned WebUI listener not exercised'
+          : 'source-imported facade/helper with development backend',
         checks: [
           'fresh_store',
           'ui_endpoint_registration',

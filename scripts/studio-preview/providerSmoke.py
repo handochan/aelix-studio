@@ -125,7 +125,7 @@ async def main(args):
                     scanned += 1
             report.update(status='passed', acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected,
                           nativePatches=[], installedPayloadUnchanged=True, installedFiles=len(before),
-                          realProvider=False, realOAuth=False, installer=False,
+                          realProvider=False, realOAuth=False, installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'])
             report.update(secretLogDatabaseScanFiles=scanned, secretLogDatabaseMatches=0)
             def digest(file):

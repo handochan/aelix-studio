@@ -103,8 +103,10 @@ export class NativeAuthService {
             ok: true,
             data: {
               root: reply.data.root,
-              command: path.join(runtime, 'adapter/bin/aelix-acp'),
+              command: '/usr/bin/env',
               args: [
+                '--',
+                path.join(runtime, 'adapter/bin/aelix-acp'),
                 '--aelix',
                 path.join(runtime, 'native/bin/aelix'),
                 '--profile',

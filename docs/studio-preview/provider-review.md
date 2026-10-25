@@ -48,3 +48,20 @@ claim of real Provider/OAuth, additional host OS, installer or field acceptance.
 
 This review and the local commit do not authorize or establish push, PR, merge,
 remote CI, publication or closure of the cross-surface acceptance Issue.
+
+## Installer follow-up review
+
+The user subsequently authorized real-account/installer acceptance and push/PR.
+A separate review of the follow-up found stale cached payload reuse, missing
+installed ACP re-audit and absolute internal symlink preservation. The builder
+now binds current recipes/baseline/prepared receipt, checks exact file and symlink
+inventory, rechecks the accepted installed ACP identity, and rejects absolute or
+escaping links. Global site injection is refused and owned launches use `-I -S -B`.
+The separate credential-root fact is no longer treated as proof of fresh OAuth;
+real browser enrollment has its own observed callback/token-exchange receipt.
+
+Final independent follow-up reruns on Node 24: 17 service/facade tests, all nine
+Python preview tests, and the current payload's `--verify-only` passed. No remaining
+production blocker was reported. Installed UI/real-account/full-suite/coverage
+checks remain author evidence. The WebUI harness scope is explicitly source facade
+and helper with an installed backend, not the compiled app-owned WebUI listener.

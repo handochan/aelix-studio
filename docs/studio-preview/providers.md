@@ -19,9 +19,9 @@ bun start
 
 Development also discovers `.local/studio-preview`; packaged hosts look under
 `resources/studio-preview`. Runtime selection is host-owned, never renderer input.
-The existing preparation venv is a qualification environment with absolute paths,
-not a relocatable installer payload. This change does not package or publish an
-installer, download a runtime at startup, or select a system Python fallback.
+The existing preparation venv is a qualification environment with absolute paths.
+The installer workflow below creates a separate relocatable payload. Startup does
+not download a runtime or select a system Python fallback.
 
 In the existing Model settings page or modal:
 
@@ -102,7 +102,52 @@ success receipts. Source/build hashes bind the receipt to the tested local bytes
 Results are recorded in [provider-acceptance.json](provider-acceptance.json);
 generated detail and screenshots are in ignored `.local/studio-provider/`.
 Independent review and reruns are recorded in [provider-review.md](provider-review.md).
-Real Provider authorization/OAuth, mobile, Linux/Windows host, final installers,
-closed-network installation and field acceptance remain separate. Local work is
-not push, PR, merge, CI or Preview release delivery; Issue #5 remains open for
-repository delivery and the remaining actual acceptance.
+The original synthetic checkpoint remains separate from the real-account and
+macOS installer follow-up below. Other OS, mobile, closed-network and field gates
+remain open. Issue #5 tracks repository delivery and final cross-surface acceptance;
+a local test or PR alone does not establish Preview release delivery.
+
+## macOS arm64 installer and real accounts
+
+Build and verify the acceptance DMG without publishing or notarizing:
+
+```sh
+node scripts/studio-preview/packaging/build.mjs --runtime /path/to/prepared/studio-preview
+/path/to/prepared/native/bin/python -B scripts/studio-preview/packaging/acceptance.py \
+  --runtime /path/to/prepared/studio-preview \
+  --dmg .local/provider-installer/artifacts/AionUi-2.2.2-mac-arm64.dmg
+```
+
+The builder copies the qualified standalone CPython base, separate native and ACP
+sites, and license/metadata files outside asar. `-I -S -B` prevents user Python
+paths and global site startup injection. Relative owned wrappers launch unchanged
+public entrypoints; `/usr/bin/env --` preserves absolute paths with spaces/Unicode
+through AionCore without a managed Node download. Native wheel members and ACP
+are re-audited before copying. Cached payload reuse requires current baseline,
+prepared identity, build recipes, exact inventory, hashes and relative contained
+symlinks. Archive a stale owned cache and rebuild; silent reuse is refused.
+
+The qualifier mounts the DMG, copies its app into a disposable `~/Applications`
+path containing spaces/Korean characters, verifies its ad-hoc signature and 309
+unchanged native wheel members, then runs installed settings and response/error
+scenarios. Standalone bundled Python and ACP also launch with source/original
+interpreter reads denied and a system-only PATH. The normal Electron UI retains
+its Chromium sandbox: nesting it inside `sandbox-exec` is not a clean-account
+substitute and failed with macOS sandbox initialization errors. The WebUI check
+uses a source-imported facade/helper and installed backend; it does not qualify
+the app-owned compiled WebUI listener.
+
+[Provider delivery evidence](provider-delivery.json) records actual OpenRouter
+API-key registration, Codex OAuth consumption, separate real browser callback/token
+exchange observation, and installed first response/restart results. Existing CLI
+auth files are compared without writing them. Raw credentials are neither written
+to receipts nor fingerprinted. A separate auth path alone does not establish new
+OAuth enrollment. Token refresh is not exercised; valid access tokens are used
+without rotating the original CLI refresh authority. The unmodified native common
+callback page says “Anthropic” even for Codex; the stored Provider is independently
+checked as `openai-codex`.
+
+This is macOS arm64 ad-hoc acceptance, separate from Developer ID, notarization,
+quarantine/Gatekeeper distribution, a clean OS account, cross-version upgrade and
+user-data-preserving uninstall, other OS targets, and publication. The PR adds a
+macOS installer qualification job; queued jobs are not completed CI evidence.

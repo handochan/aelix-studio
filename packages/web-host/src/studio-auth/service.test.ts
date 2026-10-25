@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeAuthService } from './service';
 
@@ -26,21 +27,31 @@ class Helper extends EventEmitter {
 }
 
 describe('sessionless native auth ownership and lifecycle', () => {
+  const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+  const runtime = path.resolve('/verified');
   let service: NativeAuthService;
   let helper: Helper;
   beforeEach(() => {
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
     mocks.existsSync.mockReturnValue(true);
     helper = new Helper();
     mocks.spawn.mockReturnValue(helper);
-    service = new NativeAuthService({ runtime: '/verified', timeoutMs: 20, loginTimeoutMs: 3000 });
+    service = new NativeAuthService({ runtime, timeoutMs: 20, loginTimeoutMs: 3000 });
   });
   afterEach(() => {
+    Object.defineProperty(process, 'platform', platform);
     service.dispose();
     vi.clearAllMocks();
   });
 
   it('fails without an installed runtime instead of discovering a different Python', async () => {
     mocks.existsSync.mockReturnValue(false);
+    expect(await service.request('one', { action: 'catalog' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(mocks.spawn).not.toHaveBeenCalled();
+  });
+
+  it('reports the accepted POSIX-only Preview boundary on Windows', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
     expect(await service.request('one', { action: 'catalog' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
@@ -147,10 +158,12 @@ describe('sessionless native auth ownership and lifecycle', () => {
       ok: true,
       data: {
         root: '/cli-root',
-        command: '/verified/adapter/bin/aelix-acp',
+        command: '/usr/bin/env',
         args: [
+          '--',
+          path.join(runtime, 'adapter/bin/aelix-acp'),
           '--aelix',
-          '/verified/native/bin/aelix',
+          path.join(runtime, 'native/bin/aelix'),
           '--profile',
           'coding',
           '--provider',
