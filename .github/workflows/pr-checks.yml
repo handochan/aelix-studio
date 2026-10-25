@@ -36,6 +36,55 @@ env:
   BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
 
 jobs:
+  provider-preview:
+    name: Provider Preview installer (macOS arm64)
+    if: github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
+    runs-on: macos-14
+    timeout-minutes: 30
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Resolve PR context
+        uses: ./.github/actions/checkout-pr
+        with:
+          pr_number: ${{ inputs.pr_number }}
+          github_token: ${{ github.token }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      - uses: astral-sh/setup-uv@v6
+      - run: bun install --frozen-lockfile
+      - name: Prepare unchanged public native and ACP baseline
+        run: python3 scripts/studio-preview/prepare.py
+      - name: Build the relocatable Provider DMG without publication
+        env:
+          # The Preview builder fixes mac.identity to '-' and uses no signing secrets.
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
+      - name: Mount, install and verify the actual Provider UI
+        run: >-
+          .local/studio-preview/native/bin/python -B scripts/studio-preview/packaging/acceptance.py
+          --runtime .local/studio-preview
+          --dmg ".local/provider-installer/artifacts/AionUi-$(node -p "require('./package.json').version")-mac-arm64.dmg"
+      - name: Save installer qualification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: provider-preview-macos-arm64
+          path: |
+            .local/provider-installer/acceptance.json
+            .local/provider-installer/artifacts/*.dmg
+            .local/studio-provider/*.json
+            .local/studio-provider/*.png
+          if-no-files-found: warn
+
   # Cancel in-progress runs when PR is closed (merged or manually closed)
   cancel-if-closed:
     name: Cancel if PR closed

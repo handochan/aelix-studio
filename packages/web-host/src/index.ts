@@ -3,6 +3,14 @@ import type { WebHostOptions, WebHostHandle } from './types.js';
 export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle } from './types.js';
 export { startStaticServer, stopStaticServer } from './static-server.js';
 export type { StaticServerOptions, StaticServerHandle } from './static-server.js';
+export { NativeAuthService, getNativeAuthService } from './studio-auth/service.js';
+export type {
+  NativeAuthCommand,
+  NativeAuthReply,
+  NativeAuthCatalog,
+  NativeAuthOperation,
+  NativeAuthSelection,
+} from './studio-auth/types.js';
 
 // Backend launcher exports (M4)
 export {

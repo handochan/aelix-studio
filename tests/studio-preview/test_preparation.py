@@ -13,6 +13,32 @@ spec.loader.exec_module(prepare)
 
 
 class PreparationTests(unittest.TestCase):
+    def test_standalone_selection_ignores_minor_version_alias(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / 'cpython-3.12.13-macos-aarch64-none'
+            (installation / 'bin').mkdir(parents=True)
+            (installation / 'bin/python3').write_text('owned interpreter')
+            (root / 'cpython-3.12-macos-aarch64-none').symlink_to(installation, target_is_directory=True)
+            self.assertEqual(prepare.managed_python(root), installation / 'bin/python3')
+
+    def test_standalone_selection_refuses_ambiguous_installations(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            for version in ('3.12.12', '3.12.13'):
+                (root / ('cpython-' + version)).mkdir()
+            with self.assertRaisesRegex(ValueError, 'one owned standalone'):
+                prepare.managed_python(root)
+
+    def test_standalone_selection_refuses_external_interpreter(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / 'cpython-fixture'
+            (installation / 'bin').mkdir(parents=True)
+            (installation / 'bin/python3').symlink_to(Path(__file__).resolve())
+            with self.assertRaisesRegex(ValueError, 'escapes'):
+                prepare.managed_python(root)
+
     def test_cached_archive_with_wrong_digest_is_refused(self):
         with tempfile.TemporaryDirectory() as temporary:
             target = Path(temporary) / 'archive'

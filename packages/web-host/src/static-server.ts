@@ -7,13 +7,17 @@
  * /api/auth/*. /ws and /api/stt/stream are WebSocket/stream upgrades spliced at
  * TCP level; /api/stt/stream is the STT streaming endpoint.
  *
- * Design: Node native http + serve-handler. No Express. No business routes.
+ * Design: Node native http + serve-handler. Studio's sessionless native auth
+ * facade shares this listener, with separate cookie/Origin admission checks.
+ * Other business routes remain on the backend.
  */
 
 import http, { type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import { networkInterfaces } from 'node:os';
 import net, { type Socket } from 'node:net';
 import serveHandler from 'serve-handler';
+import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
+import { getNativeAuthService } from './studio-auth/service.js';
 
 export type StaticServerOptions = {
   staticDir: string;
@@ -180,6 +184,14 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
 
+      if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
+        const addresses = ['127.0.0.1', 'localhost', ...(allowRemote ? [getLanIP()].filter(Boolean) : [])];
+        const origins = addresses.map((address) => `http://${address}:${actualPort}`);
+        if (process.env.AELIX_STUDIO_ORIGIN) origins.push(process.env.AELIX_STUDIO_ORIGIN);
+        await handleNativeAuth(req, res, { backendPort: opts.backendPort, origins });
+        return;
+      }
+
       // /api/* — reverse proxy to backend (includes /api/auth/*).
       // /login and /logout are aionui-auth's top-level auth endpoints: proxy them too
       // so WebUI browser clients reach the backend without a path-rewrite.
@@ -273,6 +285,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     lanIP,
     stop: () =>
       new Promise<void>((resolve) => {
+        getNativeAuthService().cancelOwner('web:', true);
         tcp_server.close(() => {
           http_server.close(() => resolve());
         });

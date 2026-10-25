@@ -301,7 +301,7 @@ const SettingsModal: React.FC<SettingsModalProps> = ({ visible, onCancel, defaul
   const renderBuiltinContent = () => {
     switch (activeTab) {
       case 'model':
-        return <ModelModalContent />;
+        return visible ? <ModelModalContent onOpenConversation={onCancel} /> : null;
       case 'agent':
         return <AgentModalContent />;
       case 'tools':
