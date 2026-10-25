@@ -5,7 +5,7 @@
  */
 
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import React from 'react';
 
 const renderMock = vi.hoisted(() => vi.fn());
@@ -61,6 +61,13 @@ vi.mock('@icon-park/react', () => ({
 
 import MermaidBlock from '@/renderer/components/Markdown/MermaidBlock';
 
+async function renderSettled(ui: React.ReactElement) {
+  // Complete the async SVG commit and its view-reset effect before interacting.
+  await act(async () => {
+    render(ui);
+  });
+}
+
 // jsdom lacks the pointer capture API used by the drag handlers.
 beforeAll(() => {
   Object.defineProperty(Element.prototype, 'setPointerCapture', {
@@ -87,7 +94,7 @@ describe('MermaidBlock pan/zoom', () => {
   });
 
   it('renders a static diagram without zoom controls by default', async () => {
-    render(<MermaidBlock code={'graph TD; A-->B'} />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} />);
     const diagram = await screen.findByTestId('mermaid-diagram');
     // Default path scrolls natively and exposes no zoom controls.
     expect(diagram.style.overflowX).toBe('auto');
@@ -96,7 +103,7 @@ describe('MermaidBlock pan/zoom', () => {
   });
 
   it('shows zoom controls and applies/resets scale when enablePanZoom is set', async () => {
-    render(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
     const diagram = await screen.findByTestId('mermaid-diagram');
     // Pan viewport clips (hidden overflow) instead of native scroll.
     expect(diagram.style.overflow).toBe('hidden');
@@ -117,27 +124,27 @@ describe('MermaidBlock pan/zoom', () => {
 
   it('caps narrow diagrams at their natural width so they render 1:1', async () => {
     renderMock.mockResolvedValue({ svg: '<svg viewBox="0 0 100 200" width="100%"></svg>' });
-    render(<MermaidBlock code={'graph TD; A-->B'} />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} />);
     const diagram = await screen.findByTestId('mermaid-diagram');
     expect(diagram.querySelector('svg')?.getAttribute('style')).toContain('max-width: min(100%, 100px)');
   });
 
   it('caps wide diagrams at the container width', async () => {
     renderMock.mockResolvedValue({ svg: '<svg viewBox="0 0 2000 100" width="100%"></svg>' });
-    render(<MermaidBlock code={'graph TD; A-->B'} />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} />);
     const diagram = await screen.findByTestId('mermaid-diagram');
     expect(diagram.querySelector('svg')?.getAttribute('style')).toContain('max-width: min(100%, 2000px)');
   });
 
   it('opens the zoom overlay when the static diagram is clicked', async () => {
-    render(<MermaidBlock code={'graph TD; A-->B'} />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} />);
     const diagram = await screen.findByTestId('mermaid-diagram');
     fireEvent.click(diagram);
     expect(screen.getByTestId('diagram-zoom-overlay')).toBeInTheDocument();
   });
 
   it('opens the zoom overlay on click without panning when drag-to-pan is enabled', async () => {
-    render(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
     const diagram = await screen.findByTestId('mermaid-diagram');
 
     fireEvent.pointerDown(diagram, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
@@ -150,7 +157,7 @@ describe('MermaidBlock pan/zoom', () => {
   });
 
   it('pans instead of opening the overlay when the pointer drags past the threshold', async () => {
-    render(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
+    await renderSettled(<MermaidBlock code={'graph TD; A-->B'} enablePanZoom />);
     const diagram = await screen.findByTestId('mermaid-diagram');
 
     fireEvent.pointerDown(diagram, { pointerId: 1, button: 0, clientX: 10, clientY: 10 });
