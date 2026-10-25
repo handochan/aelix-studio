@@ -12,6 +12,11 @@ import '@sentry/electron/preload';
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { ADAPTER_BRIDGE_EVENT_KEY } from '../common/adapter/constant';
 
+// Dedicated secret-bearing channel: no generic bridge interceptors or request logging.
+contextBridge.exposeInMainWorld('__studioNativeAuth', {
+  request: (command: unknown) => ipcRenderer.invoke('studio:native-auth', command),
+});
+
 /**
  * @description 注入到renderer进程中, 用于与main进程通信
  * */

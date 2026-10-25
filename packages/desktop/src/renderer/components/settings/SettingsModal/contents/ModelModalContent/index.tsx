@@ -29,10 +29,11 @@ import EditModeModal from '@/renderer/pages/settings/components/EditModeModal';
 import AionScrollArea from '@/renderer/components/base/AionScrollArea';
 import TalkToButlerButton from '@/renderer/components/base/TalkToButlerButton';
 import { useProvidersQuery } from '@/renderer/hooks/agent/useModelProviderList';
-import { useSettingsViewMode } from '../settingsViewContext';
+import { useSettingsViewMode } from '../../settingsViewContext';
 import SettingsPageHeader from '@/renderer/pages/settings/components/SettingsPageHeader';
 import { consumePendingDeepLink } from '@/renderer/hooks/system/useDeepLink';
-import '../model-provider.css';
+import '../../model-provider.css';
+import NativeProviders from './NativeProviders';
 
 /**
  * 获取协议显示标签颜色
@@ -106,7 +107,7 @@ const isModelEnabled = (platform: IProvider, model: string): boolean => {
   return platform.model_enabled[model] !== false;
 };
 
-const ModelModalContent: React.FC = () => {
+const ModelModalContent: React.FC<{ onOpenConversation?: () => void }> = ({ onOpenConversation }) => {
   const { t, i18n } = useTranslation();
   const viewMode = useSettingsViewMode();
   const isPageMode = viewMode === 'page';
@@ -402,6 +403,7 @@ const ModelModalContent: React.FC = () => {
 
       {/* Content Area */}
       <AionScrollArea className='flex-1 min-h-0' disableOverflow={isPageMode}>
+        <NativeProviders onOpenConversation={onOpenConversation} />
         {!data || data.length === 0 ? (
           <div className='flex flex-col items-center justify-center py-40px'>
             <Info theme='outline' size='48' className='text-t-secondary mb-16px' />
