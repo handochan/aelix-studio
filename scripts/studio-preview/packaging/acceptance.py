@@ -22,46 +22,79 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def unsigned_macho_identity(raw):
-    """Ignore only the signature-sized LINKEDIT VM allocation after codesign removal."""
+def macho_code_identity(raw, details=None):
+    """Hash every code byte, normalizing only bounded Mach-O signing metadata."""
     data = bytearray(raw)
     if len(data) < 32 or struct.unpack_from('<I', data)[0] != 0xFEEDFACF:
         raise ValueError('Expected a thin 64-bit Mach-O host')
     commands, command_bytes = struct.unpack_from('<II', data, 16)
-    end, offset, found = 32 + command_bytes, 32, False
+    end, offset, linkedit, signature = 32 + command_bytes, 32, None, None
     if end > len(data):
         raise ValueError('Truncated Mach-O commands')
-    for _ in range(commands):
+    for index in range(commands):
         if offset + 8 > end:
             raise ValueError('Truncated Mach-O command')
         command, size = struct.unpack_from('<II', data, offset)
-        if size < 8 or offset + size > end or command == 0x1D:
-            raise ValueError('Invalid or still-signed Mach-O command')
+        if size < 8 or offset + size > end:
+            raise ValueError('Invalid Mach-O command')
         if command == 0x19 and data[offset + 8:offset + 24].rstrip(b'\0') == b'__LINKEDIT':
-            if found or size < 72:
+            if linkedit is not None or size < 72:
                 raise ValueError('Invalid LINKEDIT command')
             vm_size, file_offset, file_size = struct.unpack_from('<QQQ', data, offset + 32)
-            if vm_size < file_size or file_offset + file_size != len(data):
-                raise ValueError('Invalid unsigned LINKEDIT extent')
-            # codesign --remove-signature truncates the signature but preserves
-            # the previous VM allocation. All other headers and bytes must match.
-            struct.pack_into('<Q', data, offset + 32, 0)
-            found = True
+            if vm_size < file_size or file_offset < end or file_offset + file_size != len(data):
+                raise ValueError('Invalid LINKEDIT extent')
+            linkedit = (offset, vm_size, file_offset, file_size)
+        if command == 0x1D:
+            if signature is not None or size != 16 or index != commands - 1:
+                raise ValueError('Signature command must be the final 16-byte command')
+            at, length = struct.unpack_from('<II', data, offset + 8)
+            if at % 16 or at + length != len(data) or length < 12:
+                raise ValueError('Invalid terminal signature extent')
+            magic, declared, count = struct.unpack_from('>III', data, at)
+            if magic != 0xFADE0CC0 or not (12 <= declared <= length) or not (1 <= count <= (declared - 12) // 8):
+                raise ValueError('Invalid embedded signature SuperBlob')
+            for entry in range(count):
+                blob = struct.unpack_from('>I', data, at + 16 + entry * 8)[0]
+                if blob < 12 + count * 8 or blob + 8 > declared:
+                    raise ValueError('Invalid signature index')
+                blob_length = struct.unpack_from('>I', data, at + blob + 4)[0]
+                if blob_length < 8 or blob + blob_length > declared:
+                    raise ValueError('Invalid signature blob extent')
+            signature = (offset, at, length, declared, count)
         offset += size
-    if not found or offset != end:
+    if linkedit is None or offset != end:
         raise ValueError('Missing or malformed LINKEDIT')
+    segment, vm_size, file_offset, file_size = linkedit
+    if signature and signature[1] < file_offset:
+        raise ValueError('Signature is outside LINKEDIT')
+    if details is not None:
+        details.update(bytes=len(raw), cpuType=struct.unpack_from('<I', raw, 4)[0],
+                       commands=commands, commandBytes=command_bytes,
+                       linkedit=dict(commandOffset=segment, vmSize=vm_size, fileOffset=file_offset, fileSize=file_size),
+                       signature=(dict(commandOffset=signature[0], dataOffset=signature[1], dataSize=signature[2],
+                                       superBlobLength=signature[3], blobs=signature[4]) if signature else None))
+    if signature:
+        command_offset, body_end, _, _, _ = signature
+        data = data[:body_end]
+        # The last command occupies existing header padding. Clear that slot;
+        # no mapped body offsets or ordinary load commands are shifted.
+        data[command_offset:command_offset + 16] = b'\0' * 16
+        struct.pack_into('<II', data, 16, commands - 1, command_bytes - 16)
+    # Signing aligns its terminal payload to16 bytes. Add only zeros, retaining
+    # every existing body byte; a nonzero alignment change still changes the hash.
+    data.extend(b'\0' * ((-len(data)) % 16))
+    struct.pack_into('<Q', data, segment + 32, 0)
+    struct.pack_into('<Q', data, segment + 48, len(data) - file_offset)
     return hashlib.sha256(data).hexdigest()
 
 
-def host_identity(path):
-    if sys.platform != 'darwin':
-        return digest(path)
-    with tempfile.TemporaryDirectory(prefix='studio-host-identity-') as temporary:
-        copy = Path(temporary) / 'aioncore'
-        shutil.copy2(path, copy)
-        subprocess.run(['codesign', '--remove-signature', str(copy)], check=True,
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        return unsigned_macho_identity(copy.read_bytes())
+def host_identity(path, details=None):
+    raw = path.read_bytes()
+    if sys.platform == 'darwin':
+        return macho_code_identity(raw, details)
+    if details is not None:
+        details.update(bytes=len(raw))
+    return hashlib.sha256(raw).hexdigest()
 
 
 def long_path(path):
@@ -179,8 +212,18 @@ def main(args):
             prepared = json.loads((runtime / 'receipt.json').read_text(encoding='utf-8'))
             core = payload.parent / 'bundled-aioncore' / target / ('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
             original_core = runtime / prepared['aioncoreBinary']
-            if digest(original_core) != prepared['aioncoreBinarySha256'] or host_identity(core) != host_identity(original_core):
-                raise ValueError('Installed host differs from the declared AionCore artifact')
+            identity = dict(expectedOriginalSha256=prepared['aioncoreBinarySha256'],
+                            observedOriginalSha256=digest(original_core), installedSha256=digest(core),
+                            original={}, installed={})
+            identity_path = output.with_name('aioncore-identity.json')
+            identity_path.write_text(json.dumps(identity, indent=2) + '\n', encoding='utf-8')
+            if identity['observedOriginalSha256'] != identity['expectedOriginalSha256']:
+                raise ValueError('Qualified original AionCore artifact bytes changed')
+            identity['originalCodeSha256'] = host_identity(original_core, identity['original'])
+            identity['installedCodeSha256'] = host_identity(core, identity['installed'])
+            identity_path.write_text(json.dumps(identity, indent=2) + '\n', encoding='utf-8')
+            if identity['originalCodeSha256'] != identity['installedCodeSha256']:
+                raise ValueError('Installed AionCore code differs from the declared artifact')
             checked = 0
             for spec in manifest['native']['wheels']:
                 wheel = runtime / 'wheels' / spec['filename']
@@ -248,6 +291,7 @@ def main(args):
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
                           aioncoreCodeIdentityMatched=True, originalAioncoreSha256=prepared['aioncoreBinarySha256'],
+                          aioncoreIdentity=identity,
                           unicodeAndSpaceInstallPath=sys.platform != 'linux', unicodeAndSpaceRuntimeRelocation=True,
                           unicodeAndSpaceUserState=True, adHocSignatureVerified=sys.platform == 'darwin',
                           developerId=False, notarized=False, installedNativeWheelMembers=checked, nativePatches=[],

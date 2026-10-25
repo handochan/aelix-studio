@@ -21,20 +21,47 @@ spec.loader.exec_module(acceptance)
 def macho_fixture(vm_size=4096, payload=b'unchanged-code!!'):
     header = struct.pack('<8I', 0xFEEDFACF, 0x100000C, 0, 2, 1, 72, 0, 0)
     segment = struct.pack('<II16sQQQQIIII', 0x19, 72, b'__LINKEDIT', 0x1000,
-                          vm_size, 104, len(payload), 1, 1, 0, 0)
-    return header + segment + payload
+                          vm_size, 136, len(payload), 1, 1, 0, 0)
+    return header + segment + b'\0' * 32 + payload
+
+
+def signed_macho_fixture():
+    data = bytearray(macho_fixture())
+    data.extend(b'\0' * ((-len(data)) % 16))
+    at = len(data)
+    blob = struct.pack('>III', 0xFADE0CC0, 28, 1) + struct.pack('>II', 0, 20) + struct.pack('>II', 0xFADE0C02, 8)
+    data.extend(blob)
+    struct.pack_into('<II', data, 16, 2, 88)
+    struct.pack_into('<II16sQQQQIIII', data, 32, 0x19, 72, b'__LINKEDIT', 0x1000, 8192, 136, len(data) - 136, 1, 1, 0, 0)
+    struct.pack_into('<IIII', data, 104, 0x1D, 16, at, len(blob))
+    return data
 
 
 class ReceiptTests(unittest.TestCase):
     def test_signing_allocation_normalization_preserves_code_comparison(self):
-        original = acceptance.unsigned_macho_identity(macho_fixture())
-        self.assertEqual(original, acceptance.unsigned_macho_identity(macho_fixture(vm_size=8192)))
-        self.assertNotEqual(original, acceptance.unsigned_macho_identity(macho_fixture(payload=b'changed-code!!!!')))
+        original = acceptance.macho_code_identity(macho_fixture())
+        self.assertEqual(original, acceptance.macho_code_identity(macho_fixture(vm_size=8192)))
+        self.assertNotEqual(original, acceptance.macho_code_identity(macho_fixture(payload=b'changed-code!!!!')))
 
     def test_macho_identity_refuses_truncated_or_missing_commands(self):
         for raw in (b'not-a-host', macho_fixture()[:40], macho_fixture().replace(b'__LINKEDIT', b'__NOTEDIT_')):
             with self.subTest(raw=raw[:8]), self.assertRaises(ValueError):
-                acceptance.unsigned_macho_identity(raw)
+                acceptance.macho_code_identity(raw)
+
+    def test_signature_normalization_retains_code_and_alignment_bytes(self):
+        signed = signed_macho_fixture()
+        expected = acceptance.macho_code_identity(macho_fixture())
+        self.assertEqual(expected, acceptance.macho_code_identity(signed))
+        signed[154] = 1
+        self.assertNotEqual(expected, acceptance.macho_code_identity(signed))
+
+    def test_signature_extent_and_index_are_not_trusted(self):
+        for field, value in ((112, 144), (116, 9999), (160, 0), (184, 9999)):
+            with self.subTest(field=field):
+                data = signed_macho_fixture()
+                struct.pack_into('<I', data, field, value)
+                with self.assertRaises(ValueError):
+                    acceptance.macho_code_identity(data)
 
     def test_modified_host_or_launcher_is_refused(self):
         for modified in ('core', 'launch.cjs', 'qualification.json', 'entrypoint'):

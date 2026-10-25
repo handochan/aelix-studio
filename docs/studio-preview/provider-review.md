@@ -118,18 +118,30 @@ no claim of 80% repository coverage). Focused runtime source coverage was 100%
 statements; the Python helper's string coverage does not prove its runtime
 behavior. Actual process and installer qualification remains separate evidence.
 
-The macOS installed host raw hash changes during ad-hoc signing. The follow-up
-identity guard checks the exact public raw host before packaging and compares
-installed versus original private copies after signature removal. It normalizes
-only the signature-sized `__LINKEDIT.vmsize` allocation, verifies the bounded
-thin 64-bit command table and complete LINKEDIT extent, and hashes all other
-bytes. Other platforms retain raw byte identity. The independent reviewer passed
-20 Python regressions and independently matched the current original/packaged
-host identity; no actionable issue remained. Signed-file raw equality is not
-claimed. The author installed the current macOS arm64 DMG: 12 UI checks, restricted
-GUI PATH, exact compiled-code inventory, 309 unchanged native wheel members and
-owned application removal passed. Actual OpenRouter first response and restart/
-resume also passed from the same packaged build without changing CLI auth.
+The macOS installed host raw hash changes during ad-hoc signing. The current
+identity guard retains the exact public raw hash before packaging and compares
+code through a deterministic thin64 Mach-O parser. It validates the complete
+LINKEDIT extent and a single final16-byte signature command, terminal signature
+payload and SuperBlob/index/blob bounds. It clears only that command slot and
+header counts, retains all mapped offsets/ordinary commands/body bytes, adds
+zero signing alignment to16 bytes and normalizes LINKEDIT extent/allocation
+metadata. Nonzero alignment changes still change the hash. Other platforms
+retain raw byte identity. Strict installed app signature verification remains.
+
+An earlier implementation removed signatures on private copies with the local
+codesign tool. Intel CI reported a mismatch even though the downloaded actual
+unsigned public Intel core and signed installer matched locally after signature
+removal. That remote cause is not claimed as established. The pure parser avoids
+host-tool normalization and now records separate raw-source/code failures and
+structural diagnostics without credentials. Independent23 Python regressions,
+an independently ad-hoc-signed owned Intel core and actual public/installed ARM
+cores matched. The author also matched the actual downloaded Intel DMG code
+against its public unsigned artifact. Signed-file raw equality is not claimed.
+
+The author installed the macOS arm64 DMG:12 UI checks, restricted GUI PATH,
+exact compiled-code inventory,309 unchanged native wheel members and owned app
+removal passed. Actual OpenRouter and existing Codex credential first/restart
+responses passed from the same packaged build without changing CLI auth.
 
 The first Windows installer job stopped at the ZIP regression fixture: CPython
 normalizes Windows separators in `ZipInfo.filename`. The extractor now checks
@@ -141,7 +153,7 @@ required; the original failed job is not accepted as installer evidence.
 The first Windows installed qualification reached NSIS installation and bundled
 Python/ACP probes, then its hostile-ACL fixture passed an unsigned generic-rights
 value outside pywin32's signed C-long range. The fixture now uses
-`FILE_GENERIC_READ`, still granting Everyone file-read access; the production
+`FILE_READ_DATA` (1), verified in the pinned pywin32 wheel, still granting Everyone file-read access; the production
 ACL boundary is unchanged. Review confirmed the fixture exercises the same
 confidentiality rejection. The installed qualification now runs callback/EOF/ACL
 regressions through the actual selected bundled payload, validates its manifest
@@ -152,3 +164,10 @@ receipts are invalidated on preflight failure. Independent review passed Python
 20 tests before the added receipt-invalidation regression; target CI remains
 required. The Intel DMG attempt failed at a resource-busy volume detach before
 installation; no forced unmount or alternate format was used to claim success.
+
+The prepared-helper CI preflight now runs before installer assembly to catch
+platform fixture/API regressions early; it does not replace the final installed
+bundled-helper qualification. The Windows fixture's named constant was in a
+different module, so the final fixture uses the verified minimal FILE_READ_DATA
+bit1 directly. No production ACL check was relaxed. Author Python23 tests passed;
+remote target reruns remain required.

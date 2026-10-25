@@ -178,10 +178,11 @@ print('PRIVATE_ACL_VERIFIED')
         String.raw`
 import os
 from pathlib import Path
-import win32con,win32security
+import win32security
 file=Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json.tmp'
 acl=win32security.GetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
-acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,win32con.FILE_GENERIC_READ,win32security.ConvertStringSidToSid('S-1-1-0'))
+# FILE_READ_DATA (0x1): the minimal dangerous credential-read grant.
+acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,0x1,win32security.ConvertStringSidToSid('S-1-1-0'))
 win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION,None,None,acl,None)
 `,
       ],

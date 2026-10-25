@@ -85,6 +85,24 @@ jobs:
         run: python -B -m unittest discover -s tests/studio-preview
       - name: Prepare unchanged public native and ACP baseline
         run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
+      - name: Check helper regressions before installer assembly
+        run: |
+          node --import tsx --input-type=module <<'JS'
+          import fs from 'node:fs';
+          import os from 'node:os';
+          import path from 'node:path';
+          const sandbox = fs.mkdtempSync(path.join(os.tmpdir(), 'Studio helper preflight 한글-'));
+          Object.assign(process.env, {
+            HOME: path.join(sandbox, 'home'), USERPROFILE: path.join(sandbox, 'home'),
+            AELIX_STUDIO_RUNTIME: path.resolve('.local/studio-preview'),
+            AELIX_AUTH_PATH: path.join(sandbox, 'wrong-root/auth.json'),
+            PROVIDER_SANDBOX: sandbox, PROVIDER_OUTPUT: path.resolve('.local/studio-provider'),
+          });
+          fs.mkdirSync(process.env.HOME, { recursive: true });
+          fs.mkdirSync(process.env.PROVIDER_OUTPUT, { recursive: true });
+          try { await import('./scripts/studio-preview/providerHelperSmoke.mjs'); }
+          finally { fs.rmSync(sandbox, { recursive: true, force: true }); }
+          JS
       - name: Build the relocatable Provider installer without publication
         env:
           # The Preview builder fixes mac.identity to '-' and uses no signing secrets.
@@ -104,6 +122,7 @@ jobs:
           name: provider-preview-${{ matrix.target }}
           path: |
             .local/provider-installer/acceptance.json
+            .local/provider-installer/aioncore-identity.json
             .local/provider-installer/artifacts/*.dmg
             .local/provider-installer/artifacts/*.exe
             .local/provider-installer/artifacts/*.deb
