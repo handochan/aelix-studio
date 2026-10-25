@@ -18,6 +18,18 @@ def digest(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
+def managed_python(directory):
+    """Choose one owned standalone installation, never a system Python or minor alias."""
+    candidates = [entry for entry in directory.iterdir()
+                  if entry.name.startswith('cpython-') and entry.is_dir() and not entry.is_symlink()]
+    if len(candidates) != 1:
+        raise ValueError('Expected one owned standalone Python installation')
+    executable = candidates[0] / 'bin/python3'
+    if not executable.is_file() or not executable.resolve().is_relative_to(directory.resolve()):
+        raise ValueError('Standalone Python executable escapes its owned installation')
+    return executable
+
+
 def download(url, destination, expected):
     if not destination.exists():
         with urllib.request.urlopen(url, timeout=60) as response:
@@ -86,8 +98,11 @@ def main():
     uv = shutil.which('uv')
     if not uv:
         raise ValueError('Build prerequisite missing: uv')
+    python_root = OUTPUT / 'python-base'
+    run(uv, '--no-config', 'python', 'install', config['python'], '--no-bin', '--no-registry', '--install-dir', python_root)
+    python = managed_python(python_root)
     for name in ('native', 'adapter'):
-        run(uv, '--no-config', 'venv', '--python', config['python'], '--no-project', OUTPUT / name)
+        run(uv, '--no-config', 'venv', '--python', python, '--no-project', OUTPUT / name)
     native = OUTPUT / 'native/bin/python'
     adapter = OUTPUT / 'adapter/bin/python'
     wheels = OUTPUT / 'wheels'
@@ -113,7 +128,7 @@ def main():
                    launcherSha256=digest(OUTPUT / 'launch.cjs'),
                    qualificationSha256=digest(OUTPUT / 'qualification.json'),
                    entrypointSha256={name: digest(OUTPUT / name) for name in ('native/bin/aelix', 'adapter/bin/aelix-acp')},
-                   uvVersion=run(uv, '--version', capture=True).strip())
+                   uvVersion=run(uv, '--version', capture=True).strip(), pythonProvider='uv-managed-standalone')
     (OUTPUT / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print('Prepared isolated baseline: ' + str(OUTPUT))
 

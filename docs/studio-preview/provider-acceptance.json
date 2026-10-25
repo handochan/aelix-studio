@@ -1,0 +1,124 @@
+{
+  "issue": "https://github.com/handochan/aelix-studio/issues/5",
+  "date": "2026-10-25",
+  "implementationBase": "aa6b07190d1eea8f8177ed4e6e8911389837fdde",
+  "delivery": "local_reviewed_commit_pending_push_and_repository_acceptance",
+  "tooling": {
+    "node": "24.19.0",
+    "python": "3.12.13",
+    "vitest": "4.1.0",
+    "bunAvailable": false,
+    "commands": "Executed repository script entrypoints with Node; no dependency/lockfile changes."
+  },
+  "authorVerification": {
+    "fullVitest": {
+      "passed": 5010,
+      "skipped": 5,
+      "filesPassed": 524,
+      "filesSkipped": 1
+    },
+    "previewPythonUnitTests": 6,
+    "typecheck": "passed",
+    "lintErrors": 0,
+    "existingLintWarnings": 913,
+    "formatCheck": "passed",
+    "i18n": "passed",
+    "build": "passed",
+    "focusedCoverage": {
+      "statements": 83.09,
+      "branches": 77.0,
+      "functions": 71.92,
+      "lines": 84.46,
+      "scope": ["NativeProviders.tsx", "nativeAuth.ts", "studio-auth/service.ts", "studio-auth/facade.ts"]
+    },
+    "nativeHelper": {
+      "status": "passed",
+      "checks": [
+        "no_llm_bootstrap_and_explicit_cli_root",
+        "external_revision_conflict_without_retry",
+        "literal_key_rejects_shell_indirection",
+        "custom_endpoint_native_schema_and_credential_url_rejection",
+        "sequential_preservation_native_permissions_and_no_secret_projection",
+        "synthetic_native_oauth_callbacks_and_success",
+        "synthetic_native_oauth_eof_cancel",
+        "oauth_eof_cancels_remote_wait_without_an_input_prompt",
+        "oauth_external_edit_before_commit_refused",
+        "malformed_cli_credentials_refused_without_reset"
+      ],
+      "nativePatches": [],
+      "realOAuth": false
+    },
+    "actualHost": {
+      "status": "passed",
+      "platform": "darwin-arm64",
+      "host": "actual built Electron / AionCore / installed ACP / public native wheel",
+      "checks": [
+        "fresh_store",
+        "ui_endpoint_registration",
+        "ui_key_registration",
+        "wrong_key_rejected",
+        "key_update_new_conversation",
+        "first_response",
+        "explicit_cli_root",
+        "aion_provider_db_separate",
+        "secret_endpoint_rejected",
+        "unreachable_endpoint_reported",
+        "untrusted_navigation_cannot_manage_credentials",
+        "actual_webui_cookie_origin_and_secret_boundary"
+      ],
+      "realProvider": false,
+      "realOAuth": false,
+      "installer": false,
+      "acceptedRequests": 1,
+      "rejectedRequests": 1,
+      "nativePatches": [],
+      "installedPayloadUnchanged": true,
+      "installedFiles": 5231,
+      "baselineSha256": "299f1014d27d4c73e2166de0269dbe85a3cd695d91cc46a2ed3fa77ee4525b31",
+      "aioncoreBinarySha256": "04404864ca622159ffcc79ef9cb468e82fc820b91f16d565c5a5efdb0b0c4cb1",
+      "secretLogDatabaseScanFiles": 13,
+      "secretLogDatabaseMatches": 0,
+      "sourceSha256": {
+        "scripts/studio-preview/providerSmoke.py": "470154d68d13df46dc3a4254da3a059a7199b971c659c7e2b747113b216744aa",
+        "scripts/studio-preview/providerHostSmoke.mjs": "df0bfe06a33a1f1c88a2555f85bc9ffe7fd34311a35d212013d64dd0244ff1e8",
+        "scripts/studio-preview/providerHelperSmoke.mjs": "6809a964b3d6b405ea76bea4891fc0845eda438d008880cd096554bcaf1ce0f5",
+        "packages/web-host/src/studio-auth/facade.test.ts": "7d667df6f47b74425c4586ce48b3e3a4aac61bd0fe003a470512ddf4ce20fa28",
+        "packages/web-host/src/studio-auth/facade.ts": "83cf14f61cd5e94eb1a876327ccca651365433c7164e5d74b4fce53586eb5f55",
+        "packages/web-host/src/studio-auth/helperSource.ts": "c2599ef07e2abb26ea815f74c2cb025c51378603db2a3c09b6cdb2f958602965",
+        "packages/web-host/src/studio-auth/service.test.ts": "5d69e52184b509fe18ec5bf10d00d192ce2eb91851d26c0989c9077232ab5a87",
+        "packages/web-host/src/studio-auth/service.ts": "1516feac10f9e366a87e3778686db3671fc80dc91f2833dc506cd0e1165510d4",
+        "packages/web-host/src/studio-auth/types.ts": "9a3b148ef0619eca63473d4546198408a95ba3b76c9065472ddf4d1f87d9f2ff",
+        "packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/NativeProviders.dom.test.tsx": "6ac3db0096fbc8545953f6f053bba05e67dd115e4f06df04a24a1553e708b9af",
+        "packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/NativeProviders.tsx": "a0182eb4a45421b4bb0a7d18100397bd2904c9506b96e40a5d65737cd5d44995",
+        "packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/index.tsx": "f090bffd01b71daee12c0c167af469a6392eb11b62d3f3ddcd7be019a67a336b",
+        "packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/nativeAuth.dom.test.tsx": "2e3dd9f7c0deeee4bf38b9f9adb4e4c88645e0a0ea3f822435da0484c40cc1b5",
+        "packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/nativeAuth.ts": "e0e3fd14b7b6fa18a7687287ffc86c1a75dbb1cafee6b158ac535fce3cee0be2",
+        "packages/desktop/src/index.ts": "cf699f9dd5e0c0d4bc2abda723b88ace08a0f2f2e21f8fe847ecf4a436cd95b4",
+        "packages/desktop/src/preload/main.ts": "1d96cb7dd6a07d4fc140c06fcc652574ce346b91bf48dd6df0667b847ee08002",
+        "packages/desktop/src/process/bridge/index.ts": "aa1078b0b31297c294924cdf78169c9f34a3c11a8e7582f0a9ce6fe9fdca56ad"
+      },
+      "builtAppSha256": {
+        "out/main/index.js": "0ec3f10d75ee8ac1e33d080ce71774b2679dd85c827c5d0fba045ffb4f4aa426",
+        "out/preload/index.js": "e4765e6c30f78738e455c19e632e4f9e34143326bd4d42356a7a07a5d4fce96a"
+      },
+      "rendererManifestSha256": "a625c802031062b9fd403f2f5f1a3b7d79dc8b8f88c401591c50e98df554340a"
+    }
+  },
+  "independentVerification": {
+    "session": "provider_review",
+    "node": "24.19.0",
+    "focusedTestFiles": 4,
+    "focusedTestsPassed": 44,
+    "publicWheelHelperChecksPassed": 10,
+    "i18n": "passed",
+    "remainingActionableFindings": 0,
+    "fullSuiteHostCoverage": "author evidence; not independently rerun"
+  },
+  "remainingAcceptance": [
+    "real Provider and real OAuth authorization/refresh",
+    "Linux/Windows/other host architectures and mobile",
+    "final installer and relocatable runtime packaging",
+    "closed-network and field acceptance",
+    "authorized push/PR/merge and exact-head CI"
+  ]
+}

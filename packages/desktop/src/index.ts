@@ -30,7 +30,8 @@ import { installQuitCleanup } from './process/startup/quitCleanup';
 import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
 import { ProcessConfig } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
-import { registerWindowMaximizeListeners } from '@process/bridge';
+import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
+import { pathToFileURL } from 'node:url';
 import { BackendLifecycleManager } from '@aionui/web-host';
 import { resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
@@ -577,6 +578,10 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   // Load the renderer: dev server URL in development, built HTML file in production
   const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
   const fallbackFile = path.join(__dirname, '../renderer/index.html');
+  registerNativeAuthWindow(mainWindow, [
+    pathToFileURL(fallbackFile).href,
+    ...(!app.isPackaged && rendererUrl ? [rendererUrl] : []),
+  ]);
 
   if (!app.isPackaged && rendererUrl) {
     console.log(`[AionUi] Loading renderer URL: ${rendererUrl}`);

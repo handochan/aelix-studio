@@ -9,6 +9,11 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IProvider } from '@/common/config/storage';
 
+// Native authentication has separate DOM/wire tests; this suite covers Aion model capabilities.
+vi.mock('@/renderer/components/settings/SettingsModal/contents/ModelModalContent/NativeProviders', () => ({
+  default: () => null,
+}));
+
 const mocks = vi.hoisted(() => ({
   close: vi.fn(),
   createProvider: vi.fn(),
