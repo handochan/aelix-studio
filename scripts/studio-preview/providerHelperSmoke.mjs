@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NativeAuthService } from '../../packages/web-host/src/studio-auth/service.ts';
 import { NATIVE_AUTH_HELPER } from '../../packages/web-host/src/studio-auth/helperSource.ts';
+import { resolveNativeRuntime } from '../../packages/web-host/src/studio-auth/runtime.ts';
 
 const runtime = process.env.AELIX_STUDIO_RUNTIME;
 const sandbox = process.env.PROVIDER_SANDBOX;
@@ -11,6 +12,8 @@ assert.ok(runtime && sandbox && process.env.PROVIDER_OUTPUT);
 const root = path.join(sandbox, 'helper-tests');
 const env = { ...process.env, AELIX_CODING_AGENT_DIR: root };
 const service = new NativeAuthService({ runtime, env });
+const resolvedRuntime = resolveNativeRuntime(runtime);
+assert.ok(resolvedRuntime, 'Selected native runtime unavailable');
 const checks = [];
 const record = (name) => checks.push(name);
 async function catalog() {
@@ -36,7 +39,7 @@ class FixtureOAuth:
 register_oauth_provider(FixtureOAuth())
 `;
 function oauth(revision, polling = false) {
-  const child = spawn(path.join(runtime, 'native/bin/python'), ['-I', '-B', '-c', prefix + NATIVE_AUTH_HELPER], {
+  const child = spawn(resolvedRuntime.python, [...resolvedRuntime.helperArgs, '-c', prefix + NATIVE_AUTH_HELPER], {
     env: { ...env, ...(polling ? { STUDIO_TEST_OAUTH_POLL: '1' } : {}) },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
@@ -69,7 +72,7 @@ function oauth(revision, polling = false) {
 
 try {
   const first = await catalog();
-  assert.equal(first.root, fs.realpathSync(root));
+  assert.equal(fs.realpathSync(first.root), fs.realpathSync(root));
   assert.equal(
     first.providers.some((item) => item.configured),
     false
@@ -121,7 +124,61 @@ try {
   assert.equal(afterLogout.providers.find((item) => item.id === 'anthropic').source, 'stored');
   assert.ok(!JSON.stringify(afterLogout).includes('synthetic-b'));
   assert.equal(fs.existsSync(process.env.AELIX_AUTH_PATH), false);
-  assert.equal(fs.statSync(path.join(root, 'auth.json')).mode & 0o777, 0o600);
+  if (process.platform === 'win32') {
+    const privateAcl = execFileSync(
+      resolvedRuntime.python,
+      [
+        ...resolvedRuntime.helperArgs,
+        '-c',
+        String.raw`
+import os
+from pathlib import Path
+import win32api,win32con,win32security
+token=win32security.OpenProcessToken(win32api.GetCurrentProcess(),win32con.TOKEN_QUERY)
+try: sid=win32security.GetTokenInformation(token,win32security.TokenUser)[0]
+finally: token.Close()
+trusted={win32security.ConvertSidToStringSid(sid),'S-1-5-18','S-1-5-32-544','S-1-3-0','S-1-3-4'}
+acl=win32security.GetNamedSecurityInfo(str(Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json'),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
+assert acl is not None
+for index in range(acl.GetAceCount()):
+    ace=acl.GetAce(index)
+    if ace[0][0] in (0,5) and ace[1] & 0x90000001:
+        assert win32security.ConvertSidToStringSid(ace[-1]) in trusted
+print('PRIVATE_ACL_VERIFIED')
+`,
+      ],
+      { env, encoding: 'utf8' }
+    );
+    assert.equal(privateAcl.trim(), 'PRIVATE_ACL_VERIFIED');
+    const temporary = path.join(root, 'auth.json.tmp');
+    fs.writeFileSync(temporary, 'preexisting-untrusted-temporary');
+    execFileSync(
+      resolvedRuntime.python,
+      [
+        ...resolvedRuntime.helperArgs,
+        '-c',
+        String.raw`
+import os
+from pathlib import Path
+import win32security
+file=Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json.tmp'
+acl=win32security.GetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
+acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,0x80000000,win32security.ConvertStringSidToSid('S-1-1-0'))
+win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION,None,None,acl,None)
+`,
+      ],
+      { env }
+    );
+    const original = fs.readFileSync(path.join(root, 'auth.json'));
+    assert.deepEqual(await mutate({ action: 'setKey', provider: 'openai', key: 'synthetic-private' }), {
+      ok: false,
+      code: 'PRIVATE_DIRECTORY_REQUIRED',
+    });
+    assert.deepEqual(fs.readFileSync(path.join(root, 'auth.json')), original);
+    assert.equal(fs.readFileSync(temporary, 'utf8'), 'preexisting-untrusted-temporary');
+    fs.unlinkSync(temporary);
+    record('windows_shared_native_temporary_refused_without_credential_write');
+  } else assert.equal(fs.statSync(path.join(root, 'auth.json')).mode & 0o777, 0o600);
   record('sequential_preservation_native_permissions_and_no_secret_projection');
 
   const success = oauth((await catalog()).revision);

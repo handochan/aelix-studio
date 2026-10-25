@@ -20,9 +20,10 @@ class ReceiptTests(unittest.TestCase):
                 baseline.write_text('{}')
                 for filename in ('core', 'launch.cjs', 'qualification.json', 'entrypoint'):
                     (root / filename).write_bytes(b'original')
+                shutil.copy(ROOT / 'scripts/studio-preview/launch.cjs', root / 'launch.cjs')
                 original = hashlib.sha256(b'original').hexdigest()
                 receipt = dict(baselineSha256=prepare.digest(baseline), aioncoreBinary='core',
-                               aioncoreBinarySha256=original, launcherSha256=original,
+                               aioncoreBinarySha256=original, launcherSha256=prepare.digest(root / 'launch.cjs'),
                                qualificationSha256=original, entrypointSha256={'entrypoint': original})
                 (root / 'receipt.json').write_text(json.dumps(receipt))
                 prepare.verify_prepared(root, baseline)

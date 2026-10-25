@@ -1,4 +1,4 @@
-/** Build the macOS arm64 Provider acceptance installer; never publish or notarize it. */
+/** Build the current host's Provider acceptance installer; never publish or notarize it. */
 import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
@@ -11,15 +11,20 @@ const { prepareAioncore } = require('../../../packages/shared-scripts/src/prepar
 const root = path.resolve(import.meta.dirname, '../../..');
 const index = process.argv.indexOf('--runtime');
 const runtime = index >= 0 ? path.resolve(process.argv[index + 1]) : path.join(root, '.local/studio-preview');
-if (process.platform !== 'darwin' || process.arch !== 'arm64')
-  throw new Error('Provider installer qualification requires macOS arm64');
+const target = `${process.platform}-${process.arch}`;
+const baseline = JSON.parse(fs.readFileSync(path.join(root, 'scripts/studio-preview/baseline.json')));
+if (!baseline.aioncore.assets[target]) throw new Error('Host has no declared Preview runtime target');
+const option = (name, fallback) => {
+  const at = process.argv.indexOf(name);
+  return at >= 0 ? path.resolve(process.argv[at + 1]) : fallback;
+};
 const run = (command, args) => {
   const result = spawnSync(command, args, { cwd: root, env: process.env, stdio: 'inherit', shell: false });
   if (result.status !== 0) throw new Error('Installer preparation failed');
 };
-const payload = path.join(root, '.local/packaging/runtime');
+const payload = option('--payload', path.join(root, '.local/packaging/runtime'));
 if (!fs.existsSync(payload))
-  run(path.join(runtime, 'native/bin/python'), [
+  run(path.join(runtime, 'native', ...(process.platform === 'win32' ? ['Scripts', 'python.exe'] : ['bin', 'python'])), [
     '-B',
     path.join(import.meta.dirname, 'bundle.py'),
     '--runtime',
@@ -28,11 +33,7 @@ if (!fs.existsSync(payload))
     payload,
   ]);
 const manifest = JSON.parse(fs.readFileSync(path.join(payload, 'manifest.json')));
-if (
-  manifest.schema !== 'aelix.studio-preview.runtime/1' ||
-  manifest.target !== 'darwin-arm64' ||
-  manifest.nativePatches.length
-)
+if (manifest.schema !== 'aelix.studio-preview.runtime/1' || manifest.target !== target || manifest.nativePatches.length)
   throw new Error('Invalid Preview payload');
 const { createHash } = await import('node:crypto');
 const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -41,8 +42,14 @@ if (
   manifest.preparedReceiptSha256 !== digest(path.join(runtime, 'receipt.json'))
 )
   throw new Error('Stale payload: archive the owned .local/packaging/runtime and rebuild');
-for (const name of ['bundle.py', 'launch.py', 'build.mjs'])
-  if (manifest.recipeSha256?.[name] !== digest(path.join(import.meta.dirname, name)))
+for (const [name, source] of [
+  ...['bundle.py', 'launch.py', 'build.mjs', 'native-requirements.lock'].map((name) => [
+    name,
+    path.join(import.meta.dirname, name),
+  ]),
+  ['launch.cjs', path.join(import.meta.dirname, '../launch.cjs')],
+])
+  if (manifest.recipeSha256?.[name] !== digest(source))
     throw new Error('Stale payload recipe: archive the owned .local/packaging/runtime and rebuild');
 const inventory = JSON.parse(fs.readFileSync(path.join(payload, 'checksums.json')));
 const current = fs
@@ -75,16 +82,30 @@ run('bun', ['run', 'package']);
 run('node', ['scripts/build-mcp-servers.js']);
 prepareAioncore({
   projectRoot: root,
-  platform: 'darwin',
-  arch: 'arm64',
+  platform: process.platform,
+  arch: process.arch,
   version: require('../../../package.json').aioncoreVersion,
 });
 run('node', ['scripts/prepareHubResources.js']);
 const config = yaml.load(fs.readFileSync(path.join(root, 'packages/desktop/electron-builder.yml'), 'utf8'));
 config.extraResources.push({ from: payload, to: 'studio-preview' });
-config.directories.output = path.join(root, '.local/provider-installer/artifacts');
+config.directories.output = option('--output', path.join(root, '.local/provider-installer/artifacts'));
 config.electronDist = path.join(path.dirname(require.resolve('electron/package.json')), 'dist');
 config.mac = { ...config.mac, identity: '-', notarize: false };
+config.win = { ...config.win, signAndEditExecutable: false };
+config.nsis = {
+  ...config.nsis,
+  perMachine: false,
+  runAfterFinish: false,
+  createDesktopShortcut: false,
+  createStartMenuShortcut: false,
+};
 config.afterSign = undefined;
 delete config.electronDownload;
-await build({ targets: Platform.MAC.createTarget(['dmg', 'zip'], Arch.arm64), config, publish: 'never' });
+const platform = { darwin: Platform.MAC, linux: Platform.LINUX, win32: Platform.WINDOWS }[process.platform];
+const formats = { darwin: ['dmg', 'zip'], linux: ['deb'], win32: ['nsis'] }[process.platform];
+await build({
+  targets: platform.createTarget(formats, process.arch === 'arm64' ? Arch.arm64 : Arch.x64),
+  config,
+  publish: 'never',
+});

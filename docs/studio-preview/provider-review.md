@@ -88,3 +88,32 @@ enables signing for PRs explicitly. Its dedicated builder still fixes the
 identity to ad-hoc `-`, disables notarization/publication and uses no signing
 credentials; normal release/build jobs are unchanged. The acceptance script
 retains strict deep signature verification before launching the app.
+
+## Five-target follow-up review
+
+A separate read-only Codex session reviewed the all-platform follow-up on main
+`95050d31956b3fe172fea5916ef530ea1501cfd6`. It found and rechecked fixes for:
+
+- Windows credential writes could preserve an unsafe existing `auth.json.tmp`
+  DACL or untrusted owner. The helper checks root/auth/native temporary/model/
+  sidecar ownership and DACLs, rechecks before OAuth commit and verifies the
+  published file. A Windows-only process regression rejects an Everyone-readable
+  native temporary file without modifying credentials or that file.
+- ASAR inventories use Windows path separators. The installed-code check now
+  normalizes separators and compares the exact renderer JavaScript inventory.
+- Helper `python.exe` launches now hide the console window.
+
+The reviewer reported no remaining actionable P1/P2 blocker in the reviewed
+helper/runtime/launcher/preparation/bundle/installer/CI source. Independent Node
+24 reruns passed 35 focused tests initially and 21 affected auth/service/facade/
+runtime tests after the final helper spawn change; Python preview tests passed
+18/18. The embedded installed probe compiled and diff whitespace checks passed.
+No implementation files, other worktrees or operator credentials were changed.
+Actual Windows ACL/installer behavior and the five installed-runtime flows still
+require their remote runner receipts; this macOS review does not establish them.
+
+Author local full tests passed 5,015 with five skipped. The coverage command
+passed, reporting 54.33% overall statements (existing repository target shortfall;
+no claim of 80% repository coverage). Focused runtime source coverage was 100%
+statements; the Python helper's string coverage does not prove its runtime
+behavior. Actual process and installer qualification remains separate evidence.

@@ -5,6 +5,7 @@ from pathlib import Path
 import tarfile
 import tempfile
 import unittest
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('preview_prepare', ROOT / 'scripts/studio-preview/prepare.py')
@@ -20,7 +21,7 @@ class PreparationTests(unittest.TestCase):
             (installation / 'bin').mkdir(parents=True)
             (installation / 'bin/python3').write_text('owned interpreter')
             (root / 'cpython-3.12-macos-aarch64-none').symlink_to(installation, target_is_directory=True)
-            self.assertEqual(prepare.managed_python(root), installation / 'bin/python3')
+            self.assertEqual(prepare.managed_python(root, system='darwin'), installation / 'bin/python3')
 
     def test_standalone_selection_refuses_ambiguous_installations(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -28,7 +29,7 @@ class PreparationTests(unittest.TestCase):
             for version in ('3.12.12', '3.12.13'):
                 (root / ('cpython-' + version)).mkdir()
             with self.assertRaisesRegex(ValueError, 'one owned standalone'):
-                prepare.managed_python(root)
+                prepare.managed_python(root, system='darwin')
 
     def test_standalone_selection_refuses_external_interpreter(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -37,7 +38,38 @@ class PreparationTests(unittest.TestCase):
             (installation / 'bin').mkdir(parents=True)
             (installation / 'bin/python3').symlink_to(Path(__file__).resolve())
             with self.assertRaisesRegex(ValueError, 'escapes'):
-                prepare.managed_python(root)
+                prepare.managed_python(root, system='darwin')
+
+    def test_windows_standalone_uses_owned_executable(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            installation = root / 'cpython-3.12.15-windows-x86_64-none'
+            installation.mkdir()
+            (installation / 'python.exe').write_bytes(b'owned executable')
+            self.assertEqual(prepare.managed_python(root, system='win32'), installation / 'python.exe')
+
+    def test_host_architecture_aliases_and_unsupported_platform(self):
+        for system, machine, expected in (
+                ('win32', 'AMD64', 'win32-x64'), ('linux', 'aarch64', 'linux-arm64'),
+                ('darwin', 'arm64', 'darwin-arm64'), ('darwin', 'x86_64', 'darwin-x64')):
+            with self.subTest(system=system, machine=machine):
+                self.assertEqual(prepare.host_target(system, machine), expected)
+        with self.assertRaisesRegex(ValueError, 'Unsupported host'):
+            prepare.host_target('linux', 'i686')
+
+    def test_zip_traversal_or_link_is_refused_before_writing(self):
+        for name, mode in (('../escape', 0), ('C:escape', 0), ('folder\\escape', 0), ('link', 0o120777)):
+            with self.subTest(name=name), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                archive = root / 'source.zip'
+                with zipfile.ZipFile(archive, 'w') as output:
+                    output.writestr('safe.txt', b'safe')
+                    member = zipfile.ZipInfo(name)
+                    member.external_attr = mode << 16
+                    output.writestr(member, b'unsafe')
+                with self.assertRaisesRegex(ValueError, 'Unsafe archive'):
+                    prepare.extract(archive, root / 'output')
+                self.assertFalse((root / 'output/safe.txt').exists())
 
     def test_cached_archive_with_wrong_digest_is_refused(self):
         with tempfile.TemporaryDirectory() as temporary:
