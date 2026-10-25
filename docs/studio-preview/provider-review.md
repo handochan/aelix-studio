@@ -65,3 +65,18 @@ Python preview tests, and the current payload's `--verify-only` passed. No remai
 production blocker was reported. Installed UI/real-account/full-suite/coverage
 checks remain author evidence. The WebUI harness scope is explicitly source facade
 and helper with an installed backend, not the compiled app-owned WebUI listener.
+
+## CI Python selection follow-up
+
+The first installer CI attempt on `89bee90` selected the runner's system Python
+3.12, whose global site contained extra packages. The bundle guard correctly
+refused that base. Preparation now installs an owned uv-managed standalone
+Python and passes its exact executable to both virtual environments. The global
+site guard remains unchanged. Fresh local preparation passed all six native and
+four adapter checks; a new payload passed the existing bundle guard and both
+bundled entrypoints launched successfully.
+
+The separate reviewer found no actionable issue in this fix and independently
+passed all 12 Python preview tests, including ambiguous installations, the minor
+version symlink alias and an escaping interpreter. Remote CI is recorded on the
+PR checks; these local observations do not establish a successful remote rerun.

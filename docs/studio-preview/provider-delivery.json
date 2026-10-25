@@ -123,7 +123,7 @@
   "localValidation": {
     "vitestPassed": 5011,
     "vitestSkipped": 5,
-    "pythonPreviewTestsPassed": 9,
+    "pythonPreviewTestsPassed": 12,
     "fullCoverage": {
       "statements": 54.36,
       "branches": 48.61,
@@ -139,7 +139,7 @@
   "independentReview": {
     "remainingProductionBlockers": 0,
     "serviceFacadeTestsPassed": 17,
-    "pythonTestsPassed": 9,
+    "pythonTestsPassed": 12,
     "payloadVerifyOnly": "passed",
     "installerAndRealAccounts": "author evidence"
   },
