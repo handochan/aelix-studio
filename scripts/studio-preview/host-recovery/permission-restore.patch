@@ -1,0 +1,264 @@
+--- a/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs
+@@ -173,12 +173,9 @@
+             };
+         }
+ 
+-        let (supports_load, preloaded_mode) = {
++        let supports_load = {
+             let session = self.session.read().await;
+-            (
+-                session.agent_capabilities().map(|c| c.load_session).unwrap_or(false),
+-                session.modes().map(|m| m.current_mode_id.to_string()),
+-            )
++            session.agent_capabilities().map(|c| c.load_session).unwrap_or(false)
+         };
+ 
+         if supports_load {
+@@ -202,15 +199,7 @@
+                 {
+                     session.apply_advertised_models(models);
+                 }
+-                if let Some(mut modes) = load_response.modes {
+-                    if let Some(db_current) = preloaded_mode {
+-                        modes.current_mode_id = db_current.into();
+-                    }
+-                    session.apply_advertised_modes(modes);
+-                }
+-                if let Some(config_options) = load_response.config_options {
+-                    session.apply_advertised_config_options(config_options);
+-                }
++                session.apply_restored_configuration(load_response.modes, load_response.config_options);
+                 session.set_session_id(DomainSessionId::new(session_id.to_owned()));
+                 self.commit_session_changes(&mut session).await;
+             }
+--- a/crates/aionui-ai-agent/src/manager/acp/session.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/session.rs
+@@ -668,6 +668,91 @@
+         }
+     }
+ 
++    /// Adopt state explicitly returned by session/load, without replaying an
++    /// older startup permission preference over the restored agent policy.
++    /// Fresh sessions and subsequent explicit user changes still reconcile.
++    pub(crate) fn apply_restored_configuration(
++        &mut self,
++        modes: Option<SessionModeState>,
++        options: Option<Vec<SessionConfigOption>>,
++    ) {
++        let is_mode = |option: &SessionConfigOption| {
++            option.category == Some(SessionConfigOptionCategory::Mode)
++                || matches!(option.id.to_string().as_str(), "mode" | "modes")
++        };
++        let incoming_mode_values: HashMap<ConfigKey, ConfigValue> = options
++            .iter()
++            .flatten()
++            .filter(|option| is_mode(option))
++            .filter_map(|option| {
++                extract_config_current_value(&option.kind)
++                    .filter(|value| !value.is_empty())
++                    .map(|value| (ConfigKey::new(option.id.to_string()), ConfigValue::new(value)))
++            })
++            .collect();
++        let reported_mode = options
++            .as_deref()
++            .and_then(|options| select_option_for_startup_seed(options, &SessionConfigOptionCategory::Mode))
++            .and_then(|option| extract_config_current_value(&option.kind))
++            .filter(|value| !value.is_empty())
++            .or_else(|| {
++                modes
++                    .as_ref()
++                    .map(|modes| modes.current_mode_id.to_string())
++                    .filter(|value| !value.is_empty())
++            });
++
++        if let Some(options) = options {
++            self.apply_advertised_config_options(options);
++        }
++        if incoming_mode_values.is_empty()
++            && let Some(modes) = modes
++        {
++            // A cached generic mode option must not supersede a fresh legacy
++            // mode when load returned only model/thought config options.
++            self.apply_advertised_modes(modes);
++        }
++        let Some(reported_mode) = reported_mode else {
++            return; // No reported policy: do not invent one from a DB seed.
++        };
++
++        let mut mode_keys = vec![ConfigKey::new("mode"), ConfigKey::new("modes")];
++        if let Some(options) = &mut self.advertised.config_options {
++            mode_keys.extend(
++                options
++                    .iter()
++                    .filter(|option| is_mode(option))
++                    .map(|option| ConfigKey::new(option.id.to_string())),
++            );
++            options.retain(|option| {
++                !is_mode(option) || incoming_mode_values.contains_key(&ConfigKey::new(option.id.to_string()))
++            });
++        }
++        self.desired
++            .pending_startup_config
++            .retain(|seed| seed.category != SessionConfigOptionCategory::Mode);
++        let previous_config = self.desired.config_selections.clone();
++        let previous_observed_config = self.observed.config_current.clone();
++        self.desired.config_selections.retain(|key, _| !mode_keys.contains(key));
++        self.observed.config_current.retain(|key, _| !mode_keys.contains(key));
++        self.desired.config_selections.extend(incoming_mode_values.clone());
++        self.observed.config_current.extend(incoming_mode_values.clone());
++        if previous_config != self.desired.config_selections {
++            self.pending_events.push(AcpSessionEvent::DesiredConfigChanged {
++                selections: self.desired.config_selections.clone(),
++            });
++        }
++        if previous_observed_config != self.observed.config_current {
++            self.pending_events.push(AcpSessionEvent::ObservedConfigSynced {
++                selections: self.observed.config_current.clone(),
++            });
++        }
++        self.desired.mode_id = incoming_mode_values
++            .is_empty()
++            .then(|| ModeId::new(reported_mode.clone()));
++        self.apply_observed_mode(ModeId::new(reported_mode));
++    }
++
+     pub fn apply_advertised_models(&mut self, models: LegacySessionModelState) {
+         let incoming_model_catalog_count = models.available_models.len();
+         let existing_model_catalog_count = self
+--- a/crates/aionui-ai-agent/src/manager/acp/session_tests.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/session_tests.rs
+@@ -10,6 +10,133 @@
+ 
+ fn make_session() -> AcpSession {
+     AcpSession::new(Some(ModeId::new("default")), None, HashMap::new())
++}
++
++fn restored_permission_modes(current: &str) -> SessionModeState {
++    SessionModeState::new(
++        current.to_owned(),
++        vec![SessionMode::new("default", "Ask"), SessionMode::new("yolo", "Yolo")],
++    )
++}
++
++#[test]
++fn resumed_permission_does_not_replay_stale_yolo_or_mode_seed() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        None,
++        HashMap::from([(ConfigKey::new("mode"), ConfigValue::new("yolo"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::Mode, ConfigValue::new("yolo"));
++    session.apply_advertised_modes(restored_permission_modes("yolo"));
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    session.resolve_pending_startup_config_seeds();
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++}
++
++#[test]
++fn resumed_generic_permission_uses_reported_current_value() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        None,
++        HashMap::from([(ConfigKey::new("permissionLevel"), ConfigValue::new("yolo"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::Mode, ConfigValue::new("yolo"));
++    let option = SessionConfigOption::select(
++        "permissionLevel",
++        "Permission",
++        "default",
++        vec![
++            SessionConfigSelectOption::new("default", "Ask"),
++            SessionConfigSelectOption::new("yolo", "Yolo"),
++        ],
++    )
++    .category(SessionConfigOptionCategory::Mode);
++    session.apply_restored_configuration(Some(restored_permission_modes("yolo")), Some(vec![option]));
++    session.resolve_pending_startup_config_seeds();
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++}
++
++#[test]
++fn resumed_permission_preserves_model_and_thought_intent() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        Some(ModelId::new("next-model")),
++        HashMap::from([(ConfigKey::new("reasoning_effort"), ConfigValue::new("high"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::ThoughtLevel, ConfigValue::new("high"));
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    assert_eq!(session.desired_model(), Some("next-model"));
++    assert_eq!(
++        session
++            .desired_config_selections()
++            .get(&ConfigKey::new("reasoning_effort")),
++        Some(&ConfigValue::new("high"))
++    );
++    assert_eq!(session.desired.pending_startup_config.len(), 1);
++}
++
++#[test]
++fn resumed_legacy_mode_wins_over_cached_generic_mode_with_partial_config() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_advertised_config_options(vec![
++        SessionConfigOption::select(
++            "permissionLevel",
++            "Permission",
++            "yolo",
++            vec![
++                SessionConfigSelectOption::new("default", "Ask"),
++                SessionConfigSelectOption::new("yolo", "Yolo"),
++            ],
++        )
++        .category(SessionConfigOptionCategory::Mode),
++    ]);
++    session.apply_restored_configuration(
++        Some(restored_permission_modes("default")),
++        Some(vec![
++            SessionConfigOption::select(
++                "reasoning_effort",
++                "Reasoning",
++                "low",
++                vec![SessionConfigSelectOption::new("low", "Low")],
++            )
++            .category(SessionConfigOptionCategory::ThoughtLevel),
++        ]),
++    );
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++    let persisted_config = session
++        .drain_events()
++        .into_iter()
++        .rev()
++        .find_map(|event| match event {
++            AcpSessionEvent::ObservedConfigSynced { selections } => Some(selections),
++            _ => None,
++        })
++        .expect("final observed config must be persisted");
++    assert!(!persisted_config.contains_key(&ConfigKey::new("permissionLevel")));
++}
++
++#[test]
++fn resumed_without_reported_mode_preserves_unresolved_intent() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_restored_configuration(None, None);
++    assert_eq!(session.desired_mode(), Some("yolo"));
++    assert!(session.modes().is_none());
++}
++
++#[test]
++fn resumed_policy_still_allows_a_later_explicit_yolo_selection() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    assert!(session.set_desired_mode(ModeId::new("yolo")));
++    assert_eq!(
++        session.plan_reconcile(),
++        vec![ReconcileAction::SetMode {
++            mode: ModeId::new("yolo")
++        }]
++    );
+ }
+ 
+ #[test]

@@ -1,0 +1,37 @@
+{
+  "schema": "aelix-studio.host-recovery-source/1",
+  "upstream": {
+    "repository": "iOfficeAI/AionCore",
+    "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
+    "tag": "v0.2.2",
+    "archiveUrl": "https://api.github.com/repos/iOfficeAI/AionCore/tarball/47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
+    "archiveSha256": "dd990a452cd945c38ce472ca0232406c8a3c961f5d95eaa67187c202b8500464"
+  },
+  "patch": {
+    "filename": "permission-restore.patch",
+    "sha256": "1e0ef6c9664efa0675068905bf2125c6abbd9dd03b1f66b9fc124a87ccc794fd",
+    "files": {
+      "crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs": {
+        "beforeSha256": "e1fd501b4ea0604af2b0cc2e113f496efedbaaebe706d48fac30949fcb00538b",
+        "afterSha256": "c616347273c2aa656e23c38a6c7f23f5b2c76a8f2ac804ad541bb6bda4e12606"
+      },
+      "crates/aionui-ai-agent/src/manager/acp/session.rs": {
+        "beforeSha256": "26610f5ce9458e63c4fb32ef694af136d3fd8464ce4964f18706773ab3d84c6b",
+        "afterSha256": "8d667fe96e52d9812828ae17d4cbbbe585d6c86b94764826581c0f1de6a14523"
+      },
+      "crates/aionui-ai-agent/src/manager/acp/session_tests.rs": {
+        "beforeSha256": "493afe4849043edce02d8514b39969ae955dcd638fdbdd058dc3d42102e93578",
+        "afterSha256": "398f23ffaf47268af4c64cb72fe3447ced91481b86cc57ea699faf3a1071c3a5"
+      }
+    }
+  },
+  "rustToolchain": "1.95.0",
+  "cargoLockSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a",
+  "upstreamLicenseSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
+  "upstreamCargoLicense": "MIT",
+  "upstreamLicenseFile": "LICENSE (preserved verbatim)",
+  "hostBuildProfile": "dev",
+  "acceptanceTargets": ["Darwin/arm64"],
+  "nativePatches": [],
+  "acpCandidate": "f5d1d5a5f774f958b25d5c37e9c7e1f72904e92e"
+}
