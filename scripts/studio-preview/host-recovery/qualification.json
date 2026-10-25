@@ -1,0 +1,182 @@
+{
+  "schema": "aelix-studio.permission-recovery-qualification/1",
+  "status": "local_candidate_qualified_pending_host_delivery",
+  "platform": "Darwin/arm64",
+  "studioBase": "aa6b07190d1eea8f8177ed4e6e8911389837fdde",
+  "installedAcpCandidate": "f5d1d5a5f774f958b25d5c37e9c7e1f72904e92e",
+  "identity": {
+    "kind": "source_built_recovery_candidate",
+    "binarySha256": "cc243bf7f789aa3f47dc73638a2bd96cbd14cbc55cb538f81128aad763274c03",
+    "buildReceiptSha256": "d9d68715a2fc39e9459dd64fcf7eaa59c0347b41a010b0b2936bd009daa1e301",
+    "sourceManifestSha256": "22d527b64cbd32f247f1956c07dca6ff2e7fd077ba1a86962aed00e4930a4fe8",
+    "patchSha256": "1e0ef6c9664efa0675068905bf2125c6abbd9dd03b1f66b9fc124a87ccc794fd",
+    "upstreamCommit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5"
+  },
+  "buildReceiptSha256": "d9d68715a2fc39e9459dd64fcf7eaa59c0347b41a010b0b2936bd009daa1e301",
+  "originalSourceFilesVerified": 1420,
+  "patchedSourceFilesVerified": 1420,
+  "cargoLockSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a",
+  "licenseFileSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
+  "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
+  "nativeBeforeAfterIdentical": true,
+  "nativeWheelOriginalMembers": 309,
+  "nativePatches": [],
+  "provider": "synthetic loopback",
+  "realProvider": false,
+  "installer": false,
+  "releasedHostBytes": false,
+  "defaultBaselinePromoted": false,
+  "issue16OtherForwardingComplete": false,
+  "remoteCI": "not_run_for_local_changes",
+  "validation": {
+    "studioVitest": {
+      "passed": 4980,
+      "skipped": 5,
+      "suitesPassed": 520,
+      "node": "24.22.1",
+      "status": "passed",
+      "logSha256": "a72179df84fd04bf3aca7817471fd284c5f30e2c4e2a94d72da92d00216977b1"
+    },
+    "studioBuild": {
+      "status": "passed",
+      "node": "24.22.1",
+      "logSha256": "c89027986f9d671822ed8d8d3e9a1a4f601fc9a9cfdc69d9123a5995106e7513"
+    },
+    "studioPython": {
+      "status": "passed",
+      "passed": 9,
+      "logSha256": "7e050eb9ae1e265f3e3c18f8753e323e6fc3935dc76f77b6867cf44470f05d74"
+    },
+    "rustAffectedCrate": {
+      "status": "passed",
+      "unitPassed": 1006,
+      "allPassed": 1044,
+      "ignored": 12,
+      "logSha256": "59c4b015684aaf1ad46239e0b42ef198b0b153bd5351c698a09136bdca26022b"
+    },
+    "rustClippy": {
+      "status": "passed",
+      "denyWarnings": true,
+      "logSha256": "c3d8046b76a92f3fa88a7ea701c7cb28747934691656c1593f8ada07c894c055"
+    },
+    "rustWorkspace": {
+      "status": "runtime_tests_passed_documentation_passed_on_rerun",
+      "runtime": {
+        "completedGroups": 224,
+        "passed": 9390,
+        "failed": 0,
+        "ignored": 52
+      },
+      "documentation": {
+        "completedGroups": 27,
+        "passed": 0,
+        "failed": 0,
+        "ignored": 1
+      },
+      "firstCommandExitCode": 1,
+      "firstFailure": "doctest E0463 aionui_session metadata after a concurrent source-candidate build reused the Cargo target directory",
+      "runtimeLogSha256": "ddf01841a4f488b06270c252d0bbc3eba418a0f11770908cd7d811eda1849cee",
+      "documentationRerunLogSha256": "5f09e0a7e4257c382b2b3c27cf86edf316031134d0a552732825e0da8b301616",
+      "documentationRerunCommand": "cargo test --workspace --doc --locked",
+      "documentationRerunExitCode": 0,
+      "sourceChangesForRepair": []
+    },
+    "acpSource": {
+      "status": "passed",
+      "passed": 35
+    },
+    "nativeEffects": {
+      "status": "passed",
+      "cases": 20
+    },
+    "installedAcp": {
+      "status": "passed",
+      "cases": 11
+    },
+    "actualHost": {
+      "status": "passed",
+      "checksPassed": [
+        "actual_host_standard_mode_selector_starts_ask",
+        "actual_host_ask_denial_no_write",
+        "actual_host_yolo_selector_and_tool_effect",
+        "actual_host_restart_restores_yolo",
+        "actual_host_downgrade_ask_and_pending_consent_stop",
+        "actual_host_history_preserved_across_mode_restarts",
+        "failed_downgrade_recovers_display_and_effective_ask",
+        "recovered_ask_and_cleaned_config_observed_in_host_sqlite",
+        "full_host_process_restart_restores_display_and_effective_ask",
+        "later_explicit_yolo_selection_still_controls_actual_effect"
+      ],
+      "receiptSha256": "d9b33ba2bc561d849237469a0eea52c630e362b028932b2bcbd57d5e7beb203f"
+    },
+    "electronUi": {
+      "status": "passed",
+      "checksPassed": [
+        "renderer_starts_ask",
+        "renderer_yolo_selector_and_actual_write",
+        "failed_downgrade_runtime_recovery_renders_ask",
+        "recovered_ask_requires_consent_without_write",
+        "cancel_pending_consent_without_write",
+        "renderer_later_yolo_selector_and_actual_write",
+        "renderer_return_to_ask"
+      ],
+      "receiptSha256": "d8cfaf489d9a33345f64f4bfdce5eb17a32eb5e207b1b052122277da3fd0b564",
+      "driverNodeVersion": "v24.22.1",
+      "electronVersions": {
+        "node": "22.21.1",
+        "acorn": "8.15.0",
+        "ada": "2.9.2",
+        "amaro": "1.1.4",
+        "ares": "1.34.5",
+        "brotli": "1.0.9",
+        "cjs_module_lexer": "2.1.0",
+        "cldr": "44.1",
+        "icu": "74.2",
+        "llhttp": "9.3.0",
+        "modules": "136",
+        "napi": "10",
+        "nbytes": "0.1.1",
+        "ncrypto": "0.0.1",
+        "nghttp2": "1.64.0",
+        "openssl": "0.0.0",
+        "simdjson": "3.13.0",
+        "simdutf": "7.0.0",
+        "sqlite": "3.50.4",
+        "tz": "2025b",
+        "undici": "6.22.0",
+        "unicode": "15.1",
+        "uv": "1.51.0",
+        "uvwasi": "0.0.23",
+        "v8": "13.8.258.32-electron.0",
+        "zlib": "1.3.1",
+        "zstd": "1.5.8",
+        "electron": "37.10.3",
+        "chrome": "138.0.7204.251"
+      },
+      "builtAppSha256": {
+        "out/main/index.js": "63fc0115bddd8f78782e2be59b9864644b03171c746aa84bbb4dd898c22535cb",
+        "out/preload/index.js": "07df4dbb468048276cf3d3b7de89d3e282a8e6bc671c2a432f48398e75f599de"
+      },
+      "harnessSha256": {
+        "smoke.py": "6755cc61d2a49f8ea313d9556faf820a2e97913b1caf4acb261829330e6ad9a6",
+        "smoke.mjs": "086370d0cb405755c6218a924ecc5b3b9037af43f9ad505817e26f59acb2902d"
+      }
+    },
+    "releasedHostRegression": {
+      "status": "known_mismatch_reproduced",
+      "receiptSha256": "49539c7ea189f2d75e8d88ee2edb9c9cf328767ba0ac7529d62a93ca22060855"
+    }
+  },
+  "independentReview": {
+    "status": "no_blocking_finding_for_permission_recovery",
+    "sourceFilesCompared": 1420,
+    "acpSourceTests": 35,
+    "nativeEffects": 20,
+    "installedAcpChecks": 11,
+    "actualHostChecks": 10,
+    "electronUiChecks": 7,
+    "wireReceiptSha256": "79275b18a46ca2357b4cf256beb988614bbf490b660ffb03c628d0e41d31827f",
+    "uiReceiptSha256": "d0dd5b8abf3f6b6bb9407f2ee58b6d4fb5ee70c44635140c221763d7cee98c7c",
+    "finalReviewReceiptSha256": "dfb456a88430de423dff5d30a8426a711ce490284ecc279bedd6a82a9450625d"
+  }
+}
