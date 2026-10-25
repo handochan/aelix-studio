@@ -1,6 +1,6 @@
 import React from 'react';
-import { render, screen } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, render, screen } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { TChatConversation } from '@/common/config/storage';
 import ChatConversation from '@/renderer/pages/conversation/components/ChatConversation';
@@ -8,6 +8,15 @@ import ChatConversation from '@/renderer/pages/conversation/components/ChatConve
 const usePresetAssistantInfoMock = vi.fn();
 const acpChatMock = vi.fn(() => <div data-testid='mock-acp-chat'>acp chat</div>);
 const acpModelSelectorMock = vi.fn(() => <div data-testid='mock-acp-model-selector'>model selector</div>);
+const backendFetch = vi.fn(() => Promise.reject(new Error('Unexpected backend HTTP in a routing fixture')));
+const backendWebSocket = vi.fn(function () {
+  throw new Error('Unexpected backend WebSocket in a routing fixture');
+});
+
+// Routing/identity is under test; lease renewal and runtime transport have their
+// own focused tests and must not leave live IO behind when this fixture unmounts.
+vi.mock('@/renderer/pages/conversation/hooks/useActiveLease', () => ({ useActiveLease: vi.fn() }));
+vi.mock('@/renderer/components/agent/AcpRuntimeRestartButton', () => ({ default: () => null }));
 
 vi.mock('@/renderer/pages/conversation/Messages/MessageList', () => ({
   default: ({ className }: { className?: string }) => <div className={className}>message history</div>,
@@ -82,10 +91,24 @@ function legacyConversation(type: 'gemini' | 'codex' | 'openclaw-gateway' | 'nan
 
 describe('ChatConversation legacy runtime rendering', () => {
   beforeEach(() => {
+    backendFetch.mockClear();
+    backendWebSocket.mockClear();
+    vi.stubGlobal('fetch', backendFetch);
+    vi.stubGlobal('WebSocket', backendWebSocket);
     usePresetAssistantInfoMock.mockReset();
     acpChatMock.mockClear();
     acpModelSelectorMock.mockClear();
     usePresetAssistantInfoMock.mockReturnValue({ info: undefined, isLoading: false });
+  });
+
+  afterEach(() => {
+    cleanup();
+    try {
+      expect(backendFetch).not.toHaveBeenCalled();
+      expect(backendWebSocket).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it.each(['gemini', 'codex', 'openclaw-gateway', 'nanobot', 'remote'] as const)(
