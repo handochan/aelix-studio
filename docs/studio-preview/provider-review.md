@@ -178,3 +178,12 @@ resolved it. Both compared roots and the owned preflight sandbox now use the
 OS-native realpath binding. Independent review confirmed exact directory equality
 is retained; no product path or ACL boundary changed. Full5,015 tests passed.
 Actual Windows confirmation remains a remote-CI requirement.
+
+The latest full run passed14 of15 jobs, including installed Intel acceptance;
+Windows prepared and installed bundled helpers each passed all12 regressions.
+The Windows UI harness then failed before the user-flow checks because asar3.4.1
+splits extraction names using the host path separator. Both extraction calls
+now normalize the relative name with the native path API. Exact byte hashes
+and renderer inventory equality remain mandatory. A real asar create/extract
+fixture now runs in preflight before packaging. Local archive probe, Python23
+and full5,015 tests passed; Windows UI acceptance still requires the new run.

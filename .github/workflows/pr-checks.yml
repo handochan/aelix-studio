@@ -91,6 +91,8 @@ jobs:
           import fs from 'node:fs';
           import os from 'node:os';
           import path from 'node:path';
+          import assert from 'node:assert/strict';
+          import { createRequire } from 'node:module';
           const sandbox = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), 'Studio helper preflight 한글-')));
           Object.assign(process.env, {
             HOME: path.join(sandbox, 'home'), USERPROFILE: path.join(sandbox, 'home'),
@@ -100,7 +102,19 @@ jobs:
           });
           fs.mkdirSync(process.env.HOME, { recursive: true });
           fs.mkdirSync(process.env.PROVIDER_OUTPUT, { recursive: true });
-          try { await import('./scripts/studio-preview/providerHelperSmoke.mjs'); }
+          try {
+            await import('./scripts/studio-preview/providerHelperSmoke.mjs');
+            const require = createRequire(import.meta.url);
+            const builder = createRequire(require.resolve('electron-builder'));
+            const library = createRequire(builder.resolve('app-builder-lib'));
+            const asar = library('@electron/asar');
+            const source = path.join(sandbox, 'archive-source');
+            fs.mkdirSync(path.join(source, 'out/main'), { recursive: true });
+            fs.writeFileSync(path.join(source, 'out/main/index.js'), 'owned-build-fixture');
+            const archive = path.join(sandbox, 'probe.asar');
+            await asar.createPackage(source, archive);
+            assert.equal(asar.extractFile(archive, path.normalize('out/main/index.js')).toString(), 'owned-build-fixture');
+          }
           finally { fs.rmSync(sandbox, { recursive: true, force: true }); }
           JS
       - name: Build the relocatable Provider installer without publication

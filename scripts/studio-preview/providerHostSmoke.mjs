@@ -41,7 +41,7 @@ try {
     const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
     for (const name of ['out/main/index.js', 'out/preload/index.js']) {
       assert.equal(
-        hash(asar.extractFile(archive, name)),
+        hash(asar.extractFile(archive, path.normalize(name))),
         hash(fs.readFileSync(name)),
         'Installed compiled host differs from this build'
       );
@@ -52,7 +52,7 @@ try {
       .filter((entry) => entry.startsWith('out/renderer/') && entry.endsWith('.js'));
     for (const name of entries) {
       assert.equal(
-        hash(asar.extractFile(archive, name)),
+        hash(asar.extractFile(archive, path.normalize(name))),
         hash(fs.readFileSync(name)),
         'Installed renderer differs from this build'
       );
