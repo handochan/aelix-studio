@@ -63,7 +63,9 @@ def extract(archive, destination):
         with zipfile.ZipFile(archive) as source:
             for member in source.infolist():
                 target = (destination / member.filename).resolve()
-                if '\\' in member.filename or ':' in member.filename or not target.is_relative_to(destination) or (member.external_attr >> 16) & 0o170000 == 0o120000:
+                # ZipInfo normalizes host separators on Windows. Inspect the
+                # original archive spelling before trusting its normalized path.
+                if '\\' in member.orig_filename or ':' in member.orig_filename or not target.is_relative_to(destination) or (member.external_attr >> 16) & 0o170000 == 0o120000:
                     raise ValueError('Unsafe archive member')
             for member in source.infolist():
                 if not member.is_dir():

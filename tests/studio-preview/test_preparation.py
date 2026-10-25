@@ -65,6 +65,7 @@ class PreparationTests(unittest.TestCase):
                 with zipfile.ZipFile(archive, 'w') as output:
                     output.writestr('safe.txt', b'safe')
                     member = zipfile.ZipInfo(name)
+                    member.filename = name  # Preserve hostile raw separators on Windows too.
                     member.external_attr = mode << 16
                     output.writestr(member, b'unsafe')
                 with self.assertRaisesRegex(ValueError, 'Unsafe archive'):

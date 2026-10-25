@@ -130,3 +130,10 @@ claimed. The author installed the current macOS arm64 DMG: 12 UI checks, restric
 GUI PATH, exact compiled-code inventory, 309 unchanged native wheel members and
 owned application removal passed. Actual OpenRouter first response and restart/
 resume also passed from the same packaged build without changing CLI auth.
+
+The first Windows installer job stopped at the ZIP regression fixture: CPython
+normalizes Windows separators in `ZipInfo.filename`. The extractor now checks
+`orig_filename` before accepting the normalized path, and the fixture explicitly
+preserves its hostile archive spelling. Independent review found no actionable
+issue and reran all20 Python tests successfully. Windows remote rerun remains
+required; the original failed job is not accepted as installer evidence.
