@@ -241,7 +241,8 @@ def main(args):
             # system-only PATH in providerHostSmoke and retains its Chromium sandbox.
             environment['PATH'] = os.environ['PATH']
             subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'providerSmoke.py'),
-                            '--runtime', str(runtime)], check=True, cwd=ROOT, env=environment, timeout=420)
+                            '--runtime', str(runtime), '--helper-runtime', str(payload)],
+                           check=True, cwd=ROOT, env=environment, timeout=420)
             report = dict(status='passed', target=target, artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),

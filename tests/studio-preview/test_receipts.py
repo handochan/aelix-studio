@@ -63,6 +63,23 @@ class ReceiptTests(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, 'different baseline'):
                 prepare.verify_prepared(root, root / 'baseline.json')
 
+    def test_provider_preflight_failure_invalidates_both_old_receipts(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            scripts = root / 'scripts/studio-preview'
+            scripts.mkdir(parents=True)
+            for name in ('prepare.py', 'providerSmoke.py'):
+                shutil.copy(ROOT / 'scripts/studio-preview' / name, scripts / name)
+            output = root / '.local/studio-provider'
+            output.mkdir(parents=True)
+            for name in ('host.json', 'helper.json'):
+                (output / name).write_text(json.dumps({'status': 'passed'}))
+            result = subprocess.run([sys.executable, '-B', str(scripts / 'providerSmoke.py'),
+                                     '--runtime', str(root / 'unprepared')], capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertEqual([json.loads((output / name).read_text())['status']
+                              for name in ('host.json', 'helper.json')], ['failed', 'failed'])
+
     def test_failed_optimized_rerun_replaces_an_old_success(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

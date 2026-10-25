@@ -137,3 +137,18 @@ normalizes Windows separators in `ZipInfo.filename`. The extractor now checks
 preserves its hostile archive spelling. Independent review found no actionable
 issue and reran all20 Python tests successfully. Windows remote rerun remains
 required; the original failed job is not accepted as installer evidence.
+
+The first Windows installed qualification reached NSIS installation and bundled
+Python/ACP probes, then its hostile-ACL fixture passed an unsigned generic-rights
+value outside pywin32's signed C-long range. The fixture now uses
+`FILE_GENERIC_READ`, still granting Everyone file-read access; the production
+ACL boundary is unchanged. Review confirmed the fixture exercises the same
+confidentiality rejection. The installed qualification now runs callback/EOF/ACL
+regressions through the actual selected bundled payload, validates its manifest
+against prepared provenance, binds the helper receipt to that manifest and
+compares every selected payload file before/after. Prepared wheel verification
+and installed app runtime discovery remain separate and mandatory. Both old
+receipts are invalidated on preflight failure. Independent review passed Python
+20 tests before the added receipt-invalidation regression; target CI remains
+required. The Intel DMG attempt failed at a resource-busy volume detach before
+installation; no forced unmount or alternate format was used to claim success.

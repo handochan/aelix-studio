@@ -5,6 +5,7 @@ import path from 'node:path';
 import { NativeAuthService } from '../../packages/web-host/src/studio-auth/service.ts';
 import { NATIVE_AUTH_HELPER } from '../../packages/web-host/src/studio-auth/helperSource.ts';
 import { resolveNativeRuntime } from '../../packages/web-host/src/studio-auth/runtime.ts';
+import { createHash } from 'node:crypto';
 
 const runtime = process.env.AELIX_STUDIO_RUNTIME;
 const sandbox = process.env.PROVIDER_SANDBOX;
@@ -177,10 +178,10 @@ print('PRIVATE_ACL_VERIFIED')
         String.raw`
 import os
 from pathlib import Path
-import win32security
+import win32con,win32security
 file=Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json.tmp'
 acl=win32security.GetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
-acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,0x80000000,win32security.ConvertStringSidToSid('S-1-1-0'))
+acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,win32con.FILE_GENERIC_READ,win32security.ConvertStringSidToSid('S-1-1-0'))
 win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION,None,None,acl,None)
 `,
       ],
@@ -258,7 +259,22 @@ win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32s
   record('malformed_cli_credentials_refused_without_reset');
   fs.writeFileSync(
     path.join(process.env.PROVIDER_OUTPUT, 'helper.json'),
-    JSON.stringify({ status: 'passed', checks, nativePatches: [], realOAuth: false }, null, 2) + '\n'
+    JSON.stringify(
+      {
+        status: 'passed',
+        checks,
+        nativePatches: [],
+        realOAuth: false,
+        helperRuntimeKind: fs.existsSync(path.join(runtime, 'manifest.json')) ? 'bundled' : 'prepared',
+        helperRuntimeManifestSha256: fs.existsSync(path.join(runtime, 'manifest.json'))
+          ? createHash('sha256')
+              .update(fs.readFileSync(path.join(runtime, 'manifest.json')))
+              .digest('hex')
+          : null,
+      },
+      null,
+      2
+    ) + '\n'
   );
   console.log(`Native Provider helper: ${checks.length} checks passed (synthetic OAuth)`);
 } finally {

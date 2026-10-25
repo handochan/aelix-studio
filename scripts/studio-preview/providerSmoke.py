@@ -73,6 +73,18 @@ async def main(args):
         raise RuntimeError('Run without Python -O')
     runtime = Path(args.runtime).resolve()
     receipt = verify_prepared(runtime)
+    helper_runtime = Path(args.helper_runtime).resolve() if args.helper_runtime else runtime
+    helper_manifest = None
+    if args.helper_runtime:
+        helper_manifest = json.loads((helper_runtime / 'manifest.json').read_text(encoding='utf-8'))
+        if (helper_manifest.get('schema') != 'aelix.studio-preview.runtime/1'
+                or helper_manifest.get('target') != receipt['target']
+                or helper_manifest.get('baselineSha256') != receipt['baselineSha256']
+                or helper_manifest.get('preparedReceiptSha256') != hashlib.sha256((runtime / 'receipt.json').read_bytes()).hexdigest()
+                or helper_manifest.get('nativePatches') != []
+                or helper_manifest.get('native') != receipt['native']
+                or helper_manifest.get('acp') != receipt['acp']):
+            raise ValueError('Selected bundled helper differs from the qualified preparation')
     output = ROOT / '.local/studio-provider'
     output.mkdir(parents=True, exist_ok=True)
     for name in ('host.json', 'helper.json'):
@@ -83,6 +95,10 @@ async def main(args):
                 for folder in ('native', 'adapter') for p in (runtime / folder).rglob('*')
                 if p.is_file() and p.suffix != '.pyc' and '__pycache__' not in p.parts}
     before = installed_bytes()
+    def helper_bytes():
+        return {p.relative_to(helper_runtime).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                for p in helper_runtime.rglob('*') if p.is_file()}
+    bundled_before = helper_bytes() if helper_manifest else None
     fixture = ProviderFixture()
     await fixture.start()
     with tempfile.TemporaryDirectory(prefix='Studio Provider user 한글-') as temporary:
@@ -97,7 +113,7 @@ async def main(args):
                    USERPROFILE=str(sandbox / 'home'), NO_PROXY='127.0.0.1,localhost',
                    XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
                    APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
-                   AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(runtime),
+                   AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(helper_runtime),
                    PROVIDER_SANDBOX=str(sandbox), PROVIDER_ENDPOINT=fixture.endpoint, PROVIDER_OUTPUT=str(output),
                    AIONUI_BACKEND_BIN=str(binary), AIONUI_E2E_TEST='1', AIONUI_DISABLE_DEVTOOLS='1',
                    AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'), AIONUI_DISABLE_AUTO_UPDATE='1',
@@ -120,6 +136,8 @@ async def main(args):
             after = installed_bytes()
             if before != after:
                 raise AssertionError('Installed wheel payload changed')
+            if helper_manifest and bundled_before != helper_bytes():
+                raise AssertionError('Installed bundled helper payload changed')
             report = json.loads((output / 'host.json').read_text())
             scanned = 0
             for file in sandbox.rglob('*'):
@@ -132,6 +150,10 @@ async def main(args):
                           nativePatches=[], installedPayloadUnchanged=True, installedFiles=len(before),
                           realProvider=False, realOAuth=False, installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'])
+            report.update(helperRuntimeKind='bundled' if helper_manifest else 'prepared',
+                          helperRuntimeManifestSha256=(hashlib.sha256((helper_runtime / 'manifest.json').read_bytes()).hexdigest()
+                                                       if helper_manifest else None),
+                          helperRuntimePayloadUnchanged=True if helper_manifest else None, helperRuntimeFiles=len(bundled_before or before))
             report.update(secretLogDatabaseScanFiles=scanned, secretLogDatabaseMatches=0)
             def digest(file):
                 return hashlib.sha256(file.read_bytes()).hexdigest()
@@ -169,10 +191,12 @@ async def main(args):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--runtime', required=True)
+    parser.add_argument('--helper-runtime', help='Installed bundled payload; the prepared runtime still supplies provenance')
     try:
         asyncio.run(main(parser.parse_args()))
     except BaseException:
         output = ROOT / '.local/studio-provider'
         output.mkdir(parents=True, exist_ok=True)
-        (output / 'host.json').write_text(json.dumps({'status': 'failed'}) + '\n')
+        for name in ('host.json', 'helper.json'):
+            (output / name).write_text(json.dumps({'status': 'failed'}) + '\n')
         raise
