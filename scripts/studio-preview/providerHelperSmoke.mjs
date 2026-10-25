@@ -31,6 +31,19 @@ from aelix_ai.oauth.types import OAuthAuthInfo, OAuthPrompt, OAuthCredentials
 class FixtureOAuth:
     id, name, uses_callback_server = 'synthetic-oauth', 'Synthetic OAuth', False
     async def login(self, callbacks):
+        if os.environ.get('STUDIO_TEST_OAUTH_CALLBACK') == '1':
+            import socket
+            from aelix_ai.oauth._callback_server import start_callback_server
+            with socket.socket() as reservation:
+                reservation.bind(('127.0.0.1', 0))
+                port = reservation.getsockname()[1]
+            server = await start_callback_server('synthetic-state', port=port)
+            try:
+                await callbacks.on_auth(OAuthAuthInfo(url=server.redirect_uri.replace('localhost', '127.0.0.1'), instructions='Synthetic loopback callback'))
+                assert await server.wait_for_code() == ('synthetic-code', 'synthetic-state')
+                return OAuthCredentials(refresh='synthetic-refresh', access='synthetic-access', expires=9999999999999)
+            finally:
+                server.shutdown()
         await callbacks.on_auth(OAuthAuthInfo(url='https://fixture.invalid/authorize?state=synthetic-state', instructions='Synthetic device code'))
         if os.environ.get('STUDIO_TEST_OAUTH_POLL') == '1':
             await asyncio.Event().wait()
@@ -38,9 +51,13 @@ class FixtureOAuth:
         return OAuthCredentials(refresh='synthetic-refresh', access='synthetic-access', expires=9999999999999)
 register_oauth_provider(FixtureOAuth())
 `;
-function oauth(revision, polling = false) {
+function oauth(revision, polling = false, callback = false) {
   const child = spawn(resolvedRuntime.python, [...resolvedRuntime.helperArgs, '-c', prefix + NATIVE_AUTH_HELPER], {
-    env: { ...env, ...(polling ? { STUDIO_TEST_OAUTH_POLL: '1' } : {}) },
+    env: {
+      ...env,
+      ...(polling ? { STUDIO_TEST_OAUTH_POLL: '1' } : {}),
+      ...(callback ? { STUDIO_TEST_OAUTH_CALLBACK: '1' } : {}),
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.stderr.resume();
@@ -195,6 +212,16 @@ win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32s
   record('synthetic_native_oauth_callbacks_and_success');
 
   assert.ok((await mutate({ action: 'logout', provider: 'synthetic-oauth' })).ok);
+
+  const callback = oauth((await catalog()).revision, false, true);
+  const address = (await callback.next()).url;
+  assert.equal((await fetch(address + '?code=synthetic-code&state=wrong-state')).status, 400);
+  assert.equal((await fetch(address + '?code=synthetic-code&state=synthetic-state')).status, 200);
+  assert.ok((await callback.next()).result?.providers.find((item) => item.id === 'synthetic-oauth')?.configured);
+  await callback.exit;
+  await assert.rejects(fetch(address));
+  assert.ok((await mutate({ action: 'logout', provider: 'synthetic-oauth' })).ok);
+  record('native_loopback_oauth_state_callback_commit_and_listener_cleanup');
 
   // EOF settles native callbacks without saving a replacement token.
   const eof = oauth((await catalog()).revision);

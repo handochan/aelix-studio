@@ -1,9 +1,11 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
 import shutil
 import subprocess
+import struct
 import sys
 import tempfile
 import unittest
@@ -11,7 +13,29 @@ import unittest
 from test_preparation import ROOT, prepare
 
 
+spec = importlib.util.spec_from_file_location('installer_acceptance', ROOT / 'scripts/studio-preview/packaging/acceptance.py')
+acceptance = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(acceptance)
+
+
+def macho_fixture(vm_size=4096, payload=b'unchanged-code!!'):
+    header = struct.pack('<8I', 0xFEEDFACF, 0x100000C, 0, 2, 1, 72, 0, 0)
+    segment = struct.pack('<II16sQQQQIIII', 0x19, 72, b'__LINKEDIT', 0x1000,
+                          vm_size, 104, len(payload), 1, 1, 0, 0)
+    return header + segment + payload
+
+
 class ReceiptTests(unittest.TestCase):
+    def test_signing_allocation_normalization_preserves_code_comparison(self):
+        original = acceptance.unsigned_macho_identity(macho_fixture())
+        self.assertEqual(original, acceptance.unsigned_macho_identity(macho_fixture(vm_size=8192)))
+        self.assertNotEqual(original, acceptance.unsigned_macho_identity(macho_fixture(payload=b'changed-code!!!!')))
+
+    def test_macho_identity_refuses_truncated_or_missing_commands(self):
+        for raw in (b'not-a-host', macho_fixture()[:40], macho_fixture().replace(b'__LINKEDIT', b'__NOTEDIT_')):
+            with self.subTest(raw=raw[:8]), self.assertRaises(ValueError):
+                acceptance.unsigned_macho_identity(raw)
+
     def test_modified_host_or_launcher_is_refused(self):
         for modified in ('core', 'launch.cjs', 'qualification.json', 'entrypoint'):
             with self.subTest(modified=modified), tempfile.TemporaryDirectory() as temporary:

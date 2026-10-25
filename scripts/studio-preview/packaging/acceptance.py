@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import shutil
+import struct
 import subprocess
 import sys
 import tempfile
@@ -19,6 +20,48 @@ from prepare import host_target, venv_path
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def unsigned_macho_identity(raw):
+    """Ignore only the signature-sized LINKEDIT VM allocation after codesign removal."""
+    data = bytearray(raw)
+    if len(data) < 32 or struct.unpack_from('<I', data)[0] != 0xFEEDFACF:
+        raise ValueError('Expected a thin 64-bit Mach-O host')
+    commands, command_bytes = struct.unpack_from('<II', data, 16)
+    end, offset, found = 32 + command_bytes, 32, False
+    if end > len(data):
+        raise ValueError('Truncated Mach-O commands')
+    for _ in range(commands):
+        if offset + 8 > end:
+            raise ValueError('Truncated Mach-O command')
+        command, size = struct.unpack_from('<II', data, offset)
+        if size < 8 or offset + size > end or command == 0x1D:
+            raise ValueError('Invalid or still-signed Mach-O command')
+        if command == 0x19 and data[offset + 8:offset + 24].rstrip(b'\0') == b'__LINKEDIT':
+            if found or size < 72:
+                raise ValueError('Invalid LINKEDIT command')
+            vm_size, file_offset, file_size = struct.unpack_from('<QQQ', data, offset + 32)
+            if vm_size < file_size or file_offset + file_size != len(data):
+                raise ValueError('Invalid unsigned LINKEDIT extent')
+            # codesign --remove-signature truncates the signature but preserves
+            # the previous VM allocation. All other headers and bytes must match.
+            struct.pack_into('<Q', data, offset + 32, 0)
+            found = True
+        offset += size
+    if not found or offset != end:
+        raise ValueError('Missing or malformed LINKEDIT')
+    return hashlib.sha256(data).hexdigest()
+
+
+def host_identity(path):
+    if sys.platform != 'darwin':
+        return digest(path)
+    with tempfile.TemporaryDirectory(prefix='studio-host-identity-') as temporary:
+        copy = Path(temporary) / 'aioncore'
+        shutil.copy2(path, copy)
+        subprocess.run(['codesign', '--remove-signature', str(copy)], check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return unsigned_macho_identity(copy.read_bytes())
 
 
 def long_path(path):
@@ -135,7 +178,8 @@ def main(args):
                 raise ValueError('Unsupported installed runtime')
             prepared = json.loads((runtime / 'receipt.json').read_text(encoding='utf-8'))
             core = payload.parent / 'bundled-aioncore' / target / ('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
-            if digest(core) != prepared['aioncoreBinarySha256']:
+            original_core = runtime / prepared['aioncoreBinary']
+            if digest(original_core) != prepared['aioncoreBinarySha256'] or host_identity(core) != host_identity(original_core):
                 raise ValueError('Installed host differs from the declared AionCore artifact')
             checked = 0
             for spec in manifest['native']['wheels']:
@@ -202,6 +246,7 @@ def main(args):
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
+                          aioncoreCodeIdentityMatched=True, originalAioncoreSha256=prepared['aioncoreBinarySha256'],
                           unicodeAndSpaceInstallPath=sys.platform != 'linux', unicodeAndSpaceRuntimeRelocation=True,
                           unicodeAndSpaceUserState=True, adHocSignatureVerified=sys.platform == 'darwin',
                           developerId=False, notarized=False, installedNativeWheelMembers=checked, nativePatches=[],

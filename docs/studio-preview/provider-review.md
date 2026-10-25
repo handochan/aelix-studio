@@ -117,3 +117,16 @@ passed, reporting 54.33% overall statements (existing repository target shortfal
 no claim of 80% repository coverage). Focused runtime source coverage was 100%
 statements; the Python helper's string coverage does not prove its runtime
 behavior. Actual process and installer qualification remains separate evidence.
+
+The macOS installed host raw hash changes during ad-hoc signing. The follow-up
+identity guard checks the exact public raw host before packaging and compares
+installed versus original private copies after signature removal. It normalizes
+only the signature-sized `__LINKEDIT.vmsize` allocation, verifies the bounded
+thin 64-bit command table and complete LINKEDIT extent, and hashes all other
+bytes. Other platforms retain raw byte identity. The independent reviewer passed
+20 Python regressions and independently matched the current original/packaged
+host identity; no actionable issue remained. Signed-file raw equality is not
+claimed. The author installed the current macOS arm64 DMG: 12 UI checks, restricted
+GUI PATH, exact compiled-code inventory, 309 unchanged native wheel members and
+owned application removal passed. Actual OpenRouter first response and restart/
+resume also passed from the same packaged build without changing CLI auth.

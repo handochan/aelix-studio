@@ -86,6 +86,13 @@ prepareAioncore({
   arch: process.arch,
   version: require('../../../package.json').aioncoreVersion,
 });
+const prepared = JSON.parse(fs.readFileSync(path.join(runtime, 'receipt.json')));
+if (
+  digest(
+    path.join(root, 'resources/bundled-aioncore', target, process.platform === 'win32' ? 'aioncore.exe' : 'aioncore')
+  ) !== prepared.aioncoreBinarySha256
+)
+  throw new Error('Prepared packaging host differs from the qualified public AionCore');
 run('node', ['scripts/prepareHubResources.js']);
 const config = yaml.load(fs.readFileSync(path.join(root, 'packages/desktop/electron-builder.yml'), 'utf8'));
 config.extraResources.push({ from: payload, to: 'studio-preview' });
