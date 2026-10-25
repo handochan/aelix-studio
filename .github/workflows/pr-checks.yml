@@ -1,4 +1,7 @@
+# Temporary verification driver on codex/studio-5-postmerge-ci only.
+# Every job checks the unchanged merged main commit; this driver is not a product change.
 name: 'PR Checks'
+run-name: 'Studio #5 merged main 5aee7a71 verification'
 
 on:
   workflow_dispatch:
@@ -22,7 +25,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: studio-5-postmerge-5aee7a71
   cancel-in-progress: true
 
 permissions:
@@ -47,12 +50,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
           fetch-depth: 0
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
-        with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -103,13 +102,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
           fetch-depth: 0
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
-        with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -132,7 +126,7 @@ jobs:
         run: npm install -g @j178/prek
 
       - name: Run prek checks
-        run: prek run --from-ref origin/${{ env.PR_BASE_REF }} --to-ref HEAD
+        run: prek run --from-ref aa6b07190d1eea8f8177ed4e6e8911389837fdde --to-ref HEAD
 
   # Job 2: Unit tests across all platforms
   unit-tests:
@@ -147,12 +141,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
         with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -191,12 +181,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
         with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -274,6 +260,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -349,6 +337,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -568,6 +558,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: 5aee7a71a064a9bcff12c504abf1ea3cabc7acd6
 
       - name: Create mock build artifacts
         shell: bash
