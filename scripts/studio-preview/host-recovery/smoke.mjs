@@ -32,10 +32,19 @@ async function launch(conversation) {
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);
   if (executablePath) assert.equal(await app.evaluate(() => process.env.AIONUI_BACKEND_BIN), undefined);
-  if (conversation)
-    await page.evaluate((id) => {
-      window.location.hash = `/conversation/${id}`;
-    }, conversation);
+  // Backend readiness precedes the authenticated startup router. Wait for its
+  // Guid surface before navigating so an initial redirect cannot replace us.
+  await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+  if (conversation) {
+    await page.locator(`[id="c-${conversation}"]`).click();
+    await expect
+      .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
+      .toBe(`#/conversation/${conversation}`);
+    await expect(page.getByTestId('message-list-content')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('message-text-content').filter({ hasText: 'SYNTHETIC_UI_ASK_RECOVERY' })).toBeVisible(
+      { timeout: 30000 }
+    );
+  }
   selector = page.getByTestId('mode-selector');
 }
 for (const signal of ['SIGINT', 'SIGTERM'])
@@ -91,6 +100,10 @@ try {
   await page.evaluate((id) => {
     window.location.hash = `/conversation/${id}`;
   }, conv.id);
+  await expect
+    .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
+    .toBe(`#/conversation/${conv.id}`);
+  await expect(page.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
   await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
   checks.push('renderer_starts_ask');
   async function select(mode) {

@@ -8,12 +8,36 @@
     "archiveSha256": "dd990a452cd945c38ce472ca0232406c8a3c961f5d95eaa67187c202b8500464"
   },
   "patch": {
-    "filename": "permission-restore.patch",
-    "sha256": "1e0ef6c9664efa0675068905bf2125c6abbd9dd03b1f66b9fc124a87ccc794fd",
+    "filename": "../host-forwarding/forwarding.patch",
+    "sha256": "3496dc9067f0384eff1705e6f2b5547d2177b7b22075be89606e9359f6ff8783",
     "files": {
+      "Cargo.lock": {
+        "beforeSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a",
+        "afterSha256": "aed579e85622e5e55b7d5959f903aa3ba27e050ad70bea20928a1aee98baed4a"
+      },
+      "Cargo.toml": {
+        "beforeSha256": "a10084a6915b4166bf7b668343e757d1fc14d0ba171d4e9b1ebbb917539e517d",
+        "afterSha256": "e74adc17db5d65217e97b31aee215cb87efd3e85714b7473e7b8659a0ff3b69f"
+      },
+      "crates/aionui-ai-agent/src/agent_task.rs": {
+        "beforeSha256": "8b8a2e67d16fc95fef35fc4efb3ee5124db98006734e33cbc631e274279a8683",
+        "afterSha256": "18bb716c9bddca577582f12c711ddf534580fa50894938d6a67cdd637cad92b2"
+      },
+      "crates/aionui-ai-agent/src/lib.rs": {
+        "beforeSha256": "4fbcf7fd680dafeaa40176041b1acc6416e38c6d473fbbf8fb6722e340dcc87e",
+        "afterSha256": "4fed59be81664da50ed0515a82245ba6033f7bb8e20ecad9ef2a3abcf4efdf0c"
+      },
+      "crates/aionui-ai-agent/src/manager/acp/agent.rs": {
+        "beforeSha256": "f9f14712ff675dc7b54c7413e0873a90183f896e546de554c21a8f77930ae207",
+        "afterSha256": "2dbf9c0c53b2b89796c354b91b0bf015da85ca0660be4159669d422c791ccd23"
+      },
       "crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs": {
         "beforeSha256": "e1fd501b4ea0604af2b0cc2e113f496efedbaaebe706d48fac30949fcb00538b",
-        "afterSha256": "c616347273c2aa656e23c38a6c7f23f5b2c76a8f2ac804ad541bb6bda4e12606"
+        "afterSha256": "c34f1be6e557e230cb29770c9b4d6df152467d5b3a77c1eeda3a92c9bbdbfdbb"
+      },
+      "crates/aionui-ai-agent/src/manager/acp/permission_router.rs": {
+        "beforeSha256": "bf697e43f5da9fbf549b7616680a296c5a669936f89d000a757fc92fdd0ed569",
+        "afterSha256": "ba227691dbb0f3bb1006f651cab9fa5f41df102724c4430d7d43164df8404026"
       },
       "crates/aionui-ai-agent/src/manager/acp/session.rs": {
         "beforeSha256": "26610f5ce9458e63c4fb32ef694af136d3fd8464ce4964f18706773ab3d84c6b",
@@ -22,11 +46,167 @@
       "crates/aionui-ai-agent/src/manager/acp/session_tests.rs": {
         "beforeSha256": "493afe4849043edce02d8514b39969ae955dcd638fdbdd058dc3d42102e93578",
         "afterSha256": "398f23ffaf47268af4c64cb72fe3447ced91481b86cc57ea699faf3a1071c3a5"
+      },
+      "crates/aionui-ai-agent/src/manager/aionrs/agent_test.rs": {
+        "beforeSha256": "470f23248db34a881fa93adfbf48d28295462a0d6bbdb90db65de47cb5e4b543",
+        "afterSha256": "8a2689f39950123548e556425f2532b40772bdb19dbb5fe031dabdfe0af015a0"
+      },
+      "crates/aionui-ai-agent/src/protocol/acp.rs": {
+        "beforeSha256": "4ed4d445c348755c235beee5555164e10e861f4e48eb722beefe4b1e091600d6",
+        "afterSha256": "a529f531153589c52c191286cfd462690639f409723c329a17ccdb481101edf1"
+      },
+      "crates/aionui-ai-agent/src/protocol/acp_forwarding/mod.rs": {
+        "beforeSha256": null,
+        "afterSha256": "8932de973bd5c958479e91a3803108b8fe7e4ef4bcfe1f95a3fb96feaf9b4597"
+      },
+      "crates/aionui-ai-agent/src/protocol/acp_forwarding/operation.rs": {
+        "beforeSha256": null,
+        "afterSha256": "5f4080484a6106b3c9036055b7c1a7ae9b38ed2de447e8e6de2040e1e9aa7097"
+      },
+      "crates/aionui-ai-agent/src/protocol/acp_forwarding/tests.rs": {
+        "beforeSha256": null,
+        "afterSha256": "9330b53a62515c9b97b4b99dca8ae90f410fcf05dee011cf4ca943ebb16a1b2c"
+      },
+      "crates/aionui-ai-agent/src/protocol/mod.rs": {
+        "beforeSha256": "9f8e49a9bc6b147a760519afd763de912e74f422e7411284beb5b85e5fe46191",
+        "afterSha256": "414dec5d555f874622051d8ed9e1cbfc981fec80262996935f85b91259e2ef17"
+      },
+      "crates/aionui-ai-agent/src/registry.rs": {
+        "beforeSha256": "b633fa7f1566e3471863193eb452a5a9103286c8fe14c1bc5fc55485763c6465",
+        "afterSha256": "09c327f308642fa5322b6a59a216b8944025db213531d719ddf0c1127e9a8015"
+      },
+      "crates/aionui-ai-agent/src/session_agent.rs": {
+        "beforeSha256": "2f7fa10ee9696baa7f1cbf63a7875cad326b0aba3881eb97527bdaa9253dba0b",
+        "afterSha256": "a90dbf18437ac810be97e82d8b580fc51da75f7f84d4803a5384a36965b997ee"
+      },
+      "crates/aionui-ai-agent/src/types.rs": {
+        "beforeSha256": "5b417524382ac89e3adb35fb0b829f7bd12979303d9f4e54de9fe2594cd970f4",
+        "afterSha256": "464513da7a60de05195b853f7730dad39fc93f72dd8f6b192c9d39c4ab4b0c21"
+      },
+      "crates/aionui-api-types/src/acp.rs": {
+        "beforeSha256": "8053a87fab972a0fbe1faa666753fca880e78350ef1b5479bbbb1e19036a8e47",
+        "afterSha256": "ae3f335dbfc4ab67b6349c76d96a5e141390930b8720916b21e73012fee55f30"
+      },
+      "crates/aionui-api-types/src/conversation.rs": {
+        "beforeSha256": "7af10dc0ce8f10c1b34ba59dd214edbf1d87f59661b9d88fb92a513fd1201702",
+        "afterSha256": "1ff15083cb9b56ca53d75182550a2412d83edf52698641e13dbcb13ec55e4656"
+      },
+      "crates/aionui-api-types/src/lib.rs": {
+        "beforeSha256": "20407b44c3182a6e189fd09dcff275d310ed4a71690b3e6583cf3ab8dacd40c5",
+        "afterSha256": "00a254915d927e663ba45ac6c963bf3aa8a78e83c1277a1d80a32ee950a154da"
+      },
+      "crates/aionui-app/src/bootstrap/tracing_init.rs": {
+        "beforeSha256": "d4ddc4b2e23ef55517ae73eec54a3d9d47eb86f8c09f1ec7692a8bf1cfea2489",
+        "afterSha256": "53673f18677a05718166f893a41dda9f2fabac7d83fbaee604ce4ef65e123b13"
+      },
+      "crates/aionui-channel/src/message_service.rs": {
+        "beforeSha256": "6664c11987cc8a7df846553c3a1b569dd5e54462886b08474d8566a98c715e94",
+        "afterSha256": "e06a6da0c4afcb4c4ed6c855751940d8c485d3d6eb804b341051f1fbb42927c0"
+      },
+      "crates/aionui-conversation/src/error.rs": {
+        "beforeSha256": "992af210bfbe13db8809061c82bf9cd95ba194abcd39a09ba22fd03dcc759189",
+        "afterSha256": "7d955110bb7d7ca061173991a1694a76c79d4d69a322f42e28339e060f83fa1a"
+      },
+      "crates/aionui-conversation/src/routes.rs": {
+        "beforeSha256": "588db43772a66ed2f4936cc30788022a67deb9d4640a5ca16d7011350d49f500",
+        "afterSha256": "7e7c349ab2d54517d7fb901ecd1f23d04baa0df9b77e092e93e4853134662b40"
+      },
+      "crates/aionui-conversation/src/runtime_state.rs": {
+        "beforeSha256": "add65f4ea112cb02c6bf7ebc32b21fe29f3e07c3d32b144789ddfbbddb198589",
+        "afterSha256": "bbb8ec827579f22296181683d977b12930571c7e535c2077ed312880b966c1f1"
+      },
+      "crates/aionui-conversation/src/service.rs": {
+        "beforeSha256": "3891867ac5671ab14badb96f4b6af124a9de35d51c8f35f77d235d1538cab72f",
+        "afterSha256": null
+      },
+      "crates/aionui-conversation/src/service/mod.rs": {
+        "beforeSha256": null,
+        "afterSha256": "8f173a7666de7a8902ccc3bb37bd60cf3cfe348c69b5545a0133209544e70cdc"
+      },
+      "crates/aionui-conversation/src/service/operations.rs": {
+        "beforeSha256": null,
+        "afterSha256": "c974b25bb5bbdb0ef4a590baeeac7b9e64f71145b7e0b2d7f7155a50d401bc00"
+      },
+      "crates/aionui-conversation/src/service_test.rs": {
+        "beforeSha256": "621b486532a3df4c5696adbd97e5e331d5eae9184855466a6b19ddcaae1963a6",
+        "afterSha256": "c278ca1af53b91867e710dbb6faf1687bc11e056c9ef61a4367f9020fac7df17"
+      },
+      "crates/aionui-conversation/src/turn_orchestrator.rs": {
+        "beforeSha256": "02e3812b0479c7d42867f32f0d7049c10b00bcfbe092bd558af7b85d02dfc784",
+        "afterSha256": "b63d9c85f463e411dd5342c4aa40e87901f0885aa6cf57ab1ed29811d9f2dd2c"
+      },
+      "crates/aionui-db/Cargo.toml": {
+        "beforeSha256": "5f72dd724b91c43dd26e25c271e236a9742d4daaaa120747d79663fc53a734a9",
+        "afterSha256": "2e96faa6333fec6ac8a5912ec13d2b895a3e11a9931846349aff86108c3310a7"
+      },
+      "crates/aionui-db/migrations/044_managed_operations.sql": {
+        "beforeSha256": null,
+        "afterSha256": "7d03e4866fc6bd8ae7e4b5034ffa12da3029d5a813b159136de7e2238ee13187"
+      },
+      "crates/aionui-db/src/lib.rs": {
+        "beforeSha256": "5139472063665ccfde4ee503804b9f8d456d88155691d3b926870893505f2fe0",
+        "afterSha256": "b32cfe6ecce226c38336addc44235d76b2ecaf2386ecb57466f067ea1c4d6b62"
+      },
+      "crates/aionui-db/src/repository/conversation.rs": {
+        "beforeSha256": "b1dc870ac55303d8033393d8cef34b233405c5306066727f80e847046fd06f87",
+        "afterSha256": null
+      },
+      "crates/aionui-db/src/repository/conversation/identity.rs": {
+        "beforeSha256": null,
+        "afterSha256": "a1ac4b7f3d22b95c259c9e7a610ebf218b26cda577f645bd4dfdf582374e5546"
+      },
+      "crates/aionui-db/src/repository/conversation/mod.rs": {
+        "beforeSha256": null,
+        "afterSha256": "04c0eb1dfed55980ef45b9af88091baffde0ccc0e6598574ef097b78b4e8a8ce"
+      },
+      "crates/aionui-db/src/repository/conversation/operations.rs": {
+        "beforeSha256": null,
+        "afterSha256": "9f178e56ca92c4c6adb6e30f674fa1c5d0730c56ab8a7c7a3f0edb74f0b96a9a"
+      },
+      "crates/aionui-db/src/repository/sqlite_conversation.rs": {
+        "beforeSha256": "712eca06217905e1c7faca20c7db36ebc52fb2ba74e93d13632d1cc69b23c29f",
+        "afterSha256": null
+      },
+      "crates/aionui-db/src/repository/sqlite_conversation/managed_tests.rs": {
+        "beforeSha256": null,
+        "afterSha256": "6e2b4d675a99d4cfac56b325ca5fb7bc6371907530e2db421bfd7530a5e159be"
+      },
+      "crates/aionui-db/src/repository/sqlite_conversation/mod.rs": {
+        "beforeSha256": null,
+        "afterSha256": "932c0548738ac50cf839e97dd1662430a899a6fe399c0f9fb4c94bb6ac3b1018"
+      },
+      "crates/aionui-db/src/repository/sqlite_conversation/operations.rs": {
+        "beforeSha256": null,
+        "afterSha256": "4c9c5fd7d7b52e6670e7553e38408d151c1689b30f35bb906968041a39bb2dc1"
+      },
+      "crates/aionui-db/tests/adoption_coverage.rs": {
+        "beforeSha256": "bd2d0dc792a118adc9f367c39b9e7c6d46c8cc9698b3b0123d34a3322997722f",
+        "afterSha256": "f09dea805e48a6509b60d42b7c9df65f6d50b90ecd2c6dd30d052808bb462ca4"
+      },
+      "crates/aionui-runtime/src/node_runtime/managed.rs": {
+        "beforeSha256": "32cf131a9643f94c3fc5a4b1b0141c1c35ff464f2c5de25ec6dc2ded36541ab2",
+        "afterSha256": "a49a9690cf225a10ab3b809567ad7ce3e2c035c828c83ecda6c0e79944b6860c"
+      },
+      "crates/aionui-runtime/src/node_runtime/managed/tests.rs": {
+        "beforeSha256": "09ea1e19f9f51866291b5f1e44110de9a1351b797f7da527996a8f0fb1b09bd8",
+        "afterSha256": "878b891f1d8e1fd7c331b74783ead71cf936fa813c07f396799abdfefe4b7f0f"
+      },
+      "crates/aionui-runtime/src/node_runtime/mod.rs": {
+        "beforeSha256": "b22c395fdff6ae187167e94e9811c12d326cf12766ca0ea3446d0fffcad69ee0",
+        "afterSha256": "27b62ebf56fabb4468c14847cb37b60b3a76c5cc4cbfee88e3b5ac186a2a5fbf"
+      },
+      "crates/aionui-session-message/src/service.rs": {
+        "beforeSha256": "b44cf7e8b66b98d5fcecbfef76dfcce46ccd1e139782f1ed46a55c039f18ab91",
+        "afterSha256": "b647139db961b2718c9475e18008e2eb56fc53eac8c24bbdfc9b0726d3196fbe"
+      },
+      "crates/aionui-session-message/tests/e2e_cross_session.rs": {
+        "beforeSha256": "aba21be4d1a30243476caf46fd06d3007865cc611f98be62993dc0153ca67b9a",
+        "afterSha256": "ee6444e900839785e28af441ba11bd8daa0fb8bdd79dcfe2d258fb8aa7d1adcb"
       }
     }
   },
   "rustToolchain": "1.95.0",
-  "cargoLockSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a",
+  "cargoLockSha256": "aed579e85622e5e55b7d5959f903aa3ba27e050ad70bea20928a1aee98baed4a",
   "upstreamLicenseSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
   "upstreamCargoLicense": "MIT",
   "upstreamLicenseFile": "LICENSE (preserved verbatim)",
@@ -60,8 +240,10 @@
     }
   },
   "sourceFileCount": 1420,
-  "buildRecipeSha256": "3da97cb9a85257aea565acfeab76d569312df033b92d09b59d8b8420c4ec2469",
+  "buildRecipeSha256": "e15c5a3143acb363a33dfa652cdd4c3404833c1f0e3e22940997633d92c404c2",
   "identityRecipeSha256": "bd80fe954d709fcc4458337fd0853c2af11ca6db096015f737eef4e217bae99e",
   "managedResourceRecipeSha256": "a6090521004747c5ad5e15cb52419bfea21a04bd6db91a7e3686b89521448362",
-  "resourceIdentityRecipeSha256": "af024a193b47d9e1b0ea9e7f45b7e8b794d1b57886e6324b601224d955f437a5"
+  "resourceIdentityRecipeSha256": "497c831c9cd7f3dbf466f9ffbad1ccd58633ee89a4f6b5105a8bad42645d0c25",
+  "patchedSourceFileCount": 1429,
+  "upstreamCargoLockSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a"
 }

@@ -16,6 +16,23 @@ const { sendMessageInvokeMock, emitterEmitMock } = vi.hoisted(() => ({
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    auth: { currentUser: { invoke: vi.fn().mockResolvedValue({ id: 'owner-1' }) } },
+    conversation: {
+      ensureRuntime: {
+        invoke: vi.fn().mockResolvedValue({
+          recovered: false,
+          config_options: [],
+          runtime: {
+            state: 'idle',
+            can_send_message: true,
+            has_task: false,
+            is_processing: false,
+            pending_confirmations: 0,
+            turn_id: null,
+          },
+        }),
+      },
+    },
     acpConversation: {
       sendMessage: {
         invoke: sendMessageInvokeMock,
@@ -43,6 +60,7 @@ vi.mock('react-i18next', () => ({
 describe('useAcpInitialMessage', () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     vi.clearAllMocks();
   });
 

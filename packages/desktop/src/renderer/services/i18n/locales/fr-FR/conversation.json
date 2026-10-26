@@ -782,5 +782,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Développer le plan",
     "collapse": "Réduire le plan"
+  },
+  "managedOperation": {
+    "uncertain": "Le résultat de la demande est inconnu. Consultez l’historique ; elle n’a pas été renvoyée.",
+    "storageUnavailable": "La demande n’a pas pu être enregistrée de manière fiable et n’a pas été envoyée.",
+    "conflict": "Cette demande a déjà été envoyée avec un contenu différent. Consultez l’historique.",
+    "interrupted": "La demande a été interrompue. Certaines modifications peuvent subsister ; consultez l’historique."
   }
 }

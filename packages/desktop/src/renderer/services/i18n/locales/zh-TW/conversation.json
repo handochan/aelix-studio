@@ -782,5 +782,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展開計劃",
     "collapse": "收合計劃"
+  },
+  "managedOperation": {
+    "uncertain": "無法確認請求結果。請檢查歷史記錄；未自動重新傳送。",
+    "storageUnavailable": "無法安全儲存請求資訊，因此未傳送。",
+    "conflict": "此請求已以不同內容傳送。請檢查歷史記錄。",
+    "interrupted": "請求已中斷，可能已產生部分變更。請檢查歷史記錄。"
   }
 }

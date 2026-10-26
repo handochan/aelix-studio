@@ -782,5 +782,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "계획 펼치기",
     "collapse": "계획 접기"
+  },
+  "managedOperation": {
+    "uncertain": "요청 결과를 확인할 수 없습니다. 기록을 확인하세요. 자동으로 다시 보내지 않았습니다.",
+    "storageUnavailable": "요청 정보를 안전하게 저장하지 못해 전송하지 않았습니다.",
+    "conflict": "이 요청은 이미 다른 내용으로 전송됐습니다. 기록을 확인하세요.",
+    "interrupted": "요청이 중단됐습니다. 일부 변경이 남아 있을 수 있으니 기록을 확인하세요."
   }
 }

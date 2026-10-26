@@ -47,7 +47,7 @@ for (const [name, source] of [
     name,
     path.join(import.meta.dirname, name),
   ]),
-  ['launch.cjs', path.join(import.meta.dirname, '../launch.cjs')],
+  ['launch.cjs', path.join(import.meta.dirname, '../host-forwarding/launch.cjs')],
 ])
   if (manifest.recipeSha256?.[name] !== digest(source))
     throw new Error('Stale payload recipe: archive the owned .local/packaging/runtime and rebuild');

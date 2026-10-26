@@ -176,6 +176,125 @@ describe('useConversationCommandQueue drain', () => {
     sessionStorage.clear();
   });
 
+  it('preserves an in-flight operation when pending queue items are cleared', async () => {
+    let finish!: () => void;
+    const onExecute = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const { result } = renderQueue({ conversation_id: 'conv-flight', runtimeGate: idleGate, onExecute });
+    let id = '';
+    act(() => {
+      id = result.current.enqueue({ input: 'uncertain request', files: [] })!.id;
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    act(() => {
+      result.current.sendNow(id);
+    });
+    await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
+    const binding = {
+      operation: { schema: 'aelix.operation/1' as const, id, host_store_id: 'a'.repeat(32) },
+      request_digest: 'b'.repeat(64),
+    };
+    await act(async () => {
+      await result.current.bindOperation(id, binding);
+    });
+    act(() => {
+      result.current.clear();
+    });
+    await waitFor(() =>
+      expect(JSON.parse(sessionStorage.getItem(storageKey('conv-flight'))!).inFlight.operation_binding).toEqual(binding)
+    );
+    await act(async () => {
+      finish();
+    });
+  });
+
+  it('does not replace the first in-flight identity with a second send-now', async () => {
+    let finish!: () => void;
+    const onExecute = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        })
+    );
+    const { result } = renderQueue({ conversation_id: 'conv-parallel', runtimeGate: idleGate, onExecute });
+    act(() => {
+      result.current.enqueue({ input: 'first', files: [] });
+      result.current.enqueue({ input: 'second', files: [] });
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(2));
+    const [first, second] = result.current.items;
+    act(() => {
+      result.current.sendNow(first.id);
+      result.current.sendNow(second.id);
+    });
+    await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(sessionStorage.getItem(storageKey('conv-parallel'))!).inFlight.id).toBe(first.id);
+    await act(async () => {
+      finish();
+    });
+  });
+
+  it('quarantines an unbound crash window instead of automatically repeating it', async () => {
+    sessionStorage.setItem(
+      storageKey('conv-crash'),
+      JSON.stringify({
+        items: [],
+        mode: 'auto',
+        isPaused: false,
+        inFlight: { id: 'original', input: 'possibly sent', files: [], created_at: 1 },
+      })
+    );
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    const { result } = renderQueue({ conversation_id: 'conv-crash', runtimeGate: idleGate, onExecute });
+    await waitFor(() => expect(result.current.items[0]?.operation_binding_invalid).toBe(true));
+    expect(result.current.isPaused).toBe(true);
+    expect(onExecute).not.toHaveBeenCalled();
+  });
+
+  it('restores a bound crash window with its original operation for reconciliation', async () => {
+    const binding = {
+      operation: { schema: 'aelix.operation/1', id: 'original', host_store_id: 'a'.repeat(32) },
+      request_digest: 'b'.repeat(64),
+    };
+    sessionStorage.setItem(
+      storageKey('conv-bound'),
+      JSON.stringify({
+        items: [],
+        mode: 'auto',
+        isPaused: false,
+        inFlight: { id: 'original', input: 'possibly sent', files: [], created_at: 1, operation_binding: binding },
+      })
+    );
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    renderQueue({ conversation_id: 'conv-bound', runtimeGate: idleGate, onExecute });
+    await waitFor(() =>
+      expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ id: 'original', operation_binding: binding }))
+    );
+  });
+
+  it('refuses a queue binding whose durable write fails', async () => {
+    const { result } = renderQueue({ conversation_id: 'conv-quota', runtimeGate: processingGate });
+    act(() => {
+      result.current.enqueue({ input: 'not admitted', files: [] });
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    const id = result.current.items[0].id;
+    const binding = {
+      operation: { schema: 'aelix.operation/1' as const, id, host_store_id: 'a'.repeat(32) },
+      request_digest: 'b'.repeat(64),
+    };
+    vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {
+      throw new DOMException('quota');
+    });
+    await act(async () => {
+      await expect(result.current.bindOperation(id, binding)).rejects.toThrow('OPERATION_STORAGE_UNAVAILABLE');
+    });
+  });
+
   it('drains a queued command when the runtime becomes idle', async () => {
     const onExecute = vi.fn().mockResolvedValue(undefined);
     const { result, rerender } = renderQueue({

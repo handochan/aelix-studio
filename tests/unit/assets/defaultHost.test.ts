@@ -55,9 +55,9 @@ beforeEach(() => {
     licenseFileSha256: policy.upstreamLicenseSha256,
     releasedHostBytes: false,
     nativePatches: [],
-    originalSourceFilesVerified: 1420,
-    patchedSourceFilesVerified: 1420,
-    sourceFilesAfterBuildVerified: 1420,
+    originalSourceFilesVerified: policy.sourceFileCount,
+    patchedSourceFilesVerified: policy.patchedSourceFileCount ?? policy.sourceFileCount,
+    sourceFilesAfterBuildVerified: policy.patchedSourceFileCount ?? policy.sourceFileCount,
     cargoVersion: 'cargo 1.95.0 (fixture)',
     rustcVersionVerbose: 'rustc 1.95.0 (fixture)',
     binarySha256: binaryHash,
@@ -76,6 +76,25 @@ beforeEach(() => {
 afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 
 describe('default host launch provenance', () => {
+  it('keeps original archive counts separate from declared patched additions', () => {
+    const previous = policy.patchedSourceFileCount;
+    try {
+      policy.patchedSourceFileCount = policy.sourceFileCount + 1;
+      receipt.sourcePolicySha256 = hash(stable(policy));
+      receipt.patchedSourceFilesVerified = policy.patchedSourceFileCount;
+      receipt.sourceFilesAfterBuildVerified = policy.patchedSourceFileCount;
+      writeJson('build-receipt.json', receipt);
+      refreshManifest();
+      expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-default-source');
+      receipt.sourceFilesAfterBuildVerified = policy.sourceFileCount;
+      writeJson('build-receipt.json', receipt);
+      refreshManifest();
+      expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow(/provenance/);
+    } finally {
+      if (previous === undefined) delete policy.patchedSourceFileCount;
+      else policy.patchedSourceFileCount = previous;
+    }
+  });
   it('accepts the declared build and complete managed resources', () => {
     expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-default-source');
   });

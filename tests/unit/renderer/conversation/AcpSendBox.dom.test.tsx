@@ -80,12 +80,25 @@ const {
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    auth: { currentUser: { invoke: vi.fn().mockResolvedValue({ id: 'owner-1' }) } },
     acpConversation: {
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
     },
     conversation: {
+      ensureRuntime: {
+        invoke: vi.fn().mockResolvedValue({
+          runtime: {
+            state: 'idle',
+            is_processing: false,
+            can_send_message: true,
+            has_task: false,
+            pending_confirmations: 0,
+            turn_id: null,
+          },
+        }),
+      },
       stop: {
         invoke: stopInvokeMock,
       },
@@ -342,6 +355,7 @@ const makeMessageState = (): UseAcpMessageReturn => ({
 
 describe('AcpSendBox', () => {
   beforeEach(() => {
+    localStorage.clear();
     vi.clearAllMocks();
     isMobileMock.current = false;
     mobileActionSheetEntries.current = [];

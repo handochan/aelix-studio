@@ -8,7 +8,7 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import platform
 import shutil
 import subprocess
@@ -50,26 +50,56 @@ def extract(archive, destination):
 
 
 def verify_source(archive, source_root, config, patched):
-    """Compare all original archive files, allowing only the reviewed patch."""
+    """Verify a closed source inventory, including declared additions/deletions."""
     if digest(archive) != config['upstream']['archiveSha256']:
         raise ValueError('Source archive digest differs from the pinned baseline')
-    count = 0
+    def relative_path(name):
+        path = PurePosixPath(name)
+        if (not name or path.is_absolute() or path.as_posix() != name or '..' in path.parts
+                or '\\' in name or ':' in name):
+            raise ValueError('Unsafe source inventory path')
+        return name
+
+    expected = {}
     with tarfile.open(archive) as source:
         for member in source.getmembers():
             if not member.isfile():
                 continue
-            relative = Path(*Path(member.name).parts[1:]).as_posix()
-            expected = hashlib.sha256(source.extractfile(member).read()).hexdigest()
-            patch_spec = config['patch']['files'].get(relative)
-            if patch_spec:
-                if expected != patch_spec['beforeSha256']:
-                    raise ValueError('Patch base digest differs: ' + relative)
-                if patched:
-                    expected = patch_spec['afterSha256']
-            if digest(Path(source_root) / relative) != expected:
-                raise ValueError('Source file differs: ' + relative)
-            count += 1
-    return count
+            relative = relative_path(PurePosixPath(*PurePosixPath(member.name).parts[1:]).as_posix())
+            if relative in expected:
+                raise ValueError('Duplicate source inventory member')
+            expected[relative] = hashlib.sha256(source.extractfile(member).read()).hexdigest()
+    original_count = len(expected)
+    for name, specification in config['patch']['files'].items():
+        relative_path(name)
+        before, after = specification['beforeSha256'], specification['afterSha256']
+        if expected.get(name) != before or (before is None and after is None):
+            raise ValueError('Patch base digest differs: ' + name)
+        if patched:
+            if after is None:
+                expected.pop(name)
+            else:
+                if not isinstance(after, str) or len(after) != 64 or any(c not in '0123456789abcdef' for c in after):
+                    raise ValueError('Patch member digest is invalid')
+                expected[name] = after
+    original_declared = config.get('sourceFileCount')
+    declared = config.get('patchedSourceFileCount', original_declared) if patched else original_declared
+    if ((original_declared is not None and original_count != original_declared)
+            or (declared is not None and len(expected) != declared)):
+        raise ValueError('Source file count differs from the declared inventory')
+    actual = set()
+    for path in Path(source_root).rglob('*'):
+        if path.is_symlink() or (not path.is_dir() and not path.is_file()):
+            raise ValueError('Unsupported source inventory member')
+        if path.is_file():
+            actual.add(path.relative_to(source_root).as_posix())
+    if actual != set(expected):
+        # Do not echo an undeclared cache member's possibly sensitive filename.
+        raise ValueError('Source inventory differs from the reviewed manifest')
+    for name, sha in expected.items():
+        if digest(Path(source_root) / name) != sha:
+            raise ValueError('Source file differs: ' + name)
+    return len(expected)
 
 
 def apply_patch(source_root, config):
@@ -184,11 +214,17 @@ def main():
     try:
         extract(archive, source_root)
         report['originalSourceFilesVerified'] = verify_source(archive, source_root, config, patched=False)
-        if digest(source_root / 'Cargo.lock') != config['cargoLockSha256'] or digest(source_root / 'LICENSE') != config['upstreamLicenseSha256']:
+        if (digest(source_root / 'Cargo.lock') != config.get('upstreamCargoLockSha256', config['cargoLockSha256'])
+                or digest(source_root / 'LICENSE') != config['upstreamLicenseSha256']):
             raise ValueError('Upstream Cargo lock or license differs')
         apply_patch(source_root, config)
         report['patchedSourceFilesVerified'] = verify_source(archive, source_root, config, patched=True)
-        target = args.target_dir.resolve() if args.target_dir else source_root / 'target'
+        if (digest(source_root / 'Cargo.lock') != config['cargoLockSha256']
+                or digest(source_root / 'LICENSE') != config['upstreamLicenseSha256']):
+            raise ValueError('Patched Cargo lock or preserved license differs')
+        target = args.target_dir.resolve() if args.target_dir else output / 'target'
+        if target.is_relative_to(source_root):
+            raise ValueError('Cargo output must remain outside the sealed source inventory')
         prefix = container_prefix(config, source_root, output, target, target_name, report) if container else []
         environment = dict(os.environ)
         if config.get('purpose') == 'default_runtime':

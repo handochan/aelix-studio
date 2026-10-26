@@ -1,14 +1,18 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
+import ast
+import asyncio
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from test_preparation import ROOT, prepare
 
@@ -38,6 +42,191 @@ def signed_macho_fixture():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_forwarding_terminal_receipt_does_not_replace_runtime_readiness(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_idle', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        idle = dict(state='idle', can_send_message=True, is_processing=False,
+                    pending_confirmations=0, turn_id=None)
+        observations = [dict(idle, state='running', turn_id='original-turn'),
+                        dict(idle, can_send_message=False),
+                        dict(idle, is_processing=True),
+                        dict(idle, pending_confirmations=1),
+                        dict(idle, turn_id='original-turn'), idle]
+        calls = []
+
+        async def api(path, method='GET'):
+            calls.append((path, method))
+            return 200, dict(operation={'state': 'completed'}, runtime=observations.pop(0))
+
+        asyncio.run(wire.wait_runtime_idle(api, '/api/conversations/original', timeout=1))
+        self.assertFalse(observations)
+        self.assertEqual(calls, [('/api/conversations/original', 'GET')] * 6)
+
+    def test_forwarding_runtime_readiness_times_out_without_a_replacement_post(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_idle_timeout', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        calls = []
+
+        async def api(path, method='GET'):
+            calls.append((path, method))
+            return 200, dict(runtime={'state': 'running', 'turn_id': 'original-turn'})
+
+        with self.assertRaises(TimeoutError):
+            asyncio.run(wire.wait_runtime_idle(api, '/api/conversations/original', timeout=0.05))
+        self.assertTrue(calls)
+        self.assertTrue(all(call == ('/api/conversations/original', 'GET') for call in calls))
+
+    def test_owned_fixture_cleanup_retries_only_transient_windows_sharing_violations(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_cleanup', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        sharing_violation = PermissionError('synthetic owned file is closing')
+        sharing_violation.winerror = 32
+        with tempfile.TemporaryDirectory() as parent:
+            directory = tempfile.TemporaryDirectory(dir=parent)
+            owned = Path(directory.name)
+            original_cleanup = directory.cleanup
+            calls = []
+
+            def closing_store():
+                calls.append(True)
+                if len(calls) < 3:
+                    raise sharing_violation
+                original_cleanup()
+
+            with patch.object(directory, 'cleanup', closing_store), patch.object(wire.time, 'sleep'):
+                wire.cleanup_owned_temporary_directory(directory)
+            self.assertEqual(len(calls), 3)
+            self.assertFalse(owned.exists())
+
+        for error, timeout in ((sharing_violation, 0), (PermissionError('access denied'), 10)):
+            with self.subTest(error=error, timeout=timeout), tempfile.TemporaryDirectory() as parent:
+                directory = tempfile.TemporaryDirectory(dir=parent)
+                try:
+                    with patch.object(directory, 'cleanup', side_effect=error) as cleanup:
+                        with self.assertRaises(PermissionError):
+                            wire.cleanup_owned_temporary_directory(directory, timeout=timeout)
+                        cleanup.assert_called_once()
+                    self.assertTrue(Path(directory.name).exists())
+                finally:
+                    directory.cleanup()
+
+    def test_forwarding_observers_support_unicode_paths_with_a_cp1252_locale(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        original_write_text = Path.write_text
+
+        def windows_write_text(path, data, encoding=None, errors=None):
+            # Emulate the default at the call boundary, before Python's own
+            # UTF-8 mode can normalize an omitted encoding into UTF-8.
+            return original_write_text(path, data, encoding=encoding or 'cp1252', errors=errors)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / '한글 경로'
+            root.mkdir()
+            payload = root / r'설치 payload\nested'
+            with patch.object(Path, 'write_text', windows_write_text):
+                with self.assertRaises(UnicodeEncodeError):
+                    (root / 'locale-probe').write_text('한글')
+                entry, native, _, _ = wire.observers(root, payload)
+            for script in (entry, native):
+                raw = script.read_bytes()
+                compile(raw, str(script), 'exec')
+                self.assertIn('한글 경로', raw.decode('utf-8'))
+            tree = ast.parse(native.read_text(encoding='utf-8'))
+            literals = [node.value for node in ast.walk(tree)
+                        if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+            self.assertEqual(literals.count(str(payload.resolve() / 'launch.py')), 2)
+
+    def test_forwarding_startup_events_and_diagnostics_are_bounded(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_startup', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        secret = 'SYNTHETIC_STARTUP_SECRET_MUST_NOT_APPEAR'
+        event = b'AIONCORE_LISTENING {"host":"127.0.0.1","port":54321}\n'
+        self.assertIsNone(wire.listening_port(event[:-1]))
+        self.assertEqual(wire.listening_port(event), 54321)
+        for payload in ({'host': 'external.example', 'port': 54321},
+                        {'host': '127.0.0.1', 'port': True},
+                        {'host': '127.0.0.1', 'port': 65536}):
+            with self.assertRaisesRegex(RuntimeError, '^Invalid owned host listening event$'):
+                wire.listening_port(b'AIONCORE_LISTENING ' + json.dumps(payload).encode() + b'\n')
+        previous = event + b'AIONCORE_READY\n'
+        current = (secret + '\nBOOTSTRAP_BIND_FAILED\n').encode()
+        diagnostic = wire.startup_diagnostics((previous + current)[len(previous):], 3, 'crash_restart')
+        self.assertTrue(diagnostic['bindFailed'])
+        self.assertFalse(diagnostic['listeningObserved'])
+        self.assertFalse(diagnostic['readyObserved'])
+        self.assertEqual(diagnostic['returncode'], 3)
+        self.assertNotIn(secret, json.dumps(diagnostic))
+        self.assertEqual(wire.startup_diagnostics(current, secret, secret)['phase'], 'unknown')
+        self.assertIsNone(wire.startup_diagnostics(current, secret, secret)['returncode'])
+
+    def test_live_database_snapshot_detects_committed_wal_only_secret(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_snapshot', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        secret = b'SYNTHETIC_REVERSE_SECRET'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / 'aionui-backend.db'
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute('PRAGMA journal_mode=WAL')
+                connection.execute('PRAGMA wal_autocheckpoint=0')
+                connection.execute('CREATE TABLE proof(value BLOB)')
+                connection.commit()
+                self.assertEqual(wire.verify_live_database_snapshots(root, secret), 1)
+                connection.execute('INSERT INTO proof VALUES(?)', (secret,))
+                connection.commit()
+                self.assertNotIn(secret, database.read_bytes())
+                with self.assertRaisesRegex(AssertionError, '^Reverse payload persisted in live host database snapshot$'):
+                    wire.verify_live_database_snapshots(root, secret)
+            finally:
+                connection.close()
+
+    def test_live_database_snapshot_deadline_and_lock_fail_closed(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_snapshot_deadline', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            connection = sqlite3.connect(root / 'aionui-backend.db')
+            try:
+                connection.execute('CREATE TABLE proof(value TEXT)')
+                connection.commit()
+                with self.assertRaises(TimeoutError):
+                    wire.verify_live_database_snapshots(root, b'SENTINEL', timeout=0)
+                connection.execute('BEGIN EXCLUSIVE')
+                with self.assertRaises((TimeoutError, sqlite3.OperationalError)):
+                    wire.verify_live_database_snapshots(root, b'SENTINEL', timeout=0.05)
+            finally:
+                connection.close()
+
+    def test_quiescent_scan_refuses_disappearing_logs_with_sidecar_suffixes(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_sidecars', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        database = Path('owned/data/aionui-backend.db')
+        sidecar = Path(str(database) + '-wal')
+        after = {database}
+        self.assertEqual(wire.removed_database_sidecars(after | {sidecar}, after, {database}), {sidecar})
+        for suffix in ('-wal', '-shm', '-journal'):
+            log = Path('owned/logs') / ('ordinary-log' + suffix)
+            with self.assertRaisesRegex(AssertionError, '^Unscanned non-sidecar persistence file disappeared$'):
+                wire.removed_database_sidecars(after | {log}, after, {database})
+
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -92,7 +281,7 @@ class ReceiptTests(unittest.TestCase):
                 baseline.write_text('{}')
                 for filename in ('core', 'launch.cjs', 'qualification.json', 'entrypoint'):
                     (root / filename).write_bytes(b'original')
-                shutil.copy(ROOT / 'scripts/studio-preview/launch.cjs', root / 'launch.cjs')
+                shutil.copy(ROOT / 'scripts/studio-preview/host-forwarding/launch.cjs', root / 'launch.cjs')
                 original = hashlib.sha256(b'original').hexdigest()
                 receipt = dict(baselineSha256=prepare.digest(baseline), aioncoreBinary='core',
                                aioncoreBinarySha256=original, launcherSha256=prepare.digest(root / 'launch.cjs'),

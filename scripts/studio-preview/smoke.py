@@ -84,8 +84,8 @@ print(json.dumps({"native":verify(manifest,root/"wheels"),"adapter":adapter_rece
                 raise AssertionError('Installed native/ACP payload changed during host smoke')
             report.update(identityBefore=identity_before, identityAfter=identity_after,
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'],
-                          harnessSourceSha256={name: digest(Path(__file__).with_name(name)) for name in
-                              ('prepare.py', 'smoke.py', 'hostSmoke.mjs', 'launch.cjs')},
+                          harnessSourceSha256={name: digest(Path(__file__).parent / name) for name in
+                              ('prepare.py', 'smoke.py', 'hostSmoke.mjs', 'host-forwarding/launch.cjs')},
                           builtAppSha256={name: digest(ROOT / name) for name in ('out/main/index.js', 'out/preload/index.js')})
             report['status'] = 'passed'
             report_path.write_text(json.dumps(report, indent=2) + '\n')

@@ -783,5 +783,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plan",
     "collapse": "Contraer plan"
+  },
+  "managedOperation": {
+    "uncertain": "Se desconoce el resultado de la solicitud. Revisa el historial; no se ha vuelto a enviar.",
+    "storageUnavailable": "No se pudo guardar la solicitud de forma segura, por lo que no se envió.",
+    "conflict": "Esta solicitud ya se envió con otro contenido. Revisa el historial.",
+    "interrupted": "La solicitud se interrumpió. Puede haber cambios parciales; revisa el historial."
   }
 }

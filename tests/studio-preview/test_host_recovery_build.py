@@ -18,6 +18,55 @@ SPEC.loader.exec_module(build)
 
 
 class HostRecoveryBuildTests(unittest.TestCase):
+    def source_fixture(self, root, files):
+        archive = root / 'source.tar'
+        with tarfile.open(archive, 'w') as out:
+            for name, data in files.items():
+                member = tarfile.TarInfo('repo/' + name)
+                member.size = len(data)
+                out.addfile(member, io.BytesIO(data))
+        config = {'upstream': {'archiveSha256': build.digest(archive)},
+                  'patch': {'files': {}}, 'sourceFileCount': len(files)}
+        build.extract(archive, root / 'source')
+        return archive, config
+
+    def test_an_undeclared_build_script_is_refused_without_echoing_its_name(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive, config = self.source_fixture(root, {'source.rs': b'original'})
+            sentinel = 'SYNTHETIC_PRIVATE_BUILD_SCRIPT.rs'
+            (root / 'source' / sentinel).write_bytes(b'undeclared')
+            with self.assertRaisesRegex(ValueError, 'Source inventory differs') as caught:
+                build.verify_source(archive, root / 'source', config, patched=False)
+            self.assertNotIn(sentinel, str(caught.exception))
+
+    def test_declared_additions_have_separate_patched_counts_and_hash_checks(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive, config = self.source_fixture(root, {'source.rs': b'original'})
+            config['patch']['files']['added.rs'] = {'beforeSha256': None,
+                                                   'afterSha256': hashlib.sha256(b'added').hexdigest()}
+            config['patchedSourceFileCount'] = 2
+            self.assertEqual(build.verify_source(archive, root / 'source', config, patched=False), 1)
+            (root / 'source/added.rs').write_bytes(b'added')
+            self.assertEqual(build.verify_source(archive, root / 'source', config, patched=True), 2)
+            (root / 'source/added.rs').write_bytes(b'changed')
+            with self.assertRaisesRegex(ValueError, 'Source file differs'):
+                build.verify_source(archive, root / 'source', config, patched=True)
+
+    def test_a_declared_deletion_does_not_hide_an_undeclared_source_member(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            archive, config = self.source_fixture(root, {'kept.rs': b'kept', 'removed.rs': b'old'})
+            config['patch']['files']['removed.rs'] = {'beforeSha256': hashlib.sha256(b'old').hexdigest(),
+                                                     'afterSha256': None}
+            config['patchedSourceFileCount'] = 1
+            (root / 'source/removed.rs').unlink()
+            self.assertEqual(build.verify_source(archive, root / 'source', config, patched=True), 1)
+            (root / 'source/unexpected.rs').write_bytes(b'extra')
+            with self.assertRaisesRegex(ValueError, 'Source inventory differs'):
+                build.verify_source(archive, root / 'source', config, patched=True)
+
     def test_archive_escape_is_refused_before_any_source_is_written(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)

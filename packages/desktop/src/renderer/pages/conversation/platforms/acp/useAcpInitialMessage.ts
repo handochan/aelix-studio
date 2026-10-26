@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { ipcBridge } from '@/common';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import { parseError, uuid } from '@/common/utils';
@@ -16,6 +15,15 @@ import { getConversationRuntimeWorkspaceErrorMessage } from '../../utils/convers
 import type { ConversationRuntimeSendFailure } from '../../runtime/conversationRuntimeViewStore';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
+import type { ManagedRequestBinding } from '@/common/types/platform/acpTypes';
+import {
+  getManagedOperationErrorMessage,
+  isManagedBinding,
+  ManagedOperationError,
+  sendManagedMessage,
+} from './managedOperations';
+
+const submittingInitials = new Set<string>();
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
@@ -52,8 +60,8 @@ export const useAcpInitialMessage = ({
 
     if (!storedMessage) return;
 
-    // Clear immediately to prevent duplicate sends (e.g., if component remounts while sendMessage is pending)
-    sessionStorage.removeItem(storageKey);
+    if (submittingInitials.has(storageKey)) return;
+    submittingInitials.add(storageKey);
 
     const sendInitialMessage = async () => {
       try {
@@ -69,23 +77,46 @@ export const useAcpInitialMessage = ({
               .map((f: unknown) => (typeof f === 'string' ? uploadFileRef(f) : f))
               .filter(isChatFileRef)
           : [];
+        const operationId =
+          typeof initialMessage.operation_id === 'string' ? initialMessage.operation_id : `initial-${conversation_id}`;
+        if (initialMessage.operation_binding !== undefined && !isManagedBinding(initialMessage.operation_binding))
+          throw new ManagedOperationError('OPERATION_UNCERTAIN');
+        const binding: ManagedRequestBinding | undefined = isManagedBinding(initialMessage.operation_binding)
+          ? initialMessage.operation_binding
+          : undefined;
+        const frozen = { input, files, operation_id: operationId, ...(binding ? { operation_binding: binding } : {}) };
+        sessionStorage.setItem(storageKey, JSON.stringify(frozen));
 
         markSendStarted?.();
         setAiProcessing(true);
 
         void checkAndUpdateTitle(conversation_id, input);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id: conversation_id,
-          files,
-        });
+        const result = await sendManagedMessage(
+          {
+            input,
+            conversation_id: conversation_id,
+            files,
+          },
+          {
+            id: operationId,
+            binding,
+            onPrepared: (prepared) =>
+              sessionStorage.setItem(storageKey, JSON.stringify({ ...frozen, operation_binding: prepared })),
+            onLegacy: () => sessionStorage.removeItem(storageKey),
+          }
+        );
+        sessionStorage.removeItem(storageKey);
         markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
+        if (result.operation?.replayed) setAiProcessing(result.runtime.is_processing);
 
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');
       } catch (error) {
         const errorMessageText =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+          getManagedOperationErrorMessage(error, t) ||
+          getConversationRuntimeWorkspaceErrorMessage(error, t) ||
+          parseError(error) ||
+          t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed?.({
@@ -131,9 +162,11 @@ export const useAcpInitialMessage = ({
       }
     };
 
-    sendInitialMessage().catch((error) => {
-      console.error('Failed to send initial message:', error);
-    });
+    sendInitialMessage()
+      .finally(() => submittingInitials.delete(storageKey))
+      .catch((error) => {
+        console.error('Failed to send initial message:', error);
+      });
   }, [
     addOrUpdateMessage,
     backend,

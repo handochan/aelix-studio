@@ -1,8 +1,8 @@
 # Permission recovery host (Studio #22 and #16)
 
 The default bootstrap and packaging policy is [default.json](default.json).
-It uses the same reviewed patch as the historical Darwin dev candidate, with
-Rust 1.95.0 `release` builds for `darwin-arm64`, `darwin-x64`, `linux-arm64`,
+It includes reviewed permission recovery and the
+[managed forwarding delta](../host-forwarding/README.md), with Rust 1.95.0 `release` builds for `darwin-arm64`, `darwin-x64`, `linux-arm64`,
 `linux-x64`, and `win32-x64`. Darwin/Windows use native compiler toolchains; Linux
 uses a matching-CPU Debian 11 compiler container pinned by OCI digests and recipe
 hash. Public beta.2 wheels remain unchanged.
@@ -18,9 +18,12 @@ never selects an older release or a system PATH host. An explicit
 `AIONUI_BACKEND_BIN` remains an operator/developer override, outside default
 installer acceptance.
 
-Build receipts bind the upstream archive, three patched files, all 1,420 source
-members, Rust toolchain, build/identity recipes, Cargo lock, verbatim license and
-binary code identity and the exported managed-resource inventory. Desktop/WebUI
+Build receipts bind the upstream archive, every added/deleted/changed member,
+the closed original/final source inventories, Rust toolchain, build/identity
+recipes, Cargo locks, verbatim license, binary code identity and the exported
+managed-resource inventory. The exact current counts and hashes live in
+`default.json`; the permission-only three-file/1,420-member candidate remains
+historical evidence in `source.json` and its original qualification receipt. Desktop/WebUI
 launch verifies that identity and the whole
 managed-resource inventory before spawning. Mach-O identity normalizes only
 bounded terminal signing metadata. Receipts detect delivery drift; they are not

@@ -782,5 +782,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expand plan",
     "collapse": "Collapse plan"
+  },
+  "managedOperation": {
+    "uncertain": "The request outcome is unknown. Check history; it has not been sent again.",
+    "storageUnavailable": "The request could not be saved safely, so it was not sent.",
+    "conflict": "This request was already sent with different content. Check history.",
+    "interrupted": "The request was interrupted. Some changes may remain; check history."
   }
 }
