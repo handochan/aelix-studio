@@ -11,6 +11,14 @@ const {
   verifyDefaultHostBundle,
 } = require('../../../packages/shared-scripts/src/default-host.js');
 
+function defaultHostCacheKey(policyHash, recipeHash, target) {
+  // MSVC object outputs hit MAX_PATH when the full policy/recipe digest is in
+  // every path. Keep the Windows locator short; receipts still verify all bits.
+  return target.startsWith('win32-')
+    ? target + '-' + policyHash.slice(0, 20)
+    : policyHash + '-' + recipeHash.slice(0, 16) + '-' + target;
+}
+
 function prepareDefaultHost({ projectRoot, platform, arch, python }) {
   const target = `${platform}-${arch}`;
   if (!policy.targets[target] || target !== `${process.platform}-${process.arch}`)
@@ -20,7 +28,7 @@ function prepareDefaultHost({ projectRoot, platform, arch, python }) {
   const recipe = path.join(here, 'build.py');
   const { createHash } = require('node:crypto');
   const policyHash = createHash('sha256').update(stable(policy)).digest('hex');
-  const key = policyHash + '-' + digest(recipe).slice(0, 16) + '-' + target;
+  const key = defaultHostCacheKey(policyHash, digest(recipe), target);
   const cache = path.join(projectRoot, '.local/default-host', key);
   const output = path.join(cache, 'build');
   const executable = platform === 'win32' ? 'aioncore.exe' : 'aioncore';
@@ -102,7 +110,7 @@ function prepareDefaultHost({ projectRoot, platform, arch, python }) {
   verifyDefaultHostBundle(directory, target);
   return { prepared: true, dir: directory, sourceType: result.sourceType };
 }
-module.exports = { prepareDefaultHost };
+module.exports = { prepareDefaultHost, defaultHostCacheKey };
 
 if (require.main === module) {
   require('../../../packages/shared-scripts/src/prepare-aioncore.js').prepareAioncore({

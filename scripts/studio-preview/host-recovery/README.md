@@ -21,7 +21,12 @@ binary code identity and the exported managed-resource inventory. Desktop/WebUI
 launch verifies that identity and the whole
 managed-resource inventory before spawning. Mach-O identity normalizes only
 bounded terminal signing metadata. Receipts detect delivery drift; they are not
-a substitute for installer signing or a trusted build pipeline.
+a substitute for installer signing or a trusted build pipeline. The native CI
+images are macOS 15, Ubuntu 24.04 and Windows Server 2022. These results do not
+establish the inherited upstream README's minimum OS versions. ELF GLIBC needs,
+PE runtime imports and actual minimum/clean OS execution remain release gates;
+the upstream release's cross/older Linux build environment and Windows static-CRT
+flags must not be inferred from this source build.
 
 The Provider Preview installer additionally includes the relocatable public-wheel
 native/ACP payload. Ordinary `dist` includes the default Rust host but does not

@@ -137,3 +137,18 @@ describe('default host launch provenance', () => {
     expect(codeIdentity(signed)).not.toBe(codeIdentity(original));
   });
 });
+
+describe('Windows default source build paths', () => {
+  it('keeps the observed aws-lc MSVC output path below MAX_PATH', () => {
+    const { defaultHostCacheKey } = require('../../../scripts/studio-preview/host-recovery/prepareDefaultHost.cjs');
+    const policyHash = 'fc225fb6369c8dca82942671aa63c8508289143b8f49e32664ceaad54411dd46';
+    const recipeHash = '1c0075664430f093' + '0'.repeat(48);
+    const root = String.raw`D:\a\aelix-studio\aelix-studio\.local\default-host`;
+    const suffix =
+      'cargo-target/x86_64-pc-windows-msvc/release/build/aws-lc-sys-c53fc92379a36417/out/out-stdalign_check/4ff06014f56aa32a-stdalign_check.o';
+    const full = policyHash + '-' + recipeHash.slice(0, 16) + '-win32-x64';
+    const key = defaultHostCacheKey(policyHash, recipeHash, 'win32-x64');
+    expect(path.win32.join(root, full, suffix).length).toBeGreaterThan(260);
+    expect(path.win32.join(root, key, suffix).length).toBeLessThan(240);
+  });
+});

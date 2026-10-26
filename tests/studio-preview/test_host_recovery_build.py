@@ -64,3 +64,13 @@ class HostRecoveryBuildTests(unittest.TestCase):
                     'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.autocrlf', 'GIT_CONFIG_VALUE_0': 'true'}):
                 build.apply_patch(source, config)
             self.assertEqual((source / 'test.rs').read_bytes(), b'new\n')
+
+
+    def test_gui_keeps_display_transport_without_importing_provider_secrets_or_user_roots(self):
+        spec = importlib.util.spec_from_file_location('host_recovery_smoke', PATH.with_name('smoke.py'))
+        smoke = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(smoke)
+        isolated = {'HOME': 'owned-home', 'PATH': 'owned-path'}
+        driver = {'DISPLAY': ':91', 'XAUTHORITY': '/owned-xvfb/auth', 'API_KEY': 'synthetic-secret', 'HOME': 'operator-home'}
+        self.assertEqual(smoke.gui_environment(isolated, driver),
+                         dict(isolated, DISPLAY=':91', XAUTHORITY='/owned-xvfb/auth'))

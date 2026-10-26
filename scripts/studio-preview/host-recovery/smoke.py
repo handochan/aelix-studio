@@ -23,6 +23,13 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def gui_environment(base, environment=None):
+    # Preserve only the Xvfb display transport from the driver. Provider routing,
+    # credentials and user roots still come exclusively from the isolated fixture.
+    source = os.environ if environment is None else environment
+    return dict(base, **{key: source[key] for key in ('DISPLAY', 'XAUTHORITY') if key in source})
+
+
 async def run(args, report):
     if args.runtime:
         return await run_installed(args, report)
@@ -68,6 +75,7 @@ async def run(args, report):
                    AIONUI_DISABLE_AUTO_UPDATE='1', AIONUI_CDP_PORT='0',
                    AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
+        env = gui_environment(env)
         process = None
         try:
             process = await asyncio.create_subprocess_exec('node', str(HERE / 'smoke.mjs'), cwd=ROOT, env=env, start_new_session=True)
@@ -188,6 +196,7 @@ def setup(api):
                    AIONUI_DISABLE_DEVTOOLS='1', AIONUI_DISABLE_AUTO_UPDATE='1', AIONUI_CDP_PORT='0',
                    AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
+        env = gui_environment(env)
         process = None
         try:
             process = await asyncio.create_subprocess_exec('node', str(HERE / 'smoke.mjs'), cwd=ROOT, env=env,
