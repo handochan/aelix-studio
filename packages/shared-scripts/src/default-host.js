@@ -94,14 +94,14 @@ function codeIdentity(raw) {
 }
 
 function inventory(directory, { excludeManifest = true } = {}) {
-  const root = fs.realpathSync(directory),
+  const root = fs.realpathSync.native(directory),
     result = {};
   function visit(current) {
     for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
       const file = path.join(current, entry.name),
         relative = path.relative(root, file).split(path.sep).join('/');
       if (excludeManifest && relative === 'manifest.json') continue;
-      const real = fs.realpathSync(file);
+      const real = fs.realpathSync.native(file);
       if (!real.startsWith(root + path.sep)) throw new Error('Default host resource escapes its bundle');
       if (entry.isSymbolicLink()) {
         const link = fs.readlinkSync(file);

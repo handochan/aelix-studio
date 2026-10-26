@@ -63,5 +63,5 @@
   "buildRecipeSha256": "3da97cb9a85257aea565acfeab76d569312df033b92d09b59d8b8420c4ec2469",
   "identityRecipeSha256": "bd80fe954d709fcc4458337fd0853c2af11ca6db096015f737eef4e217bae99e",
   "managedResourceRecipeSha256": "a6090521004747c5ad5e15cb52419bfea21a04bd6db91a7e3686b89521448362",
-  "resourceIdentityRecipeSha256": "cc97a1a245c6977cab656797f5b46861ff7e9b3365227165f07591dab95d40a4"
+  "resourceIdentityRecipeSha256": "af024a193b47d9e1b0ea9e7f45b7e8b794d1b57886e6324b601224d955f437a5"
 }

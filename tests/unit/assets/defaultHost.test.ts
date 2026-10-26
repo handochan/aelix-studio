@@ -111,6 +111,22 @@ describe('default host launch provenance', () => {
     (receipt.buildContainer as Record<string, unknown>).recipeSha256 = 'b'.repeat(64);
     expect(check).toThrow('compiler container or GLIBC compatibility differs');
   });
+  it.runIf(process.platform === 'win32')('verifies a Windows namespaced install path', () => {
+    expect(verifyDefaultHostBundle(path.toNamespacedPath(directory), 'win32-x64').sourceType).toBe(
+      'studio-default-source'
+    );
+  });
+  it('rejects a resource directory junction or symlink escaping the native canonical root', () => {
+    const outside = path.join(root, 'outside');
+    fs.mkdirSync(outside);
+    fs.writeFileSync(path.join(outside, 'extra'), 'outside fixture');
+    fs.symlinkSync(
+      outside,
+      path.join(directory, 'managed-resources/outside'),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
+    expect(() => inventory(directory)).toThrow('resource escapes its bundle');
+  });
   it('rejects replacement code even when the mutable bundle inventory is refreshed', () => {
     fs.writeFileSync(path.join(directory, 'aioncore.exe'), 'replacement code');
     manifest.binaryCodeSha256 = hash('replacement code');

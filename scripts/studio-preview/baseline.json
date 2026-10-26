@@ -115,7 +115,7 @@
         "sha256": "d1ed8d1da869230c18701747d07e8f068db5b8c9442e65261304aeb4c27eacf6"
       }
     },
-    "sourceManifestSha256": "440a0e8d18d31854803d9d3391eade9d50021c180a0306b960c9567b20a3914a"
+    "sourceManifestSha256": "3e1f10018dbc2fd8e03a26d2884bd9cd7853972116eebf12bc556f3f6e963534"
   },
   "acceptance": {
     "hostTargets": ["darwin-arm64"],
