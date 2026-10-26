@@ -51,8 +51,8 @@
     }
   },
   "sourceFileCount": 1420,
-  "buildRecipeSha256": "0741326d91548f37011161f557916d1e274b8be5695743978e9b40dfe698b2bc",
-  "identityRecipeSha256": "39afd091331a5bc025ef7a3acfb315cd0cf1d44fc18e17f338f1b3cec02b0981",
+  "buildRecipeSha256": "1c0075664430f0939e7cede779732064d01a640f6e6fe2ab3576b0e17e2b89f0",
+  "identityRecipeSha256": "bd80fe954d709fcc4458337fd0853c2af11ca6db096015f737eef4e217bae99e",
   "managedResourceRecipeSha256": "a6090521004747c5ad5e15cb52419bfea21a04bd6db91a7e3686b89521448362",
   "resourceIdentityRecipeSha256": "90182629d04fb2b2a5212eb769a37b7b9f37560e198e670e8320ebebd9e03dea"
 }

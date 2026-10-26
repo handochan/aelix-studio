@@ -77,4 +77,3 @@ def host_identity(path, details=None):
     if details is not None:
         details.update(bytes=len(raw))
     return hashlib.sha256(raw).hexdigest()
-

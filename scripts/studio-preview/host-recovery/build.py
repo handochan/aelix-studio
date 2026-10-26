@@ -78,7 +78,7 @@ def apply_patch(source_root, config):
         raise ValueError('Patch digest differs from the reviewed manifest')
     env = dict(os.environ, GIT_CEILING_DIRECTORIES=str(Path(source_root).resolve().parent))
     for check in (True, False):
-        subprocess.run(['git', 'apply', *(['--check'] if check else []), str(patch)],
+        subprocess.run(['git', '-c', 'core.autocrlf=false', '-c', 'core.eol=lf', 'apply', *(['--check'] if check else []), str(patch)],
                        cwd=source_root, env=env, check=True, capture_output=True, text=True)
 
 

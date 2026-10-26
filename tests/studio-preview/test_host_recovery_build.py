@@ -2,6 +2,8 @@
 import hashlib
 import importlib.util
 import io
+import os
+from unittest.mock import patch
 from pathlib import Path
 import tarfile
 import tempfile
@@ -47,3 +49,18 @@ class HostRecoveryBuildTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             with self.assertRaisesRegex(ValueError, 'Patch digest'):
                 build.apply_patch(Path(temporary), {'patch': {'filename': 'permission-restore.patch', 'sha256': '0' * 64}})
+
+
+    def test_patch_keeps_pinned_lf_bytes_under_windows_style_git_configuration(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / 'source'
+            source.mkdir()
+            (source / 'test.rs').write_bytes(b'old\n')
+            diff = root / 'test.patch'
+            diff.write_bytes(b'diff --git a/test.rs b/test.rs\n--- a/test.rs\n+++ b/test.rs\n@@ -1 +1 @@\n-old\n+new\n')
+            config = {'patch': {'filename': diff.name, 'sha256': build.digest(diff)}}
+            with patch.object(build, 'HERE', root), patch.dict(os.environ, {
+                    'GIT_CONFIG_COUNT': '1', 'GIT_CONFIG_KEY_0': 'core.autocrlf', 'GIT_CONFIG_VALUE_0': 'true'}):
+                build.apply_patch(source, config)
+            self.assertEqual((source / 'test.rs').read_bytes(), b'new\n')
