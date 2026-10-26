@@ -2,7 +2,6 @@
 import ast
 import hashlib
 import importlib.util
-import io
 import json
 from pathlib import Path
 import shutil
@@ -46,19 +45,18 @@ class ReceiptTests(unittest.TestCase):
             'forwarding_wire', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
         wire = importlib.util.module_from_spec(wire_spec)
         wire_spec.loader.exec_module(wire)
-        original_open = io.open
+        original_write_text = Path.write_text
 
-        def windows_open(file, mode='r', buffering=-1, encoding=None, errors=None,
-                         newline=None, closefd=True, opener=None):
-            if 'b' not in mode and encoding in (None, 'locale'):
-                encoding = 'cp1252'
-            return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+        def windows_write_text(path, data, encoding=None, errors=None):
+            # Emulate the default at the call boundary, before Python's own
+            # UTF-8 mode can normalize an omitted encoding into UTF-8.
+            return original_write_text(path, data, encoding=encoding or 'cp1252', errors=errors)
 
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / '한글 경로'
             root.mkdir()
             payload = root / r'설치 payload\nested'
-            with patch('io.open', side_effect=windows_open):
+            with patch.object(Path, 'write_text', windows_write_text):
                 with self.assertRaises(UnicodeEncodeError):
                     (root / 'locale-probe').write_text('한글')
                 entry, native, _, _ = wire.observers(root, payload)
