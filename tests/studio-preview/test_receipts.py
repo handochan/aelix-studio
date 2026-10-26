@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import sqlite3
 import subprocess
 import struct
 import sys
@@ -93,6 +94,63 @@ class ReceiptTests(unittest.TestCase):
         self.assertNotIn(secret, json.dumps(diagnostic))
         self.assertEqual(wire.startup_diagnostics(current, secret, secret)['phase'], 'unknown')
         self.assertIsNone(wire.startup_diagnostics(current, secret, secret)['returncode'])
+
+    def test_live_database_snapshot_detects_committed_wal_only_secret(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_snapshot', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        secret = b'SYNTHETIC_REVERSE_SECRET'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            database = root / 'aionui-backend.db'
+            connection = sqlite3.connect(database)
+            try:
+                connection.execute('PRAGMA journal_mode=WAL')
+                connection.execute('PRAGMA wal_autocheckpoint=0')
+                connection.execute('CREATE TABLE proof(value BLOB)')
+                connection.commit()
+                self.assertEqual(wire.verify_live_database_snapshots(root, secret), 1)
+                connection.execute('INSERT INTO proof VALUES(?)', (secret,))
+                connection.commit()
+                self.assertNotIn(secret, database.read_bytes())
+                with self.assertRaisesRegex(AssertionError, '^Reverse payload persisted in live host database snapshot$'):
+                    wire.verify_live_database_snapshots(root, secret)
+            finally:
+                connection.close()
+
+    def test_live_database_snapshot_deadline_and_lock_fail_closed(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_snapshot_deadline', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            connection = sqlite3.connect(root / 'aionui-backend.db')
+            try:
+                connection.execute('CREATE TABLE proof(value TEXT)')
+                connection.commit()
+                with self.assertRaises(TimeoutError):
+                    wire.verify_live_database_snapshots(root, b'SENTINEL', timeout=0)
+                connection.execute('BEGIN EXCLUSIVE')
+                with self.assertRaises((TimeoutError, sqlite3.OperationalError)):
+                    wire.verify_live_database_snapshots(root, b'SENTINEL', timeout=0.05)
+            finally:
+                connection.close()
+
+    def test_quiescent_scan_refuses_disappearing_logs_with_sidecar_suffixes(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_sidecars', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        database = Path('owned/data/aionui-backend.db')
+        sidecar = Path(str(database) + '-wal')
+        after = {database}
+        self.assertEqual(wire.removed_database_sidecars(after | {sidecar}, after, {database}), {sidecar})
+        for suffix in ('-wal', '-shm', '-journal'):
+            log = Path('owned/logs') / ('ordinary-log' + suffix)
+            with self.assertRaisesRegex(AssertionError, '^Unscanned non-sidecar persistence file disappeared$'):
+                wire.removed_database_sidecars(after | {log}, after, {database})
 
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):

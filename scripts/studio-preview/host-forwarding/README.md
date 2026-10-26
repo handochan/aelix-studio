@@ -21,7 +21,12 @@ checkout. The public native beta.2 wheels remain unchanged.
   `--port 0` / listening-event path, while crash recovery retains the original
   data directory, operation fences and pre-crash native/model request baseline.
   Failed startup JSON records only fixed phase/boolean/exit-code diagnostics;
-  raw local host logs are not uploaded. Desktop local mode intentionally retains
+  raw local host logs are not uploaded. The final privacy check uses a live,
+  read-only SQLite online snapshot of committed data, then stops the owned host
+  and scans every remaining log/DB-prefix file as raw bytes. Snapshot/read failures
+  fail the qualification. Before/after file counts and disappearing SQLite
+  sidecars are recorded separately; live raw-sidecar inspection is not claimed.
+  Desktop local mode intentionally retains
   AionCore's existing local default identity; it does not become an authenticated
   network service by enabling this feature.
 - `smoke.py` and `smoke.mjs` exercise the existing Electron initial message,

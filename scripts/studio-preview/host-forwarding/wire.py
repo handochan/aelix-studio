@@ -1,6 +1,7 @@
 """Owned source host + installed ACP + actual public native, synthetic model."""
 
-import argparse, asyncio, hashlib, json, os, signal, subprocess, sys, tempfile, urllib.request, urllib.error
+import argparse, asyncio, hashlib, json, os, signal, sqlite3, subprocess, sys, tempfile, time, urllib.request, urllib.error
+from contextlib import closing
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -44,7 +45,7 @@ def listening_port(raw):
 
 
 def startup_diagnostics(raw, returncode, phase):
-    if phase not in {"initial_startup", "native_contract", "crash_restart", "original_operation_recovery", "authenticated_restart", "authentication_contract"}:
+    if phase not in {"initial_startup", "native_contract", "crash_restart", "original_operation_recovery", "authenticated_restart", "authentication_contract", "persistence_scan"}:
         phase = "unknown"
     if returncode is not None and type(returncode) is not int:
         returncode = None
@@ -58,6 +59,41 @@ def startup_diagnostics(raw, returncode, phase):
         listeningObserved=b"AIONCORE_LISTENING " in raw,
         readyObserved=b"AIONCORE_READY" in raw,
     )
+
+
+def persistence_files(data_root):
+    return sorted(file for file in data_root.rglob("*") if file.is_file()
+                  and ("logs" in file.parts or file.name.startswith("aionui-backend.db")))
+
+
+def removed_database_sidecars(before, after, databases):
+    removed = before - after
+    allowed = {Path(str(database) + suffix) for database in databases
+               for suffix in ("-wal", "-shm", "-journal")}
+    assert removed <= allowed, "Unscanned non-sidecar persistence file disappeared"
+    return removed
+
+
+def verify_live_database_snapshots(data_root, secret, timeout=5):
+    databases = sorted(data_root.rglob("aionui-backend.db"))
+    assert databases, "Owned host database snapshot target missing"
+    deadline = time.monotonic() + timeout
+
+    def progress(_status, _remaining, _total):
+        if time.monotonic() >= deadline:
+            raise TimeoutError("Owned host database snapshot deadline")
+
+    # SQLite itself observes committed WAL state without reading mandatory
+    # locked sidecar ranges as ordinary files. All connections close before
+    # host shutdown; snapshots stay private and are never uploaded.
+    with tempfile.TemporaryDirectory(prefix="studio16-private-db-snapshot-") as temporary:
+        for index, database in enumerate(databases):
+            snapshot = Path(temporary) / (str(index) + ".db")
+            with closing(sqlite3.connect(database.resolve().as_uri() + "?mode=ro", uri=True, timeout=1)) as source:
+                with closing(sqlite3.connect(snapshot)) as destination:
+                    source.backup(destination, pages=128, progress=progress, sleep=0.01)
+            assert secret not in snapshot.read_bytes(), "Reverse payload persisted in live host database snapshot"
+    return len(databases)
 
 
 def observers(root, payload=None):
@@ -595,15 +631,23 @@ async def run(args):
                     "foreign_origin_cookie_mutation_without_csrf_is_rejected_before_admission",
                 ]
             )
-            for file in (root / "host").rglob("*"):
-                if file.is_file() and (
-                    "logs" in file.parts or file.name.startswith("aionui-backend.db")
-                ):
-                    assert b"SYNTHETIC_REVERSE_SECRET" not in file.read_bytes(), (
-                        "Reverse payload persisted in host log/DB"
-                    )
+            phase = "persistence_scan"
+            secret = b"SYNTHETIC_REVERSE_SECRET"
+            before_shutdown = set(persistence_files(root / "host"))
+            databases = set((root / "host").rglob("aionui-backend.db"))
+            snapshot_count = verify_live_database_snapshots(root / "host", secret)
+            # Release live SQLite/file locks before the raw byte scan. This is
+            # the existing bounded host stop, with no skipped unreadable files.
+            process.terminate()
+            await asyncio.wait_for(process.wait(), 10)
+            after_shutdown = set(persistence_files(root / "host"))
+            removed_sidecars = removed_database_sidecars(before_shutdown, after_shutdown, databases)
+            assert after_shutdown, "Owned host persistence scan target missing"
+            for file in after_shutdown:
+                assert secret not in file.read_bytes(), "Reverse payload persisted in quiescent host log/DB"
+            assert secret not in log_path.read_bytes(), "Reverse payload persisted in host stdout log"
             checks.append(
-                "malformed_typed_request_and_sdk_warn_payload_never_enter_host_logs_or_database"
+                "malformed_typed_request_and_sdk_warn_payload_absent_from_host_logs_and_committed_database"
             )
             assert [event["phase"] for event in startup_events] == [
                 "initial_startup", "crash_restart", "authenticated_restart"]
@@ -617,6 +661,11 @@ async def run(args):
                 hostBinarySha256=hashlib.sha256(HOST.read_bytes()).hexdigest(),
                 nativePatches=[],
                 startupEvents=startup_events,
+                liveDatabaseSnapshots=snapshot_count,
+                persistenceFilesBeforeShutdown=len(before_shutdown),
+                persistenceFilesAfterShutdown=len(after_shutdown),
+                sidecarsRemovedDuringShutdown=len(removed_sidecars),
+                quiescentPersistenceScan=process.returncode is not None,
                 harnessSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             )
         except BaseException as error:
