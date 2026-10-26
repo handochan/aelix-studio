@@ -1,4 +1,7 @@
+# Temporary validation driver; every job checks the actual merged product SHA.
+# This branch is not merged into product main.
 name: 'PR Checks'
+run-name: 'Studio #5 platforms merged main c0ef6f846 verification'
 
 on:
   workflow_dispatch:
@@ -22,7 +25,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: studio-5-platforms-main-c0ef6f846
   cancel-in-progress: true
 
 permissions:
@@ -59,12 +62,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
           fetch-depth: 0
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
-        with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -162,13 +161,8 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
           fetch-depth: 0
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
-        with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -191,7 +185,7 @@ jobs:
         run: npm install -g @j178/prek
 
       - name: Run prek checks
-        run: prek run --from-ref origin/${{ env.PR_BASE_REF }} --to-ref HEAD
+        run: prek run --from-ref 95050d31956b3fe172fea5916ef530ea1501cfd6 --to-ref HEAD
 
   # Job 2: Unit tests across all platforms
   unit-tests:
@@ -206,12 +200,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
         with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -250,12 +241,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
-
-      - name: Resolve PR context
-        uses: ./.github/actions/checkout-pr
         with:
-          pr_number: ${{ inputs.pr_number }}
-          github_token: ${{ github.token }}
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -333,6 +321,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -379,7 +370,7 @@ jobs:
   # Job 4: Build test across representative PR platforms (parallel with code-quality and unit-tests)
   build-test:
     name: Build Test (${{ matrix.platform }})
-    if: github.event.action != 'closed' && github.event.pull_request.draft == false && inputs.skip_build_test != true
+    if: (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false)) && inputs.skip_build_test != true
     runs-on: ${{ matrix.os }}
     timeout-minutes: 45
     strategy:
@@ -408,6 +399,9 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -621,12 +615,15 @@ jobs:
   # Job 5: Test release scripts (fast, no build required)
   release-script-test:
     name: Release Script Test
-    if: github.event.action != 'closed' && github.event.pull_request.draft == false
+    if: github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: c0ef6f846bd589f5978105399f71b64f9e679f30
+          fetch-depth: 0
 
       - name: Create mock build artifacts
         shell: bash
