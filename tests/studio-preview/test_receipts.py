@@ -1,4 +1,5 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
+import ast
 import hashlib
 import importlib.util
 import io
@@ -56,7 +57,7 @@ class ReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / '한글 경로'
             root.mkdir()
-            payload = root / '설치 payload'
+            payload = root / r'설치 payload\nested'
             with patch('io.open', side_effect=windows_open):
                 with self.assertRaises(UnicodeEncodeError):
                     (root / 'locale-probe').write_text('한글')
@@ -65,7 +66,10 @@ class ReceiptTests(unittest.TestCase):
                 raw = script.read_bytes()
                 compile(raw, str(script), 'exec')
                 self.assertIn('한글 경로', raw.decode('utf-8'))
-            self.assertIn(str(payload.resolve() / 'launch.py'), native.read_text(encoding='utf-8'))
+            tree = ast.parse(native.read_text(encoding='utf-8'))
+            literals = [node.value for node in ast.walk(tree)
+                        if isinstance(node, ast.Constant) and isinstance(node.value, str)]
+            self.assertEqual(literals.count(str(payload.resolve() / 'launch.py')), 2)
 
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
