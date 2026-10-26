@@ -19,6 +19,30 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'host-recovery'))
 from identity import host_identity, macho_code_identity
 
 
+# Qualification-only diagnostics never include raw resource bytes or extra filenames.
+BUNDLE_VERIFIER = r"""
+const fs = require('node:fs'), path = require('node:path');
+const api = require(process.argv[1]);
+try { api.verifyDefaultHostBundle(process.argv[2], process.argv[3]); }
+catch (error) {
+  let diagnostic = { status: 'unavailable' };
+  try {
+    const expected = JSON.parse(fs.readFileSync(path.join(process.argv[2], 'manifest.json'), 'utf8')).inventory;
+    const actual = api.inventory(process.argv[2]);
+    const missing = Object.keys(expected).filter(key => !(key in actual));
+    const changed = Object.keys(expected).filter(key => key in actual && expected[key] !== actual[key]);
+    const sample = keys => keys.filter(key => /^[a-zA-Z0-9_./@-]{1,384}$/.test(key)).sort().slice(0, 8);
+    diagnostic = { status: 'compared', expectedCount: Object.keys(expected).length,
+      actualCount: Object.keys(actual).length, missingCount: missing.length, changedCount: changed.length,
+      extraCount: Object.keys(actual).filter(key => !(key in expected)).length,
+      missingPublicPaths: sample(missing), changedPublicPaths: sample(changed) };
+  } catch { /* Never serialize arbitrary exceptions or resource bytes. */ }
+  fs.writeFileSync(process.argv[4], JSON.stringify(diagnostic, null, 2) + '\n');
+  throw error;
+}
+"""
+
+
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -224,9 +248,10 @@ def main(args):
                 save_preflight()
             save_preflight()
             try:
-                subprocess.run(['node', '-e',
-                                "require(process.argv[1]).verifyDefaultHostBundle(process.argv[2],process.argv[3])",
-                                str(ROOT / 'packages/shared-scripts/src/default-host.js'), str(core.parent), target],
+
+                subprocess.run(['node', '-e', BUNDLE_VERIFIER,
+                                str(ROOT / 'packages/shared-scripts/src/default-host.js'), str(core.parent), target,
+                                str(output.with_name('inventory-diff.json'))],
                                check=True, cwd=ROOT, timeout=120)
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
                 failed_preflight('bundleVerify', error)

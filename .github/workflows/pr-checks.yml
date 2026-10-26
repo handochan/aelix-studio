@@ -157,6 +157,7 @@ jobs:
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
             .local/provider-installer/host-preflight.json
+            .local/provider-installer/inventory-diff.json
             .local/provider-installer/permission/qualification.json
             .local/provider-installer/permission/renderer-result.json
             .local/provider-installer/permission/*.png

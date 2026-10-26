@@ -38,6 +38,27 @@ def signed_macho_fixture():
 
 
 class ReceiptTests(unittest.TestCase):
+    @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
+    def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            missing = 'managed-resources/node/node_modules/pkg/package.json'
+            changed = 'managed-resources/node/node.exe'
+            sentinel = 'SYNTHETIC_AUTH_PAYLOAD_MUST_NOT_APPEAR'
+            (root / 'manifest.json').write_text(json.dumps({'inventory': {missing: 'missing-sha', changed: 'old-sha'}}))
+            fixture = root / 'fixture.cjs'
+            fixture.write_text("module.exports={verifyDefaultHostBundle(){throw Error('fixture mismatch')},inventory(){return "
+                               + json.dumps({changed: sentinel, sentinel: 'extra-sha'}) + ";}}")
+            output = root / 'diagnostic.json'
+            result = subprocess.run(['node', '-e', acceptance.BUNDLE_VERIFIER, str(fixture), str(root),
+                                     'win32-x64', str(output)], capture_output=True, timeout=10)
+            self.assertNotEqual(result.returncode, 0)
+            diagnostic = json.loads(output.read_text())
+            self.assertEqual((diagnostic['missingCount'], diagnostic['changedCount'], diagnostic['extraCount']), (1, 1, 1))
+            self.assertEqual(diagnostic['missingPublicPaths'], [missing])
+            self.assertEqual(diagnostic['changedPublicPaths'], [changed])
+            self.assertNotIn(sentinel, output.read_text())
+
     def test_signing_allocation_normalization_preserves_code_comparison(self):
         original = acceptance.macho_code_identity(macho_fixture())
         self.assertEqual(original, acceptance.macho_code_identity(macho_fixture(vm_size=8192)))
