@@ -40,7 +40,7 @@ from pathlib import Path
 from aelix_acp import server
 facts=Path(os.environ['OPERATION_FACTS'])
 def note(value):
-    with facts.open('a') as stream: stream.write(json.dumps(value)+'\\n')
+    with facts.open('a', encoding='utf-8') as stream: stream.write(json.dumps(value)+'\\n')
 class Observed(server.Server):
     async def client_request(self,method,params):
         if method!='session/request_permission': return await super().client_request(method,params)
@@ -73,7 +73,7 @@ server.main()
     native = root / "observed-native.py"
     native.write_text(
         "import os\nfrom pathlib import Path\n"
-        + f'with Path({str(starts)!r}).open("a") as f:f.write(str(os.getpid())+"\\n")\n'
+        + f'with Path({str(starts)!r}).open("a", encoding="utf-8") as f:f.write(str(os.getpid())+"\\n")\n'
         + (
             "import sys,runpy\nsys.argv=["
             + repr(str(payload.resolve() / "launch.py"))
@@ -82,7 +82,8 @@ server.main()
             + ',run_name="__main__")\n'
             if payload
             else "from aelix_coding_agent.cli.entry import main_sync\nmain_sync()\n"
-        )
+        ),
+        encoding="utf-8",
     )
     return entry, native, facts, starts
 
@@ -96,7 +97,7 @@ async def run(args):
     from qualify_beta2 import adapter_receipt
 
     host_before = hashlib.sha256(HOST.read_bytes()).hexdigest()
-    manifest = json.loads((ACP / "docs/beta2/manifest.json").read_text())
+    manifest = json.loads((ACP / "docs/beta2/manifest.json").read_text(encoding="utf-8"))
     wheels = args.artifacts.resolve()
     before = verify(manifest, wheels)
     installed = adapter_receipt(args.adapter.resolve())
@@ -283,7 +284,7 @@ async def run(args):
             assert terminal["state"] == "completed", terminal
             checks.append("actual_http_admission_metadata_native_prompt_and_terminal")
             count = len(fixture.requests)
-            launches = starts.read_text().splitlines()
+            launches = starts.read_text(encoding="utf-8").splitlines()
             code, replay = await api(route + "/messages", "POST", body)
             assert (
                 code == 200
@@ -293,7 +294,7 @@ async def run(args):
             )
             assert (
                 len(fixture.requests) == count
-                and starts.read_text().splitlines() == launches
+                and starts.read_text(encoding="utf-8").splitlines() == launches
             )
             checks.append(
                 "completed_http_duplicate_preserves_ids_without_model_or_native_start"
@@ -346,7 +347,7 @@ async def run(args):
             ), cancelled
             fixture.release.set()
             checks.append("scoped_http_cancel_waits_for_native_terminal")
-            rows = [json.loads(line) for line in facts.read_text().splitlines()]
+            rows = [json.loads(line) for line in facts.read_text(encoding="utf-8").splitlines()]
             prompts = [r for r in rows if r["method"] == "session/prompt"]
             assert len(prompts) == 2 and all(
                 r["operation"]["conversationId"] == conv["id"] for r in prompts
@@ -373,14 +374,14 @@ async def run(args):
                     await asyncio.sleep(0.02)
                 while not any(
                     row.get("reverseUnsupported")
-                    for row in map(json.loads, facts.read_text().splitlines())
+                    for row in map(json.loads, facts.read_text(encoding="utf-8").splitlines())
                 ):
                     await asyncio.sleep(0.02)
-                    while not any(
-                        row.get("malformedTypedRejected")
-                        for row in map(json.loads, facts.read_text().splitlines())
-                    ):
-                        await asyncio.sleep(0.02)
+                while not any(
+                    row.get("malformedTypedRejected")
+                    for row in map(json.loads, facts.read_text(encoding="utf-8").splitlines())
+                ):
+                    await asyncio.sleep(0.02)
             assert (
                 not target.exists()
                 and (await status(route, consent))["state"] == "pending"
@@ -403,7 +404,7 @@ async def run(args):
                 dict(content="SYNTHETIC_GENERATION", operation=generation),
             )
             assert (await settled(route, generation))["state"] == "completed"
-            rows = list(map(json.loads, facts.read_text().splitlines()))
+            rows = list(map(json.loads, facts.read_text(encoding="utf-8").splitlines()))
             contexts = [
                 row["operation"]
                 for row in rows
@@ -422,7 +423,7 @@ async def run(args):
                 dict(content="QUALIFICATION_HOLD", operation=crashed),
             )
             await asyncio.wait_for(fixture.entered.wait(), 15)
-            launches = starts.read_text().splitlines()
+            launches = starts.read_text(encoding="utf-8").splitlines()
             requests = len(fixture.requests)
             process.kill()
             await process.wait()
@@ -447,7 +448,7 @@ async def run(args):
                 and recovered["automatic_retry"] is False
             ), recovered
             assert (
-                starts.read_text().splitlines() == launches
+                starts.read_text(encoding="utf-8").splitlines() == launches
                 and len(fixture.requests) == requests
             )
             checks.append(
@@ -460,11 +461,11 @@ async def run(args):
             )
             assert (
                 duplicate["operation"]["replayed"]
-                and starts.read_text().splitlines() == launches
+                and starts.read_text(encoding="utf-8").splitlines() == launches
             )
             checks.append("post_crash_duplicate_does_not_create_native_worker")
             assert "SYNTHETIC_REVERSE_SECRET" not in (root / "host.log").read_text(
-                errors="replace"
+                encoding="utf-8", errors="replace"
             )
             checks.append("reverse_secret_payload_absent_from_host_logs")
             # Reuse the exact host/state with its supported authenticated mode.
@@ -543,7 +544,7 @@ async def run(args):
                 )
             )[0] == 403
             assert (
-                starts.read_text().splitlines() == launches
+                starts.read_text(encoding="utf-8").splitlines() == launches
                 and len(fixture.requests) == requests
             )
             checks.extend(
@@ -607,7 +608,7 @@ async def run(args):
         if payload_before is not None
         else None,
     )
-    args.report.write_text(json.dumps(report, indent=2) + "\n")
+    args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report))
 
 

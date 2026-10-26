@@ -1,6 +1,7 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -9,6 +10,7 @@ import struct
 import sys
 import tempfile
 import unittest
+from unittest.mock import patch
 
 from test_preparation import ROOT, prepare
 
@@ -38,6 +40,33 @@ def signed_macho_fixture():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_forwarding_observers_support_unicode_paths_with_a_cp1252_locale(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        original_open = io.open
+
+        def windows_open(file, mode='r', buffering=-1, encoding=None, errors=None,
+                         newline=None, closefd=True, opener=None):
+            if 'b' not in mode and encoding in (None, 'locale'):
+                encoding = 'cp1252'
+            return original_open(file, mode, buffering, encoding, errors, newline, closefd, opener)
+
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary) / '한글 경로'
+            root.mkdir()
+            payload = root / '설치 payload'
+            with patch('io.open', side_effect=windows_open):
+                with self.assertRaises(UnicodeEncodeError):
+                    (root / 'locale-probe').write_text('한글')
+                entry, native, _, _ = wire.observers(root, payload)
+            for script in (entry, native):
+                raw = script.read_bytes()
+                compile(raw, str(script), 'exec')
+                self.assertIn('한글 경로', raw.decode('utf-8'))
+            self.assertIn(str(payload.resolve() / 'launch.py'), native.read_text(encoding='utf-8'))
+
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
         with tempfile.TemporaryDirectory() as temporary:

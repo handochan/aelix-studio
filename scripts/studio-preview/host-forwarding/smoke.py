@@ -27,7 +27,7 @@ async def run(args):
     from beta2_identity import verify
     from qualify_beta2 import adapter_receipt
 
-    manifest = json.loads((args.acp_source / "docs/beta2/manifest.json").read_text())
+    manifest = json.loads((args.acp_source / "docs/beta2/manifest.json").read_text(encoding="utf-8"))
     audit = lambda: dict(
         native=verify(manifest, args.artifacts), adapter=adapter_receipt(args.adapter)
     )
@@ -124,7 +124,7 @@ async def run(args):
                     "Electron managed forwarding qualification failed"
                 )
             result = json.loads(
-                (args.report.parent / "renderer-result.json").read_text()
+                (args.report.parent / "renderer-result.json").read_text(encoding="utf-8")
             )
             assert audit() == before
             if args.payload:
@@ -133,7 +133,7 @@ async def run(args):
                     for p in args.payload.rglob("*")
                     if p.is_file()
                 }
-            rows = list(map(json.loads, facts.read_text().splitlines()))
+            rows = list(map(json.loads, facts.read_text(encoding="utf-8").splitlines()))
             prompts = [
                 row["operation"]
                 for row in rows
@@ -156,7 +156,7 @@ async def run(args):
                     for name in ("smoke.py", "smoke.mjs", "wire.py")
                 },
             )
-            args.report.write_text(json.dumps(result, indent=2) + "\n")
+            args.report.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
             print(json.dumps(dict(status="passed", checks=len(result["checksPassed"]))))
         finally:
             if "process" in locals() and process.returncode is None:
