@@ -3,6 +3,7 @@ import hashlib
 import importlib.util
 import io
 import os
+import subprocess
 from unittest.mock import patch
 from pathlib import Path
 import tarfile
@@ -82,3 +83,45 @@ class HostRecoveryBuildTests(unittest.TestCase):
         self.assertEqual(build.maximum_glibc_requirement('Name: GLIBC_2.9\nName: GLIBC_2.30', '2.30'), '2.30')
         with self.assertRaisesRegex(ValueError, 'no auditable GLIBC'):
             build.maximum_glibc_requirement('no version table', '2.30')
+
+
+class InstalledPythonAliasTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('host_recovery_alias', PATH.with_name('smoke.py'))
+        self.smoke = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.smoke)
+
+    def test_alias_matches_the_actual_installed_file_across_windows_namespace_prefix(self):
+        with tempfile.TemporaryDirectory(prefix='studio-alias-') as temporary:
+            root = Path(temporary).resolve()
+            installed = root / 'installed-python'
+            installed.mkdir()
+            (installed / 'python').write_bytes(b'owned fixture')
+            target = Path('\\\\?\\' + str(installed)) if os.name == 'nt' else installed
+            alias = root / 'alias'
+            if os.name == 'nt':
+                subprocess.run(['cmd', '/d', '/c', 'mklink', '/J', str(alias), str(target)],
+                               check=True, capture_output=True)
+            else:
+                alias.symlink_to(target, target_is_directory=True)
+            self.smoke.validate_installed_python_alias(alias / 'python', target / 'python')
+            if os.name == 'nt':
+                alias.rmdir()
+
+    def test_identical_bytes_in_another_runtime_are_refused(self):
+        with tempfile.TemporaryDirectory(prefix='studio-alias-') as temporary:
+            root = Path(temporary)
+            installed, substitute = root / 'installed', root / 'substitute'
+            installed.write_bytes(b'same fixture')
+            substitute.write_bytes(installed.read_bytes())
+            with self.assertRaisesRegex(ValueError, 'owned whitespace-free alias'):
+                self.smoke.validate_installed_python_alias(substitute, installed)
+
+    def test_whitespace_alias_is_refused_even_for_the_same_installed_file(self):
+        with tempfile.TemporaryDirectory(prefix='studio-alias-') as temporary:
+            root = Path(temporary)
+            installed, alias = root / 'installed', root / 'alias space'
+            installed.write_bytes(b'owned fixture')
+            os.link(installed, alias)
+            with self.assertRaisesRegex(ValueError, 'owned whitespace-free alias'):
+                self.smoke.validate_installed_python_alias(alias, installed)

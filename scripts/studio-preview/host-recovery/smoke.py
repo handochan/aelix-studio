@@ -30,6 +30,13 @@ def gui_environment(base, environment=None):
     return dict(base, **{key: source[key] for key in ('DISPLAY', 'XAUTHORITY') if key in source})
 
 
+def validate_installed_python_alias(alias, python):
+    # Windows junction resolution can retain a \\?\ prefix on only one path.
+    # Compare OS file identity, while retaining the probe's whitespace boundary.
+    if not alias.samefile(python) or any(char.isspace() for char in str(alias)):
+        raise ValueError('Custom-agent test requires an owned whitespace-free alias to installed Python')
+
+
 async def run(args, report):
     if args.runtime:
         return await run_installed(args, report)
@@ -152,8 +159,7 @@ async def run_installed(args, report):
         else:
             alias.symlink_to(payload / 'python', target_is_directory=True)
         adapter_python = alias / ('python.exe' if os.name == 'nt' else 'bin/python3')
-        if adapter_python.resolve() != python.resolve() or any(char.isspace() for char in str(adapter_python)):
-            raise ValueError('Custom-agent test requires an owned whitespace-free alias to installed Python')
+        validate_installed_python_alias(adapter_python, python)
         extension = sandbox / 'permission_fixture.py'
         extension.write_text((source / 'scripts/permission_fixture_extension.py').read_text() + '''
 
