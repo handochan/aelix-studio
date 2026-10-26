@@ -56,6 +56,76 @@ def long_path(path):
     return path
 
 
+def assert_windows_install_unused():
+    # Refuse an existing real installation or running desktop before NSIS
+    # can change its per-user registration or request another app's exit.
+    import winreg
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for view in (0, winreg.KEY_WOW64_32KEY):
+            try:
+                key = winreg.OpenKey(hive, r'Software\Microsoft\Windows\CurrentVersion\Uninstall', 0, winreg.KEY_READ | view)
+            except OSError:
+                continue
+            with key:
+                for index in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
+                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
+                                raise ValueError('Refusing to replace an existing AionUi installation')
+                    except OSError:
+                        continue
+    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
+    if b'aionui.exe' in processes.lower():
+        raise ValueError('Refusing to interrupt an existing AionUi process')
+
+
+def qualify_windows_copy_failure(artifact, directory, report_path):
+    """Force an owned locked-file failure, remove it, then permit normal retry."""
+    import ctypes
+    from ctypes import wintypes
+    assert_windows_install_unused()
+    app = directory / 'AionUi'
+    relative = ('resources/bundled-aioncore/win32-x64/managed-resources/node/'
+                'node-v24.11.0-win-x64/node_modules/npm/node_modules/'
+                'validate-npm-package-license/node_modules/spdx-expression-parse/package.json')
+    blocked = long_path(app / relative)
+    blocked.parent.mkdir(parents=True)
+    blocked.write_bytes(b'owned installer copy failure probe')
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(blocked), 0x80000000, 0, None, 3, 0x80, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    report = {'status': 'running', 'fault': 'owned_destination_file_locked', 'nativePatches': []}
+    report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    try:
+        try:
+            result = subprocess.run('"' + str(artifact) + '" /S /D=' + str(app),
+                                    check=False, timeout=300, shell=False)
+            report['observedExitCode'] = result.returncode
+        finally:
+            kernel.CloseHandle(handle)
+            if list(app.glob('*ninstall*.exe')):
+                remove_install(app, 'nsis', None)
+            elif app.exists():
+                shutil.rmtree(long_path(app))
+        report['ownedFailedAppRemoved'] = not app.exists()
+        if result.returncode != 1603 or not report['ownedFailedAppRemoved']:
+            raise ValueError('Owned locked-file installer did not fail closed and clean up')
+        # A second normal installation runs at this exact artifact/location.
+        assert_windows_install_unused()
+        report['status'] = 'passed'
+    except BaseException:
+        report['status'] = 'failed'
+        raise
+    finally:
+        report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+
+
 def installed(artifact, directory):
     """Return executable/payload/app/format after installing only the owned candidate."""
     if sys.platform == 'darwin':
@@ -71,26 +141,7 @@ def installed(artifact, directory):
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
         return app / 'Contents/MacOS/AionUi', app / 'Contents/Resources/studio-preview', app, 'dmg', None
     if sys.platform == 'win32':
-        # Refuse an existing real installation or running desktop before NSIS
-        # can change its per-user registration or request another app's exit.
-        import winreg
-        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            for view in (0, winreg.KEY_WOW64_32KEY):
-                try:
-                    key = winreg.OpenKey(hive, r'Software\Microsoft\Windows\CurrentVersion\Uninstall', 0, winreg.KEY_READ | view)
-                except OSError:
-                    continue
-                with key:
-                    for index in range(winreg.QueryInfoKey(key)[0]):
-                        try:
-                            with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
-                                if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
-                                    raise ValueError('Refusing to replace an existing AionUi installation')
-                        except OSError:
-                            continue
-        processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
-        if b'aionui.exe' in processes.lower():
-            raise ValueError('Refusing to interrupt an existing AionUi process')
+        assert_windows_install_unused()
         app = directory / 'AionUi'
         # NSIS /D is the final, unquoted tail. CreateProcess receives this command
         # directly (no cmd/shell), preserving spaces and Unicode without expansion.
@@ -152,6 +203,9 @@ def main(args):
         applications = None
     with tempfile.TemporaryDirectory(prefix='Studio Provider 한글-', dir=applications) as temporary:
         directory = Path(temporary).resolve()
+        copy_failure_report = output.with_name('installer-copy-failure.json')
+        if sys.platform == 'win32':
+            qualify_windows_copy_failure(artifact, directory, copy_failure_report)
         executable, payload, app, kind, package = installed(artifact, directory)
         try:
             if not executable.is_file():
@@ -295,6 +349,8 @@ def main(args):
                           standaloneRuntimeSourceDenied=sys.platform == 'darwin', standaloneIsolatedOwnedImports=True,
                           systemNodePythonNotUsedByRuntime=True, guiRestrictedPath=True,
                           installedUi=json.loads((ROOT / '.local/studio-provider/host.json').read_text(encoding='utf-8')),
+                          installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
+                          installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)

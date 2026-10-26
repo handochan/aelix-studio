@@ -120,6 +120,7 @@ win:
   artifactName: ${productName}-${version}-${os}-${arch}.${ext}
 
 nsis:
+  include: scripts/studio-preview/packaging/windowsInstaller.nsh
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true

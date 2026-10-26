@@ -35,6 +35,18 @@ PE runtime import auditing and actual minimum/clean OS execution remain release
 gates. Controller OS, compiler-container OS and installer-test OS are distinct
 evidence; a static ABI check alone does not establish execution on that OS.
 
+Windows embedded x64 NSIS packages use the official `customInstall` hook to
+re-extract their original payload into a private short staging directory and
+recopy it with system `robocopy` long-path support. Public Node bytes, its original
+versioned directory and the complete resource inventory are preserved. The app
+still verifies the full source/resource seal before launch; copy success alone
+is not integrity acceptance. Copy execution/error codes fail installation closed.
+The qualifier forces a locked destination file, verifies the copy failure exit,
+cleans the owned failed installation, and retries the same artifact/location.
+This follows the existing NSIS uninstall/registry steps and is not atomic rollback
+or cross-version upgrade acceptance. ZIP, web and multi-architecture packages
+are rejected by this hook until separately qualified.
+
 The Provider Preview installer additionally includes the relocatable public-wheel
 native/ACP payload. Ordinary `dist` includes the default Rust host but does not
 by itself establish acceptance of that additional Preview payload. The existing
