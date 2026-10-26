@@ -4,9 +4,9 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeAuthService } from './service';
 
-const mocks = vi.hoisted(() => ({ spawn: vi.fn(), existsSync: vi.fn(() => true) }));
+const mocks = vi.hoisted(() => ({ spawn: vi.fn(), existsSync: vi.fn(() => true), readFileSync: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
-vi.mock('node:fs', () => ({ existsSync: mocks.existsSync }));
+vi.mock('node:fs', () => ({ existsSync: mocks.existsSync, readFileSync: mocks.readFileSync }));
 
 class Helper extends EventEmitter {
   stdin = new PassThrough();
@@ -33,7 +33,7 @@ describe('sessionless native auth ownership and lifecycle', () => {
   let helper: Helper;
   beforeEach(() => {
     Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-    mocks.existsSync.mockReturnValue(true);
+    mocks.existsSync.mockImplementation((file) => !String(file).endsWith('manifest.json'));
     helper = new Helper();
     mocks.spawn.mockReturnValue(helper);
     service = new NativeAuthService({ runtime, timeoutMs: 20, loginTimeoutMs: 3000 });
@@ -50,10 +50,15 @@ describe('sessionless native auth ownership and lifecycle', () => {
     expect(mocks.spawn).not.toHaveBeenCalled();
   });
 
-  it('reports the accepted POSIX-only Preview boundary on Windows', async () => {
+  it('launches the selected Windows Python directly with pipe input', async () => {
     Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
-    expect(await service.request('one', { action: 'catalog' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
-    expect(mocks.spawn).not.toHaveBeenCalled();
+    const pending = service.request('one', { action: 'catalog' });
+    helper.frame({ result: { providers: [] } });
+    helper.emit('close', 0);
+    expect(mocks.spawn.mock.calls[0][0]).toBe(path.join(runtime, 'native', 'Scripts', 'python.exe'));
+    expect(mocks.spawn.mock.calls[0][2].shell).toBe(false);
+    expect(mocks.spawn.mock.calls[0][2].windowsHide).toBe(true);
+    expect((await pending).ok).toBe(true);
   });
 
   it('passes credentials only through stdin, never argv or the result', async () => {
@@ -158,19 +163,8 @@ describe('sessionless native auth ownership and lifecycle', () => {
       ok: true,
       data: {
         root: '/cli-root',
-        command: '/usr/bin/env',
-        args: [
-          '--',
-          path.join(runtime, 'adapter/bin/aelix-acp'),
-          '--aelix',
-          path.join(runtime, 'native/bin/aelix'),
-          '--profile',
-          'coding',
-          '--provider',
-          'openai',
-          '--model',
-          'model-one',
-        ],
+        command: 'node',
+        args: [path.join(runtime, 'launch.cjs'), '--profile', 'coding', '--provider=openai', '--model=model-one'],
         env: [{ name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' }],
       },
     });

@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import sys
 import tempfile
+import threading
 import uuid
 from urllib.parse import urlsplit
 
@@ -40,18 +41,121 @@ async def main():
     from aelix_coding_agent.model_registry import ModelRegistry
     from aelix_coding_agent.models_json import strip_json_comments, validate_models_config, validate_config_semantics
 
-    reader = asyncio.StreamReader(limit=65536)
-    await asyncio.get_running_loop().connect_read_pipe(lambda: asyncio.StreamReaderProtocol(reader), sys.stdin.buffer)
+    # Anonymous stdin pipes are not connect_read_pipe transports on Windows.
+    # A daemon owns blocking reads; a bounded queue applies backpressure without
+    # leaving a default-executor thread that prevents cancellation/EOF shutdown.
+    loop = asyncio.get_running_loop()
+    input_lines = asyncio.Queue(maxsize=2)
+    input_stopped = threading.Event()
+    asyncio.current_task().add_done_callback(lambda _task: input_stopped.set())
+    def deliver(line):
+        if input_stopped.is_set():
+            return False
+        delivery = input_lines.put(line)
+        try:
+            future = asyncio.run_coroutine_threadsafe(delivery, loop)
+        except RuntimeError:
+            delivery.close()
+            return False
+        while not input_stopped.is_set():
+            try:
+                future.result(timeout=0.2)
+                return True
+            except TimeoutError:
+                continue
+            except Exception:
+                return False
+        future.cancel()
+        return False
+    def read_input():
+        try:
+            fd = sys.stdin.fileno()
+            if sys.platform == "win32":
+                import msvcrt
+                msvcrt.setmode(fd, os.O_BINARY)
+            buffer = b""
+            while not input_stopped.is_set():
+                # Raw fd reads avoid the BufferedReader lock during CPython's
+                # Windows daemon-thread finalization (including OAuth success).
+                chunk = os.read(fd, 4096)
+                if not chunk:
+                    if buffer:
+                        deliver(buffer)
+                    deliver(b"")
+                    return
+                buffer += chunk
+                while b"\n" in buffer:
+                    line, buffer = buffer.split(b"\n", 1)
+                    if len(line) > 65535:
+                        deliver(b"x" * 65537)
+                        return
+                    if not deliver(line + b"\n"):
+                        return
+                if len(buffer) > 65536:
+                    deliver(b"x" * 65537)
+                    return
+        except (OSError, RuntimeError):
+            deliver(b"")
+    input_thread = threading.Thread(target=read_input, daemon=True)
+    input_thread.start()
     async def read():
-        line = await reader.readline()
+        line = await input_lines.get()
         if not line:
             raise Refused("CANCELLED")
+        if len(line) > 65536:
+            raise Refused("INVALID_INPUT")
         return json.loads(line)
 
     args = await read()
     action = args.get("action")
     root = Path(get_agent_dir()).expanduser().resolve()
     auth_path, models_path = root / "auth.json", root / "models.json"
+    def verify_private_files():
+        pass
+    if sys.platform == "win32" and (action not in ("catalog", "select") or not root.exists()):
+        if action not in ("catalog", "select") and args.get("exclusive") is not True:
+            raise Refused("EXCLUSIVE_REQUIRED")
+        # Windows chmod does not establish credential confidentiality. New
+        # roots receive a protected user/system/admin DACL; an existing shared
+        # root is refused instead of changing unrelated operator permissions.
+        import win32api
+        import win32con
+        import win32security
+        token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+        try:
+            owner = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+        finally:
+            token.Close()
+        trusted = {win32security.ConvertSidToStringSid(owner), "S-1-5-18", "S-1-5-32-544", "S-1-3-0", "S-1-3-4"}
+        if not root.exists():
+            root.mkdir(parents=True)
+            acl = win32security.ACL()
+            for sid in (owner, win32security.ConvertStringSidToSid("S-1-5-18"), win32security.ConvertStringSidToSid("S-1-5-32-544")):
+                acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS, 3, 0x1F01FF, sid)
+            win32security.SetNamedSecurityInfo(str(root), win32security.SE_FILE_OBJECT,
+                win32security.DACL_SECURITY_INFORMATION | win32security.PROTECTED_DACL_SECURITY_INFORMATION,
+                None, None, acl, None)
+        def verify_private_files():
+            for protected in (root, auth_path, root / "auth.json.tmp", models_path, root / ".studio-auth.lock"):
+                if not protected.exists():
+                    continue
+                descriptor = win32security.GetNamedSecurityInfo(str(protected), win32security.SE_FILE_OBJECT,
+                    win32security.DACL_SECURITY_INFORMATION | win32security.OWNER_SECURITY_INFORMATION)
+                # An untrusted owner can replace the DACL regardless of its
+                # current entries. CREATOR_OWNER does not establish ownership.
+                if win32security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) not in trusted - {"S-1-3-0", "S-1-3-4"}:
+                    raise Refused("PRIVATE_DIRECTORY_REQUIRED")
+                acl = descriptor.GetSecurityDescriptorDacl()
+                if acl is None:
+                    raise Refused("PRIVATE_DIRECTORY_REQUIRED")
+                for index in range(acl.GetAceCount()):
+                    ace = acl.GetAce(index)
+                    if ace[0][0] not in (0, 1, 5, 6):
+                        raise Refused("PRIVATE_DIRECTORY_REQUIRED")
+                    if ace[0][0] in (0, 5) and ace[1] & 0xD00D0047:
+                        if win32security.ConvertSidToStringSid(ace[-1]) not in trusted:
+                            raise Refused("PRIVATE_DIRECTORY_REQUIRED")
+        verify_private_files()
 
     def revision():
         # File metadata only: never hash credentials into a receipt/operation ledger.
@@ -68,7 +172,7 @@ async def main():
     # before calling it so registration cannot silently replace operator credentials.
     if auth_path.exists():
         try:
-            raw = auth_path.read_text()
+            raw = auth_path.read_text(encoding="utf-8")
             parsed_auth = json.loads(raw) if raw.strip() else {}
             if not isinstance(parsed_auth, dict) or any(not isinstance(value, dict) for value in parsed_auth.values()):
                 raise ValueError()
@@ -119,12 +223,20 @@ async def main():
         raise Refused("CONFLICT")
     # Stable sidecar serializes cooperating Studio helpers. Legacy CLI does not
     # participate: exclusive operator use remains required, including on POSIX.
-    import fcntl
     root.mkdir(parents=True, exist_ok=True, mode=0o700)
-    lock_file = open(root / ".studio-auth.lock", "a")
+    lock_file = open(root / ".studio-auth.lock", "a+b")
     try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except BlockingIOError:
+        if sys.platform == "win32":
+            import msvcrt
+            if lock_file.seek(0, 2) == 0:
+                lock_file.write(b"\0")
+                lock_file.flush()
+            lock_file.seek(0)
+            msvcrt.locking(lock_file.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except (BlockingIOError, PermissionError):
         raise Refused("BUSY")
     if args.get("revision") != revision():
         raise Refused("CONFLICT")
@@ -147,7 +259,7 @@ async def main():
         if api not in ("openai-completions", "anthropic-messages"):
             raise Refused("UNSUPPORTED")
         model = text(args.get("model"))
-        config = json.loads(strip_json_comments(models_path.read_text())) if models_path.exists() else {"providers": {}}
+        config = json.loads(strip_json_comments(models_path.read_text(encoding="utf-8"))) if models_path.exists() else {"providers": {}}
         providers = config.setdefault("providers", {})
         existing = providers.get(pid, {})
         # Preserve operator-owned auth/headers/model overrides; add only a missing model and explicit endpoint.
@@ -226,7 +338,9 @@ async def main():
             await asyncio.gather(pump, closed, login, return_exceptions=True)
         if revision() != original_revision:
             raise Refused("CONFLICT")
+        verify_private_files()
         await storage.set_oauth(pid, credentials)
+    verify_private_files()
     await storage.load()
     if storage.drain_errors():
         raise Refused("NATIVE_FAILED")

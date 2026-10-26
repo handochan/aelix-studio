@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { NativeAuthService } from '../../packages/web-host/src/studio-auth/service.ts';
 import { NATIVE_AUTH_HELPER } from '../../packages/web-host/src/studio-auth/helperSource.ts';
+import { resolveNativeRuntime } from '../../packages/web-host/src/studio-auth/runtime.ts';
+import { createHash } from 'node:crypto';
 
 const runtime = process.env.AELIX_STUDIO_RUNTIME;
 const sandbox = process.env.PROVIDER_SANDBOX;
@@ -11,6 +13,8 @@ assert.ok(runtime && sandbox && process.env.PROVIDER_OUTPUT);
 const root = path.join(sandbox, 'helper-tests');
 const env = { ...process.env, AELIX_CODING_AGENT_DIR: root };
 const service = new NativeAuthService({ runtime, env });
+const resolvedRuntime = resolveNativeRuntime(runtime);
+assert.ok(resolvedRuntime, 'Selected native runtime unavailable');
 const checks = [];
 const record = (name) => checks.push(name);
 async function catalog() {
@@ -28,6 +32,19 @@ from aelix_ai.oauth.types import OAuthAuthInfo, OAuthPrompt, OAuthCredentials
 class FixtureOAuth:
     id, name, uses_callback_server = 'synthetic-oauth', 'Synthetic OAuth', False
     async def login(self, callbacks):
+        if os.environ.get('STUDIO_TEST_OAUTH_CALLBACK') == '1':
+            import socket
+            from aelix_ai.oauth._callback_server import start_callback_server
+            with socket.socket() as reservation:
+                reservation.bind(('127.0.0.1', 0))
+                port = reservation.getsockname()[1]
+            server = await start_callback_server('synthetic-state', port=port)
+            try:
+                await callbacks.on_auth(OAuthAuthInfo(url=server.redirect_uri.replace('localhost', '127.0.0.1'), instructions='Synthetic loopback callback'))
+                assert await server.wait_for_code() == ('synthetic-code', 'synthetic-state')
+                return OAuthCredentials(refresh='synthetic-refresh', access='synthetic-access', expires=9999999999999)
+            finally:
+                server.shutdown()
         await callbacks.on_auth(OAuthAuthInfo(url='https://fixture.invalid/authorize?state=synthetic-state', instructions='Synthetic device code'))
         if os.environ.get('STUDIO_TEST_OAUTH_POLL') == '1':
             await asyncio.Event().wait()
@@ -35,9 +52,13 @@ class FixtureOAuth:
         return OAuthCredentials(refresh='synthetic-refresh', access='synthetic-access', expires=9999999999999)
 register_oauth_provider(FixtureOAuth())
 `;
-function oauth(revision, polling = false) {
-  const child = spawn(path.join(runtime, 'native/bin/python'), ['-I', '-B', '-c', prefix + NATIVE_AUTH_HELPER], {
-    env: { ...env, ...(polling ? { STUDIO_TEST_OAUTH_POLL: '1' } : {}) },
+function oauth(revision, polling = false, callback = false) {
+  const child = spawn(resolvedRuntime.python, [...resolvedRuntime.helperArgs, '-c', prefix + NATIVE_AUTH_HELPER], {
+    env: {
+      ...env,
+      ...(polling ? { STUDIO_TEST_OAUTH_POLL: '1' } : {}),
+      ...(callback ? { STUDIO_TEST_OAUTH_CALLBACK: '1' } : {}),
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.stderr.resume();
@@ -69,7 +90,7 @@ function oauth(revision, polling = false) {
 
 try {
   const first = await catalog();
-  assert.equal(first.root, fs.realpathSync(root));
+  assert.equal(fs.realpathSync.native(first.root), fs.realpathSync.native(root));
   assert.equal(
     first.providers.some((item) => item.configured),
     false
@@ -121,7 +142,62 @@ try {
   assert.equal(afterLogout.providers.find((item) => item.id === 'anthropic').source, 'stored');
   assert.ok(!JSON.stringify(afterLogout).includes('synthetic-b'));
   assert.equal(fs.existsSync(process.env.AELIX_AUTH_PATH), false);
-  assert.equal(fs.statSync(path.join(root, 'auth.json')).mode & 0o777, 0o600);
+  if (process.platform === 'win32') {
+    const privateAcl = execFileSync(
+      resolvedRuntime.python,
+      [
+        ...resolvedRuntime.helperArgs,
+        '-c',
+        String.raw`
+import os
+from pathlib import Path
+import win32api,win32con,win32security
+token=win32security.OpenProcessToken(win32api.GetCurrentProcess(),win32con.TOKEN_QUERY)
+try: sid=win32security.GetTokenInformation(token,win32security.TokenUser)[0]
+finally: token.Close()
+trusted={win32security.ConvertSidToStringSid(sid),'S-1-5-18','S-1-5-32-544','S-1-3-0','S-1-3-4'}
+acl=win32security.GetNamedSecurityInfo(str(Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json'),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
+assert acl is not None
+for index in range(acl.GetAceCount()):
+    ace=acl.GetAce(index)
+    if ace[0][0] in (0,5) and ace[1] & 0x90000001:
+        assert win32security.ConvertSidToStringSid(ace[-1]) in trusted
+print('PRIVATE_ACL_VERIFIED')
+`,
+      ],
+      { env, encoding: 'utf8' }
+    );
+    assert.equal(privateAcl.trim(), 'PRIVATE_ACL_VERIFIED');
+    const temporary = path.join(root, 'auth.json.tmp');
+    fs.writeFileSync(temporary, 'preexisting-untrusted-temporary');
+    execFileSync(
+      resolvedRuntime.python,
+      [
+        ...resolvedRuntime.helperArgs,
+        '-c',
+        String.raw`
+import os
+from pathlib import Path
+import win32security
+file=Path(os.environ['AELIX_CODING_AGENT_DIR'])/'auth.json.tmp'
+acl=win32security.GetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
+# FILE_READ_DATA (0x1): the minimal dangerous credential-read grant.
+acl.AddAccessAllowedAceEx(win32security.ACL_REVISION_DS,0,0x1,win32security.ConvertStringSidToSid('S-1-1-0'))
+win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32security.DACL_SECURITY_INFORMATION,None,None,acl,None)
+`,
+      ],
+      { env }
+    );
+    const original = fs.readFileSync(path.join(root, 'auth.json'));
+    assert.deepEqual(await mutate({ action: 'setKey', provider: 'openai', key: 'synthetic-private' }), {
+      ok: false,
+      code: 'PRIVATE_DIRECTORY_REQUIRED',
+    });
+    assert.deepEqual(fs.readFileSync(path.join(root, 'auth.json')), original);
+    assert.equal(fs.readFileSync(temporary, 'utf8'), 'preexisting-untrusted-temporary');
+    fs.unlinkSync(temporary);
+    record('windows_shared_native_temporary_refused_without_credential_write');
+  } else assert.equal(fs.statSync(path.join(root, 'auth.json')).mode & 0o777, 0o600);
   record('sequential_preservation_native_permissions_and_no_secret_projection');
 
   const success = oauth((await catalog()).revision);
@@ -138,6 +214,16 @@ try {
   record('synthetic_native_oauth_callbacks_and_success');
 
   assert.ok((await mutate({ action: 'logout', provider: 'synthetic-oauth' })).ok);
+
+  const callback = oauth((await catalog()).revision, false, true);
+  const address = (await callback.next()).url;
+  assert.equal((await fetch(address + '?code=synthetic-code&state=wrong-state')).status, 400);
+  assert.equal((await fetch(address + '?code=synthetic-code&state=synthetic-state')).status, 200);
+  assert.ok((await callback.next()).result?.providers.find((item) => item.id === 'synthetic-oauth')?.configured);
+  await callback.exit;
+  await assert.rejects(fetch(address));
+  assert.ok((await mutate({ action: 'logout', provider: 'synthetic-oauth' })).ok);
+  record('native_loopback_oauth_state_callback_commit_and_listener_cleanup');
 
   // EOF settles native callbacks without saving a replacement token.
   const eof = oauth((await catalog()).revision);
@@ -174,7 +260,22 @@ try {
   record('malformed_cli_credentials_refused_without_reset');
   fs.writeFileSync(
     path.join(process.env.PROVIDER_OUTPUT, 'helper.json'),
-    JSON.stringify({ status: 'passed', checks, nativePatches: [], realOAuth: false }, null, 2) + '\n'
+    JSON.stringify(
+      {
+        status: 'passed',
+        checks,
+        nativePatches: [],
+        realOAuth: false,
+        helperRuntimeKind: fs.existsSync(path.join(runtime, 'manifest.json')) ? 'bundled' : 'prepared',
+        helperRuntimeManifestSha256: fs.existsSync(path.join(runtime, 'manifest.json'))
+          ? createHash('sha256')
+              .update(fs.readFileSync(path.join(runtime, 'manifest.json')))
+              .digest('hex')
+          : null,
+      },
+      null,
+      2
+    ) + '\n'
   );
   console.log(`Native Provider helper: ${checks.length} checks passed (synthetic OAuth)`);
 } finally {

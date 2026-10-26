@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
 
@@ -13,6 +15,11 @@ const appEnv = { ...process.env };
 if (executablePath) {
   delete appEnv.AELIX_STUDIO_RUNTIME;
   delete appEnv.AIONUI_BACKEND_BIN;
+  delete appEnv.AIONUI_BUNDLED_MANAGED_RESOURCES;
+  appEnv.PATH =
+    process.platform === 'win32'
+      ? `${process.env.SystemRoot ?? process.env.SYSTEMROOT}\\System32;${process.env.SystemRoot ?? process.env.SYSTEMROOT}`
+      : '/usr/bin:/bin';
 }
 const app = await electron.launch({
   ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
@@ -25,6 +32,43 @@ let foreign;
 let webui;
 try {
   page = await app.firstWindow();
+  if (executablePath) {
+    const require = createRequire(import.meta.url);
+    const builder = createRequire(require.resolve('electron-builder'));
+    const library = createRequire(builder.resolve('app-builder-lib'));
+    const asar = library('@electron/asar');
+    const archive = await app.evaluate(({ app }) => app.getAppPath());
+    const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
+    for (const name of ['out/main/index.js', 'out/preload/index.js']) {
+      assert.equal(
+        hash(asar.extractFile(archive, path.normalize(name))),
+        hash(fs.readFileSync(name)),
+        'Installed compiled host differs from this build'
+      );
+    }
+    const entries = asar
+      .listPackage(archive)
+      .map((entry) => entry.replaceAll('\\', '/').replace(/^\//, ''))
+      .filter((entry) => entry.startsWith('out/renderer/') && entry.endsWith('.js'));
+    for (const name of entries) {
+      assert.equal(
+        hash(asar.extractFile(archive, path.normalize(name))),
+        hash(fs.readFileSync(name)),
+        'Installed renderer differs from this build'
+      );
+    }
+    const compiled = [];
+    const visit = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const file = path.join(directory, entry.name);
+        if (entry.isDirectory()) visit(file);
+        else if (entry.name.endsWith('.js')) compiled.push(file.replaceAll('\\', '/'));
+      }
+    };
+    visit('out/renderer');
+    assert.ok(entries.length > 0, 'Installed renderer inventory is empty');
+    assert.deepEqual(entries.sort(), compiled.sort(), 'Installed renderer inventory differs from this build');
+  }
   await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
     timeout: 60000,
   });
@@ -200,9 +244,10 @@ try {
     JSON.stringify(
       {
         status: 'pending_payload_audit',
+        installedCompiledBuildMatched: Boolean(executablePath),
         platform: process.platform + '-' + process.arch,
         host: executablePath
-          ? 'installed macOS app / bundled AionCore / relocatable ACP and public native wheels'
+          ? 'installed app / bundled AionCore / relocatable ACP and public native wheels'
           : 'actual built Electron / AionCore / installed ACP / public native wheel',
         webuiScope: executablePath
           ? 'source-imported facade/helper with installed backend; compiled app-owned WebUI listener not exercised'

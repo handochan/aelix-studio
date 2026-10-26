@@ -51,7 +51,7 @@ ambiguous connection loss or cancellation; cancellation can race a commit.
   is read from the same agent directory; existing unrelated entries are preserved.
 - The helper is embedded in Studio's host code and uses native sessionless APIs.
   It never supervises or sends private commands to a live ACP worker. The native
-  four wheels and the accepted ACP source pin remain unchanged.
+  four wheels remain unchanged; ACP is separately source-pinned and qualified.
 - Desktop uses a dedicated preload IPC channel, restricted to the registered
   main window and exact Studio renderer URL. Navigation cancels its OAuth owner.
   The WebUI facade shares the existing listener and requires an actual backend
@@ -72,8 +72,9 @@ ambiguous connection loss or cancellation; cancellation can race a commit.
 - **Legacy CLI concurrent mutation remains unsupported.** The exclusive-use
   checkbox, sidecar and revision check cannot fix the public wheel's lock/rename
   race with a noncooperating writer. Native #46 remains the cross-process contract
-  dependency. Windows helper execution is explicitly unavailable; Linux and other
-  host targets have not received this change's actual UI/installer qualification.
+  dependency. Windows uses a protected user/system/admin DACL for a new auth
+  root and refuses mutation of an existing shared root. Its cooperative sidecar
+  uses a byte-range lock; POSIX retains `flock`. No existing operator ACL is changed.
 
 ## Verification and delivery
 
@@ -120,9 +121,10 @@ node scripts/studio-preview/packaging/build.mjs --runtime /path/to/prepared/stud
 
 The builder copies the qualified standalone CPython base, separate native and ACP
 sites, and license/metadata files outside asar. `-I -S -B` prevents user Python
-paths and global site startup injection. Relative owned wrappers launch unchanged
-public entrypoints; `/usr/bin/env --` preserves absolute paths with spaces/Unicode
-through AionCore without a managed Node download. Native wheel members and ACP
+paths and global site startup injection. An outside-asar CommonJS launcher runs the bundled Python directly, with
+literal argument arrays and unchanged public entrypoints. AionCore resolves Node
+from its bundled managed resources; the installed GUI receives a system-only PATH.
+Windows does not depend on POSIX wrappers or `cmd.exe` argument parsing. Native wheel members and ACP
 are re-audited before copying. Cached payload reuse requires current baseline,
 prepared identity, build recipes, exact inventory, hashes and relative contained
 symlinks. Archive a stale owned cache and rebuild; silent reuse is refused.
@@ -151,3 +153,44 @@ This is macOS arm64 ad-hoc acceptance, separate from Developer ID, notarization,
 quarantine/Gatekeeper distribution, a clean OS account, cross-version upgrade and
 user-data-preserving uninstall, other OS targets, and publication. The PR adds a
 macOS installer qualification job; queued jobs are not completed CI evidence.
+
+## Five-target Provider follow-up
+
+PR #17 was accepted only on macOS arm64. Issue #5 is reopened for
+`darwin-arm64`, `darwin-x64`, `linux-arm64`, `linux-x64` and `win32-x64`.
+The current source adds portable helper stdin/locks, direct Python launch,
+CPython 3.12.15 with a universal hashed dependency lock, and released AionCore
+v0.2.2 assets for each target. The native beta.2 four wheels remain byte-identical.
+The ACP pin includes the independently reviewed Windows stdio, authenticated
+loopback permission transport and worker Job lifetime work in
+[ACP PR #16](https://github.com/handochan/aelix-acp/pull/16).
+
+The `Provider Preview installer` CI matrix prepares and qualifies actual native
+and ACP processes on each matching runner, builds the current-host installer,
+installs it, exercises the same Provider settings/first-response/error/OAuth
+fixtures and removes only the owned installation. Formats are macOS DMG,
+Linux Debian package and Windows per-user NSIS. Linux uses its real default
+package path plus a separate Unicode/space runtime relocation probe; all five
+use Unicode/space user-state roots. Existing Windows AionUi registrations or
+processes and existing Linux package installations are refused before install.
+
+```sh
+python -B scripts/studio-preview/prepare.py --target win32-x64
+node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
+python -B scripts/studio-preview/packaging/acceptance.py --runtime .local/studio-preview
+# On Linux, run the qualifier as an ordinary user under xvfb-run -a.
+```
+
+Installed host/preload/renderer JavaScript must match the current compiled
+build; installed AionCore and 309 native wheel members must match the declared
+artifacts. The runtime uses only its owned isolated Python imports. Windows
+also re-audits the exact pywin32 bootstrap wheel and does not run its system
+post-install script or arbitrary site startup files. Failure replaces prior
+success receipts. Each target uploads its installer and acceptance detail.
+
+This section describes the implementation and qualification contract. A target
+is accepted only after its exact-head installer job and receipt pass. The older
+`provider-delivery.json` remains historical macOS real-account evidence; CI
+fixtures do not establish real remote OAuth/account acceptance on another OS.
+Clean-account, cross-version upgrade, release signing/notarization, compiled
+WebUI/mobile, offline and field gates stay tracked separately by Issue #8.

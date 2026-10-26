@@ -1,0 +1,7 @@
+# Released native wheels remain unchanged. Pin the Windows bootstrap explicitly.
+aelix==0.1.0b2
+aelix-ai==0.1.0b2
+aelix-agent-core==0.1.0b2
+aelix-coding-agent==0.1.0b2
+pywin32==311; sys_platform == 'win32'
+colorama==0.4.6; sys_platform == 'win32'

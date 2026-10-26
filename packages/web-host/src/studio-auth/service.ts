@@ -1,8 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { NATIVE_AUTH_HELPER } from './helperSource.js';
+import { resolveNativeRuntime, type NativeRuntime } from './runtime.js';
 import type { NativeAuthCommand, NativeAuthData, NativeAuthOperation, NativeAuthReply } from './types.js';
 
 type Operation = {
@@ -22,6 +22,7 @@ const SAFE_CODES = new Set([
   'UNSUPPORTED_PROVIDER',
   'UNSUPPORTED_MODEL',
   'EXCLUSIVE_REQUIRED',
+  'PRIVATE_DIRECTORY_REQUIRED',
   'CONFLICT',
   'BUSY',
   'CANCELLED',
@@ -44,22 +45,18 @@ export class NativeAuthService {
     } = {}
   ) {}
 
-  private runtime(): string | undefined {
+  private runtime(): NativeRuntime | undefined {
+    const explicit = this.options.runtime ?? process.env.AELIX_STUDIO_RUNTIME;
+    if (explicit) return resolveNativeRuntime(explicit);
     const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-    const candidates = [
-      this.options.runtime,
-      process.env.AELIX_STUDIO_RUNTIME,
-      resources && path.join(resources, 'studio-preview'),
-      path.resolve('.local/studio-preview'),
-    ];
-    const runtime = candidates.find((candidate): candidate is string =>
-      Boolean(
-        candidate &&
-        existsSync(path.join(candidate, 'native/bin/python')) &&
-        existsSync(path.join(candidate, 'adapter/bin/aelix-acp'))
-      )
-    );
-    return runtime ? path.resolve(runtime) : undefined;
+    const candidates = [resources && path.join(resources, 'studio-preview'), path.resolve('.local/studio-preview')];
+    for (const candidate of candidates) {
+      if (candidate) {
+        const runtime = resolveNativeRuntime(candidate);
+        if (runtime) return runtime;
+      }
+    }
+    return undefined;
   }
 
   /** Returns only safe error codes; request bodies/native exception text must not be logged. */
@@ -71,7 +68,7 @@ export class NativeAuthService {
       if (!ACTIONS.has(command.action)) return fail('UNSUPPORTED');
       if ('operationId' in command) return this.control(owner, command);
       const runtime = this.runtime();
-      if (!runtime || process.platform === 'win32') return fail('RUNTIME_UNAVAILABLE');
+      if (!runtime) return fail('RUNTIME_UNAVAILABLE');
       const mutation = !['catalog', 'select'].includes(command.action);
       if (mutation && (this.mutating || this.operation?.state.phase === 'pending')) return fail('BUSY');
       if (mutation) this.mutating = true;
@@ -103,18 +100,13 @@ export class NativeAuthService {
             ok: true,
             data: {
               root: reply.data.root,
-              command: '/usr/bin/env',
+              command: 'node',
               args: [
-                '--',
-                path.join(runtime, 'adapter/bin/aelix-acp'),
-                '--aelix',
-                path.join(runtime, 'native/bin/aelix'),
+                runtime.launcher,
                 '--profile',
                 'coding',
-                '--provider',
-                command.provider,
-                '--model',
-                command.model,
+                `--provider=${command.provider}`,
+                `--model=${command.model}`,
               ],
               env: [{ name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root }],
             },
@@ -159,12 +151,13 @@ export class NativeAuthService {
     return { ok: true, data: { ...op.state } };
   }
 
-  private run(runtime: string, command: NativeAuthCommand, operation?: Operation): Promise<NativeAuthReply> {
+  private run(runtime: NativeRuntime, command: NativeAuthCommand, operation?: Operation): Promise<NativeAuthReply> {
     return new Promise((resolve) => {
-      const child = spawn(path.join(runtime, 'native/bin/python'), ['-I', '-B', '-c', NATIVE_AUTH_HELPER], {
+      const child = spawn(runtime.python, [...runtime.helperArgs, '-c', NATIVE_AUTH_HELPER], {
         env: { ...(this.options.env ?? process.env), PYTHONDONTWRITEBYTECODE: '1' },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
+        windowsHide: true,
       });
       this.children.add(child);
       if (operation) operation.child = child;

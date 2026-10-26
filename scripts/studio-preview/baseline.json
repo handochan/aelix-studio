@@ -1,7 +1,7 @@
 {
   "schema": "aelix-studio.preview/1",
   "studioBase": "c47a346db8d0303bc64a1a0bf93b4b94cceb99df",
-  "python": "3.12",
+  "python": "3.12.15",
   "native": {
     "schemaVersion": 1,
     "nativeVersion": "0.1.0b2",
@@ -85,9 +85,9 @@
   },
   "acp": {
     "repository": "handochan/aelix-acp",
-    "commit": "c573b2cacc26b1b76e1377ceeaa1bd1bf6b3431e",
+    "commit": "361c8ec9ffbc7e93c34653f37ee784421af3bd93",
     "version": "0.1.0",
-    "archiveSha256": "dd7dc00f54b264c238d2468ebd5cba0a99424f99376622f38de2d41e27db66ff"
+    "archiveSha256": "df70c3165e8907ce2329a7b5b1418c546002255cb9d33481d46a601715ea066c"
   },
   "aioncore": {
     "repository": "iOfficeAI/AionCore",
@@ -97,6 +97,22 @@
       "darwin-arm64": {
         "filename": "aioncore-v0.2.2-aarch64-apple-darwin.tar.gz",
         "sha256": "70c50b84be9e17ba574a2c74370e6d57a267f44bdd6ecf641740cf220737d5cb"
+      },
+      "darwin-x64": {
+        "filename": "aioncore-v0.2.2-x86_64-apple-darwin.tar.gz",
+        "sha256": "f7e68835a8530ce3a2ae2f06cfd47a516b0027337c64f253f8220b8edc53577d"
+      },
+      "linux-arm64": {
+        "filename": "aioncore-v0.2.2-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "e9bbb4a6f909cd14aa8b3d78a5c139557c2063930d155f6102df424d27155292"
+      },
+      "linux-x64": {
+        "filename": "aioncore-v0.2.2-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "1c3f241c7deff8e9d6da189c1017e6b12df7b538a1f557276c79b3c33d257335"
+      },
+      "win32-x64": {
+        "filename": "aioncore-v0.2.2-x86_64-pc-windows-msvc.zip",
+        "sha256": "d1ed8d1da869230c18701747d07e8f068db5b8c9442e65261304aeb4c27eacf6"
       }
     }
   },
@@ -109,5 +125,14 @@
     "nativePatches": [],
     "realProvider": false,
     "installer": false
+  },
+  "platformBootstrap": {
+    "win32-x64": [
+      {
+        "filename": "pywin32-311-cp312-cp312-win_amd64.whl",
+        "url": "https://files.pythonhosted.org/packages/d1/a8/a0e8d07d4d051ec7502cd58b291ec98dcc0c3fff027caad0470b72cfcc2f/pywin32-311-cp312-cp312-win_amd64.whl",
+        "sha256": "b8c095edad5c211ff31c05223658e71bf7116daa0ecf3ad85f3201ea3190d067"
+      }
+    ]
   }
 }
