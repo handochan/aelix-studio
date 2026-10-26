@@ -69,6 +69,10 @@ class ProviderFixture:
 
 
 async def main(args):
+    output = ROOT / '.local/studio-provider'
+    output.mkdir(parents=True, exist_ok=True)
+    for name in ('host.json', 'helper.json'):
+        (output / name).write_text(json.dumps({'status': 'running'}) + '\n')
     if not __debug__:
         raise RuntimeError('Run without Python -O')
     runtime = Path(args.runtime).resolve()
@@ -85,10 +89,6 @@ async def main(args):
                 or helper_manifest.get('native') != receipt['native']
                 or helper_manifest.get('acp') != receipt['acp']):
             raise ValueError('Selected bundled helper differs from the qualified preparation')
-    output = ROOT / '.local/studio-provider'
-    output.mkdir(parents=True, exist_ok=True)
-    for name in ('host.json', 'helper.json'):
-        (output / name).write_text(json.dumps({'status': 'running'}) + '\n')
     binary = runtime / receipt['aioncoreBinary']
     def installed_bytes():
         return {str(p.relative_to(runtime)): hashlib.sha256(p.read_bytes()).hexdigest()
@@ -198,5 +198,8 @@ if __name__ == '__main__':
         output = ROOT / '.local/studio-provider'
         output.mkdir(parents=True, exist_ok=True)
         for name in ('host.json', 'helper.json'):
-            (output / name).write_text(json.dumps({'status': 'failed'}) + '\n')
+            file = output / name
+            completed = json.loads(file.read_text()) if file.exists() else {}
+            if completed.get('status') != 'passed':
+                file.write_text(json.dumps({'status': 'failed'}) + '\n')
         raise

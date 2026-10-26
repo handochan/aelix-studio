@@ -5,7 +5,11 @@ on:
     inputs:
       pr_number:
         description: 'PR number to run checks on'
-        required: true
+        required: false
+        type: string
+      commit_sha:
+        description: 'Exact merged main commit to verify (mutually exclusive with pr_number)'
+        required: false
         type: string
       skip_build_test:
         description: 'Skip the build test job (saves ~45 min)'
@@ -22,7 +26,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || inputs.pr_number }}
+  group: pr-checks-${{ github.event.pull_request.number || inputs.pr_number || inputs.commit_sha }}
   cancel-in-progress: true
 
 permissions:
@@ -40,7 +44,7 @@ jobs:
     name: Provider Preview installer (${{ matrix.target }})
     if: github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     defaults:
       run:
         shell: bash
@@ -59,11 +63,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit_sha || github.ref }}
           fetch-depth: 0
       - name: Resolve PR context
         uses: ./.github/actions/checkout-pr
         with:
           pr_number: ${{ inputs.pr_number }}
+          commit_sha: ${{ inputs.commit_sha }}
           github_token: ${{ github.token }}
       - uses: actions/setup-node@v4
         with:
@@ -83,6 +89,19 @@ jobs:
         run: bunx playwright install-deps chromium
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
+      - name: Set up pinned source-host Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - name: Cache pinned source-host build
+        uses: actions/cache@v4
+        with:
+          path: .local/default-host
+          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-recovery/permission-restore.patch') }}
+      - name: Install Linux source-host prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev clang libclang-dev cmake
       - name: Prepare unchanged public native and ACP baseline
         run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
       - name: Check helper regressions before installer assembly
@@ -137,6 +156,17 @@ jobs:
           path: |
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
+            .local/provider-installer/host-preflight.json
+            .local/provider-installer/inventory-diff.json
+            .local/provider-installer/installer-copy-failure.json
+            .local/provider-installer/permission/qualification.json
+            .local/provider-installer/permission/renderer-result.json
+            .local/provider-installer/permission/*.png
+            resources/bundled-aioncore/**/build-receipt.json
+            resources/bundled-aioncore/**/manifest.json
+            .local/default-host/**/build.log
+            .local/default-host/**/container-build.log
+            .local/default-host/**/build-receipt.json
             .local/provider-installer/artifacts/*.dmg
             .local/provider-installer/artifacts/*.exe
             .local/provider-installer/artifacts/*.deb
@@ -162,12 +192,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: ${{ inputs.commit_sha || github.ref }}
           fetch-depth: 0
 
       - name: Resolve PR context
         uses: ./.github/actions/checkout-pr
         with:
           pr_number: ${{ inputs.pr_number }}
+          commit_sha: ${{ inputs.commit_sha }}
           github_token: ${{ github.token }}
 
       - name: Setup Node.js
@@ -191,7 +223,12 @@ jobs:
         run: npm install -g @j178/prek
 
       - name: Run prek checks
-        run: prek run --from-ref origin/${{ env.PR_BASE_REF }} --to-ref HEAD
+        run: |
+          if [ -n "${{ inputs.commit_sha }}" ]; then
+            prek run --all-files
+          else
+            prek run --from-ref origin/${{ env.PR_BASE_REF }} --to-ref HEAD
+          fi
 
   # Job 2: Unit tests across all platforms
   unit-tests:
@@ -206,11 +243,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.ref }}
 
       - name: Resolve PR context
         uses: ./.github/actions/checkout-pr
         with:
           pr_number: ${{ inputs.pr_number }}
+          commit_sha: ${{ inputs.commit_sha }}
           github_token: ${{ github.token }}
 
       - name: Setup Node.js
@@ -250,11 +290,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.ref }}
 
       - name: Resolve PR context
         uses: ./.github/actions/checkout-pr
         with:
           pr_number: ${{ inputs.pr_number }}
+          commit_sha: ${{ inputs.commit_sha }}
           github_token: ${{ github.token }}
 
       - name: Setup Node.js
@@ -333,6 +376,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.ref }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -381,7 +426,7 @@ jobs:
     name: Build Test (${{ matrix.platform }})
     if: github.event.action != 'closed' && github.event.pull_request.draft == false && inputs.skip_build_test != true
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -408,7 +453,28 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.ref }}
 
+      - name: Resolve PR or merged-source context
+        uses: ./.github/actions/checkout-pr
+        with:
+          pr_number: ${{ inputs.pr_number }}
+          commit_sha: ${{ inputs.commit_sha }}
+          github_token: ${{ github.token }}
+      - name: Set up pinned source-host Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: '1.95.0'
+      - name: Cache pinned source-host build
+        uses: actions/cache@v4
+        with:
+          path: .local/default-host
+          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-recovery/permission-restore.patch') }}
+      - name: Install Linux source-host prerequisites
+        if: runner.os == 'Linux'
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev clang libclang-dev cmake
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
@@ -627,6 +693,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit_sha || github.ref }}
 
       - name: Create mock build artifacts
         shell: bash

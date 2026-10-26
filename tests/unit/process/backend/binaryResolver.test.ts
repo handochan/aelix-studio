@@ -8,7 +8,10 @@ import { execSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { verifyDefaultHostBundle } from '../../../../packages/shared-scripts/src/default-host.js';
 import { resolveBinaryPath } from '@/process/backend/binaryResolver';
+
+vi.mock('../../../../packages/shared-scripts/src/default-host.js', () => ({ verifyDefaultHostBundle: vi.fn() }));
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
@@ -108,15 +111,38 @@ describe('resolveBinaryPath', () => {
     expect(execSync).not.toHaveBeenCalled();
   });
 
-  it('ignores a blank AIONUI_BACKEND_BIN and falls back to the normal search order', () => {
+  it('refuses PATH fallback when the default bundle is absent', () => {
     process.env.AIONUI_BACKEND_BIN = '   ';
-    const resolved = '/usr/local/bin/aioncore';
-
     setResourcesPath(undefined);
-    vi.mocked(execSync).mockReturnValue(`${resolved}\n`);
-    vi.mocked(existsSync).mockImplementation((path) => path === resolved);
+    vi.mocked(existsSync).mockReturnValue(false);
+    vi.mocked(execSync).mockReturnValue('/unqualified/aioncore');
+    expect(() => resolveBinaryPath()).toThrow('Cannot find "aioncore" binary');
+    expect(execSync).not.toHaveBeenCalled();
+  });
 
-    expect(resolveBinaryPath()).toBe(resolved);
+  it('rejects a changed default bundle before any PATH lookup', () => {
+    setResourcesPath('/owned/resources');
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(verifyDefaultHostBundle).mockImplementation(() => {
+      throw new Error('source policy differs');
+    });
+    expect(() => resolveBinaryPath()).toThrow('Default host bundle failed verification');
+    expect(execSync).not.toHaveBeenCalled();
+  });
+
+  it('returns the verified default bundle', () => {
+    setResourcesPath('/owned/resources');
+    vi.mocked(existsSync).mockReturnValue(true);
+    vi.mocked(verifyDefaultHostBundle).mockReturnValue({});
+    expect(resolveBinaryPath()).toBe(
+      join(
+        '/owned/resources',
+        'bundled-aioncore',
+        `${process.platform}-${process.arch}`,
+        process.platform === 'win32' ? 'aioncore.exe' : 'aioncore'
+      )
+    );
+    expect(execSync).not.toHaveBeenCalled();
   });
 
   it('attaches bundled path diagnostics when aioncore cannot be resolved', () => {
@@ -155,7 +181,6 @@ describe('resolveBinaryPath', () => {
           resourcesDirEntries: ['bundled-aioncore/'],
           runtimeDirEntries: ['manifest.json'],
           pathLookupCommand: process.platform === 'win32' ? 'where aioncore' : 'which aioncore',
-          pathLookupError: expect.stringContaining('not found on PATH'),
         }),
       });
     }

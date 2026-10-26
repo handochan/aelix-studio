@@ -114,7 +114,8 @@
         "filename": "aioncore-v0.2.2-x86_64-pc-windows-msvc.zip",
         "sha256": "d1ed8d1da869230c18701747d07e8f068db5b8c9442e65261304aeb4c27eacf6"
       }
-    }
+    },
+    "sourceManifestSha256": "3e1f10018dbc2fd8e03a26d2884bd9cd7853972116eebf12bc556f3f6e963534"
   },
   "acceptance": {
     "hostTargets": ["darwin-arm64"],

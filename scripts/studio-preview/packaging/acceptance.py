@@ -6,7 +6,6 @@ import os
 from pathlib import Path
 import re
 import shutil
-import struct
 import subprocess
 import sys
 import tempfile
@@ -16,85 +15,37 @@ import zipfile
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(Path(__file__).parents[1]))
 from prepare import host_target, venv_path
+sys.path.insert(0, str(Path(__file__).parents[1] / 'host-recovery'))
+from identity import host_identity, macho_code_identity
+
+
+# Qualification-only diagnostics never include raw resource bytes or extra filenames.
+BUNDLE_VERIFIER = r"""
+const fs = require('node:fs'), path = require('node:path');
+const api = require(process.argv[1]);
+try { api.verifyDefaultHostBundle(process.argv[2], process.argv[3]); }
+catch (error) {
+  let diagnostic = { status: 'unavailable' };
+  try {
+    const expected = JSON.parse(fs.readFileSync(path.join(process.argv[2], 'manifest.json'), 'utf8')).inventory;
+    const actual = api.inventory(process.argv[2]);
+    const missing = Object.keys(expected).filter(key => !(key in actual));
+    const changed = Object.keys(expected).filter(key => key in actual && expected[key] !== actual[key]);
+    const sample = keys => keys.filter(key => /^[a-zA-Z0-9_./@-]{1,384}$/.test(key)).sort().slice(0, 8);
+    diagnostic = { status: 'compared', expectedCount: Object.keys(expected).length,
+      actualCount: Object.keys(actual).length, missingCount: missing.length, changedCount: changed.length,
+      extraCount: Object.keys(actual).filter(key => !(key in expected)).length,
+      missingPublicPaths: sample(missing), changedPublicPaths: sample(changed) };
+  } catch { /* Never serialize arbitrary exceptions or resource bytes. */ }
+  fs.writeFileSync(process.argv[4], JSON.stringify(diagnostic, null, 2) + '\n');
+  throw error;
+}
+"""
 
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
-
-def macho_code_identity(raw, details=None):
-    """Hash every code byte, normalizing only bounded Mach-O signing metadata."""
-    data = bytearray(raw)
-    if len(data) < 32 or struct.unpack_from('<I', data)[0] != 0xFEEDFACF:
-        raise ValueError('Expected a thin 64-bit Mach-O host')
-    commands, command_bytes = struct.unpack_from('<II', data, 16)
-    end, offset, linkedit, signature = 32 + command_bytes, 32, None, None
-    if end > len(data):
-        raise ValueError('Truncated Mach-O commands')
-    for index in range(commands):
-        if offset + 8 > end:
-            raise ValueError('Truncated Mach-O command')
-        command, size = struct.unpack_from('<II', data, offset)
-        if size < 8 or offset + size > end:
-            raise ValueError('Invalid Mach-O command')
-        if command == 0x19 and data[offset + 8:offset + 24].rstrip(b'\0') == b'__LINKEDIT':
-            if linkedit is not None or size < 72:
-                raise ValueError('Invalid LINKEDIT command')
-            vm_size, file_offset, file_size = struct.unpack_from('<QQQ', data, offset + 32)
-            if vm_size < file_size or file_offset < end or file_offset + file_size != len(data):
-                raise ValueError('Invalid LINKEDIT extent')
-            linkedit = (offset, vm_size, file_offset, file_size)
-        if command == 0x1D:
-            if signature is not None or size != 16 or index != commands - 1:
-                raise ValueError('Signature command must be the final 16-byte command')
-            at, length = struct.unpack_from('<II', data, offset + 8)
-            if at % 16 or at + length != len(data) or length < 12:
-                raise ValueError('Invalid terminal signature extent')
-            magic, declared, count = struct.unpack_from('>III', data, at)
-            if magic != 0xFADE0CC0 or not (12 <= declared <= length) or not (1 <= count <= (declared - 12) // 8):
-                raise ValueError('Invalid embedded signature SuperBlob')
-            for entry in range(count):
-                blob = struct.unpack_from('>I', data, at + 16 + entry * 8)[0]
-                if blob < 12 + count * 8 or blob + 8 > declared:
-                    raise ValueError('Invalid signature index')
-                blob_length = struct.unpack_from('>I', data, at + blob + 4)[0]
-                if blob_length < 8 or blob + blob_length > declared:
-                    raise ValueError('Invalid signature blob extent')
-            signature = (offset, at, length, declared, count)
-        offset += size
-    if linkedit is None or offset != end:
-        raise ValueError('Missing or malformed LINKEDIT')
-    segment, vm_size, file_offset, file_size = linkedit
-    if signature and signature[1] < file_offset:
-        raise ValueError('Signature is outside LINKEDIT')
-    if details is not None:
-        details.update(bytes=len(raw), cpuType=struct.unpack_from('<I', raw, 4)[0],
-                       commands=commands, commandBytes=command_bytes,
-                       linkedit=dict(commandOffset=segment, vmSize=vm_size, fileOffset=file_offset, fileSize=file_size),
-                       signature=(dict(commandOffset=signature[0], dataOffset=signature[1], dataSize=signature[2],
-                                       superBlobLength=signature[3], blobs=signature[4]) if signature else None))
-    if signature:
-        command_offset, body_end, _, _, _ = signature
-        data = data[:body_end]
-        # The last command occupies existing header padding. Clear that slot;
-        # no mapped body offsets or ordinary load commands are shifted.
-        data[command_offset:command_offset + 16] = b'\0' * 16
-        struct.pack_into('<II', data, 16, commands - 1, command_bytes - 16)
-    # Signing aligns its terminal payload to16 bytes. Add only zeros, retaining
-    # every existing body byte; a nonzero alignment change still changes the hash.
-    data.extend(b'\0' * ((-len(data)) % 16))
-    struct.pack_into('<Q', data, segment + 32, 0)
-    struct.pack_into('<Q', data, segment + 48, len(data) - file_offset)
-    return hashlib.sha256(data).hexdigest()
-
-
-def host_identity(path, details=None):
-    raw = path.read_bytes()
-    if sys.platform == 'darwin':
-        return macho_code_identity(raw, details)
-    if details is not None:
-        details.update(bytes=len(raw))
-    return hashlib.sha256(raw).hexdigest()
 
 
 def long_path(path):
@@ -103,6 +54,76 @@ def long_path(path):
     if os.name == 'nt' and not value.startswith('\\\\?\\'):
         return Path('\\\\?\\UNC\\' + value[2:] if value.startswith('\\\\') else '\\\\?\\' + value)
     return path
+
+
+def assert_windows_install_unused():
+    # Refuse an existing real installation or running desktop before NSIS
+    # can change its per-user registration or request another app's exit.
+    import winreg
+    for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+        for view in (0, winreg.KEY_WOW64_32KEY):
+            try:
+                key = winreg.OpenKey(hive, r'Software\Microsoft\Windows\CurrentVersion\Uninstall', 0, winreg.KEY_READ | view)
+            except OSError:
+                continue
+            with key:
+                for index in range(winreg.QueryInfoKey(key)[0]):
+                    try:
+                        with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
+                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
+                                raise ValueError('Refusing to replace an existing AionUi installation')
+                    except OSError:
+                        continue
+    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
+    if b'aionui.exe' in processes.lower():
+        raise ValueError('Refusing to interrupt an existing AionUi process')
+
+
+def qualify_windows_copy_failure(artifact, directory, report_path):
+    """Force an owned locked-file failure, remove it, then permit normal retry."""
+    import ctypes
+    from ctypes import wintypes
+    assert_windows_install_unused()
+    app = directory / 'AionUi'
+    relative = ('resources/bundled-aioncore/win32-x64/managed-resources/node/'
+                'node-v24.11.0-win-x64/node_modules/npm/node_modules/'
+                'validate-npm-package-license/node_modules/spdx-expression-parse/package.json')
+    blocked = long_path(app / relative)
+    blocked.parent.mkdir(parents=True)
+    blocked.write_bytes(b'owned installer copy failure probe')
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+                                  wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    handle = kernel.CreateFileW(str(blocked), 0x80000000, 0, None, 3, 0x80, None)
+    if handle in (None, ctypes.c_void_p(-1).value):
+        raise ctypes.WinError(ctypes.get_last_error())
+    report = {'status': 'running', 'fault': 'owned_destination_file_locked', 'nativePatches': []}
+    report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    try:
+        try:
+            result = subprocess.run('"' + str(artifact) + '" /S /D=' + str(app),
+                                    check=False, timeout=300, shell=False)
+            report['observedExitCode'] = result.returncode
+        finally:
+            kernel.CloseHandle(handle)
+            if list(app.glob('*ninstall*.exe')):
+                remove_install(app, 'nsis', None)
+            elif app.exists():
+                shutil.rmtree(long_path(app))
+        report['ownedFailedAppRemoved'] = not app.exists()
+        if result.returncode != 1603 or not report['ownedFailedAppRemoved']:
+            raise ValueError('Owned locked-file installer did not fail closed and clean up')
+        # A second normal installation runs at this exact artifact/location.
+        assert_windows_install_unused()
+        report['status'] = 'passed'
+    except BaseException:
+        report['status'] = 'failed'
+        raise
+    finally:
+        report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 
 
 def installed(artifact, directory):
@@ -120,26 +141,7 @@ def installed(artifact, directory):
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
         return app / 'Contents/MacOS/AionUi', app / 'Contents/Resources/studio-preview', app, 'dmg', None
     if sys.platform == 'win32':
-        # Refuse an existing real installation or running desktop before NSIS
-        # can change its per-user registration or request another app's exit.
-        import winreg
-        for hive in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
-            for view in (0, winreg.KEY_WOW64_32KEY):
-                try:
-                    key = winreg.OpenKey(hive, r'Software\Microsoft\Windows\CurrentVersion\Uninstall', 0, winreg.KEY_READ | view)
-                except OSError:
-                    continue
-                with key:
-                    for index in range(winreg.QueryInfoKey(key)[0]):
-                        try:
-                            with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
-                                if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
-                                    raise ValueError('Refusing to replace an existing AionUi installation')
-                        except OSError:
-                            continue
-        processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
-        if b'aionui.exe' in processes.lower():
-            raise ValueError('Refusing to interrupt an existing AionUi process')
+        assert_windows_install_unused()
         app = directory / 'AionUi'
         # NSIS /D is the final, unquoted tail. CreateProcess receives this command
         # directly (no cmd/shell), preserving spaces and Unicode without expansion.
@@ -201,6 +203,9 @@ def main(args):
         applications = None
     with tempfile.TemporaryDirectory(prefix='Studio Provider 한글-', dir=applications) as temporary:
         directory = Path(temporary).resolve()
+        copy_failure_report = output.with_name('installer-copy-failure.json')
+        if sys.platform == 'win32':
+            qualify_windows_copy_failure(artifact, directory, copy_failure_report)
         executable, payload, app, kind, package = installed(artifact, directory)
         try:
             if not executable.is_file():
@@ -279,6 +284,45 @@ def main(args):
                 raise ValueError('Installed Python escaped its bundle')
             subprocess.run([*wrapper, *isolated, 'acp', '--version'], env=environment,
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            # Verify the installed source bundle before GUI startup, then check
+            # that its PE/ELF/Mach-O loader works with the same system-only PATH.
+            # This uses test-driver Node; the installed app still resolves itself.
+            preflight_path = output.with_name('host-preflight.json')
+            preflight = {'bundleVerify': {'status': 'running'}}
+            def save_preflight():
+                preflight_path.write_text(json.dumps(preflight, indent=2) + '\n', encoding='utf-8')
+            def failed_preflight(stage, error):
+                details = {'status': 'failed', 'exceptionKind': type(error).__name__,
+                           'timeout': isinstance(error, subprocess.TimeoutExpired)}
+                for name in ('returncode', 'errno', 'winerror'):
+                    value = getattr(error, name, None)
+                    if isinstance(value, int):
+                        details[name] = value
+                preflight[stage] = details
+                save_preflight()
+            save_preflight()
+            try:
+
+                subprocess.run(['node', '-e', BUNDLE_VERIFIER,
+                                str(ROOT / 'packages/shared-scripts/src/default-host.js'), str(core.parent), target,
+                                str(output.with_name('inventory-diff.json'))],
+                               check=True, cwd=ROOT, timeout=120)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+                failed_preflight('bundleVerify', error)
+                raise
+            preflight['bundleVerify'] = {'status': 'passed'}
+            preflight['hostVersion'] = {'status': 'running'}
+            save_preflight()
+            try:
+                version = subprocess.run([str(core), '--version'], env=environment, capture_output=True, timeout=30)
+            except (subprocess.TimeoutExpired, OSError) as error:
+                failed_preflight('hostVersion', error)
+                raise
+            preflight['hostVersion'] = {'status': 'passed' if version.returncode == 0 else 'failed',
+                                        'exitCode': version.returncode, 'timeout': False}
+            save_preflight()
+            if version.returncode:
+                raise ValueError('Installed host loader/version check failed: exit ' + str(version.returncode))
             environment['PROVIDER_APP_EXECUTABLE'] = str(executable)
             # The qualifier itself uses development Node; the installed app receives a
             # system-only PATH in providerHostSmoke and retains its Chromium sandbox.
@@ -286,7 +330,14 @@ def main(args):
             subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'providerSmoke.py'),
                             '--runtime', str(runtime), '--helper-runtime', str(payload)],
                            check=True, cwd=ROOT, env=environment, timeout=420)
-            report = dict(status='passed', target=target, artifactKind=kind, artifactSha256=digest(artifact),
+            permission_output = output.parent / 'permission/qualification.json'
+            subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-recovery/smoke.py'),
+                            '--runtime', str(runtime), '--payload', str(payload), '--report', str(permission_output)],
+                           check=True, cwd=ROOT, env=environment, timeout=420)
+            permission = json.loads(permission_output.read_text(encoding='utf-8'))
+            if permission['status'] != 'passed' or not permission['installer'] or permission['defaultHostOverride']:
+                raise ValueError('Installed default host permission acceptance failed')
+            report = dict(status='passed', target=target, permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output), artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
@@ -298,6 +349,8 @@ def main(args):
                           standaloneRuntimeSourceDenied=sys.platform == 'darwin', standaloneIsolatedOwnedImports=True,
                           systemNodePythonNotUsedByRuntime=True, guiRestrictedPath=True,
                           installedUi=json.loads((ROOT / '.local/studio-provider/host.json').read_text(encoding='utf-8')),
+                          installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
+                          installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)

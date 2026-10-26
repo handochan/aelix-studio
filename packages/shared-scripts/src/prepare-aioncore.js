@@ -442,6 +442,19 @@ function downloadAndExtract(platform, arch, tag) {
  */
 function prepareAioncore(options) {
   const { projectRoot, platform, arch, version = 'latest' } = options;
+  const packageFile = path.join(projectRoot, 'package.json');
+  const sourcePolicy =
+    fs.existsSync(packageFile) && JSON.parse(fs.readFileSync(packageFile, 'utf8')).aioncoreSourcePolicy;
+  if (sourcePolicy) {
+    if (sourcePolicy !== 'scripts/studio-preview/host-recovery/default.json')
+      throw new Error('Unknown Studio host source policy');
+    const { prepareDefaultHost } = require(
+      path.join(projectRoot, 'scripts/studio-preview/host-recovery/prepareDefaultHost.cjs')
+    );
+    const result = prepareDefaultHost({ ...options, prepareManagedResources });
+    verifyPreparedAioncoreBundle(projectRoot, platform, arch);
+    return result;
+  }
   const runtimeKey = `${platform}-${arch}`;
   const actionsRunId = (process.env.AIONUI_BACKEND_RUN_ID || '').trim();
 
@@ -584,6 +597,7 @@ function prepareAioncore(options) {
 }
 
 module.exports = {
+  prepareManagedResources,
   getActionsArtifactMissingMessage,
   getActionsArtifactName,
   prepareAioncore,

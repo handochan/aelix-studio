@@ -27,6 +27,29 @@ const app = await electron.launch({
   env: appEnv,
   timeout: 60000,
 });
+// Keep only known startup markers; raw process output may contain credentials.
+const startupMarkers = new Set();
+const markerPatterns = [
+  ['spawn_requested', '[aioncore] starting:'],
+  ['default_policy', 'Default host source policy differs'],
+  ['default_receipt', 'Default host build receipt changed'],
+  ['default_provenance', 'Default host build provenance differs'],
+  ['default_code', 'Default host code or upstream license changed'],
+  ['default_inventory', 'Default host resource inventory changed'],
+  ['default_resources', 'Default host managed resources differ'],
+  ['default_resource_contract', 'Default host managed resource contract differs'],
+  ['resolve_binary', "stage: 'resolve_binary'"],
+  ['spawn_error', "stage: 'spawn_error'"],
+  ['early_exit', "stage: 'early_exit'"],
+  ['missing_file', 'ENOENT'],
+  ['access_denied', 'EACCES'],
+];
+for (const stream of [app.process().stdout, app.process().stderr]) {
+  stream?.on('data', (chunk) => {
+    const text = chunk.toString();
+    for (const [code, marker] of markerPatterns) if (text.includes(marker)) startupMarkers.add(code);
+  });
+}
 let page;
 let foreign;
 let webui;
@@ -275,7 +298,24 @@ try {
     ) + '\n'
   );
 } catch (error) {
-  if (page) await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
+  if (page) {
+    await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
+    const state = await page
+      .evaluate(() => {
+        const failure = window.__backendStartupBridge?.getState() ?? window.__backendStartupFailure;
+        const result = { failed: window.__backendStartupFailed === true, portReady: window.__backendPort > 0 };
+        for (const key of ['reason', 'backendBoundaryCode', 'backendBoundaryStage', 'incompleteInstallationKind']) {
+          if (typeof failure?.[key] === 'string' && /^[a-zA-Z0-9_.-]{1,100}$/.test(failure[key]))
+            result[key] = failure[key];
+        }
+        return result;
+      })
+      .catch(() => ({ unavailable: true }));
+    fs.writeFileSync(
+      path.join(output, 'startup-failure.json'),
+      JSON.stringify({ ...state, markers: [...startupMarkers] }) + '\n'
+    );
+  }
   throw error;
 } finally {
   if (webui) await webui.stop();
