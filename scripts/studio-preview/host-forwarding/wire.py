@@ -1,7 +1,7 @@
 """Owned source host + installed ACP + actual public native, synthetic model."""
 
 import argparse, asyncio, hashlib, json, os, signal, sqlite3, subprocess, sys, tempfile, time, urllib.request, urllib.error
-from contextlib import closing
+from contextlib import closing, contextmanager
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -59,6 +59,47 @@ def startup_diagnostics(raw, returncode, phase):
         listeningObserved=b"AIONCORE_LISTENING " in raw,
         readyObserved=b"AIONCORE_READY" in raw,
     )
+
+
+async def wait_runtime_idle(api, route, timeout=30):
+    # A durable ACP outcome can precede the host orchestrator's turn-claim
+    # release. Observe readiness separately before a distinct test operation;
+    # never use a new POST or a retry to discover whether cleanup finished.
+    async with asyncio.timeout(timeout):
+        while True:
+            _, conversation = await api(route)
+            runtime = conversation.get("runtime") or {}
+            if (runtime.get("state") == "idle"
+                    and runtime.get("can_send_message") is True
+                    and runtime.get("is_processing") is False
+                    and runtime.get("pending_confirmations") == 0
+                    and "turn_id" in runtime and runtime["turn_id"] is None):
+                return
+            await asyncio.sleep(0.02)
+
+
+def cleanup_owned_temporary_directory(directory, timeout=10):
+    # On Windows, ACP can still be closing its session/store after Core exits.
+    # Retry only the observed sharing violation on this owned fixture tree;
+    # persistent locks and all other cleanup failures must remain failures.
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            directory.cleanup()
+            return
+        except PermissionError as error:
+            if getattr(error, "winerror", None) != 32 or time.monotonic() >= deadline:
+                raise
+            time.sleep(0.05)
+
+
+@contextmanager
+def owned_temporary_directory():
+    directory = tempfile.TemporaryDirectory(prefix="studio16-source-wire-")
+    try:
+        yield directory.name
+    finally:
+        cleanup_owned_temporary_directory(directory)
 
 
 def persistence_files(data_root):
@@ -190,7 +231,7 @@ async def run(args):
         )
 
     payload_before = payload_inventory()
-    with tempfile.TemporaryDirectory(prefix="studio16-source-wire-") as temporary:
+    with owned_temporary_directory() as temporary:
         root = Path(temporary).resolve()
         fixture = ToolFixture(root)
         await fixture.start()
@@ -278,6 +319,7 @@ async def run(args):
                         "failed",
                         "interrupted",
                     ):
+                        await wait_runtime_idle(api, route)
                         return result
                     await asyncio.sleep(0.02)
 

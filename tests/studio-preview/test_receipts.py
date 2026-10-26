@@ -1,5 +1,6 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
 import ast
+import asyncio
 import hashlib
 import importlib.util
 import json
@@ -41,6 +42,80 @@ def signed_macho_fixture():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_forwarding_terminal_receipt_does_not_replace_runtime_readiness(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_idle', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        idle = dict(state='idle', can_send_message=True, is_processing=False,
+                    pending_confirmations=0, turn_id=None)
+        observations = [dict(idle, state='running', turn_id='original-turn'),
+                        dict(idle, can_send_message=False),
+                        dict(idle, is_processing=True),
+                        dict(idle, pending_confirmations=1),
+                        dict(idle, turn_id='original-turn'), idle]
+        calls = []
+
+        async def api(path, method='GET'):
+            calls.append((path, method))
+            return 200, dict(operation={'state': 'completed'}, runtime=observations.pop(0))
+
+        asyncio.run(wire.wait_runtime_idle(api, '/api/conversations/original', timeout=1))
+        self.assertFalse(observations)
+        self.assertEqual(calls, [('/api/conversations/original', 'GET')] * 6)
+
+    def test_forwarding_runtime_readiness_times_out_without_a_replacement_post(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_idle_timeout', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        calls = []
+
+        async def api(path, method='GET'):
+            calls.append((path, method))
+            return 200, dict(runtime={'state': 'running', 'turn_id': 'original-turn'})
+
+        with self.assertRaises(TimeoutError):
+            asyncio.run(wire.wait_runtime_idle(api, '/api/conversations/original', timeout=0.05))
+        self.assertTrue(calls)
+        self.assertTrue(all(call == ('/api/conversations/original', 'GET') for call in calls))
+
+    def test_owned_fixture_cleanup_retries_only_transient_windows_sharing_violations(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_cleanup', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        sharing_violation = PermissionError('synthetic owned file is closing')
+        sharing_violation.winerror = 32
+        with tempfile.TemporaryDirectory() as parent:
+            directory = tempfile.TemporaryDirectory(dir=parent)
+            owned = Path(directory.name)
+            original_cleanup = directory.cleanup
+            calls = []
+
+            def closing_store():
+                calls.append(True)
+                if len(calls) < 3:
+                    raise sharing_violation
+                original_cleanup()
+
+            with patch.object(directory, 'cleanup', closing_store), patch.object(wire.time, 'sleep'):
+                wire.cleanup_owned_temporary_directory(directory)
+            self.assertEqual(len(calls), 3)
+            self.assertFalse(owned.exists())
+
+        for error, timeout in ((sharing_violation, 0), (PermissionError('access denied'), 10)):
+            with self.subTest(error=error, timeout=timeout), tempfile.TemporaryDirectory() as parent:
+                directory = tempfile.TemporaryDirectory(dir=parent)
+                try:
+                    with patch.object(directory, 'cleanup', side_effect=error) as cleanup:
+                        with self.assertRaises(PermissionError):
+                            wire.cleanup_owned_temporary_directory(directory, timeout=timeout)
+                        cleanup.assert_called_once()
+                    self.assertTrue(Path(directory.name).exists())
+                finally:
+                    directory.cleanup()
+
     def test_forwarding_observers_support_unicode_paths_with_a_cp1252_locale(self):
         wire_spec = importlib.util.spec_from_file_location(
             'forwarding_wire', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')

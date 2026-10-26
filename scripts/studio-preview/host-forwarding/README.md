@@ -26,6 +26,12 @@ checkout. The public native beta.2 wheels remain unchanged.
   and scans every remaining log/DB-prefix file as raw bytes. Snapshot/read failures
   fail the qualification. Before/after file counts and disappearing SQLite
   sidecars are recorded separately; live raw-sidecar inspection is not claimed.
+  A terminal operation receipt and host runtime readiness are observed
+  separately: a bounded conversation GET barrier requires an idle runtime,
+  released turn and no pending consent before a distinct test operation. It
+  never probes readiness by resubmitting a POST.
+  Final owned-fixture cleanup retries Windows sharing violation 32 for at most
+  ten seconds while the adapter closes; persistent locks and other errors fail.
   Desktop local mode intentionally retains
   AionCore's existing local default identity; it does not become an authenticated
   network service by enabling this feature.
