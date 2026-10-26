@@ -156,12 +156,14 @@ jobs:
           path: |
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
+            .local/provider-installer/host-preflight.json
             .local/provider-installer/permission/qualification.json
             .local/provider-installer/permission/renderer-result.json
             .local/provider-installer/permission/*.png
             resources/bundled-aioncore/**/build-receipt.json
             resources/bundled-aioncore/**/manifest.json
             .local/default-host/**/build.log
+            .local/default-host/**/container-build.log
             .local/default-host/**/build-receipt.json
             .local/provider-installer/artifacts/*.dmg
             .local/provider-installer/artifacts/*.exe

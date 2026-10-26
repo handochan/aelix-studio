@@ -2,13 +2,16 @@
 
 The default bootstrap and packaging policy is [default.json](default.json).
 It uses the same reviewed patch as the historical Darwin dev candidate, with
-Rust 1.95.0 `release` builds on native runners for `darwin-arm64`, `darwin-x64`,
-`linux-arm64`, `linux-x64`, and `win32-x64`. Public beta.2 wheels remain unchanged.
+Rust 1.95.0 `release` builds for `darwin-arm64`, `darwin-x64`, `linux-arm64`,
+`linux-x64`, and `win32-x64`. Darwin/Windows use native compiler toolchains; Linux
+uses a matching-CPU Debian 11 compiler container pinned by OCI digests and recipe
+hash. Public beta.2 wheels remain unchanged.
 
 Run `bun run prepare:host` before the normal desktop/WebUI development launch.
 Normal `dist` builds and Preview `prepare.py` call the same source preparation
 path. Rust, Git, Python and the native compiler prerequisites are build-time
-requirements; installed Preview users need none of those developer tools.
+requirements; Linux host builds also require Docker. Installed Preview users
+need none of those developer tools.
 The cache lives under `.local/default-host/`. Existing incomplete or stale owned
 build/bundle directories are refused; archive them before rebuilding. A failure
 never selects an older release or a system PATH host. An explicit
@@ -23,10 +26,14 @@ managed-resource inventory before spawning. Mach-O identity normalizes only
 bounded terminal signing metadata. Receipts detect delivery drift; they are not
 a substitute for installer signing or a trusted build pipeline. The native CI
 images are macOS 15, Ubuntu 24.04 and Windows Server 2022. These results do not
-establish the inherited upstream README's minimum OS versions. ELF GLIBC needs,
-PE runtime imports and actual minimum/clean OS execution remain release gates;
-the upstream release's cross/older Linux build environment and Windows static-CRT
-flags must not be inferred from this source build.
+establish the inherited upstream README's minimum OS versions. The compiler
+container retains the upstream release GLIBC requirement ceilings (x64 2.34,
+ARM64 2.30); each built ELF is checked with `readelf` before its receipt is
+accepted. Windows explicitly fixes `-C target-feature=+crt-static`. Receipts bind
+the compiler container identity, measured GLIBC maximum and target Rust flags.
+PE runtime import auditing and actual minimum/clean OS execution remain release
+gates. Controller OS, compiler-container OS and installer-test OS are distinct
+evidence; a static ABI check alone does not establish execution on that OS.
 
 The Provider Preview installer additionally includes the relocatable public-wheel
 native/ACP payload. Ordinary `dist` includes the default Rust host but does not

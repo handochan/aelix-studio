@@ -41,18 +41,27 @@
       "rustTarget": "x86_64-apple-darwin"
     },
     "linux-arm64": {
-      "rustTarget": "aarch64-unknown-linux-gnu"
+      "rustTarget": "aarch64-unknown-linux-gnu",
+      "container": {
+        "recipeSha256": "451a6f235ccae389a9fc1f02a4208893e855aad4b1e7c29e6b5ad0df2c224cc8",
+        "glibcMax": "2.30"
+      }
     },
     "linux-x64": {
-      "rustTarget": "x86_64-unknown-linux-gnu"
+      "rustTarget": "x86_64-unknown-linux-gnu",
+      "container": {
+        "recipeSha256": "451a6f235ccae389a9fc1f02a4208893e855aad4b1e7c29e6b5ad0df2c224cc8",
+        "glibcMax": "2.34"
+      }
     },
     "win32-x64": {
-      "rustTarget": "x86_64-pc-windows-msvc"
+      "rustTarget": "x86_64-pc-windows-msvc",
+      "rustFlags": "-C target-feature=+crt-static"
     }
   },
   "sourceFileCount": 1420,
-  "buildRecipeSha256": "1c0075664430f0939e7cede779732064d01a640f6e6fe2ab3576b0e17e2b89f0",
+  "buildRecipeSha256": "3da97cb9a85257aea565acfeab76d569312df033b92d09b59d8b8420c4ec2469",
   "identityRecipeSha256": "bd80fe954d709fcc4458337fd0853c2af11ca6db096015f737eef4e217bae99e",
   "managedResourceRecipeSha256": "a6090521004747c5ad5e15cb52419bfea21a04bd6db91a7e3686b89521448362",
-  "resourceIdentityRecipeSha256": "90182629d04fb2b2a5212eb769a37b7b9f37560e198e670e8320ebebd9e03dea"
+  "resourceIdentityRecipeSha256": "cc97a1a245c6977cab656797f5b46861ff7e9b3365227165f07591dab95d40a4"
 }

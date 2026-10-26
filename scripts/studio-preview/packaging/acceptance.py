@@ -206,6 +206,44 @@ def main(args):
                 raise ValueError('Installed Python escaped its bundle')
             subprocess.run([*wrapper, *isolated, 'acp', '--version'], env=environment,
                            check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            # Verify the installed source bundle before GUI startup, then check
+            # that its PE/ELF/Mach-O loader works with the same system-only PATH.
+            # This uses test-driver Node; the installed app still resolves itself.
+            preflight_path = output.with_name('host-preflight.json')
+            preflight = {'bundleVerify': {'status': 'running'}}
+            def save_preflight():
+                preflight_path.write_text(json.dumps(preflight, indent=2) + '\n', encoding='utf-8')
+            def failed_preflight(stage, error):
+                details = {'status': 'failed', 'exceptionKind': type(error).__name__,
+                           'timeout': isinstance(error, subprocess.TimeoutExpired)}
+                for name in ('returncode', 'errno', 'winerror'):
+                    value = getattr(error, name, None)
+                    if isinstance(value, int):
+                        details[name] = value
+                preflight[stage] = details
+                save_preflight()
+            save_preflight()
+            try:
+                subprocess.run(['node', '-e',
+                                "require(process.argv[1]).verifyDefaultHostBundle(process.argv[2],process.argv[3])",
+                                str(ROOT / 'packages/shared-scripts/src/default-host.js'), str(core.parent), target],
+                               check=True, cwd=ROOT, timeout=120)
+            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as error:
+                failed_preflight('bundleVerify', error)
+                raise
+            preflight['bundleVerify'] = {'status': 'passed'}
+            preflight['hostVersion'] = {'status': 'running'}
+            save_preflight()
+            try:
+                version = subprocess.run([str(core), '--version'], env=environment, capture_output=True, timeout=30)
+            except (subprocess.TimeoutExpired, OSError) as error:
+                failed_preflight('hostVersion', error)
+                raise
+            preflight['hostVersion'] = {'status': 'passed' if version.returncode == 0 else 'failed',
+                                        'exitCode': version.returncode, 'timeout': False}
+            save_preflight()
+            if version.returncode:
+                raise ValueError('Installed host loader/version check failed: exit ' + str(version.returncode))
             environment['PROVIDER_APP_EXECUTABLE'] = str(executable)
             # The qualifier itself uses development Node; the installed app receives a
             # system-only PATH in providerHostSmoke and retains its Chromium sandbox.

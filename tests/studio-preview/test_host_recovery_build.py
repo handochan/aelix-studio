@@ -74,3 +74,11 @@ class HostRecoveryBuildTests(unittest.TestCase):
         driver = {'DISPLAY': ':91', 'XAUTHORITY': '/owned-xvfb/auth', 'API_KEY': 'synthetic-secret', 'HOME': 'operator-home'}
         self.assertEqual(smoke.gui_environment(isolated, driver),
                          dict(isolated, DISPLAY=':91', XAUTHORITY='/owned-xvfb/auth'))
+
+
+    def test_glibc_gate_rejects_a_newer_abi_than_the_retained_release_baseline(self):
+        with self.assertRaisesRegex(ValueError, 'GLIBC requirement exceeds'):
+            build.maximum_glibc_requirement('Name: GLIBC_2.2.5\nName: GLIBC_2.39', '2.34')
+        self.assertEqual(build.maximum_glibc_requirement('Name: GLIBC_2.9\nName: GLIBC_2.30', '2.30'), '2.30')
+        with self.assertRaisesRegex(ValueError, 'no auditable GLIBC'):
+            build.maximum_glibc_requirement('no version table', '2.30')

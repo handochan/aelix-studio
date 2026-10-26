@@ -126,6 +126,7 @@ function verifyDefaultHostBundle(directory, target) {
   )
     throw new Error('Default host source policy differs from this Studio build');
   if (`${manifest.platform}-${manifest.arch}` !== target) throw new Error('Default host target differs');
+  const targetPolicy = policy.targets[target];
   const receiptFile = path.join(directory, 'build-receipt.json');
   if (digest(receiptFile) !== manifest.buildReceiptSha256) throw new Error('Default host build receipt changed');
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
@@ -144,6 +145,7 @@ function verifyDefaultHostBundle(directory, target) {
     receipt.originalSourceFilesVerified !== policy.sourceFileCount ||
     receipt.patchedSourceFilesVerified !== policy.sourceFileCount ||
     receipt.profile !== 'release' ||
+    receipt.rustFlags !== (targetPolicy.rustFlags ?? '') ||
     receipt.patchSha256 !== policy.patch.sha256 ||
     stable(receipt.upstream) !== stable(policy.upstream) ||
     receipt.cargoLockSha256 !== policy.cargoLockSha256 ||
@@ -153,6 +155,21 @@ function verifyDefaultHostBundle(directory, target) {
     receipt.sourceFilesAfterBuildVerified !== receipt.originalSourceFilesVerified
   )
     throw new Error('Default host build provenance differs');
+  if (targetPolicy.container) {
+    const maximum = receipt.maximumGlibcVersionNeeded;
+    const expectedPlatform = 'linux/' + (manifest.arch === 'x64' ? 'amd64' : 'arm64');
+    const compare = (version) => version.split('.').reduce((result, part) => result * 1000 + Number(part), 0);
+    if (
+      !receipt.buildContainer ||
+      receipt.buildContainer.recipeSha256 !== targetPolicy.container.recipeSha256 ||
+      receipt.buildContainer.platform !== expectedPlatform ||
+      !/^sha256:[0-9a-f]{64}$/.test(receipt.buildContainer.imageId) ||
+      typeof maximum !== 'string' ||
+      !/^[0-9]+\.[0-9]+$/.test(maximum) ||
+      compare(maximum) > compare(targetPolicy.container.glibcMax)
+    )
+      throw new Error('Default host compiler container or GLIBC compatibility differs');
+  }
   if (
     digest(path.join(directory, 'AIONCORE-LICENSE.txt')) !== policy.upstreamLicenseSha256 ||
     codeIdentity(fs.readFileSync(path.join(directory, receipt.binary))) !== receipt.binaryCodeSha256 ||

@@ -82,14 +82,66 @@ def apply_patch(source_root, config):
                        cwd=source_root, env=env, check=True, capture_output=True, text=True)
 
 
+def maximum_glibc_requirement(output, ceiling):
+    import re
+    versions = set(re.findall(r'\bName:\s+GLIBC_([0-9]+(?:\.[0-9]+)+)', output))
+    if not versions:
+        raise ValueError('ELF has no auditable GLIBC version requirements')
+    maximum = max(versions, key=lambda value: tuple(map(int, value.split('.'))))
+    if tuple(map(int, maximum.split('.'))) > tuple(map(int, ceiling.split('.'))):
+        raise ValueError('ELF GLIBC requirement exceeds the retained release baseline: ' + maximum)
+    return maximum
+
+
+def container_prefix(config, source_root, output, target, target_name, report):
+    """Use pinned native-architecture Linux build tools without exposing user homes."""
+    if platform.system() not in ('Darwin', 'Linux') or not shutil.which('docker'):
+        raise ValueError('Linux source builds require Docker on a matching Linux/macOS architecture')
+    recipe = HERE.parent / 'packaging/hostBuild.Dockerfile'
+    spec = config['targets'][target_name]['container']
+    if digest(recipe) != spec['recipeSha256']:
+        raise ValueError('Linux compiler container recipe differs from its pinned policy')
+    arch = target_name.split('-')[1]
+    docker_platform = 'linux/' + {'x64': 'amd64', 'arm64': 'arm64'}[arch]
+    tag = 'aelix-studio-host:' + spec['recipeSha256'][:20] + '-' + arch
+    with (output / 'container-build.log').open('w') as log:
+        subprocess.run(['docker', 'build', '--platform', docker_platform,
+                        '--build-arg', 'STUDIO_RECIPE_SHA=' + spec['recipeSha256'],
+                        '--tag', tag, '--file', str(recipe), str(recipe.parent)],
+                       check=True, stdout=log, stderr=subprocess.STDOUT)
+    image, = json.loads(subprocess.check_output(['docker', 'image', 'inspect', tag], text=True))
+    if (image['Os'] != 'linux' or image['Architecture'] != docker_platform.split('/')[1]
+            or image['Config']['Labels'].get('org.aelix.host-build.recipe') != spec['recipeSha256']):
+        raise ValueError('Linux compiler container identity differs')
+    report['buildContainer'] = dict(recipeSha256=spec['recipeSha256'], imageId=image['Id'], platform=docker_platform)
+    registry = target.parent / 'container-registry'
+    registry.mkdir(parents=True, exist_ok=True)
+    target.mkdir(parents=True, exist_ok=True)
+    recipes = HERE.parents[2] / 'packages/shared-scripts/src'
+    return ['docker', 'run', '--rm', '--platform', docker_platform,
+            '--user', str(os.getuid()) + ':' + str(os.getgid()),
+            '--env', 'HOME=/tmp/studio-host-build', '--env', 'LC_ALL=C',
+            '--env', 'RUSTUP_TOOLCHAIN=' + config['rustToolchain'],
+            '--env', 'RUSTFLAGS=' + config['targets'][target_name].get('rustFlags', ''),
+            '--env', 'CARGO_INCREMENTAL=0',
+            '--volume', str(recipes) + ':' + str(recipes) + ':ro',
+            '--volume', str(HERE) + ':' + str(HERE) + ':ro',
+            '--volume', str(output) + ':' + str(output) + ':rw',
+            '--volume', str(source_root) + ':' + str(source_root) + ':ro',
+            '--volume', str(target) + ':' + str(target) + ':rw',
+            '--volume', str(registry) + ':/usr/local/cargo/registry:rw',
+            '--workdir', str(source_root), image['Id'],
+            'sh', '-c', 'mkdir -p "$HOME"; exec "$@"', 'studio-host-build']
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--manifest', type=Path, default=MANIFEST)
-    parser.add_argument('--target', help='Native Node-style target from the release manifest')
-    parser.add_argument('--archive', type=Path, required=True, help='Exact public source archive pinned in source.json')
-    parser.add_argument('--output', type=Path, required=True, help='New task-owned output directory; existing paths are refused')
-    parser.add_argument('--cargo', default=shutil.which('cargo'), help='Pinned Rust Cargo executable (normal rustup proxy path)')
-    parser.add_argument('--target-dir', type=Path, help='Optional task-owned Cargo cache, without changing source identity')
+    parser.add_argument('--target', help='Node-style target; Linux uses the pinned compiler container')
+    parser.add_argument('--archive', type=Path, required=True, help='Exact pinned public source archive')
+    parser.add_argument('--output', type=Path, required=True, help='New task-owned output; existing paths are refused')
+    parser.add_argument('--cargo', default=shutil.which('cargo'), help='Pinned native Rust Cargo executable')
+    parser.add_argument('--target-dir', type=Path, help='Task-owned Cargo cache; do not share concurrent builds')
     args = parser.parse_args()
     manifest = args.manifest.resolve()
     config = json.loads(manifest.read_text())
@@ -99,11 +151,13 @@ def main():
     architecture = {'arm64': 'arm64', 'aarch64': 'arm64', 'x86_64': 'x64', 'amd64': 'x64'}.get(platform.machine().lower())
     system = {'Darwin': 'darwin', 'Linux': 'linux', 'Windows': 'win32'}.get(platform.system())
     native_target = str(system) + '-' + str(architecture)
-    target_spec = None
+    target_name = args.target or native_target
+    target_spec = config.get('targets', {}).get(target_name)
+    container = target_spec and target_spec.get('container')
     if 'targets' in config:
-        target_spec = config['targets'].get(args.target or native_target)
-        if not target_spec or (args.target and args.target != native_target):
-            raise ValueError('Source host builds require a matching native runner')
+        if not target_spec or (target_name != native_target and not (
+                container and target_name.startswith('linux-') and target_name.split('-')[1] == architecture)):
+            raise ValueError('Source host builds require a matching native architecture')
     elif platform.system() + '/' + platform.machine() not in config['acceptanceTargets']:
         raise ValueError('This candidate build acceptance currently covers Darwin/arm64 only')
     resource_recipe = HERE.parents[2] / 'packages/shared-scripts/src/prepare-aioncore.js'
@@ -111,7 +165,7 @@ def main():
     if config.get('purpose') == 'default_runtime':
         if digest(resource_recipe) != config['managedResourceRecipeSha256'] or digest(resource_identity) != config['resourceIdentityRecipeSha256']:
             raise ValueError('Managed resource recipe differs from the source policy')
-    if not args.cargo:
+    if not container and not args.cargo:
         raise ValueError('The pinned Rust toolchain is required')
     archive, output = args.archive.resolve(), args.output.resolve()
     if digest(archive) != config['upstream']['archiveSha256']:
@@ -123,26 +177,33 @@ def main():
               'sourceManifestSha256': digest(manifest), 'buildRecipeSha256': digest(Path(__file__)), 'patchSha256': config['patch']['sha256'],
               'upstream': config['upstream'], 'profile': config['hostBuildProfile'],
               'platform': platform.system() + '/' + platform.machine(),
-              'releasedHostBytes': False, 'nativePatches': [],
-              'target': native_target, 'purpose': config.get('purpose', 'development_candidate'),
-              'binary': 'aioncore.exe' if system == 'win32' else 'aioncore'}
+              'releasedHostBytes': False, 'nativePatches': [], 'target': target_name,
+              'purpose': config.get('purpose', 'development_candidate'),
+              'binary': 'aioncore.exe' if target_name.startswith('win32-') else 'aioncore',
+              'rustFlags': (target_spec or {}).get('rustFlags', '')}
     try:
         extract(archive, source_root)
         report['originalSourceFilesVerified'] = verify_source(archive, source_root, config, patched=False)
-        if digest(source_root / 'Cargo.lock') != config['cargoLockSha256']:
-            raise ValueError('Cargo lock differs from the pinned source')
-        if digest(source_root / 'LICENSE') != config['upstreamLicenseSha256']:
-            raise ValueError('Upstream license file differs')
+        if digest(source_root / 'Cargo.lock') != config['cargoLockSha256'] or digest(source_root / 'LICENSE') != config['upstreamLicenseSha256']:
+            raise ValueError('Upstream Cargo lock or license differs')
         apply_patch(source_root, config)
         report['patchedSourceFilesVerified'] = verify_source(archive, source_root, config, patched=True)
-        cargo = str(Path(args.cargo).absolute())
-        report['cargoVersion'] = subprocess.check_output([cargo, '--version'], cwd=source_root, text=True).strip()
-        if config['rustToolchain'] not in report['cargoVersion']:
-            raise ValueError('Cargo differs from the upstream-pinned toolchain')
-        report['rustcVersionVerbose'] = subprocess.check_output([str(Path(cargo).with_name('rustc.exe' if system == 'win32' else 'rustc')), '--version', '--verbose'], cwd=source_root, text=True).strip()
-        if 'rustc ' + config['rustToolchain'] + ' ' not in report['rustcVersionVerbose']:
-            raise ValueError('Rust compiler differs from the upstream-pinned toolchain')
         target = args.target_dir.resolve() if args.target_dir else source_root / 'target'
+        prefix = container_prefix(config, source_root, output, target, target_name, report) if container else []
+        environment = dict(os.environ)
+        if config.get('purpose') == 'default_runtime':
+            environment.pop('CARGO_ENCODED_RUSTFLAGS', None)
+            environment['RUSTFLAGS'] = report['rustFlags']
+        def capture(argv):
+            return subprocess.check_output([*prefix, *argv], cwd=source_root, env=environment, text=True).strip()
+        cargo = '/usr/local/cargo/bin/cargo' if container else str(Path(args.cargo).absolute())
+        rustc = '/usr/local/cargo/bin/rustc' if container else str(Path(cargo).with_name('rustc.exe' if system == 'win32' else 'rustc'))
+        report['cargoVersion'] = capture([cargo, '--version'])
+        report['rustcVersionVerbose'] = capture([rustc, '--version', '--verbose'])
+        if not report['cargoVersion'].startswith('cargo ' + config['rustToolchain'] + ' ') or not report['rustcVersionVerbose'].startswith('rustc ' + config['rustToolchain'] + ' '):
+            raise ValueError('Compiler differs from the pinned Rust toolchain')
+        if container:
+            report['buildContainer']['osRelease'] = capture(['cat', '/etc/os-release'])
         argv = [cargo, 'build', '--locked', '-p', 'aionui-app', '--bin', 'aioncore', '--target-dir', str(target)]
         profile = config['hostBuildProfile']
         if profile not in ('dev', 'release'):
@@ -151,25 +212,27 @@ def main():
             argv.append('--release')
         if target_spec:
             argv.extend(['--target', target_spec['rustTarget']])
-        report['buildArgv'] = argv
+        report['buildArgv'] = [*prefix, *argv]
         with (output / 'build.log').open('w') as log:
-            subprocess.run(argv, cwd=source_root, check=True, stdout=log, stderr=subprocess.STDOUT)
+            subprocess.run(report['buildArgv'], cwd=source_root, env=environment, check=True, stdout=log, stderr=subprocess.STDOUT)
         binary_dir = target / target_spec['rustTarget'] if target_spec else target
         binary_dir /= 'release' if profile == 'release' else 'debug'
-        shutil.copy2(binary_dir / report['binary'], output / report['binary'])
+        binary = output / report['binary']
+        shutil.copy2(binary_dir / report['binary'], binary)
         shutil.copy2(source_root / 'LICENSE', output / 'AIONCORE-LICENSE.txt')
         report['sourceFilesAfterBuildVerified'] = verify_source(archive, source_root, config, patched=True)
-        report['binarySha256'] = digest(output / report['binary'])
+        report['binarySha256'] = digest(binary)
         identity_spec = importlib.util.spec_from_file_location('studio_host_identity', HERE / 'identity.py')
         identity = importlib.util.module_from_spec(identity_spec)
         identity_spec.loader.exec_module(identity)
-        report['binaryCodeSha256'] = identity.host_identity(output / report['binary'])
+        report['binaryCodeSha256'] = identity.macho_code_identity(binary.read_bytes()) if target_name.startswith('darwin-') else digest(binary)
         report['identityRecipeSha256'] = digest(HERE / 'identity.py')
         report['licenseFileSha256'] = digest(output / 'AIONCORE-LICENSE.txt')
         report['cargoLockSha256'] = digest(source_root / 'Cargo.lock')
+        if container:
+            report['maximumGlibcVersionNeeded'] = maximum_glibc_requirement(capture(['readelf', '--version-info', str(binary)]), container['glibcMax'])
         if config.get('purpose') == 'default_runtime':
-            # The source build receipt seals the exported resources as well as the
-            # host, before mutable packaging manifests are generated.
+            report['resourceDriverNodeVersion'] = capture(['node', '--version'])
             resource_script = (
                 "const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');"
                 "require(process.argv[1]).prepareManagedResources(process.argv[3],process.argv[4]);"
@@ -177,8 +240,8 @@ def main():
                 "const entries=inventory(path.join(process.argv[4],'managed-resources'),{excludeManifest:false});"
                 "fs.writeFileSync(path.join(process.argv[4],'resource-identity.json'),JSON.stringify({"
                 "sha256:crypto.createHash('sha256').update(stable(entries)).digest('hex'),entries}));")
-            subprocess.run(['node', '-e', resource_script, str(resource_recipe), str(resource_identity),
-                            str(output / report['binary']), str(output)], check=True)
+            subprocess.run([*prefix, 'node', '-e', resource_script, str(resource_recipe), str(resource_identity), str(binary), str(output)],
+                           cwd=source_root, env=environment, check=True)
             resources = json.loads((output / 'resource-identity.json').read_text())
             report['managedResourcesSha256'] = resources['sha256']
             report['managedResourceRecipeSha256'] = digest(resource_recipe)

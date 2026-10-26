@@ -40,6 +40,7 @@ beforeEach(() => {
     target: 'win32-x64',
     binary: 'aioncore.exe',
     profile: 'release',
+    rustFlags: policy.targets['win32-x64'].rustFlags ?? '',
     sourcePolicySha256: hash(stable(policy)),
     buildRecipeSha256: policy.buildRecipeSha256,
     identityRecipeSha256: policy.identityRecipeSha256,
@@ -77,6 +78,38 @@ afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
 describe('default host launch provenance', () => {
   it('accepts the declared build and complete managed resources', () => {
     expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-default-source');
+  });
+  it('accepts the retained Linux ABI and rejects a newer GLIBC or another compiler recipe', () => {
+    fs.renameSync(path.join(directory, 'aioncore.exe'), path.join(directory, 'aioncore'));
+    receipt.target = 'linux-arm64';
+    receipt.binary = 'aioncore';
+    receipt.rustFlags = '';
+    receipt.maximumGlibcVersionNeeded = '2.30';
+    receipt.buildContainer = {
+      recipeSha256: policy.targets['linux-arm64'].container.recipeSha256,
+      platform: 'linux/arm64',
+      imageId: 'sha256:' + 'a'.repeat(64),
+    };
+    manifest.platform = 'linux';
+    manifest.arch = 'arm64';
+    const resourceFile = path.join(directory, 'managed-resources/manifest.json');
+    const resources = JSON.parse(fs.readFileSync(resourceFile, 'utf8'));
+    resources.runtimeKey = 'linux-arm64';
+    fs.writeFileSync(resourceFile, JSON.stringify(resources));
+    receipt.managedResourcesSha256 = hash(
+      stable(inventory(path.join(directory, 'managed-resources'), { excludeManifest: false }))
+    );
+    const check = () => {
+      writeJson('build-receipt.json', receipt);
+      refreshManifest();
+      return verifyDefaultHostBundle(directory, 'linux-arm64');
+    };
+    expect(check().sourceType).toBe('studio-default-source');
+    receipt.maximumGlibcVersionNeeded = '2.39';
+    expect(check).toThrow('compiler container or GLIBC compatibility differs');
+    receipt.maximumGlibcVersionNeeded = '2.30';
+    (receipt.buildContainer as Record<string, unknown>).recipeSha256 = 'b'.repeat(64);
+    expect(check).toThrow('compiler container or GLIBC compatibility differs');
   });
   it('rejects replacement code even when the mutable bundle inventory is refreshed', () => {
     fs.writeFileSync(path.join(directory, 'aioncore.exe'), 'replacement code');
