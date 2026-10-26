@@ -102,7 +102,7 @@ export default defineConfig(({ mode }) => {
         // '@aionui/web-host' excluded so its TS sources (which use ESM ".js" import specifiers)
         // are bundled by esbuild rather than left as `require('@aionui/web-host')`, which Node
         // cannot resolve because the package ships no compiled .js files (workspace-only).
-        externalizeDepsPlugin({ exclude: ['fix-path', '@aionui/web-host'] }),
+        externalizeDepsPlugin({ exclude: ['fix-path', '@aionui/web-host', '@aionui/shared-scripts'] }),
         ...(isDevelopment
           ? [
               {
@@ -135,6 +135,7 @@ export default defineConfig(({ mode }) => {
       ],
       resolve: { alias: mainAliases, extensions: ['.ts', '.tsx', '.js', '.json'] },
       build: {
+        commonjsOptions: { include: [/node_modules/, /shared-scripts/] },
         sourcemap: enableSentrySourceMaps ? 'hidden' : isDevelopment,
         reportCompressedSize: false,
         rollupOptions: {

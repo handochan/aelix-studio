@@ -93,6 +93,12 @@ def verify_prepared(runtime, baseline=MANIFEST):
         raise ValueError('Prepared runtime has a different baseline')
     if receipt.get('dependencyLockSha256') and receipt['dependencyLockSha256'] != digest(Path(__file__).parent / 'packaging/native-requirements.lock'):
         raise ValueError('Prepared runtime has a different dependency lock')
+    if receipt.get('aioncoreBundleManifestSha256'):
+        if digest(runtime / 'aioncore/manifest.json') != receipt['aioncoreBundleManifestSha256'] or receipt['aioncoreSourceManifestSha256'] != digest(Path(__file__).parent / 'host-recovery/default.json'):
+            raise ValueError('Prepared default host provenance changed')
+        subprocess.run(['node', '-e',
+            "require('./packages/shared-scripts/src/default-host.js').verifyDefaultHostBundle(process.argv[1],process.argv[2]);",
+            str(runtime / 'aioncore'), receipt['target']], cwd=ROOT, check=True)
     if receipt['launcherSha256'] != digest(Path(__file__).with_name('launch.cjs')):
         raise ValueError('Prepared runtime has a stale launcher')
     for relative, key in ((receipt['aioncoreBinary'], 'aioncoreBinarySha256'), ('launch.cjs', 'launcherSha256'),
@@ -155,15 +161,23 @@ def main(output=OUTPUT, expected_target=None):
     run(uv, '--no-config', 'pip', 'install', '--python', adapter, '--no-index', wheel)
     run(native, '-B', source / 'scripts/qualify_beta2.py', '--adapter', venv_path(output, 'adapter', 'aelix-acp'),
         '--artifacts', wheels, '--report', output / 'qualification.json')
-    core = config['aioncore']
-    asset = core['assets'][target]
-    archive = output / asset['filename']
-    download(f"https://github.com/{core['repository']}/releases/download/{core['tag']}/{asset['filename']}", archive, asset['sha256'])
-    extract(archive, output / 'aioncore')
-    binary, = (output / 'aioncore').rglob('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
+    policy_path = ROOT / 'scripts/studio-preview/host-recovery/default.json'
+    if digest(policy_path) != config['aioncore']['sourceManifestSha256']:
+        raise ValueError('Default host source policy differs from Preview baseline')
+    # Build prerequisites may use task-local Rust homes. Native qualification above
+    # retains its separate sanitized environment and unchanged public wheels.
+    subprocess.run(['node', '-e',
+        "const p=require('./packages/shared-scripts/src/prepare-aioncore.js');p.prepareAioncore(JSON.parse(process.argv[1]));",
+        json.dumps(dict(projectRoot=str(ROOT), platform=sys.platform, arch=target.split('-')[1], python=str(native)))],
+        check=True, cwd=ROOT)
+    source_bundle = ROOT / 'resources/bundled-aioncore' / target
+    shutil.copytree(source_bundle, output / 'aioncore', symlinks=True)
+    binary = output / 'aioncore' / ('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
     shutil.copy(Path(__file__).with_name('launch.cjs'), output / 'launch.cjs')
     receipt = dict(config, target=target, baselineSha256=digest(MANIFEST), acpWheelSha256=digest(wheel),
                    aioncoreBinary=str(binary.relative_to(output)), aioncoreBinarySha256=digest(binary),
+                   aioncoreBundleManifestSha256=digest(output / 'aioncore/manifest.json'),
+                   aioncoreSourceManifestSha256=digest(policy_path),
                    launcherSha256=digest(output / 'launch.cjs'),
                    qualificationSha256=digest(output / 'qualification.json'),
                    entrypointSha256={path.relative_to(output).as_posix(): digest(path) for path in (venv_path(output, 'native', 'aelix'), venv_path(output, 'adapter', 'aelix-acp'))},

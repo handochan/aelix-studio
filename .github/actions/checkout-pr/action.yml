@@ -5,6 +5,10 @@ inputs:
     description: 'PR number (only used when triggered via workflow_dispatch)'
     required: false
     default: ''
+  commit_sha:
+    description: 'Exact merged main commit for post-merge source verification'
+    required: false
+    default: ''
   github_token:
     description: 'GitHub token for gh API calls'
     required: true
@@ -15,9 +19,21 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.github_token }}
+        VERIFY_COMMIT: ${{ inputs.commit_sha }}
+        VERIFY_PR: ${{ inputs.pr_number }}
       run: |
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          PR_INFO=$(gh api repos/${{ github.repository }}/pulls/${{ inputs.pr_number }})
+          if [ -n "$VERIFY_COMMIT" ]; then
+            [[ "$VERIFY_COMMIT" =~ ^[0-9a-f]{40}$ ]] && [ -z "$VERIFY_PR" ] || exit 1
+            git fetch origin main
+            git merge-base --is-ancestor "$VERIFY_COMMIT" origin/main
+            git checkout --detach "$VERIFY_COMMIT"
+            test "$(git rev-parse HEAD)" = "$VERIFY_COMMIT"
+            echo "PR_BASE_REF=main" >> $GITHUB_ENV
+            exit 0
+          fi
+          [[ "$VERIFY_PR" =~ ^[0-9]+$ ]] || exit 1
+          PR_INFO=$(gh api "repos/${{ github.repository }}/pulls/$VERIFY_PR")
           HEAD_SHA=$(echo "$PR_INFO" | jq -r '.head.sha')
           BASE_REF=$(echo "$PR_INFO" | jq -r '.base.ref')
           git fetch origin "refs/pull/${{ inputs.pr_number }}/head"

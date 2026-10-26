@@ -1,4 +1,46 @@
-# Permission recovery host candidate (Studio #16)
+# Permission recovery host (Studio #22 and #16)
+
+The default bootstrap and packaging policy is [default.json](default.json).
+It uses the same reviewed patch as the historical Darwin dev candidate, with
+Rust 1.95.0 `release` builds on native runners for `darwin-arm64`, `darwin-x64`,
+`linux-arm64`, `linux-x64`, and `win32-x64`. Public beta.2 wheels remain unchanged.
+
+Run `bun run prepare:host` before the normal desktop/WebUI development launch.
+Normal `dist` builds and Preview `prepare.py` call the same source preparation
+path. Rust, Git, Python and the native compiler prerequisites are build-time
+requirements; installed Preview users need none of those developer tools.
+The cache lives under `.local/default-host/`. Existing incomplete or stale owned
+build/bundle directories are refused; archive them before rebuilding. A failure
+never selects an older release or a system PATH host. An explicit
+`AIONUI_BACKEND_BIN` remains an operator/developer override, outside default
+installer acceptance.
+
+Build receipts bind the upstream archive, three patched files, all 1,420 source
+members, Rust toolchain, build/identity recipes, Cargo lock, verbatim license and
+binary code identity and the exported managed-resource inventory. Desktop/WebUI
+launch verifies that identity and the whole
+managed-resource inventory before spawning. Mach-O identity normalizes only
+bounded terminal signing metadata. Receipts detect delivery drift; they are not
+a substitute for installer signing or a trusted build pipeline.
+
+The Provider Preview installer additionally includes the relocatable public-wheel
+native/ACP payload. Ordinary `dist` includes the default Rust host but does not
+by itself establish acceptance of that additional Preview payload. The existing
+five-runner Preview job installs actual DMG/DEB/NSIS artifacts, checks original
+native members and Provider behavior, then runs `smoke.py --runtime ... --payload
+...` against the installed app without backend/runtime overrides. Permission
+checks include Ask deny/allow, Yolo effects, guard and other-extension denial,
+observed native cancellation, failed downgrade, read-only saved-state observation,
+full app/backend exit/relaunch, displayed/effective Ask and preserved history,
+and a later explicit Yolo selection. The fault-injection custom agent uses an owned
+whitespace-free directory alias to the installed Python because the upstream
+custom-agent probe tokenizes its command field on spaces. The alias resolves to
+the original installed executable; it substitutes no developer runtime. Reports remain separate from real-provider,
+OAuth, field and final signed-release acceptance.
+
+`source.json` and `qualification.json` below are the immutable historical
+Darwin/arm64 dev-candidate identity and evidence. New default acceptance is
+recorded by the Issue #22 PR, exact source SHA and CI artifact receipts.
 
 This separately identified AionCore source build fixes the ordinary ACP
 `session/load` path after a failed Yolo → Ask transition. The restored agent's
@@ -24,10 +66,10 @@ configuration event consumed by the existing SQLite persistence writer.
   verifies all patched originals before and after the locked build, and copies
   the binary and upstream `LICENSE` with a build receipt. It refuses existing
   output paths, unsafe archive members, unexpected bytes and another toolchain.
-- Acceptance currently covers a **Darwin/arm64 dev build**. This is a local
+- Historical candidate acceptance covers a **Darwin/arm64 dev build**. This is a local
   source-built candidate, not the released Studio #4 binary, installer or
-  cross-platform acceptance. The released baseline manifest and default runtime
-  selection remain at their existing pins. Candidate use is explicit through
+  cross-platform acceptance. That historical candidate kept the released baseline
+  and default runtime unchanged. Candidate use is explicit through
   `AIONUI_BACKEND_BIN` after receipt verification.
 - The upstream root `LICENSE` is preserved verbatim (Apache-2.0 text); its
   workspace Cargo metadata declares MIT. Both are recorded without replacing
@@ -88,6 +130,6 @@ the displayed restored mode, visible Allow/Reject buttons, cancellation without
 a write, and a later Yolo selection with an actual file effect.
 
 The unchanged released host remains a separately reproduced known failure.
-Local candidate acceptance does not mark ACP #5 or Studio #16 Done: reviewed
-host delivery/integration and the rest of #16 remain outstanding. Real-provider,
-Windows/Linux host, installer and field acceptance remain unrun.
+Historical candidate acceptance did not mark ACP #5 or Studio #16 Done.
+Default-host acceptance is tracked separately in Issue #22; the remaining
+Studio #16 forwarding and ACP #12 ledger contracts retain their own acceptance.

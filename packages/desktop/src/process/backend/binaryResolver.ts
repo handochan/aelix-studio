@@ -4,17 +4,16 @@
  * Search order:
  *  1. AIONUI_BACKEND_BIN env override (path, resolved to absolute)
  *  2. Bundled with app (production)
- *  3. System PATH
+ * Explicit overrides are opt-in; the default source policy never falls back to PATH.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { execSync } from 'node:child_process';
+import { verifyDefaultHostBundle } from '../../../../shared-scripts/src/default-host.js';
 
 const BINARY_NAME = 'aioncore';
 const BIN_ENV_VAR = 'AIONUI_BACKEND_BIN';
 const MAX_DIR_ENTRIES = 20;
-const MAX_LOOKUP_TEXT_LENGTH = 1000;
 
 type BackendBinaryResolveDiagnostics = {
   envOverridePath?: string;
@@ -60,10 +59,6 @@ function listDirEntries(dirPath: string): string[] | undefined {
   }
 }
 
-function trimLookupText(text: string): string {
-  return text.trim().slice(0, MAX_LOOKUP_TEXT_LENGTH);
-}
-
 /**
  * Resolve the aioncore binary path.
  * Returns the absolute path to the binary, or throws if not found.
@@ -83,11 +78,8 @@ export function resolveBinaryPath(): string {
   const bundled = bundledPath(runtimeKey, binaryName, diagnostics);
   if (bundled) return bundled;
 
-  const fromPath = resolveFromSystemPATH(diagnostics);
-  if (fromPath) return fromPath;
-
   throw new BackendBinaryResolveError(
-    `Cannot find "${BINARY_NAME}" binary. Checked bundled location and system PATH.`,
+    `Cannot find "${BINARY_NAME}" binary. Prepare the default source host bundle or set an explicit backend override.`,
     diagnostics
   );
 }
@@ -125,7 +117,11 @@ function bundledPath(
   binaryName: string,
   diagnostics: BackendBinaryResolveDiagnostics
 ): string | null {
-  const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const electronProcess = process as NodeJS.Process & { resourcesPath?: string; defaultApp?: boolean };
+  const resourcesPath =
+    electronProcess.resourcesPath && !electronProcess.defaultApp
+      ? electronProcess.resourcesPath
+      : join(process.cwd(), 'resources');
   if (!resourcesPath) return null;
   diagnostics.resourcesPath = resourcesPath;
 
@@ -138,24 +134,16 @@ function bundledPath(
   diagnostics.resourcesDirEntries = listDirEntries(resourcesPath);
   diagnostics.runtimeDirEntries = listDirEntries(runtimeDir);
 
-  if (existsSync(candidate)) return candidate;
-  return null;
-}
-
-/**
- * Try to find the binary on the system PATH.
- */
-function resolveFromSystemPATH(diagnostics: BackendBinaryResolveDiagnostics): string | null {
+  if (!existsSync(candidate)) return null;
   try {
-    const result = execSync(diagnostics.pathLookupCommand, { encoding: 'utf-8', timeout: 5000 }).trim();
-    diagnostics.pathLookupResult = trimLookupText(result);
-    const firstMatch = result.split(/\r?\n/).find((line) => line.trim());
-    if (firstMatch && existsSync(firstMatch.trim())) return firstMatch.trim();
+    verifyDefaultHostBundle(runtimeDir, runtimeKey);
   } catch (error) {
-    diagnostics.pathLookupError = error instanceof Error ? trimLookupText(error.message) : String(error);
-    return null;
+    throw new BackendBinaryResolveError(
+      `Default host bundle failed verification: ${error instanceof Error ? error.message : String(error)}`,
+      diagnostics
+    );
   }
-  return null;
+  return candidate;
 }
 
 export type { BackendBinaryResolveDiagnostics };

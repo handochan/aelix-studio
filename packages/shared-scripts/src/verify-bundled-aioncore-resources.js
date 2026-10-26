@@ -326,12 +326,39 @@ function requireContractDirectory(baseDir, runtimeKey, cli, root, relativePath, 
   }
 }
 
-function verifyBundledAioncoreResources({ resourcesDir, electronPlatformName, targetArch }) {
+function readDefaultSourceType(baseDir) {
+  try {
+    return (
+      JSON.parse(fs.readFileSync(path.join(baseDir, 'manifest.json'), 'utf8')).sourceType === 'studio-default-source'
+    );
+  } catch {
+    return false;
+  }
+}
+
+function verifyBundledAioncoreResources({
+  resourcesDir,
+  electronPlatformName,
+  targetArch,
+  requireDefaultSource = false,
+  verifySource = true,
+  bundleDir,
+}) {
   const runtimeKey = `${electronPlatformName}-${targetArch}`;
-  const baseDir = path.join(resourcesDir, 'bundled-aioncore', runtimeKey);
+  const baseDir = bundleDir || path.join(resourcesDir, 'bundled-aioncore', runtimeKey);
   const checked = [];
   const missing = [];
   const failures = [];
+  if (
+    verifySource &&
+    (requireDefaultSource || (isFile(path.join(baseDir, 'manifest.json')) && readDefaultSourceType(baseDir)))
+  ) {
+    try {
+      require('./default-host').verifyDefaultHostBundle(baseDir, runtimeKey);
+    } catch (error) {
+      failures.push({ component: 'default-host', reason: 'provenance', message: error.message });
+    }
+  }
 
   requireRelativePath(baseDir, runtimeKey, [backendBinaryName(electronPlatformName)], checked, missing, failures);
   verifyBundleManifest(baseDir, runtimeKey, electronPlatformName, targetArch, checked, missing, failures);
