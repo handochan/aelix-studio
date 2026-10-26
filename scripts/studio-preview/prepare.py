@@ -99,7 +99,7 @@ def verify_prepared(runtime, baseline=MANIFEST):
         subprocess.run(['node', '-e',
             "require('./packages/shared-scripts/src/default-host.js').verifyDefaultHostBundle(process.argv[1],process.argv[2]);",
             str(runtime / 'aioncore'), receipt['target']], cwd=ROOT, check=True)
-    if receipt['launcherSha256'] != digest(Path(__file__).with_name('launch.cjs')):
+    if receipt['launcherSha256'] != digest(Path(__file__).parent / 'host-forwarding/launch.cjs'):
         raise ValueError('Prepared runtime has a stale launcher')
     for relative, key in ((receipt['aioncoreBinary'], 'aioncoreBinarySha256'), ('launch.cjs', 'launcherSha256'),
                           ('qualification.json', 'qualificationSha256')):
@@ -173,7 +173,7 @@ def main(output=OUTPUT, expected_target=None):
     source_bundle = ROOT / 'resources/bundled-aioncore' / target
     shutil.copytree(source_bundle, output / 'aioncore', symlinks=True)
     binary = output / 'aioncore' / ('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
-    shutil.copy(Path(__file__).with_name('launch.cjs'), output / 'launch.cjs')
+    shutil.copy(Path(__file__).parent / 'host-forwarding/launch.cjs', output / 'launch.cjs')
     receipt = dict(config, target=target, baselineSha256=digest(MANIFEST), acpWheelSha256=digest(wheel),
                    aioncoreBinary=str(binary.relative_to(output)), aioncoreBinarySha256=digest(binary),
                    aioncoreBundleManifestSha256=digest(output / 'aioncore/manifest.json'),

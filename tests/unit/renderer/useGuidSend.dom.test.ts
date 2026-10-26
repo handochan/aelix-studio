@@ -76,10 +76,26 @@ const createDeps = (): GuidSendDeps => ({
 
 describe('useGuidSend', () => {
   beforeEach(() => {
+    sessionStorage.clear();
     createConversationInvokeMock.mockReset();
     createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
     swrMutateMock.mockReset();
     swrMutateMock.mockResolvedValue(undefined);
+  });
+
+  it('persists the initial intent identity before navigating into a renderer', async () => {
+    const deps = createDeps();
+    deps.navigate = vi.fn(async () => {
+      expect(JSON.parse(sessionStorage.getItem('acp_initial_message_conv-1')!)).toMatchObject({
+        input: 'hello',
+        operation_id: 'initial-conv-1',
+      });
+    }) as never;
+    const { result } = renderHook(() => useGuidSend(deps));
+    await act(async () => {
+      await result.current.handleSend();
+    });
+    expect(deps.navigate).toHaveBeenCalledWith('/conversation/conv-1');
   });
 
   it('passes selected mode into assistant conversation overrides when creating a preset ACP conversation', async () => {

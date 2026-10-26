@@ -1,0 +1,4337 @@
+diff --git a/Cargo.lock b/Cargo.lock
+index 94ed1f9..eafa342 100644
+--- a/Cargo.lock
++++ b/Cargo.lock
+@@ -641,8 +641,10 @@ dependencies = [
+  "aionui-common",
+  "async-trait",
+  "fs2",
++ "hmac 0.12.1",
+  "serde",
+  "serde_json",
++ "sha2 0.10.9",
+  "sqlx",
+  "tempfile",
+  "thiserror 2.0.18",
+diff --git a/Cargo.toml b/Cargo.toml
+index 5846fbd..9a29cea 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -177,6 +177,7 @@ calamine = "0.36"
+ rust_xlsxwriter = "0.82"
+ sha1 = "0.10"
+ sha2 = "0.10"
++hmac = "=0.12.1"
+ 
+ # AWS
+ aws-config = { version = "1", features = ["behavior-version-latest"] }
+diff --git a/crates/aionui-ai-agent/src/agent_task.rs b/crates/aionui-ai-agent/src/agent_task.rs
+index 193ab4c..8cfc05c 100644
+--- a/crates/aionui-ai-agent/src/agent_task.rs
++++ b/crates/aionui-ai-agent/src/agent_task.rs
+@@ -212,6 +212,42 @@ pub enum AgentInstance {
+ }
+ 
+ impl AgentInstance {
++    pub fn has_managed_operation_capability(&self) -> bool {
++        matches!(self, Self::Acp(manager) if manager.has_managed_operation_capability())
++    }
++
++    pub fn cancel_managed_turn(&self, expected_turn: &str) -> Option<bool> {
++        match self {
++            Self::Acp(manager) => manager.cancel_managed_turn(expected_turn),
++            _ => None,
++        }
++    }
++
++    pub fn managed_cancelled_before_dispatch(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> bool {
++        matches!(self, Self::Acp(manager) if manager.managed_cancelled_before_dispatch(sid,operation))
++    }
++
++    pub async fn managed_execution_binding(&self) -> Result<Option<crate::ManagedExecutionBinding>, AgentError> {
++        match self {
++            Self::Acp(manager) => manager.managed_execution_binding().await,
++            _ => Ok(None),
++        }
++    }
++
++    pub async fn managed_operation_status(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> Result<serde_json::Value, AgentError> {
++        match self {
++            Self::Acp(manager) => manager.managed_operation_status(sid, operation).await,
++            _ => Err(AgentError::conflict("Managed operation status unavailable")),
++        }
++    }
+     /// Common `IAgentTask` view, regardless of variant.
+     pub fn as_task(&self) -> &dyn IAgentTask {
+         match self {
+diff --git a/crates/aionui-ai-agent/src/lib.rs b/crates/aionui-ai-agent/src/lib.rs
+index c9d10c4..2d2e2ab 100644
+--- a/crates/aionui-ai-agent/src/lib.rs
++++ b/crates/aionui-ai-agent/src/lib.rs
+@@ -59,6 +59,9 @@ pub use idle_scanner::{
+ };
+ pub use manager::acp::RequiredFullAutoApplication;
+ pub use persistence::AcpSessionSyncService;
++pub use protocol::acp_forwarding::operation::{
++    ManagedExecutionBinding, managed_command_binding, managed_status_command, query_managed_operation_status_only,
++};
+ pub use protocol::error::AcpError;
+ pub use protocol::events::AgentStreamEvent;
+ pub use protocol::send_error::AgentSendError;
+diff --git a/crates/aionui-ai-agent/src/manager/acp/agent.rs b/crates/aionui-ai-agent/src/manager/acp/agent.rs
+index 6e77e95..b7aeffd 100644
+--- a/crates/aionui-ai-agent/src/manager/acp/agent.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/agent.rs
+@@ -612,6 +612,69 @@ pub struct AcpAgentManager {
+ }
+ 
+ impl AcpAgentManager {
++    pub fn has_managed_operation_capability(&self) -> bool {
++        self.protocol
++            .managed_capability()
++            .is_ok_and(|capability| capability.is_some())
++    }
++
++    pub fn cancel_managed_turn(&self, expected_turn: &str) -> Option<bool> {
++        if !self.has_managed_operation_capability() {
++            return None;
++        }
++        Some(
++            self.protocol
++                .cancel_managed_turn(expected_turn, || self.permission_router.cancel_all()),
++        )
++    }
++
++    pub fn managed_cancelled_before_dispatch(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> bool {
++        self.protocol.managed_cancelled_before_dispatch(sid, operation)
++    }
++
++    pub async fn managed_execution_binding(&self) -> Result<Option<crate::ManagedExecutionBinding>, AgentError> {
++        if self.protocol.managed_capability()?.is_none() {
++            return Ok(None);
++        }
++        let status = crate::managed_status_command(&self.params.metadata, &self.params.workspace.path)?;
++        let actual = &self.params.command_spec;
++        if actual.args != self.params.metadata.args
++            || std::fs::canonicalize(&actual.command).ok() != std::fs::canonicalize(&status.command).ok()
++        {
++            return Err(AgentError::conflict("Managed operation launch binding unavailable"));
++        }
++        let sid = self.ensure_session_opened().await?;
++        let (observed_sid, scope) = self
++            .protocol
++            .managed_scope()
++            .ok_or_else(|| AgentError::conflict("Managed operation worker binding unavailable"))?;
++        if sid != observed_sid {
++            return Err(AgentError::conflict("Managed operation session binding changed"));
++        }
++        Ok(Some(crate::ManagedExecutionBinding {
++            session_id: sid,
++            scope,
++            metadata_id: self.params.metadata.id.clone(),
++            command_binding: crate::managed_command_binding(&self.params.metadata, &self.params.workspace.path)?,
++        }))
++    }
++
++    pub async fn managed_operation_status(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> Result<serde_json::Value, AgentError> {
++        // Lookup never calls ensure_session_opened or follows a resume anchor.
++        self.protocol
++            .operation_status(sid, operation)
++            .await
++            .map_err(AgentError::from)
++    }
++
+     /// Create a new ACP agent manager by spawning a CLI subprocess and
+     /// establishing an ACP protocol connection.
+     ///
+@@ -1909,6 +1972,7 @@ mod tests {
+     #[test]
+     fn acp_final_input_dump_value_contains_post_hook_prompt_and_context() {
+         let data = crate::types::SendMessageData {
++            managed_operation: None,
+             content: "original team wake".into(),
+             msg_id: "msg-acp-final".into(),
+             turn_id: Some("turn-acp-final".into()),
+diff --git a/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs b/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs
+index a80e909..3c72db2 100644
+--- a/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/agent_session_flow.rs
+@@ -85,6 +85,11 @@ impl AcpAgentManager {
+     /// Emits a `warn!` so ops can still see the original failure that
+     /// triggered the rebuild.
+     async fn rebuild_after_session_not_found(&self, stale_sid: &str, err: &AcpError) -> Result<String, AgentError> {
++        if self.protocol.managed_capability()?.is_some() {
++            return Err(AgentError::Conflict(
++                "Managed session missing; automatic rebuild disabled".into(),
++            ));
++        }
+         warn!(
+             conversation_id = %self.params.conversation_id,
+             stale_session_id = %stale_sid,
+@@ -173,12 +178,9 @@ impl AcpAgentManager {
+             };
+         }
+ 
+-        let (supports_load, preloaded_mode) = {
++        let supports_load = {
+             let session = self.session.read().await;
+-            (
+-                session.agent_capabilities().map(|c| c.load_session).unwrap_or(false),
+-                session.modes().map(|m| m.current_mode_id.to_string()),
+-            )
++            session.agent_capabilities().map(|c| c.load_session).unwrap_or(false)
+         };
+ 
+         if supports_load {
+@@ -202,15 +204,7 @@ impl AcpAgentManager {
+                 {
+                     session.apply_advertised_models(models);
+                 }
+-                if let Some(mut modes) = load_response.modes {
+-                    if let Some(db_current) = preloaded_mode {
+-                        modes.current_mode_id = db_current.into();
+-                    }
+-                    session.apply_advertised_modes(modes);
+-                }
+-                if let Some(config_options) = load_response.config_options {
+-                    session.apply_advertised_config_options(config_options);
+-                }
++                session.apply_restored_configuration(load_response.modes, load_response.config_options);
+                 session.set_session_id(DomainSessionId::new(session_id.to_owned()));
+                 self.commit_session_changes(&mut session).await;
+             }
+@@ -349,9 +343,17 @@ impl AcpAgentManager {
+         // earlier turn cannot override a later benign empty turn.
+         self.process.clear_stderr().await;
+ 
++        let mut prompt_request = PromptRequest::new(SessionId::new(sid), prompt_blocks);
++        if let Some(operation) = &data.managed_operation {
++            prompt_request.meta.get_or_insert_default().insert(
++                "aelix/operation".into(),
++                serde_json::to_value(operation)
++                    .map_err(|_| AgentError::bad_request("Invalid managed operation context"))?,
++            );
++        }
+         let prompt_response = self
+             .protocol
+-            .prompt(PromptRequest::new(SessionId::new(sid), prompt_blocks))
++            .prompt(prompt_request)
+             .await
+             .map_err(AcpSendFailure::from)?;
+ 
+@@ -1554,6 +1556,7 @@ mod tests {
+         let img = img.to_string_lossy().into_owned();
+         let content = format!("hi\n\n{}\n{img}", aionui_common::constants::AIONUI_FILES_MARKER);
+         let data = SendMessageData {
++            managed_operation: None,
+             content: content.clone(),
+             msg_id: "m1".into(),
+             turn_id: None,
+@@ -1584,6 +1587,7 @@ mod tests {
+             aionui_common::constants::AIONUI_FILES_MARKER
+         );
+         let data = SendMessageData {
++            managed_operation: None,
+             content,
+             msg_id: "m2".into(),
+             turn_id: None,
+@@ -1636,6 +1640,7 @@ mod tests {
+         let img = img.to_string_lossy().into_owned();
+         let content = format!("read this\n\n{}\n{img}", aionui_common::constants::AIONUI_FILES_MARKER);
+         let data = SendMessageData {
++            managed_operation: None,
+             content: content.clone(),
+             msg_id: "m4".into(),
+             turn_id: None,
+@@ -1668,6 +1673,7 @@ mod tests {
+         let img_path = img.to_string_lossy().into_owned();
+         let content = format!("gone\n\n{}\n{img_path}", aionui_common::constants::AIONUI_FILES_MARKER);
+         let data = SendMessageData {
++            managed_operation: None,
+             content: content.clone(),
+             msg_id: "m3".into(),
+             turn_id: None,
+diff --git a/crates/aionui-ai-agent/src/manager/acp/permission_router.rs b/crates/aionui-ai-agent/src/manager/acp/permission_router.rs
+index 569d34d..2b9f55f 100644
+--- a/crates/aionui-ai-agent/src/manager/acp/permission_router.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/permission_router.rs
+@@ -57,8 +57,16 @@ impl PermissionRouter {
+ 
+         tokio::spawn(async move {
+             let mut rx = this.permission_rx.lock().await;
+-
+-            while let Some(perm_req) = rx.recv().await {
++            let mut cleanup = tokio::time::interval(std::time::Duration::from_secs(1));
++            cleanup.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
++            loop {
++                let request = tokio::select! {
++                    request = rx.recv() => request,
++                    _ = cleanup.tick() => { this.prune_closed(); continue; }
++                };
++                let Some(perm_req) = request else {
++                    break;
++                };
+                 runtime.bump_activity();
+ 
+                 let call_id = perm_req.request.tool_call.tool_call_id.to_string();
+@@ -107,11 +115,20 @@ impl PermissionRouter {
+                     let _ = pending.responder.send(PermissionDecision::Cancelled);
+                 }
+             }
++            this.cancel_all();
+         });
+     }
+ 
++    fn prune_closed(&self) {
++        self.pending_permissions
++            .lock()
++            .unwrap()
++            .retain(|_, pending| !pending.responder.is_closed());
++    }
++
+     /// Pending permission items recoverable by conversation confirmation APIs.
+     pub fn get_confirmations(&self) -> Vec<Confirmation> {
++        self.prune_closed();
+         self.pending_permissions
+             .lock()
+             .unwrap()
+@@ -312,6 +329,18 @@ mod tests {
+         assert_eq!(confirmations[0].description, "Write /tmp/current_time.txt");
+     }
+ 
++    #[test]
++    fn expired_reverse_request_removes_its_pending_confirmation() {
++        let (_tx, rx) = mpsc::channel(1);
++        let router = PermissionRouter::new(rx);
++        let (sender, receiver) = oneshot::channel();
++        router.insert_pending_for_test("expired".into(), sender, sample_confirmation("expired"));
++        assert_eq!(router.get_confirmations().len(), 1);
++        drop(receiver); // SDK reverse deadline drops the waiting receiver.
++        assert!(router.get_confirmations().is_empty());
++        assert!(router.pending_permissions.lock().unwrap().is_empty());
++    }
++
+     #[test]
+     fn confirm_removes_pending_confirmation_and_forwards_option() {
+         let (_tx, rx) = mpsc::channel(1);
+diff --git a/crates/aionui-ai-agent/src/manager/acp/session.rs b/crates/aionui-ai-agent/src/manager/acp/session.rs
+index b9c9e7f..10b52ac 100644
+--- a/crates/aionui-ai-agent/src/manager/acp/session.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/session.rs
+@@ -668,6 +668,91 @@ impl AcpSession {
+         }
+     }
+ 
++    /// Adopt state explicitly returned by session/load, without replaying an
++    /// older startup permission preference over the restored agent policy.
++    /// Fresh sessions and subsequent explicit user changes still reconcile.
++    pub(crate) fn apply_restored_configuration(
++        &mut self,
++        modes: Option<SessionModeState>,
++        options: Option<Vec<SessionConfigOption>>,
++    ) {
++        let is_mode = |option: &SessionConfigOption| {
++            option.category == Some(SessionConfigOptionCategory::Mode)
++                || matches!(option.id.to_string().as_str(), "mode" | "modes")
++        };
++        let incoming_mode_values: HashMap<ConfigKey, ConfigValue> = options
++            .iter()
++            .flatten()
++            .filter(|option| is_mode(option))
++            .filter_map(|option| {
++                extract_config_current_value(&option.kind)
++                    .filter(|value| !value.is_empty())
++                    .map(|value| (ConfigKey::new(option.id.to_string()), ConfigValue::new(value)))
++            })
++            .collect();
++        let reported_mode = options
++            .as_deref()
++            .and_then(|options| select_option_for_startup_seed(options, &SessionConfigOptionCategory::Mode))
++            .and_then(|option| extract_config_current_value(&option.kind))
++            .filter(|value| !value.is_empty())
++            .or_else(|| {
++                modes
++                    .as_ref()
++                    .map(|modes| modes.current_mode_id.to_string())
++                    .filter(|value| !value.is_empty())
++            });
++
++        if let Some(options) = options {
++            self.apply_advertised_config_options(options);
++        }
++        if incoming_mode_values.is_empty()
++            && let Some(modes) = modes
++        {
++            // A cached generic mode option must not supersede a fresh legacy
++            // mode when load returned only model/thought config options.
++            self.apply_advertised_modes(modes);
++        }
++        let Some(reported_mode) = reported_mode else {
++            return; // No reported policy: do not invent one from a DB seed.
++        };
++
++        let mut mode_keys = vec![ConfigKey::new("mode"), ConfigKey::new("modes")];
++        if let Some(options) = &mut self.advertised.config_options {
++            mode_keys.extend(
++                options
++                    .iter()
++                    .filter(|option| is_mode(option))
++                    .map(|option| ConfigKey::new(option.id.to_string())),
++            );
++            options.retain(|option| {
++                !is_mode(option) || incoming_mode_values.contains_key(&ConfigKey::new(option.id.to_string()))
++            });
++        }
++        self.desired
++            .pending_startup_config
++            .retain(|seed| seed.category != SessionConfigOptionCategory::Mode);
++        let previous_config = self.desired.config_selections.clone();
++        let previous_observed_config = self.observed.config_current.clone();
++        self.desired.config_selections.retain(|key, _| !mode_keys.contains(key));
++        self.observed.config_current.retain(|key, _| !mode_keys.contains(key));
++        self.desired.config_selections.extend(incoming_mode_values.clone());
++        self.observed.config_current.extend(incoming_mode_values.clone());
++        if previous_config != self.desired.config_selections {
++            self.pending_events.push(AcpSessionEvent::DesiredConfigChanged {
++                selections: self.desired.config_selections.clone(),
++            });
++        }
++        if previous_observed_config != self.observed.config_current {
++            self.pending_events.push(AcpSessionEvent::ObservedConfigSynced {
++                selections: self.observed.config_current.clone(),
++            });
++        }
++        self.desired.mode_id = incoming_mode_values
++            .is_empty()
++            .then(|| ModeId::new(reported_mode.clone()));
++        self.apply_observed_mode(ModeId::new(reported_mode));
++    }
++
+     pub fn apply_advertised_models(&mut self, models: LegacySessionModelState) {
+         let incoming_model_catalog_count = models.available_models.len();
+         let existing_model_catalog_count = self
+diff --git a/crates/aionui-ai-agent/src/manager/acp/session_tests.rs b/crates/aionui-ai-agent/src/manager/acp/session_tests.rs
+index 47d73f2..2fe534d 100644
+--- a/crates/aionui-ai-agent/src/manager/acp/session_tests.rs
++++ b/crates/aionui-ai-agent/src/manager/acp/session_tests.rs
+@@ -12,6 +12,133 @@ fn make_session() -> AcpSession {
+     AcpSession::new(Some(ModeId::new("default")), None, HashMap::new())
+ }
+ 
++fn restored_permission_modes(current: &str) -> SessionModeState {
++    SessionModeState::new(
++        current.to_owned(),
++        vec![SessionMode::new("default", "Ask"), SessionMode::new("yolo", "Yolo")],
++    )
++}
++
++#[test]
++fn resumed_permission_does_not_replay_stale_yolo_or_mode_seed() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        None,
++        HashMap::from([(ConfigKey::new("mode"), ConfigValue::new("yolo"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::Mode, ConfigValue::new("yolo"));
++    session.apply_advertised_modes(restored_permission_modes("yolo"));
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    session.resolve_pending_startup_config_seeds();
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++}
++
++#[test]
++fn resumed_generic_permission_uses_reported_current_value() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        None,
++        HashMap::from([(ConfigKey::new("permissionLevel"), ConfigValue::new("yolo"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::Mode, ConfigValue::new("yolo"));
++    let option = SessionConfigOption::select(
++        "permissionLevel",
++        "Permission",
++        "default",
++        vec![
++            SessionConfigSelectOption::new("default", "Ask"),
++            SessionConfigSelectOption::new("yolo", "Yolo"),
++        ],
++    )
++    .category(SessionConfigOptionCategory::Mode);
++    session.apply_restored_configuration(Some(restored_permission_modes("yolo")), Some(vec![option]));
++    session.resolve_pending_startup_config_seeds();
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++}
++
++#[test]
++fn resumed_permission_preserves_model_and_thought_intent() {
++    let mut session = AcpSession::new(
++        Some(ModeId::new("yolo")),
++        Some(ModelId::new("next-model")),
++        HashMap::from([(ConfigKey::new("reasoning_effort"), ConfigValue::new("high"))]),
++    );
++    session.seed_pending_startup_config(SessionConfigOptionCategory::ThoughtLevel, ConfigValue::new("high"));
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    assert_eq!(session.desired_model(), Some("next-model"));
++    assert_eq!(
++        session
++            .desired_config_selections()
++            .get(&ConfigKey::new("reasoning_effort")),
++        Some(&ConfigValue::new("high"))
++    );
++    assert_eq!(session.desired.pending_startup_config.len(), 1);
++}
++
++#[test]
++fn resumed_legacy_mode_wins_over_cached_generic_mode_with_partial_config() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_advertised_config_options(vec![
++        SessionConfigOption::select(
++            "permissionLevel",
++            "Permission",
++            "yolo",
++            vec![
++                SessionConfigSelectOption::new("default", "Ask"),
++                SessionConfigSelectOption::new("yolo", "Yolo"),
++            ],
++        )
++        .category(SessionConfigOptionCategory::Mode),
++    ]);
++    session.apply_restored_configuration(
++        Some(restored_permission_modes("default")),
++        Some(vec![
++            SessionConfigOption::select(
++                "reasoning_effort",
++                "Reasoning",
++                "low",
++                vec![SessionConfigSelectOption::new("low", "Low")],
++            )
++            .category(SessionConfigOptionCategory::ThoughtLevel),
++        ]),
++    );
++    assert_eq!(session.modes().unwrap().current_mode_id.to_string(), "default");
++    assert!(session.plan_reconcile().is_empty());
++    let persisted_config = session
++        .drain_events()
++        .into_iter()
++        .rev()
++        .find_map(|event| match event {
++            AcpSessionEvent::ObservedConfigSynced { selections } => Some(selections),
++            _ => None,
++        })
++        .expect("final observed config must be persisted");
++    assert!(!persisted_config.contains_key(&ConfigKey::new("permissionLevel")));
++}
++
++#[test]
++fn resumed_without_reported_mode_preserves_unresolved_intent() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_restored_configuration(None, None);
++    assert_eq!(session.desired_mode(), Some("yolo"));
++    assert!(session.modes().is_none());
++}
++
++#[test]
++fn resumed_policy_still_allows_a_later_explicit_yolo_selection() {
++    let mut session = AcpSession::new(Some(ModeId::new("yolo")), None, HashMap::new());
++    session.apply_restored_configuration(Some(restored_permission_modes("default")), None);
++    assert!(session.set_desired_mode(ModeId::new("yolo")));
++    assert_eq!(
++        session.plan_reconcile(),
++        vec![ReconcileAction::SetMode {
++            mode: ModeId::new("yolo")
++        }]
++    );
++}
++
+ #[test]
+ fn assign_session_id_emits_event() {
+     let mut session = make_session();
+diff --git a/crates/aionui-ai-agent/src/manager/aionrs/agent_test.rs b/crates/aionui-ai-agent/src/manager/aionrs/agent_test.rs
+index 9310f1e..ab4f581 100644
+--- a/crates/aionui-ai-agent/src/manager/aionrs/agent_test.rs
++++ b/crates/aionui-ai-agent/src/manager/aionrs/agent_test.rs
+@@ -149,6 +149,7 @@ fn aionrs_final_input_dump_value_contains_raw_split_input_and_context() {
+         runtime_env: vec![("AIONUI_RAW".to_owned(), "raw-env-value".to_owned())],
+     };
+     let data = SendMessageData {
++        managed_operation: None,
+         content: "team wake raw content".to_owned(),
+         msg_id: "msg-aionrs-final".to_owned(),
+         turn_id: Some("turn-aionrs-final".to_owned()),
+diff --git a/crates/aionui-ai-agent/src/protocol/acp.rs b/crates/aionui-ai-agent/src/protocol/acp.rs
+index 0c7905c..5b48033 100644
+--- a/crates/aionui-ai-agent/src/protocol/acp.rs
++++ b/crates/aionui-ai-agent/src/protocol/acp.rs
+@@ -37,7 +37,7 @@ use agent_client_protocol::schema::v1::{
+     WaitForTerminalExitResponse,
+ };
+ use agent_client_protocol::{
+-    Agent, Client, ConnectionTo, Lines, Responder, UntypedMessage, on_receive_notification, on_receive_request,
++    Agent, Client, ConnectionTo, Lines, UntypedMessage, on_receive_notification, on_receive_request,
+ };
+ use aionui_common::ErrorChain;
+ use futures_util::{SinkExt, StreamExt, TryStreamExt};
+@@ -47,6 +47,7 @@ use tokio_util::codec::{FramedRead, FramedWrite, LinesCodec};
+ use tracing::{debug, info, warn};
+ 
+ use crate::protocol::acp_dialect;
++use crate::protocol::acp_forwarding;
+ use crate::protocol::acp_init_budget::InitBudget;
+ use crate::protocol::error::AcpError;
+ use crate::protocol::events::{self as stream_event, AgentStreamEvent};
+@@ -64,6 +65,14 @@ use agent_client_protocol::schema::v1::{
+ /// sent untyped. See `manager::acp::legacy_session_model` for the state DTOs.
+ const LEGACY_SESSION_SET_MODEL_METHOD: &str = "session/set_model";
+ 
++fn managed_contract_error() -> AcpError {
++    AcpError::AgentInternal {
++        message: "Managed operation binding cannot be verified; automatic replay disabled".into(),
++        code: -32044,
++        data: Some(serde_json::json!({"kind":"managed_contract_invalid","automaticRetry":false})),
++    }
++}
++
+ /// Params frame for the legacy `session/set_model` request.
+ fn build_legacy_set_model_params(session_id: &str, model_id: &str) -> serde_json::Value {
+     serde_json::json!({ "sessionId": session_id, "modelId": model_id })
+@@ -146,6 +155,8 @@ pub struct AcpProtocol {
+     alive: Arc<AtomicBool>,
+     /// Cached initialize response from the ACP handshake.
+     initialize_response: Arc<RwLock<Option<InitializeResponse>>>,
++    managed_session: RwLock<Option<(String, aionui_api_types::ManagedSessionScope)>>,
++    managed_prompt: RwLock<ManagedPromptState>,
+     /// Set to `true` for the duration of a `session/load` request so that
+     /// the SDK notification handler skips broadcasting the CLI's historical
+     /// `session/update` replay to the UI event channel. The flag does NOT
+@@ -249,6 +260,8 @@ impl AcpProtocol {
+             shutdown_tx: Some(shutdown_tx),
+             alive,
+             initialize_response: Arc::new(RwLock::new(Some(init_response))),
++            managed_session: RwLock::new(None),
++            managed_prompt: RwLock::new(ManagedPromptState::default()),
+             replay_suppression,
+             terminal_registry,
+         })
+@@ -271,6 +284,68 @@ impl AcpProtocol {
+         self.initialize_response().map(|response| response.auth_methods)
+     }
+ 
++    pub fn managed_capability(&self) -> Result<Option<aionui_api_types::ManagedOperationCapability>, AcpError> {
++        let value = self
++            .agent_capabilities()
++            .and_then(|caps| caps.meta)
++            .and_then(|meta| meta.get("aelix/operations").cloned());
++        let Some(value) = value else {
++            return Ok(None);
++        };
++        let capability: aionui_api_types::ManagedOperationCapability =
++            serde_json::from_value(value).map_err(|_| managed_contract_error())?;
++        if !capability.valid() {
++            return Err(managed_contract_error());
++        }
++        Ok(Some(capability))
++    }
++
++    fn apply_managed_scope(
++        &self,
++        sid: &str,
++        meta: Option<&serde_json::Map<String, serde_json::Value>>,
++    ) -> Result<(), AcpError> {
++        let Some(capability) = self.managed_capability()? else {
++            return Ok(());
++        };
++        *self.managed_session.write().unwrap() = None;
++        let value = meta
++            .and_then(|meta| meta.get("aelix/operationStore"))
++            .ok_or_else(managed_contract_error)?;
++        let scope: aionui_api_types::ManagedSessionScope =
++            serde_json::from_value(value.clone()).map_err(|_| managed_contract_error())?;
++        if !scope.valid() || scope.store_id != capability.store_id || !aionui_api_types::managed_operation_token(sid) {
++            return Err(managed_contract_error());
++        }
++        *self.managed_session.write().unwrap() = Some((sid.to_owned(), scope));
++        Ok(())
++    }
++
++    pub fn managed_scope(&self) -> Option<(String, aionui_api_types::ManagedSessionScope)> {
++        self.managed_session.read().unwrap().clone()
++    }
++
++    pub async fn operation_status(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> Result<serde_json::Value, AcpError> {
++        let capability = self.managed_capability()?.ok_or_else(managed_contract_error)?;
++        if !operation.valid()
++            || capability.store_id != operation.store_id
++            || !aionui_api_types::managed_operation_token(sid)
++        {
++            return Err(managed_contract_error());
++        }
++        let request = UntypedMessage::new(
++            "_aelix/operation_status",
++            serde_json::json!({"sessionId":sid,"operation":operation}),
++        )
++        .map_err(|_| managed_contract_error())?;
++        self.send_config_request(request, "_aelix/operation_status", std::time::Duration::from_secs(5))
++            .await
++    }
++
+     /// Create a new ACP session.
+     ///
+     /// Returns the typed response plus the raw top-level `models` value when
+@@ -280,10 +355,22 @@ impl AcpProtocol {
+     /// parsing (typed parsing alone would silently drop it).
+     pub async fn new_session(
+         &self,
+-        req: NewSessionRequest,
++        mut req: NewSessionRequest,
+     ) -> Result<(NewSessionResponse, Option<serde_json::Value>), AcpError> {
+-        self.send_request_capturing_legacy_models(req, AGENT_METHOD_NAMES.session_new)
+-            .await
++        if let Some(capability) = self.managed_capability()? {
++            *self.managed_session.write().unwrap() = None;
++            req.meta.get_or_insert_default().insert(
++                "aelix/operationStore".into(),
++                serde_json::json!({
++                    "schema": capability.schema, "storeId": capability.store_id
++                }),
++            );
++        }
++        let result: (NewSessionResponse, Option<serde_json::Value>) = self
++            .send_request_capturing_legacy_models(req, AGENT_METHOD_NAMES.session_new)
++            .await?;
++        self.apply_managed_scope(&result.0.session_id.to_string(), result.0.meta.as_ref())?;
++        Ok(result)
+     }
+ 
+     /// Load (resume) an existing ACP session.
+@@ -304,11 +391,24 @@ impl AcpProtocol {
+     /// alongside the typed response for legacy-surface agents.
+     pub async fn load_session(
+         &self,
+-        req: LoadSessionRequest,
++        mut req: LoadSessionRequest,
+     ) -> Result<(LoadSessionResponse, Option<serde_json::Value>), AcpError> {
+         let _guard = ReplaySuppressionGuard::new(&self.replay_suppression);
+-        self.send_request_capturing_legacy_models(req, AGENT_METHOD_NAMES.session_load)
+-            .await
++        let sid = req.session_id.to_string();
++        if let Some(capability) = self.managed_capability()? {
++            *self.managed_session.write().unwrap() = None;
++            req.meta.get_or_insert_default().insert(
++                "aelix/operationStore".into(),
++                serde_json::json!({
++                    "schema": capability.schema, "storeId": capability.store_id
++                }),
++            );
++        }
++        let result: (LoadSessionResponse, Option<serde_json::Value>) = self
++            .send_request_capturing_legacy_models(req, AGENT_METHOD_NAMES.session_load)
++            .await?;
++        self.apply_managed_scope(&sid, result.0.meta.as_ref())?;
++        Ok(result)
+     }
+ 
+     /// Fork an existing ACP session into a new session.
+@@ -331,18 +431,84 @@ impl AcpProtocol {
+     /// Blocks until the agent returns a `PromptResponse` (turn completed).
+     /// Streaming events arrive via the `event_tx` broadcast channel.
+     pub async fn prompt(&self, req: PromptRequest) -> Result<PromptResponse, AcpError> {
++        if let Some(value) = req.meta.as_ref().and_then(|meta| meta.get("aelix/operation")) {
++            let operation: aionui_api_types::ManagedOperationContext =
++                serde_json::from_value(value.clone()).map_err(|_| managed_contract_error())?;
++            let (sid, scope) = self.managed_scope().ok_or_else(managed_contract_error)?;
++            if !operation.valid()
++                || sid != req.session_id.to_string()
++                || scope.store_id != operation.store_id
++                || scope.worker_generation != operation.generation
++            {
++                return Err(managed_contract_error());
++            }
++            self.ensure_connected()?;
++            log_client_request(AGENT_METHOD_NAMES.session_prompt, &json_str(&req));
++            // SDK2.0.0 send_request_to synchronously enqueues (jsonrpc.rs
++            // 3400+). Registration + intent check + enqueue share one lock;
++            // a concurrent Stop can never overtake the first prompt frame.
++            let (_guard, request) = ManagedPromptGuard::enqueue(&self.managed_prompt, sid, operation, || {
++                self.connection.send_request(req)
++            })?;
++            let response = request.block_task().await;
++            log_agent_response(AGENT_METHOD_NAMES.session_prompt, &json_or_err(&response));
++            return response.map_err(|error| AcpError::from_sdk(error, AGENT_METHOD_NAMES.session_prompt));
++        }
+         self.send_request(req, AGENT_METHOD_NAMES.session_prompt).await
+     }
+ 
+     /// Cancel the current prompt in a session (fire-and-forget notification).
+-    pub fn cancel(&self, notification: CancelNotification) {
++    pub fn cancel(&self, mut notification: CancelNotification) {
+         if !self.is_connected() {
+             return;
+         }
++        if let Some((sid, operation)) = self.managed_prompt.read().unwrap().active.as_ref()
++            && sid == &notification.session_id.to_string()
++        {
++            if let Ok(value) = serde_json::to_value(operation) {
++                notification
++                    .meta
++                    .get_or_insert_default()
++                    .insert("aelix/operation".into(), value);
++            } else {
++                return;
++            }
++        }
+         log_client_notify(AGENT_METHOD_NAMES.session_cancel, &json_str(&notification));
+         let _ = self.connection.send_notification(notification);
+     }
+ 
++    pub fn cancel_managed_turn(&self, expected_turn: &str, cancel_permissions: impl FnOnce()) -> bool {
++        if !self.is_connected() {
++            return false;
++        }
++        enqueue_managed_cancel(&self.managed_prompt, expected_turn, |sid, operation| {
++            cancel_permissions();
++            let Ok(value) = serde_json::to_value(operation) else {
++                return false;
++            };
++            let mut notification = CancelNotification::new(sid.to_owned());
++            notification
++                .meta
++                .get_or_insert_default()
++                .insert("aelix/operation".into(), value);
++            self.connection.send_notification(notification).is_ok()
++        })
++    }
++
++    pub fn managed_cancelled_before_dispatch(
++        &self,
++        sid: &str,
++        operation: &aionui_api_types::ManagedOperationContext,
++    ) -> bool {
++        self.managed_prompt
++            .read()
++            .unwrap()
++            .local_cancelled
++            .as_ref()
++            .is_some_and(|(original_sid, original)| original_sid == sid && original == operation)
++    }
++
+     /// Set the session mode.
+     ///
+     /// Bounded by `CONFIG_RPC_TIMEOUT_SECS`: a dropped or never-arriving
+@@ -352,12 +518,19 @@ impl AcpProtocol {
+     /// The timeout is applied via [`Self::send_config_request`], which keeps the
+     /// in-flight SDK request alive on timeout (see that method for why).
+     pub async fn set_mode(&self, req: SetSessionModeRequest) -> Result<SetSessionModeResponse, AcpError> {
+-        self.send_config_request(
+-            req,
+-            AGENT_METHOD_NAMES.session_set_mode,
+-            std::time::Duration::from_secs(CONFIG_RPC_TIMEOUT_SECS),
+-        )
+-        .await
++        if self.managed_capability()?.is_some() {
++            *self.managed_session.write().unwrap() = None;
++        }
++        let sid = req.session_id.to_string();
++        let result: SetSessionModeResponse = self
++            .send_config_request(
++                req,
++                AGENT_METHOD_NAMES.session_set_mode,
++                std::time::Duration::from_secs(CONFIG_RPC_TIMEOUT_SECS),
++            )
++            .await?;
++        self.apply_managed_scope(&sid, result.meta.as_ref())?;
++        Ok(result)
+     }
+ 
+     /// Set the session model via the legacy `session/set_model` RPC, sent as
+@@ -586,6 +759,85 @@ impl Drop for AcpProtocol {
+ /// Using a guard (instead of manual `store` around `send_request`) ensures
+ /// the flag is cleared even if the future is cancelled, the request fails,
+ /// or the task panics.
++#[derive(Default)]
++struct ManagedPromptState {
++    active: Option<(String, aionui_api_types::ManagedOperationContext)>,
++    cancelled_turn: Option<String>,
++    local_cancelled: Option<(String, aionui_api_types::ManagedOperationContext)>,
++}
++
++struct ManagedPromptGuard<'a> {
++    slot: &'a RwLock<ManagedPromptState>,
++    expected: (String, aionui_api_types::ManagedOperationContext),
++}
++
++impl<'a> ManagedPromptGuard<'a> {
++    #[cfg(test)]
++    fn new(
++        slot: &'a RwLock<ManagedPromptState>,
++        sid: String,
++        operation: aionui_api_types::ManagedOperationContext,
++    ) -> Result<Self, AcpError> {
++        Self::enqueue(slot, sid, operation, || ()).map(|(guard, ())| guard)
++    }
++
++    fn enqueue<T>(
++        slot: &'a RwLock<ManagedPromptState>,
++        sid: String,
++        operation: aionui_api_types::ManagedOperationContext,
++        enqueue: impl FnOnce() -> T,
++    ) -> Result<(Self, T), AcpError> {
++        let mut state = slot.write().unwrap();
++        if state.active.is_some() {
++            return Err(managed_contract_error());
++        }
++        let expected = (sid, operation);
++        if state.cancelled_turn.as_deref() == Some(expected.1.turn_id.as_str()) {
++            state.local_cancelled = Some(expected);
++            return Err(AcpError::AgentInternal {
++                message: "Managed turn cancelled before dispatch".into(),
++                code: -32800,
++                data: Some(serde_json::json!({"kind":"cancelled_before_dispatch","automaticRetry":false})),
++            });
++        }
++        state.active = Some(expected.clone());
++        let request = enqueue();
++        Ok((Self { slot, expected }, request))
++    }
++}
++
++fn enqueue_managed_cancel(
++    slot: &RwLock<ManagedPromptState>,
++    expected_turn: &str,
++    enqueue: impl FnOnce(&str, &aionui_api_types::ManagedOperationContext) -> bool,
++) -> bool {
++    let mut state = slot.write().unwrap();
++    if state
++        .active
++        .as_ref()
++        .is_some_and(|(_, operation)| operation.turn_id != expected_turn)
++    {
++        return false;
++    }
++    state.cancelled_turn = Some(expected_turn.to_owned());
++    let Some((sid, operation)) = state.active.as_ref() else {
++        return true;
++    };
++    // Hold the same lock through permission snapshot and SDK cancel enqueue.
++    // A cannot finish and B cannot register a different scope in this boundary.
++    enqueue(sid, operation)
++}
++
++impl Drop for ManagedPromptGuard<'_> {
++    fn drop(&mut self) {
++        let mut state = self.slot.write().unwrap();
++        if state.active.as_ref() == Some(&self.expected) {
++            state.active = None;
++        }
++    }
++}
++
++/// Scope historical notification suppression to the actual load future.
+ struct ReplaySuppressionGuard<'a> {
+     flag: &'a AtomicBool,
+ }
+@@ -630,7 +882,7 @@ async fn run_sdk_background(
+     // writes). Only the two recognised shapes are absorbed; every other line,
+     // including genuinely malformed input, is forwarded unchanged.
+     let dialect_event_tx = event_tx.clone();
+-    let incoming = FramedRead::new(stdout, LinesCodec::new())
++    let incoming = FramedRead::new(stdout, LinesCodec::new_with_max_length(acp_forwarding::MAX_FRAME_BYTES))
+         .map_err(std::io::Error::other)
+         .filter_map(move |line: std::io::Result<String>| {
+             let dialect_event_tx = dialect_event_tx.clone();
+@@ -666,6 +918,7 @@ async fn run_sdk_background(
+     let mut shutdown_rx = Some(shutdown_rx);
+     let phase = Arc::new(Mutex::new(AcpConnectionPhase::Starting));
+     let phase_for_main = Arc::clone(&phase);
++    let reverse_budget = Arc::new(tokio::sync::Semaphore::new(acp_forwarding::MAX_REVERSE_REQUESTS));
+ 
+     let result = Client
+         .builder()
+@@ -698,9 +951,12 @@ async fn run_sdk_background(
+         )
+         .on_receive_request(
+             {
+-                async move |request: RequestPermissionRequest, responder, _cx| {
+-                    handle_permission_request(request, responder, &permission_tx).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: RequestPermissionRequest, responder, cx| {
++                    let permission_tx = permission_tx.clone();
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_permission_request(request, &permission_tx).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+@@ -709,9 +965,13 @@ async fn run_sdk_background(
+             {
+                 let registry = Arc::clone(&terminal_registry);
+                 let event_tx = event_tx.clone();
+-                async move |request: CreateTerminalRequest, responder, _cx| {
+-                    handle_terminal_create(request, responder, &registry, &event_tx).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: CreateTerminalRequest, responder, cx| {
++                    let registry = Arc::clone(&registry);
++                    let event_tx = event_tx.clone();
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_terminal_create(request, &registry, &event_tx).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+@@ -719,9 +979,12 @@ async fn run_sdk_background(
+         .on_receive_request(
+             {
+                 let registry = Arc::clone(&terminal_registry);
+-                async move |request: TerminalOutputRequest, responder, _cx| {
+-                    handle_terminal_output(request, responder, &registry).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: TerminalOutputRequest, responder, cx| {
++                    let registry = Arc::clone(&registry);
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_terminal_output(request, &registry).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+@@ -730,9 +993,13 @@ async fn run_sdk_background(
+             {
+                 let registry = Arc::clone(&terminal_registry);
+                 let event_tx = event_tx.clone();
+-                async move |request: WaitForTerminalExitRequest, responder, _cx| {
+-                    handle_terminal_wait(request, responder, &registry, &event_tx).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: WaitForTerminalExitRequest, responder, cx| {
++                    let registry = Arc::clone(&registry);
++                    let event_tx = event_tx.clone();
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_terminal_wait(request, &registry, &event_tx).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+@@ -740,9 +1007,12 @@ async fn run_sdk_background(
+         .on_receive_request(
+             {
+                 let registry = Arc::clone(&terminal_registry);
+-                async move |request: KillTerminalRequest, responder, _cx| {
+-                    handle_terminal_kill(request, responder, &registry).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: KillTerminalRequest, responder, cx| {
++                    let registry = Arc::clone(&registry);
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_terminal_kill(request, &registry).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+@@ -750,13 +1020,25 @@ async fn run_sdk_background(
+         .on_receive_request(
+             {
+                 let registry = Arc::clone(&terminal_registry);
+-                async move |request: ReleaseTerminalRequest, responder, _cx| {
+-                    handle_terminal_release(request, responder, &registry).await;
+-                    Ok(())
++                let budget = Arc::clone(&reverse_budget);
++                async move |request: ReleaseTerminalRequest, responder, cx| {
++                    let registry = Arc::clone(&registry);
++                    acp_forwarding::dispatch(cx, &budget, responder, async move {
++                        handle_terminal_release(request, &registry).await
++                    })
+                 }
+             },
+             on_receive_request!(),
+         )
++        .on_receive_request(
++            async |_: UntypedMessage, responder, _: ConnectionTo<Agent>| {
++                // Final fallback, after typed handlers. Never echo a raw method
++                // or payload into this bounded unsupported-client-action reply.
++                let _ = responder.respond_with_error(acp_forwarding::unsupported());
++                Ok(())
++            },
++            on_receive_request!(),
++        )
+         .connect_with(transport, async move |connection: ConnectionTo<Agent>| {
+             // Step 1 — initialize handshake. main_fn is the canonical place
+             // to call `block_task` (see SDK `connect_with` doc example).
+@@ -834,19 +1116,13 @@ async fn handle_session_notification(
+ /// forward the user's decision back to the SDK responder.
+ async fn handle_permission_request(
+     request: RequestPermissionRequest,
+-    responder: Responder<RequestPermissionResponse>,
+     event_tx: &mpsc::Sender<PermissionRequest>,
+-) {
++) -> Result<RequestPermissionResponse, agent_client_protocol::Error> {
+     log_agent_request("session/request_permission", &json_str(&request));
+-
+     let (response_tx, response_rx) = oneshot::channel();
+-
+     if event_tx.send(PermissionRequest { request, response_tx }).await.is_err() {
+-        warn!("Permission channel closed, cancelling request");
+-        let _ = responder.respond(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled));
+-        return;
++        return Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled));
+     }
+-
+     let response = match response_rx.await {
+         Ok(PermissionDecision::Selected { option_id }) => RequestPermissionResponse::new(
+             RequestPermissionOutcome::Selected(SelectedPermissionOutcome::new(option_id)),
+@@ -855,9 +1131,8 @@ async fn handle_permission_request(
+             RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
+         }
+     };
+-
+     log_client_response("session/request_permission", &json_str(&response));
+-    let _ = responder.respond(response);
++    Ok(response)
+ }
+ 
+ /// Convert a registry exit into the wire `TerminalExitStatus`.
+@@ -877,7 +1152,7 @@ async fn emit_terminal_snapshot(
+     event_tx: &broadcast::Sender<AgentStreamEvent>,
+ ) -> bool {
+     let Some(snap) = registry.output(terminal_id).await else {
+-        return false;
++        return true; // Removed/released/connection teardown: stop the UI poller.
+     };
+     let command = registry.command_line(terminal_id).await.unwrap_or_default();
+     let done = snap.exit.is_some();
+@@ -894,12 +1169,16 @@ async fn emit_terminal_snapshot(
+     done
+ }
+ 
++fn terminal_unavailable() -> agent_client_protocol::Error {
++    agent_client_protocol::Error::internal_error()
++        .data(serde_json::json!({"kind":"terminal_unavailable","retry":false}))
++}
++
+ async fn handle_terminal_create(
+     request: CreateTerminalRequest,
+-    responder: Responder<CreateTerminalResponse>,
+     registry: &Arc<crate::terminal::TerminalRegistry>,
+     event_tx: &broadcast::Sender<AgentStreamEvent>,
+-) {
++) -> Result<CreateTerminalResponse, agent_client_protocol::Error> {
+     log_agent_request("terminal/create", &json_str(&request));
+     let params = crate::terminal::CreateTerminalParams {
+         command: request.command.clone(),
+@@ -908,93 +1187,66 @@ async fn handle_terminal_create(
+         cwd: request.cwd.clone(),
+         output_byte_limit: request.output_byte_limit,
+     };
+-    match registry.create(params).await {
+-        Ok(terminal_id) => {
+-            // UI stream: push throttled snapshots until the command exits.
+-            // The agent-side contract stays pull-based (`terminal/output`);
+-            // this task only feeds our own frontend.
+-            let poll_registry = Arc::clone(registry);
+-            let poll_event_tx = event_tx.clone();
+-            let poll_id = terminal_id.clone();
+-            tokio::spawn(async move {
+-                loop {
+-                    let done = emit_terminal_snapshot(&poll_registry, &poll_id, &poll_event_tx).await;
+-                    if done {
+-                        break;
+-                    }
+-                    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+-                }
+-            });
+-            let response = CreateTerminalResponse::new(terminal_id);
+-            log_client_response("terminal/create", &json_str(&response));
+-            let _ = responder.respond(response);
+-        }
+-        Err(err) => {
+-            warn!(error = %err, "terminal/create failed");
+-            let _ = responder.respond_with_internal_error(err);
++    let terminal_id = registry.create(params).await.map_err(|_| terminal_unavailable())?;
++    let poll_registry = Arc::clone(registry);
++    let poll_event_tx = event_tx.clone();
++    let poll_id = terminal_id.clone();
++    tokio::spawn(async move {
++        loop {
++            if emit_terminal_snapshot(&poll_registry, &poll_id, &poll_event_tx).await {
++                break;
++            }
++            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+         }
+-    }
++    });
++    let response = CreateTerminalResponse::new(terminal_id);
++    log_client_response("terminal/create", &json_str(&response));
++    Ok(response)
+ }
+ 
+ async fn handle_terminal_output(
+     request: TerminalOutputRequest,
+-    responder: Responder<TerminalOutputResponse>,
+     registry: &Arc<crate::terminal::TerminalRegistry>,
+-) {
+-    match registry.output(&request.terminal_id.to_string()).await {
+-        Some(snap) => {
+-            let mut response = TerminalOutputResponse::new(snap.output, snap.truncated);
+-            response.exit_status = snap.exit.map(wire_exit_status);
+-            let _ = responder.respond(response);
+-        }
+-        None => {
+-            let _ = responder.respond_with_internal_error(format!("unknown terminal: {}", request.terminal_id));
+-        }
+-    }
++) -> Result<TerminalOutputResponse, agent_client_protocol::Error> {
++    let snap = registry
++        .output(&request.terminal_id.to_string())
++        .await
++        .ok_or_else(terminal_unavailable)?;
++    let mut response = TerminalOutputResponse::new(snap.output, snap.truncated);
++    response.exit_status = snap.exit.map(wire_exit_status);
++    Ok(response)
+ }
+ 
+ async fn handle_terminal_wait(
+     request: WaitForTerminalExitRequest,
+-    responder: Responder<WaitForTerminalExitResponse>,
+     registry: &Arc<crate::terminal::TerminalRegistry>,
+     event_tx: &broadcast::Sender<AgentStreamEvent>,
+-) {
++) -> Result<WaitForTerminalExitResponse, agent_client_protocol::Error> {
+     let terminal_id = request.terminal_id.to_string();
+-    match registry.wait_for_exit(&terminal_id).await {
+-        Some(exit) => {
+-            // Make sure the UI sees the terminal frame even if the poller
+-            // lost a race with process exit.
+-            emit_terminal_snapshot(registry, &terminal_id, event_tx).await;
+-            let response = WaitForTerminalExitResponse::new(wire_exit_status(exit));
+-            let _ = responder.respond(response);
+-        }
+-        None => {
+-            let _ = responder.respond_with_internal_error(format!("unknown terminal: {terminal_id}"));
+-        }
+-    }
++    let exit = registry
++        .wait_for_exit(&terminal_id)
++        .await
++        .ok_or_else(terminal_unavailable)?;
++    emit_terminal_snapshot(registry, &terminal_id, event_tx).await;
++    Ok(WaitForTerminalExitResponse::new(wire_exit_status(exit)))
+ }
+ 
+ async fn handle_terminal_kill(
+     request: KillTerminalRequest,
+-    responder: Responder<KillTerminalResponse>,
+     registry: &Arc<crate::terminal::TerminalRegistry>,
+-) {
+-    if registry.kill(&request.terminal_id.to_string(), "agent").await {
+-        let _ = responder.respond(KillTerminalResponse::new());
+-    } else {
+-        let _ = responder.respond_with_internal_error(format!("unknown terminal: {}", request.terminal_id));
++) -> Result<KillTerminalResponse, agent_client_protocol::Error> {
++    if !registry.kill(&request.terminal_id.to_string(), "agent").await {
++        return Err(terminal_unavailable());
+     }
++    Ok(KillTerminalResponse::new())
+ }
+ 
+ async fn handle_terminal_release(
+     request: ReleaseTerminalRequest,
+-    responder: Responder<ReleaseTerminalResponse>,
+     registry: &Arc<crate::terminal::TerminalRegistry>,
+-) {
++) -> Result<ReleaseTerminalResponse, agent_client_protocol::Error> {
+     registry.release(&request.terminal_id.to_string()).await;
+-    // Release is idempotent on the wire: an unknown id still gets a success
+-    // response (the agent's intent — "this terminal is gone" — holds).
+-    let _ = responder.respond(ReleaseTerminalResponse::new());
++    Ok(ReleaseTerminalResponse::new())
+ }
+ 
+ /// Serialize a value to a compact JSON string, falling back to Debug on failure.
+@@ -1248,6 +1500,214 @@ impl std::fmt::Debug for AcpProtocol {
+ mod tests {
+     use super::*;
+ 
++    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
++    async fn concurrent_cancel_cannot_overtake_managed_prompt_sdk_enqueue() {
++        use agent_client_protocol::schema::v1::{ContentBlock, StopReason, TextContent};
++        use agent_client_protocol::{Channel, on_receive_notification};
++        let (client_wire, agent_wire) = Channel::duplex();
++        let (ready_tx, ready_rx) = oneshot::channel();
++        let client = tokio::spawn(async move {
++            Client
++                .builder()
++                .connect_with(client_wire, async move |cx: ConnectionTo<Agent>| {
++                    ready_tx.send(cx).unwrap();
++                    std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++                })
++                .await
++        });
++        let observed = Arc::new(Mutex::new(Vec::new()));
++        let prompt_log = observed.clone();
++        let cancel_log = observed.clone();
++        let agent = tokio::spawn(async move {
++            Agent
++                .builder()
++                .on_receive_request(
++                    async move |_: PromptRequest, responder, _cx| {
++                        prompt_log.lock().unwrap().push("prompt:turn-a");
++                        responder.respond(PromptResponse::new(StopReason::EndTurn))
++                    },
++                    on_receive_request!(),
++                )
++                .on_receive_notification(
++                    async move |notification: CancelNotification, _cx| {
++                        assert_eq!(notification.meta.unwrap()["aelix/operation"]["turnId"], "turn-a");
++                        cancel_log.lock().unwrap().push("cancel:turn-a");
++                        Ok(())
++                    },
++                    on_receive_notification!(),
++                )
++                .connect_with(agent_wire, async |_: ConnectionTo<Client>| {
++                    std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++                })
++                .await
++        });
++        let connection = ready_rx.await.unwrap();
++        let cancel_connection = connection.clone();
++        let slot = Arc::new(RwLock::new(ManagedPromptState::default()));
++        let cancel_slot = slot.clone();
++        let start = Arc::new(std::sync::Barrier::new(2));
++        let cancel_start = start.clone();
++        let finish = Arc::new(std::sync::Barrier::new(2));
++        let cancel_finish = finish.clone();
++        let (attempted_tx, attempted_rx) = std::sync::mpsc::channel();
++        let operation = aionui_api_types::ManagedOperationContext {
++            schema: aionui_api_types::MANAGED_OPERATION_SCHEMA.into(),
++            id: "op-a".into(),
++            store_id: "store-1".into(),
++            conversation_id: "conv-1".into(),
++            turn_id: "turn-a".into(),
++            generation: "gen-1".into(),
++        };
++        let cancel = std::thread::spawn(move || {
++            cancel_start.wait();
++            attempted_tx.send(()).unwrap();
++            assert!(enqueue_managed_cancel(&cancel_slot, "turn-a", |sid, context| {
++                let mut notification = CancelNotification::new(sid.to_owned());
++                notification
++                    .meta
++                    .get_or_insert_default()
++                    .insert("aelix/operation".into(), serde_json::to_value(context).unwrap());
++                cancel_connection.send_notification(notification).is_ok()
++            }));
++            cancel_finish.wait();
++        });
++        let sender = std::thread::spawn(move || {
++            let mut request = PromptRequest::new("session-1", vec![ContentBlock::Text(TextContent::new("synthetic"))]);
++            request
++                .meta
++                .get_or_insert_default()
++                .insert("aelix/operation".into(), serde_json::to_value(&operation).unwrap());
++            let (guard, request) = ManagedPromptGuard::enqueue(&slot, "session-1".into(), operation, || {
++                start.wait();
++                attempted_rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap();
++                connection.send_request(request)
++            })
++            .unwrap();
++            finish.wait();
++            drop(guard);
++            request
++        });
++        let request = sender.join().unwrap();
++        cancel.join().unwrap();
++        request.block_task().await.unwrap();
++        tokio::time::timeout(std::time::Duration::from_secs(2), async {
++            while observed.lock().unwrap().len() < 2 {
++                tokio::task::yield_now().await;
++            }
++        })
++        .await
++        .unwrap();
++        assert_eq!(*observed.lock().unwrap(), vec!["prompt:turn-a", "cancel:turn-a"]);
++        client.abort();
++        agent.abort();
++        let _ = tokio::join!(client, agent);
++    }
++
++    #[tokio::test(start_paused = true)]
++    async fn late_mode_ack_cannot_restore_an_invalidated_scope_or_enqueue_a_stale_prompt() {
++        use agent_client_protocol::Channel;
++        let (client_wire, agent_wire) = Channel::duplex();
++        let (ready_tx, ready_rx) = oneshot::channel();
++        let client = tokio::spawn(async move {
++            Client
++                .builder()
++                .connect_with(client_wire, async move |cx: ConnectionTo<Agent>| {
++                    ready_tx.send(cx).unwrap();
++                    std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++                })
++                .await
++        });
++        let (entered_tx, entered_rx) = oneshot::channel();
++        let entered = Arc::new(Mutex::new(Some(entered_tx)));
++        let agent = tokio::spawn(async move {
++            Agent.builder().on_receive_request(async move |_:SetSessionModeRequest,responder,_cx| {
++                entered.lock().unwrap().take().unwrap().send(()).unwrap();
++                tokio::time::sleep(std::time::Duration::from_secs(CONFIG_RPC_TIMEOUT_SECS+5)).await;
++                let mut response=SetSessionModeResponse::new();
++                response.meta.get_or_insert_default().insert("aelix/operationStore".into(),serde_json::json!({
++                    "schema":"aelix.operation/1","storeId":"store-1","workerGeneration":"generation-2","nativeSessionId":"native-1"}));
++                responder.respond(response)
++            },on_receive_request!()).connect_with(agent_wire,async |_:ConnectionTo<Client>| {
++                std::future::pending::<Result<(),agent_client_protocol::Error>>().await
++            }).await
++        });
++        let initialize:InitializeResponse=serde_json::from_value(serde_json::json!({"protocolVersion":1,"authMethods":[],
++            "agentCapabilities":{"loadSession":true,"_meta":{"aelix/operations":{"schema":"aelix.operation/1","storeId":"store-1",
++            "statusMethod":"_aelix/operation_status","statusOnlyArgument":"--operations-status-only","statusOnly":false}}}})).unwrap();
++        let protocol = Arc::new(AcpProtocol {
++            connection: ready_rx.await.unwrap(),
++            shutdown_tx: None,
++            alive: Arc::new(AtomicBool::new(true)),
++            initialize_response: Arc::new(RwLock::new(Some(initialize))),
++            managed_session: RwLock::new(None),
++            managed_prompt: RwLock::new(ManagedPromptState::default()),
++            replay_suppression: Arc::new(AtomicBool::new(false)),
++            terminal_registry: Arc::new(crate::terminal::TerminalRegistry::new("test", None)),
++        });
++        protocol
++            .apply_managed_scope(
++                "session-1",
++                Some(
++                    &serde_json::json!({"aelix/operationStore":{"schema":"aelix.operation/1",
++            "storeId":"store-1","workerGeneration":"generation-1","nativeSessionId":"native-1"}})
++                    .as_object()
++                    .unwrap()
++                    .clone(),
++                ),
++            )
++            .unwrap();
++        let mode = tokio::spawn({
++            let protocol = protocol.clone();
++            async move { protocol.set_mode(SetSessionModeRequest::new("session-1", "yolo")).await }
++        });
++        entered_rx.await.unwrap();
++        assert!(protocol.managed_scope().is_none());
++        tokio::time::advance(std::time::Duration::from_secs(CONFIG_RPC_TIMEOUT_SECS)).await;
++        assert!(matches!(mode.await.unwrap(), Err(AcpError::RequestTimeout { .. })));
++        tokio::time::advance(std::time::Duration::from_secs(6)).await;
++        tokio::task::yield_now().await;
++        assert!(protocol.managed_scope().is_none());
++        let mut request = PromptRequest::new("session-1", vec![]);
++        request.meta.get_or_insert_default().insert(
++            "aelix/operation".into(),
++            serde_json::json!({"schema":"aelix.operation/1","id":"op-1",
++            "storeId":"store-1","conversationId":"conv-1","turnId":"turn-1","generation":"generation-1"}),
++        );
++        assert!(protocol.prompt(request).await.is_err());
++        assert!(protocol.is_connected());
++        drop(protocol);
++        client.abort();
++        agent.abort();
++        let _ = tokio::join!(client, agent);
++    }
++
++    #[test]
++    fn pre_dispatch_cancel_keeps_original_turn_and_does_not_cancel_a_later_turn() {
++        let slot = RwLock::new(ManagedPromptState {
++            cancelled_turn: Some("turn-a".into()),
++            ..Default::default()
++        });
++        let operation = aionui_api_types::ManagedOperationContext {
++            schema: aionui_api_types::MANAGED_OPERATION_SCHEMA.into(),
++            id: "op-a".into(),
++            store_id: "store-1".into(),
++            conversation_id: "conv-1".into(),
++            turn_id: "turn-a".into(),
++            generation: "gen-1".into(),
++        };
++        assert!(ManagedPromptGuard::new(&slot, "session-1".into(), operation.clone()).is_err());
++        assert_eq!(slot.read().unwrap().local_cancelled.as_ref().unwrap().1, operation);
++        let later = aionui_api_types::ManagedOperationContext {
++            id: "op-b".into(),
++            turn_id: "turn-b".into(),
++            ..operation
++        };
++        let guard = ManagedPromptGuard::new(&slot, "session-1".into(), later.clone()).unwrap();
++        assert_eq!(slot.read().unwrap().active.as_ref().unwrap().1, later);
++        drop(guard);
++        assert!(slot.read().unwrap().active.is_none());
++    }
++
+     #[test]
+     fn legacy_set_model_frame_shape() {
+         let frame = build_legacy_set_model_params("sess-1", "deepseek-v4-pro");
+diff --git a/crates/aionui-ai-agent/src/protocol/acp_forwarding/mod.rs b/crates/aionui-ai-agent/src/protocol/acp_forwarding/mod.rs
+new file mode 100644
+index 0000000..81bdb9e
+--- /dev/null
++++ b/crates/aionui-ai-agent/src/protocol/acp_forwarding/mod.rs
+@@ -0,0 +1,64 @@
++//! Bounded connection-owned reverse request dispatch.
++//!
++//! SDK 2.0.0 `jsonrpc.rs:784-845` runs request handlers on one event loop;
++//! `ConnectionTo::spawn` owns tasks until connection teardown. Consent and
++//! terminal waits must therefore leave that loop immediately. Expected request
++//! failures are replies, never unrelated errors returned by a spawned task.
++use std::{future::Future, sync::Arc, time::Duration};
++
++use agent_client_protocol::{Agent, ConnectionTo, JsonRpcResponse, Responder};
++use tokio::sync::Semaphore;
++pub mod operation;
++
++pub(super) const MAX_REVERSE_REQUESTS: usize = 32;
++pub(super) const REVERSE_DEADLINE: Duration = Duration::from_secs(300);
++pub(super) const MAX_FRAME_BYTES: usize = 16 * 1024 * 1024;
++
++pub(super) fn unsupported() -> agent_client_protocol::Error {
++    agent_client_protocol::Error::method_not_found().data(serde_json::json!({
++        "kind": "unsupported_client_action", "retry": false
++    }))
++}
++
++pub(super) fn dispatch<R, Fut>(
++    connection: ConnectionTo<Agent>,
++    budget: &Arc<Semaphore>,
++    responder: Responder<R>,
++    handler: Fut,
++) -> Result<(), agent_client_protocol::Error>
++where
++    R: JsonRpcResponse + Send + 'static,
++    Fut: Future<Output = Result<R, agent_client_protocol::Error>> + Send + 'static,
++{
++    let Ok(permit) = Arc::clone(budget).try_acquire_owned() else {
++        let _ = responder.respond_with_error(
++            agent_client_protocol::Error::internal_error()
++                .data(serde_json::json!({"kind": "client_capacity_exceeded", "retry": false})),
++        );
++        return Ok(());
++    };
++    connection.spawn(async move {
++        let _permit = permit;
++        // SDK2.0.0 ResponderDropGuard only settles abandoned BATCH slots.
++        // Retain the single-request responder until an explicit result/error;
++        // returning Ok keeps expected failures from closing the connection.
++        match tokio::time::timeout(REVERSE_DEADLINE, handler).await {
++            Ok(Ok(response)) => {
++                let _ = responder.respond(response);
++            }
++            Ok(Err(error)) => {
++                let _ = responder.respond_with_error(error);
++            }
++            Err(_) => {
++                let _ = responder.respond_with_error(
++                    agent_client_protocol::Error::internal_error()
++                        .data(serde_json::json!({"kind":"client_request_deadline_exceeded","retry":false})),
++                );
++            }
++        }
++        Ok(())
++    })
++}
++
++#[cfg(test)]
++mod tests;
+diff --git a/crates/aionui-ai-agent/src/protocol/acp_forwarding/operation.rs b/crates/aionui-ai-agent/src/protocol/acp_forwarding/operation.rs
+new file mode 100644
+index 0000000..056c7eb
+--- /dev/null
++++ b/crates/aionui-ai-agent/src/protocol/acp_forwarding/operation.rs
+@@ -0,0 +1,143 @@
++//! Narrow status transport: existing process infrastructure, initialize/status
++//! only, no session load/new or native supervisor. Capability is re-negotiated.
++use crate::protocol::{acp::AcpProtocol, acp_init_budget::InitBudget};
++use crate::{AgentError, capability::cli_process::CliAgentProcess};
++use aionui_api_types::{AgentMetadata, ManagedOperationContext, ManagedSessionScope};
++use aionui_common::{CommandSpec, EnvVar};
++use std::{
++    path::{Path, PathBuf},
++    sync::{Arc, OnceLock},
++    time::Duration,
++};
++use tokio::sync::{Semaphore, broadcast, mpsc};
++
++pub struct ManagedExecutionBinding {
++    pub session_id: String,
++    pub scope: ManagedSessionScope,
++    pub metadata_id: String,
++    /// Memory-only input to the repository's keyed command fingerprint.
++    pub command_binding: Vec<u8>,
++}
++
++pub fn managed_command_binding(meta: &AgentMetadata, workspace: &str) -> Result<Vec<u8>, AgentError> {
++    let resolved = managed_status_command(meta, workspace)?.command;
++    let resolved = std::fs::canonicalize(resolved).map_err(|_| unavailable())?;
++    // Credential values (including operator argv/env auth) are not inputs to
++    // an operation fingerprint. Bind the local executable/metadata/workspace
++    // and nonsecret shape; status re-negotiates the ORIGINAL adapter store and
++    // checks the original session/context before reading an outcome.
++    let env_names = meta.env.iter().map(|entry| entry.name.as_str()).collect::<Vec<_>>();
++    serde_json::to_vec(&(&meta.id, &meta.command, resolved, meta.args.len(), env_names, workspace))
++        .map_err(|_| unavailable())
++}
++
++pub fn managed_status_command(meta: &AgentMetadata, workspace: &str) -> Result<CommandSpec, AgentError> {
++    if !meta.enabled {
++        return Err(unavailable());
++    }
++    let configured = meta.command.as_deref().ok_or_else(unavailable)?;
++    let command = if configured == "node" {
++        aionui_runtime::node_runtime::existing_node_runtime_command().ok_or_else(unavailable)?
++    } else {
++        PathBuf::from(configured)
++    };
++    // Status never installs/resolves a new runtime. Packaged/local direct
++    // commands are eligible; absent or changed launch configuration is unknown.
++    if !command.is_absolute() || !command.is_file() || !Path::new(workspace).is_dir() {
++        return Err(unavailable());
++    }
++    let mut args = meta.args.clone();
++    args.push("--operations-status-only".into());
++    Ok(CommandSpec {
++        command,
++        args,
++        env: meta
++            .env
++            .iter()
++            .map(|e| EnvVar {
++                name: e.name.clone(),
++                value: e.value.clone(),
++            })
++            .collect(),
++        cwd: Some(workspace.to_owned()),
++    })
++}
++
++fn unavailable() -> AgentError {
++    AgentError::conflict("Managed operation status unavailable; automatic replay disabled")
++}
++
++struct OwnedStatus(Option<CliAgentProcess>);
++impl Drop for OwnedStatus {
++    fn drop(&mut self) {
++        if let Some(process) = &self.0 {
++            process.force_kill_tree();
++        }
++    }
++}
++
++pub async fn query_managed_operation_status_only(
++    meta: &AgentMetadata,
++    workspace: &str,
++    sid: &str,
++    operation: &ManagedOperationContext,
++) -> Result<serde_json::Value, AgentError> {
++    static BUDGET: OnceLock<Arc<Semaphore>> = OnceLock::new();
++    let _permit = BUDGET
++        .get_or_init(|| Arc::new(Semaphore::new(16)))
++        .clone()
++        .try_acquire_owned()
++        .map_err(|_| unavailable())?;
++    let command = managed_status_command(meta, workspace)?;
++    // The timeout owns the entire process guard. Cancellation/deadline kills
++    // the owned transport tree even while SDK initialize/status is awaiting.
++    tokio::time::timeout(Duration::from_secs(8), async {
++        let process = CliAgentProcess::spawn_for_sdk(command)
++            .await
++            .map_err(|_| unavailable())?;
++        let mut owned = OwnedStatus(Some(process));
++        let process = owned.0.as_ref().unwrap();
++        let (stdin, stdout) = process.take_stdio().await.ok_or_else(unavailable)?;
++        let (events, _) = broadcast::channel(16);
++        let (permissions, _permission_rx) = mpsc::channel(1);
++        let (notifications, _notification_rx) = mpsc::channel(1);
++        let protocol = AcpProtocol::connect(
++            stdin,
++            stdout,
++            events,
++            permissions,
++            notifications,
++            "managed-operation-status",
++            Some(PathBuf::from(workspace)),
++            InitBudget {
++                timeout: Duration::from_secs(3),
++                cold_start: false,
++            },
++        )
++        .await
++        .map_err(|_| unavailable())?;
++        let capability = protocol
++            .managed_capability()
++            .map_err(|_| unavailable())?
++            .ok_or_else(unavailable)?;
++        if !capability.status_only
++            || capability.store_id != operation.store_id
++            || protocol.agent_capabilities().is_none_or(|caps| caps.load_session)
++        {
++            return Err(unavailable());
++        }
++        let result = protocol
++            .operation_status(sid, operation)
++            .await
++            .map_err(|_| unavailable());
++        drop(protocol);
++        process
++            .kill(Duration::from_millis(100))
++            .await
++            .map_err(|_| unavailable())?;
++        owned.0.take();
++        result
++    })
++    .await
++    .map_err(|_| unavailable())?
++}
+diff --git a/crates/aionui-ai-agent/src/protocol/acp_forwarding/tests.rs b/crates/aionui-ai-agent/src/protocol/acp_forwarding/tests.rs
+new file mode 100644
+index 0000000..5e8e77c
+--- /dev/null
++++ b/crates/aionui-ai-agent/src/protocol/acp_forwarding/tests.rs
+@@ -0,0 +1,197 @@
++use super::*;
++use agent_client_protocol::schema::v1::{
++    RequestPermissionOutcome, RequestPermissionRequest, RequestPermissionResponse,
++};
++use agent_client_protocol::{Channel, Client, UntypedMessage, on_receive_request};
++use tokio::sync::oneshot;
++
++#[cfg(unix)]
++#[test]
++fn status_command_binding_detects_canonical_path_change_without_secret_inputs() {
++    use std::os::unix::fs::symlink;
++    let root = tempfile::tempdir().unwrap();
++    let first = root.path().join("first");
++    let second = root.path().join("second");
++    let alias = root.path().join("program");
++    std::fs::write(&first, "first").unwrap();
++    std::fs::write(&second, "second").unwrap();
++    symlink(&first, &alias).unwrap();
++    let mut meta: aionui_api_types::AgentMetadata = serde_json::from_value(serde_json::json!({
++        "id":"managed-1","name":"Synthetic","agent_type":"acp","agent_source":"custom",
++        "enabled":true,"available":true,"sort_order":0,"command":alias,
++        "args":["SYNTHETIC_ARG_SECRET"],"env":[{"name":"TOKEN","value":"SYNTHETIC_ENV_SECRET"}]
++    }))
++    .unwrap();
++    let workspace = root.path().to_str().unwrap();
++    let before = operation::managed_command_binding(&meta, workspace).unwrap();
++    assert!(!String::from_utf8_lossy(&before).contains("SYNTHETIC_"));
++    meta.args[0] = "different credential".into();
++    meta.env[0].value = "different credential".into();
++    assert_eq!(operation::managed_command_binding(&meta, workspace).unwrap(), before);
++    std::fs::remove_file(&alias).unwrap();
++    symlink(&second, &alias).unwrap();
++    assert_ne!(operation::managed_command_binding(&meta, workspace).unwrap(), before);
++    std::fs::remove_file(&alias).unwrap();
++    assert!(operation::managed_command_binding(&meta, workspace).is_err());
++    meta.command = Some("npx".into());
++    meta.resolved_command = Some(first);
++    assert!(operation::managed_status_command(&meta, workspace).is_err());
++}
++
++#[tokio::test(start_paused = true)]
++async fn single_reverse_request_gets_explicit_deadline_error_and_connection_survives() {
++    let (client_wire, agent_wire) = Channel::duplex();
++    let budget = Arc::new(Semaphore::new(1));
++    let client_budget = budget.clone();
++    let (entered_tx, entered_rx) = oneshot::channel();
++    let entered = Arc::new(std::sync::Mutex::new(Some(entered_tx)));
++    let client = tokio::spawn(async move {
++        Client
++            .builder()
++            .on_receive_request(
++                async move |request: UntypedMessage, responder, cx| {
++                    if request.method == "_review/deadline" {
++                        let entered = entered.lock().unwrap().take();
++                        dispatch(cx, &client_budget, responder, async move {
++                            entered.unwrap().send(()).unwrap();
++                            std::future::pending::<Result<serde_json::Value, agent_client_protocol::Error>>().await
++                        })
++                    } else {
++                        let _ = responder.respond_with_error(unsupported());
++                        Ok(())
++                    }
++                },
++                on_receive_request!(),
++            )
++            .connect_with(client_wire, async |_: ConnectionTo<Agent>| {
++                std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++            })
++            .await
++    });
++    let (ready_tx, ready_rx) = oneshot::channel();
++    let agent = tokio::spawn(async move {
++        Agent
++            .builder()
++            .connect_with(agent_wire, async move |cx: ConnectionTo<Client>| {
++                ready_tx.send(cx).unwrap();
++                std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++            })
++            .await
++    });
++    let connection = ready_rx.await.unwrap();
++    let request = connection.send_request(
++        UntypedMessage::new("_review/deadline", serde_json::json!({"secret":"SYNTHETIC_PRIVATE"})).unwrap(),
++    );
++    let task = tokio::spawn(async move { request.block_task().await });
++    entered_rx.await.unwrap();
++    tokio::time::advance(REVERSE_DEADLINE + Duration::from_secs(1)).await;
++    let error = tokio::time::timeout(Duration::from_secs(1), task)
++        .await
++        .unwrap()
++        .unwrap()
++        .unwrap_err();
++    assert_eq!(
++        error.data.unwrap(),
++        serde_json::json!({"kind":"client_request_deadline_exceeded","retry":false})
++    );
++    assert_eq!(budget.available_permits(), 1);
++    let followup = connection
++        .send_request(UntypedMessage::new("_review/followup", serde_json::json!({})).unwrap())
++        .block_task()
++        .await
++        .unwrap_err();
++    assert_eq!(followup.data.unwrap()["kind"], "unsupported_client_action");
++    client.abort();
++    agent.abort();
++    let _ = tokio::join!(client, agent);
++}
++
++#[tokio::test]
++async fn unknown_action_and_capacity_reply_while_typed_consent_is_pending() {
++    // Real pinned SDK routing on its JSON-value transport; OS stdio and actual
++    // host qualification are separate probes. Typed permission priority stays
++    // ahead of the catch-all even while a consent task holds the only permit.
++    let (client_wire, agent_wire) = Channel::duplex();
++    let (ready_tx, ready_rx) = oneshot::channel();
++    let (entered_tx, entered_rx) = oneshot::channel();
++    let (release_tx, release_rx) = oneshot::channel();
++    let entered = Arc::new(std::sync::Mutex::new(Some(entered_tx)));
++    let release = Arc::new(std::sync::Mutex::new(Some(release_rx)));
++    let budget = Arc::new(Semaphore::new(1));
++    let client = tokio::spawn(async move {
++        Client
++            .builder()
++            .on_receive_request(
++                async move |_: RequestPermissionRequest, responder, cx| {
++                    let entered = entered.lock().unwrap().take();
++                    let release = release.lock().unwrap().take();
++                    dispatch(cx, &budget, responder, async move {
++                        let _ = entered.unwrap().send(());
++                        let _ = release.unwrap().await;
++                        Ok(RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled))
++                    })
++                },
++                on_receive_request!(),
++            )
++            .on_receive_request(
++                async |_: UntypedMessage, responder, _: ConnectionTo<Agent>| {
++                    let _ = responder.respond_with_error(unsupported());
++                    Ok(())
++                },
++                on_receive_request!(),
++            )
++            .connect_with(client_wire, async move |cx: ConnectionTo<Agent>| {
++                let _ = ready_tx.send(cx);
++                std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++            })
++            .await
++    });
++    let (agent_ready_tx, agent_ready_rx) = oneshot::channel();
++    let agent = tokio::spawn(async move {
++        Agent
++            .builder()
++            .connect_with(agent_wire, async move |cx: ConnectionTo<Client>| {
++                let _ = agent_ready_tx.send(cx);
++                std::future::pending::<Result<(), agent_client_protocol::Error>>().await
++            })
++            .await
++    });
++    let _client_connection = ready_rx.await.unwrap();
++    let connection = agent_ready_rx.await.unwrap();
++    let permission = UntypedMessage::new(
++        "session/request_permission",
++        serde_json::json!({
++            "sessionId": "scope-1", "toolCall": {"toolCallId": "call-1", "title": "Synthetic"},
++            "options": [{"optionId": "once", "name": "Allow", "kind": "allow_once"}]
++        }),
++    )
++    .unwrap();
++    let pending = connection.send_request(permission.clone());
++    let pending_task = tokio::spawn(async move { pending.block_task().await });
++    tokio::time::timeout(Duration::from_secs(2), entered_rx)
++        .await
++        .unwrap()
++        .unwrap();
++    let unknown = UntypedMessage::new(
++        "_client/action/SYNTHETIC_SECRET",
++        serde_json::json!({"secret":"SYNTHETIC_SECRET"}),
++    )
++    .unwrap();
++    let error = tokio::time::timeout(Duration::from_secs(2), connection.send_request(unknown).block_task())
++        .await
++        .unwrap()
++        .unwrap_err();
++    assert_eq!(
++        error.data,
++        Some(serde_json::json!({"kind":"unsupported_client_action","retry":false}))
++    );
++    assert!(!serde_json::to_string(&error).unwrap().contains("SYNTHETIC_SECRET"));
++    let capacity = connection.send_request(permission).block_task().await.unwrap_err();
++    assert_eq!(capacity.data.unwrap()["kind"], "client_capacity_exceeded");
++    assert!(!pending_task.is_finished());
++    release_tx.send(()).unwrap();
++    assert!(pending_task.await.unwrap().is_ok());
++    client.abort();
++    agent.abort();
++    let _ = tokio::join!(client, agent);
++}
+diff --git a/crates/aionui-ai-agent/src/protocol/mod.rs b/crates/aionui-ai-agent/src/protocol/mod.rs
+index 22e8000..39ff27c 100644
+--- a/crates/aionui-ai-agent/src/protocol/mod.rs
++++ b/crates/aionui-ai-agent/src/protocol/mod.rs
+@@ -1,5 +1,6 @@
+ pub(crate) mod acp;
+ pub(crate) mod acp_dialect;
++pub(crate) mod acp_forwarding;
+ pub(crate) mod acp_init_budget;
+ 
+ pub(crate) mod custom_agent_probe;
+diff --git a/crates/aionui-ai-agent/src/registry.rs b/crates/aionui-ai-agent/src/registry.rs
+index 1d3d70d..ab7d434 100644
+--- a/crates/aionui-ai-agent/src/registry.rs
++++ b/crates/aionui-ai-agent/src/registry.rs
+@@ -775,6 +775,13 @@ enum AvailabilityProjection {
+ /// Callers choose whether availability should come from persisted snapshots
+ /// or from a live command probe. Startup hydration uses cached projection;
+ /// explicit refresh and single-agent health-check reloads use probe.
++/// Decode existing operator configuration without a probe/install side effect.
++/// Used only after conversation ownership and an original operation binding
++/// have been checked; a cached handshake alone never negotiates the protocol.
++pub fn managed_operation_metadata(row: AgentMetadataRow) -> Option<AgentMetadata> {
++    decode_row(row, AvailabilityProjection::Cached).map(|(meta, _)| meta)
++}
++
+ fn decode_row(
+     row: AgentMetadataRow,
+     availability: AvailabilityProjection,
+diff --git a/crates/aionui-ai-agent/src/session_agent.rs b/crates/aionui-ai-agent/src/session_agent.rs
+index 9c62c54..73ad51f 100644
+--- a/crates/aionui-ai-agent/src/session_agent.rs
++++ b/crates/aionui-ai-agent/src/session_agent.rs
+@@ -6446,6 +6446,7 @@ mod persist_tests {
+         let err = crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: "hi".into(),
+                 msg_id: "m1".into(),
+                 turn_id: None,
+@@ -6917,6 +6918,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: format!("see\n\n{marker}\n{img}\n{pdf}"),
+                 msg_id: "m-media".into(),
+                 turn_id: None,
+@@ -6989,6 +6991,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: format!("replace the qr code\n\n{marker}\n{img}"),
+                 msg_id: "m-link".into(),
+                 turn_id: None,
+@@ -7053,6 +7056,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: "look".into(),
+                 msg_id: "m-nolink".into(),
+                 turn_id: None,
+@@ -7735,6 +7739,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: "hi".into(),
+                 msg_id: "m1".into(),
+                 turn_id: None,
+@@ -7788,6 +7793,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: "hello".into(),
+                 msg_id: "m-1".into(),
+                 turn_id: None,
+@@ -7867,6 +7873,7 @@ mod pump_tests {
+         crate::agent_task::IAgentTask::send_message(
+             task.as_ref(),
+             SendMessageData {
++                managed_operation: None,
+                 content: "hi".into(),
+                 msg_id: "m-2".into(),
+                 turn_id: None,
+@@ -10164,6 +10171,7 @@ mod force_kill_tests {
+         IAgentTask::send_message(
+             task,
+             SendMessageData {
++                managed_operation: None,
+                 content: "hello".into(),
+                 msg_id: "m1".into(),
+                 turn_id: None,
+diff --git a/crates/aionui-ai-agent/src/types.rs b/crates/aionui-ai-agent/src/types.rs
+index ce55c7d..f1afb27 100644
+--- a/crates/aionui-ai-agent/src/types.rs
++++ b/crates/aionui-ai-agent/src/types.rs
+@@ -10,6 +10,8 @@ use crate::session_context::AgentSessionContext;
+ /// Data payload for sending a user message to an Agent.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct SendMessageData {
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub managed_operation: Option<aionui_api_types::ManagedOperationContext>,
+     /// User message content.
+     pub content: String,
+     /// Client-generated message ID for correlation.
+@@ -327,6 +329,7 @@ mod tests {
+     #[test]
+     fn send_message_data_serde_roundtrip() {
+         let data = SendMessageData {
++            managed_operation: None,
+             content: "Hello".into(),
+             msg_id: "msg-001".into(),
+             turn_id: Some("turn-001".into()),
+diff --git a/crates/aionui-api-types/src/acp.rs b/crates/aionui-api-types/src/acp.rs
+index d65117c..625e508 100644
+--- a/crates/aionui-api-types/src/acp.rs
++++ b/crates/aionui-api-types/src/acp.rs
+@@ -2,6 +2,108 @@ use std::collections::HashMap;
+ 
+ use serde::{Deserialize, Serialize};
+ 
++pub const MANAGED_OPERATION_SCHEMA: &str = "aelix.operation/1";
++
++/// Opaque bounded correlation identifiers, never prompt/output strings.
++pub fn managed_operation_token(value: &str) -> bool {
++    !value.is_empty()
++        && value.len() <= 128
++        && value.as_bytes()[0].is_ascii_alphanumeric()
++        && value.bytes().all(|c| c.is_ascii_alphanumeric() || b"_.:-".contains(&c))
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct ManagedOperationContext {
++    pub schema: String,
++    pub id: String,
++    pub store_id: String,
++    pub conversation_id: String,
++    pub turn_id: String,
++    pub generation: String,
++}
++
++impl ManagedOperationContext {
++    pub fn valid(&self) -> bool {
++        self.schema == MANAGED_OPERATION_SCHEMA
++            && [
++                &self.id,
++                &self.store_id,
++                &self.conversation_id,
++                &self.turn_id,
++                &self.generation,
++            ]
++            .into_iter()
++            .all(|v| managed_operation_token(v))
++    }
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct ManagedOperationCapability {
++    pub schema: String,
++    pub store_id: String,
++    pub status_method: String,
++    pub status_only_argument: String,
++    pub status_only: bool,
++}
++
++impl ManagedOperationCapability {
++    pub fn valid(&self) -> bool {
++        self.schema == MANAGED_OPERATION_SCHEMA
++            && managed_operation_token(&self.store_id)
++            && self.status_method == "_aelix/operation_status"
++            && self.status_only_argument == "--operations-status-only"
++    }
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(rename_all = "camelCase", deny_unknown_fields)]
++pub struct ManagedSessionScope {
++    pub schema: String,
++    pub store_id: String,
++    pub worker_generation: String,
++    pub native_session_id: String,
++}
++
++impl ManagedSessionScope {
++    pub fn valid(&self) -> bool {
++        self.schema == MANAGED_OPERATION_SCHEMA
++            && [&self.store_id, &self.worker_generation, &self.native_session_id]
++                .into_iter()
++                .all(|v| managed_operation_token(v))
++    }
++}
++
++/// Server admission key. Its host namespace is learned before first submit;
++/// a recreated host database cannot silently admit the old client key again.
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++#[serde(deny_unknown_fields)]
++pub struct HostOperationKey {
++    pub schema: String,
++    pub id: String,
++    pub host_store_id: String,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
++pub struct HostOperationCapability {
++    pub schema: String,
++    pub host_store_id: String,
++}
++
++#[derive(Debug, Clone, Serialize, Deserialize)]
++pub struct HostOperationReceipt {
++    pub schema: String,
++    pub id: String,
++    pub host_store_id: String,
++    pub msg_id: String,
++    pub turn_id: String,
++    pub state: String,
++    pub effects_unknown: bool,
++    pub automatic_retry: bool,
++    pub replayed: bool,
++}
++
+ /// Request body for detecting an ACP CLI executable.
+ ///
+ /// `backend` is a vendor label (e.g. "claude"). The service resolves it
+diff --git a/crates/aionui-api-types/src/conversation.rs b/crates/aionui-api-types/src/conversation.rs
+index 38c47e1..bd7a6d8 100644
+--- a/crates/aionui-api-types/src/conversation.rs
++++ b/crates/aionui-api-types/src/conversation.rs
+@@ -177,6 +177,8 @@ pub struct SessionRef {
+ /// `msg_id` is server-generated — clients must not provide one.
+ #[derive(Debug, Deserialize)]
+ pub struct SendMessageRequest {
++    #[serde(default)]
++    pub operation: Option<crate::HostOperationKey>,
+     pub content: String,
+     #[serde(default)]
+     pub files: Vec<ChatFileRef>,
+@@ -193,6 +195,8 @@ pub struct SendMessageRequest {
+ /// Response for `POST /api/conversations/:id/messages`.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct SendMessageResponse {
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub operation: Option<crate::HostOperationReceipt>,
+     pub msg_id: String,
+     pub turn_id: String,
+     /// B5 mid-turn interjection: `true` when the message was delivered INTO the
+@@ -213,6 +217,10 @@ pub struct CancelConversationRequest {
+ /// Response for `POST /api/conversations/:id/cancel`.
+ #[derive(Debug, Clone, Serialize, Deserialize)]
+ pub struct CancelConversationResponse {
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub request_accepted: Option<bool>,
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub reason: Option<String>,
+     pub runtime: ConversationRuntimeSummary,
+ }
+ 
+@@ -246,6 +254,8 @@ pub struct ConversationRuntimeSummary {
+ 
+ #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+ pub struct EnsureConversationRuntimeResponse {
++    #[serde(default, skip_serializing_if = "Option::is_none")]
++    pub operation_capability: Option<crate::HostOperationCapability>,
+     pub recovered: bool,
+     pub config_options: Vec<AcpConfigOptionDto>,
+     pub runtime: ConversationRuntimeSummary,
+diff --git a/crates/aionui-api-types/src/lib.rs b/crates/aionui-api-types/src/lib.rs
+index 6bb062a..d63f796 100644
+--- a/crates/aionui-api-types/src/lib.rs
++++ b/crates/aionui-api-types/src/lib.rs
+@@ -42,10 +42,12 @@ mod websocket;
+ 
+ pub use acp::{
+     AcpConfigOptionDto, AcpConfigSelectOptionDto, AcpEnvResponse, AgentModeResponse, ConfigOptionConfirmation,
+-    DetectCliRequest, DetectCliResponse, GetConfigOptionsResponse, GetModelInfoResponse, ModelInfoEntry,
+-    ModelInfoPayload, ProbeModelRequest, SetConfigOptionRequest, SetConfigOptionResponse, SetModeRequest,
+-    SetModelRequest, SideQuestionRequest, SideQuestionResponse, TryConnectCustomAgentRequest,
+-    TryConnectCustomAgentResponse, WorkspaceBrowseQuery, WorkspaceEntry,
++    DetectCliRequest, DetectCliResponse, GetConfigOptionsResponse, GetModelInfoResponse, HostOperationCapability,
++    HostOperationKey, HostOperationReceipt, MANAGED_OPERATION_SCHEMA, ManagedOperationCapability,
++    ManagedOperationContext, ManagedSessionScope, ModelInfoEntry, ModelInfoPayload, ProbeModelRequest,
++    SetConfigOptionRequest, SetConfigOptionResponse, SetModeRequest, SetModelRequest, SideQuestionRequest,
++    SideQuestionResponse, TryConnectCustomAgentRequest, TryConnectCustomAgentResponse, WorkspaceBrowseQuery,
++    WorkspaceEntry, managed_operation_token,
+ };
+ pub use acp_prompt_hook::AcpPromptHookWarningPayload;
+ pub use agent_build_extra::{
+diff --git a/crates/aionui-app/src/bootstrap/tracing_init.rs b/crates/aionui-app/src/bootstrap/tracing_init.rs
+index e09cf1d..1d2a13c 100644
+--- a/crates/aionui-app/src/bootstrap/tracing_init.rs
++++ b/crates/aionui-app/src/bootstrap/tracing_init.rs
+@@ -45,6 +45,22 @@ const AIONRS_TARGETS: &[&str] = &[
+ 
+ const RAW_AIONRS_PAYLOAD_TARGETS: &[&str] = &["aion_agent", "aion_providers"];
+ 
++fn acp_payload_safe(metadata: &tracing::Metadata<'_>) -> bool {
++    // SDK 2.0.0 also logs parse errors with user-controlled variant strings
++    // at WARN (incoming_actor.rs:554). Enforce a payload boundary at every
++    // SDK level, after user overrides; Core's sanitized lifecycle logs remain.
++    !metadata.target().starts_with("agent_client_protocol")
++}
++
++fn payload_safe_subscriber<S>(subscriber: S) -> impl tracing::Subscriber + Send + Sync
++where
++    S: tracing::Subscriber + Send + Sync + 'static,
++{
++    // This is global: a third sink's user-injected EnvFilter directive must
++    // never re-enable SDK payloads blocked on the console/backend sinks.
++    subscriber.with(tracing_subscriber::filter::filter_fn(acp_payload_safe))
++}
++
+ fn build_env_filter(log_level: Option<&str>) -> EnvFilter {
+     let user_directives = log_level.unwrap_or("info");
+     let suppressions = NOISE_SUPPRESSIONS.join(",");
+@@ -176,7 +192,10 @@ pub fn init_tracing(
+     let log_dir = selection.root.as_path();
+     let active_log_dir = selection.active_dir.as_path();
+ 
+-    let console_layer = fmt::layer().with_target(true).with_filter(build_env_filter(log_level));
++    let console_layer = fmt::layer()
++        .with_target(true)
++        .with_filter(build_env_filter(log_level))
++        .with_filter(tracing_subscriber::filter::filter_fn(acp_payload_safe));
+ 
+     // Backend file layer — excludes aion_* targets
+     let file_appender = DailyDatedLogWriter::new(log_dir.to_path_buf(), "aioncore.log");
+@@ -187,7 +206,8 @@ pub fn init_tracing(
+         .with_writer(non_blocking)
+         .with_ansi(false)
+         .with_target(true)
+-        .with_filter(build_backend_filter(log_level));
++        .with_filter(build_backend_filter(log_level))
++        .with_filter(tracing_subscriber::filter::filter_fn(acp_payload_safe));
+ 
+     // Aionrs file layer — only aion_* targets
+     let aionrs_level = build_aionrs_level(log_level);
+@@ -210,20 +230,22 @@ pub fn init_tracing(
+         .with_target(true)
+         .with_filter(aionrs_filter);
+ 
+-    tracing_subscriber::registry()
+-        .with(console_layer)
+-        .with(backend_file_layer)
+-        .with(aionrs_layer)
+-        .try_init()
+-        .map_err(|e| {
+-            BootstrapError::new(
+-                BootstrapErrorCode::LoggingInitFailed,
+-                "logging.subscriber",
+-                LOGGING_INIT_MESSAGE,
+-            )
+-            .with_source(e)
+-            .with_field("logDir", active_log_dir.display().to_string())
+-        })?;
++    payload_safe_subscriber(
++        tracing_subscriber::registry()
++            .with(console_layer)
++            .with(backend_file_layer)
++            .with(aionrs_layer),
++    )
++    .try_init()
++    .map_err(|e| {
++        BootstrapError::new(
++            BootstrapErrorCode::LoggingInitFailed,
++            "logging.subscriber",
++            LOGGING_INIT_MESSAGE,
++        )
++        .with_source(e)
++        .with_field("logDir", active_log_dir.display().to_string())
++    })?;
+ 
+     if let Some(fallback) = &selection.fallback {
+         // Production-visible degradation marker (AIONUI-231): the requested
+@@ -344,6 +366,77 @@ mod tests {
+     use super::*;
+     use tracing::Level;
+ 
++    #[derive(Clone, Default)]
++    struct Capture(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
++    impl Write for Capture {
++        fn write(&mut self, bytes: &[u8]) -> io::Result<usize> {
++            self.0.lock().unwrap().extend_from_slice(bytes);
++            Ok(bytes.len())
++        }
++        fn flush(&mut self) -> io::Result<()> {
++            Ok(())
++        }
++    }
++    impl<'a> tracing_subscriber::fmt::MakeWriter<'a> for Capture {
++        type Writer = Capture;
++        fn make_writer(&'a self) -> Self::Writer {
++            self.clone()
++        }
++    }
++
++    #[test]
++    fn all_production_sinks_reject_sdk_payloads_even_with_explicit_override() {
++        let level = Some("info,agent_client_protocol::jsonrpc=trace");
++        let console = Capture::default();
++        let backend = Capture::default();
++        let aionrs = Capture::default();
++        let subscriber = payload_safe_subscriber(
++            tracing_subscriber::registry()
++                .with(
++                    fmt::layer()
++                        .with_writer(console.clone())
++                        .with_filter(build_env_filter(level)),
++                )
++                .with(
++                    fmt::layer()
++                        .with_writer(backend.clone())
++                        .with_filter(build_backend_filter(level)),
++                )
++                .with(
++                    fmt::layer()
++                        .with_writer(aionrs.clone())
++                        .with_filter(EnvFilter::new(build_aionrs_level(level))),
++                ),
++        );
++        tracing::subscriber::with_default(subscriber, || {
++            tracing::trace!(target: "agent_client_protocol::jsonrpc::incoming_actor", "SYNTHETIC_PRIVATE");
++            tracing::warn!(target: "agent_client_protocol::jsonrpc::incoming_actor", "SYNTHETIC_PRIVATE");
++            tracing::error!(target: "agent_client_protocol::jsonrpc::incoming_actor", "SYNTHETIC_PRIVATE");
++            tracing::info!(target: "aionui_ai_agent::protocol::acp", "safe_lifecycle");
++        });
++        for capture in [&console, &backend, &aionrs] {
++            assert!(!String::from_utf8_lossy(&capture.0.lock().unwrap()).contains("SYNTHETIC_PRIVATE"));
++        }
++        assert!(String::from_utf8_lossy(&console.0.lock().unwrap()).contains("safe_lifecycle"));
++        assert!(String::from_utf8_lossy(&backend.0.lock().unwrap()).contains("safe_lifecycle"));
++    }
++
++    #[test]
++    fn explicit_dev_sdk_trace_override_still_cannot_enable_raw_payloads() {
++        let subscriber = tracing_subscriber::registry()
++            .with(build_env_filter(Some(
++                "trace,agent_client_protocol::jsonrpc::handlers=trace",
++            )))
++            .with(tracing_subscriber::filter::filter_fn(acp_payload_safe));
++        tracing::subscriber::with_default(subscriber, || {
++            assert!(!tracing::enabled!(target: "agent_client_protocol::jsonrpc::handlers", Level::TRACE));
++            assert!(!tracing::enabled!(target: "agent_client_protocol::jsonrpc::handlers", Level::DEBUG));
++            assert!(!tracing::enabled!(target: "agent_client_protocol::jsonrpc::incoming_actor", Level::WARN));
++            assert!(!tracing::enabled!(target: "agent_client_protocol::jsonrpc::incoming_actor", Level::ERROR));
++            assert!(tracing::enabled!(target: "aionui_ai_agent::protocol::acp", Level::INFO));
++        });
++    }
++
+     #[test]
+     fn env_filter_suppresses_raw_acp_sdk_jsonrpc_debug_even_when_debug_enabled() {
+         let subscriber = tracing_subscriber::registry().with(build_env_filter(Some("debug")));
+diff --git a/crates/aionui-channel/src/message_service.rs b/crates/aionui-channel/src/message_service.rs
+index 8e572a3..fd97825 100644
+--- a/crates/aionui-channel/src/message_service.rs
++++ b/crates/aionui-channel/src/message_service.rs
+@@ -72,6 +72,7 @@ impl ChannelMessageService {
+         // correlate the user message back to the conversation should use
+         // `conversation_id` + stream events instead of a client-provided id.
+         let req = SendMessageRequest {
++            operation: None,
+             content: text.to_owned(),
+             files: vec![],
+             // Channel traffic has no `@@` picker, so never any session refs.
+diff --git a/crates/aionui-conversation/src/error.rs b/crates/aionui-conversation/src/error.rs
+index 6a13a3b..88b2d9d 100644
+--- a/crates/aionui-conversation/src/error.rs
++++ b/crates/aionui-conversation/src/error.rs
+@@ -8,6 +8,10 @@ use aionui_db::DbError;
+ /// output mapper. Do not render `ConversationError::Acp` directly to clients.
+ #[derive(Debug, thiserror::Error)]
+ pub enum ConversationError {
++    #[error("Managed operation identity conflicts with the accepted request")]
++    ManagedOperationConflict,
++    #[error("Managed operation outcome unavailable; automatic replay disabled")]
++    ManagedOperationUnavailable,
+     #[error("Conversation not found: {id}")]
+     NotFound { id: String },
+ 
+@@ -105,6 +109,10 @@ impl ConversationError {
+ 
+     pub(crate) fn to_agent_error(&self) -> AgentError {
+         match self {
++            Self::ManagedOperationConflict => AgentError::conflict("Managed operation identity conflict"),
++            Self::ManagedOperationUnavailable => {
++                AgentError::conflict("Managed operation outcome unavailable; automatic replay disabled")
++            }
+             Self::NotFound { id } => AgentError::not_found(format!("Conversation {id} not found")),
+             Self::MessageNotFound { id } => AgentError::not_found(format!("Message {id} not found")),
+             Self::ArtifactNotFound { id } => AgentError::not_found(format!("Artifact {id} not found")),
+@@ -141,6 +149,8 @@ impl ConversationError {
+ 
+     pub(crate) fn error_code(&self) -> &'static str {
+         match self {
++            Self::ManagedOperationConflict => "OPERATION_CONFLICT",
++            Self::ManagedOperationUnavailable => "OPERATION_UNCERTAIN",
+             Self::NotFound { .. }
+             | Self::MessageNotFound { .. }
+             | Self::ArtifactNotFound { .. }
+diff --git a/crates/aionui-conversation/src/routes.rs b/crates/aionui-conversation/src/routes.rs
+index ef0abc1..7346d33 100644
+--- a/crates/aionui-conversation/src/routes.rs
++++ b/crates/aionui-conversation/src/routes.rs
+@@ -23,6 +23,18 @@ use crate::state::ConversationRouterState;
+ impl From<ConversationError> for ApiError {
+     fn from(error: ConversationError) -> Self {
+         match error {
++            ConversationError::ManagedOperationConflict => ApiError::coded(
++                StatusCode::CONFLICT,
++                "OPERATION_CONFLICT",
++                "Managed operation identity conflicts with the accepted request",
++                Some(serde_json::json!({"automatic_retry":false})),
++            ),
++            ConversationError::ManagedOperationUnavailable => ApiError::coded(
++                StatusCode::CONFLICT,
++                "OPERATION_UNCERTAIN",
++                "Managed operation outcome unavailable; automatic replay disabled",
++                Some(serde_json::json!({"effects_unknown":true,"automatic_retry":false})),
++            ),
+             ConversationError::NotFound { id } => ApiError::NotFound(format!("Conversation {id} not found")),
+             ConversationError::MessageNotFound { id } => ApiError::NotFound(format!("Message {id} not found")),
+             ConversationError::ArtifactNotFound { id } => ApiError::NotFound(format!("Artifact {id} not found")),
+@@ -122,6 +134,10 @@ pub fn conversation_routes(state: ConversationRouterState) -> Router {
+         .route("/api/conversations/{id}/fork", post(fork))
+         .route("/api/conversations/{id}/associated", get(associated))
+         .route("/api/conversations/{id}/messages", get(list_msg).post(send_msg))
++        .route(
++            "/api/conversations/{id}/operations/{operation_id}",
++            get(operation_status),
++        )
+         // MUST precede the `{messageId}` wildcard below: registered after it,
+         // "latest" would be captured as a message id and 404.
+         .route("/api/conversations/{id}/messages/latest", get(latest_msg))
+@@ -315,14 +331,41 @@ async fn send_msg(
+         .map_err(ApiError::from)?;
+     // B5: a mid-turn delivery already handed the message to the RUNNING turn —
+     // that is a completed delivery (200), not a scheduled one (202).
+-    let status = if response.delivered_midturn {
+-        StatusCode::OK
+-    } else {
+-        StatusCode::ACCEPTED
+-    };
++    let status =
++        if response.delivered_midturn || response.operation.as_ref().is_some_and(|operation| operation.replayed) {
++            StatusCode::OK
++        } else {
++            StatusCode::ACCEPTED
++        };
+     Ok((status, Json(ApiResponse::ok(response))))
+ }
+ 
++#[derive(serde::Deserialize)]
++#[serde(deny_unknown_fields)]
++struct OperationStatusQuery {
++    host_store_id: String,
++}
++
++async fn operation_status(
++    State(state): State<ConversationRouterState>,
++    Extension(user): Extension<CurrentUser>,
++    Path((id, operation_id)): Path<(String, String)>,
++    Query(query): Query<OperationStatusQuery>,
++) -> Result<Json<ApiResponse<aionui_api_types::HostOperationReceipt>>, ApiError> {
++    let key = aionui_api_types::HostOperationKey {
++        schema: aionui_api_types::MANAGED_OPERATION_SCHEMA.into(),
++        id: operation_id,
++        host_store_id: query.host_store_id,
++    };
++    Ok(Json(ApiResponse::ok(
++        state
++            .service
++            .managed_operation_status(&user.id, &id, &key)
++            .await
++            .map_err(ApiError::from)?,
++    )))
++}
++
+ async fn list_artifacts(
+     State(state): State<ConversationRouterState>,
+     Extension(user): Extension<CurrentUser>,
+diff --git a/crates/aionui-conversation/src/runtime_state.rs b/crates/aionui-conversation/src/runtime_state.rs
+index 1d525c7..067cfdd 100644
+--- a/crates/aionui-conversation/src/runtime_state.rs
++++ b/crates/aionui-conversation/src/runtime_state.rs
+@@ -243,6 +243,53 @@ impl ConversationRuntimeStateService {
+         }
+     }
+ 
++    pub fn mark_cancelling_for_turn(&self, conversation_id: &str, turn_id: &str) -> bool {
++        let Ok(mut state) = self.state.lock() else {
++            return false;
++        };
++        if state.active_turns.get(conversation_id).map(String::as_str) != Some(turn_id) {
++            return false;
++        }
++        state.cancelling_conversations.insert(conversation_id.to_owned());
++        true
++    }
++
++    pub fn clear_cancelling_for_turn(&self, conversation_id: &str, turn_id: &str) {
++        if let Ok(mut state) = self.state.lock()
++            && state.active_turns.get(conversation_id).map(String::as_str) == Some(turn_id)
++        {
++            state.cancelling_conversations.remove(conversation_id);
++        }
++    }
++
++    pub fn begin_cancel_timeout_for_turn(&self, conversation_id: &str, turn_id: &str) -> bool {
++        let Ok(mut state) = self.state.lock() else {
++            return false;
++        };
++        if state.active_turns.get(conversation_id).map(String::as_str) != Some(turn_id)
++            || !state.cancelling_conversations.contains(conversation_id)
++            || state.restarting_conversations.contains(conversation_id)
++        {
++            return false;
++        }
++        // Atomically fence a replacement turn until the owned kill finishes.
++        state.restarting_conversations.insert(conversation_id.to_owned());
++        true
++    }
++
++    pub fn defer_cancel_for_turn(&self, conversation_id: &str, turn_id: &str) -> bool {
++        let Ok(mut state) = self.state.lock() else {
++            return false;
++        };
++        if state.active_turns.get(conversation_id).map(String::as_str) != Some(turn_id) {
++            return false;
++        }
++        state
++            .deferred_cancels
++            .insert(conversation_id.to_owned(), turn_id.to_owned());
++        true
++    }
++
+     pub fn clear_cancelling(&self, conversation_id: &str) {
+         match self.state.lock() {
+             Ok(mut state) => {
+@@ -623,6 +670,26 @@ mod tests {
+ 
+     use super::*;
+ 
++    #[test]
++    fn late_cancel_and_watchdog_cannot_mutate_a_replacement_turn() {
++        let state = Arc::new(ConversationRuntimeStateService::default());
++        let mut first = state.try_claim_turn("conv-1", "turn-a").unwrap();
++        assert!(state.mark_cancelling_for_turn("conv-1", "turn-a"));
++        first.release_for_turn("turn-a");
++        let mut second = state.try_claim_turn("conv-1", "turn-b").unwrap();
++        assert!(!state.mark_cancelling_for_turn("conv-1", "turn-a"));
++        assert!(!state.defer_cancel_for_turn("conv-1", "turn-a"));
++        assert!(!state.begin_cancel_timeout_for_turn("conv-1", "turn-a"));
++        assert!(state.mark_cancelling_for_turn("conv-1", "turn-b"));
++        state.clear_cancelling_for_turn("conv-1", "turn-a");
++        assert!(state.is_cancelling("conv-1"));
++        assert!(state.begin_cancel_timeout_for_turn("conv-1", "turn-b"));
++        second.release_for_turn("turn-b");
++        assert!(state.try_claim_turn("conv-1", "turn-c").is_err());
++        state.clear_restarting("conv-1");
++        assert!(state.try_claim_turn("conv-1", "turn-c").is_ok());
++    }
++
+     #[test]
+     fn claim_records_active_turn_id_in_summary() {
+         let state = Arc::new(ConversationRuntimeStateService::default());
+diff --git a/crates/aionui-conversation/src/service.rs b/crates/aionui-conversation/src/service/mod.rs
+similarity index 97%
+rename from crates/aionui-conversation/src/service.rs
+rename to crates/aionui-conversation/src/service/mod.rs
+index 601850d..ac5eabb 100644
+--- a/crates/aionui-conversation/src/service.rs
++++ b/crates/aionui-conversation/src/service/mod.rs
+@@ -310,8 +310,12 @@ fn reject_deprecated_runtime_row(row: &ConversationRow) -> Result<(), Conversati
+     Ok(())
+ }
+ 
++pub(crate) mod operations;
++
+ #[derive(Clone)]
+ pub struct ConversationService {
++    managed_admissions:
++        Arc<std::sync::Mutex<std::collections::HashMap<String, std::sync::Weak<tokio::sync::Mutex<()>>>>>,
+     workspace_root: PathBuf,
+     broadcaster: Arc<dyn EventBroadcaster>,
+     skill_resolver: Arc<dyn SkillResolver>,
+@@ -407,6 +411,7 @@ impl ConversationService {
+         acp_session_repo: Arc<dyn IAcpSessionRepository>,
+     ) -> Self {
+         Self {
++            managed_admissions: Arc::new(std::sync::Mutex::new(std::collections::HashMap::new())),
+             workspace_root,
+             broadcaster,
+             skill_resolver,
+@@ -919,6 +924,7 @@ impl ConversationService {
+         turn_id: String,
+     ) -> SendMessageResponse {
+         SendMessageResponse {
++            operation: None,
+             msg_id,
+             turn_id,
+             delivered_midturn: false,
+@@ -3576,7 +3582,7 @@ enum MidturnOutcome {
+     /// contract; the tip response has `delivered_midturn=false`, so the route
+     /// returns the ordinary 202 for it, 200 only for a real delivery). The
+     /// caller returns this response.
+-    Delivered(SendMessageResponse),
++    Delivered(Box<SendMessageResponse>),
+     /// codex rejected the steer with "no active turn to steer" (§6甲.1): the
+     /// turn ended between our read and the write. The caller opens a NEW turn
+     /// through the normal path, reusing the already-persisted message row
+@@ -3721,6 +3727,7 @@ impl ConversationService {
+             ));
+         }
+         let data = aionui_ai_agent::types::SendMessageData {
++            managed_operation: None,
+             content: resolved.content.clone(),
+             msg_id: user_msg_id.clone(),
+             turn_id: Some(active_turn_id.clone()),
+@@ -3740,7 +3747,7 @@ impl ConversationService {
+                     .send_message_response(conversation_id, user_msg_id, active_turn_id)
+                     .await;
+                 response.delivered_midturn = true;
+-                Ok(MidturnOutcome::Delivered(response))
++                Ok(MidturnOutcome::Delivered(Box::new(response)))
+             }
+             Err(e) if steer_rejection_is_turn_ended(&e) => {
+                 info!(
+@@ -3793,10 +3800,10 @@ impl ConversationService {
+                 }
+                 self.persist_and_broadcast_send_failure_tip(user_id, conversation_id, &active_turn_id, &e, None)
+                     .await;
+-                Ok(MidturnOutcome::Delivered(
++                Ok(MidturnOutcome::Delivered(Box::new(
+                     self.send_message_response(conversation_id, user_msg_id, active_turn_id)
+                         .await,
+-                ))
++                )))
+             }
+         }
+     }
+@@ -3815,7 +3822,7 @@ impl ConversationService {
+         req: SendMessageRequest,
+         task_manager: &Arc<dyn IWorkerTaskManager>,
+     ) -> Result<SendMessageResponse, ConversationError> {
+-        if req.content.trim().is_empty() {
++        if req.operation.is_none() && req.content.trim().is_empty() {
+             return Err(ConversationError::BadRequest {
+                 reason: "Message content must not be empty".into(),
+             });
+@@ -3846,6 +3853,31 @@ impl ConversationService {
+ 
+         reject_deprecated_runtime_row(&row)?;
+ 
++        let managed = operations::request(&req)?;
++        let _admission = match &managed {
++            Some(_) => Some(self.managed_admission_lock(conversation_id).lock_owned().await),
++            None => None,
++        };
++        if let Some((key, canonical)) = &managed
++            && let Some(existing) = self
++                .conversation_repo
++                .lookup_operation(user_id, conversation_id, &key.id, &key.host_store_id, Some(canonical))
++                .await
++                .map_err(operations::db_error)?
++        {
++            return self
++                .managed_duplicate_response(user_id, conversation_id, existing)
++                .await;
++        }
++        if req.content.trim().is_empty() {
++            return Err(ConversationError::bad_request("Message content must not be empty"));
++        }
++        let managed_binding = if managed.is_some() {
++            Some(self.managed_new_binding(conversation_id, task_manager).await?)
++        } else {
++            None
++        };
++
+         // `@@` references resolve at the same boundary and with the same
+         // atomicity as file attachments. Sender workspace comes from the row so
+         // the block can state `workspace: same` without the model comparing
+@@ -3885,7 +3917,8 @@ impl ConversationService {
+         // with the active turn's id. Every other case (including the 409 for
+         // non-supporting backends) is unchanged and handled by the claim below.
+         let mut fallback_user_msg: Option<String> = None;
+-        if let Some(active_turn_id) = self.runtime_state.active_turn_id_for(conversation_id)
++        if req.operation.is_none()
++            && let Some(active_turn_id) = self.runtime_state.active_turn_id_for(conversation_id)
+             && let Some(agent) = task_manager.get_task(conversation_id)
+             && agent.supports_midturn_delivery()
+         {
+@@ -3926,7 +3959,7 @@ impl ConversationService {
+                     )
+                     .await?
+                 {
+-                    MidturnOutcome::Delivered(response) => return Ok(response),
++                    MidturnOutcome::Delivered(response) => return Ok(*response),
+                     // codex rejected the steer because the turn just ended → fall
+                     // through and open a NEW turn for the already-persisted message.
+                     MidturnOutcome::TurnEnded { user_msg_id } => fallback_user_msg = user_msg_id,
+@@ -3976,8 +4009,37 @@ impl ConversationService {
+         // The TurnEnded fallback already persisted + broadcast this message
+         // (with the statusChanged flip) — doing it again would duplicate the
+         // row and the live-view bubble.
++        let managed_row = if let (Some((key, canonical)), Some(binding)) = (&managed, &managed_binding) {
++            let (inserted, record) = self
++                .conversation_repo
++                .admit_operation(&aionui_db::AdmitManagedOperation {
++                    user_id,
++                    conversation_id,
++                    operation_id: &key.id,
++                    host_store_id: &key.host_store_id,
++                    canonical_request: canonical,
++                    command_binding: &binding.command_binding,
++                    message: &user_msg,
++                    turn_id: &turn_id,
++                    adapter_store_id: &binding.scope.store_id,
++                    acp_session_id: &binding.session_id,
++                    generation: &binding.scope.worker_generation,
++                    metadata_id: &binding.metadata_id,
++                })
++                .await
++                .map_err(operations::db_error)?;
++            if !inserted {
++                drop(turn_claim);
++                return self.managed_duplicate_response(user_id, conversation_id, record).await;
++            }
++            Some(record)
++        } else {
++            None
++        };
+         if !was_fallback {
+-            if let Err(e) = self.conversation_repo.insert_message(user_id, &user_msg).await {
++            if managed_row.is_none()
++                && let Err(e) = self.conversation_repo.insert_message(user_id, &user_msg).await
++            {
+                 warn!(msg_id = %user_msg_id, error = %ErrorChain(&e), "Failed to insert user message");
+                 return Err(e.into());
+             }
+@@ -4031,6 +4093,10 @@ impl ConversationService {
+ 
+         let user_msg_id_ret = user_msg_id.clone();
+         ConversationTurnOrchestrator::new(self.clone(), Arc::clone(task_manager)).spawn_user_turn(TurnStartInput {
++            operation: managed_row
++                .as_ref()
++                .map(|row| operations::context(conversation_id, row)),
++            operation_key: managed.as_ref().map(|(key, _)| key.clone()),
+             user_id: user_id.to_owned(),
+             conversation: row,
+             content: resolved.content,
+@@ -4050,9 +4116,11 @@ impl ConversationService {
+             elapsed_ms = now_ms().saturating_sub(send_started_at),
+             "Message accepted, agent work scheduled"
+         );
+-        Ok(self
++        let mut response = self
+             .send_message_response(conversation_id, user_msg_id_ret, turn_id)
+-            .await)
++            .await;
++        response.operation = managed_row.as_ref().map(|row| operations::receipt(row, false));
++        Ok(response)
+     }
+ 
+     /// Run a conversation-backed agent turn without expressing it as the
+@@ -4153,6 +4221,8 @@ impl ConversationService {
+         let conversation_id = request.conversation_id.clone();
+         let result = ConversationTurnOrchestrator::new(self.clone(), self.task_manager.clone())
+             .run_user_turn(TurnStartInput {
++                operation: None,
++                operation_key: None,
+                 user_id: request.user_id,
+                 conversation: row,
+                 content: request.content,
+@@ -4378,6 +4448,8 @@ impl ConversationService {
+                 "cancel ignored because turn id mismatched"
+             );
+             return Ok(CancelConversationResponse {
++                request_accepted: Some(false),
++                reason: Some("stale_turn".into()),
+                 runtime: self.runtime_summary_for(conversation_id).await,
+             });
+         }
+@@ -4393,7 +4465,13 @@ impl ConversationService {
+             // Record the intent instead. The orchestrator applies it as soon as
+             // the task appears, so a cancel issued during the build behaves like
+             // one issued a second later.
+-            self.runtime_state.defer_cancel(conversation_id, turn_id);
++            if !self.runtime_state.defer_cancel_for_turn(conversation_id, turn_id) {
++                return Ok(CancelConversationResponse {
++                    request_accepted: Some(false),
++                    reason: Some("stale_turn".into()),
++                    runtime: self.runtime_summary_for(conversation_id).await,
++                });
++            }
+             info!(
+                 conversation_id,
+                 turn_id, "Cancel arrived before the agent registered; deferring it to the build"
+@@ -4405,13 +4483,30 @@ impl ConversationService {
+             self.notify_turn_cancelled(user_id, conversation_id, turn_id, cause)
+                 .await;
+             return Ok(CancelConversationResponse {
++                request_accepted: Some(true),
++                reason: Some("intent_recorded".into()),
+                 runtime: self.runtime_summary_for(conversation_id).await,
+             });
+         };
+ 
+-        self.runtime_state.mark_cancelling(conversation_id);
+-        if let Err(e) = agent.cancel().await {
+-            self.runtime_state.clear_cancelling(conversation_id);
++        if !self.runtime_state.mark_cancelling_for_turn(conversation_id, turn_id) {
++            return Ok(CancelConversationResponse {
++                request_accepted: Some(false),
++                reason: Some("stale_turn".into()),
++                runtime: self.runtime_summary_for(conversation_id).await,
++            });
++        }
++        if let Some(accepted) = agent.cancel_managed_turn(turn_id) {
++            if !accepted {
++                self.runtime_state.clear_cancelling_for_turn(conversation_id, turn_id);
++                return Ok(CancelConversationResponse {
++                    request_accepted: Some(false),
++                    reason: Some("stale_turn_or_scope".into()),
++                    runtime: self.runtime_summary_for(conversation_id).await,
++                });
++            }
++        } else if let Err(e) = agent.cancel().await {
++            self.runtime_state.clear_cancelling_for_turn(conversation_id, turn_id);
+             warn!(conversation_id, turn_id, error = %ErrorChain(&e), "Failed to cancel agent");
+             return Err(e.into());
+         }
+@@ -4428,9 +4523,7 @@ impl ConversationService {
+ 
+             tokio::spawn(async move {
+                 tokio::time::sleep(ACP_CANCEL_DRAIN_TIMEOUT).await;
+-                if runtime_state.active_turn_id_for(&conv_id).as_deref() == Some(active_turn.as_str())
+-                    && runtime_state.is_cancelling(&conv_id)
+-                {
++                if runtime_state.begin_cancel_timeout_for_turn(&conv_id, &active_turn) {
+                     warn!(
+                         conversation_id = %conv_id,
+                         turn_id = %active_turn,
+@@ -4440,6 +4533,7 @@ impl ConversationService {
+                     task_manager
+                         .kill_and_wait(&conv_id, Some(AgentKillReason::UserCancelTimeout))
+                         .await;
++                    runtime_state.clear_restarting(&conv_id);
+                 }
+             });
+         }
+@@ -4448,6 +4542,8 @@ impl ConversationService {
+         self.notify_turn_cancelled(user_id, conversation_id, turn_id, cause)
+             .await;
+         Ok(CancelConversationResponse {
++            request_accepted: Some(true),
++            reason: Some("intent_recorded".into()),
+             runtime: self.runtime_summary_for(conversation_id).await,
+         })
+     }
+@@ -4544,7 +4640,9 @@ impl ConversationService {
+             .map_err(ConversationError::from)?
+             .config_options;
+ 
++        let operation_capability = self.managed_host_capability(&agent).await?;
+         Ok(EnsureConversationRuntimeResponse {
++            operation_capability,
+             recovered,
+             config_options,
+             runtime: self.runtime_summary_for(conversation_id).await,
+@@ -4636,7 +4734,13 @@ impl ConversationService {
+         self.runtime_state.clear_restarting(conversation_id);
+         let (recovered, config_options) = restart_result?;
+ 
++        let operation_capability = if let Some(agent) = task_manager.get_task(conversation_id) {
++            self.managed_host_capability(&agent).await?
++        } else {
++            None
++        };
+         Ok(EnsureConversationRuntimeResponse {
++            operation_capability,
+             recovered,
+             config_options,
+             runtime: self.runtime_summary_for(conversation_id).await,
+diff --git a/crates/aionui-conversation/src/service/operations.rs b/crates/aionui-conversation/src/service/operations.rs
+new file mode 100644
+index 0000000..3d6cc76
+--- /dev/null
++++ b/crates/aionui-conversation/src/service/operations.rs
+@@ -0,0 +1,371 @@
++//! HTTP admission/status without prompt replay. Stored records contain only
++//! opaque IDs, keyed fingerprints and allowlisted outcome state.
++use super::ConversationService;
++use crate::ConversationError;
++use aionui_ai_agent::{IWorkerTaskManager, ManagedExecutionBinding};
++use aionui_api_types::{
++    HostOperationKey, HostOperationReceipt, MANAGED_OPERATION_SCHEMA, ManagedOperationContext, SendMessageRequest,
++    SendMessageResponse, managed_operation_token,
++};
++use aionui_db::{DbError, ManagedOperationRow};
++use std::sync::{Arc, Weak};
++use tokio::sync::Mutex;
++
++pub(super) fn db_error(error: DbError) -> ConversationError {
++    match error {
++        DbError::Conflict(_) => ConversationError::ManagedOperationConflict,
++        _ => ConversationError::ManagedOperationUnavailable,
++    }
++}
++
++pub(super) fn request(req: &SendMessageRequest) -> Result<Option<(HostOperationKey, Vec<u8>)>, ConversationError> {
++    let Some(key) = req.operation.clone() else {
++        return Ok(None);
++    };
++    if key.schema != MANAGED_OPERATION_SCHEMA
++        || !managed_operation_token(&key.id)
++        || !managed_operation_token(&key.host_store_id)
++    {
++        return Err(ConversationError::bad_request("Invalid managed operation key"));
++    }
++    let body = serde_json::to_vec(&(&req.content, &req.files, &req.sessions, &req.inject_skills, req.hidden))
++        .map_err(|_| ConversationError::bad_request("Invalid managed operation body"))?;
++    if body.len() > 16 * 1024 * 1024 {
++        return Err(ConversationError::bad_request(
++            "Managed operation body exceeds frame budget",
++        ));
++    }
++    Ok(Some((key, body)))
++}
++
++pub(crate) fn receipt(row: &ManagedOperationRow, replayed: bool) -> HostOperationReceipt {
++    HostOperationReceipt {
++        schema: MANAGED_OPERATION_SCHEMA.into(),
++        id: row.operation_id.clone(),
++        host_store_id: row.host_store_id.clone(),
++        msg_id: row.msg_id.clone(),
++        turn_id: row.turn_id.clone(),
++        state: row.state.clone(),
++        effects_unknown: row.state != "completed",
++        automatic_retry: false,
++        replayed,
++    }
++}
++
++pub(crate) fn context(conversation: &str, row: &ManagedOperationRow) -> ManagedOperationContext {
++    ManagedOperationContext {
++        schema: MANAGED_OPERATION_SCHEMA.into(),
++        id: row.operation_id.clone(),
++        store_id: row.adapter_store_id.clone(),
++        conversation_id: conversation.into(),
++        turn_id: row.turn_id.clone(),
++        generation: row.generation.clone(),
++    }
++}
++
++fn observed_state(value: &serde_json::Value, expected: &ManagedOperationContext) -> Result<String, ConversationError> {
++    let row = value
++        .get("operation")
++        .ok_or(ConversationError::ManagedOperationUnavailable)?;
++    for (name, expected) in [
++        ("schema", expected.schema.as_str()),
++        ("id", &expected.id),
++        ("storeId", &expected.store_id),
++        ("conversationId", &expected.conversation_id),
++        ("turnId", &expected.turn_id),
++        ("generation", &expected.generation),
++    ] {
++        if row.get(name).and_then(|v| v.as_str()) != Some(expected) {
++            return Err(ConversationError::ManagedOperationUnavailable);
++        }
++    }
++    let state = row
++        .get("state")
++        .and_then(|v| v.as_str())
++        .ok_or(ConversationError::ManagedOperationUnavailable)?;
++    if ![
++        "pending",
++        "completed",
++        "cancelled",
++        "failed",
++        "interrupted",
++        "not_found",
++    ]
++    .contains(&state)
++        || row.get("automaticRetry").and_then(|v| v.as_bool()) != Some(false)
++        || row.get("effectsUnknown").and_then(|v| v.as_bool()) != Some(state != "completed")
++    {
++        return Err(ConversationError::ManagedOperationUnavailable);
++    }
++    match state {
++        "completed"
++            if row.get("code").and_then(|v| v.as_str()) != Some("end_turn")
++                || row.get("stopReason").and_then(|v| v.as_str()) != Some("end_turn") =>
++        {
++            return Err(ConversationError::ManagedOperationUnavailable);
++        }
++        "cancelled"
++            if row.get("code").and_then(|v| v.as_str()) != Some("cancelled")
++                || row.get("stopReason").and_then(|v| v.as_str()) != Some("cancelled") =>
++        {
++            return Err(ConversationError::ManagedOperationUnavailable);
++        }
++        "failed" | "interrupted"
++            if ![
++                Some("owner_lost"),
++                Some("timeout"),
++                Some("transport_closed"),
++                Some("dispatch_failed"),
++                Some("native_error"),
++            ]
++            .contains(&row.get("code").and_then(|v| v.as_str())) =>
++        {
++            return Err(ConversationError::ManagedOperationUnavailable);
++        }
++        _ => {}
++    }
++    // Absence may race a pre-dispatch transport buffer. It proves neither
++    // writer exit nor no effects: retain uncertainty without a terminal/replay.
++    Ok(if state == "not_found"
++        || (state == "pending" && row.get("executionObservation").and_then(|v| v.as_str()) == Some("recovery_waiting"))
++    {
++        "recovery_waiting"
++    } else {
++        state
++    }
++    .into())
++}
++
++impl ConversationService {
++    pub(super) async fn managed_host_capability(
++        &self,
++        agent: &aionui_ai_agent::AgentInstance,
++    ) -> Result<Option<aionui_api_types::HostOperationCapability>, ConversationError> {
++        if agent
++            .managed_execution_binding()
++            .await
++            .map_err(|_| ConversationError::ManagedOperationUnavailable)?
++            .is_none()
++        {
++            return Ok(None);
++        }
++        Ok(Some(aionui_api_types::HostOperationCapability {
++            schema: MANAGED_OPERATION_SCHEMA.into(),
++            host_store_id: self.conversation_repo.operation_namespace().await.map_err(db_error)?,
++        }))
++    }
++
++    pub(super) fn managed_admission_lock(&self, conversation: &str) -> Arc<Mutex<()>> {
++        let mut locks = self.managed_admissions.lock().unwrap();
++        locks.retain(|_, lock| lock.strong_count() > 0);
++        if let Some(lock) = locks.get(conversation).and_then(Weak::upgrade) {
++            return lock;
++        }
++        let lock = Arc::new(Mutex::new(()));
++        locks.insert(conversation.to_owned(), Arc::downgrade(&lock));
++        lock
++    }
++
++    pub(super) async fn managed_new_binding(
++        &self,
++        conversation: &str,
++        tasks: &Arc<dyn IWorkerTaskManager>,
++    ) -> Result<ManagedExecutionBinding, ConversationError> {
++        // Only an actually negotiated runtime can admit keyed work. The UI's
++        // existing explicit runtime/ensure path performs warmup beforehand.
++        tasks
++            .get_task(conversation)
++            .ok_or(ConversationError::ManagedOperationUnavailable)?
++            .managed_execution_binding()
++            .await
++            .map_err(|_| ConversationError::ManagedOperationUnavailable)?
++            .ok_or(ConversationError::ManagedOperationUnavailable)
++    }
++
++    async fn refresh_managed_operation(
++        &self,
++        user: &str,
++        conversation: &str,
++        row: ManagedOperationRow,
++    ) -> Result<ManagedOperationRow, ConversationError> {
++        if [
++            "completed",
++            "cancelled",
++            "cancelled_before_dispatch",
++            "failed",
++            "interrupted",
++        ]
++        .contains(&row.state.as_str())
++        {
++            return Ok(row);
++        }
++        let operation = context(conversation, &row);
++        let live = if let Some(agent) = self.task_manager.get_task(conversation) {
++            if agent.managed_cancelled_before_dispatch(&row.acp_session_id, &operation) {
++                self.conversation_repo
++                    .settle_operation(user, conversation, &row.operation_id, "cancelled_before_dispatch")
++                    .await
++                    .map_err(db_error)?;
++                return self
++                    .conversation_repo
++                    .lookup_operation(user, conversation, &row.operation_id, &row.host_store_id, None)
++                    .await
++                    .map_err(db_error)?
++                    .ok_or(ConversationError::ManagedOperationUnavailable);
++            }
++            agent
++                .managed_operation_status(&row.acp_session_id, &operation)
++                .await
++                .ok()
++        } else {
++            None
++        };
++        let observed = match live {
++            Some(value) => Ok(value),
++            None => {
++                let metadata_row = self
++                    .agent_metadata_repo
++                    .get_for_user(user, &row.metadata_id)
++                    .await
++                    .map_err(db_error)?
++                    .ok_or(ConversationError::ManagedOperationUnavailable)?;
++                let metadata = aionui_ai_agent::registry::managed_operation_metadata(metadata_row)
++                    .ok_or(ConversationError::ManagedOperationUnavailable)?;
++                let conversation_row = self
++                    .conversation_repo
++                    .get(user, conversation)
++                    .await
++                    .map_err(db_error)?
++                    .ok_or(ConversationError::ManagedOperationUnavailable)?;
++                let workspace = crate::session_mentions::workspace_from_extra(&conversation_row.extra)
++                    .ok_or(ConversationError::ManagedOperationUnavailable)?;
++                let binding = aionui_ai_agent::managed_command_binding(&metadata, &workspace)
++                    .map_err(|_| ConversationError::ManagedOperationUnavailable)?;
++                if !self
++                    .conversation_repo
++                    .operation_command_matches(user, conversation, &row.operation_id, &binding)
++                    .await
++                    .map_err(db_error)?
++                {
++                    return Err(ConversationError::ManagedOperationUnavailable);
++                }
++                aionui_ai_agent::query_managed_operation_status_only(
++                    &metadata,
++                    &workspace,
++                    &row.acp_session_id,
++                    &operation,
++                )
++                .await
++                .map_err(|_| ConversationError::ManagedOperationUnavailable)
++            }
++        }?;
++        let state = observed_state(&observed, &operation)?;
++        self.conversation_repo
++            .settle_operation(user, conversation, &row.operation_id, &state)
++            .await
++            .map_err(db_error)?;
++        self.conversation_repo
++            .lookup_operation(user, conversation, &row.operation_id, &row.host_store_id, None)
++            .await
++            .map_err(db_error)?
++            .ok_or(ConversationError::ManagedOperationUnavailable)
++    }
++
++    pub(super) async fn managed_duplicate_response(
++        &self,
++        user: &str,
++        conversation: &str,
++        row: ManagedOperationRow,
++    ) -> Result<SendMessageResponse, ConversationError> {
++        let row = self.refresh_managed_operation(user, conversation, row).await?;
++        let mut response = self
++            .send_message_response(conversation, row.msg_id.clone(), row.turn_id.clone())
++            .await;
++        response.operation = Some(receipt(&row, true));
++        Ok(response)
++    }
++
++    pub async fn managed_operation_status(
++        &self,
++        user: &str,
++        conversation: &str,
++        key: &HostOperationKey,
++    ) -> Result<HostOperationReceipt, ConversationError> {
++        // Ownership precedes even namespace/key lookup and any process launch.
++        self.conversation_repo
++            .get(user, conversation)
++            .await?
++            .ok_or_else(|| ConversationError::NotFound {
++                id: conversation.into(),
++            })?;
++        if key.schema != MANAGED_OPERATION_SCHEMA
++            || !managed_operation_token(&key.id)
++            || !managed_operation_token(&key.host_store_id)
++        {
++            return Err(ConversationError::bad_request("Invalid managed operation key"));
++        }
++        let row = self
++            .conversation_repo
++            .lookup_operation(user, conversation, &key.id, &key.host_store_id, None)
++            .await
++            .map_err(db_error)?;
++        let Some(row) = row else {
++            return Ok(HostOperationReceipt {
++                schema: MANAGED_OPERATION_SCHEMA.into(),
++                id: key.id.clone(),
++                host_store_id: key.host_store_id.clone(),
++                msg_id: String::new(),
++                turn_id: String::new(),
++                state: "not_found".into(),
++                effects_unknown: true,
++                automatic_retry: false,
++                replayed: false,
++            });
++        };
++        let row = self.refresh_managed_operation(user, conversation, row).await?;
++        Ok(receipt(&row, true))
++    }
++
++    pub(crate) async fn settle_managed_turn(&self, user: &str, conversation: &str, key: &HostOperationKey) {
++        if self.managed_operation_status(user, conversation, key).await.is_err() {
++            // Keep the durable pending/accepted row. No invented terminal and no
++            // automatic replay: explicit status can reconcile after reconnect.
++            tracing::warn!(
++                conversation_id = conversation,
++                operation_id = key.id,
++                "Managed outcome remains unavailable"
++            );
++        }
++    }
++
++    pub(crate) async fn record_managed_not_dispatched(
++        &self,
++        user: &str,
++        conversation: &str,
++        operation: &ManagedOperationContext,
++    ) {
++        let result = async {
++            let store = self.conversation_repo.operation_namespace().await.map_err(db_error)?;
++            let row = self
++                .conversation_repo
++                .lookup_operation(user, conversation, &operation.id, &store, None)
++                .await
++                .map_err(db_error)?
++                .ok_or(ConversationError::ManagedOperationUnavailable)?;
++            if context(conversation, &row) != *operation {
++                return Err(ConversationError::ManagedOperationUnavailable);
++            }
++            self.conversation_repo
++                .settle_operation(user, conversation, &operation.id, "cancelled_before_dispatch")
++                .await
++                .map_err(db_error)
++        }
++        .await;
++        if result.is_err() {
++            tracing::warn!(
++                conversation_id = conversation,
++                "Pre-dispatch cancellation outcome remains unavailable"
++            );
++        }
++    }
++}
+diff --git a/crates/aionui-conversation/src/service_test.rs b/crates/aionui-conversation/src/service_test.rs
+index 9b991c0..c7997bc 100644
+--- a/crates/aionui-conversation/src/service_test.rs
++++ b/crates/aionui-conversation/src/service_test.rs
+@@ -6035,6 +6035,7 @@ async fn send_message_persists_openclaw_gateway_unreachable_tip_when_turn_build_
+             "user_1",
+             &conv.id,
+             SendMessageRequest {
++                operation: None,
+                 content: "hello".into(),
+                 hidden: false,
+                 files: vec![],
+diff --git a/crates/aionui-conversation/src/turn_orchestrator.rs b/crates/aionui-conversation/src/turn_orchestrator.rs
+index e234f6e..f8779a6 100644
+--- a/crates/aionui-conversation/src/turn_orchestrator.rs
++++ b/crates/aionui-conversation/src/turn_orchestrator.rs
+@@ -29,6 +29,8 @@ fn acp_backend_from_build_options(options: &BuildTaskOptions) -> Option<&str> {
+ }
+ 
+ pub(crate) struct TurnStartInput {
++    pub operation: Option<aionui_api_types::ManagedOperationContext>,
++    pub operation_key: Option<aionui_api_types::HostOperationKey>,
+     pub user_id: String,
+     pub conversation: ConversationRow,
+     /// User message content, already resolved to the inlined `[[AION_FILES]]`
+@@ -78,6 +80,7 @@ struct TurnAttemptInput {
+ }
+ 
+ struct TurnAttemptResult {
++    managed_capability: bool,
+     outcome: RelayOutcome,
+     summary: TurnAttemptSummary,
+     agent_type: AgentType,
+@@ -239,6 +242,11 @@ impl ConversationTurnOrchestrator {
+         // error, and reporting one would surface a red bubble for something
+         // they asked for.
+         if runtime_state.take_deferred_cancel(&input.conv_id, &input.turn_id) {
++            if let Some(operation) = &input.send.managed_operation {
++                self.service
++                    .record_managed_not_dispatched(&input.user_id, &input.conv_id, operation)
++                    .await;
++            }
+             info!(
+                 conversation_id = %input.conv_id,
+                 turn_id = %input.turn_id,
+@@ -277,6 +285,7 @@ impl ConversationTurnOrchestrator {
+         while let Some((current_send, msg_id)) = pending_send.take() {
+             let lifecycle = runtime_state.lifecycle_for(&input.conv_id);
+             let defer_clean_terminal_errors = input.defer_clean_terminal_errors
++                && !agent.has_managed_operation_capability()
+                 && agent.agent_type() == AgentType::Acp
+                 && lifecycle == RuntimeLifecycleState::Active
+                 && aggregate_summary.safe_to_auto_replay();
+@@ -428,12 +437,17 @@ impl ConversationTurnOrchestrator {
+                 .await;
+             }
+ 
++            if agent.has_managed_operation_capability() {
++                last_outcome = Some(outcome);
++                break;
++            }
+             match continuation_policy.decide(&input.conv_id, continuation_count, &outcome, lifecycle) {
+                 ContinuationDecision::Continue { content, next_count } => {
+                     continuation_count = next_count;
+                     let next_turn_msg_id = ConversationService::mint_msg_id();
+                     pending_send = Some((
+                         SendMessageData {
++                            managed_operation: None,
+                             content,
+                             msg_id: next_turn_msg_id.clone(),
+                             turn_id: Some(input.turn_id.clone()),
+@@ -451,6 +465,7 @@ impl ConversationTurnOrchestrator {
+         }
+ 
+         Ok(TurnAttemptResult {
++            managed_capability: agent.has_managed_operation_capability(),
+             outcome: last_outcome.unwrap_or_default(),
+             summary: aggregate_summary,
+             agent_type: agent.agent_type(),
+@@ -466,6 +481,7 @@ impl ConversationTurnOrchestrator {
+         let allowed_skill_names = input.build_options.context.skills.clone();
+         let first_turn_msg_id = ConversationService::mint_msg_id();
+         let initial_send = SendMessageData {
++            managed_operation: input.operation.clone(),
+             content: input.content,
+             msg_id: first_turn_msg_id.clone(),
+             turn_id: Some(turn_id.clone()),
+@@ -540,13 +556,17 @@ impl ConversationTurnOrchestrator {
+ 
+             let mut recovery_outcome = attempt_result.outcome.clone();
+             recovery_outcome.attempt = attempt_result.summary.clone();
+-            let decision = TurnRecoveryPolicy::decide(
+-                attempt_result.agent_type,
+-                attempt_result.backend.as_deref(),
+-                &recovery_outcome,
+-                lifecycle,
+-                replayed,
+-            );
++            let decision = if input.operation.is_some() || attempt_result.managed_capability {
++                TurnRecoveryDecision::None
++            } else {
++                TurnRecoveryPolicy::decide(
++                    attempt_result.agent_type,
++                    attempt_result.backend.as_deref(),
++                    &recovery_outcome,
++                    lifecycle,
++                    replayed,
++                )
++            };
+ 
+             match decision {
+                 TurnRecoveryDecision::AutoReplayOnce { reason, .. } => {
+@@ -646,6 +666,10 @@ impl ConversationTurnOrchestrator {
+             .complete_released_turn(&input.user_id, &conv_id, &turn_id, was_deleting)
+             .await;
+ 
++        if let Some(key) = &input.operation_key {
++            self.service.settle_managed_turn(&input.user_id, &conv_id, key).await;
++        }
++
+         ConversationTurnResult {
+             status: if final_failed {
+                 ConversationTurnStatus::Failed
+diff --git a/crates/aionui-db/Cargo.toml b/crates/aionui-db/Cargo.toml
+index fb18c5d..72741a1 100644
+--- a/crates/aionui-db/Cargo.toml
++++ b/crates/aionui-db/Cargo.toml
+@@ -12,6 +12,8 @@ serde.workspace = true
+ serde_json.workspace = true
+ thiserror.workspace = true
+ tracing.workspace = true
++hmac.workspace = true
++sha2.workspace = true
+ 
+ [dev-dependencies]
+ tokio.workspace = true
+diff --git a/crates/aionui-db/migrations/044_managed_operations.sql b/crates/aionui-db/migrations/044_managed_operations.sql
+new file mode 100644
+index 0000000..aa018ed
+--- /dev/null
++++ b/crates/aionui-db/migrations/044_managed_operations.sql
+@@ -0,0 +1,26 @@
++-- One durable host epoch/key; no prompt/output/credential columns.
++CREATE TABLE IF NOT EXISTS managed_operation_meta (
++    singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
++    store_id TEXT NOT NULL CHECK(length(store_id) = 32),
++    fingerprint_key BLOB NOT NULL CHECK(typeof(fingerprint_key) = 'blob' AND length(fingerprint_key) = 32),
++    root_id TEXT,
++    file_id TEXT
++);
++INSERT INTO managed_operation_meta VALUES(1, lower(hex(randomblob(16))), randomblob(32), NULL, NULL);
++CREATE TABLE IF NOT EXISTS managed_operations (
++    user_id TEXT NOT NULL,
++    conversation_id TEXT NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
++    operation_id TEXT NOT NULL CHECK(length(operation_id) BETWEEN 1 AND 128),
++    fingerprint BLOB NOT NULL CHECK(typeof(fingerprint) = 'blob' AND length(fingerprint) = 32),
++    command_fingerprint BLOB NOT NULL CHECK(typeof(command_fingerprint) = 'blob' AND length(command_fingerprint) = 32),
++    msg_id TEXT NOT NULL,
++    turn_id TEXT NOT NULL,
++    adapter_store_id TEXT NOT NULL,
++    acp_session_id TEXT NOT NULL,
++    generation TEXT NOT NULL,
++    metadata_id TEXT NOT NULL,
++    state TEXT NOT NULL CHECK(state IN ('accepted','pending','recovery_waiting','completed','cancelled','cancelled_before_dispatch','failed','interrupted')),
++    created_at INTEGER NOT NULL,
++    updated_at INTEGER NOT NULL,
++    PRIMARY KEY(conversation_id, operation_id)
++);
+diff --git a/crates/aionui-db/src/lib.rs b/crates/aionui-db/src/lib.rs
+index a6c8fe9..a257f10 100644
+--- a/crates/aionui-db/src/lib.rs
++++ b/crates/aionui-db/src/lib.rs
+@@ -35,8 +35,9 @@ pub use models::{
+ };
+ pub use repository::channel::UpdatePluginStatusParams;
+ pub use repository::conversation::{
+-    ConversationFilters, ConversationRowUpdate, MentionableCandidatesParams, MessagePageCursor, MessagePageDirection,
+-    MessagePageParams, MessagePageResult, MessageRowUpdate, MessageSearchRow, StaleRuntimeMessageRow,
++    AdmitManagedOperation, ConversationFilters, ConversationRowUpdate, ManagedOperationRow,
++    MentionableCandidatesParams, MessagePageCursor, MessagePageDirection, MessagePageParams, MessagePageResult,
++    MessageRowUpdate, MessageSearchRow, StaleRuntimeMessageRow,
+ };
+ pub use repository::cron::{
+     ClaimCronRunParams, CronRunClaimResult, FinishCronRunParams, RecoverableCronRun, UpdateCronJobParams,
+diff --git a/crates/aionui-db/src/repository/conversation/identity.rs b/crates/aionui-db/src/repository/conversation/identity.rs
+new file mode 100644
+index 0000000..ad8191b
+--- /dev/null
++++ b/crates/aionui-db/src/repository/conversation/identity.rs
+@@ -0,0 +1,81 @@
++//! Physical identity of the host SQLite store, separate from its copied UUID.
++use crate::DbError;
++use std::{fs::OpenOptions, path::Path};
++
++fn physical_id(path: &Path) -> Result<String, DbError> {
++    let result = (|| -> std::io::Result<String> {
++        if path.symlink_metadata()?.file_type().is_symlink() {
++            return Err(std::io::Error::other("Unsupported store alias"));
++        }
++        let mut options = OpenOptions::new();
++        options.read(true);
++        #[cfg(windows)]
++        {
++            use std::os::windows::fs::OpenOptionsExt;
++            options.custom_flags(0x02000000); // FILE_FLAG_BACKUP_SEMANTICS, also for parent directory.
++        }
++        let file = options.open(path)?;
++        #[cfg(unix)]
++        {
++            use std::os::unix::fs::MetadataExt;
++            let value = file.metadata()?;
++            if value.ino() == 0 {
++                return Err(std::io::Error::other("Missing file identity"));
++            }
++            Ok(format!("posix:{}:{}", value.dev(), value.ino()))
++        }
++        #[cfg(windows)]
++        {
++            use std::{ffi::c_void, os::windows::io::AsRawHandle};
++            #[repr(C)]
++            struct FileId {
++                volume: u64,
++                id: [u8; 16],
++            }
++            #[link(name = "kernel32")]
++            unsafe extern "system" {
++                fn GetFileInformationByHandleEx(handle: *mut c_void, class: i32, info: *mut c_void, size: u32) -> i32;
++            }
++            let mut value = FileId { volume: 0, id: [0; 16] };
++            // FileIdInfo returns the full Windows 128-bit file ID, including
++            // on ReFS; this intentionally does not truncate to file_index64.
++            let ok = unsafe {
++                GetFileInformationByHandleEx(
++                    file.as_raw_handle(),
++                    18,
++                    (&mut value as *mut FileId).cast(),
++                    std::mem::size_of::<FileId>() as u32,
++                )
++            };
++            if ok == 0 || value.id.iter().all(|b| *b == 0) {
++                return Err(std::io::Error::other("Missing file identity"));
++            }
++            let id = value.id.iter().map(|b| format!("{b:02x}")).collect::<String>();
++            Ok(format!("windows:{}:{id}", value.volume))
++        }
++        #[cfg(not(any(unix, windows)))]
++        {
++            Err(std::io::Error::other("Unsupported store identity platform"))
++        }
++    })();
++    result.map_err(|_| DbError::Init("Managed operation store identity unavailable".into()))
++}
++
++pub(crate) async fn storage_identity(pool: &sqlx::SqlitePool) -> Result<(String, String), DbError> {
++    use sqlx::Row;
++    let row = sqlx::query("PRAGMA database_list")
++        .fetch_all(pool)
++        .await?
++        .into_iter()
++        .find(|row| row.try_get::<String, _>("name").ok().as_deref() == Some("main"))
++        .ok_or_else(|| DbError::Init("Managed operation store identity unavailable".into()))?;
++    let filename: String = row.try_get("file")?;
++    if filename.is_empty() {
++        return Ok(("memory".into(), "memory".into()));
++    }
++    let path = Path::new(&filename);
++    let parent = path
++        .parent()
++        .ok_or_else(|| DbError::Init("Managed operation store identity unavailable".into()))?;
++    Ok((physical_id(parent)?, physical_id(path)?))
++}
+diff --git a/crates/aionui-db/src/repository/conversation.rs b/crates/aionui-db/src/repository/conversation/mod.rs
+similarity index 94%
+rename from crates/aionui-db/src/repository/conversation.rs
+rename to crates/aionui-db/src/repository/conversation/mod.rs
+index 846e22b..35fa571 100644
+--- a/crates/aionui-db/src/repository/conversation.rs
++++ b/crates/aionui-db/src/repository/conversation/mod.rs
+@@ -1,5 +1,8 @@
+ use aionui_common::{PaginatedResult, TimestampMs};
+ use serde::{Deserialize, Serialize};
++pub(super) mod identity;
++pub mod operations;
++pub use operations::{AdmitManagedOperation, ManagedOperationRow};
+ 
+ use crate::error::DbError;
+ use crate::models::{
+@@ -16,6 +19,37 @@ use crate::models::{
+ /// Object-safe via `async_trait` to support `Arc<dyn IConversationRepository>`.
+ #[async_trait::async_trait]
+ pub trait IConversationRepository: Send + Sync {
++    async fn operation_namespace(&self) -> Result<String, DbError> {
++        Err(operations::unavailable())
++    }
++    async fn lookup_operation(
++        &self,
++        _user: &str,
++        _conversation: &str,
++        _id: &str,
++        _store: &str,
++        _canonical_request: Option<&[u8]>,
++    ) -> Result<Option<ManagedOperationRow>, DbError> {
++        Err(operations::unavailable())
++    }
++    async fn admit_operation(
++        &self,
++        _params: &AdmitManagedOperation<'_>,
++    ) -> Result<(bool, ManagedOperationRow), DbError> {
++        Err(operations::unavailable())
++    }
++    async fn operation_command_matches(
++        &self,
++        _user: &str,
++        _conversation: &str,
++        _id: &str,
++        _binding: &[u8],
++    ) -> Result<bool, DbError> {
++        Err(operations::unavailable())
++    }
++    async fn settle_operation(&self, _user: &str, _conversation: &str, _id: &str, _state: &str) -> Result<(), DbError> {
++        Err(operations::unavailable())
++    }
+     // ── Conversation CRUD ───────────────────────────────────────────
+ 
+     /// Returns a conversation by user and ID, or `None` if not found.
+diff --git a/crates/aionui-db/src/repository/conversation/operations.rs b/crates/aionui-db/src/repository/conversation/operations.rs
+new file mode 100644
+index 0000000..7e2cea2
+--- /dev/null
++++ b/crates/aionui-db/src/repository/conversation/operations.rs
+@@ -0,0 +1,36 @@
++//! Payload-free managed operation repository contract.
++use crate::{DbError, models::MessageRow};
++
++#[derive(Clone, Debug)]
++pub struct ManagedOperationRow {
++    pub host_store_id: String,
++    pub operation_id: String,
++    pub msg_id: String,
++    pub turn_id: String,
++    pub adapter_store_id: String,
++    pub acp_session_id: String,
++    pub generation: String,
++    pub metadata_id: String,
++    pub state: String,
++}
++
++pub struct AdmitManagedOperation<'a> {
++    pub user_id: &'a str,
++    pub conversation_id: &'a str,
++    pub operation_id: &'a str,
++    pub host_store_id: &'a str,
++    /// Memory-only fingerprint inputs. They are never SQL values.
++    pub canonical_request: &'a [u8],
++    pub command_binding: &'a [u8],
++    /// The ordinary conversation message, committed once with admission.
++    pub message: &'a MessageRow,
++    pub turn_id: &'a str,
++    pub adapter_store_id: &'a str,
++    pub acp_session_id: &'a str,
++    pub generation: &'a str,
++    pub metadata_id: &'a str,
++}
++
++pub fn unavailable() -> DbError {
++    DbError::Init("Managed operation persistence unavailable".into())
++}
+diff --git a/crates/aionui-db/src/repository/sqlite_conversation/managed_tests.rs b/crates/aionui-db/src/repository/sqlite_conversation/managed_tests.rs
+new file mode 100644
+index 0000000..9d10484
+--- /dev/null
++++ b/crates/aionui-db/src/repository/sqlite_conversation/managed_tests.rs
+@@ -0,0 +1,242 @@
++use super::tests::{sample_conversation, sample_message, setup};
++use super::*;
++use crate::AdmitManagedOperation;
++const USER: &str = "system_default_user";
++
++#[tokio::test]
++async fn managed_adoption_transfers_owner_without_resetting_store_or_original_fences() {
++    use crate::{ExternalUserProjection, IUserRepository, SqliteUserRepository, UserType};
++    let (repo, db) = setup().await;
++    let conversation = sample_conversation(USER);
++    repo.create(&conversation).await.unwrap();
++    let store = repo.operation_namespace().await.unwrap();
++    let message = sample_message(&conversation.id);
++    repo.admit_operation(&admission(&conversation.id, &store, &message, b"SYNTHETIC_REQUEST"))
++        .await
++        .unwrap();
++    let before: (String, Vec<u8>) = sqlx::query_as("SELECT store_id,fingerprint_key FROM managed_operation_meta")
++        .fetch_one(db.pool())
++        .await
++        .unwrap();
++    let users = SqliteUserRepository::new(db.pool().clone());
++    let owner = users
++        .ensure_external_user(UserType::Aionpro, "synthetic-owner", ExternalUserProjection::default())
++        .await
++        .unwrap();
++    users.adopt_system_default_data(&owner.id).await.unwrap();
++    let after: (String, Vec<u8>) = sqlx::query_as("SELECT store_id,fingerprint_key FROM managed_operation_meta")
++        .fetch_one(db.pool())
++        .await
++        .unwrap();
++    assert_eq!(before, after);
++    assert!(
++        repo.lookup_operation(USER, &conversation.id, "operation-1", &store, None)
++            .await
++            .unwrap()
++            .is_none()
++    );
++    let original = repo
++        .lookup_operation(&owner.id, &conversation.id, "operation-1", &store, None)
++        .await
++        .unwrap()
++        .unwrap();
++    assert_eq!(
++        (original.msg_id, original.turn_id, original.generation),
++        (message.id, "turn-1".into(), "original-generation".into())
++    );
++    // A new owner can inspect the original record, but cannot start a status-only
++    // process using a command authenticated under the former owner's scope.
++    assert!(
++        !repo
++            .operation_command_matches(
++                &owner.id,
++                &conversation.id,
++                "operation-1",
++                b"SYNTHETIC_COMMAND_AUTH_MUST_NOT_BE_STORED"
++            )
++            .await
++            .unwrap()
++    );
++    // The accepted request belonged to the former owner. A changed ownership
++    // scope cannot silently become another admission with that original key.
++    assert!(matches!(
++        repo.lookup_operation(
++            &owner.id,
++            &conversation.id,
++            "operation-1",
++            &store,
++            Some(b"SYNTHETIC_REQUEST")
++        )
++        .await,
++        Err(DbError::Conflict(_))
++    ));
++}
++
++fn admission<'a>(
++    conversation: &'a str,
++    store: &'a str,
++    message: &'a MessageRow,
++    body: &'a [u8],
++) -> AdmitManagedOperation<'a> {
++    AdmitManagedOperation {
++        user_id: USER,
++        conversation_id: conversation,
++        operation_id: "operation-1",
++        host_store_id: store,
++        canonical_request: body,
++        command_binding: b"SYNTHETIC_COMMAND_AUTH_MUST_NOT_BE_STORED",
++        message,
++        turn_id: "turn-1",
++        adapter_store_id: "original-store",
++        acp_session_id: "original-session",
++        generation: "original-generation",
++        metadata_id: "metadata-1",
++    }
++}
++
++#[tokio::test]
++async fn managed_admission_and_ordinary_message_commit_once_with_original_ids() {
++    let (repo, db) = setup().await;
++    let conversation = sample_conversation(USER);
++    repo.create(&conversation).await.unwrap();
++    let store = repo.operation_namespace().await.unwrap();
++    let message = sample_message(&conversation.id);
++    let first = repo
++        .admit_operation(&admission(&conversation.id, &store, &message, b"SYNTHETIC_REQUEST"))
++        .await
++        .unwrap();
++    let second_message = sample_message(&conversation.id);
++    let mut second = admission(&conversation.id, &store, &second_message, b"SYNTHETIC_REQUEST");
++    second.turn_id = "later-turn";
++    let duplicate = repo.admit_operation(&second).await.unwrap();
++    assert!(first.0 && !duplicate.0);
++    assert_eq!((duplicate.1.msg_id, duplicate.1.turn_id), (message.id, "turn-1".into()));
++    let count: i64 = sqlx::query_scalar("SELECT count(*) FROM messages WHERE conversation_id=?")
++        .bind(&conversation.id)
++        .fetch_one(db.pool())
++        .await
++        .unwrap();
++    assert_eq!(count, 1);
++}
++
++#[tokio::test]
++async fn managed_duplicate_conflicts_without_storing_raw_request_or_launch_credentials() {
++    let (repo, db) = setup().await;
++    let conversation = sample_conversation(USER);
++    repo.create(&conversation).await.unwrap();
++    let store = repo.operation_namespace().await.unwrap();
++    let message = sample_message(&conversation.id);
++    repo.admit_operation(&admission(&conversation.id, &store, &message, b"SYNTHETIC_SECRET_BODY"))
++        .await
++        .unwrap();
++    let changed = repo
++        .lookup_operation(USER, &conversation.id, "operation-1", &store, Some(b"DIFFERENT"))
++        .await;
++    assert!(matches!(changed, Err(DbError::Conflict(_))));
++    let row: sqlx::sqlite::SqliteRow = sqlx::query("SELECT * FROM managed_operations")
++        .fetch_one(db.pool())
++        .await
++        .unwrap();
++    for column in ["fingerprint", "command_fingerprint"] {
++        let value: Vec<u8> = row.try_get(column).unwrap();
++        assert_eq!(value.len(), 32);
++        assert!(!String::from_utf8_lossy(&value).contains("SYNTHETIC"));
++    }
++    assert!(
++        !repo
++            .operation_command_matches(USER, &conversation.id, "operation-1", b"CHANGED_COMMAND")
++            .await
++            .unwrap()
++    );
++}
++
++#[tokio::test]
++async fn managed_cross_user_lookup_and_admission_never_access_another_owner() {
++    let (repo, _) = setup().await;
++    let conversation = sample_conversation(USER);
++    repo.create(&conversation).await.unwrap();
++    let store = repo.operation_namespace().await.unwrap();
++    let message = sample_message(&conversation.id);
++    repo.admit_operation(&admission(&conversation.id, &store, &message, b"SYNTHETIC"))
++        .await
++        .unwrap();
++    assert!(
++        repo.lookup_operation("other-user", &conversation.id, "operation-1", &store, None)
++            .await
++            .unwrap()
++            .is_none()
++    );
++    let mut other = admission(&conversation.id, &store, &message, b"SYNTHETIC");
++    other.user_id = "other-user";
++    assert!(matches!(repo.admit_operation(&other).await, Err(DbError::NotFound(_))));
++}
++
++#[tokio::test]
++async fn managed_terminal_cannot_be_overwritten_by_late_pending_or_cleanup() {
++    let (repo, _) = setup().await;
++    let conversation = sample_conversation(USER);
++    repo.create(&conversation).await.unwrap();
++    let store = repo.operation_namespace().await.unwrap();
++    let message = sample_message(&conversation.id);
++    repo.admit_operation(&admission(&conversation.id, &store, &message, b"SYNTHETIC"))
++        .await
++        .unwrap();
++    repo.settle_operation(USER, &conversation.id, "operation-1", "completed")
++        .await
++        .unwrap();
++    for state in ["pending", "recovery_waiting", "interrupted"] {
++        repo.settle_operation(USER, &conversation.id, "operation-1", state)
++            .await
++            .unwrap();
++    }
++    assert_eq!(
++        repo.lookup_operation(USER, &conversation.id, "operation-1", &store, None)
++            .await
++            .unwrap()
++            .unwrap()
++            .state,
++        "completed"
++    );
++    assert!(
++        repo.lookup_operation(USER, &conversation.id, "operation-1", "different-store", None)
++            .await
++            .is_err()
++    );
++}
++
++#[tokio::test]
++async fn managed_same_directory_database_copy_cannot_restore_the_old_namespace() {
++    let temporary = tempfile::tempdir().unwrap();
++    let path = temporary.path().join("host.sqlite3");
++    let db = crate::init_database(&path).await.unwrap();
++    let repo = SqliteConversationRepository::new(db.pool().clone());
++    let store = repo.operation_namespace().await.unwrap();
++    // Publish a consistent SQLite snapshot before changing the main file's
++    // identity. A raw copy must not race WAL/checkpoint cleanup and fail for
++    // incidental short reads before the namespace fence is exercised.
++    let copy = temporary.path().join("copy.sqlite3");
++    sqlx::query("PRAGMA wal_checkpoint(TRUNCATE)")
++        .execute(db.pool())
++        .await
++        .unwrap();
++    sqlx::query("VACUUM INTO ?")
++        .bind(copy.to_str().unwrap())
++        .execute(db.pool())
++        .await
++        .unwrap();
++    db.pool().close().await;
++    drop(repo);
++    drop(db);
++    let retained = temporary.path().join("retained.sqlite3");
++    std::fs::rename(&path, &retained).unwrap();
++    std::fs::rename(&copy, &path).unwrap();
++    let db = crate::init_database(&path).await.unwrap();
++    let repo = SqliteConversationRepository::new(db.pool().clone());
++    assert!(repo.operation_namespace().await.is_err());
++    let after: String = sqlx::query_scalar("SELECT store_id FROM managed_operation_meta")
++        .fetch_one(db.pool())
++        .await
++        .unwrap();
++    assert_eq!(store, after);
++    db.pool().close().await;
++}
+diff --git a/crates/aionui-db/src/repository/sqlite_conversation.rs b/crates/aionui-db/src/repository/sqlite_conversation/mod.rs
+similarity index 98%
+rename from crates/aionui-db/src/repository/sqlite_conversation.rs
+rename to crates/aionui-db/src/repository/sqlite_conversation/mod.rs
+index e513649..8b8fa68 100644
+--- a/crates/aionui-db/src/repository/sqlite_conversation.rs
++++ b/crates/aionui-db/src/repository/sqlite_conversation/mod.rs
+@@ -1,4 +1,7 @@
+ use sqlx::{Row, SqlitePool};
++#[cfg(test)]
++mod managed_tests;
++mod operations;
+ 
+ use aionui_common::{PaginatedResult, TimestampMs};
+ 
+@@ -292,6 +295,37 @@ impl SqliteConversationRepository {
+ 
+ #[async_trait::async_trait]
+ impl IConversationRepository for SqliteConversationRepository {
++    async fn operation_namespace(&self) -> Result<String, DbError> {
++        self.managed_namespace().await
++    }
++    async fn lookup_operation(
++        &self,
++        user: &str,
++        conversation: &str,
++        id: &str,
++        store: &str,
++        canonical: Option<&[u8]>,
++    ) -> Result<Option<crate::ManagedOperationRow>, DbError> {
++        self.managed_lookup(user, conversation, id, store, canonical).await
++    }
++    async fn admit_operation(
++        &self,
++        params: &crate::AdmitManagedOperation<'_>,
++    ) -> Result<(bool, crate::ManagedOperationRow), DbError> {
++        self.managed_admit(params).await
++    }
++    async fn operation_command_matches(
++        &self,
++        user: &str,
++        conversation: &str,
++        id: &str,
++        body: &[u8],
++    ) -> Result<bool, DbError> {
++        self.managed_command_matches(user, conversation, id, body).await
++    }
++    async fn settle_operation(&self, user: &str, conversation: &str, id: &str, state: &str) -> Result<(), DbError> {
++        self.managed_settle(user, conversation, id, state).await
++    }
+     // ── Conversation CRUD ───────────────────────────────────────────
+ 
+     async fn get(&self, user_id: &str, id: &str) -> Result<Option<ConversationRow>, DbError> {
+@@ -1610,13 +1644,13 @@ mod tests {
+     use super::*;
+     use crate::init_database_memory;
+ 
+-    async fn setup() -> (SqliteConversationRepository, crate::Database) {
++    pub(super) async fn setup() -> (SqliteConversationRepository, crate::Database) {
+         let db = init_database_memory().await.unwrap();
+         let repo = SqliteConversationRepository::new(db.pool().clone());
+         (repo, db)
+     }
+ 
+-    fn sample_conversation(user_id: &str) -> ConversationRow {
++    pub(super) fn sample_conversation(user_id: &str) -> ConversationRow {
+         let now = aionui_common::now_ms();
+         ConversationRow {
+             id: aionui_common::generate_prefixed_id("conv"),
+@@ -1638,7 +1672,7 @@ mod tests {
+         }
+     }
+ 
+-    fn sample_message(conv_id: &str) -> MessageRow {
++    pub(super) fn sample_message(conv_id: &str) -> MessageRow {
+         let now = aionui_common::now_ms();
+         MessageRow {
+             id: aionui_common::generate_prefixed_id("msg"),
+diff --git a/crates/aionui-db/src/repository/sqlite_conversation/operations.rs b/crates/aionui-db/src/repository/sqlite_conversation/operations.rs
+new file mode 100644
+index 0000000..c4a539b
+--- /dev/null
++++ b/crates/aionui-db/src/repository/sqlite_conversation/operations.rs
+@@ -0,0 +1,227 @@
++use super::SqliteConversationRepository;
++use crate::{AdmitManagedOperation, DbError, ManagedOperationRow};
++use hmac::{Hmac, Mac};
++use sha2::Sha256;
++use sqlx::Row;
++
++type HmacSha256 = Hmac<Sha256>;
++const MAX_INPUT: usize = 16 * 1024 * 1024;
++
++fn unavailable() -> DbError {
++    DbError::Init("Managed operation store unavailable".into())
++}
++fn conflict() -> DbError {
++    DbError::Conflict("Managed operation identity conflict".into())
++}
++fn mac(key: &[u8], domain: &[u8], user: &str, conversation: &str, body: &[u8]) -> Result<HmacSha256, DbError> {
++    if key.len() != 32 || body.len() > MAX_INPUT {
++        return Err(unavailable());
++    }
++    let mut mac = HmacSha256::new_from_slice(key).map_err(|_| unavailable())?;
++    for value in [domain, user.as_bytes(), conversation.as_bytes()] {
++        mac.update(value);
++        mac.update(&[0]);
++    }
++    mac.update(body);
++    Ok(mac)
++}
++
++impl SqliteConversationRepository {
++    async fn managed_meta(&self) -> Result<(String, Vec<u8>), DbError> {
++        let identity = super::super::conversation::identity::storage_identity(&self.pool).await?;
++        let query = "SELECT store_id,substr(fingerprint_key,1,33) AS key,root_id,file_id FROM managed_operation_meta WHERE singleton=1";
++        let mut row = sqlx::query(query)
++            .fetch_optional(&self.pool)
++            .await?
++            .ok_or_else(unavailable)?;
++        if row.try_get::<Option<String>, _>("root_id")?.is_none()
++            && row.try_get::<Option<String>, _>("file_id")?.is_none()
++        {
++            sqlx::query("UPDATE managed_operation_meta SET root_id=?,file_id=? WHERE singleton=1 AND root_id IS NULL AND file_id IS NULL")
++                .bind(&identity.0).bind(&identity.1).execute(&self.pool).await?;
++            row = sqlx::query(query)
++                .fetch_optional(&self.pool)
++                .await?
++                .ok_or_else(unavailable)?;
++        }
++        let root: String = row.try_get("root_id").map_err(|_| unavailable())?;
++        let file: String = row.try_get("file_id").map_err(|_| unavailable())?;
++        let store: String = row.try_get("store_id")?;
++        let key: Vec<u8> = row.try_get("key").map_err(|_| unavailable())?;
++        if (root, file) != identity
++            || identity != super::super::conversation::identity::storage_identity(&self.pool).await?
++            || store.len() != 32
++            || !store.bytes().all(|c| c.is_ascii_hexdigit())
++            || key.len() != 32
++        {
++            return Err(unavailable());
++        }
++        Ok((store, key))
++    }
++
++    pub(super) async fn managed_namespace(&self) -> Result<String, DbError> {
++        Ok(self.managed_meta().await?.0)
++    }
++
++    pub(super) async fn managed_lookup(
++        &self,
++        user: &str,
++        conversation: &str,
++        id: &str,
++        store: &str,
++        canonical: Option<&[u8]>,
++    ) -> Result<Option<ManagedOperationRow>, DbError> {
++        let (current, key) = self.managed_meta().await?;
++        if current != store {
++            return Err(conflict());
++        }
++        let row = sqlx::query("SELECT o.operation_id,o.msg_id,o.turn_id,o.adapter_store_id,o.acp_session_id,o.generation,o.metadata_id,o.state,substr(o.fingerprint,1,33) AS fingerprint \
++            FROM managed_operations o INNER JOIN conversations c ON c.id=o.conversation_id AND c.user_id=o.user_id \
++            WHERE o.user_id=? AND o.conversation_id=? AND o.operation_id=?")
++            .bind(user).bind(conversation).bind(id).fetch_optional(&self.pool).await?;
++        let Some(row) = row else {
++            return Ok(None);
++        };
++        if let Some(body) = canonical {
++            let fingerprint: Vec<u8> = row.try_get("fingerprint").map_err(|_| unavailable())?;
++            mac(&key, b"request", user, conversation, body)?
++                .verify_slice(&fingerprint)
++                .map_err(|_| conflict())?;
++        }
++        let result = ManagedOperationRow {
++            host_store_id: current,
++            operation_id: row.try_get("operation_id")?,
++            msg_id: row.try_get("msg_id")?,
++            turn_id: row.try_get("turn_id")?,
++            adapter_store_id: row.try_get("adapter_store_id")?,
++            acp_session_id: row.try_get("acp_session_id")?,
++            generation: row.try_get("generation")?,
++            metadata_id: row.try_get("metadata_id")?,
++            state: row.try_get("state")?,
++        };
++        if [
++            &result.operation_id,
++            &result.msg_id,
++            &result.turn_id,
++            &result.adapter_store_id,
++            &result.acp_session_id,
++            &result.generation,
++            &result.metadata_id,
++        ]
++        .iter()
++        .any(|v| v.is_empty() || v.len() > 128)
++            || ![
++                "accepted",
++                "pending",
++                "recovery_waiting",
++                "completed",
++                "cancelled",
++                "cancelled_before_dispatch",
++                "failed",
++                "interrupted",
++            ]
++            .contains(&result.state.as_str())
++        {
++            return Err(unavailable());
++        }
++        Ok(Some(result))
++    }
++
++    pub(super) async fn managed_admit(
++        &self,
++        p: &AdmitManagedOperation<'_>,
++    ) -> Result<(bool, ManagedOperationRow), DbError> {
++        let (store, key) = self.managed_meta().await?;
++        if store != p.host_store_id || p.message.conversation_id != p.conversation_id {
++            return Err(conflict());
++        }
++        let fingerprint = mac(&key, b"request", p.user_id, p.conversation_id, p.canonical_request)?
++            .finalize()
++            .into_bytes();
++        let command = mac(&key, b"command", p.user_id, p.conversation_id, p.command_binding)?
++            .finalize()
++            .into_bytes();
++        let mut tx = self.pool.begin_with("BEGIN IMMEDIATE").await?;
++        let owner: i64 = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM conversations WHERE id=? AND user_id=?)")
++            .bind(p.conversation_id)
++            .bind(p.user_id)
++            .fetch_one(&mut *tx)
++            .await?;
++        if owner != 1 {
++            return Err(DbError::NotFound("Managed conversation unavailable".into()));
++        }
++        let inserted = sqlx::query("INSERT INTO managed_operations(user_id,conversation_id,operation_id,fingerprint,command_fingerprint,msg_id,turn_id,adapter_store_id,acp_session_id,generation,metadata_id,state,created_at,updated_at) \
++            VALUES(?,?,?,?,?,?,?,?,?,?,?,'accepted',?,?) ON CONFLICT(conversation_id,operation_id) DO NOTHING")
++            .bind(p.user_id).bind(p.conversation_id).bind(p.operation_id).bind(fingerprint.as_slice()).bind(command.as_slice())
++            .bind(&p.message.id).bind(p.turn_id).bind(p.adapter_store_id).bind(p.acp_session_id).bind(p.generation).bind(p.metadata_id)
++            .bind(p.message.created_at).bind(p.message.created_at).execute(&mut *tx).await?.rows_affected() == 1;
++        if inserted {
++            let m = p.message;
++            sqlx::query("INSERT INTO messages(id,conversation_id,msg_id,type,content,position,status,hidden,created_at,backend_turn_id) VALUES(?,?,?,?,?,?,?,?,?,?)")
++                .bind(&m.id).bind(&m.conversation_id).bind(&m.msg_id).bind(&m.r#type).bind(&m.content).bind(&m.position)
++                .bind(&m.status).bind(m.hidden).bind(m.created_at).bind(&m.backend_turn_id).execute(&mut *tx).await?;
++            sqlx::query("UPDATE conversations SET updated_at=MAX(updated_at,?) WHERE id=? AND user_id=?")
++                .bind(m.created_at)
++                .bind(p.conversation_id)
++                .bind(p.user_id)
++                .execute(&mut *tx)
++                .await?;
++        }
++        tx.commit().await?;
++        let row = self
++            .managed_lookup(
++                p.user_id,
++                p.conversation_id,
++                p.operation_id,
++                p.host_store_id,
++                Some(p.canonical_request),
++            )
++            .await?
++            .ok_or_else(unavailable)?;
++        Ok((inserted, row))
++    }
++
++    pub(super) async fn managed_command_matches(
++        &self,
++        user: &str,
++        conversation: &str,
++        id: &str,
++        body: &[u8],
++    ) -> Result<bool, DbError> {
++        let (_, key) = self.managed_meta().await?;
++        let stored: Option<Vec<u8>> = sqlx::query_scalar("SELECT substr(o.command_fingerprint,1,33) FROM managed_operations o \
++            INNER JOIN conversations c ON c.id=o.conversation_id AND c.user_id=o.user_id WHERE o.user_id=? AND o.conversation_id=? AND o.operation_id=?")
++            .bind(user).bind(conversation).bind(id).fetch_optional(&self.pool).await?;
++        Ok(stored.is_some_and(|value| {
++            mac(&key, b"command", user, conversation, body).is_ok_and(|m| m.verify_slice(&value).is_ok())
++        }))
++    }
++
++    pub(super) async fn managed_settle(
++        &self,
++        user: &str,
++        conversation: &str,
++        id: &str,
++        state: &str,
++    ) -> Result<(), DbError> {
++        self.managed_meta().await?;
++        if ![
++            "pending",
++            "recovery_waiting",
++            "completed",
++            "cancelled",
++            "cancelled_before_dispatch",
++            "failed",
++            "interrupted",
++        ]
++        .contains(&state)
++        {
++            return Err(unavailable());
++        }
++        sqlx::query("UPDATE managed_operations SET state=?,updated_at=? WHERE user_id=? AND conversation_id=? AND operation_id=? \
++            AND state NOT IN ('completed','cancelled','cancelled_before_dispatch','failed','interrupted') \
++            AND EXISTS(SELECT 1 FROM conversations c WHERE c.id=managed_operations.conversation_id AND c.user_id=managed_operations.user_id)")
++            .bind(state).bind(aionui_common::now_ms()).bind(user).bind(conversation).bind(id).execute(&self.pool).await?;
++        Ok(())
++    }
++}
+diff --git a/crates/aionui-db/tests/adoption_coverage.rs b/crates/aionui-db/tests/adoption_coverage.rs
+index 4ef2b33..fb42418 100644
+--- a/crates/aionui-db/tests/adoption_coverage.rs
++++ b/crates/aionui-db/tests/adoption_coverage.rs
+@@ -35,6 +35,12 @@ const GLOBAL_TABLES: &[(&str, &str)] = &[
+     // Canonical filesystem-path registry shared by all users by design
+     // (project-bind: folders are reused globally by resource_canonical).
+     ("folders", "global canonical path registry"),
++    // The epoch/HMAC key fences one physical host database across all owners.
++    // User adoption transfers owned operation rows, never resets their store.
++    (
++        "managed_operation_meta",
++        "physical host database epoch and private fingerprint key",
++    ),
+ ];
+ 
+ /// Tables whose `user_id` column is NOT a Core-user ownership column — it
+diff --git a/crates/aionui-runtime/src/node_runtime/managed.rs b/crates/aionui-runtime/src/node_runtime/managed.rs
+index 00dce81..58ca6e6 100644
+--- a/crates/aionui-runtime/src/node_runtime/managed.rs
++++ b/crates/aionui-runtime/src/node_runtime/managed.rs
+@@ -98,6 +98,17 @@ pub(crate) fn probe_preferred_local_runtime() -> Option<ResolvedNodeRuntime> {
+     Some(runtime)
+ }
+ 
++pub(crate) fn existing_managed_runtime() -> Option<ResolvedNodeRuntime> {
++    existing_managed_runtime_at(&cache::node_runtime_root()?)
++}
++
++fn existing_managed_runtime_at(root: &Path) -> Option<ResolvedNodeRuntime> {
++    let directory = root.join(platform_spec().ok()?.directory_name());
++    // Read-only counterpart for original-operation status. Do not activate a
++    // bundled copy, create a directory, validate by spawning, or install here.
++    probe_runtime_root(&directory, ResolvedNodeSource::Managed).ok()
++}
++
+ pub async fn install_and_validate() -> Result<ResolvedNodeRuntime, NodeRuntimeError> {
+     install_and_validate_with_reporter(None).await
+ }
+diff --git a/crates/aionui-runtime/src/node_runtime/managed/tests.rs b/crates/aionui-runtime/src/node_runtime/managed/tests.rs
+index e46131e..8d5d1b1 100644
+--- a/crates/aionui-runtime/src/node_runtime/managed/tests.rs
++++ b/crates/aionui-runtime/src/node_runtime/managed/tests.rs
+@@ -9,6 +9,52 @@ fn write_file(path: &Path) {
+     std::fs::write(path, b"").expect("write file");
+ }
+ 
++#[test]
++fn status_lookup_never_installs_a_missing_runtime() {
++    let temporary = tempfile::tempdir().unwrap();
++    let missing = temporary.path().join("absent");
++    assert!(existing_managed_runtime_at(&missing).is_none());
++    assert!(!missing.exists());
++}
++
++#[test]
++fn status_lookup_reads_existing_pinned_files_without_executing_them() {
++    let temporary = tempfile::tempdir().unwrap();
++    let root = temporary.path();
++    let directory = root.join(platform_spec().unwrap().directory_name());
++    let layout = current_managed_node_archive_layout();
++    let node = managed_node_path_for_layout(&directory, layout);
++    // Empty, non-executable files deliberately cannot pass a process probe.
++    write_file(&node);
++    write_file(&managed_npm_cli_path_for_layout(&directory, layout));
++    write_file(&managed_npx_cli_path_for_layout(&directory, layout));
++    #[cfg(unix)]
++    {
++        use std::os::unix::fs::PermissionsExt;
++        let marker = root.join("execution-marker");
++        std::fs::write(
++            &node,
++            format!("#!/bin/sh\nprintf executed > '{}'\nexit 99\n", marker.display()),
++        )
++        .unwrap();
++        std::fs::set_permissions(&node, std::fs::Permissions::from_mode(0o755)).unwrap();
++    }
++    let before = std::fs::read_dir(root).unwrap().count();
++    assert_eq!(existing_managed_runtime_at(root).unwrap().node_path, node);
++    assert_eq!(std::fs::read_dir(root).unwrap().count(), before);
++    assert!(!root.join("execution-marker").exists());
++    let npm = managed_npm_cli_path_for_layout(&directory, layout);
++    std::fs::remove_file(&npm).unwrap();
++    assert!(existing_managed_runtime_at(root).is_none());
++    write_file(&npm);
++    let npx = managed_npx_cli_path_for_layout(&directory, layout);
++    std::fs::remove_file(&npx).unwrap();
++    assert!(existing_managed_runtime_at(root).is_none());
++    write_file(&npx);
++    std::fs::remove_file(node).unwrap();
++    assert!(existing_managed_runtime_at(root).is_none());
++}
++
+ /// Resolve the bundled root the parent process handed down. The fixture must be
+ /// built at exactly this path — the child gets a fresh `tempfile::tempdir()`, so
+ /// re-deriving the path locally would point somewhere the env var never named.
+diff --git a/crates/aionui-runtime/src/node_runtime/mod.rs b/crates/aionui-runtime/src/node_runtime/mod.rs
+index a13c273..d011af7 100644
+--- a/crates/aionui-runtime/src/node_runtime/mod.rs
++++ b/crates/aionui-runtime/src/node_runtime/mod.rs
+@@ -57,6 +57,12 @@ pub async fn ensure_node_runtime() -> Result<ResolvedNodeRuntime, NodeRuntimeErr
+     ensure_node_runtime_with_reporter(None).await
+ }
+ 
++/// Locate only an already activated pinned Node executable, without any spawn
++/// or installation. Missing state remains unavailable to status-only callers.
++pub fn existing_node_runtime_command() -> Option<std::path::PathBuf> {
++    managed::existing_managed_runtime().map(|runtime| runtime.node_path)
++}
++
+ pub async fn ensure_node_runtime_with_reporter(
+     reporter: Option<&dyn NodeRuntimeProgressReporter>,
+ ) -> Result<ResolvedNodeRuntime, NodeRuntimeError> {
+diff --git a/crates/aionui-session-message/src/service.rs b/crates/aionui-session-message/src/service.rs
+index d3be978..dce1655 100644
+--- a/crates/aionui-session-message/src/service.rs
++++ b/crates/aionui-session-message/src/service.rs
+@@ -354,6 +354,7 @@ impl SessionMessageService {
+         content: String,
+     ) -> Result<SendMessageResponse, DeliverAttemptError> {
+         let request = SendMessageRequest {
++            operation: None,
+             content,
+             files: Vec::new(),
+             // The delivered body is already fully composed; `@@` resolution is
+diff --git a/crates/aionui-session-message/tests/e2e_cross_session.rs b/crates/aionui-session-message/tests/e2e_cross_session.rs
+index 0261fd8..9bacbb7 100644
+--- a/crates/aionui-session-message/tests/e2e_cross_session.rs
++++ b/crates/aionui-session-message/tests/e2e_cross_session.rs
+@@ -199,6 +199,7 @@ async fn the_send_message_team_guard_cannot_be_bypassed_by_calling_the_layer_bel
+             USER,
+             &team_conv.id,
+             SendMessageRequest {
++                operation: None,
+                 content: "straight at the bottom layer".to_owned(),
+                 files: Vec::new(),
+                 sessions: Vec::new(),

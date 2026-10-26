@@ -125,10 +125,31 @@ try {
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
   const input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
+  const conversationId = await page.evaluate(() => window.location.hash.split('/conversation/')[1]?.split(/[/?]/)[0]);
+  assert.ok(conversationId);
+  const managedPort = await page.evaluate(() => window.__backendPort);
+  const managedReady = await fetch(
+    `http://127.0.0.1:${managedPort}/api/conversations/${conversationId}/runtime/ensure`,
+    {
+      method: 'POST',
+    }
+  );
+  assert.equal(managedReady.status, 200);
+  assert.equal((await managedReady.json()).data.operation_capability.schema, 'aelix.operation/1');
+  let firstManagedOperation;
+  page.on('request', (request) => {
+    if (
+      !firstManagedOperation &&
+      request.method() === 'POST' &&
+      new URL(request.url()).pathname === `/api/conversations/${conversationId}/messages`
+    )
+      firstManagedOperation = request.postDataJSON()?.operation;
+  });
   await input.fill('Check rejected credentials');
   await page.getByTestId('sendbox-send-btn').click();
   // Confirm failure via host runtime rather than interpreting storage as authorization.
   await expect(page.getByText(/Invalid API key|authentication_error|401/).last()).toBeVisible({ timeout: 30000 });
+  assert.equal(firstManagedOperation?.schema, 'aelix.operation/1');
 
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
@@ -280,6 +301,8 @@ try {
           'ui_endpoint_registration',
           'ui_key_registration',
           'wrong_key_rejected',
+          'installed_default_aelix_launcher_negotiates_managed_capability',
+          'installed_default_aelix_sendbox_preserves_keyed_operation',
           'key_update_new_conversation',
           'first_response',
           'explicit_cli_root',

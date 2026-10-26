@@ -783,5 +783,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Plan ausklappen",
     "collapse": "Plan einklappen"
+  },
+  "managedOperation": {
+    "uncertain": "Das Ergebnis der Anfrage ist unbekannt. Prüfen Sie den Verlauf; sie wurde nicht erneut gesendet.",
+    "storageUnavailable": "Die Anfrage konnte nicht sicher gespeichert werden und wurde daher nicht gesendet.",
+    "conflict": "Diese Anfrage wurde bereits mit anderem Inhalt gesendet. Prüfen Sie den Verlauf.",
+    "interrupted": "Die Anfrage wurde unterbrochen. Einige Änderungen können bestehen bleiben; prüfen Sie den Verlauf."
   }
 }

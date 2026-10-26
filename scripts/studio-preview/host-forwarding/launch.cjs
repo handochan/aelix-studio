@@ -30,7 +30,7 @@ const args = bundled
     ];
 // Only this launcher holds the ACP input write end. Its death produces ACP EOF
 // even when the backend still holds the launcher's own stdin pipe open.
-const child = spawn(python, [...args, ...process.argv.slice(2)], {
+const child = spawn(python, [...args, '--managed-operations', ...process.argv.slice(2)], {
   stdio: ['pipe', 'inherit', 'inherit'],
   shell: false,
   windowsHide: true,

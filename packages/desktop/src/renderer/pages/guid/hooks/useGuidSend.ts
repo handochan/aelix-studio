@@ -271,6 +271,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       if (input.trim()) {
         const initialMessage = {
           input,
+          // One initial intent per new conversation. Copies restored in another
+          // window must keep the same identity before either renderer mounts.
+          operation_id: `initial-${conversation.id}`,
           files: files.length > 0 ? files : undefined,
         };
         sessionStorage.setItem(`acp_initial_message_${conversation.id}`, JSON.stringify(initialMessage));

@@ -48,11 +48,14 @@ import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/me
 import type { ChatFileRef } from '@/common/types/chatFile';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
+import type { ManagedRequestBinding } from '@/common/types/platform/acpTypes';
+import { getManagedOperationErrorMessage, ManagedOperationError, sendManagedMessage } from './managedOperations';
+import { useManagedOperationRecovery } from './managedOperations/useRecovery';
 import type { UseAcpMessageReturn } from './useAcpMessage';
 
 const configErrorMessageKey = (error: unknown) => {
@@ -281,11 +284,28 @@ const AcpSendBox: React.FC<{
     addOrUpdateMessage: addOrUpdateMessageRef.current,
   });
 
+  const queueBindingRef = useRef<((id: string, binding: ManagedRequestBinding) => Promise<void>) | null>(null);
+  const explicitQueuedSends = useRef(new Set<string>());
+  useManagedOperationRecovery(conversation_id, { setAiProcessing, markSendAccepted, markSendFailed });
+
   const executeCommand = useCallback(
-    async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
+    async (
+      {
+        input,
+        files,
+        sessions,
+        id,
+        operation_binding,
+        operation_binding_invalid,
+      }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'> &
+        Partial<Pick<ConversationCommandQueueItem, 'id' | 'operation_binding' | 'operation_binding_invalid'>>,
+      execution?: { manual: boolean }
+    ) => {
       // Plain user text; the backend resolves each ChatFileRef and injects the
       // [[AION_FILES]] marker at the send edge (no front-end path/marker building).
       try {
+        if (operation_binding_invalid || (operation_binding && teamSendMessage))
+          throw new ManagedOperationError('OPERATION_UNCERTAIN');
         if (teamPermission) await teamPermission.warmupSession();
         void checkAndUpdateTitle(conversation_id, input);
         if (teamSendMessage) {
@@ -299,19 +319,39 @@ const AcpSendBox: React.FC<{
 
         markSendStarted();
         setAiProcessing(true);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id,
-          files,
-          // `@@` references. Dropping this here is a silent failure: the agent
-          // simply never receives the session block.
-          sessions,
-        });
+        const manual = execution?.manual || (id ? explicitQueuedSends.current.delete(id) : true);
+        const result = await sendManagedMessage(
+          {
+            input,
+            conversation_id,
+            files,
+            // `@@` references. Dropping this here is a silent failure: the agent
+            // simply never receives the session block.
+            sessions,
+          },
+          {
+            id: id ?? `ui-${uuid(36)}`,
+            binding: operation_binding,
+            manual,
+            reuseUnadmitted: !id,
+            onPrepared: id
+              ? async (binding) => {
+                  const bind = queueBindingRef.current;
+                  if (!bind) throw new ManagedOperationError('OPERATION_STORAGE_UNAVAILABLE');
+                  await bind(id, binding);
+                }
+              : undefined,
+          }
+        );
         markSendAccepted(result.turn_id, result.runtime, result.msg_id);
+        if (result.operation?.replayed) setAiProcessing(result.runtime.is_processing);
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
         const errorMsg =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+          getManagedOperationErrorMessage(error, t) ||
+          getConversationRuntimeWorkspaceErrorMessage(error, t) ||
+          parseError(error) ||
+          t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed({
@@ -409,6 +449,7 @@ Please check your local CLI tool authentication status`,
     mode: queueMode,
     isInteractionLocked: isQueueInteractionLocked,
     enqueue,
+    bindOperation,
     remove,
     prioritize,
     sendNow,
@@ -431,6 +472,7 @@ Please check your local CLI tool authentication status`,
     runtimeGate: commandQueueRuntimeGate,
     onExecute: executeCommand,
   });
+  queueBindingRef.current = bindOperation;
 
   // `@@` session references the user picked. Declared before the handlers that
   // read it — every send path has to both forward and release it.
@@ -742,6 +784,10 @@ Please check your local CLI tool authentication status`,
   const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
+      if (item.operation_binding_invalid || (supportsMidturnDelivery && item.operation_binding)) {
+        Message.warning(t('conversation.managedOperation.uncertain'));
+        return;
+      }
       if (supportsMidturnDelivery) {
         // Supporting agents can deliver directly into the running turn — no
         // need to stop/restart. Remove the item BEFORE executing (rather than
@@ -772,9 +818,10 @@ Please check your local CLI tool authentication status`,
       // occurs when sendNow() calls onExecute() directly before the backend
       // has finished processing the stop.
       await effectiveHandleStop();
+      explicitQueuedSends.current.add(item.id);
       prioritize(item.id);
     },
-    [effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
+    [effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery, t]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 

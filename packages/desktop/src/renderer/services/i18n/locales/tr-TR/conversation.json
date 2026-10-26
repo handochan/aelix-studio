@@ -784,5 +784,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Planı genişlet",
     "collapse": "Planı daralt"
+  },
+  "managedOperation": {
+    "uncertain": "İsteğin sonucu bilinmiyor. Geçmişi kontrol edin; istek yeniden gönderilmedi.",
+    "storageUnavailable": "İstek güvenli biçimde kaydedilemediği için gönderilmedi.",
+    "conflict": "Bu istek daha önce farklı içerikle gönderildi. Geçmişi kontrol edin.",
+    "interrupted": "İstek kesildi. Bazı değişiklikler kalmış olabilir; geçmişi kontrol edin."
   }
 }

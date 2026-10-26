@@ -221,10 +221,32 @@ export type AcpConfigOptionDto = {
 };
 
 export type EnsureConversationRuntimeResponse = {
+  operation_capability?: HostOperationCapability;
   recovered: boolean;
   config_options: AcpConfigOptionDto[];
   runtime: TConversationRuntimeSummary;
 };
+
+export type HostOperationKey = { schema: 'aelix.operation/1'; id: string; host_store_id: string };
+export type HostOperationCapability = { schema: 'aelix.operation/1'; host_store_id: string };
+export type HostOperationReceipt = HostOperationKey & {
+  msg_id: string;
+  turn_id: string;
+  state:
+    | 'accepted'
+    | 'pending'
+    | 'recovery_waiting'
+    | 'completed'
+    | 'cancelled'
+    | 'cancelled_before_dispatch'
+    | 'failed'
+    | 'interrupted'
+    | 'not_found';
+  effects_unknown: boolean;
+  automatic_retry: false;
+  replayed: boolean;
+};
+export type ManagedRequestBinding = { operation: HostOperationKey; request_digest: string };
 
 export type GetConfigOptionsResponse = {
   config_options: AcpConfigOptionDto[];

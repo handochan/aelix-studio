@@ -337,7 +337,21 @@ def main(args):
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
             if permission['status'] != 'passed' or not permission['installer'] or permission['defaultHostOverride']:
                 raise ValueError('Installed default host permission acceptance failed')
-            report = dict(status='passed', target=target, permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output), artifactKind=kind, artifactSha256=digest(artifact),
+            forwarding = {}
+            for harness, filename in (('wire.py', 'wire.json'), ('smoke.py', 'qualification.json')):
+                forwarding_output = output.parent / 'forwarding' / filename
+                subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-forwarding' / harness),
+                                '--host', str(core), '--python', str(payload / ('python/python.exe' if sys.platform == 'win32' else 'python/bin/python3')), '--adapter', str(venv_path(runtime, 'adapter', 'aelix-acp')),
+                                '--acp-source', str(runtime / 'source' / ('aelix-acp-' + prepared['acp']['commit'])),
+                                '--artifacts', str(runtime / 'wheels'), '--payload', str(payload), '--report', str(forwarding_output)],
+                               check=True, cwd=ROOT, env=environment, timeout=300)
+                forwarding[filename] = json.loads(forwarding_output.read_text(encoding='utf-8'))
+                if forwarding[filename]['status'] != 'passed' or not forwarding[filename]['installer']:
+                    raise ValueError('Installed managed forwarding acceptance failed')
+            report = dict(status='passed', target=target, forwardingWireChecks=forwarding['wire.json']['checksPassed'],
+                          forwardingUiChecks=forwarding['qualification.json']['checksPassed'],
+                          forwardingReportSha256={name: digest(output.parent / 'forwarding' / name) for name in forwarding},
+                          permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output), artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),

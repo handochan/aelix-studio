@@ -97,7 +97,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .local/default-host
-          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-recovery/permission-restore.patch') }}
+          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-forwarding/forwarding.patch') }}
       - name: Install Linux source-host prerequisites
         if: runner.os == 'Linux'
         shell: bash
@@ -162,6 +162,8 @@ jobs:
             .local/provider-installer/permission/qualification.json
             .local/provider-installer/permission/renderer-result.json
             .local/provider-installer/permission/*.png
+            .local/provider-installer/forwarding/*.json
+            .local/provider-installer/forwarding/*.png
             resources/bundled-aioncore/**/build-receipt.json
             resources/bundled-aioncore/**/manifest.json
             .local/default-host/**/build.log
@@ -470,7 +472,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: .local/default-host
-          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-recovery/permission-restore.patch') }}
+          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-forwarding/forwarding.patch') }}
       - name: Install Linux source-host prerequisites
         if: runner.os == 'Linux'
         shell: bash

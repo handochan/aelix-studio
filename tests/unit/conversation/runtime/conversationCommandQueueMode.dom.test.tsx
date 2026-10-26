@@ -209,7 +209,7 @@ describe('useConversationCommandQueue mode & send-now', () => {
     });
 
     await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
-    expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'second' }));
+    expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'second' }), { manual: true });
     // The other command stays queued and manual mode is preserved.
     await waitFor(() => expect(result.current.items).toHaveLength(1));
     expect(result.current.items[0].input).toBe('first');

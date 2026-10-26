@@ -143,7 +143,7 @@ function verifyDefaultHostBundle(directory, target) {
     !receipt.cargoVersion.startsWith('cargo ' + policy.rustToolchain + ' ') ||
     !receipt.rustcVersionVerbose.startsWith('rustc ' + policy.rustToolchain + ' ') ||
     receipt.originalSourceFilesVerified !== policy.sourceFileCount ||
-    receipt.patchedSourceFilesVerified !== policy.sourceFileCount ||
+    receipt.patchedSourceFilesVerified !== (policy.patchedSourceFileCount ?? policy.sourceFileCount) ||
     receipt.profile !== 'release' ||
     receipt.rustFlags !== (targetPolicy.rustFlags ?? '') ||
     receipt.patchSha256 !== policy.patch.sha256 ||
@@ -152,7 +152,7 @@ function verifyDefaultHostBundle(directory, target) {
     receipt.licenseFileSha256 !== policy.upstreamLicenseSha256 ||
     receipt.releasedHostBytes !== false ||
     receipt.nativePatches.length ||
-    receipt.sourceFilesAfterBuildVerified !== receipt.originalSourceFilesVerified
+    receipt.sourceFilesAfterBuildVerified !== receipt.patchedSourceFilesVerified
   )
     throw new Error('Default host build provenance differs');
   if (targetPolicy.container) {

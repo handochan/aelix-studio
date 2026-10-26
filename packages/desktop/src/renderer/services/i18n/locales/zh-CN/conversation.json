@@ -782,5 +782,11 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展开计划",
     "collapse": "收起计划"
+  },
+  "managedOperation": {
+    "uncertain": "无法确认请求结果。请检查历史记录；未自动重新发送。",
+    "storageUnavailable": "无法安全保存请求信息，因此未发送。",
+    "conflict": "此请求已以不同内容发送。请检查历史记录。",
+    "interrupted": "请求已中断，可能已产生部分更改。请检查历史记录。"
   }
 }

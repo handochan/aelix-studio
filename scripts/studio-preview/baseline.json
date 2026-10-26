@@ -85,9 +85,9 @@
   },
   "acp": {
     "repository": "handochan/aelix-acp",
-    "commit": "361c8ec9ffbc7e93c34653f37ee784421af3bd93",
+    "commit": "117cf6c9d536c4aa98b1f3a6481c12464584960c",
     "version": "0.1.0",
-    "archiveSha256": "df70c3165e8907ce2329a7b5b1418c546002255cb9d33481d46a601715ea066c"
+    "archiveSha256": "6c646f5bf8d71fe766939d3dd9d2bc817519d041272505080c19f0c782dab1fd"
   },
   "aioncore": {
     "repository": "iOfficeAI/AionCore",
@@ -115,7 +115,7 @@
         "sha256": "d1ed8d1da869230c18701747d07e8f068db5b8c9442e65261304aeb4c27eacf6"
       }
     },
-    "sourceManifestSha256": "3e1f10018dbc2fd8e03a26d2884bd9cd7853972116eebf12bc556f3f6e963534"
+    "sourceManifestSha256": "954942f6a6903802f6158ae1f9ba8812a95882aa4b039dfa8fbf959ea7e8e155"
   },
   "acceptance": {
     "hostTargets": ["darwin-arm64"],
