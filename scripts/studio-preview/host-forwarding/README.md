@@ -17,9 +17,13 @@ checkout. The public native beta.2 wheels remain unchanged.
   processes using a synthetic model. It checks admission/duplicate/conflict,
   original cancel scope, consent, bounded unsupported reverse requests, mode
   generation, hard host death, status-only recovery, session authentication,
-  owner denial and cookie/CSRF rejection. Desktop local mode intentionally
-  retains AionCore's existing local default identity; it does not become an
-  authenticated network service by enabling this feature.
+  owner denial and cookie/CSRF rejection. Each launch uses Core's existing
+  `--port 0` / listening-event path, while crash recovery retains the original
+  data directory, operation fences and pre-crash native/model request baseline.
+  Failed startup JSON records only fixed phase/boolean/exit-code diagnostics;
+  raw local host logs are not uploaded. Desktop local mode intentionally retains
+  AionCore's existing local default identity; it does not become an authenticated
+  network service by enabling this feature.
 - `smoke.py` and `smoke.mjs` exercise the existing Electron initial message,
   send box and command queue. The response-loss test accepts the actual HTTP
   request, then aborts its response and reloads the renderer. Native dispatch

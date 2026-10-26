@@ -1,6 +1,6 @@
 """Owned source host + installed ACP + actual public native, synthetic model."""
 
-import argparse, asyncio, hashlib, json, os, signal, socket, subprocess, sys, tempfile, urllib.request, urllib.error
+import argparse, asyncio, hashlib, json, os, signal, subprocess, sys, tempfile, urllib.request, urllib.error
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -22,6 +22,42 @@ def http(port, path, method="GET", body=None, headers=None):
         except ValueError:
             result = {}
         return error.code, result
+
+
+def listening_port(raw):
+    # Only complete events from this launch may select the loopback endpoint.
+    complete = raw.rsplit(b"\n", 1)[0] if b"\n" in raw else b""
+    for line in complete.splitlines():
+        if not line.startswith(b"AIONCORE_LISTENING "):
+            continue
+        try:
+            if len(line) > 4096:
+                raise ValueError
+            value = json.loads(line[len(b"AIONCORE_LISTENING "):])
+            if (set(value) != {"host", "port"} or value["host"] != "127.0.0.1"
+                    or type(value["port"]) is not int or not 1 <= value["port"] <= 65535):
+                raise ValueError
+            return value["port"]
+        except (ValueError, TypeError):
+            raise RuntimeError("Invalid owned host listening event") from None
+    return None
+
+
+def startup_diagnostics(raw, returncode, phase):
+    if phase not in {"initial_startup", "native_contract", "crash_restart", "original_operation_recovery", "authenticated_restart", "authentication_contract"}:
+        phase = "unknown"
+    if returncode is not None and type(returncode) is not int:
+        returncode = None
+    return dict(
+        phase=phase,
+        returncode=returncode,
+        bindFailed=b"BOOTSTRAP_BIND_FAILED" in raw,
+        peerAlreadyRunning=b"BOOTSTRAP_PEER_ALREADY_RUNNING" in raw,
+        dataInitFailed=b"BOOTSTRAP_DATA_INIT_FAILED" in raw,
+        serviceInitFailed=b"BOOTSTRAP_SERVICE_INIT_FAILED" in raw,
+        listeningObserved=b"AIONCORE_LISTENING " in raw,
+        readyObserved=b"AIONCORE_READY" in raw,
+    )
 
 
 def observers(root, payload=None):
@@ -131,17 +167,21 @@ async def run(args):
             AIONUI_EXTENSIONS_PATH=str(root / "extensions"),
             AIONUI_EXTENSION_STATES_FILE=str(root / "extension-states.json"),
         )
-        with socket.socket() as sock:
-            sock.bind(("127.0.0.1", 0))
-            port = sock.getsockname()[1]
-        log = (root / "host.log").open("wb")
+        port, process = None, None
+        phase = "initial_startup"
+        startup_events = []
+        launch_offset = 0
+        log_path = root / "host.log"
+        log = log_path.open("wb")
 
         async def launch(local=True):
-            return await asyncio.create_subprocess_exec(
+            nonlocal port, process, launch_offset
+            launch_offset = log_path.stat().st_size
+            process = await asyncio.create_subprocess_exec(
                 str(HOST),
                 *(["--local"] if local else []),
                 "--port",
-                str(port),
+                "0",
                 "--data-dir",
                 str(root / "host"),
                 "--managed-resources-mode",
@@ -154,8 +194,26 @@ async def run(args):
                 stderr=log,
                 **({"start_new_session": True} if os.name != "nt" else {}),
             )
-
-        process = await launch()
+            # Match the desktop launcher: let Core bind port 0 and consume its
+            # actual listening event. The original state and operation fences
+            # stay unchanged across restarts; HTTP port is not their identity.
+            async with asyncio.timeout(30):
+                while True:
+                    raw = log_path.read_bytes()[launch_offset:]
+                    selected = listening_port(raw)
+                    if selected is not None:
+                        port = selected
+                        try:
+                            code, _ = await asyncio.to_thread(http, port, "/api/assistants")
+                            assert code == (200 if local else 401), "Unexpected owned host startup posture"
+                            startup_events.append(startup_diagnostics(
+                                log_path.read_bytes()[launch_offset:], process.returncode, phase))
+                            return process
+                        except OSError:
+                            pass
+                    if process.returncode is not None:
+                        raise RuntimeError("Owned host exited during startup")
+                    await asyncio.sleep(0.05)
 
         async def api(path, method="GET", body=None, expected=(200, 201, 202)):
             code, value = await asyncio.to_thread(http, port, path, method, body)
@@ -189,15 +247,8 @@ async def run(args):
 
         checks = []
         try:
-            async with asyncio.timeout(30):
-                while True:
-                    try:
-                        await api("/api/assistants")
-                        break
-                    except OSError:
-                        if process.returncode is not None:
-                            raise RuntimeError("Owned source host exited")
-                        await asyncio.sleep(0.05)
+            process = await launch()
+            phase = "native_contract"
             python = os.path.abspath(args.python)
             if args.payload:
                 alias = root / "bundled-python"
@@ -428,14 +479,9 @@ async def run(args):
             process.kill()
             await process.wait()
             fixture.release.set()
+            phase = "crash_restart"
             process = await launch()
-            async with asyncio.timeout(30):
-                while True:
-                    try:
-                        await api("/api/assistants")
-                        break
-                    except OSError:
-                        await asyncio.sleep(0.05)
+            phase = "original_operation_recovery"
             async with asyncio.timeout(20):
                 while True:
                     recovered = await status(route, crashed)
@@ -488,7 +534,9 @@ async def run(args):
             )
             await provision.communicate(b"Synthetic-Qualification-Password-123!\n")
             assert provision.returncode == 0
+            phase = "authenticated_restart"
             process = await launch(local=False)
+            phase = "authentication_contract"
             path = (
                 route
                 + "/operations/"
@@ -496,13 +544,7 @@ async def run(args):
                 + "?host_store_id="
                 + key["host_store_id"]
             )
-            async with asyncio.timeout(30):
-                while True:
-                    try:
-                        assert (await asyncio.to_thread(http, port, path))[0] == 401
-                        break
-                    except OSError:
-                        await asyncio.sleep(0.05)
+            assert (await asyncio.to_thread(http, port, path))[0] == 401
             assert (
                 await asyncio.to_thread(
                     http, port, path, "GET", None, {"Authorization": "Bearer invalid"}
@@ -563,6 +605,9 @@ async def run(args):
             checks.append(
                 "malformed_typed_request_and_sdk_warn_payload_never_enter_host_logs_or_database"
             )
+            assert [event["phase"] for event in startup_events] == [
+                "initial_startup", "crash_restart", "authenticated_restart"]
+            assert all(event["listeningObserved"] and event["readyObserved"] for event in startup_events)
             report = dict(
                 status="passed",
                 scope="actual host HTTP/stdio + installed ACP + public native; synthetic provider; UI separate",
@@ -571,16 +616,27 @@ async def run(args):
                 providerRequests=len(fixture.requests),
                 hostBinarySha256=hashlib.sha256(HOST.read_bytes()).hexdigest(),
                 nativePatches=[],
+                startupEvents=startup_events,
                 harnessSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
             )
-        except BaseException:
-            args.report.with_name("host-failure.local").write_bytes(
-                (root / "host.log").read_bytes()
-            )
+        except BaseException as error:
+            raw = log_path.read_bytes()
+            args.report.with_name("host-failure.local").write_bytes(raw)
+            failure_kind = type(error).__name__
+            if failure_kind not in {"TimeoutError", "AssertionError", "RuntimeError", "OSError", "CancelledError"}:
+                failure_kind = "Other"
+            # Uploaded diagnostics are fixed enums/booleans and an exit code,
+            # never raw logs, argv, endpoints, request payloads or exceptions.
+            args.report.write_text(json.dumps(dict(
+                status="failed", checksPassed=checks, failureKind=failure_kind,
+                startup=startup_diagnostics(raw[launch_offset:], process.returncode if process else None, phase),
+                startupEvents=startup_events,
+                nativePatches=[], harnessSha256=hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            ), indent=2) + "\n", encoding="utf-8")
             raise
         finally:
             fixture.release.set()
-            if process.returncode is None:
+            if process is not None and process.returncode is None:
                 process.terminate()
                 try:
                     await asyncio.wait_for(process.wait(), 10)
@@ -621,6 +677,7 @@ def main():
     args.report.parent.mkdir(parents=True, exist_ok=True)
     if not __debug__:
         raise RuntimeError("Qualification requires assertions")
+    args.report.write_text(json.dumps(dict(status="running", nativePatches=[])) + "\n", encoding="utf-8")
     asyncio.run(run(args))
 
 

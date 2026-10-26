@@ -69,6 +69,31 @@ class ReceiptTests(unittest.TestCase):
                         if isinstance(node, ast.Constant) and isinstance(node.value, str)]
             self.assertEqual(literals.count(str(payload.resolve() / 'launch.py')), 2)
 
+    def test_forwarding_startup_events_and_diagnostics_are_bounded(self):
+        wire_spec = importlib.util.spec_from_file_location(
+            'forwarding_wire_startup', ROOT / 'scripts/studio-preview/host-forwarding/wire.py')
+        wire = importlib.util.module_from_spec(wire_spec)
+        wire_spec.loader.exec_module(wire)
+        secret = 'SYNTHETIC_STARTUP_SECRET_MUST_NOT_APPEAR'
+        event = b'AIONCORE_LISTENING {"host":"127.0.0.1","port":54321}\n'
+        self.assertIsNone(wire.listening_port(event[:-1]))
+        self.assertEqual(wire.listening_port(event), 54321)
+        for payload in ({'host': 'external.example', 'port': 54321},
+                        {'host': '127.0.0.1', 'port': True},
+                        {'host': '127.0.0.1', 'port': 65536}):
+            with self.assertRaisesRegex(RuntimeError, '^Invalid owned host listening event$'):
+                wire.listening_port(b'AIONCORE_LISTENING ' + json.dumps(payload).encode() + b'\n')
+        previous = event + b'AIONCORE_READY\n'
+        current = (secret + '\nBOOTSTRAP_BIND_FAILED\n').encode()
+        diagnostic = wire.startup_diagnostics((previous + current)[len(previous):], 3, 'crash_restart')
+        self.assertTrue(diagnostic['bindFailed'])
+        self.assertFalse(diagnostic['listeningObserved'])
+        self.assertFalse(diagnostic['readyObserved'])
+        self.assertEqual(diagnostic['returncode'], 3)
+        self.assertNotIn(secret, json.dumps(diagnostic))
+        self.assertEqual(wire.startup_diagnostics(current, secret, secret)['phase'], 'unknown')
+        self.assertIsNone(wire.startup_diagnostics(current, secret, secret)['returncode'])
+
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
         with tempfile.TemporaryDirectory() as temporary:
