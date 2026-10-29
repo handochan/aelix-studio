@@ -1,4 +1,22 @@
-# Preview 개발 착수 안내
+# Studio 개발 착수 안내
+
+## Beta 우선 착수 순서 (2026-10-30)
+
+D13에 따라 Studio의 첫 공개 릴리스는 공동 Beta다. 이 절이 현재 착수 기준이고, 아래 절은
+2026-10-25 Preview 준비 기록이다. 판단은 [decisions.md](decisions.md)의 D03·D12·D13과 사용자 결정 기록을 따른다.
+
+| 단계 | 실행 Issue                                                                                                                                                                                                                                                                                                                                                                                                         | 선행 / 비고                                            |
+| ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------ |
+| 0    | [Studio #27 결정 기록](https://github.com/handochan/aelix-studio/issues/27), [aelix-ai #623 control-v1 freeze](https://github.com/handochan/aelix-ai/issues/623), [aelix-ai #624 B6 선택 저장 노출](https://github.com/handochan/aelix-ai/issues/624)                                                                                                                                                              | #624는 aelix-ai B6 착수 전에 판정                      |
+| 1    | [host #1 기준선](https://github.com/handochan/aelix-studio-host/issues/1) ∥ [ACP #20 PR #1 재정렬](https://github.com/handochan/aelix-acp/issues/20) → [host #2 정체성·외부 접속](https://github.com/handochan/aelix-studio-host/issues/2) ∥ [host #3 권한 복원](https://github.com/handochan/aelix-studio-host/issues/3) → [host #4 세션 동기화·`_meta`](https://github.com/handochan/aelix-studio-host/issues/4) | Studio #14는 host #2와 함께                            |
+| 2    | [Studio #28 Beta 기준선](https://github.com/handochan/aelix-studio/issues/28) → [Studio #29 runtime-controls 이전](https://github.com/handochan/aelix-studio/issues/29), [Studio #8 내부 검증 빌드](https://github.com/handochan/aelix-studio/issues/8)                                                                                                                                                            | host composition 변경은 직렬. #29는 Codex 담당 확인 뒤 |
+| 3    | (#24, #30) → (#31, #32) → (#7, #6) → (#10, #11) → (#26, #15)                                                                                                                                                                                                                                                                                                                                                       | 동시 구현 최대 2개. #7은 aelix-ai B6 뒤                |
+| 4    | 최종 beta.3·Analytics wheel로 [Studio #9](https://github.com/handochan/aelix-studio/issues/9) 재검증 → 공동 출시                                                                                                                                                                                                                                                                                                   | #623 freeze 확인                                       |
+
+보류: aelix-ai #612 분할(R4), 세션 잠금 보유자·상태 조회(R7), 확장 관리 API(R8)는 사용자 판정 전이다.
+서브에이전트 S3(자식 기록·승인·자식별 제어)는 R4 판정 뒤 카드로 만든다.
+
+## Preview 준비 기록 (2026-10-25)
 
 2026-10-25 준비 기준. 실제 상태와 담당은 [Project 9](https://github.com/users/handochan/projects/9) 및
 Issue/PR·CI를 다시 확인한다. 이 준비는 제품 코드·native wheel·dependency·출시를 변경하지 않는다.
@@ -14,7 +32,7 @@ Issue/PR·CI를 다시 확인한다. 이 준비는 제품 코드·native wheel·
 - 첫 Beta는 공개 beta.3·Analytics 첫 Beta와 공동 출시하고 홈페이지 소개·지원 OS 다운로드·시작 안내의 실제 공개 확인을 포함한다.
 - helper 배치·추가 wire/schema·writable generation·upstream 교체 방법은 [decisions.md](decisions.md)의 제안 상태다. source spike/ADR로 정하며 출시 제한을 임의로 승인하지 않는다.
 
-## 첫 실행 순서
+## Preview 첫 실행 순서 (2026-10-25 기록)
 
 공통 기준선은 한 명이 직렬로 정한다. 아직 선행이 끝나지 않은 Studio 카드를 Ready로 표시하지 않는다.
 기준선/공통 계약 이후에만 독립 구현을 최대 두 개씩 배정한다.
