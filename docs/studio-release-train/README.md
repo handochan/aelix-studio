@@ -107,17 +107,17 @@ handoff를 약속할 수 없다. 보기/복제 분기만 제공하거나 호환 
 
 ## 5. 출시 단계와 필수 약속
 
-| 영역          | P: beta.2 기반 Preview                                                                                 | B: beta.3·Analytics·Studio 첫 Beta                                                                  | 이후                                             |
-| ------------- | ------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| 설치/시작     | 시스템 Python/소스 없이 설치, Provider 설정·기존 CLI 감지·첫 응답                                      | upgrade/uninstall/rollback 및 기존 사용자 migration 검증                                            | 조직 관리·배포 확장                              |
-| 대화 제어     | 모델·추론·stream·Ask/Yolo·중단·context 표시·compact, 기존 Aion 분기/설정 UI 연결. clear 별도 구현 제외 | 공개 beta.3 기능을 기준으로 실제 작업을 host UI로 수용. 슬래시 명령 전수 복제는 요구하지 않음       | 고급 편집·협업                                   |
-| 관리          | 프로필 작성/선택, 확장 설치/on-off, 도구/스킬 on-off를 실제 실행에 반영                                | profile CRUD, schema-driven 관리, 표준 native dialog/extension 명령, 출처·오류·복구                 | 확장별 웹 기여 표면                              |
-| CLI 세션      | 발견·정체성 연결·소유자 표시·읽기 전용 갱신. legacy 안전성 제약 명시                                   | 양쪽 보유자 표시 + 공통 lock 단일 writer(세션 종료까지)·해제 후 상대 턴 반영·이어받기               | 실행 중 live 보기·원격 host·장기 작업 감독       |
-| Analytics     | 명시적 experimental 상태라도 설치/초기화/분석/근거/다중 페이지 미리보기 사용 가능                      | 실제 Analytics Beta artifact와 공식 지원·공동 검증                                                  | 선택 기반 후속 분석은 Analytics 계약에 따라 별도 |
-| 팀            | 기존 Team UX 보존, 실제 leader/teammate 메시지·도구·승인·취소 수용                                     | Aion Team과 native child 상태를 구분하고 복구 가능한 진행 표시                                      | Aelix orchestration으로 단계 전환                |
-| Desktop/Web   | 기존 5개 build target와 인증된 단일 운영자 WebUI, mobile browser                                       | 모든 지원 target의 설치·업데이트·핵심 여정 수용                                                     | native mobile app/IdP SSO/다중 사용자            |
-| 네트워크      | 인터넷·내부 Provider·차단 모드를 구분, 자산/런타임 번들                                                | cache 없는 신규 환경의 설치·시작·분석·패키지 반입·업데이트 검증                                     | 조직 정책/원격 브라우저                          |
-| 공식 홈페이지 | 첫 Beta 소개·다운로드·문서 자료 준비                                                                   | Studio 소개·실제 지원 OS 다운로드·시작 안내·CLI/Analytics 관계·Beta 제한을 홈페이지에 공개하고 검증 | 출시 버전에 맞춰 소개·문서·다운로드 유지         |
+| 영역          | P: beta.2 기반 Preview                                                                                 | B: beta.3·Analytics·Studio 첫 Beta                                                                               | 이후                                             |
+| ------------- | ------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| 설치/시작     | 시스템 Python/소스 없이 설치, Provider 설정·기존 CLI 감지·첫 응답                                      | upgrade/uninstall/rollback 및 기존 사용자 migration 검증                                                         | 조직 관리·배포 확장                              |
+| 대화 제어     | 모델·추론·stream·Ask/Yolo·중단·context 표시·compact, 기존 Aion 분기/설정 UI 연결. clear 별도 구현 제외 | 공개 beta.3 기능을 기준으로 실제 작업을 host UI로 수용. 슬래시 명령 전수 복제는 요구하지 않음                    | 고급 편집·협업                                   |
+| 관리          | 프로필 작성/선택, 확장 설치/on-off, 도구/스킬 on-off를 실제 실행에 반영                                | profile CRUD, schema-driven 관리, 표준 native dialog/extension 명령, 출처·오류·복구                              | 확장별 웹 기여 표면                              |
+| CLI 세션      | 발견·정체성 연결·소유자 표시·읽기 전용 갱신. legacy 안전성 제약 명시                                   | 양쪽 live 보기 + 공통 lock 기반 단일 writer·안전한 이어받기. 어려우면 최소선은 양쪽 보유자 표시·idle 동기화(D03) | 원격 host·장기 작업 감독                         |
+| Analytics     | 명시적 experimental 상태라도 설치/초기화/분석/근거/다중 페이지 미리보기 사용 가능                      | 실제 Analytics Beta artifact와 공식 지원·공동 검증                                                               | 선택 기반 후속 분석은 Analytics 계약에 따라 별도 |
+| 팀            | 기존 Team UX 보존, 실제 leader/teammate 메시지·도구·승인·취소 수용                                     | Aion Team과 native child 상태를 구분하고 복구 가능한 진행 표시                                                   | Aelix orchestration으로 단계 전환                |
+| Desktop/Web   | 기존 5개 build target와 인증된 단일 운영자 WebUI, mobile browser                                       | 모든 지원 target의 설치·업데이트·핵심 여정 수용                                                                  | native mobile app/IdP SSO/다중 사용자            |
+| 네트워크      | 인터넷·내부 Provider·차단 모드를 구분, 자산/런타임 번들                                                | cache 없는 신규 환경의 설치·시작·분석·패키지 반입·업데이트 검증                                                  | 조직 정책/원격 브라우저                          |
+| 공식 홈페이지 | 첫 Beta 소개·다운로드·문서 자료 준비                                                                   | Studio 소개·실제 지원 OS 다운로드·시작 안내·CLI/Analytics 관계·Beta 제한을 홈페이지에 공개하고 검증              | 출시 버전에 맞춰 소개·문서·다운로드 유지         |
 
 위 표의 Preview 열은 **목표/검증 gate**다. 현재 구현 상태가 아니다. D13에 따라 P열은
 내부 검증 gate이고 공개 출시 gate는 B열이다.
@@ -145,7 +145,7 @@ flowchart TD
 패키지·catalog 같은 전역 관리는 LLM을 띄우지 않는 Studio 소유 stdio helper로 연결한다.
 helper는 현재 host가 감독하는 세션을 다시 감독하지 않는다. 실행 중 커스텀 command,
 dialog, steer/request metadata는 실제 host 통과 여부를 따로 probe하고, 필요할 때만
-작은 forwarding patch를 검토한다. configOptions 성공으로 이 경로까지 완료됐다고 세지 않는다.
+작은 host 변경(D12)을 검토한다. configOptions 성공으로 이 경로까지 완료됐다고 세지 않는다.
 별도 범용 daemon은 강제하지 않는다. 상세 경계는 D05와 세션 계약 1.1절을 따른다.
 
 | 계층                             | 소유하는 것                                                                                                           | 소유하지 않는 것                                            |
