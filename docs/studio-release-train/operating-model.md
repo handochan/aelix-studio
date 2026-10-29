@@ -1,7 +1,7 @@
 # Studio / ACP 개발 운영 모델
 
 공통 운영 기준의 정본은 [Project 9 README](https://github.com/users/handochan/projects/9)다.
-정확한 ID는 `PVT_kwHOA-ATMs4BojoA`이며 core·ACP·Studio의 관련 Issue만 연결한다.
+정확한 ID는 `PVT_kwHOA-ATMs4BojoA`이며 core·ACP·Studio·Studio host(`aelix-studio-host`)의 관련 Issue만 연결한다.
 이 문서는 설계 묶음의 읽기 진입점이다. 보드 규칙과 다른 독립 정책을 만들지 않는다.
 
 ## 최소 운영
