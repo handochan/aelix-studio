@@ -113,6 +113,8 @@ Preview J02의 완료 기록 자동 갱신은 idle file snapshot이 아니다. �
 실행 중 token/thought/tool/approval delta까지의 live streaming은 공통 observation
 publisher가 필요하므로 P-conditional이며 B 필수다. 제안 SLO는 정상 로컬 환경에서
 관찰 가능한 변화 후 2초 이내 갱신이다. 이 수치는 측정값이 아니며 환경·부하와 함께 수용한다.
+Beta에서 live 보기가 불가하면 [D03](decisions.md)의 최소선(양쪽 보유자 표시·idle 동기화)을 따르고,
+그 근거를 [Studio #30](https://github.com/handochan/aelix-studio/issues/30)에 남긴다.
 
 ## 4. 측정 기록의 단위
 
