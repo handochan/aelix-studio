@@ -80,7 +80,7 @@ jobs:
         env:
           PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
         run: |
-          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/installed-app.json -- python -B scripts/studio-preview/host-release/smoke.py --runtime .local/studio-preview --payload /opt/AionUi/resources/studio-preview --report .local/outbound/permission/qualification.json
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/installed-app.json -- .local/studio-preview/native/bin/python -B scripts/studio-preview/host-release/smoke.py --runtime .local/studio-preview --payload /opt/AionUi/resources/studio-preview --report .local/outbound/permission/qualification.json
       - name: Audit production startup without test guards
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:

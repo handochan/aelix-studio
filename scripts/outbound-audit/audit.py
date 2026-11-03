@@ -97,7 +97,7 @@ def audit(command, report_path):
             raise RuntimeError('Linux strace is required; the audit cannot be skipped')
         with tempfile.TemporaryDirectory(prefix='studio-outbound-') as directory:
             trace = Path(directory) / 'network'
-            process = subprocess.run(['strace', '-f', '-Y', '-qq', '-v', '-s', '0', '-e',
+            process = subprocess.run(['strace', '-f', '-Y', '-q', '-v', '-s', '0', '-e',
                                       'trace=connect,sendto,sendmsg,sendmmsg', '-o', str(trace), '--', *command])
             report = analyze_trace(trace)
         report['commandExitCode'] = process.returncode

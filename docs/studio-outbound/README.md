@@ -23,7 +23,7 @@ remaining decisions; the Issue stays open.
 | 11  | Preview image failure falls back to original URL               | #35 owns `MarkdownViewer.tsx`, its new error strings and tests. Not changed here.                                                                                                                                                                                                                     |
 | 12  | Non-URL browser input goes to Bing                             | Retained pending a configurable search-template design. Removing search or making it unusable is outside the noninteractive boundary. Explicit URL navigation is preserved.                                                                                                                           |
 | 13  | Image-provider calls add AionUi referral headers               | Removed. Explicit provider `baseConfig.defaultHeaders` and configured endpoints are preserved.                                                                                                                                                                                                        |
-| 14  | Host npm/npx defaults                                          | Fixed by host #2 / .3+. #35 owns the pin and settings forwarding. Historical npm-address attempts still need PID/feature attribution in the new CI reports.                                                                                                                                           |
+| 14  | Host npm/npx defaults                                          | Fixed by host #2 / .3+. #35 owns the pin and settings forwarding. Studio also preflighted disabled chrome-devtools entries; this draft skips that preflight and preserves explicit enablement. The default in-app browser MCP still needs offline bundling.                                           |
 | 15  | Build downloads unpinned AionHub `dist-latest`                 | Still present. Next step: retain functionality with an immutable version/hash manifest or offline resource import; do not silently drop bundled features.                                                                                                                                             |
 
 Provider/OAuth, explicit MCP, channels, speech recognition, WebUI and local Team
@@ -76,6 +76,17 @@ also starts an IPv6 reachability check even for loopback HTTP requests. Its
 uses the fixed Google IPv6 address; generic background-network flags and turning
 off DoH do not establish zero attempts.
 
+A later production-default CI audit at head `fb0d6ee8e` started successfully and
+reported 81 attempts / 0 unparsed on Linux x64. It attributed npm-address calls
+to `npm exec chrome` / libuv threads, not Chromium alone. Source review identified
+`runBackendMigrations.ts` preflighting `chrome-devtools` even when disabled, and
+the default in-app browser MCP spawning pinned `chrome-devtools-mcp` via npx.
+The disabled preflight is now skipped; explicitly enabled MCP behavior is
+retained. The in-app browser MCP needs offline bundling or a user-selected
+installation step; it is not silently disabled here. The same run's session audit
+failed before app launch because its driver used system Python; the workflow now
+uses the prepared native Python, retaining the receipt verification.
+
 ## Gate and decisions
 
 `studio-outbound.yml` adds a failing whole-installed-app CI job for both Linux
@@ -102,13 +113,14 @@ finished. Green unit tests do not establish a zero-attempt app.
    maintained engine patch that uses OS/local routing information. Preserve
    user-configured IPv6 endpoints; do not disable IPv6 globally or exempt Google
    from the audit. An Electron dependency change is also held at #35's manifest.
-3. **Monaco:** bundle the editor/workers after #35, with no feature loss. This
+3. **Browser MCP:** recommended: bundle the pinned chrome-devtools MCP and its dependencies, preserving browser control offline. Alternatives are an internal package source with explicit installation, or default-off with user opt-in. Do not disable browser control silently. This dependency work also needs manifest integration after #35.
+4. **Monaco:** bundle the editor/workers after #35, with no feature loss. This
    follows the existing decision and needs integration, not a new approval to
    remove the editor.
-4. **Browser search:** recommended: no implicit public search provider and an
+5. **Browser search:** recommended: no implicit public search provider and an
    explicit user-configured template; retain navigation and show a reason for
    non-URL input before search is configured. Alternative: internal search URL.
-5. **Hub and offline delivery:** pin all resource inputs and hashes, then add
+6. **Hub and offline delivery:** pin all resource inputs and hashes, then add
    offline import and final five-target tests. Disabling or removing visible
    features is not assumed.
 
@@ -119,7 +131,7 @@ connection list or successful offline smoke would not replace an attempt audit.
 ## Local source validation
 
 The source gate passed lint (warnings retained), format, TypeScript and all 13
-locale checks. Vitest: **5,009 passed / 7 skipped**; audit parser: **8 passed**.
+locale checks. Vitest: **5,012 passed / 7 skipped**; audit tests: **9 passed on Linux** (including a real blocked-thread exit) and **2 startup-environment tests passed**.
 A real descendant TCP/UDP positive control detected **2 attempts / 0 unparsed**
 and correctly exited 86. The earlier coverage run completed at **54.24% statements**;
 it predates the final chat-image change and does not meet the repository's 80%

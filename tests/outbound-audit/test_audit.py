@@ -2,6 +2,8 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+import shutil
+import sys
 
 ROOT = Path(__file__).resolve().parents[2]
 spec = importlib.util.spec_from_file_location('audit', ROOT / 'scripts/outbound-audit/audit.py')
@@ -40,6 +42,13 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(result['externalAttempts'], 1)
         self.assertEqual(result['unparsedRecords'], 0)
         self.assertEqual(result['interruptedSyscalls'], 1)
+
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('strace'), 'Linux strace runtime test')
+    def test_normal_process_exit_accounts_for_a_blocked_thread_syscall(self):
+        code = "import socket,threading,time,os; a,b=socket.socketpair(); threading.Thread(target=lambda:a.sendall(b'x'*4000000),daemon=True).start(); time.sleep(0.1); os._exit(0)"
+        with tempfile.TemporaryDirectory() as directory:
+            report = Path(directory) / 'report.json'
+            self.assertEqual(audit.audit([sys.executable, '-c', code], report), 0)
 
     def test_sendmmsg_keeps_each_destination(self):
         result = self.parse('1<network> sendmmsg(2, [{msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(8000), sin_addr=inet_addr("127.0.0.1")}}}, {msg_hdr={msg_name={sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("203.0.113.1")}}}], 2, 0) = 2\n')
