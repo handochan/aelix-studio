@@ -97,7 +97,7 @@ requires detection of two descendant TCP/UDP positive-control attempts. There
 is no report-only or address-exception escape. A proxy or missing strace fails
 closed. Branch-protection configuration is not changed by this PR.
 
-The retained #35 fixture is copied without edits; the separate wrapper adds
+The #35 policy snapshot is copied without edits into `scripts/outbound-audit/destinationPolicy.py`; no #35 file is changed. Its later module/API split is kept separate. The wrapper adds
 PID/comm and terminal interruption accounting. Incomplete addresses or missing
 terminal evidence still fail. Audit artifacts contain no syscall payloads or
 command arguments. Raw NetLogs are local diagnostics only and are not uploaded.

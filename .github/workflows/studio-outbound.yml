@@ -58,7 +58,7 @@ jobs:
       - name: Prove child-process TCP and UDP detection
         run: |
           set +e
-          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/studio-preview/fixtures/outboundAudit.py --child-positive-control
+          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/outbound-audit/destinationPolicy.py --child-positive-control
           code=$?
           set -e
           test "$code" = 86

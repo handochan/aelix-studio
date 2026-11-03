@@ -16,10 +16,12 @@ attempts with no unparsed records. No address exceptions or report-only mode are
 provided. CI artifacts retain counts, addresses and PID/comm, never socket
 payloads or command arguments. Temporary strace output is deleted.
 
-The destination parser at `../studio-preview/fixtures/outboundAudit.py` is copied
-byte-for-byte from PR #35 head `a141d456759e48636e6972cb1f458b1a5644c7d5`.
-That shared file is not edited here; attribution and interrupted-call handling
-live in `audit.py`. Reconcile the shared fixture with #35 after it merges.
+`destinationPolicy.py` is copied byte-for-byte from PR #35's
+`fixtures/outboundAudit.py` at `a141d456759e48636e6972cb1f458b1a5644c7d5`.
+PR #35 later split its parser into a scoped module and changed its API (head
+`28ddf60c893d87eca354973bf1518dbb4502df0e`). This private snapshot avoids editing
+or conflicting with those shared files. The wrapper always enforces the whole
+command tree; it does not inherit a host-only or report-only selection.
 
 Run on Linux with strace 6.1 or newer:
 

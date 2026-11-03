@@ -1,6 +1,6 @@
 """Attribute Linux syscall attempts to threads and fail on any external destination.
 
-The PR #35 parser/policy stays byte-identical at its original path. This wrapper
+The PR #35 policy snapshot stays byte-identical in this private directory. This wrapper
 adds strace PID/comm attribution and accounts for syscalls interrupted by process
 termination without dropping their already-observed destinations. No payloads or
 execve arguments are recorded. Raw temporary traces are deleted after analysis.
@@ -16,7 +16,7 @@ import subprocess
 import sys
 import tempfile
 
-FIXTURE = Path(__file__).resolve().parents[1] / 'studio-preview/fixtures/outboundAudit.py'
+FIXTURE = Path(__file__).with_name('destinationPolicy.py')
 spec = importlib.util.spec_from_file_location('outbound_fixture', FIXTURE)
 policy = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(policy)
