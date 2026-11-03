@@ -105,11 +105,16 @@ async def main(args):
         sandbox = Path(temporary).resolve()
         for name in ('home', 'agent', 'workspace', 'extensions'):
             (sandbox / name).mkdir()
+        # Bound only the synthetic transport failure: native and SDK defaults
+        # can otherwise keep Windows' closed-port probe retrying beyond the UI assertion.
+        settings = sandbox / 'agent/settings.json'
+        settings.write_text(json.dumps({'retry': {'enabled': False, 'provider': {'timeoutMs': 5000, 'maxRetries': 0}}}))
         # Retain realistic OS env, remove provider routing/auth variables without printing them.
         env = {k: v for k, v in os.environ.items() if not any(token in k for token in
                ('API_KEY', 'AUTH_TOKEN', 'ACCESS_TOKEN', 'BASE_URL', 'AELIX_', 'ANTHROPIC_', 'OPENAI_',
                 'AWS_', 'GOOGLE_', 'GEMINI_', 'AZURE_', 'OPENROUTER_', 'PROXY'))}
         env.update(HOME=str(sandbox / 'home'), AELIX_CODING_AGENT_DIR=str(sandbox / 'agent'),
+                   AELIX_SETTINGS_PATH=str(settings),
                    USERPROFILE=str(sandbox / 'home'), NO_PROXY='127.0.0.1,localhost',
                    XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
                    APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
