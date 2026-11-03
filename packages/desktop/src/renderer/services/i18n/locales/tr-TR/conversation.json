@@ -331,6 +331,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "Bu mesajın sonucu bilinmiyor",
+        "body": "Model veya araçlar zaten çalışmış olabilir. Bu mesajı yeniden göndermeden önce konuşma geçmişini kontrol edin."
       }
     }
   },
@@ -784,11 +788,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Planı genişlet",
     "collapse": "Planı daralt"
-  },
-  "managedOperation": {
-    "uncertain": "İsteğin sonucu bilinmiyor. Geçmişi kontrol edin; istek yeniden gönderilmedi.",
-    "storageUnavailable": "İstek güvenli biçimde kaydedilemediği için gönderilmedi.",
-    "conflict": "Bu istek daha önce farklı içerikle gönderildi. Geçmişi kontrol edin.",
-    "interrupted": "İstek kesildi. Bazı değişiklikler kalmış olabilir; geçmişi kontrol edin."
   }
 }

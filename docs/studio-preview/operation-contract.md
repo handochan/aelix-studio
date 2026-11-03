@@ -1,3 +1,8 @@
+> Historical #25 contract, retired by Studio #28. The current renderer uses ordinary ACP
+> message sends, and the host is the pinned `aelix-studio-host` release. Migration 044 and
+> the private managed-operation routes below are not part of this baseline. See the
+> [current baseline and internal DB reset instructions](README.md).
+
 # Managed prompt operation candidate
 
 Status: Studio integration candidate for [ACP #12](https://github.com/handochan/aelix-acp/issues/12)
@@ -139,7 +144,7 @@ errors are the primary operation diagnostics.
 
 The source-built release host has local actual HTTP/stdio and Electron
 qualification with synthetic model responses. The committed
-[qualification drivers](../../scripts/studio-preview/host-forwarding/README.md)
+[qualification drivers](https://github.com/handochan/aelix-studio/blob/ce98f677a41e7f34c5f7f1609508b7e96289f5f2/scripts/studio-preview/host-forwarding/README.md)
 repeat these checks inside each actual installer acceptance job. Reports keep
 source, installed native, host wire, renderer and installer evidence separate.
 The original native wheel members and installed adapter are audited before

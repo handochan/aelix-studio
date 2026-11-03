@@ -240,7 +240,7 @@ Invoke-Git $repoRoot @('diff', '--binary', 'HEAD', "--output=$patchPath") | Out-
 $hasPatch = (Get-Item -LiteralPath $patchPath).Length -gt 0
 $baseRef = (Invoke-Git $repoRoot @('rev-parse', 'HEAD')).Trim()
 $nodeModules = Join-Path $repoRoot 'node_modules'
-$localAioncoreBinary = Join-Path $repoRoot 'resources\bundled-aioncore\win32-x64\aioncore.exe'
+$localAioncoreBinary = Join-Path $repoRoot 'resources\bundled-aioncore\win32-x64\aelix-studio-host.exe'
 $localAioncoreBundleDir = Join-Path $repoRoot 'out\win-unpacked\resources\bundled-aioncore\win32-x64'
 if (-not (Test-Path -LiteralPath (Join-Path $localAioncoreBundleDir 'managed-resources') -PathType Container)) {
   $localAioncoreBundleDir = Join-Path $env:LOCALAPPDATA 'Programs\AionUi\resources\bundled-aioncore\win32-x64'

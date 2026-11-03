@@ -1,8 +1,8 @@
-/** Default source-host provenance shared by preparation and launchers. */
+/** Pinned release-host provenance shared by preparation and launchers. */
 const fs = require('node:fs');
 const path = require('node:path');
 const { createHash } = require('node:crypto');
-const policy = require('../../../scripts/studio-preview/host-recovery/default.json');
+const policy = require('../../../scripts/studio-preview/host-release/default.json');
 
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
 const digest = (file) => sha256(fs.readFileSync(file));
@@ -11,7 +11,7 @@ const stable = (value) =>
     item && typeof item === 'object' && !Array.isArray(item)
       ? Object.fromEntries(
           Object.keys(item)
-            .sort()
+            .toSorted()
             .map((key) => [key, item[key]])
         )
       : item
@@ -97,7 +97,9 @@ function inventory(directory, { excludeManifest = true } = {}) {
   const root = fs.realpathSync.native(directory),
     result = {};
   function visit(current) {
-    for (const entry of fs.readdirSync(current, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    for (const entry of fs
+      .readdirSync(current, { withFileTypes: true })
+      .toSorted((a, b) => a.name.localeCompare(b.name))) {
       const file = path.join(current, entry.name),
         relative = path.relative(root, file).split(path.sep).join('/');
       if (excludeManifest && relative === 'manifest.json') continue;
@@ -116,71 +118,81 @@ function inventory(directory, { excludeManifest = true } = {}) {
   return result;
 }
 
-/** Fail closed on an old, incomplete or changed default bundle before spawning it. */
+/** Verify immutable release provenance and installer-stable code identity before spawning. */
 function verifyDefaultHostBundle(directory, target) {
   const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
-  if (
-    !policy.targets[target] ||
-    manifest.sourceType !== 'studio-default-source' ||
-    stable(manifest.hostPolicy) !== stable(policy)
-  )
-    throw new Error('Default host source policy differs from this Studio build');
+  const expected = policy.targets[target];
+  if (!expected || manifest.sourceType !== 'studio-host-release' || stable(manifest.hostPolicy) !== stable(policy))
+    throw new Error('Default host release policy differs from this Studio build');
   if (`${manifest.platform}-${manifest.arch}` !== target) throw new Error('Default host target differs');
-  const targetPolicy = policy.targets[target];
+  const provenanceFile = path.join(directory, 'release-provenance.json');
+  if (digest(provenanceFile) !== policy.provenanceSha256) throw new Error('Default host release provenance changed');
+  const provenance = JSON.parse(fs.readFileSync(provenanceFile, 'utf8'));
+  if (
+    provenance.schema !== 'aelix-studio-host.release-provenance/1' ||
+    provenance.kind !== 'release' ||
+    provenance.label !== policy.tag ||
+    provenance.repository !== policy.repository ||
+    provenance.commit !== policy.commit ||
+    provenance.tree !== policy.tree ||
+    stable(provenance.targets[target]) !== stable(expected)
+  )
+    throw new Error('Default host release provenance differs');
   const receiptFile = path.join(directory, 'build-receipt.json');
   if (digest(receiptFile) !== manifest.buildReceiptSha256) throw new Error('Default host build receipt changed');
   const receipt = JSON.parse(fs.readFileSync(receiptFile, 'utf8'));
   if (
-    receipt.status !== 'built_candidate' ||
-    receipt.purpose !== 'default_runtime' ||
+    receipt.schema !== 'aelix-studio-host.build-receipt/1' ||
+    receipt.status !== 'built' ||
+    receipt.dirty !== false ||
+    receipt.repository !== policy.repository ||
+    receipt.commit !== policy.commit ||
+    receipt.tree !== policy.tree ||
+    receipt.label !== policy.tag ||
     receipt.target !== target ||
-    receipt.binary !== (target.startsWith('win32-') ? 'aioncore.exe' : 'aioncore') ||
-    receipt.sourcePolicySha256 !== sha256(stable(policy)) ||
-    receipt.buildRecipeSha256 !== policy.buildRecipeSha256 ||
-    receipt.identityRecipeSha256 !== policy.identityRecipeSha256 ||
-    receipt.managedResourceRecipeSha256 !== policy.managedResourceRecipeSha256 ||
-    receipt.resourceIdentityRecipeSha256 !== policy.resourceIdentityRecipeSha256 ||
-    !receipt.cargoVersion.startsWith('cargo ' + policy.rustToolchain + ' ') ||
-    !receipt.rustcVersionVerbose.startsWith('rustc ' + policy.rustToolchain + ' ') ||
-    receipt.originalSourceFilesVerified !== policy.sourceFileCount ||
-    receipt.patchedSourceFilesVerified !== (policy.patchedSourceFileCount ?? policy.sourceFileCount) ||
+    receipt.binary !== expected.binary ||
+    receipt.archive !== expected.archive ||
+    receipt.binarySha256 !== expected.binarySha256 ||
+    receipt.binaryCodeSha256 !== expected.binaryCodeSha256 ||
+    receipt.rustToolchain !== policy.rustToolchain ||
     receipt.profile !== 'release' ||
-    receipt.rustFlags !== (targetPolicy.rustFlags ?? '') ||
-    receipt.patchSha256 !== policy.patch.sha256 ||
-    stable(receipt.upstream) !== stable(policy.upstream) ||
     receipt.cargoLockSha256 !== policy.cargoLockSha256 ||
-    receipt.licenseFileSha256 !== policy.upstreamLicenseSha256 ||
-    receipt.releasedHostBytes !== false ||
-    receipt.nativePatches.length ||
-    receipt.sourceFilesAfterBuildVerified !== receipt.patchedSourceFilesVerified
+    stable(receipt.upstream) !==
+      stable({
+        repository: policy.upstream.repository,
+        tag: policy.upstream.tag,
+        commit: policy.upstream.commit,
+      }) ||
+    receipt.licenseSha256 !== policy.licenseSha256 ||
+    receipt.noticeSha256 !== policy.noticeSha256
   )
     throw new Error('Default host build provenance differs');
-  if (targetPolicy.container) {
+  if (target.startsWith('linux-')) {
     const maximum = receipt.maximumGlibcVersionNeeded;
-    const expectedPlatform = 'linux/' + (manifest.arch === 'x64' ? 'amd64' : 'arm64');
-    const compare = (version) => version.split('.').reduce((result, part) => result * 1000 + Number(part), 0);
+    const compare = (version) =>
+      version
+        .replace(/^GLIBC_/, '')
+        .split('.')
+        .reduce((result, part) => result * 1000 + Number(part), 0);
     if (
-      !receipt.buildContainer ||
-      receipt.buildContainer.recipeSha256 !== targetPolicy.container.recipeSha256 ||
-      receipt.buildContainer.platform !== expectedPlatform ||
-      !/^sha256:[0-9a-f]{64}$/.test(receipt.buildContainer.imageId) ||
       typeof maximum !== 'string' ||
-      !/^[0-9]+\.[0-9]+$/.test(maximum) ||
-      compare(maximum) > compare(targetPolicy.container.glibcMax)
+      !/^GLIBC_[0-9]+\.[0-9]+(?:\.[0-9]+)?$/.test(maximum) ||
+      compare(maximum) > compare(expected.glibcCeiling) ||
+      stable(receipt.buildContainer) !== stable(expected.buildContainer)
     )
       throw new Error('Default host compiler container or GLIBC compatibility differs');
   }
   if (
-    digest(path.join(directory, 'AIONCORE-LICENSE.txt')) !== policy.upstreamLicenseSha256 ||
-    codeIdentity(fs.readFileSync(path.join(directory, receipt.binary))) !== receipt.binaryCodeSha256 ||
-    receipt.binaryCodeSha256 !== manifest.binaryCodeSha256
+    digest(path.join(directory, 'LICENSE')) !== policy.licenseSha256 ||
+    digest(path.join(directory, 'NOTICE')) !== policy.noticeSha256 ||
+    codeIdentity(fs.readFileSync(path.join(directory, expected.binary))) !== expected.binaryCodeSha256
   )
     throw new Error('Default host code or upstream license changed');
   if (stable(inventory(directory)) !== stable(manifest.inventory))
     throw new Error('Default host resource inventory changed');
   if (
     sha256(stable(inventory(path.join(directory, 'managed-resources'), { excludeManifest: false }))) !==
-    receipt.managedResourcesSha256
+    manifest.managedResourcesSha256
   )
     throw new Error('Default host managed resources differ from the build receipt');
   const resources = require('./verify-bundled-aioncore-resources').verifyBundledAioncoreResources({

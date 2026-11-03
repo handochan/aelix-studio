@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "メッセージの実行結果を確認できません",
+        "body": "モデルやツールがすでに実行された可能性があります。再送信する前に会話履歴を確認してください。"
       }
     }
   },
@@ -782,11 +786,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "プランを展開",
     "collapse": "プランを折りたたむ"
-  },
-  "managedOperation": {
-    "uncertain": "リクエストの結果を確認できません。履歴を確認してください。自動再送信はしていません。",
-    "storageUnavailable": "リクエスト情報を安全に保存できなかったため、送信しませんでした。",
-    "conflict": "このリクエストは別の内容ですでに送信されています。履歴を確認してください。",
-    "interrupted": "リクエストが中断されました。一部の変更が残っている可能性があります。履歴を確認してください。"
   }
 }

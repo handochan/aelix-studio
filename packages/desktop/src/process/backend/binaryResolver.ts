@@ -4,14 +4,14 @@
  * Search order:
  *  1. AIONUI_BACKEND_BIN env override (path, resolved to absolute)
  *  2. Bundled with app (production)
- * Explicit overrides are opt-in; the default source policy never falls back to PATH.
+ * Explicit overrides are opt-in; the default release policy never falls back to PATH.
  */
 
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { verifyDefaultHostBundle } from '../../../../shared-scripts/src/default-host.js';
 
-const BINARY_NAME = 'aioncore';
+const BINARY_NAME = 'aelix-studio-host';
 const BIN_ENV_VAR = 'AIONUI_BACKEND_BIN';
 const MAX_DIR_ENTRIES = 20;
 
@@ -79,7 +79,7 @@ export function resolveBinaryPath(): string {
   if (bundled) return bundled;
 
   throw new BackendBinaryResolveError(
-    `Cannot find "${BINARY_NAME}" binary. Prepare the default source host bundle or set an explicit backend override.`,
+    `Cannot find "${BINARY_NAME}" binary. Prepare the pinned host release bundle or set an explicit backend override.`,
     diagnostics
   );
 }
@@ -110,7 +110,7 @@ function envOverridePath(diagnostics: BackendBinaryResolveDiagnostics): string |
 
 /**
  * Check bundled binary in resources directory.
- * Layout: bundled-aioncore/{platform}-{arch}/aioncore[.exe]
+ * Layout: bundled-aioncore/{platform}-{arch}/aelix-studio-host[.exe]
  */
 function bundledPath(
   runtimeKey: string,

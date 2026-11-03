@@ -198,10 +198,28 @@ release 또는 선별한 commit으로 한다. 현재 stable checker만으로 mai
 각 모듈은 `upstream / extended / replaced / retired` ownership map을 갖고,
 새 경로의 수용·migration·rollback이 준비됐을 때 한 번에 권한을 넘긴다.
 동일 Provider store나 session writer를 두 구현이 동시에 정본으로 쓰지 않는다.
+
 이미 대체한 영역이 upstream merge로 재활성화되는지 regression gate로 검사한다.
 
 세부 순서와 release gate는 [delivery-plan.md](delivery-plan.md), 판단 충돌은
 [decisions.md](decisions.md)에 기록한다. 고정 일정/공수는 이 문서가 확정하지 않는다.
+
+### 모듈 소유권 map 초판 — Studio #28 (`aelix.2`)
+
+이 표는 현재 코드의 책임을 기록하며 추가 대체 구현을 승인하지 않는다. `upstream`은 재사용,
+`extended`는 기존 표면/형식에 Studio 연결 추가, `replaced`는 해당 책임의 정본 이전,
+`retired`는 실행 경로에서 제거됨을 뜻한다.
+
+| 모듈 / 경로                                                                                          | 상태     | 정본 / 변경 책임                                    | 경계와 재활성화 방지                                                                 |
+| ---------------------------------------------------------------------------------------------------- | -------- | --------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| renderer의 대화·설정·sidebar·preview·Team 표면 (`packages/desktop/src/renderer/`)                    | extended | Studio; AionUi v2.2.2 유래 화면 재사용              | native 실행 규칙을 화면에 복제하지 않음; renderer/IPC 테스트                         |
+| Provider 인증·모델 설정 (`packages/web-host/src/studio-auth/`)                                       | replaced | native AuthStorage와 설정; Studio는 입력·검증·표시  | Aion Provider DB를 Aelix 인증 정본으로 사용하지 않음; Provider/helper smoke          |
+| 실행·권한·프로필·리소스·원본 세션                                                                    | replaced | aelix-ai exact pin; Studio 무수정 source wheel 번들 | native writer 한 곳; beta.3 공개 wheel 수용은 별도                                   |
+| ACP wire·native control 변환·세션 lease                                                              | replaced | aelix-acp exact pin (`runtime-reference.json`)      | 표준 ACP 우선; native 규칙 중복 구현 금지; 설치 wheel/source 무결성 검사             |
+| host DB·프로세스·session/load·재전송 정책                                                            | extended | `handochan/aelix-studio-host` release               | 내부 crate·DB/API는 upstream 최소 차이; tag/archive/provenance 고정과 Ask/Yolo smoke |
+| host 배포·IPC·WebUI 인증 (`packages/shared-scripts/`, `packages/web-host/`, desktop backend/preload) | extended | Studio                                              | 호환 marker·env·data 경로 유지; launch 전 release 검증, HTTP cookie/Origin·LAN smoke |
+| editor·browser·파일/미리보기 엔진                                                                    | upstream | Aion 유래 구현; Studio 통합                         | 기존 표면 유지; 교체·migration·rollback은 별도 수용                                  |
+| #25 Web Locks·managed-operation API/DB 044·Studio host source patches                                | retired  | 중복 전송 방지는 ACP #20·host #6                    | 일반 ACP 전송 복원; patch/build 단계 없음; 044 내부 DB 초기화 안내, LAN HTTP smoke   |
 
 ## 9. 검토 결과와 문서 읽는 순서
 

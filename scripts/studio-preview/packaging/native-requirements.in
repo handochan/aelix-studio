@@ -1,7 +1,23 @@
-# Released native wheels remain unchanged. Pin the Windows bootstrap explicitly.
-aelix==0.1.0b2
-aelix-ai==0.1.0b2
-aelix-agent-core==0.1.0b2
-aelix-coding-agent==0.1.0b2
+# Third-party dependencies of unmodified native e19ab55e17e871a40356fc9802f3f6669ca727de.
+# Native wheels are built from the checksum-pinned source, never resolved from PyPI.
+anthropic>=0.40,<1.0
+openai>=2.7.2,<3
+httpx>=0.27,<1.0
+jsonschema>=4.18,<5
+google-genai>=1.52,<2
+PyYAML>=6.0
+pathspec>=0.12
+pydantic>=2.7,<3
+filelock>=3.12,<5
+pygments>=2.18
+markdown-it-py>=3.0
+packaging>=23
+mcp>=1.27,<2
+Pillow>=11.0,<12.0
+tree-sitter>=0.25,<0.26
+tree-sitter-bash>=0.25,<0.26
+tree-sitter-powershell>=0.26,<0.27
+cryptography>=42,<49
+truststore>=0.9
 pywin32==311; sys_platform == 'win32'
 colorama==0.4.6; sys_platform == 'win32'

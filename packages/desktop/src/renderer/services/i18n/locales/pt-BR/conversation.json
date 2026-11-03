@@ -354,6 +354,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "O resultado desta mensagem é desconhecido",
+        "body": "O modelo ou as ferramentas podem já ter sido executados. Confira o histórico da conversa antes de enviar esta mensagem novamente."
       }
     }
   },
@@ -788,11 +792,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plano",
     "collapse": "Recolher plano"
-  },
-  "managedOperation": {
-    "uncertain": "O resultado da solicitação é desconhecido. Verifique o histórico; ela não foi reenviada.",
-    "storageUnavailable": "Não foi possível salvar a solicitação com segurança, por isso ela não foi enviada.",
-    "conflict": "Esta solicitação já foi enviada com outro conteúdo. Verifique o histórico.",
-    "interrupted": "A solicitação foi interrompida. Algumas alterações podem permanecer; verifique o histórico."
   }
 }

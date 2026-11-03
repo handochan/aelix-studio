@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "请求仍在使用旧的团队身份字段",
         "body": "这个团队操作必须使用 assistant_id，不能再使用旧的 backend 或 agent 字段。"
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "无法确认消息的执行结果",
+        "body": "模型或工具可能已经运行。再次发送前，请先检查对话记录。"
       }
     }
   },
@@ -782,11 +786,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展开计划",
     "collapse": "收起计划"
-  },
-  "managedOperation": {
-    "uncertain": "无法确认请求结果。请检查历史记录；未自动重新发送。",
-    "storageUnavailable": "无法安全保存请求信息，因此未发送。",
-    "conflict": "此请求已以不同内容发送。请检查历史记录。",
-    "interrupted": "请求已中断，可能已产生部分更改。请检查历史记录。"
   }
 }

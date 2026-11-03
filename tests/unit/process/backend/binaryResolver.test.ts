@@ -116,7 +116,7 @@ describe('resolveBinaryPath', () => {
     setResourcesPath(undefined);
     vi.mocked(existsSync).mockReturnValue(false);
     vi.mocked(execSync).mockReturnValue('/unqualified/aioncore');
-    expect(() => resolveBinaryPath()).toThrow('Cannot find "aioncore" binary');
+    expect(() => resolveBinaryPath()).toThrow('Cannot find "aelix-studio-host" binary');
     expect(execSync).not.toHaveBeenCalled();
   });
 
@@ -139,7 +139,7 @@ describe('resolveBinaryPath', () => {
         '/owned/resources',
         'bundled-aioncore',
         `${process.platform}-${process.arch}`,
-        process.platform === 'win32' ? 'aioncore.exe' : 'aioncore'
+        process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host'
       )
     );
     expect(execSync).not.toHaveBeenCalled();
@@ -148,7 +148,7 @@ describe('resolveBinaryPath', () => {
   it('attaches bundled path diagnostics when aioncore cannot be resolved', () => {
     const resourcesPath = '/app/resources';
     const runtimeKey = `${process.platform}-${process.arch}`;
-    const binaryName = process.platform === 'win32' ? 'aioncore.exe' : 'aioncore';
+    const binaryName = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
     const bundledDir = join(resourcesPath, 'bundled-aioncore');
     const runtimeDir = join(bundledDir, runtimeKey);
     const checkedBundledPath = join(runtimeDir, binaryName);
@@ -164,7 +164,7 @@ describe('resolveBinaryPath', () => {
       throw new Error('not found on PATH');
     });
 
-    expect(() => resolveBinaryPath()).toThrow('Cannot find "aioncore" binary');
+    expect(() => resolveBinaryPath()).toThrow('Cannot find "aelix-studio-host" binary');
 
     try {
       resolveBinaryPath();
@@ -180,7 +180,7 @@ describe('resolveBinaryPath', () => {
           runtimeDirExists: false,
           resourcesDirEntries: ['bundled-aioncore/'],
           runtimeDirEntries: ['manifest.json'],
-          pathLookupCommand: process.platform === 'win32' ? 'where aioncore' : 'which aioncore',
+          pathLookupCommand: process.platform === 'win32' ? 'where aelix-studio-host' : 'which aelix-studio-host',
         }),
       });
     }

@@ -2,7 +2,7 @@ const fs = require('fs');
 const path = require('path');
 
 function backendBinaryName(platform) {
-  return platform === 'win32' ? 'aioncore.exe' : 'aioncore';
+  return platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
 }
 
 function normalize(relativePath) {
@@ -329,7 +329,7 @@ function requireContractDirectory(baseDir, runtimeKey, cli, root, relativePath, 
 function readDefaultSourceType(baseDir) {
   try {
     return (
-      JSON.parse(fs.readFileSync(path.join(baseDir, 'manifest.json'), 'utf8')).sourceType === 'studio-default-source'
+      JSON.parse(fs.readFileSync(path.join(baseDir, 'manifest.json'), 'utf8')).sourceType === 'studio-host-release'
     );
   } catch {
     return false;

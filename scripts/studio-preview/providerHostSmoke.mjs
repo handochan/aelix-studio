@@ -31,7 +31,7 @@ const app = await electron.launch({
 const startupMarkers = new Set();
 const markerPatterns = [
   ['spawn_requested', '[aioncore] starting:'],
-  ['default_policy', 'Default host source policy differs'],
+  ['default_policy', 'Default host release policy differs'],
   ['default_receipt', 'Default host build receipt changed'],
   ['default_provenance', 'Default host build provenance differs'],
   ['default_code', 'Default host code or upstream license changed'],
@@ -51,9 +51,25 @@ for (const stream of [app.process().stdout, app.process().stderr]) {
   });
 }
 let page;
+let lanPage;
 let foreign;
 let webui;
+let stage = 'startup';
+const lanFailures = [];
+const trace = (next) => {
+  stage = next;
+  fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
+};
 try {
+  if (executablePath) {
+    const selected = process.env.AELIX_STUDIO_RUNTIME;
+    assert.ok(selected, 'Installed smoke requires the selected helper runtime');
+    const installed = path.join(await app.evaluate(() => process.resourcesPath), 'studio-preview');
+    // Keep the source facade's launch identity identical to the actual app;
+    // Windows filesystem namespace prefixes must not create a second agent recipe.
+    assert.equal(fs.realpathSync.native(selected), fs.realpathSync.native(installed));
+    process.env.AELIX_STUDIO_RUNTIME = installed;
+  }
   page = await app.firstWindow();
   if (executablePath) {
     const require = createRequire(import.meta.url);
@@ -125,31 +141,10 @@ try {
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
   const input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
-  const conversationId = await page.evaluate(() => window.location.hash.split('/conversation/')[1]?.split(/[/?]/)[0]);
-  assert.ok(conversationId);
-  const managedPort = await page.evaluate(() => window.__backendPort);
-  const managedReady = await fetch(
-    `http://127.0.0.1:${managedPort}/api/conversations/${conversationId}/runtime/ensure`,
-    {
-      method: 'POST',
-    }
-  );
-  assert.equal(managedReady.status, 200);
-  assert.equal((await managedReady.json()).data.operation_capability.schema, 'aelix.operation/1');
-  let firstManagedOperation;
-  page.on('request', (request) => {
-    if (
-      !firstManagedOperation &&
-      request.method() === 'POST' &&
-      new URL(request.url()).pathname === `/api/conversations/${conversationId}/messages`
-    )
-      firstManagedOperation = request.postDataJSON()?.operation;
-  });
   await input.fill('Check rejected credentials');
   await page.getByTestId('sendbox-send-btn').click();
   // Confirm failure via host runtime rather than interpreting storage as authorization.
   await expect(page.getByText(/Invalid API key|authentication_error|401/).last()).toBeVisible({ timeout: 30000 });
-  assert.equal(firstManagedOperation?.schema, 'aelix.operation/1');
 
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
@@ -224,7 +219,12 @@ try {
   const resetBody = await reset.json();
   const password = resetBody.data?.new_password ?? resetBody.new_password;
   assert.equal(typeof password, 'string');
-  webui = await startStaticServer({ staticDir: path.resolve('out/renderer'), backendPort: port, port: 0 });
+  webui = await startStaticServer({
+    staticDir: path.resolve('out/renderer'),
+    backendPort: port,
+    port: 0,
+    allowRemote: true,
+  });
   const headers = {
     origin: webui.localUrl,
     'content-type': 'application/json',
@@ -273,6 +273,96 @@ try {
     403
   );
 
+  // Open the actual HTTP WebUI on a non-loopback LAN address. A new BrowserWindow
+  // has no preload or Node access: Web Locks must be absent in this insecure context.
+  assert.ok(webui.networkUrl, 'LAN address is required for the HTTP regression');
+  const lanUrl = webui.networkUrl;
+  const lanHeaders = { ...headers, origin: lanUrl };
+  trace('lan_login');
+  const lanLogin = await fetch(lanUrl + '/login', {
+    method: 'POST',
+    headers: lanHeaders,
+    signal: AbortSignal.timeout(15000),
+    body: JSON.stringify({ username: 'admin', password, remember: false }),
+  });
+  assert.equal(lanLogin.ok, true);
+  await app.context().addCookies(
+    lanLogin.headers.getSetCookie().map((value) => {
+      const [name, ...parts] = value.split(';')[0].split('=');
+      return { name, value: parts.join('='), url: lanUrl, httpOnly: true };
+    })
+  );
+  const endpointStatus = await (
+    await fetch(route, { method: 'POST', headers: { ...headers, cookie }, body: '{"action":"catalog"}' })
+  ).json();
+  const restoredEndpoint = await fetch(route, {
+    method: 'POST',
+    headers: { ...headers, cookie },
+    body: JSON.stringify({
+      action: 'endpoint',
+      provider: 'fixture',
+      model: 'fixture-model',
+      endpoint: process.env.PROVIDER_ENDPOINT,
+      api: 'openai-completions',
+      revision: endpointStatus.data.revision,
+      exclusive: true,
+    }),
+  });
+  assert.equal((await restoredEndpoint.json()).ok, true);
+  trace('lan_window');
+  const lanWindow = app.waitForEvent('window');
+  await app.evaluate(({ BrowserWindow }, url) => {
+    const window = new BrowserWindow({
+      show: true,
+      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+    });
+    void window.loadURL(url + '/#/settings/model');
+  }, lanUrl);
+  lanPage = await lanWindow;
+  const lanBrowserWindow = await app.browserWindow(lanPage);
+  lanPage.on('response', (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (pathname.startsWith('/api/') && response.status() >= 400 && lanFailures.length < 20)
+      lanFailures.push({ path: pathname, status: response.status() });
+  });
+  lanPage.on('pageerror', (error) => {
+    if (lanFailures.length < 20) lanFailures.push({ pageError: error.message.slice(0, 200) });
+  });
+  await lanBrowserWindow.evaluate((window) => {
+    window.show();
+    window.focus();
+  });
+  await lanPage.waitForURL(`${lanUrl}/#/settings/model`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  trace('lan_http_document_loaded');
+  assert.deepEqual(await lanPage.evaluate(() => ({ secure: window.isSecureContext, locks: typeof navigator.locks })), {
+    secure: false,
+    locks: 'undefined',
+  });
+  trace('lan_settings');
+  const lanNative = lanPage.getByTestId('native-provider-settings');
+  await expect(lanNative).toBeVisible({ timeout: 30000 });
+  const lanLanguage = await lanPage.evaluate(() => document.documentElement.lang);
+  const lanStrings = JSON.parse(
+    fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', lanLanguage, 'settings.json'))
+  ).nativeAuth;
+  trace('lan_create_conversation');
+  await lanNative.getByRole('button', { name: lanStrings.startConversation, exact: true }).click();
+  await expect(lanPage.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
+  trace('lan_send');
+  await lanPage.getByTestId('sendbox-input').fill('SYNTHETIC_LAN_HTTP_FIRST_RESPONSE');
+  await lanPage.getByTestId('sendbox-send-btn').click();
+  await expect(
+    lanPage.getByTestId('message-text-left').filter({ hasText: 'NATIVE_PROVIDER_FIRST_RESPONSE' })
+  ).toBeVisible({ timeout: 30000 });
+  trace('lan_response');
+  await lanPage.screenshot({ path: path.join(output, 'lan-http-first-response.png') });
+  const lanClosed = lanPage.waitForEvent('close', { timeout: 10000 });
+  await lanBrowserWindow.evaluate((window) => window.destroy());
+  await lanClosed;
+  await lanBrowserWindow.dispose();
+  trace('lan_closed');
+
+  trace('foreign_navigation');
   foreign = http.createServer((_req, res) => res.end('<html><body>Untrusted navigation fixture</body></html>'));
   await new Promise((resolve) => foreign.listen(0, '127.0.0.1', resolve));
   await page.goto(`http://127.0.0.1:${foreign.address().port}`);
@@ -291,7 +381,7 @@ try {
         installedCompiledBuildMatched: Boolean(executablePath),
         platform: process.platform + '-' + process.arch,
         host: executablePath
-          ? 'installed app / bundled AionCore / relocatable ACP and public native wheels'
+          ? 'installed app / bundled AionCore / relocatable ACP and pinned native source wheels'
           : 'actual built Electron / AionCore / installed ACP / public native wheel',
         webuiScope: executablePath
           ? 'source-imported facade/helper with installed backend; compiled app-owned WebUI listener not exercised'
@@ -301,8 +391,6 @@ try {
           'ui_endpoint_registration',
           'ui_key_registration',
           'wrong_key_rejected',
-          'installed_default_aelix_launcher_negotiates_managed_capability',
-          'installed_default_aelix_sendbox_preserves_keyed_operation',
           'key_update_new_conversation',
           'first_response',
           'explicit_cli_root',
@@ -311,6 +399,7 @@ try {
           'unreachable_endpoint_reported',
           'untrusted_navigation_cannot_manage_credentials',
           'actual_webui_cookie_origin_and_secret_boundary',
+          'lan_http_insecure_context_without_web_locks_sends_and_receives',
         ],
         realProvider: false,
         realOAuth: false,
@@ -321,6 +410,11 @@ try {
     ) + '\n'
   );
 } catch (error) {
+  fs.writeFileSync(
+    path.join(output, 'ui-failure.json'),
+    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
+  );
+  if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
     await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
     const state = await page
@@ -341,10 +435,14 @@ try {
   }
   throw error;
 } finally {
+  // Close the owned browser clients before waiting for fixture TCP listeners.
+  trace('stop_app');
+  await app.close();
+  trace('stop_webui');
   if (webui) await webui.stop();
   if (foreign) {
     foreign.closeAllConnections();
     await new Promise((resolve) => foreign.close(resolve));
   }
-  await app.close();
+  trace('stopped');
 }

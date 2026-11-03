@@ -12,13 +12,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import useSWR from 'swr';
 import { classifyConversationBusyError } from './conversationBusyError';
-import type { ManagedRequestBinding } from '@/common/types/platform/acpTypes';
-import { isManagedBinding, ManagedOperationError } from './acp/managedOperations/persistence';
-import i18n from 'i18next';
 
 export type ConversationCommandQueueItem = {
-  operation_binding?: ManagedRequestBinding;
-  operation_binding_invalid?: true;
   id: string;
   input: string;
   files: ChatFileRef[];
@@ -33,7 +28,6 @@ export type ConversationCommandQueueItem = {
 export type ConversationCommandQueueMode = 'auto' | 'manual';
 
 export type ConversationCommandQueueState = {
-  inFlight?: ConversationCommandQueueItem;
   items: ConversationCommandQueueItem[];
   isPaused: boolean;
   mode: ConversationCommandQueueMode;
@@ -149,11 +143,6 @@ const normalizeQueueItem = (item: unknown): ConversationCommandQueueItem | null 
   }
 
   const normalizedItem: ConversationCommandQueueItem = {
-    ...(isManagedBinding(candidate.operation_binding) ? { operation_binding: candidate.operation_binding } : {}),
-    ...((candidate.operation_binding !== undefined && !isManagedBinding(candidate.operation_binding)) ||
-    candidate.operation_binding_invalid
-      ? { operation_binding_invalid: true as const }
-      : {}),
     id: candidate.id,
     input: candidate.input,
     // Elements validated by the isChatFileRef guard above; `.every` doesn't
@@ -183,7 +172,6 @@ export const normalizeQueueState = (state: unknown): ConversationCommandQueueSta
 
   const candidate = state as Partial<ConversationCommandQueueState>;
   const mode = normalizeQueueMode(candidate.mode);
-  const inFlight = normalizeQueueItem(candidate.inFlight);
   const normalizedItems = Array.isArray(candidate.items)
     ? candidate.items.map(normalizeQueueItem).filter((item): item is ConversationCommandQueueItem => item !== null)
     : [];
@@ -192,7 +180,6 @@ export const normalizeQueueState = (state: unknown): ConversationCommandQueueSta
   for (const item of normalizedItems.slice(0, MAX_QUEUED_COMMANDS)) {
     const nextItems = [...items, item];
     const nextState = {
-      ...(inFlight ? { inFlight } : {}),
       items: nextItems,
       isPaused: Boolean(candidate.isPaused),
       mode,
@@ -206,7 +193,6 @@ export const normalizeQueueState = (state: unknown): ConversationCommandQueueSta
   }
 
   return {
-    ...(inFlight ? { inFlight } : {}),
     items,
     isPaused: items.length > 0 ? Boolean(candidate.isPaused) : false,
     mode,
@@ -221,7 +207,7 @@ export const createQueuedCommandItem = ({
   files,
   sessions,
 }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>): ConversationCommandQueueItem => ({
-  id: uuid(36),
+  id: uuid(),
   input,
   files: uniqueFiles(files),
   // Normalised on the way in as well as on the way out of persistence, so an
@@ -231,7 +217,7 @@ export const createQueuedCommandItem = ({
 });
 
 const getQueueValidationFailureReason = (state: ConversationCommandQueueState): QueueValidationFailureReason | null => {
-  if (state.items.length + (state.inFlight ? 1 : 0) > MAX_QUEUED_COMMANDS) {
+  if (state.items.length > MAX_QUEUED_COMMANDS) {
     return 'queueFull';
   }
 
@@ -290,21 +276,7 @@ const readPersistedQueueState = (conversation_id: string): ConversationCommandQu
     }
 
     const parsed = JSON.parse(stored) as unknown;
-    let normalized = normalizeQueueState(parsed);
-    if (normalized.inFlight) {
-      const interrupted = normalized.inFlight;
-      // An unbound crash window cannot safely become another unkeyed send.
-      const restored = interrupted.operation_binding
-        ? interrupted
-        : { ...interrupted, operation_binding_invalid: true as const };
-      normalized = {
-        ...normalized,
-        inFlight: undefined,
-        items: restoreQueuedCommand(normalized.items, restored),
-        isPaused:
-          normalized.isPaused || !interrupted.operation_binding || Boolean(interrupted.operation_binding_invalid),
-      };
-    }
+    const normalized = normalizeQueueState(parsed);
     queueStore.set(conversation_id, normalized);
     logCommandQueue(conversation_id, 'restored', {
       itemCount: normalized.items.length,
@@ -331,7 +303,7 @@ const removePersistedQueueState = (conversation_id: string): void => {
 const persistQueueState = (conversation_id: string, state: ConversationCommandQueueState): void => {
   const normalized = normalizeQueueState(state);
 
-  if (normalized.items.length === 0 && !normalized.inFlight && !normalized.isPaused && normalized.mode === 'manual') {
+  if (normalized.items.length === 0 && !normalized.isPaused && normalized.mode === 'manual') {
     removePersistedQueueState(conversation_id);
     return;
   }
@@ -442,7 +414,7 @@ type UseConversationCommandQueueOptions = {
   isBusy: boolean;
   isHydrated?: boolean;
   runtimeGate?: ConversationCommandQueueRuntimeGate;
-  onExecute: (item: ConversationCommandQueueItem, context?: { manual: boolean }) => Promise<void>;
+  onExecute: (item: ConversationCommandQueueItem) => Promise<void>;
 };
 
 /// `sessions` is part of the enqueue input, not just of the stored item: a
@@ -454,7 +426,7 @@ type BackgroundCommandQueueRunner = {
   conversation_id: string;
   active: boolean;
   executing: boolean;
-  onExecute: (item: ConversationCommandQueueItem, context?: { manual: boolean }) => Promise<void>;
+  onExecute: (item: ConversationCommandQueueItem) => Promise<void>;
 };
 
 const backgroundRunners = new Map<string, BackgroundCommandQueueRunner>();
@@ -527,7 +499,7 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
     return;
   }
 
-  if (state.inFlight || state.isPaused || state.mode === 'manual') {
+  if (state.isPaused || state.mode === 'manual') {
     return;
   }
 
@@ -542,11 +514,6 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
     releaseBackgroundTurnCompletedListener();
     return;
   }
-  if (nextCommand.operation_binding_invalid) {
-    persistQueueState(runner.conversation_id, { ...currentState, isPaused: true });
-    Message.warning(i18n.t('conversation.managedOperation.uncertain'));
-    return;
-  }
 
   runner.executing = true;
   let shouldContinueDrain = true;
@@ -557,17 +524,14 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
   persistQueueState(runner.conversation_id, {
     ...currentState,
     items: remainingCommands,
-    inFlight: nextCommand,
     isPaused: false,
   });
 
   try {
     await runner.onExecute(nextCommand);
-    const accepted = readPersistedQueueState(runner.conversation_id);
-    persistQueueState(runner.conversation_id, { ...accepted, inFlight: undefined });
   } catch (error) {
     const failedState = readPersistedQueueState(runner.conversation_id);
-    const restoredItems = restoreQueuedCommand(failedState.items, failedState.inFlight ?? nextCommand);
+    const restoredItems = restoreQueuedCommand(failedState.items, nextCommand);
     const busyError = classifyConversationBusyError(error);
     if (busyError) {
       logCommandQueue(runner.conversation_id, 'background-busy-wait', {
@@ -577,12 +541,7 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
         code: busyError.code,
         remainingItemCount: restoredItems.length,
       });
-      persistQueueState(runner.conversation_id, {
-        ...failedState,
-        inFlight: undefined,
-        items: restoredItems,
-        isPaused: false,
-      });
+      persistQueueState(runner.conversation_id, { ...failedState, items: restoredItems, isPaused: false });
       shouldContinueDrain = false;
       return;
     }
@@ -591,12 +550,7 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
       item: summarizeQueuedCommand(nextCommand),
       error: error instanceof Error ? error.message : String(error),
     });
-    persistQueueState(runner.conversation_id, {
-      ...failedState,
-      inFlight: undefined,
-      items: restoredItems,
-      isPaused: true,
-    });
+    persistQueueState(runner.conversation_id, { ...failedState, items: restoredItems, isPaused: true });
     Message.warning('The next queued command could not start. Edit, reorder, or remove it to continue.');
   } finally {
     runner.executing = false;
@@ -740,7 +694,7 @@ export const useConversationCommandQueue = ({
 
     registerBackgroundCommandQueueRunner({
       conversation_id,
-      onExecute: (item, context) => (context ? onExecuteRef.current(item, context) : onExecuteRef.current(item)),
+      onExecute: (item) => onExecuteRef.current(item),
     });
 
     return () => {
@@ -791,42 +745,6 @@ export const useConversationCommandQueue = ({
     [conversation_id, enabled, mutate]
   );
 
-  const bindOperation = useCallback(
-    async (commandId: string, binding: ManagedRequestBinding): Promise<void> => {
-      if (!isManagedBinding(binding)) throw new ManagedOperationError('OPERATION_UNCERTAIN');
-      let found = false;
-      const bind = (item: ConversationCommandQueueItem): ConversationCommandQueueItem => {
-        if (item.id !== commandId) return item;
-        found = true;
-        return { ...item, operation_binding: binding };
-      };
-      await updateState((state) => ({
-        ...state,
-        items: state.items.map(bind),
-        ...(state.inFlight ? { inFlight: bind(state.inFlight) } : {}),
-      }));
-      try {
-        const stored = JSON.parse(
-          window.sessionStorage.getItem(getStorageKey(conversation_id)) ?? '{}'
-        ) as Partial<ConversationCommandQueueState>;
-        const item =
-          stored.inFlight?.id === commandId ? stored.inFlight : stored.items?.find((entry) => entry.id === commandId);
-        const saved = item?.operation_binding;
-        if (
-          !found ||
-          !isManagedBinding(saved) ||
-          saved.request_digest !== binding.request_digest ||
-          saved.operation.id !== binding.operation.id ||
-          saved.operation.host_store_id !== binding.operation.host_store_id
-        )
-          throw new Error();
-      } catch {
-        throw new ManagedOperationError('OPERATION_STORAGE_UNAVAILABLE');
-      }
-    },
-    [conversation_id, updateState]
-  );
-
   const clear = useCallback(() => {
     waitingForTurnStartRef.current = false;
     waitingForTurnCompletionRef.current = false;
@@ -834,10 +752,7 @@ export const useConversationCommandQueue = ({
     observedBusyBlockedGateRef.current = false;
     pausedRef.current = false;
     logCommandQueue(conversation_id, 'cleared');
-    void updateState((state) => ({
-      ...createDefaultQueueState(),
-      ...(state.inFlight ? { inFlight: state.inFlight } : {}),
-    }));
+    void updateState(() => createDefaultQueueState());
   }, [conversation_id, updateState]);
 
   useAddEventListener(
@@ -977,19 +892,13 @@ export const useConversationCommandQueue = ({
       }
 
       const currentState = normalizeQueueState(stateRef.current);
-      if (currentState.inFlight) return;
       const target = currentState.items.find((item) => item.id === commandId);
       if (!target) {
-        return;
-      }
-      if (target.operation_binding_invalid) {
-        Message.warning(t('conversation.managedOperation.uncertain'));
         return;
       }
 
       // Remove only the targeted command; the rest keep their mode, order and paused flag.
       const nextItems = removeQueuedCommand(currentState.items, commandId);
-      stateRef.current = { ...currentState, items: nextItems, inFlight: target, isPaused: false };
       waitingForTurnStartRef.current = true;
       waitingForTurnCompletionRef.current = false;
       observedBusyBlockedGateRef.current = false;
@@ -1001,53 +910,49 @@ export const useConversationCommandQueue = ({
       void updateState((state) => ({
         ...state,
         items: removeQueuedCommand(state.items, commandId),
-        inFlight: target,
         isPaused: false,
-      }))
-        .then(() => onExecuteRef.current(target, { manual: true }))
-        .then(() => updateState((state) => ({ ...state, inFlight: undefined })))
-        .catch((error) => {
-          const busyError = classifyConversationBusyError(error);
-          if (busyError) {
-            waitingForBusyReleaseRef.current = true;
-            waitingForTurnStartRef.current = false;
-            waitingForTurnCompletionRef.current = true;
-            pausedRef.current = false;
-            logCommandQueue(conversation_id, 'send-now-busy-wait', {
-              item: summarizeQueuedCommand(target),
-              busyKind: busyError.kind,
-              status: busyError.status,
-              code: busyError.code,
-              remainingItemCount: nextItems.length + 1,
-            });
-            void updateState((state) => ({
-              ...state,
-              items: restoreQueuedCommand(state.items, state.inFlight ?? target),
-              inFlight: undefined,
-              isPaused: false,
-            }));
-            return;
-          }
-          console.error('[conversation-command-queue] Failed to send queued command now:', error);
-          logCommandQueue(conversation_id, 'send-now-failed', {
-            item: summarizeQueuedCommand(target),
-            error: error instanceof Error ? error.message : String(error),
-          });
+      }));
+
+      void onExecuteRef.current(target).catch((error) => {
+        const busyError = classifyConversationBusyError(error);
+        if (busyError) {
+          waitingForBusyReleaseRef.current = true;
           waitingForTurnStartRef.current = false;
-          waitingForTurnCompletionRef.current = false;
-          pausedRef.current = true;
+          waitingForTurnCompletionRef.current = true;
+          pausedRef.current = false;
+          logCommandQueue(conversation_id, 'send-now-busy-wait', {
+            item: summarizeQueuedCommand(target),
+            busyKind: busyError.kind,
+            status: busyError.status,
+            code: busyError.code,
+            remainingItemCount: nextItems.length + 1,
+          });
           void updateState((state) => ({
             ...state,
-            items: restoreQueuedCommand(state.items, state.inFlight ?? target),
-            inFlight: undefined,
-            isPaused: true,
+            items: restoreQueuedCommand(state.items, target),
+            isPaused: false,
           }));
-          Message.warning(
-            t('conversation.commandQueue.pausedAfterFailure', {
-              defaultValue: 'The next queued command could not start. Edit, reorder, or remove it to continue.',
-            })
-          );
+          return;
+        }
+        console.error('[conversation-command-queue] Failed to send queued command now:', error);
+        logCommandQueue(conversation_id, 'send-now-failed', {
+          item: summarizeQueuedCommand(target),
+          error: error instanceof Error ? error.message : String(error),
         });
+        waitingForTurnStartRef.current = false;
+        waitingForTurnCompletionRef.current = false;
+        pausedRef.current = true;
+        void updateState((state) => ({
+          ...state,
+          items: restoreQueuedCommand(state.items, target),
+          isPaused: true,
+        }));
+        Message.warning(
+          t('conversation.commandQueue.pausedAfterFailure', {
+            defaultValue: 'The next queued command could not start. Edit, reorder, or remove it to continue.',
+          })
+        );
+      });
     },
     [conversation_id, enabled, t, updateState]
   );
@@ -1085,7 +990,7 @@ export const useConversationCommandQueue = ({
       itemCount: data.items.length,
     });
     void updateState((state) => {
-      if (state.items.length === 0 && !state.inFlight) {
+      if (state.items.length === 0) {
         pausedRef.current = false;
         return createDefaultQueueState();
       }
@@ -1183,19 +1088,12 @@ export const useConversationCommandQueue = ({
       waitingForTurnCompletionRef.current ||
       waitingForBusyReleaseRef.current ||
       interactionLockedRef.current ||
-      data.inFlight ||
       data.items.length === 0
     ) {
       return;
     }
 
     const [nextCommand, ...remainingCommands] = data.items;
-    if (nextCommand.operation_binding_invalid) {
-      pausedRef.current = true;
-      void updateState((state) => ({ ...state, isPaused: true }));
-      Message.warning(t('conversation.managedOperation.uncertain'));
-      return;
-    }
     waitingForTurnStartRef.current = true;
     observedBusyBlockedGateRef.current = false;
     logCommandQueue(conversation_id, 'dequeued', {
@@ -1208,59 +1106,52 @@ export const useConversationCommandQueue = ({
     void updateState((state) => ({
       ...state,
       items: remainingCommands,
-      inFlight: nextCommand,
       isPaused: false,
     })).then(() =>
-      onExecuteRef
-        .current(nextCommand)
-        .then(() => updateState((state) => ({ ...state, inFlight: undefined })))
-        .catch((error) => {
-          const busyError = classifyConversationBusyError(error);
-          if (busyError) {
-            waitingForBusyReleaseRef.current = true;
-            waitingForTurnStartRef.current = false;
-            waitingForTurnCompletionRef.current = true;
-            pausedRef.current = false;
-            logCommandQueue(conversation_id, 'busy-wait', {
-              item: summarizeQueuedCommand(nextCommand),
-              busyKind: busyError.kind,
-              status: busyError.status,
-              code: busyError.code,
-              remainingItemCount: remainingCommands.length + 1,
-            });
-            void updateState((state) => ({
-              ...state,
-              items: restoreQueuedCommand(state.items, state.inFlight ?? nextCommand),
-              inFlight: undefined,
-              isPaused: false,
-            }));
-            return;
-          }
-          console.error('[conversation-command-queue] Failed to execute queued command:', error);
-          logCommandQueue(conversation_id, 'execute-failed', {
-            item: summarizeQueuedCommand(nextCommand),
-            error: error instanceof Error ? error.message : String(error),
-          });
+      onExecuteRef.current(nextCommand).catch((error) => {
+        const busyError = classifyConversationBusyError(error);
+        if (busyError) {
+          waitingForBusyReleaseRef.current = true;
           waitingForTurnStartRef.current = false;
-          waitingForTurnCompletionRef.current = false;
-          pausedRef.current = true;
+          waitingForTurnCompletionRef.current = true;
+          pausedRef.current = false;
+          logCommandQueue(conversation_id, 'busy-wait', {
+            item: summarizeQueuedCommand(nextCommand),
+            busyKind: busyError.kind,
+            status: busyError.status,
+            code: busyError.code,
+            remainingItemCount: remainingCommands.length + 1,
+          });
           void updateState((state) => ({
             ...state,
-            items: restoreQueuedCommand(state.items, state.inFlight ?? nextCommand),
-            inFlight: undefined,
-            isPaused: true,
+            items: restoreQueuedCommand(state.items, nextCommand),
+            isPaused: false,
           }));
-          Message.warning(
-            t('conversation.commandQueue.pausedAfterFailure', {
-              defaultValue: 'The next queued command could not start. Edit, reorder, or remove it to continue.',
-            })
-          );
-        })
+          return;
+        }
+        console.error('[conversation-command-queue] Failed to execute queued command:', error);
+        logCommandQueue(conversation_id, 'execute-failed', {
+          item: summarizeQueuedCommand(nextCommand),
+          error: error instanceof Error ? error.message : String(error),
+        });
+        waitingForTurnStartRef.current = false;
+        waitingForTurnCompletionRef.current = false;
+        pausedRef.current = true;
+        void updateState((state) => ({
+          ...state,
+          items: restoreQueuedCommand(state.items, nextCommand),
+          isPaused: true,
+        }));
+        Message.warning(
+          t('conversation.commandQueue.pausedAfterFailure', {
+            defaultValue: 'The next queued command could not start. Edit, reorder, or remove it to continue.',
+          })
+        );
+      })
     );
   }, [
     conversation_id,
     data.items,
-    data.inFlight,
     data.mode,
     enabled,
     executionGateVersion,
@@ -1279,7 +1170,6 @@ export const useConversationCommandQueue = ({
     isInteractionLocked,
     hasPendingCommands: enabled ? data.items.length > 0 : false,
     enqueue,
-    bindOperation,
     update,
     remove,
     prioritize,

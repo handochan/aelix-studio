@@ -45,14 +45,14 @@ try {
     ],
     env: [],
     icon: '🧬',
-    advanced: { description: 'Isolated Studio #4 qualification' },
+    advanced: { description: 'Isolated Studio #28 qualification' },
   });
   assert.ok(agent.id);
   const assistants = await api('/api/assistants');
   const assistant = assistants.find((item) => item.name === 'Aelix Preview qualification');
   assert.ok(assistant, 'Existing custom-agent registration must create an assistant');
   const conversation = await api('/api/conversations', 'POST', {
-    name: 'Public beta.2 baseline',
+    name: 'Pinned Beta candidate baseline',
     assistant: { id: assistant.id },
     extra: { workspace: path.join(sandbox, 'workspace'), custom_workspace: true },
   });
@@ -60,13 +60,9 @@ try {
   fs.writeFileSync(path.join(runtime, 'runtime-observed.json'), JSON.stringify(observed, null, 2) + '\n');
   const options = observed.config_options ?? [];
   const model = options.find((item) => item.id === 'model');
-  assert.ok(model, 'AionCore must translate the legacy ACP model selector');
+  assert.ok(model, 'The released host must preserve the advertised ACP model selector');
   assert.equal(model.current_value, 'fixture/one');
-  assert.equal(model.options.length, 1, 'Do not claim live model switching');
-  assert.equal(
-    options.some((item) => /thinking|reasoning/i.test(item.id)),
-    false
-  );
+  assert.deepEqual(model.options.map((item) => item.value).sort(), ['fixture/one', 'fixture/two']);
   await page.evaluate((id) => {
     window.location.hash = `/conversation/${id}`;
   }, conversation.id);
@@ -82,11 +78,11 @@ try {
     {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ value: 'fixture/two' }),
+      body: JSON.stringify({ value: 'fixture/absent' }),
       signal: AbortSignal.timeout(15_000),
     }
   );
-  assert.equal(unsupported.status, 400, 'The host must reject a model absent from the launch-only selector');
+  assert.equal(unsupported.status, 400, 'The host must reject a model absent from the advertised selector');
   const input = page.getByTestId('sendbox-input');
   await input.fill('QUALIFICATION_STUDIO_SESSION');
   await page.getByTestId('sendbox-send-btn').click();
@@ -112,16 +108,17 @@ try {
         checks: [
           'custom_agent_registration',
           'basic_session',
-          'launch_model_selector',
+          'advertised_model_selector',
           'host_unavailable_model_rejected',
           'ui_text_stream',
           'ui_stop',
         ],
         unsupportedModelHttpStatus: unsupported.status,
         configOptionIds: options.map((item) => item.id),
-        liveModelSwitch: false,
-        reasoningForwarded: false,
-        contextForwarded: false,
+        liveModelSwitch: 'not-exercised',
+        reasoningAdvertised: options.some((item) => /thinking|reasoning/i.test(item.id)),
+        reasoningForwarded: 'not-exercised',
+        contextForwarded: 'not-exercised',
       },
       null,
       2

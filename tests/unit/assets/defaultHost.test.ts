@@ -20,12 +20,15 @@ function refreshManifest() {
   writeJson('manifest.json', manifest);
 }
 
+const originalPolicy = structuredClone(policy);
 beforeEach(() => {
+  Object.assign(policy, structuredClone(originalPolicy));
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-default-host-'));
   directory = path.join(root, 'bundled-aioncore/win32-x64');
   fs.mkdirSync(path.join(directory, 'managed-resources/node'), { recursive: true });
-  fs.writeFileSync(path.join(directory, 'aioncore.exe'), 'synthetic non-executable fixture');
-  fs.copyFileSync('LICENSE', path.join(directory, 'AIONCORE-LICENSE.txt'));
+  fs.writeFileSync(path.join(directory, 'aelix-studio-host.exe'), 'synthetic non-executable fixture');
+  fs.copyFileSync('LICENSE', path.join(directory, 'LICENSE'));
+  fs.writeFileSync(path.join(directory, 'NOTICE'), 'synthetic notice');
   fs.writeFileSync(path.join(directory, 'managed-resources/node/node.exe'), 'synthetic node fixture');
   writeJson('managed-resources/manifest.json', {
     schemaVersion: 2,
@@ -33,106 +36,112 @@ beforeEach(() => {
     node: { version: '24.11.0', root: 'node', executable: 'node.exe' },
     clis: [],
   });
-  const binaryHash = hash(fs.readFileSync(path.join(directory, 'aioncore.exe')));
+  const binaryHash = hash(fs.readFileSync(path.join(directory, 'aelix-studio-host.exe')));
+  policy.targets['win32-x64'].binarySha256 = binaryHash;
+  policy.targets['win32-x64'].binaryCodeSha256 = binaryHash;
+  policy.licenseSha256 = hash(fs.readFileSync('LICENSE'));
+  policy.noticeSha256 = hash('synthetic notice');
+  const provenance = {
+    schema: 'aelix-studio-host.release-provenance/1',
+    kind: 'release',
+    label: policy.tag,
+    repository: policy.repository,
+    commit: policy.commit,
+    tree: policy.tree,
+    targets: policy.targets,
+  };
+  writeJson('release-provenance.json', provenance);
+  policy.provenanceSha256 = hash(fs.readFileSync(path.join(directory, 'release-provenance.json')));
   receipt = {
-    status: 'built_candidate',
-    purpose: 'default_runtime',
+    schema: 'aelix-studio-host.build-receipt/1',
+    status: 'built',
+    dirty: false,
+    repository: policy.repository,
+    commit: policy.commit,
+    tree: policy.tree,
+    label: policy.tag,
     target: 'win32-x64',
-    binary: 'aioncore.exe',
-    profile: 'release',
-    rustFlags: policy.targets['win32-x64'].rustFlags ?? '',
-    sourcePolicySha256: hash(stable(policy)),
-    buildRecipeSha256: policy.buildRecipeSha256,
-    identityRecipeSha256: policy.identityRecipeSha256,
-    managedResourceRecipeSha256: policy.managedResourceRecipeSha256,
-    resourceIdentityRecipeSha256: policy.resourceIdentityRecipeSha256,
-    managedResourcesSha256: hash(
-      stable(inventory(path.join(directory, 'managed-resources'), { excludeManifest: false }))
-    ),
-    patchSha256: policy.patch.sha256,
-    upstream: policy.upstream,
-    cargoLockSha256: policy.cargoLockSha256,
-    licenseFileSha256: policy.upstreamLicenseSha256,
-    releasedHostBytes: false,
-    nativePatches: [],
-    originalSourceFilesVerified: policy.sourceFileCount,
-    patchedSourceFilesVerified: policy.patchedSourceFileCount ?? policy.sourceFileCount,
-    sourceFilesAfterBuildVerified: policy.patchedSourceFileCount ?? policy.sourceFileCount,
-    cargoVersion: 'cargo 1.95.0 (fixture)',
-    rustcVersionVerbose: 'rustc 1.95.0 (fixture)',
+    binary: 'aelix-studio-host.exe',
+    archive: policy.targets['win32-x64'].archive,
     binarySha256: binaryHash,
     binaryCodeSha256: binaryHash,
+    rustToolchain: policy.rustToolchain,
+    profile: 'release',
+    upstream: { repository: policy.upstream.repository, tag: policy.upstream.tag, commit: policy.upstream.commit },
+    cargoLockSha256: policy.cargoLockSha256,
+    licenseSha256: policy.licenseSha256,
+    noticeSha256: policy.noticeSha256,
   };
   writeJson('build-receipt.json', receipt);
   manifest = {
     platform: 'win32',
     arch: 'x64',
-    sourceType: 'studio-default-source',
+    sourceType: 'studio-host-release',
     hostPolicy: policy,
-    binaryCodeSha256: binaryHash,
+    managedResourcesSha256: hash(
+      stable(inventory(path.join(directory, 'managed-resources'), { excludeManifest: false }))
+    ),
   };
   refreshManifest();
 });
-afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+afterEach(() => {
+  fs.rmSync(root, { recursive: true, force: true });
+  Object.assign(policy, structuredClone(originalPolicy));
+});
 
 describe('default host launch provenance', () => {
-  it('keeps original archive counts separate from declared patched additions', () => {
-    const previous = policy.patchedSourceFileCount;
-    try {
-      policy.patchedSourceFileCount = policy.sourceFileCount + 1;
-      receipt.sourcePolicySha256 = hash(stable(policy));
-      receipt.patchedSourceFilesVerified = policy.patchedSourceFileCount;
-      receipt.sourceFilesAfterBuildVerified = policy.patchedSourceFileCount;
-      writeJson('build-receipt.json', receipt);
-      refreshManifest();
-      expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-default-source');
-      receipt.sourceFilesAfterBuildVerified = policy.sourceFileCount;
-      writeJson('build-receipt.json', receipt);
-      refreshManifest();
-      expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow(/provenance/);
-    } finally {
-      if (previous === undefined) delete policy.patchedSourceFileCount;
-      else policy.patchedSourceFileCount = previous;
-    }
+  it('accepts the pinned release receipt and complete resources', () => {
+    expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-host-release');
   });
-  it('accepts the declared build and complete managed resources', () => {
-    expect(verifyDefaultHostBundle(directory, 'win32-x64').sourceType).toBe('studio-default-source');
+  it('rejects a changed release provenance even with a refreshed local inventory', () => {
+    writeJson('release-provenance.json', { commit: 'unreviewed' });
+    refreshManifest();
+    expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow('release provenance changed');
   });
-  it('accepts the retained Linux ABI and rejects a newer GLIBC or another compiler recipe', () => {
-    fs.renameSync(path.join(directory, 'aioncore.exe'), path.join(directory, 'aioncore'));
-    receipt.target = 'linux-arm64';
-    receipt.binary = 'aioncore';
-    receipt.rustFlags = '';
-    receipt.maximumGlibcVersionNeeded = '2.30';
-    receipt.buildContainer = {
-      recipeSha256: policy.targets['linux-arm64'].container.recipeSha256,
-      platform: 'linux/arm64',
-      imageId: 'sha256:' + 'a'.repeat(64),
-    };
-    manifest.platform = 'linux';
-    manifest.arch = 'arm64';
+  it('rejects a receipt for another source commit even with a refreshed local inventory', () => {
+    receipt.commit = '0'.repeat(40);
+    writeJson('build-receipt.json', receipt);
+    refreshManifest();
+    expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow('build provenance differs');
+  });
+  it('accepts the released GLIBC prefix and rejects a newer or malformed Linux ABI', () => {
+    const spec = policy.targets['linux-arm64'];
+    spec.binarySha256 = receipt.binarySha256;
+    spec.binaryCodeSha256 = receipt.binaryCodeSha256;
+    fs.renameSync(path.join(directory, 'aelix-studio-host.exe'), path.join(directory, 'aelix-studio-host'));
+    Object.assign(receipt, {
+      target: 'linux-arm64',
+      binary: spec.binary,
+      archive: spec.archive,
+      buildContainer: spec.buildContainer,
+      maximumGlibcVersionNeeded: 'GLIBC_2.30',
+    });
+    Object.assign(manifest, { platform: 'linux', arch: 'arm64' });
     const resourceFile = path.join(directory, 'managed-resources/manifest.json');
     const resources = JSON.parse(fs.readFileSync(resourceFile, 'utf8'));
     resources.runtimeKey = 'linux-arm64';
     fs.writeFileSync(resourceFile, JSON.stringify(resources));
-    receipt.managedResourcesSha256 = hash(
+    manifest.managedResourcesSha256 = hash(
       stable(inventory(path.join(directory, 'managed-resources'), { excludeManifest: false }))
     );
+    const provenance = JSON.parse(fs.readFileSync(path.join(directory, 'release-provenance.json'), 'utf8'));
+    provenance.targets = policy.targets;
+    writeJson('release-provenance.json', provenance);
+    policy.provenanceSha256 = hash(fs.readFileSync(path.join(directory, 'release-provenance.json')));
     const check = () => {
       writeJson('build-receipt.json', receipt);
       refreshManifest();
       return verifyDefaultHostBundle(directory, 'linux-arm64');
     };
-    expect(check().sourceType).toBe('studio-default-source');
-    receipt.maximumGlibcVersionNeeded = '2.39';
-    expect(check).toThrow('compiler container or GLIBC compatibility differs');
+    expect(check().sourceType).toBe('studio-host-release');
+    receipt.maximumGlibcVersionNeeded = 'GLIBC_2.39';
+    expect(check).toThrow('GLIBC compatibility differs');
     receipt.maximumGlibcVersionNeeded = '2.30';
-    (receipt.buildContainer as Record<string, unknown>).recipeSha256 = 'b'.repeat(64);
-    expect(check).toThrow('compiler container or GLIBC compatibility differs');
+    expect(check).toThrow('GLIBC compatibility differs');
   });
   it.runIf(process.platform === 'win32')('verifies a Windows namespaced install path', () => {
     expect(verifyDefaultHostBundle(path.toNamespacedPath(directory), 'win32-x64').sourceType).toBe(
-      'studio-default-source'
+      'studio-host-release'
     );
   });
   it('rejects a resource directory junction or symlink escaping the native canonical root', () => {
@@ -147,7 +156,7 @@ describe('default host launch provenance', () => {
     expect(() => inventory(directory)).toThrow('resource escapes its bundle');
   });
   it('rejects replacement code even when the mutable bundle inventory is refreshed', () => {
-    fs.writeFileSync(path.join(directory, 'aioncore.exe'), 'replacement code');
+    fs.writeFileSync(path.join(directory, 'aelix-studio-host.exe'), 'replacement code');
     manifest.binaryCodeSha256 = hash('replacement code');
     refreshManifest();
     expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow('code or upstream license changed');
@@ -165,7 +174,7 @@ describe('default host launch provenance', () => {
     );
   });
   it('rejects an old toolchain receipt with a refreshed receipt hash', () => {
-    receipt.cargoVersion = 'cargo 1.94.0 (fixture)';
+    receipt.rustToolchain = '1.94.0';
     writeJson('build-receipt.json', receipt);
     refreshManifest();
     expect(() => verifyDefaultHostBundle(directory, 'win32-x64')).toThrow('build provenance differs');
@@ -206,17 +215,52 @@ describe('default host launch provenance', () => {
   });
 });
 
-describe('Windows default source build paths', () => {
-  it('keeps the observed aws-lc MSVC output path below MAX_PATH', () => {
-    const { defaultHostCacheKey } = require('../../../scripts/studio-preview/host-recovery/prepareDefaultHost.cjs');
-    const policyHash = 'fc225fb6369c8dca82942671aa63c8508289143b8f49e32664ceaad54411dd46';
-    const recipeHash = '1c0075664430f093' + '0'.repeat(48);
-    const root = String.raw`D:\a\aelix-studio\aelix-studio\.local\default-host`;
-    const suffix =
-      'cargo-target/x86_64-pc-windows-msvc/release/build/aws-lc-sys-c53fc92379a36417/out/out-stdalign_check/4ff06014f56aa32a-stdalign_check.o';
-    const full = policyHash + '-' + recipeHash.slice(0, 16) + '-win32-x64';
-    const key = defaultHostCacheKey(policyHash, recipeHash, 'win32-x64');
-    expect(path.win32.join(root, full, suffix).length).toBeGreaterThan(260);
-    expect(path.win32.join(root, key, suffix).length).toBeLessThan(240);
+describe('release archive selection', () => {
+  it('uses the normalized immutable host release archive name', () => {
+    const { getAssetName } = require('../../../packages/shared-scripts/src/prepare-aioncore.js');
+    expect(getAssetName('darwin', 'arm64', policy.tag)).toBe(policy.targets['darwin-arm64'].archive);
+    expect(getAssetName('win32', 'x64', policy.tag)).toBe(policy.targets['win32-x64'].archive);
+    expect(getAssetName('unsupported', 'x64', policy.tag)).toBeNull();
+  });
+  it('refuses a changed cached release archive before extraction or execution', () => {
+    const { prepareDefaultHost } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const target = `${process.platform}-${process.arch}`;
+    if (!policy.targets[target]) return;
+    const cache = path.join(root, '.local/default-host', policy.tag, target);
+    fs.mkdirSync(cache, { recursive: true });
+    fs.writeFileSync(path.join(cache, policy.targets[target].archive), 'changed bytes');
+    expect(() => prepareDefaultHost({ projectRoot: root, platform: process.platform, arch: process.arch })).toThrow(
+      'release archive checksum differs'
+    );
+  });
+});
+
+describe('verified archive publication', () => {
+  it('removes an interrupted download and permits a fresh verified retry', () => {
+    const { downloadVerifiedArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const archive = path.join(root, 'release.tar.gz');
+    const interrupted = (_url: string, temporary: string) => {
+      fs.writeFileSync(temporary, 'partial');
+      throw new Error('interrupted');
+    };
+    expect(() => downloadVerifiedArchive('https://fixture.invalid', archive, hash('complete'), interrupted)).toThrow(
+      'interrupted'
+    );
+    expect(fs.readdirSync(root).filter((name: string) => name.includes('release.tar.gz'))).toEqual([]);
+    downloadVerifiedArchive('https://fixture.invalid', archive, hash('complete'), (_url: string, temporary: string) =>
+      fs.writeFileSync(temporary, 'complete')
+    );
+    expect(fs.readFileSync(archive, 'utf8')).toBe('complete');
+  });
+  it('never publishes bytes that differ from the archive pin', () => {
+    const { downloadVerifiedArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const archive = path.join(root, 'release.tar.gz');
+    expect(() =>
+      downloadVerifiedArchive('https://fixture.invalid', archive, hash('expected'), (_url: string, temporary: string) =>
+        fs.writeFileSync(temporary, 'wrong')
+      )
+    ).toThrow('checksum differs');
+    expect(fs.existsSync(archive)).toBe(false);
+    expect(fs.readdirSync(root).filter((name: string) => name.endsWith('.partial'))).toEqual([]);
   });
 });

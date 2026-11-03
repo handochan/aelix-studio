@@ -347,7 +347,7 @@ function Test-BundledResourcesOnce {
     return $failures
   }
 
-  Test-NonEmptyFile $failures 'aioncore' '' (Join-Path $baseDir 'aioncore.exe') $true $baseDir | Out-Null
+  Test-NonEmptyFile $failures 'aioncore' '' (Join-Path $baseDir 'aelix-studio-host.exe') $true $baseDir | Out-Null
 
   $bundleManifestPath = Join-Path $baseDir 'manifest.json'
   if (Test-NonEmptyFile $failures 'aioncore-manifest' '' $bundleManifestPath $false $baseDir) {

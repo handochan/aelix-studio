@@ -72,7 +72,7 @@ echo "✓ Version: $VERSION"
 echo ""
 echo "5. Checking backend binary..."
 BACKEND_DIR="bundled-aioncore/$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m | sed 's/aarch64/arm64/; s/x86_64/x64/')"
-BACKEND_BINARY="$BACKEND_DIR/aioncore"
+BACKEND_BINARY="$BACKEND_DIR/aelix-studio-host"
 if [ ! -x "$BACKEND_BINARY" ]; then
   echo "❌ Backend binary missing or not executable: $BACKEND_BINARY"
   exit 1

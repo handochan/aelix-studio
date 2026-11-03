@@ -1,58 +1,17 @@
 {
   "schema": "aelix-studio.preview/1",
-  "studioBase": "c47a346db8d0303bc64a1a0bf93b4b94cceb99df",
+  "studioBase": "ce98f677a41e7f34c5f7f1609508b7e96289f5f2",
   "python": "3.12.15",
   "native": {
     "schemaVersion": 1,
     "nativeVersion": "0.1.0b2",
+    "status": "beta.3-candidate",
     "sourceTag": {
       "repository": "https://github.com/handochan/aelix-ai",
-      "tag": "v0.1.0-beta.2",
-      "commit": "1093cc2578e70500c91fe0a8d340b7db2528c8de",
-      "relationship": "Public release source reference; wheel build provenance is not independently attested."
+      "commit": "e19ab55e17e871a40356fc9802f3f6669ca727de",
+      "archiveSha256": "c6088edb122c8e3dec4b954e104bf12ff4db749674b6d540b70c5ac5b1ebf997",
+      "relationship": "Unmodified source wheels built from the exact beta.3 candidate; source still declares 0.1.0b2. Not public beta.3 wheels."
     },
-    "wheels": [
-      {
-        "distribution": "aelix",
-        "version": "0.1.0b2",
-        "metadataUrl": "https://pypi.org/pypi/aelix/0.1.0b2/json",
-        "filename": "aelix-0.1.0b2-py3-none-any.whl",
-        "url": "https://files.pythonhosted.org/packages/f6/05/fabe2a1aa29c1e798eb55bd5aa913a85f0b993d622cc6926600608e68e1c/aelix-0.1.0b2-py3-none-any.whl",
-        "sha256": "98a9201be2c84c96a1e3944bd003ba7b7346e6e0807dfbfaae3a00ef8e4994b7",
-        "size": 21796,
-        "uploadedAt": "2026-09-09T05:29:48.670636Z"
-      },
-      {
-        "distribution": "aelix-ai",
-        "version": "0.1.0b2",
-        "metadataUrl": "https://pypi.org/pypi/aelix-ai/0.1.0b2/json",
-        "filename": "aelix_ai-0.1.0b2-py3-none-any.whl",
-        "url": "https://files.pythonhosted.org/packages/f1/49/91a10475ce8b227a4679dd6a3f861c52784fcad14551a2aae33507abda46/aelix_ai-0.1.0b2-py3-none-any.whl",
-        "sha256": "5a8b03bdc87161ea17efd96500b13fd7627618c14b6402e9e46a20d6414f1552",
-        "size": 392074,
-        "uploadedAt": "2026-09-09T05:29:51.730304Z"
-      },
-      {
-        "distribution": "aelix-agent-core",
-        "version": "0.1.0b2",
-        "metadataUrl": "https://pypi.org/pypi/aelix-agent-core/0.1.0b2/json",
-        "filename": "aelix_agent_core-0.1.0b2-py3-none-any.whl",
-        "url": "https://files.pythonhosted.org/packages/c4/99/3dee40b1aefe3a6434f173d84a9ee9794f6e8285d85eabab49fe60a7c44d/aelix_agent_core-0.1.0b2-py3-none-any.whl",
-        "sha256": "f3fdabe25ed8e49aeed467a815fcfd4e5d18eedb4fb6d871649739220341b609",
-        "size": 216721,
-        "uploadedAt": "2026-09-09T05:29:50.115910Z"
-      },
-      {
-        "distribution": "aelix-coding-agent",
-        "version": "0.1.0b2",
-        "metadataUrl": "https://pypi.org/pypi/aelix-coding-agent/0.1.0b2/json",
-        "filename": "aelix_coding_agent-0.1.0b2-py3-none-any.whl",
-        "url": "https://files.pythonhosted.org/packages/61/d5/257d23fd784caac63ad08d40d2b81399caa2dacf05bcf8a51574d0acbad7/aelix_coding_agent-0.1.0b2-py3-none-any.whl",
-        "sha256": "60b19815c9355fa1a5d3c4f99e9d32ff53d4ad2522515038b76115273db8baf6",
-        "size": 1361351,
-        "uploadedAt": "2026-09-09T05:29:53.239709Z"
-      }
-    ],
     "imports": [
       ["aelix_agent_core.harness.hooks", "ToolCallResult"],
       ["aelix_ai.oauth.auth_storage", "AuthStorage"],
@@ -63,66 +22,52 @@
       ["aelix_coding_agent.agents", "resolve_profile"],
       ["aelix_coding_agent.agents", "profile_to_flags"],
       ["aelix_agent_core.session.jsonl_repo", "JsonlSessionRepo"]
-    ],
-    "cliFlags": [
-      "--mode",
-      "--offline",
-      "--no-extensions",
-      "--no-agents",
-      "--no-context-files",
-      "--no-skills",
-      "--provider",
-      "--model",
-      "--thinking",
-      "--permission-mode",
-      "--session-dir"
-    ],
-    "expectedClassicRpcGaps": {
-      "get_available_models": "requires a ModelRegistry",
-      "set_model": "requires a ModelRegistry",
-      "aelix_control": "Unknown RpcCommand type"
-    }
+    ]
   },
   "acp": {
     "repository": "handochan/aelix-acp",
-    "commit": "117cf6c9d536c4aa98b1f3a6481c12464584960c",
-    "version": "0.1.0",
-    "archiveSha256": "6c646f5bf8d71fe766939d3dd9d2bc817519d041272505080c19f0c782dab1fd"
+    "commit": "16d6555b08825d1d63c3b082de2b10a1152562c0",
+    "version": "0.2.0a1",
+    "archiveSha256": "6d4b9e4c918ca51345b4b39ff93e31141a4f31decd67f628b7a54c496078c111",
+    "runtimeReferenceSha256": "fc0965b86c0fb776f27a8dd57264dc2a3fe931bb563a08dc4755602177fe1625"
   },
   "aioncore": {
-    "repository": "iOfficeAI/AionCore",
-    "tag": "v0.2.2",
-    "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
+    "repository": "handochan/aelix-studio-host",
+    "tag": "host-v0.2.2-aelix.2",
+    "commit": "2e1c31006bc0429324e0c37e222575dcdb06b1a2",
+    "tree": "5a3d563bc731f13ed144e79015f52c41777a4b55",
+    "provenanceFile": "aelix-studio-host-0.2.2-aelix.2-provenance.json",
+    "provenanceSha256": "c76e162fe1c3659234abc43739f1df11591b33e4ebca9013aee58cdd98fb0439",
     "assets": {
       "darwin-arm64": {
-        "filename": "aioncore-v0.2.2-aarch64-apple-darwin.tar.gz",
-        "sha256": "70c50b84be9e17ba574a2c74370e6d57a267f44bdd6ecf641740cf220737d5cb"
+        "filename": "aelix-studio-host-0.2.2-aelix.2-aarch64-apple-darwin.tar.gz",
+        "sha256": "30d0f3a417668130adaac83a1ff7275e2270d10760967dc5b70b72612dc0b791"
       },
       "darwin-x64": {
-        "filename": "aioncore-v0.2.2-x86_64-apple-darwin.tar.gz",
-        "sha256": "f7e68835a8530ce3a2ae2f06cfd47a516b0027337c64f253f8220b8edc53577d"
+        "filename": "aelix-studio-host-0.2.2-aelix.2-x86_64-apple-darwin.tar.gz",
+        "sha256": "50819854f085e2f0ee74b40710f1ff34a556b89d78be35311cc501ad752b1bec"
       },
       "linux-arm64": {
-        "filename": "aioncore-v0.2.2-aarch64-unknown-linux-gnu.tar.gz",
-        "sha256": "e9bbb4a6f909cd14aa8b3d78a5c139557c2063930d155f6102df424d27155292"
+        "filename": "aelix-studio-host-0.2.2-aelix.2-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "3eb24f28c3eda322fab3671782d63aed85badb4ee758a72151de09154d65a50d"
       },
       "linux-x64": {
-        "filename": "aioncore-v0.2.2-x86_64-unknown-linux-gnu.tar.gz",
-        "sha256": "1c3f241c7deff8e9d6da189c1017e6b12df7b538a1f557276c79b3c33d257335"
+        "filename": "aelix-studio-host-0.2.2-aelix.2-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "2a6e23642b5ac77915713fc45c626a8aeab483b9a84cbc0546ab550f7f249a81"
       },
       "win32-x64": {
-        "filename": "aioncore-v0.2.2-x86_64-pc-windows-msvc.zip",
-        "sha256": "d1ed8d1da869230c18701747d07e8f068db5b8c9442e65261304aeb4c27eacf6"
+        "filename": "aelix-studio-host-0.2.2-aelix.2-x86_64-pc-windows-msvc.zip",
+        "sha256": "249c3e164ff030146d4e0ddf82642027bef74f201328416be7b2197083b780c7"
       }
     },
-    "sourceManifestSha256": "954942f6a6903802f6158ae1f9ba8812a95882aa4b039dfa8fbf959ea7e8e155"
+    "sourceManifestSha256": "356ef4dc74595fd1d4d0eeb174864489bb428b5615c410c0ecf64cf92ea2cbde"
   },
   "acceptance": {
-    "hostTargets": ["darwin-arm64"],
+    "hostTargets": [],
     "releaseTargets": [],
-    "model": "launch-only",
-    "reasoning": "not-forwarded",
-    "context": "not-forwarded",
+    "model": "pending-qualification",
+    "reasoning": "pending-qualification",
+    "context": "pending-qualification",
     "nativePatches": [],
     "realProvider": false,
     "installer": false

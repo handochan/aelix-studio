@@ -39,6 +39,45 @@ describe('Windows bundled aioncore install verifier', () => {
 
   const runOnWindows = process.platform === 'win32' ? it : it.skip;
 
+  runOnWindows('accepts a complete pinned-host bundle with exit code zero', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'studio-valid-install-'));
+    const installDir = join(tmp, 'install');
+    const base = join(installDir, 'resources', 'bundled-aioncore', 'win32-x64');
+    const logPath = join(tmp, 'verify.log');
+    try {
+      writeFile(join(base, 'aelix-studio-host.exe'), 'nonempty host fixture');
+      writeJson(join(base, 'manifest.json'), { platform: 'win32', arch: 'x64' });
+      writeFile(join(base, 'managed-resources', 'node', 'node.exe'), 'nonempty node fixture');
+      writeJson(join(base, 'managed-resources', 'manifest.json'), {
+        schemaVersion: 2,
+        runtimeKey: 'win32-x64',
+        node: { version: '24.11.0', root: 'node', executable: 'node.exe' },
+        clis: [],
+      });
+      const result = spawnSync(
+        'powershell.exe',
+        [
+          '-NoProfile',
+          '-ExecutionPolicy',
+          'Bypass',
+          '-File',
+          scriptPath,
+          '-InstallDir',
+          installDir,
+          '-RuntimeKey',
+          'win32-x64',
+          '-LogPath',
+          logPath,
+        ],
+        { encoding: 'utf8' }
+      );
+      expect(result.status, result.stderr || result.stdout).toBe(0);
+      expect(readFileSync(logPath, 'utf8')).toContain('result=ok');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   runOnWindows('fails an old-version-only Codex CLI install directory', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aionui-install-verify-'));
     const installDir = join(tmp, 'install');
@@ -47,7 +86,7 @@ describe('Windows bundled aioncore install verifier', () => {
     const codexTriple = 'x86_64-pc-windows-msvc';
 
     try {
-      writeFile(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'aioncore.exe'), 'x');
+      writeFile(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'aelix-studio-host.exe'), 'x');
       writeJson(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'manifest.json'), {
         platform: 'win32',
         arch: 'x64',

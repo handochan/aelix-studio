@@ -43,11 +43,10 @@ if (
 )
   throw new Error('Stale payload: archive the owned .local/packaging/runtime and rebuild');
 for (const [name, source] of [
-  ...['bundle.py', 'launch.py', 'build.mjs', 'native-requirements.lock'].map((name) => [
-    name,
-    path.join(import.meta.dirname, name),
-  ]),
-  ['launch.cjs', path.join(import.meta.dirname, '../host-forwarding/launch.cjs')],
+  ...['bundle.py', 'launch.py', 'build.mjs', 'runtime.py', 'build-requirements.txt', 'native-requirements.lock'].map(
+    (name) => [name, path.join(import.meta.dirname, name)]
+  ),
+  ['launch.cjs', path.join(import.meta.dirname, '../host-release/launch.cjs')],
 ])
   if (manifest.recipeSha256?.[name] !== digest(source))
     throw new Error('Stale payload recipe: archive the owned .local/packaging/runtime and rebuild');
@@ -89,10 +88,15 @@ prepareAioncore({
 const prepared = JSON.parse(fs.readFileSync(path.join(runtime, 'receipt.json')));
 if (
   digest(
-    path.join(root, 'resources/bundled-aioncore', target, process.platform === 'win32' ? 'aioncore.exe' : 'aioncore')
+    path.join(
+      root,
+      'resources/bundled-aioncore',
+      target,
+      process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host'
+    )
   ) !== prepared.aioncoreBinarySha256
 )
-  throw new Error('Prepared packaging host differs from the qualified public AionCore');
+  throw new Error('Prepared packaging host differs from the qualified pinned host release');
 run('node', ['scripts/prepareHubResources.js']);
 const config = yaml.load(fs.readFileSync(path.join(root, 'packages/desktop/electron-builder.yml'), 'utf8'));
 config.extraResources.push({ from: payload, to: 'studio-preview' });

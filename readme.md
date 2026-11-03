@@ -624,11 +624,11 @@ A: All data is stored locally in a SQLite database. Nothing is uploaded to any s
 
 ### System Requirements
 
-The list below records inherited AionUi UI requirements. The Aelix Studio Preview
-patched-host installer qualification targets macOS 15 (arm64/x64), Ubuntu 24.04
+The list below records inherited AionUi UI requirements. The Aelix Studio Preview installer qualification uses the pinned host release and
+targets macOS 15 (arm64/x64), Ubuntu 24.04
 (arm64/x64), and Windows Server 2022 (x64) native CI images.
 Current results and pending clean-OS, minimum-OS and runtime-dependency acceptance
-are tracked in [the host qualification guide](scripts/studio-preview/host-recovery/README.md)
+are tracked in [the host qualification guide](scripts/studio-preview/host-release/README.md)
 and [Preview release gates](docs/studio-release-train/delivery-plan.md).
 
 - **macOS**: 10.15 or higher

@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "請求仍在使用舊的團隊身份欄位",
         "body": "這個團隊操作必須使用 assistant_id，不能再使用舊的 backend 或 agent 欄位。"
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "無法確認訊息的執行結果",
+        "body": "模型或工具可能已經執行。再次傳送前，請先檢查對話紀錄。"
       }
     }
   },
@@ -782,11 +786,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展開計劃",
     "collapse": "收合計劃"
-  },
-  "managedOperation": {
-    "uncertain": "無法確認請求結果。請檢查歷史記錄；未自動重新傳送。",
-    "storageUnavailable": "無法安全儲存請求資訊，因此未傳送。",
-    "conflict": "此請求已以不同內容傳送。請檢查歷史記錄。",
-    "interrupted": "請求已中斷，可能已產生部分變更。請檢查歷史記錄。"
   }
 }
