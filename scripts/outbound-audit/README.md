@@ -38,3 +38,39 @@ The first revision intentionally exposes remaining default connections as a
 failing gate. A passing unit test, offline functional smoke or host-only audit
 never substitutes for this installed-app result. See the #15 inventory and its
 remaining product decisions before promoting this draft.
+
+## IPv6-only investigation harness
+
+`ipv6Capture.py`, `ipv6Probe.cjs` and `ipv6Peer.py` are isolated diagnostic tools;
+they are not imported by Studio or the production gate. They refuse a namespace
+with interfaces other than loopback at startup and require a disposable Docker
+`--network none` container. The fixture disables spelling only to isolate this
+probe; it does not implement dictionary bundling or change product defaults.
+
+The image needs Python 3, iproute2, tcpdump, strace, Xvfb and the current Linux
+Electron binary/dependencies. The measured local image was
+`aelix-studio-15:ipv6`, built from the previous qualification image with
+`apt-get install -y tcpdump iproute2 python3 util-linux`. See the
+[report](../../docs/studio-outbound/ipv6-investigation.md) for exact engine and
+capture versions, binary checksums and scope.
+
+```sh
+mkdir -p .local/ipv6-investigation
+# The candidate is a separately checksum-verified archive, not a project upgrade.
+docker run --rm --init --network none \
+  --sysctl net.ipv6.conf.all.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.default.disable_ipv6=0 \
+  --sysctl net.ipv6.conf.default.router_solicitations=0 \
+  --cap-add NET_ADMIN --cap-add NET_RAW --cap-add SYS_ADMIN --cap-add SYS_PTRACE \
+  --security-opt seccomp=unconfined --entrypoint python3 \
+  -v "$PWD:/workspace:ro" -v "$PWD/.local/ipv6-investigation:/evidence" \
+  aelix-studio-15:ipv6 /workspace/scripts/outbound-audit/ipv6Capture.py \
+  --output /evidence/run \
+  --candidate /workspace/.local/studio-15/ipv6/electron45/electron
+```
+
+Omit `--candidate` for the current engine only. The output directory must be new.
+The 54-byte snap length stores Ethernet/IPv6 headers only. Dropped, incomplete or
+undrained captures and failed UDP capture controls abort the experiment. The
+unchanged auditor is separately required to retain exit 86/87; the research
+command completing successfully does not mean the app audit passed.

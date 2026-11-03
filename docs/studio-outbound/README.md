@@ -1,5 +1,10 @@
 # Studio #15 outbound defaults and remaining acceptance
 
+2026-11-04 follow-up: the [user decisions](https://github.com/handochan/aelix-studio/issues/15#issuecomment-6616678246)
+supersede the earlier option list below. This execution performs only the
+[IPv6 investigation](ipv6-investigation.md); the other implementations remain
+queued after #35. The audit remains blocking and failing.
+
 This draft starts at main `dac2408`. It does **not** establish G12, offline
 installation, or zero external attempts. PR #35 owns the host upgrade and its
 preview-image fallback. Its shared files are held for integration after that PR
