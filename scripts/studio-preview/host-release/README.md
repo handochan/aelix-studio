@@ -2,7 +2,8 @@
 
 `default.json` pins `host-v0.2.2-aelix.2`, its source commit/tree, five archive
 SHA-256 values and release provenance. `provenance.json` is the byte-preserved
-published release asset. The source archive/build/patch flow is retired.
+published release asset. The release also publishes `aelix-studio-host-checksums.txt`;
+its archive digests are pinned in `default.json`. The source archive/build/patch flow is retired.
 
 `prepare.cjs` verifies each archive before extraction, checks the released binary,
 retains LICENSE/NOTICE and the original build receipt, then asks the released host
