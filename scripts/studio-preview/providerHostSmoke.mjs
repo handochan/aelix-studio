@@ -51,8 +51,14 @@ for (const stream of [app.process().stdout, app.process().stderr]) {
   });
 }
 let page;
+let lanPage;
 let foreign;
 let webui;
+let stage = 'startup';
+const trace = (next) => {
+  stage = next;
+  fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
+};
 try {
   page = await app.firstWindow();
   if (executablePath) {
@@ -262,9 +268,11 @@ try {
   assert.ok(webui.networkUrl, 'LAN address is required for the HTTP regression');
   const lanUrl = webui.networkUrl;
   const lanHeaders = { ...headers, origin: lanUrl };
+  trace('lan_login');
   const lanLogin = await fetch(lanUrl + '/login', {
     method: 'POST',
     headers: lanHeaders,
+    signal: AbortSignal.timeout(15000),
     body: JSON.stringify({ username: 'admin', password, remember: false }),
   });
   assert.equal(lanLogin.ok, true);
@@ -291,6 +299,7 @@ try {
     }),
   });
   assert.equal((await restoredEndpoint.json()).ok, true);
+  trace('lan_window');
   const lanWindow = app.waitForEvent('window');
   await app.evaluate(({ BrowserWindow }, url) => {
     const window = new BrowserWindow({
@@ -299,27 +308,39 @@ try {
     });
     void window.loadURL(url + '/#/settings/model');
   }, lanUrl);
-  const lanPage = await lanWindow;
+  lanPage = await lanWindow;
+  const lanBrowserWindow = await app.browserWindow(lanPage);
+  await lanPage.waitForURL(`${lanUrl}/#/settings/model`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  trace('lan_http_document_loaded');
   assert.deepEqual(await lanPage.evaluate(() => ({ secure: window.isSecureContext, locks: typeof navigator.locks })), {
     secure: false,
     locks: 'undefined',
   });
+  trace('lan_settings');
   const lanNative = lanPage.getByTestId('native-provider-settings');
   await expect(lanNative).toBeVisible({ timeout: 30000 });
   const lanLanguage = await lanPage.evaluate(() => document.documentElement.lang);
   const lanStrings = JSON.parse(
     fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', lanLanguage, 'settings.json'))
   ).nativeAuth;
+  trace('lan_create_conversation');
   await lanNative.getByRole('button', { name: lanStrings.startConversation, exact: true }).click();
   await expect(lanPage.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
+  trace('lan_send');
   await lanPage.getByTestId('sendbox-input').fill('SYNTHETIC_LAN_HTTP_FIRST_RESPONSE');
   await lanPage.getByTestId('sendbox-send-btn').click();
   await expect(
     lanPage.getByTestId('message-text-left').filter({ hasText: 'NATIVE_PROVIDER_FIRST_RESPONSE' })
   ).toBeVisible({ timeout: 30000 });
+  trace('lan_response');
   await lanPage.screenshot({ path: path.join(output, 'lan-http-first-response.png') });
-  await lanPage.close();
+  const lanClosed = lanPage.waitForEvent('close', { timeout: 10000 });
+  await lanBrowserWindow.evaluate((window) => window.destroy());
+  await lanClosed;
+  await lanBrowserWindow.dispose();
+  trace('lan_closed');
 
+  trace('foreign_navigation');
   foreign = http.createServer((_req, res) => res.end('<html><body>Untrusted navigation fixture</body></html>'));
   await new Promise((resolve) => foreign.listen(0, '127.0.0.1', resolve));
   await page.goto(`http://127.0.0.1:${foreign.address().port}`);
@@ -367,6 +388,11 @@ try {
     ) + '\n'
   );
 } catch (error) {
+  fs.writeFileSync(
+    path.join(output, 'ui-failure.json'),
+    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error }) + '\n'
+  );
+  if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
     await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
     const state = await page
@@ -387,10 +413,14 @@ try {
   }
   throw error;
 } finally {
+  // Close the owned browser clients before waiting for fixture TCP listeners.
+  trace('stop_app');
+  await app.close();
+  trace('stop_webui');
   if (webui) await webui.stop();
   if (foreign) {
     foreign.closeAllConnections();
     await new Promise((resolve) => foreign.close(resolve));
   }
-  await app.close();
+  trace('stopped');
 }
