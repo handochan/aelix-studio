@@ -119,7 +119,7 @@ connection list or successful offline smoke would not replace an attempt audit.
 ## Local source validation
 
 The source gate passed lint (warnings retained), format, TypeScript and all 13
-locale checks. Vitest: **5,006 passed / 7 skipped**; audit parser: **8 passed**.
+locale checks. Vitest: **5,009 passed / 7 skipped**; audit parser: **8 passed**.
 A real descendant TCP/UDP positive control detected **2 attempts / 0 unparsed**
 and correctly exited 86. The earlier coverage run completed at **54.24% statements**;
 it predates the final chat-image change and does not meet the repository's 80%

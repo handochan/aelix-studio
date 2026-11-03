@@ -7,7 +7,7 @@
 // configureChromium sets app name (dev isolation) and Chromium flags — must run before
 // ANY module that calls app.getPath('userData'), because Electron caches the path on first call.
 import './process/utils/configureChromium';
-import { startupUpdateEnabled } from './process/services/updateFeed';
+import { initializeDesktopUpdates } from './process/services/updateFeed';
 import { installGpuCrashHandler } from './process/utils/gpuRecovery';
 import { describeUncaughtError } from './process/utils/describeUncaughtError';
 import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtError';
@@ -539,34 +539,21 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   registerWindowMaximizeListeners(mainWindow);
   attachWindowBoundsPersistence(mainWindow, (bounds) => ProcessConfig.set('window.bounds', bounds));
 
-  // Initialize auto-updater service (skip when disabled via env, e.g. E2E / CI)
-  // 初始化自动更新服务（通过环境变量禁用时跳过，例如 E2E / CI 场景）
-  if (startupUpdateEnabled(process.env)) {
-    Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
-      .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
-        // Create status broadcast callback that emits via ipcBridge (pure emitter, no window binding)
-        const statusBroadcast = createAutoUpdateStatusBroadcast();
-        autoUpdaterService.initialize(statusBroadcast);
-        autoUpdaterService.setBeforeQuitAndInstall(async () => {
+  // Initialize manual update handling without starting a background request.
+  Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
+    .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
+      initializeDesktopUpdates(autoUpdaterService, {
+        broadcast: createAutoUpdateStatusBroadcast(),
+        beforeQuit: async () => {
           await backendManager.stop();
-        });
-        // Check for updates after 3 seconds delay. Skipped in the discontinued
-        // build: AionUi's final version guides users to the website instead of
-        // auto-checking, so startup stays silent. The flag is a compile-time
-        // literal, so this branch is tree-shaken out of non-discontinued builds.
-        // 3秒后检查更新。停更版启动静默，不做应用内检测。
-        if (!process.env.IS_DISCONTINUED_BUILD) {
-          setTimeout(() => {
-            void autoUpdaterService.checkForUpdatesAndNotify();
-          }, 3000);
-        }
-      })
-      .catch((error) => {
-        console.error('[App] Failed to initialize autoUpdaterService:', error);
+        },
+        env: process.env,
+        discontinued: Boolean(process.env.IS_DISCONTINUED_BUILD),
       });
-  } else {
-    console.log('[Studio] Automatic update checks are off; use About to check explicitly.');
-  }
+    })
+    .catch((error) => {
+      console.error('[Studio] Failed to initialize update handling:', error);
+    });
 
   // Load the renderer: dev server URL in development, built HTML file in production
   const rendererUrl = process.env['ELECTRON_RENDERER_URL'];

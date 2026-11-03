@@ -1,5 +1,6 @@
 /** Studio updates are user initiated and use only the Studio release repository. */
 import type { GithubOptions } from 'builder-util-runtime';
+import type { BeforeQuitAndInstallCallback, StatusBroadcastCallback } from './autoUpdaterService';
 
 export const STUDIO_UPDATE_REPO = 'handochan/aelix-studio';
 
@@ -17,4 +18,32 @@ export function startupUpdateEnabled(env: NodeJS.ProcessEnv): boolean {
     env.CI !== '1' &&
     env.GITHUB_ACTIONS !== 'true'
   );
+}
+
+type UpdateLifecycle = {
+  initialize: (broadcast: StatusBroadcastCallback) => void;
+  setBeforeQuitAndInstall: (callback: BeforeQuitAndInstallCallback) => void;
+  checkForUpdatesAndNotify: () => Promise<void>;
+};
+
+/** Keep manual update/status/host cleanup available even when background checks are off. */
+export function initializeDesktopUpdates(
+  updater: UpdateLifecycle,
+  options: {
+    broadcast: StatusBroadcastCallback;
+    beforeQuit: BeforeQuitAndInstallCallback;
+    env: NodeJS.ProcessEnv;
+    discontinued: boolean;
+  },
+  schedule: (callback: () => void, delay: number) => void = (callback, delay) => {
+    setTimeout(callback, delay);
+  }
+): void {
+  updater.initialize(options.broadcast);
+  updater.setBeforeQuitAndInstall(options.beforeQuit);
+  if (startupUpdateEnabled(options.env) && !options.discontinued) {
+    schedule(() => {
+      void updater.checkForUpdatesAndNotify();
+    }, 3000);
+  }
 }
