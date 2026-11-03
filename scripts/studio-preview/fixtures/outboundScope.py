@@ -53,9 +53,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     root_executables = {}
     fork_at, executions = {}, {}
     sequence = 0
-    structural_errors = 0
+    classification_issues = []
     observed_order = []
     pending = {}
+    terminal_stops, killed_at = {}, {}
+    invalid_terminal_stops = set()
 
     def state(pid, name=None):
         if pid not in states:
@@ -65,63 +67,70 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             states[pid]['process'] = name
         return states[pid]
 
+    def classification_issue(reason, pid=None, call=None):
+        # Only fixed reason codes and numeric task identities enter reports.
+        # Never include trace text, executable paths, argv or environment.
+        issue = {'reason': reason}
+        if pid is not None: issue['pid'] = pid
+        if call in FORK | EXEC: issue['syscall'] = call
+        classification_issues.append(issue)
+
     def unknown(pid, call):
-        nonlocal structural_errors
         if call in NETWORK:
             state(pid)['unparsed'] += 1
         else:
-            structural_errors += 1
+            classification_issue('incomplete_syscall', pid, call)
 
     def record(pid, line, started):
-        nonlocal structural_errors
         item = state(pid)
         if line.startswith('+++'):
             if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):
                 item['finished'] = True
+                if line.startswith('+++ killed by '): killed_at[pid] = started
             else:
-                structural_errors += 1
+                classification_issue('unknown_terminal_record', pid)
             return
         match = CALL.match(line)
         if not match:
             if line and not line.startswith(('+++', '---')):
-                structural_errors += 1
+                classification_issue('unknown_record', pid)
             return
         call = match[1]
         if call in FORK:
             result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
             if not result:
-                structural_errors += 1; return
+                classification_issue('unknown_fork_result', pid, call); return
             child = int(result[1])
             translated = re.search(r"/\* (\d+) in strace's PID NS \*/", result[2])
             if child > 0 and translated:
                 child = int(translated[1])
             if child > 0:
                 if child == pid or child in parents:
-                    structural_errors += 1
+                    classification_issue('conflicting_fork_edge', child, call)
                 else:
                     parents[child] = pid
                     fork_at[child] = started
             return
         if call in EXEC:
             if not re.search(r'=\s+0(?:\s|$)', line):
-                if '= -1 ' not in line: structural_errors += 1
+                if '= -1 ' not in line: classification_issue('unknown_exec_result', pid, call)
                 return
             pattern = rf'^execve\(({QUOTED}),' if call == 'execve' else rf'^execveat\([^,]+, ({QUOTED}),'
             filename = re.match(pattern, line)
             if not filename:
-                structural_errors += 1; return
+                classification_issue('unknown_exec_filename', pid, call); return
             try:
                 executable = decode_path(filename[1])
                 # Trace filenames always follow Linux/POSIX rules, including offline tests on Windows.
                 if not PurePosixPath(executable).is_absolute():
-                    if selected: structural_errors += 1
+                    if selected: classification_issue('relative_exec_filename', pid, call)
                     return
             except (OSError, ValueError, RuntimeError):
-                structural_errors += 1; return
+                classification_issue('invalid_exec_filename', pid, call); return
             executions.setdefault(pid, []).append((started, executable))
             return
         if call not in NETWORK:
-            structural_errors += 1; return
+            classification_issue('unknown_syscall', pid); return
         def destination(address, port):
             try:
                 parsed = ipaddress.ip_address(address.strip('[]'))
@@ -177,15 +186,27 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 pid, name, line = int(prefix[1]), prefix[2], prefix[3]
             else:
                 pid, name, line = legacy_pid, None, raw
-                if selected and line: structural_errors += 1
+                if selected and line: classification_issue('missing_task_prefix', pid)
             state(pid, name)
+            # strace can fail to read registers when a task is killed at a
+            # syscall-entry stop. Its exact stub has no resumed syscall, exec
+            # success or fork result. Attribute it to its captured PID only if
+            # the next/last record for that task is its signal-death record.
+            # Missing edges, pending fork/exec and every other unknown stay fatal.
+            if pid in terminal_stops and (not line.startswith('+++ killed by ') or pid in killed_at):
+                invalid_terminal_stops.add(pid)
+            if line == '???( <unfinished ...>':
+                if pid in pending or pid in terminal_stops:
+                    invalid_terminal_stops.add(pid)
+                terminal_stops[pid] = sequence
+                continue
             call = CALL.match(line)
             resumed = RESUMED.match(line)
             if '<unfinished ...>' in line:
                 if pid in pending:
                     unknown(pid, pending[pid][0])
                 if not call:
-                    structural_errors += 1; continue
+                    classification_issue('unknown_unfinished_syscall', pid); continue
                 pending[pid] = (call[1], line.replace('<unfinished ...>', ''), sequence)
                 continue
             started = sequence
@@ -198,6 +219,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             record(pid, line, started)
     for pid, (call, _line, _started) in pending.items():
         unknown(pid, call)
+    for pid, at in terminal_stops.items():
+        if pid in invalid_terminal_stops or killed_at.get(pid, 0) <= at:
+            classification_issue('unknown_unfinished_syscall', pid)
+        else:
+            # An attributable decode failure remains unparsed in this PID's
+            # tree. It blocks selected trees and whole-command enforcement;
+            # an unselected sibling is retained in the report-only measurement.
+            state(pid)['unparsed'] += 1
 
     # Resolve /proc/self/exe from the captured executable inherited at fork,
     # never from the auditor's /proc or from a mutable process/thread name.
@@ -233,26 +262,29 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         for at, _path in entries:
             executable = image_before(pid, at + 1)
             if executable is None:
-                if selected: structural_errors += 1
+                if selected: classification_issue('unresolved_exec_image', pid)
             elif executable in selected:
                 roots.add(pid); matches.add(executable)
                 root_executables[pid] = Path(executable).name
 
     if require_lifecycle:
-        structural_errors += sum(not item['finished'] for item in states.values())
+        for pid, item in states.items():
+            if not item['finished']: classification_issue('missing_terminal_record', pid)
     if (selected or require_lifecycle) and states:
         # The traced command is the only permitted parentless task. Every other
         # PID/TID must have a captured fork edge, including reparented descendants.
-        structural_errors += sum(pid not in parents for pid in states if pid != observed_order[0])
-        if selected and not roots: structural_errors += 1
-        structural_errors += sum(child not in states for child in parents)
-        structural_errors += len(required - matches)
+        for pid in states:
+            if pid != observed_order[0] and pid not in parents: classification_issue('missing_fork_edge', pid)
+        if selected and not roots: classification_issue('missing_selected_root')
+        for child in parents:
+            if child not in states: classification_issue('missing_child_records', child)
+        for _ in required - matches: classification_issue('missing_required_executable')
         for child in parents:
             seen = set()
             current = child
             while current in parents:
                 if current in seen:
-                    structural_errors += 1; break
+                    classification_issue('cyclic_fork_edges', child); break
                 seen.add(current); current = parents[current]
     included = set(roots)
     while selected:
@@ -275,8 +307,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
-                'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + structural_errors,
-                'classificationErrors': structural_errors, 'external': external, 'processes': processes}
+                'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(classification_issues),
+                'classificationErrors': len(classification_issues), 'classificationIssues': classification_issues,
+                'external': external, 'processes': processes}
 
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole

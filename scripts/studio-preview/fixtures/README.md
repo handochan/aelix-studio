@@ -50,6 +50,16 @@ Unparsed network records of a known non-selected PID remain in the whole-app
 report, while ambiguous process attribution blocks the selected gate. The latter
 report has `enforcement: report-only` and never changes the gate result. Both
 reports include counts, PID/parent/comm, root identities and parser source hashes.
+Classification failures also include fixed reason codes and numeric task IDs in
+`classificationIssues`; no raw trace text or executable path is included.
+An exact `???( <unfinished ...>` register-decoding stub immediately followed by
+that task's signal-death record remains an unparsed record of its captured PID.
+This strace [register-read fallback](https://github.com/strace/strace/blob/v6.1/src/syscall.c#L1355)
+cannot resume after task death. It is attributable only with complete fork
+ancestry, no pending fork/exec and no intervening/subsequent task records. The
+same stub in a selected tree still fails; whole-command enforcement also fails.
+Missing ancestry/lifecycle, interrupted fork/exec, other unknown records or any
+ambiguous attribution remain classification errors that block every scope.
 No network addresses are newly exempted: only loopback/Unix IPC is allowed, with
 DNS port 53 counted as external even on loopback. Proxy preflight remains strict.
 

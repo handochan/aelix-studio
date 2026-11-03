@@ -22,11 +22,11 @@ LOCAL = CONNECT.replace('203.0.113.1', '127.0.0.1')
 
 
 class ScopedParserTests(unittest.TestCase):
-    def parse(self, lines, roots=(HOST, PYTHON), required=(HOST,)):
+    def parse(self, lines, roots=(HOST, PYTHON), required=(HOST,), lifecycle=False):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / 'network.trace'
             trace.write_text('\n'.join(lines) + '\n')
-            return audit.analyze_processes([trace], roots, required)
+            return audit.analyze_processes([trace], roots, required, lifecycle)
 
     def base(self):
         return ['1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
@@ -131,6 +131,68 @@ class ScopedParserTests(unittest.TestCase):
             f'99<worker> {CONNECT}'])
         self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (1, 0))
         self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 99)['parentPid'], 2)
+
+    def test_classification_diagnostics_preserve_failure_without_trace_secrets(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<host> clone(child_stack=NULL, flags=SIGCHLD) = 3<lost>',
+            '4<orphan> execve("./SYNTHETIC_PATH_SECRET", [...], 0x1 /* 1 var */) = 0'])
+        self.assertEqual(scoped['classificationErrors'], len(scoped['classificationIssues']))
+        self.assertEqual({issue['reason'] for issue in scoped['classificationIssues']},
+                         {'relative_exec_filename', 'missing_child_records', 'missing_fork_edge'})
+        self.assertNotIn('SYNTHETIC_PATH_SECRET', json.dumps(scoped))
+
+    def test_killed_sibling_register_decode_stub_remains_in_its_own_tree(self):
+        scoped, whole = self.parse(self.base() + [
+            '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3<renderer>',
+            '3<renderer> ???( <unfinished ...>',
+            '3<renderer> +++ killed by SIGTERM +++',
+            '2<host> +++ exited with 0 +++', '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (0, 0))
+        self.assertEqual((whole['classificationErrors'], whole['unparsedRecords']), (0, 1))
+        self.assertEqual(next(p for p in whole['processes'] if p['pid'] == 3)['unparsedRecords'], 1)
+
+    def test_same_terminal_stub_inside_selected_tree_still_fails(self):
+        for lines in [self.base() + ['2<host> ???( <unfinished ...>', '2<host> +++ killed by SIGTERM +++'],
+                      self.base() + ['2<host> clone(child_stack=NULL, flags=SIGCHLD) = 3<renamed>',
+                                     '3<renamed> ???( <unfinished ...>', '3<renamed> +++ killed by SIGKILL +++',
+                                     '2<host> +++ exited with 0 +++']]:
+            with self.subTest(lines=lines):
+                scoped, _ = self.parse(lines + ['1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertEqual(scoped['unparsedRecords'], 1)
+
+    def test_terminal_stub_never_hides_missing_ancestry_or_lifecycle(self):
+        for extra in [
+            ['3<orphan> ???( <unfinished ...>', '3<orphan> +++ killed by SIGTERM +++'],
+            ['1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3<renderer>', '3<renderer> ???( <unfinished ...>'],
+        ]:
+            with self.subTest(extra=extra):
+                scoped, _ = self.parse(self.base() + extra + [
+                    '2<host> +++ exited with 0 +++', '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertGreater(scoped['classificationErrors'], 0)
+
+    def test_only_exact_final_stub_with_signal_death_is_attributable(self):
+        for extra in [
+            ['3<renderer> ???( <unfinished ...>', '3<renderer> +++ exited with 0 +++'],
+            ['3<renderer> ???( <unfinished ...>', f'3<renderer> {CONNECT}', '3<renderer> +++ killed by SIGTERM +++'],
+            ['3<renderer> ???( <unfinished ...>', '3<renderer> ???( <unfinished ...>', '3<renderer> +++ killed by SIGTERM +++'],
+            ['3<renderer> ???( <unfinished ...>', '3<renderer> +++ killed by SIGTERM +++', '3<renderer> +++ killed by SIGTERM +++'],
+            ['3<renderer> ???(NULL) = 0', '3<renderer> +++ killed by SIGTERM +++'],
+        ]:
+            with self.subTest(extra=extra):
+                scoped, _ = self.parse(self.base() + [
+                    '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3<renderer>', *extra,
+                    '2<host> +++ exited with 0 +++', '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertGreater(scoped['classificationErrors'], 0)
+
+    def test_pending_fork_or_exec_is_fatal_even_for_killed_sibling(self):
+        for call in ['clone(child_stack=NULL, flags=SIGCHLD', 'execve("/unknown/image", [...], 0x1']:
+            with self.subTest(call=call):
+                scoped, _ = self.parse(self.base() + [
+                    '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3<renderer>',
+                    '3<renderer> ' + call + ' <unfinished ...>',
+                    '3<renderer> ???( <unfinished ...>', '3<renderer> +++ killed by SIGTERM +++',
+                    '2<host> +++ exited with 0 +++', '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertGreater(scoped['classificationErrors'], 0)
 
     def test_c_escaped_unicode_path_matches_without_disclosing_path(self):
         from outboundScope import decode_path
