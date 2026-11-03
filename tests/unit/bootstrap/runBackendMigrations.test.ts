@@ -6,6 +6,7 @@ import { resolveImageGenerationMigrationConfig, runBackendMigrations } from '@/p
 
 const {
   batchImportServersMock,
+  execFileMock,
   configFileGetMock,
   configFileSetMock,
   httpRequestMock,
@@ -14,6 +15,7 @@ const {
   updateServerMock,
 } = vi.hoisted(() => ({
   batchImportServersMock: vi.fn(),
+  execFileMock: vi.fn(),
   configFileGetMock: vi.fn(),
   configFileSetMock: vi.fn(),
   httpRequestMock: vi.fn(),
@@ -21,6 +23,8 @@ const {
   testMcpConnectionMock: vi.fn(),
   updateServerMock: vi.fn(),
 }));
+
+vi.mock('node:child_process', () => ({ execFile: execFileMock }));
 
 vi.mock('@/common/adapter/httpBridge', () => ({
   httpRequest: httpRequestMock,
@@ -214,5 +218,50 @@ describe('runBackendMigrations', () => {
       'yes',
       'yes'
     );
+  });
+});
+
+describe('disabled MCP startup preflight', () => {
+  const chromeServer = (enabled: boolean): IMcpServer => ({
+    ...imageServer(),
+    id: 'chrome-id',
+    name: 'chrome-devtools',
+    enabled,
+    transport: { type: 'stdio', command: 'npx', args: ['-y', 'chrome-devtools-mcp@latest'] },
+    original_json: '{"mcpServers":{}}',
+  });
+  beforeEach(() => {
+    execFileMock.mockImplementation(
+      (
+        _command: string,
+        _args: string[],
+        _options: unknown,
+        callback: (error: NodeJS.ErrnoException | null) => void
+      ) => {
+        callback(Object.assign(new Error('missing'), { code: 'ENOENT' }));
+      }
+    );
+  });
+  it('never probes or tests a disabled chrome-devtools server, even without system npx', async () => {
+    listServersMock.mockResolvedValue([chromeServer(false)]);
+    await runBackendMigrations(configFile as never);
+    expect(execFileMock).not.toHaveBeenCalled();
+    expect(testMcpConnectionMock).not.toHaveBeenCalled();
+  });
+  it('preserves preflight for a server explicitly enabled by the user', async () => {
+    const server = chromeServer(true);
+    listServersMock.mockResolvedValue([server]);
+    await runBackendMigrations(configFile as never);
+    expect(execFileMock).toHaveBeenCalledOnce();
+    expect(testMcpConnectionMock).toHaveBeenCalledWith(server);
+  });
+  it('keeps startup available if an explicitly enabled server cannot connect', async () => {
+    const error = new Error('offline');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    listServersMock.mockResolvedValue([chromeServer(true)]);
+    testMcpConnectionMock.mockRejectedValueOnce(error);
+    await runBackendMigrations(configFile as never);
+    expect(warn).toHaveBeenCalledWith('[Migration] chrome-devtools MCP preflight failed', error);
+    warn.mockRestore();
   });
 });
