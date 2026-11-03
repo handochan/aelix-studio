@@ -41,7 +41,9 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
       .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
       .toBe(`#/conversation/${conversation}`);
     await expect(page.getByTestId('message-list-content')).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId('message-text-content').filter({ hasText: marker })).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${marker}$`) })).toBeVisible({
+      timeout: 30000,
+    });
   }
   selector = page.getByTestId('mode-selector');
 }
