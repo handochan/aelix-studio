@@ -111,11 +111,8 @@ def setup(api):
         parameters={'type':'object','properties':{}}, execute=hold))
 ''', encoding='utf-8')
         wrapper = sandbox / 'native-wrapper.py'
-        wrapper.write_text('import sys,runpy\nfrom pathlib import Path\n'
-            + f'root=Path({str(sandbox)!r})\n'
-            + "if (root/'fail-start').exists(): sys.exit(73)\n"
-            + f"sys.argv=[{str(payload / 'launch.py')!r},'native',*sys.argv[1:],'-e',{str(extension)!r}]\n"
-            + f"runpy.run_path({str(payload / 'launch.py')!r},run_name='__main__')\n", encoding='utf-8')
+        wrapper.write_text((HERE.parent / 'fixtures/nativeFailure.py').read_text() +
+            f'\nrun(Path({str(sandbox)!r}), Path({str(payload)!r}), Path({str(extension)!r}), sys.argv[1:])\n', encoding='utf-8')
         command = [*prefix, 'acp', '--aelix', str(python), '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B',
                    '--aelix-arg=-Xutf8', '--aelix-arg=' + str(wrapper), '--provider', 'fixture', '--model', 'one',
                    '--state-dir', str(sandbox / 'acp')]
@@ -178,7 +175,7 @@ def main():
     report = {'schema': 'aelix-studio.permission-recovery-ui/1', 'status': 'failed',
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
-              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'smoke.mjs')}}
+              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'smoke.mjs', '../fixtures/nativeFailure.py')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')

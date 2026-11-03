@@ -37,6 +37,13 @@ that database. Also use a fresh internal browser profile: old #25 queue/localSto
 bindings are retired. Preserve native CLI auth and session files; this reset concerns Studio's
 internal test state only. This is not a public upgrade/migration path.
 
+With a 044 internal database, the aelix.2 host (migrations through 043) reports sqlx
+`VersionMissing(44)` as `database.newer_than_app`. The inherited screen says
+“A newer version of AionUi is required … no reinstall or data reset is needed”.
+For this internal #25 rollback, **that message requires a fresh Studio data directory,
+not an update**: stop the app/host, back up the owned test state, and follow the reset
+instructions above. No screen branch or public upgrade policy is added.
+
 Reproduce on a supported native runner (Node 22+, Bun, Python, uv **0.13.5**):
 
 ```sh
@@ -50,13 +57,17 @@ this path on darwin arm64/x64, Linux arm64/x64 and Windows x64. The actual insta
 checks first response, Ask/Yolo recovery and full process restart without a backend override.
 The Provider smoke also opens authenticated LAN HTTP WebUI in an ordinary sandboxed
 Chromium window without preload, verifies insecure-context Web Locks absence, and sends
-through the existing UI. All model/credential inputs are synthetic loopback fixtures.
+through the existing UI. This LAN evidence covers the **source web-host library serving
+the built renderer on a LAN address with the installed backend**. The installed app’s
+own WebUI listener was not started or qualified. All model/credential inputs are
+synthetic loopback fixtures.
 Independent review belongs to the separate Claude coordination session.
 
 The initial [ownership map](../studio-release-train/README.md#모듈-소유권-map-초판--studio-28-aelix2)
 records native/ACP/host/Studio authority and the retired #25 path.
 
-Issue #28 remains open for `aelix.3`: after host PRs #12/#15 and the next release, advance
+Issue #28 remains open for `aelix.3`: after PR #34 is merged, use a new PR on the same
+Issue for the release containing host PRs #12/#15. Advance
 the pin, remove direct remote-image fallback, add four error-code locales/display and
 `protocol_code`/`data` handling, and forward the agreed host environment settings.
 Those behaviors are intentionally outside this PR. No main push, tag, release or merge occurs.

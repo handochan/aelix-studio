@@ -10,7 +10,32 @@ const {
   stable,
   verifyDefaultHostBundle,
 } = require('../../../packages/shared-scripts/src/default-host.js');
-const { createHash } = require('node:crypto');
+const { createHash, randomUUID } = require('node:crypto');
+
+/** Publish an archive to its cache only after the complete download matches its pin. */
+function downloadVerifiedArchive(
+  url,
+  archive,
+  expected,
+  download = (source, destination) => {
+    execFileSync('curl', ['--fail', '--location', '--silent', '--show-error', '--output', destination, source], {
+      stdio: 'inherit',
+    });
+  }
+) {
+  if (fs.existsSync(archive)) {
+    if (digest(archive) !== expected) throw new Error('Default host release archive checksum differs');
+    return;
+  }
+  const temporary = archive + '.' + process.pid + '.' + randomUUID() + '.partial';
+  try {
+    download(url, temporary);
+    if (digest(temporary) !== expected) throw new Error('Default host release archive checksum differs');
+    fs.renameSync(temporary, archive);
+  } finally {
+    fs.rmSync(temporary, { force: true });
+  }
+}
 
 function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResources }) {
   const target = `${platform}-${arch}`;
@@ -25,13 +50,8 @@ function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResourc
   const cache = path.join(projectRoot, '.local/default-host', policy.tag, target);
   fs.mkdirSync(cache, { recursive: true });
   const archive = path.join(cache, spec.archive);
-  if (!fs.existsSync(archive)) {
-    const url = `https://github.com/${policy.repository}/releases/download/${policy.tag}/${spec.archive}`;
-    execFileSync('curl', ['--fail', '--location', '--silent', '--show-error', '--output', archive, url], {
-      stdio: 'inherit',
-    });
-  }
-  if (digest(archive) !== spec.archiveSha256) throw new Error('Default host release archive checksum differs');
+  const url = `https://github.com/${policy.repository}/releases/download/${policy.tag}/${spec.archive}`;
+  downloadVerifiedArchive(url, archive, spec.archiveSha256);
   const extracted = path.join(cache, 'extracted');
   fs.rmSync(extracted, { recursive: true, force: true });
   fs.mkdirSync(extracted);
@@ -76,7 +96,7 @@ function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResourc
   verifyDefaultHostBundle(directory, target);
   return { prepared: true, dir: directory, sourceType: manifest.sourceType };
 }
-module.exports = { prepareDefaultHost };
+module.exports = { prepareDefaultHost, downloadVerifiedArchive };
 
 if (require.main === module)
   require('../../../packages/shared-scripts/src/prepare-aioncore.js').prepareAioncore({

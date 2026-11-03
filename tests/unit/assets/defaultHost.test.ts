@@ -234,3 +234,33 @@ describe('release archive selection', () => {
     );
   });
 });
+
+describe('verified archive publication', () => {
+  it('removes an interrupted download and permits a fresh verified retry', () => {
+    const { downloadVerifiedArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const archive = path.join(root, 'release.tar.gz');
+    const interrupted = (_url: string, temporary: string) => {
+      fs.writeFileSync(temporary, 'partial');
+      throw new Error('interrupted');
+    };
+    expect(() => downloadVerifiedArchive('https://fixture.invalid', archive, hash('complete'), interrupted)).toThrow(
+      'interrupted'
+    );
+    expect(fs.readdirSync(root).filter((name: string) => name.includes('release.tar.gz'))).toEqual([]);
+    downloadVerifiedArchive('https://fixture.invalid', archive, hash('complete'), (_url: string, temporary: string) =>
+      fs.writeFileSync(temporary, 'complete')
+    );
+    expect(fs.readFileSync(archive, 'utf8')).toBe('complete');
+  });
+  it('never publishes bytes that differ from the archive pin', () => {
+    const { downloadVerifiedArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const archive = path.join(root, 'release.tar.gz');
+    expect(() =>
+      downloadVerifiedArchive('https://fixture.invalid', archive, hash('expected'), (_url: string, temporary: string) =>
+        fs.writeFileSync(temporary, 'wrong')
+      )
+    ).toThrow('checksum differs');
+    expect(fs.existsSync(archive)).toBe(false);
+    expect(fs.readdirSync(root).filter((name: string) => name.endsWith('.partial'))).toEqual([]);
+  });
+});

@@ -188,7 +188,7 @@ def main(output=OUTPUT, expected_target=None):
     run(uv, '--no-config', 'pip', 'install', '--python', native, '--no-deps', *sorted(wheels.glob('*.whl')))
     for bootstrap in config.get('platformBootstrap', {}).get(target, []):
         download(bootstrap['url'], wheels / bootstrap['filename'], bootstrap['sha256'])
-    run(uv, '--no-config', 'build', '--wheel', '--python', native, '--build-constraint', constraints, '--out-dir', output / 'acp-wheel', source)
+    run(uv, '--no-config', 'build', '--wheel', '--no-sources', '--python', native, '--build-constraint', constraints, '--out-dir', output / 'acp-wheel', source)
     wheel, = (output / 'acp-wheel').glob('*.whl')
     run(uv, '--no-config', 'pip', 'install', '--python', adapter, '--no-index', wheel)
     native_manifest = output / 'native-manifest.json'

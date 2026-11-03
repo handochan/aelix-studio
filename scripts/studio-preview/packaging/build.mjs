@@ -96,7 +96,7 @@ if (
     )
   ) !== prepared.aioncoreBinarySha256
 )
-  throw new Error('Prepared packaging host differs from the qualified public AionCore');
+  throw new Error('Prepared packaging host differs from the qualified pinned host release');
 run('node', ['scripts/prepareHubResources.js']);
 const config = yaml.load(fs.readFileSync(path.join(root, 'packages/desktop/electron-builder.yml'), 'utf8'));
 config.extraResources.push({ from: payload, to: 'studio-preview' });

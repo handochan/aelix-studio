@@ -16,9 +16,13 @@ Studio script whose docstring differs.
 
 `smoke.py` / `smoke.mjs` exercise the actual installed app and released host with
 synthetic native model/tool effects: Ask deny/allow, Yolo and guardrail enforcement,
-Stop, native control mode changes, session restoration and full app/host restart in
-both Ask and Yolo. The former beta.2 failed-child-rebuild injection is inapplicable
-to ACP #20: permission changes now use in-place native control-v1.
+Stop, a Yolo→Ask failure under the `fail-start` marker, and full app/host
+restarts in both modes. A transparent native stdio relay closes the real
+`permissions/set` downgrade after ACP saves Ask and before native receives it;
+it also rejects worker startup while the marker is present. No policy replies
+are synthesized. After clearing the fault and fully restarting, the installed
+host must restore Ask, require actual consent, persist the corrected selection,
+and continue to permit a later explicit Yolo selection.
 No Studio permission-restore patch or backend override is used. The old forwarding
 harness and migration 044 are removed; see `docs/studio-preview/README.md` for the
 internal test database reset and next `aelix.3` scope.

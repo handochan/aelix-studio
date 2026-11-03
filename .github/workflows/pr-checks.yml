@@ -594,7 +594,11 @@ jobs:
           }
 
           Write-Host "Using installer: $($installer.FullName)"
-          Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -NoNewWindow
+          $installProcess = Start-Process -FilePath $installer.FullName -ArgumentList '/S' -Wait -PassThru -NoNewWindow
+          Write-Host "Installer exit code: $($installProcess.ExitCode)"
+          if ($installProcess.ExitCode -ne 0) {
+            throw "Silent install failed with exit code $($installProcess.ExitCode)"
+          }
 
           $candidates = @(
             "$env:LOCALAPPDATA\\Programs\\AionUi\\AionUi.exe",

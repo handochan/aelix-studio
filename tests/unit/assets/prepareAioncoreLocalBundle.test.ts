@@ -6,7 +6,7 @@ import { join } from 'node:path';
 const { prepareAioncore } = require('../../../packages/shared-scripts/src/prepare-aioncore');
 
 describe('prepare-aioncore local bundle input', () => {
-  it('hard fails local bundle input that lacks managed-resources manifest', () => {
+  it('refuses local bundle fallback without a release policy', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-bundle-'));
     const projectRoot = join(tmp, 'project');
     const localBundle = join(tmp, 'bundle');
@@ -23,7 +23,7 @@ describe('prepare-aioncore local bundle input', () => {
           arch: 'x64',
           version: 'v0.1.46',
         })
-      ).toThrow(/managed-resources\/manifest\.json/);
+      ).toThrow('Studio host release policy is required');
     } finally {
       if (previous === undefined) delete process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR;
       else process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR = previous;

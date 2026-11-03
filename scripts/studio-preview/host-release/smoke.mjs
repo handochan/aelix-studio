@@ -184,12 +184,30 @@ try {
     fs.unlinkSync(target);
     checks.push('installed_full_app_and_host_process_restart_restores_display_and_effective_yolo');
   }
-  // ACP #20 changes permission mode in place through native control-v1. The old
-  // beta.2 failed-child-rebuild trigger no longer applies; verify both persisted
-  // modes through real full app/host restarts instead.
-  await select('default');
+  // ACP persists the Ask downgrade before calling native. Close that native RPC
+  // under fail-start so the host still caches Yolo while the adapter reports Ask
+  // on session/load; the released host must adopt the restored policy.
+  fs.writeFileSync(path.join(sandbox, 'fail-start'), '');
+  await api(`${route}/config-options/permission_mode`, 'PUT', { value: 'default' }, [502]);
+  await expect.poll(() => fs.existsSync(path.join(sandbox, 'downgrade-fault.json')), { timeout: 10000 }).toBe(true);
+  const fault = JSON.parse(fs.readFileSync(path.join(sandbox, 'downgrade-fault.json')));
+  assert.equal(fault.forwarded, false);
+  checks.push('failed_yolo_to_ask_rpc_injected_after_adapter_downgrade_before_native_dispatch');
+  await api(`${route}/runtime/restart`, 'POST', undefined, [502]);
+  const startup = JSON.parse(fs.readFileSync(path.join(sandbox, 'startup-fault.json')));
+  assert.deepEqual(startup, { nativeStarted: false, mode: 'default' });
+  checks.push('fail_start_blocks_native_rebuild_with_saved_ask');
+  const failedPort = port;
+  await app.close();
+  app = null;
+  await assert.rejects(fetch(`http://127.0.0.1:${failedPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
+  fs.unlinkSync(path.join(sandbox, 'fail-start'));
+  await launch(conv.id, 'SYNTHETIC_UI_YOLO');
+  assert.notEqual(appPids.at(-2), appPids.at(-1));
+  await api(`${route}/runtime/ensure`, 'POST');
+  await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
   await expect(selector).toContainText(/Default|기본값|Ask/);
-  checks.push('native_control_switch_to_ask_renders_effective_mode');
+  checks.push('failed_downgrade_full_app_host_restart_restores_ask_without_replaying_cached_yolo');
   let turn = await toolPrompt('SYNTHETIC_UI_ASK_RECOVERY');
   await consent();
   await page.screenshot({ path: path.join(output, 'ask-after-failure.png') });

@@ -82,7 +82,7 @@ try {
       'Uninstall AionUi.exe',
       'resources\app.asar',
       'resources\app-update.yml',
-      'resources\bundled-aioncore\win32-x64\aioncore.exe'
+      'resources\bundled-aioncore\win32-x64\aelix-studio-host.exe'
     )
     $known = @(
       $knownRelative |

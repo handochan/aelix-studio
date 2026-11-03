@@ -1,6 +1,8 @@
 """Released-host smoke keeps owned paths and isolated GUI environment boundaries."""
 import importlib.util
 import os
+import json
+import sys
 import subprocess
 from pathlib import Path
 import tempfile
@@ -61,3 +63,50 @@ class InstalledPythonAliasTests(unittest.TestCase):
             os.link(installed, alias)
             with self.assertRaisesRegex(ValueError, 'owned whitespace-free alias'):
                 self.smoke.validate_installed_python_alias(alias, installed)
+
+
+class NativeFailureRelayTests(unittest.TestCase):
+    def fixture(self, root):
+        source = ROOT / 'scripts/studio-preview/fixtures/nativeFailure.py'
+        wrapper = root / 'wrapper.py'
+        wrapper.write_text(source.read_text() + f'\nrun(Path({str(root)!r}), Path({str(root)!r}), Path({str(root / "extension.py")!r}), sys.argv[1:])\n')
+        (root / 'launch.py').write_text('import sys,json\nfrom pathlib import Path\n'
+            'print("READY",flush=True)\n'
+            'for line in sys.stdin.buffer:\n'
+            ' Path(__file__).with_name("received").write_bytes(line)\n'
+            ' sys.stdout.buffer.write(line);sys.stdout.buffer.flush()\n')
+        return wrapper
+
+    def test_unmarked_relay_preserves_native_bytes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wrapper = self.fixture(root)
+            frame = b'{"id":1,"type":"get_state"}\n'
+            result = subprocess.run([sys.executable, '-I', '-B', str(wrapper)], input=frame, capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 0)
+            self.assertEqual(result.stdout, b'READY\n' + frame)
+
+    def test_fail_start_never_starts_a_native_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wrapper = self.fixture(root)
+            (root / 'fail-start').touch()
+            result = subprocess.run([sys.executable, '-I', '-B', str(wrapper)], input=b'', capture_output=True, timeout=15)
+            self.assertEqual(result.returncode, 73)
+            self.assertEqual(result.stdout, b'')
+
+    def test_marked_downgrade_closes_the_child_without_forwarding_or_faking_a_reply(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            wrapper = self.fixture(root)
+            process = subprocess.Popen([sys.executable, '-I', '-B', str(wrapper)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                self.assertEqual(process.stdout.readline(), b'READY\n')
+                (root / 'fail-start').touch()
+                frame = dict(id=2, type='aelix_control', method='permissions/set', params={'mode':'default'})
+                output, _ = process.communicate((json.dumps(frame)+'\n').encode(), timeout=15)
+                self.assertEqual((process.returncode, output), (73, b''))
+                self.assertFalse((root / 'received').exists())
+                self.assertEqual(json.loads((root / 'downgrade-fault.json').read_text())['forwarded'], False)
+            finally:
+                if process.poll() is None: process.kill();process.wait()
