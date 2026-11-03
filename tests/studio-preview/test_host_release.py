@@ -71,7 +71,7 @@ class NativeFailureRelayTests(unittest.TestCase):
         wrapper = root / 'wrapper.py'
         wrapper.write_text(source.read_text() + f'\nrun(Path({str(root)!r}), Path({str(root)!r}), Path({str(root / "extension.py")!r}), sys.argv[1:])\n')
         (root / 'launch.py').write_text('import sys,json\nfrom pathlib import Path\n'
-            'print("READY",flush=True)\n'
+            'sys.stdout.buffer.write(b"READY\\r\\n");sys.stdout.buffer.flush()\n'
             'for line in sys.stdin.buffer:\n'
             ' Path(__file__).with_name("received").write_bytes(line)\n'
             ' sys.stdout.buffer.write(line);sys.stdout.buffer.flush()\n')
@@ -84,7 +84,7 @@ class NativeFailureRelayTests(unittest.TestCase):
             frame = b'{"id":1,"type":"get_state"}\n'
             result = subprocess.run([sys.executable, '-I', '-B', str(wrapper)], input=frame, capture_output=True, timeout=15)
             self.assertEqual(result.returncode, 0)
-            self.assertEqual(result.stdout, b'READY\n' + frame)
+            self.assertEqual(result.stdout, b'READY\r\n' + frame)
 
     def test_fail_start_never_starts_a_native_child(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -101,7 +101,7 @@ class NativeFailureRelayTests(unittest.TestCase):
             wrapper = self.fixture(root)
             process = subprocess.Popen([sys.executable, '-I', '-B', str(wrapper)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
-                self.assertEqual(process.stdout.readline(), b'READY\n')
+                self.assertEqual(process.stdout.readline(), b'READY\r\n')
                 (root / 'fail-start').touch()
                 frame = dict(id=2, type='aelix_control', method='permissions/set', params={'mode':'default'})
                 output, _ = process.communicate((json.dumps(frame)+'\n').encode(), timeout=15)
@@ -110,3 +110,5 @@ class NativeFailureRelayTests(unittest.TestCase):
                 self.assertEqual(json.loads((root / 'downgrade-fault.json').read_text())['forwarded'], False)
             finally:
                 if process.poll() is None: process.kill();process.wait()
+                for stream in (process.stdin, process.stdout, process.stderr):
+                    if stream: stream.close()
