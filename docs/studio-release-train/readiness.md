@@ -18,6 +18,14 @@ D13에 따라 Studio의 첫 공개 릴리스는 공동 Beta다. 이 절이 현�
 #623·#624의 beta.3 포함과 Batch도 aelix-ai 오너 판정을 기다린다.
 서브에이전트의 자식 기록·승인·자식별 제어(S3)는 첫 Beta 요구(G13)에 남아 있고, R4 판정 뒤 카드로 만든다.
 
+## Studio #28 현재 단계 — 2026-11-03
+
+사용자 지정으로 host `host-v0.2.2-aelix.2`, native `e19ab55e17e871a40356fc9802f3f6669ca727de`,
+ACP `16d6555b08825d1d63c3b082de2b10a1152562c0`의 기준선을 먼저 구성한다.
+host #1·#3·#6과 ACP #20은 완료됐다. 이번 범위와 검증은 [기준선](../studio-preview/README.md)을 따른다.
+#28은 다음 `aelix.3`(host #12·#15) pin과 UI 후속까지 열어 둔다. #29의 기존 미커밋
+runtime-controls 작업은 별도 checkout에 보존하며 이 기준선 변경에 섞지 않는다.
+
 ## Preview 준비 기록 (2026-10-25)
 
 2026-10-25 준비 기준. 실제 상태와 담당은 [Project 9](https://github.com/users/handochan/projects/9) 및

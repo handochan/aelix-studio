@@ -20,7 +20,7 @@ if (executablePath) {
 let app, page, port, selector, conversationRoute;
 const appPids = [],
   checks = [];
-async function launch(conversation) {
+async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   app = await electron.launch({
     ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
     cwd: executablePath ? sandbox : process.cwd(),
@@ -41,9 +41,7 @@ async function launch(conversation) {
       .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
       .toBe(`#/conversation/${conversation}`);
     await expect(page.getByTestId('message-list-content')).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId('message-text-content').filter({ hasText: 'SYNTHETIC_UI_ASK_RECOVERY' })).toBeVisible(
-      { timeout: 30000 }
-    );
+    await expect(page.getByTestId('message-text-content').filter({ hasText: marker })).toBeVisible({ timeout: 30000 });
   }
   selector = page.getByTestId('mode-selector');
 }
@@ -169,24 +167,37 @@ try {
     assert.equal(fs.existsSync(path.join(sandbox, 'workspace/late-write.txt')), false);
     checks.push('installed_yolo_stop_observed_native_cancellation_without_late_write');
   }
-  fs.writeFileSync(path.join(sandbox, 'fail-start'), '');
-  await api(`${route}/config-options/mode`, 'PUT', { value: 'default' }, [502]);
-  fs.unlinkSync(path.join(sandbox, 'fail-start'));
-  await page.getByRole('button', { name: /^(Reconnect agent|에이전트 다시 연결)$/ }).click();
-  await page.getByRole('button', { name: /^(Confirm|확인)$/ }).click();
-  await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
+  if (executablePath) {
+    const oldPort = port;
+    await app.close();
+    app = null;
+    await assert.rejects(fetch(`http://127.0.0.1:${oldPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
+    await launch(conv.id, 'SYNTHETIC_UI_YOLO');
+    await api(`${route}/runtime/ensure`, 'POST');
+    await expect(selector).toHaveAttribute('data-current-mode', 'yolo', { timeout: 30000 });
+    await toolPrompt('SYNTHETIC_UI_YOLO_RESTORED');
+    await idle();
+    assert.ok(fs.existsSync(target));
+    assert.equal((await api(`${route}/confirmations`)).length, 0);
+    fs.unlinkSync(target);
+    checks.push('installed_full_app_and_host_process_restart_restores_display_and_effective_yolo');
+  }
+  // ACP #20 changes permission mode in place through native control-v1. The old
+  // beta.2 failed-child-rebuild trigger no longer applies; verify both persisted
+  // modes through real full app/host restarts instead.
+  await select('default');
   await expect(selector).toContainText(/Default|기본값|Ask/);
-  checks.push('failed_downgrade_runtime_recovery_renders_ask');
+  checks.push('native_control_switch_to_ask_renders_effective_mode');
   let turn = await toolPrompt('SYNTHETIC_UI_ASK_RECOVERY');
   await consent();
   await page.screenshot({ path: path.join(output, 'ask-after-failure.png') });
   await api(`${route}/cancel`, 'POST', { turn_id: turn.turn_id });
   await idle();
   assert.equal(fs.existsSync(target), false);
-  checks.push('recovered_ask_requires_consent_without_write', 'cancel_pending_consent_without_write');
+  checks.push('ask_requires_consent_without_write', 'cancel_pending_consent_without_write');
   if (executablePath) {
     const observer = JSON.parse(process.env.RECOVERY_OBSERVER_ARGS);
-    const code = `import sqlite3,json\nfrom pathlib import Path\nok=False\nfor file in Path(${JSON.stringify(sandbox)}).rglob('aionui-backend.db'):\n try:\n  with sqlite3.connect(file.as_uri()+'?mode=ro',uri=True) as db:\n   row=db.execute('SELECT session_config FROM acp_session WHERE conversation_id = ?',(${JSON.stringify(conv.id)},)).fetchone()\n  r=json.loads(row[0]).get('runtime',{}) if row else {}\n  ok=ok or (r.get('current_mode_id')=='default' and r.get('config_selections',{}).get('mode')!='yolo')\n except sqlite3.Error: pass\nprint(json.dumps(ok))`;
+    const code = `import sqlite3,json\nfrom pathlib import Path\nok=False\nfor file in Path(${JSON.stringify(sandbox)}).rglob('aionui-backend.db'):\n try:\n  with sqlite3.connect(file.as_uri()+'?mode=ro',uri=True) as db:\n   row=db.execute('SELECT session_config FROM acp_session WHERE conversation_id = ?',(${JSON.stringify(conv.id)},)).fetchone()\n  r=json.loads(row[0]).get('runtime',{}) if row else {}\n  ok=ok or (r.get('current_mode_id')=='default' and r.get('config_selections',{}).get('permission_mode')=='default')\n except sqlite3.Error: pass\nprint(json.dumps(ok))`;
     await expect
       .poll(
         () => {
@@ -201,13 +212,13 @@ try {
         { timeout: 20000 }
       )
       .toBe(true);
-    checks.push('installed_recovered_ask_and_cleaned_config_observed_in_host_sqlite');
+    checks.push('installed_ask_and_permission_config_observed_in_host_sqlite');
     const oldPort = port;
     await app.close();
     app = null;
     await assert.rejects(fetch(`http://127.0.0.1:${oldPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
     await launch(conv.id);
-    assert.notEqual(appPids[0], appPids[1]);
+    assert.notEqual(appPids.at(-2), appPids.at(-1));
     await api(`${route}/runtime/ensure`, 'POST');
     await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
     await expect(selector).toContainText(/Default|기본값|Ask/);
@@ -243,8 +254,8 @@ try {
         driverNodeVersion: process.version,
         electronVersions: await app.evaluate(() => process.versions),
         appPids,
-        displayedModeAfterFailure: 'default',
-        actualApprovalAfterFailure: 'ask',
+        displayedModeAfterRestore: 'default',
+        actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,
       },
       null,

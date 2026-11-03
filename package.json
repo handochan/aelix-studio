@@ -73,7 +73,7 @@
     "prepare": "husky",
     "postinstall": "node scripts/postinstall.js",
     "test:bun": "bun test packages/desktop/src/process/services/database/drivers/*.bun.test.ts",
-    "prepare:host": "node scripts/studio-preview/host-recovery/prepareDefaultHost.cjs"
+    "prepare:host": "node scripts/studio-preview/host-release/prepare.cjs"
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "^0.18.2",
@@ -262,8 +262,8 @@
   "engines": {
     "node": ">=22 <25"
   },
-  "aioncoreSourcePolicy": "scripts/studio-preview/host-recovery/default.json",
-  "aioncoreVersion": "v0.2.2",
+  "aioncoreSourcePolicy": "scripts/studio-preview/host-release/default.json",
+  "aioncoreVersion": "host-v0.2.2-aelix.2",
   "electronRebuild": {
     "electronVersion": "^37.3.1"
   },

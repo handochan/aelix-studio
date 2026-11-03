@@ -133,7 +133,14 @@ function seedRuntimeKey(
 ) {
   const managedResourcesDir = join(resourcesDir, 'bundled-aioncore', runtimeKey, 'managed-resources');
   mkdirSync(join(resourcesDir, 'bundled-aioncore', runtimeKey), { recursive: true });
-  writeFile(join(resourcesDir, 'bundled-aioncore', runtimeKey, platform === 'win32' ? 'aioncore.exe' : 'aioncore'));
+  writeFile(
+    join(
+      resourcesDir,
+      'bundled-aioncore',
+      runtimeKey,
+      platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host'
+    )
+  );
   writeJson(join(resourcesDir, 'bundled-aioncore', runtimeKey, 'manifest.json'), { platform, arch });
   writeFile(join(managedResourcesDir, ...nodeRoot.split('/'), ...nodeExecutable.split('/')));
   createManagedCliFixture({ managedResourcesDir, name: 'claude', version: CLAUDE_VERSION, runtimeKey });

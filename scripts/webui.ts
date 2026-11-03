@@ -34,7 +34,7 @@ const DEFAULT_PORT = (() => {
   if (process.env.AIONUI_MULTI_INSTANCE === '1') return 25810;
   return 25809;
 })();
-const BACKEND_BINARY = process.platform === 'win32' ? 'aioncore.exe' : 'aioncore';
+const BACKEND_BINARY = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
 
 const __filename = fileURLToPath(import.meta.url);
 const repoRoot = path.resolve(path.dirname(__filename), '..');
@@ -49,7 +49,7 @@ const getFlag = (name: string): string | undefined => {
 };
 
 /**
- * Resolve the directory where aioncore persists its SQLite DB.
+ * Resolve the directory where aelix-studio-host persists its SQLite DB.
  *
  * `bun run webui` runs **independently of the Electron desktop app** — it must
  * work on hosts that never installed AionUi.app, and its default work dir must

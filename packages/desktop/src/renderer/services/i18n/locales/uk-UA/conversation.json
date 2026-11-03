@@ -352,6 +352,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "Результат виконання повідомлення невідомий",
+        "body": "Модель або інструменти вже могли спрацювати. Перевірте історію розмови, перш ніж надсилати це повідомлення повторно."
       }
     }
   },
@@ -798,11 +802,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Розгорнути план",
     "collapse": "Згорнути план"
-  },
-  "managedOperation": {
-    "uncertain": "Результат запиту невідомий. Перевірте історію; запит не було надіслано повторно.",
-    "storageUnavailable": "Не вдалося надійно зберегти запит, тому його не було надіслано.",
-    "conflict": "Цей запит уже надіслано з іншим вмістом. Перевірте історію.",
-    "interrupted": "Запит перервано. Деякі зміни могли залишитися; перевірте історію."
   }
 }

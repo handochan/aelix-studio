@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "The outcome of this message is unknown",
+        "body": "The model or tools may already have run. Check the conversation history before sending this message again."
       }
     }
   },
@@ -782,11 +786,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expand plan",
     "collapse": "Collapse plan"
-  },
-  "managedOperation": {
-    "uncertain": "The request outcome is unknown. Check history; it has not been sent again.",
-    "storageUnavailable": "The request could not be saved safely, so it was not sent.",
-    "conflict": "This request was already sent with different content. Check history.",
-    "interrupted": "The request was interrupted. Some changes may remain; check history."
   }
 }

@@ -1,4 +1,4 @@
-"""Build a relocatable host payload from the accepted public-wheel baseline.
+"""Build a relocatable host payload from the pinned candidate source-wheel baseline.
 
 No native/ACP files are patched. This is a build-time operation, never a runtime download.
 """
@@ -49,17 +49,11 @@ def main(args):
     native, adapter = metadata('native'), metadata('adapter')
     if native['base'] != adapter['base']:
         raise ValueError('Native and ACP Python bases differ')
-    # Original pure-Python wheel members must still match the public artifacts.
-    qualifier = runtime / 'source' / ('aelix-acp-' + receipt['acp']['commit']) / 'scripts'
     qualification = json.loads((runtime / 'qualification.json').read_text())
-    for name, expected in qualification['harnessSourceSha256'].items():
-        if digest(qualifier / name) != expected:
-            raise ValueError('Accepted qualification harness changed')
-    observed_adapter = subprocess.check_output([str(prepare.venv_path(runtime, 'native')), '-I', '-B', '-c',
-        'import sys,json;sys.path.insert(0,sys.argv[1]);from qualify_beta2 import adapter_receipt;from pathlib import Path;print(json.dumps(adapter_receipt(Path(sys.argv[2]))))',
-        str(qualifier), str(prepare.venv_path(runtime, 'adapter', 'aelix-acp'))], text=True, encoding='utf-8')
-    if json.loads(observed_adapter) != qualification['installedAdapter']:
-        raise ValueError('Installed ACP differs from its accepted qualification/source')
+    from runtime import adapter_receipt
+    source = runtime / 'source' / ('aelix-acp-' + receipt['acp']['commit']) / 'src/aelix_acp'
+    if adapter_receipt(prepare.venv_path(runtime, 'adapter', 'aelix-acp'), source) != qualification['installedAdapter']:
+        raise ValueError('Installed ACP differs from its exact source')
     base_site = (Path(native['base']) / 'Lib/site-packages' if sys.platform == 'win32' else
                  Path(native['base']) / 'lib' / ('python' + '.'.join(native['version'].split('.')[:2])) / 'site-packages')
     if any(base_site.glob('*.pth')) or any(base_site.glob('*.egg-link')):
@@ -68,8 +62,8 @@ def main(args):
         if entry.name not in ('README.txt', 'pip', '__pycache__') and not entry.name.startswith('pip-'):
             raise ValueError('Standalone Python base contains unqualified user packages')
     audit = subprocess.check_output([str(prepare.venv_path(runtime, 'native')), '-I', '-B', '-c',
-        'import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from beta2_identity import verify;print(json.dumps(verify(json.loads(Path(sys.argv[2]).read_text())["native"],Path(sys.argv[3]))))',
-        str(qualifier), str(Path(__file__).parents[1] / 'baseline.json'), str(runtime / 'wheels')], text=True)
+        'import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from runtime import verify;print(json.dumps(verify(json.loads(Path(sys.argv[2]).read_text())["native"],Path(sys.argv[3]))))',
+        str(Path(__file__).parent), str(runtime / 'receipt.json'), str(runtime / 'wheels')], text=True)
     bootstrap_pth = set()
     bootstrap_audits = []
     for artifact in receipt.get('platformBootstrap', {}).get(receipt['target'], []):
@@ -114,7 +108,7 @@ def main(args):
                         baselineSha256=receipt['baselineSha256'], native=receipt['native'], acp=receipt['acp'],
                         acpWheelSha256=receipt['acpWheelSha256'], installedAdapterAudit='matches accepted qualification', nativeWheelAudit=json.loads(audit), nativePatches=[],
                         preparedReceiptSha256=digest(runtime / 'receipt.json'),
-                        recipeSha256={file.name: digest(file) for file in (Path(__file__), Path(__file__).with_name('launch.py'), Path(__file__).with_name('build.mjs'))},
+                        recipeSha256={file.name: digest(file) for file in (Path(__file__), Path(__file__).with_name('launch.py'), Path(__file__).with_name('build.mjs'), Path(__file__).with_name('runtime.py'), Path(__file__).with_name('build-requirements.txt'))},
                         dependencyLockSha256=receipt['dependencyLockSha256'], platformBootstrapAudit=bootstrap_audits,
                         pythonProvenance='uv-managed python-build-standalone copied from qualified CPython base; no venv',
                         entrypoints=['python/python.exe' if sys.platform == 'win32' else 'python/bin/python3', 'launch.py', 'launch.cjs'])

@@ -1,4 +1,4 @@
-"""Prepare an isolated public-wheel/ACP/AionCore baseline, not a release bundle."""
+"""Prepare an isolated exact-source native/ACP and immutable host release baseline."""
 import hashlib
 import argparse
 import json
@@ -93,13 +93,20 @@ def verify_prepared(runtime, baseline=MANIFEST):
         raise ValueError('Prepared runtime has a different baseline')
     if receipt.get('dependencyLockSha256') and receipt['dependencyLockSha256'] != digest(Path(__file__).parent / 'packaging/native-requirements.lock'):
         raise ValueError('Prepared runtime has a different dependency lock')
+    if receipt.get('buildConstraintsSha256'):
+        if receipt['buildConstraintsSha256'] != digest(Path(__file__).parent / 'packaging/build-requirements.txt'):
+            raise ValueError('Prepared runtime has different build constraints')
+        qualification = json.loads((runtime / 'qualification.json').read_text())
+        for relative, expected in qualification['harnessSourceSha256'].items():
+            if digest(Path(__file__).parent / relative) != expected:
+                raise ValueError('Prepared runtime qualification recipe changed')
     if receipt.get('aioncoreBundleManifestSha256'):
-        if digest(runtime / 'aioncore/manifest.json') != receipt['aioncoreBundleManifestSha256'] or receipt['aioncoreSourceManifestSha256'] != digest(Path(__file__).parent / 'host-recovery/default.json'):
+        if digest(runtime / 'aioncore/manifest.json') != receipt['aioncoreBundleManifestSha256'] or receipt['aioncoreSourceManifestSha256'] != digest(Path(__file__).parent / 'host-release/default.json'):
             raise ValueError('Prepared default host provenance changed')
         subprocess.run(['node', '-e',
             "require('./packages/shared-scripts/src/default-host.js').verifyDefaultHostBundle(process.argv[1],process.argv[2]);",
             str(runtime / 'aioncore'), receipt['target']], cwd=ROOT, check=True)
-    if receipt['launcherSha256'] != digest(Path(__file__).parent / 'host-forwarding/launch.cjs'):
+    if receipt['launcherSha256'] != digest(Path(__file__).parent / 'host-release/launch.cjs'):
         raise ValueError('Prepared runtime has a stale launcher')
     for relative, key in ((receipt['aioncoreBinary'], 'aioncoreBinarySha256'), ('launch.cjs', 'launcherSha256'),
                           ('qualification.json', 'qualificationSha256')):
@@ -135,8 +142,9 @@ def main(output=OUTPUT, expected_target=None):
     download(f"https://codeload.github.com/{acp['repository']}/tar.gz/{acp['commit']}", archive, acp['archiveSha256'])
     extract(archive, output / 'source')
     source = output / 'source' / ('aelix-acp-' + acp['commit'])
-    if json.loads((source / 'docs/beta2/manifest.json').read_text()) != config['native']:
-        raise ValueError('Studio native baseline differs from accepted ACP qualification')
+    reference = source / 'runtime-reference.json'
+    if digest(reference) != acp['runtimeReferenceSha256'] or json.loads(reference.read_text())['commit'] != config['native']['sourceTag']['commit']:
+        raise ValueError('ACP runtime reference differs from the pinned native')
     uv = shutil.which('uv')
     if not uv:
         raise ValueError('Build prerequisite missing: uv')
@@ -149,31 +157,59 @@ def main(output=OUTPUT, expected_target=None):
     adapter = venv_path(output, 'adapter')
     wheels = output / 'wheels'
     wheels.mkdir()
-    for spec in config['native']['wheels']:
-        download(spec['url'], wheels / spec['filename'], spec['sha256'])
+    native_spec = config['native']['sourceTag']
+    native_archive = output / 'native.tar.gz'
+    download(f"https://codeload.github.com/handochan/aelix-ai/tar.gz/{native_spec['commit']}", native_archive, native_spec['archiveSha256'])
+    extract(native_archive, output / 'native-source')
+    native_source = output / 'native-source' / ('aelix-ai-' + native_spec['commit'])
+    original = {file.relative_to(native_source).as_posix(): digest(file) for file in native_source.rglob('*') if file.is_file()}
+    env['SOURCE_DATE_EPOCH'] = '315532800'
+    constraints = Path(__file__).parent / 'packaging/build-requirements.txt'
+    for package in (native_source, *(native_source / 'packages' / name for name in ('aelix-ai', 'aelix-agent-core', 'aelix-coding-agent'))):
+        run(uv, '--no-config', 'build', '--wheel', '--no-sources', '--python', native, '--build-constraint', constraints, '--out-dir', wheels, package)
+    for relative, expected in original.items():
+        if digest(native_source / relative) != expected:
+            raise ValueError('Native source was modified during the build')
+    native_wheels = []
+    import zipfile
+    import email.parser
+    for wheel in sorted(wheels.glob('*.whl')):
+        with zipfile.ZipFile(wheel) as archive:
+            metadata_name, = (name for name in archive.namelist() if name.endswith('.dist-info/METADATA'))
+            info = email.parser.Parser().parsestr(archive.read(metadata_name).decode())
+        native_wheels.append(dict(distribution=info['Name'], version=info['Version'], filename=wheel.name, sha256=digest(wheel), size=wheel.stat().st_size))
+    if {spec['distribution'] for spec in native_wheels} != {'aelix', 'aelix-ai', 'aelix-agent-core', 'aelix-coding-agent'}:
+        raise ValueError('Expected exactly four native source wheels')
+    config['native']['wheels'] = native_wheels
+    config['native']['sourceInventorySha256'] = hashlib.sha256(json.dumps(original, sort_keys=True).encode()).hexdigest()
     dependency_lock = Path(__file__).parent / 'packaging/native-requirements.lock'
     run(uv, '--no-config', 'pip', 'sync', '--python', native, '--index-url', 'https://pypi.org/simple',
         '--require-hashes', '--only-binary', ':all:', dependency_lock)
+    run(uv, '--no-config', 'pip', 'install', '--python', native, '--no-deps', *sorted(wheels.glob('*.whl')))
     for bootstrap in config.get('platformBootstrap', {}).get(target, []):
         download(bootstrap['url'], wheels / bootstrap['filename'], bootstrap['sha256'])
-    run(uv, '--no-config', 'build', '--wheel', '--python', native, '--out-dir', output / 'acp-wheel', source)
+    run(uv, '--no-config', 'build', '--wheel', '--python', native, '--build-constraint', constraints, '--out-dir', output / 'acp-wheel', source)
     wheel, = (output / 'acp-wheel').glob('*.whl')
     run(uv, '--no-config', 'pip', 'install', '--python', adapter, '--no-index', wheel)
-    run(native, '-B', source / 'scripts/qualify_beta2.py', '--adapter', venv_path(output, 'adapter', 'aelix-acp'),
-        '--artifacts', wheels, '--report', output / 'qualification.json')
-    policy_path = ROOT / 'scripts/studio-preview/host-recovery/default.json'
+    native_manifest = output / 'native-manifest.json'
+    native_manifest.write_text(json.dumps(config['native']))
+    audit_code = 'import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from runtime import verify,adapter_receipt;print(json.dumps(dict(native=verify(json.loads(Path(sys.argv[2]).read_text()),sys.argv[3]),installedAdapter=adapter_receipt(Path(sys.argv[4]),Path(sys.argv[5])))))'
+    qualification = json.loads(run(native, '-I', '-B', '-c', audit_code, Path(__file__).parent / 'packaging', native_manifest, wheels, venv_path(output, 'adapter', 'aelix-acp'), source / 'src/aelix_acp', capture=True))
+    qualification['harnessSourceSha256'] = {name: digest(Path(__file__).parent / name) for name in ('prepare.py', 'packaging/runtime.py')}
+    (output / 'qualification.json').write_text(json.dumps(qualification, indent=2) + '\n')
+    policy_path = ROOT / 'scripts/studio-preview/host-release/default.json'
     if digest(policy_path) != config['aioncore']['sourceManifestSha256']:
-        raise ValueError('Default host source policy differs from Preview baseline')
-    # Build prerequisites may use task-local Rust homes. Native qualification above
-    # retains its separate sanitized environment and unchanged public wheels.
+        raise ValueError('Default host release policy differs from candidate baseline')
+    # Host preparation downloads the pinned release. Native build/qualification
+    # above uses a separate sanitized environment and unmodified candidate source.
     subprocess.run(['node', '-e',
         "const p=require('./packages/shared-scripts/src/prepare-aioncore.js');p.prepareAioncore(JSON.parse(process.argv[1]));",
         json.dumps(dict(projectRoot=str(ROOT), platform=sys.platform, arch=target.split('-')[1], python=str(native)))],
         check=True, cwd=ROOT)
     source_bundle = ROOT / 'resources/bundled-aioncore' / target
     shutil.copytree(source_bundle, output / 'aioncore', symlinks=True)
-    binary = output / 'aioncore' / ('aioncore.exe' if sys.platform == 'win32' else 'aioncore')
-    shutil.copy(Path(__file__).parent / 'host-forwarding/launch.cjs', output / 'launch.cjs')
+    binary = output / 'aioncore' / ('aelix-studio-host.exe' if sys.platform == 'win32' else 'aelix-studio-host')
+    shutil.copy(Path(__file__).parent / 'host-release/launch.cjs', output / 'launch.cjs')
     receipt = dict(config, target=target, baselineSha256=digest(MANIFEST), acpWheelSha256=digest(wheel),
                    aioncoreBinary=str(binary.relative_to(output)), aioncoreBinarySha256=digest(binary),
                    aioncoreBundleManifestSha256=digest(output / 'aioncore/manifest.json'),
@@ -182,7 +218,7 @@ def main(output=OUTPUT, expected_target=None):
                    qualificationSha256=digest(output / 'qualification.json'),
                    entrypointSha256={path.relative_to(output).as_posix(): digest(path) for path in (venv_path(output, 'native', 'aelix'), venv_path(output, 'adapter', 'aelix-acp'))},
                    dependencyLockSha256=digest(dependency_lock),
-                   uvVersion=run(uv, '--version', capture=True).strip(), pythonProvider='uv-managed-standalone')
+                   buildConstraintsSha256=digest(constraints), uvVersion=run(uv, '--version', capture=True).strip(), pythonProvider='uv-managed-standalone')
     (output / 'receipt.json').write_text(json.dumps(receipt, indent=2) + '\n')
     print('Prepared isolated baseline: ' + str(output))
 

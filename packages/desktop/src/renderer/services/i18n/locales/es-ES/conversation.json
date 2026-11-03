@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "The request used a legacy team identity field",
         "body": "This team action must use assistant_id instead of legacy backend or agent fields."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "Se desconoce el resultado de este mensaje",
+        "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. Revisa el historial de la conversación antes de volver a enviar este mensaje."
       }
     }
   },
@@ -783,11 +787,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plan",
     "collapse": "Contraer plan"
-  },
-  "managedOperation": {
-    "uncertain": "Se desconoce el resultado de la solicitud. Revisa el historial; no se ha vuelto a enviar.",
-    "storageUnavailable": "No se pudo guardar la solicitud de forma segura, por lo que no se envió.",
-    "conflict": "Esta solicitud ya se envió con otro contenido. Revisa el historial.",
-    "interrupted": "La solicitud se interrumpió. Puede haber cambios parciales; revisa el historial."
   }
 }

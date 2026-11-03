@@ -69,7 +69,7 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 mkdir -p "$out"
-printf 'archive' > "$out/aioncore-v0.1.46-x86_64-unknown-linux-gnu.tar.gz"
+printf 'archive' > "$out/aelix-studio-host-v0.1.46-x86_64-unknown-linux-gnu.tar.gz"
 `
   );
   writeExecutable(
@@ -85,11 +85,11 @@ while [[ $# -gt 0 ]]; do
   shift || true
 done
 mkdir -p "$out"
-cat > "$out/aioncore" <<'SH'
+cat > "$out/aelix-studio-host" <<'SH'
 #!/usr/bin/env bash
 exit 0
 SH
-chmod +x "$out/aioncore"
+chmod +x "$out/aelix-studio-host"
 `
   );
 
@@ -182,7 +182,7 @@ describe('prepare-aioncore GitHub Actions artifact resolver', () => {
 
   posixFakeToolchainIt('hard fails local binary fallback when prepared managed resources lack contract', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'aionui-local-binary-gate-'));
-    const localBinary = join(tmp, 'aioncore');
+    const localBinary = join(tmp, 'aelix-studio-host');
     writeExecutable(localBinary, '#!/usr/bin/env bash\nexit 0\n');
     const fakeBin = createFakeToolchain(tmp, { curlFails: true });
     const previousPath = process.env.PATH;

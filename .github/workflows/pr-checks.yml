@@ -89,20 +89,7 @@ jobs:
         run: bunx playwright install-deps chromium
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
-      - name: Set up pinned source-host Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.95.0'
-      - name: Cache pinned source-host build
-        uses: actions/cache@v4
-        with:
-          path: .local/default-host
-          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-forwarding/forwarding.patch') }}
-      - name: Install Linux source-host prerequisites
-        if: runner.os == 'Linux'
-        shell: bash
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev clang libclang-dev cmake
-      - name: Prepare unchanged public native and ACP baseline
+      - name: Prepare exact native and ACP source wheels with the released host
         run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
       - name: Check helper regressions before installer assembly
         run: |
@@ -162,13 +149,11 @@ jobs:
             .local/provider-installer/permission/qualification.json
             .local/provider-installer/permission/renderer-result.json
             .local/provider-installer/permission/*.png
-            .local/provider-installer/forwarding/*.json
-            .local/provider-installer/forwarding/*.png
             resources/bundled-aioncore/**/build-receipt.json
             resources/bundled-aioncore/**/manifest.json
-            .local/default-host/**/build.log
-            .local/default-host/**/container-build.log
-            .local/default-host/**/build-receipt.json
+            resources/bundled-aioncore/**/release-provenance.json
+            .local/studio-preview/receipt.json
+            .local/studio-preview/qualification.json
             .local/provider-installer/artifacts/*.dmg
             .local/provider-installer/artifacts/*.exe
             .local/provider-installer/artifacts/*.deb
@@ -464,19 +449,6 @@ jobs:
           pr_number: ${{ inputs.pr_number }}
           commit_sha: ${{ inputs.commit_sha }}
           github_token: ${{ github.token }}
-      - name: Set up pinned source-host Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: '1.95.0'
-      - name: Cache pinned source-host build
-        uses: actions/cache@v4
-        with:
-          path: .local/default-host
-          key: source-host-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/studio-preview/host-recovery/default.json', 'scripts/studio-preview/host-recovery/build.py', 'scripts/studio-preview/host-recovery/identity.py', 'scripts/studio-preview/host-forwarding/forwarding.patch') }}
-      - name: Install Linux source-host prerequisites
-        if: runner.os == 'Linux'
-        shell: bash
-        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev clang libclang-dev cmake
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:

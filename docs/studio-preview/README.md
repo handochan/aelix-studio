@@ -1,3 +1,68 @@
+# Studio #28 Beta candidate baseline — host `aelix.2`
+
+Current executable pins are in [baseline.json](../../scripts/studio-preview/baseline.json).
+The historical Preview evidence below describes older commits and public beta.2 wheels.
+It does not establish acceptance for this candidate or for the public joint Beta.
+
+| Component               | Exact source / archive SHA-256                                                                                                |
+| ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| Studio base             | `ce98f677a41e7f34c5f7f1609508b7e96289f5f2`                                                                                    |
+| Host                    | `host-v0.2.2-aelix.2`, commit `2e1c31006bc0429324e0c37e222575dcdb06b1a2`                                                      |
+| Host provenance         | `c76e162fe1c3659234abc43739f1df11591b33e4ebca9013aee58cdd98fb0439`                                                            |
+| Native beta.3 candidate | `e19ab55e17e871a40356fc9802f3f6669ca727de`; source archive `c6088edb122c8e3dec4b954e104bf12ff4db749674b6d540b70c5ac5b1ebf997` |
+| ACP                     | `16d6555b08825d1d63c3b082de2b10a1152562c0`; source archive `6d4b9e4c918ca51345b4b39ff93e31141a4f31decd67f628b7a54c496078c111` |
+
+The native source still declares `0.1.0b2`. Studio builds its four wheels without patches,
+using the exact candidate source, a fixed build timestamp and declared build constraints.
+These are **candidate source wheels**, not public beta.2 or beta.3 wheel evidence. The ACP
+runtime reference must match that exact native commit and its pinned file hash. Preparation
+records each produced wheel hash, the native source inventory, installed ACP package hashes,
+Python provenance, dependency lock and host release identity in `.local/studio-preview/receipt.json`.
+The relocatable payload retains these pins and validates original wheel members after install.
+
+Host archives for all five targets and their release smoke results are pinned in
+[host policy](../../scripts/studio-preview/host-release/default.json) and the byte-preserved
+[release provenance](../../scripts/studio-preview/host-release/provenance.json). Studio
+verifies archive SHA-256 before extraction/execution, retains `LICENSE` and `NOTICE`, and
+checks installer-stable code identity. Managed Node is prepared at build time by the released
+host. No upstream source download, Rust build, permission patch or forwarding patch runs.
+The host retains `AIONCORE_LISTENING`, `AIONCORE_READY`, `.aioncore.log`, exit 3 /
+`BOOTSTRAP_PEER_ALREADY_RUNNING`, `AIONCORE_BOOTSTRAP_SECRET`, `x-aioncore-bootstrap-secret`,
+`AIONUI_*`, existing data directories and `aionui-backend.db`.
+
+For an internal database that has migration **044** from #25: stop Studio and its host,
+back up the entire owned internal test data directory (including SQLite sidecars), then
+start this candidate with a **fresh data directory**. Do not reuse or automatically downgrade
+that database. Also use a fresh internal browser profile: old #25 queue/localStorage operation
+bindings are retired. Preserve native CLI auth and session files; this reset concerns Studio's
+internal test state only. This is not a public upgrade/migration path.
+
+Reproduce on a supported native runner (Node 22+, Bun, Python, uv **0.13.5**):
+
+```sh
+python -B scripts/studio-preview/prepare.py --target darwin-arm64
+node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
+.local/studio-preview/native/bin/python -B scripts/studio-preview/packaging/acceptance.py --runtime .local/studio-preview
+```
+
+Use `Scripts/python.exe` on Windows and `xvfb-run -a` for Linux acceptance. PR Checks runs
+this path on darwin arm64/x64, Linux arm64/x64 and Windows x64. The actual installed app
+checks first response, Ask/Yolo recovery and full process restart without a backend override.
+The Provider smoke also opens authenticated LAN HTTP WebUI in an ordinary sandboxed
+Chromium window without preload, verifies insecure-context Web Locks absence, and sends
+through the existing UI. All model/credential inputs are synthetic loopback fixtures.
+Independent review belongs to the separate Claude coordination session.
+
+The initial [ownership map](../studio-release-train/README.md#모듈-소유권-map-초판--studio-28-aelix2)
+records native/ACP/host/Studio authority and the retired #25 path.
+
+Issue #28 remains open for `aelix.3`: after host PRs #12/#15 and the next release, advance
+the pin, remove direct remote-image fallback, add four error-code locales/display and
+`protocol_code`/`data` handling, and forward the agreed host environment settings.
+Those behaviors are intentionally outside this PR. No main push, tag, release or merge occurs.
+
+---
+
 # Studio #4 public beta.2 baseline
 
 This is the reproducible qualification path for [Studio #4](https://github.com/handochan/aelix-studio/issues/4),

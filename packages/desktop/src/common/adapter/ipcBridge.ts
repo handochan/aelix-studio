@@ -16,7 +16,6 @@ import type { IConfirmation } from '@/common/chat/chatLib';
 import type { AcpSlashCommandApiItem } from '@/common/chat/slash/types';
 import { bridge } from '@/common/platform/bridge';
 import { buildListTasksPath } from './teamTaskPath';
-import type { HostOperationKey, HostOperationReceipt } from '../types/platform/acpTypes';
 import type { OpenDialogOptions } from 'electron';
 import type {
   ICssTheme,
@@ -370,7 +369,6 @@ export const conversation = {
   sendMessage: httpPost<ISendMessageResult, ISendMessageParams>(
     (p) => `/api/conversations/${p.conversation_id}/messages`,
     (p) => ({
-      ...(p.operation ? { operation: p.operation } : {}),
       content: p.input,
       files: p.files,
       // `@@` session references. Omitting this silently breaks the feature end
@@ -380,10 +378,6 @@ export const conversation = {
       loading_id: p.loading_id,
       inject_skills: p.inject_skills,
     })
-  ),
-  getOperationStatus: httpGet<HostOperationReceipt, { conversation_id: string; operation: HostOperationKey }>(
-    (p) =>
-      `/api/conversations/${encodeURIComponent(p.conversation_id)}/operations/${encodeURIComponent(p.operation.id)}?${new URLSearchParams({ host_store_id: p.operation.host_store_id })}`
   ),
   getSlashCommands: httpGet<AcpSlashCommandApiItem[], { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/slash-commands`
@@ -1127,7 +1121,6 @@ export const mode = {
 
 export const acpConversation = {
   sendMessage: conversation.sendMessage,
-  getOperationStatus: conversation.getOperationStatus,
   responseStream: conversation.responseStream,
   /** Management view used by Agent settings. */
   getManagedAgents: httpGet<import('@/renderer/utils/model/agentTypes').ManagedAgent[], void>('/api/agents/management'),
@@ -1780,8 +1773,7 @@ export interface ICronJobUpdateParams {
 // Shared types (re-exported for consumers)
 // ---------------------------------------------------------------------------
 
-export interface ISendMessageParams {
-  operation?: HostOperationKey;
+interface ISendMessageParams {
   input: string;
   conversation_id: string;
   /** Source-tagged file refs; the backend resolves each to an absolute path and
@@ -1798,7 +1790,6 @@ export interface ISendMessageParams {
 // use this as the canonical msg_id when rendering an optimistic bubble so the
 // local state aligns with DB rows and WebSocket stream events.
 export interface ISendMessageResult {
-  operation?: HostOperationReceipt;
   msg_id: string;
   turn_id: string;
   runtime: TConversationRuntimeSummary;

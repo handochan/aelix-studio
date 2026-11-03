@@ -348,6 +348,10 @@
       "TEAM_ASSISTANT_FIELD_UNSUPPORTED": {
         "title": "La demande utilisait un ancien champ d'identité d'équipe",
         "body": "Cette action d'équipe doit utiliser assistant_id au lieu des anciens champs backend ou agent."
+      },
+      "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
+        "title": "Le résultat de ce message est inconnu",
+        "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Vérifiez l’historique de la conversation avant de renvoyer ce message."
       }
     }
   },
@@ -782,11 +786,5 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Développer le plan",
     "collapse": "Réduire le plan"
-  },
-  "managedOperation": {
-    "uncertain": "Le résultat de la demande est inconnu. Consultez l’historique ; elle n’a pas été renvoyée.",
-    "storageUnavailable": "La demande n’a pas pu être enregistrée de manière fiable et n’a pas été envoyée.",
-    "conflict": "Cette demande a déjà été envoyée avec un contenu différent. Consultez l’historique.",
-    "interrupted": "La demande a été interrompue. Certaines modifications peuvent subsister ; consultez l’historique."
   }
 }

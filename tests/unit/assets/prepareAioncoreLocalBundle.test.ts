@@ -11,7 +11,7 @@ describe('prepare-aioncore local bundle input', () => {
     const projectRoot = join(tmp, 'project');
     const localBundle = join(tmp, 'bundle');
     mkdirSync(join(localBundle, 'managed-resources'), { recursive: true });
-    writeFileSync(join(localBundle, 'aioncore.exe'), '');
+    writeFileSync(join(localBundle, 'aelix-studio-host.exe'), '');
 
     const previous = process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR;
     process.env.AIONUI_BACKEND_LOCAL_BUNDLE_DIR = localBundle;

@@ -26,33 +26,16 @@ async def main():
         return hashlib.sha256(path.read_bytes()).hexdigest()
     binary = RUNTIME / receipt['aioncoreBinary']
     source = RUNTIME / 'source' / ('aelix-acp-' + receipt['acp']['commit'])
-    qualification = json.loads((RUNTIME / 'qualification.json').read_text())
-    for name, expected in qualification['harnessSourceSha256'].items():
-        if digest(source / 'scripts' / name) != expected:
-            raise ValueError('Qualified ACP harness bytes changed')
+    sys.path.insert(0, str(Path(__file__).parent / 'fixtures'))
+    from loopback import Fixture
     def audit():
-        code = '''import json,sys
-from pathlib import Path
-sys.path.insert(0, sys.argv[1])
-from beta2_identity import verify
-from qualify_beta2 import adapter_receipt
-root=Path(sys.argv[2])
-manifest=json.loads(Path(sys.argv[3]).read_text())["native"]
-print(json.dumps({"native":verify(manifest,root/"wheels"),"adapter":adapter_receipt(root/"adapter/bin/aelix-acp")}))'''
-        result = subprocess.check_output([str(RUNTIME / 'native/bin/python'), '-I', '-B', '-c', code,
-            str(source / 'scripts'), str(RUNTIME), str(Path(__file__).with_name('baseline.json'))],
-            cwd=RUNTIME, env={key: os.environ[key] for key in ('PATH', 'TMP', 'TEMP') if key in os.environ}, text=True, timeout=120)
-        observed = json.loads(result)
-        if observed['adapter'] != qualification['installedAdapter']:
-            raise ValueError('Installed ACP differs from the qualified source pin')
-        return observed
+        return json.loads(subprocess.check_output([str(RUNTIME / 'native/bin/python'), '-I', '-B', '-c',
+            'import sys,json;from pathlib import Path;sys.path.insert(0,sys.argv[1]);from runtime import verify,adapter_receipt;root=Path(sys.argv[2]);print(json.dumps(dict(native=verify(json.loads((root/"receipt.json").read_text())["native"],root/"wheels"),adapter=adapter_receipt(root/"adapter/bin/aelix-acp",Path(sys.argv[3])))))',
+            str(Path(__file__).parent / 'packaging'), str(RUNTIME), str(source / 'src/aelix_acp')], text=True))
     identity_before = audit()
-    spec = importlib.util.spec_from_file_location('preview_wire', source / 'scripts/beta2_wire.py')
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
     with tempfile.TemporaryDirectory(prefix='studio-preview-') as temporary:
         sandbox = Path(temporary)
-        fixture = module.Fixture(sandbox)
+        fixture = Fixture(sandbox)
         await fixture.start()
         async def observe_hold():
             await fixture.entered.wait()
@@ -85,7 +68,7 @@ print(json.dumps({"native":verify(manifest,root/"wheels"),"adapter":adapter_rece
             report.update(identityBefore=identity_before, identityAfter=identity_after,
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'],
                           harnessSourceSha256={name: digest(Path(__file__).parent / name) for name in
-                              ('prepare.py', 'smoke.py', 'hostSmoke.mjs', 'host-forwarding/launch.cjs')},
+                              ('prepare.py', 'smoke.py', 'hostSmoke.mjs', 'host-release/launch.cjs')},
                           builtAppSha256={name: digest(ROOT / name) for name in ('out/main/index.js', 'out/preload/index.js')})
             report['status'] = 'passed'
             report_path.write_text(json.dumps(report, indent=2) + '\n')

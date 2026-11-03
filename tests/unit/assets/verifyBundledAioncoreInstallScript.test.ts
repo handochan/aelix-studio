@@ -47,7 +47,7 @@ describe('Windows bundled aioncore install verifier', () => {
     const codexTriple = 'x86_64-pc-windows-msvc';
 
     try {
-      writeFile(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'aioncore.exe'), 'x');
+      writeFile(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'aelix-studio-host.exe'), 'x');
       writeJson(join(installDir, 'resources', 'bundled-aioncore', 'win32-x64', 'manifest.json'), {
         platform: 'win32',
         arch: 'x64',

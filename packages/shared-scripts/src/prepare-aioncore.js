@@ -21,8 +21,8 @@ const os = require('os');
 const path = require('path');
 const { verifyBundledAioncoreResources } = require('./verify-bundled-aioncore-resources');
 
-const GITHUB_OWNER = 'iOfficeAI';
-const GITHUB_REPO = 'AionCore';
+const GITHUB_OWNER = 'handochan';
+const GITHUB_REPO = 'aelix-studio-host';
 
 const ACTIONS_ARTIFACT_TARGETS = {
   'darwin-arm64': {
@@ -87,7 +87,7 @@ function writeJson(filePath, payload) {
 }
 
 function getBinaryName(platform) {
-  return platform === 'win32' ? 'aioncore.exe' : 'aioncore';
+  return platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
 }
 
 function getActionsTarget(platform, arch) {
@@ -203,7 +203,7 @@ function getAssetName(platform, arch, tag) {
   const normalizedPlatform = platformMap[platform];
   if (!normalizedArch || !normalizedPlatform) return null;
   const ext = platform === 'win32' ? '.zip' : '.tar.gz';
-  return `aioncore-${tag}-${normalizedArch}-${normalizedPlatform}${ext}`;
+  return `aelix-studio-host-${tag.replace(/^host-v/, '')}-${normalizedArch}-${normalizedPlatform}${ext}`;
 }
 
 function getDownloadUrl(assetName, tag) {
@@ -259,7 +259,7 @@ function findAioncoreArchiveInDir(dir) {
     const fullPath = path.join(dir, entry.name);
     if (
       entry.isFile() &&
-      entry.name.startsWith('aioncore-') &&
+      entry.name.startsWith('aelix-studio-host-') &&
       (entry.name.endsWith('.zip') || entry.name.endsWith('.tar.gz'))
     ) {
       return fullPath;
@@ -446,11 +446,9 @@ function prepareAioncore(options) {
   const sourcePolicy =
     fs.existsSync(packageFile) && JSON.parse(fs.readFileSync(packageFile, 'utf8')).aioncoreSourcePolicy;
   if (sourcePolicy) {
-    if (sourcePolicy !== 'scripts/studio-preview/host-recovery/default.json')
+    if (sourcePolicy !== 'scripts/studio-preview/host-release/default.json')
       throw new Error('Unknown Studio host source policy');
-    const { prepareDefaultHost } = require(
-      path.join(projectRoot, 'scripts/studio-preview/host-recovery/prepareDefaultHost.cjs')
-    );
+    const { prepareDefaultHost } = require(path.join(projectRoot, 'scripts/studio-preview/host-release/prepare.cjs'));
     const result = prepareDefaultHost({ ...options, prepareManagedResources });
     verifyPreparedAioncoreBundle(projectRoot, platform, arch);
     return result;
@@ -598,6 +596,7 @@ function prepareAioncore(options) {
 
 module.exports = {
   prepareManagedResources,
+  getAssetName,
   getActionsArtifactMissingMessage,
   getActionsArtifactName,
   prepareAioncore,

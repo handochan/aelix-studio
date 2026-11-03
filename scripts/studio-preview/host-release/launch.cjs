@@ -25,12 +25,12 @@ const args = bundled
       '--aelix-arg=-I',
       '--aelix-arg=-B',
       '--aelix-arg=-Xutf8',
-      '--aelix-arg=-c',
-      '--aelix-arg=from aelix_coding_agent.cli.entry import main_sync; main_sync()',
+      '--aelix-arg=-m',
+      '--aelix-arg=aelix_coding_agent',
     ];
 // Only this launcher holds the ACP input write end. Its death produces ACP EOF
 // even when the backend still holds the launcher's own stdin pipe open.
-const child = spawn(python, [...args, '--managed-operations', ...process.argv.slice(2)], {
+const child = spawn(python, [...args, ...process.argv.slice(2)], {
   stdio: ['pipe', 'inherit', 'inherit'],
   shell: false,
   windowsHide: true,
