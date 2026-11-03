@@ -86,10 +86,10 @@
       "title": "L'installation d'AionUi est incomplète",
       "description": "Cette installation ne dispose pas des ressources locales requises, AionCore ne peut donc pas démarrer. Veuillez télécharger et réinstaller la dernière version d'AionUi. Si le problème réapparaît après la réinstallation, vérifiez si un logiciel de sécurité ou antivirus a mis AionCore en quarantaine.",
       "downloadLatest": "Télécharger le dernier",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic",
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez.",
       "runtimeComponentDescription": "Il manque les composants d'exécution groupés requis dans cette installation, donc {{resource}} ne peut pas démarrer. Réinstallez le dernier package AionUi. Si cela se produit toujours après la réinstallation, vérifiez si un logiciel de sécurité ou un antivirus a mis en quarantaine les composants AionUi."
     },
     "packageArchitectureMismatch": {
@@ -99,10 +99,10 @@
     "dataMigration": {
       "title": "Échec de la migration des données locales",
       "description": "AionUi s'est ouvert, mais AionCore s'est arrêté lors de l'initialisation des données locales. La réinstallation d'AionUi ne résoudra peut-être pas ce problème. Envoyez un rapport de diagnostic ou contactez le support afin que la migration de la base de données locale puisse être inspectée.",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     },
     "databaseNewerThanApp": {
       "title": "Une version plus récente d'AionUi est requise",
@@ -112,28 +112,28 @@
     "localDataRepair": {
       "title": "La réparation des données locales a échoué",
       "description": "AionUi s'est ouvert, mais AionCore s'est arrêté lors de la préparation des données locales de démarrage, comme les enregistrements d'assistants ou d'agents. La réinstallation d'AionUi ne résoudra peut-être pas ce problème. Envoyez un rapport de diagnostic ou contactez l'assistance afin que la base de données locale puisse être inspectée.",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     },
     "startupDirectory": {
       "title": "Le répertoire de démarrage n'est pas disponible",
       "description": "AionUi s'est ouvert, mais AionCore n'a pas pu démarrer car le répertoire de travail ou de journal configuré est manquant, indisponible ou bloqué par les autorisations. Vérifiez que les répertoires configurés existent et sont accessibles en écriture, puis redémarrez AionUi.",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     },
     "recoverableDatabaseCorruption": {
       "title": "Les données locales sont corrompues",
       "description": "AionUi a détecté que la base de données locale est corrompue et ne peut pas continuer le démarrage. Après confirmation, AionUi sauvegardera l'ancienne base de données et créera une nouvelle base de données locale pour continuer le démarrage. Les conversations passées ne seront plus affichées et l'ancienne base de données sera conservée comme fichier de sauvegarde.",
       "confirmRebuild": "Sauvegarder l'ancienne base de données et reconstruire la nouvelle base de données",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsHint": "L'envoi de diagnostics ne modifiera pas la base de données locale.",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic",
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsHint": "Le rapport contient les journaux récents et les diagnostics. Vérifiez le fichier local avant de le partager. Rien n’est envoyé automatiquement.",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez.",
       "rebuildFailed": "Échec de la sauvegarde de l'ancienne base de données et de la reconstruction de la nouvelle base de données",
       "confirmDialog": {
         "title": "Reconstruire la base de données ?",
@@ -145,11 +145,11 @@
     "transientConcurrentStartup": {
       "title": "AionUi démarre",
       "description": "À l'ouverture de cette fenêtre, un autre démarrage d'AionUi utilisait encore les données locales. C'est temporaire et vos données sont en sécurité — aucune réinstallation n'est nécessaire. Veuillez patienter un instant et réessayer, ou redémarrer AionUi.",
-      "sendDiagnostics": "Envoyer des diagnostics",
-      "diagnosticsSent": "Diagnostics envoyés",
-      "diagnosticsReportSuccess": "Rapport de diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du rapport de diagnostic",
-      "diagnosticsHint": "Si cela se reproduit, vous pouvez envoyer un rapport de diagnostic."
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez.",
+      "diagnosticsHint": "Le rapport contient les journaux récents et les diagnostics. Vérifiez le fichier local avant de le partager. Rien n’est envoyé automatiquement."
     },
     "pendingSlow": {
       "title": "Démarrage",
@@ -158,26 +158,26 @@
     "exited": {
       "title": "Le démarrage ne s'est pas terminé",
       "description": "AionCore n'a pas pu terminer son démarrage et s'est fermé. Veuillez redémarrer l'application ; si le problème persiste, envoyez un diagnostic.",
-      "sendDiagnostics": "Envoyer le diagnostic",
-      "diagnosticsSent": "Diagnostic envoyé",
-      "diagnosticsReportSuccess": "Diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du diagnostic, veuillez réessayer"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     },
     "portReportTimeout": {
       "title": "Délai de démarrage dépassé",
       "description": "AionCore n'a pas terminé son démarrage dans le délai prévu. Veuillez redémarrer l'application ; si le problème persiste, envoyez un diagnostic.",
-      "sendDiagnostics": "Envoyer le diagnostic",
-      "diagnosticsSent": "Diagnostic envoyé",
-      "diagnosticsReportSuccess": "Diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du diagnostic, veuillez réessayer"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     },
     "startupFailed": {
       "title": "Échec du démarrage",
       "description": "AionCore n'a pas pu démarrer. Veuillez redémarrer l'application ; si le problème persiste, envoyez un diagnostic.",
-      "sendDiagnostics": "Envoyer le diagnostic",
-      "diagnosticsSent": "Diagnostic envoyé",
-      "diagnosticsReportSuccess": "Diagnostic envoyé",
-      "diagnosticsReportFailed": "Échec de l'envoi du diagnostic, veuillez réessayer"
+      "sendDiagnostics": "Enregistrer le rapport localement",
+      "diagnosticsSent": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+      "diagnosticsReportFailed": "Impossible de préparer le rapport. Réessayez."
     }
   },
   "fileAttach.addFiles": "Ajouter des fichiers",

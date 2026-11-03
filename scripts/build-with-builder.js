@@ -480,10 +480,7 @@ function escapeNsisDefineValue(value) {
 function writeGeneratedSentryDsnInclude(projectRoot) {
   const generatedInclude = path.join(projectRoot, 'resources/windows/support/_sentry-dsn.generated.nsh');
   fs.mkdirSync(path.dirname(generatedInclude), { recursive: true });
-  fs.writeFileSync(
-    generatedInclude,
-    `!define AIONUI_SENTRY_DSN "${escapeNsisDefineValue(process.env.SENTRY_DSN || '')}"\n`
-  );
+  fs.writeFileSync(generatedInclude, `!define AIONUI_SENTRY_DSN ""\n`);
 }
 
 function isValidPackageVersion(value) {

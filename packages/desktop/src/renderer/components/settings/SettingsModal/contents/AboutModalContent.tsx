@@ -117,7 +117,7 @@ const AboutModalContent: React.FC = () => {
     },
     {
       title: t('settings.updateLog'),
-      url: 'https://github.com/iOfficeAI/AionUi/releases',
+      url: 'https://github.com/handochan/aelix-studio/releases',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {

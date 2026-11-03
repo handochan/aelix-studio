@@ -1,22 +1,20 @@
-/**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
- */
+/** Studio updates are user initiated and use only the Studio release repository. */
+import type { GithubOptions } from 'builder-util-runtime';
 
-import { CdnGenericProvider } from './cdnGenericProvider';
-import type { CdnGenericProviderConfiguration } from './cdnGenericProvider';
+export const STUDIO_UPDATE_REPO = 'handochan/aelix-studio';
 
-export const CDN_UPDATE_BASE_URL = 'https://static.aionui.com/releases';
+export function buildStudioFeedOptions(): GithubOptions {
+  return { provider: 'github', owner: 'handochan', repo: 'aelix-studio' };
+}
 
-export type CdnFeedOptions = CdnGenericProviderConfiguration & {
-  updateProvider: typeof CdnGenericProvider;
-};
-
-export function buildCdnFeedOptions(): CdnFeedOptions {
-  return {
-    provider: 'custom',
-    url: CDN_UPDATE_BASE_URL,
-    updateProvider: CdnGenericProvider,
-  };
+/** Automatic checks require explicit operator opt-in; legacy disable guards still win. */
+export function startupUpdateEnabled(env: NodeJS.ProcessEnv): boolean {
+  return (
+    env.AELIX_STUDIO_AUTO_UPDATE === '1' &&
+    env.AIONUI_DISABLE_AUTO_UPDATE !== '1' &&
+    env.AIONUI_E2E_TEST !== '1' &&
+    env.CI !== 'true' &&
+    env.CI !== '1' &&
+    env.GITHUB_ACTIONS !== 'true'
+  );
 }

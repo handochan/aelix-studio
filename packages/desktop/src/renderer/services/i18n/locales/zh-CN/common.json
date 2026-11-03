@@ -86,10 +86,10 @@
       "title": "AionUi 安装不完整",
       "description": "当前安装缺少必要的本地资源，AionCore 无法启动。请下载并重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionCore。",
       "downloadLatest": "下载最新版",
-      "sendDiagnostics": "发送诊断报告",
-      "diagnosticsSent": "诊断报告已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败",
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。",
       "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionUi 组件。"
     },
     "packageArchitectureMismatch": {
@@ -99,10 +99,10 @@
     "dataMigration": {
       "title": "本地数据迁移失败",
       "description": "AionUi 已打开，但 AionCore 在初始化本地数据时停止。重复安装 AionUi 未必能解决此问题。请发送诊断报告或联系支持，以便检查本地数据库迁移状态。",
-      "sendDiagnostics": "发送诊断报告",
-      "diagnosticsSent": "诊断报告已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "databaseNewerThanApp": {
       "title": "需要更新 AionUi",
@@ -112,28 +112,28 @@
     "localDataRepair": {
       "title": "本地数据修复失败",
       "description": "AionUi 已打开，但 AionCore 在准备本地启动数据时停止，例如 assistant 或智能体记录。重新安装 AionUi 可能无法解决此问题。请发送诊断报告或联系支持，以便检查本地数据库。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "startupDirectory": {
       "title": "启动目录不可用",
       "description": "AionUi 已打开，但由于配置的工作目录或日志目录不存在、不可访问或权限受限，AionCore 无法启动。请确认这些目录存在且可写，然后重启 AionUi。",
-      "sendDiagnostics": "发送诊断报告",
-      "diagnosticsSent": "诊断报告已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "recoverableDatabaseCorruption": {
       "title": "本地数据已损坏",
       "description": "检测到本地数据库损坏，AionUi 无法继续启动。确认后将备份旧数据库，并创建新的本地数据库继续启动。历史会话将不再显示，旧数据库会保留为备份文件。",
       "confirmRebuild": "备份旧库并重建新库",
-      "sendDiagnostics": "发送诊断报告",
-      "diagnosticsHint": "发送诊断报告不会修改本地数据库。",
-      "diagnosticsSent": "诊断报告已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败",
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsHint": "报告包含最近的日志和诊断信息。分享前请检查本地文件，不会自动发送。",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。",
       "rebuildFailed": "备份旧库并重建新库失败",
       "confirmDialog": {
         "title": "确认重建数据库？",
@@ -145,11 +145,11 @@
     "transientConcurrentStartup": {
       "title": "AionUi 正在启动",
       "description": "此窗口打开时，另一个 AionUi 启动进程仍在使用本地数据。这是暂时的，您的数据是安全的——无需重新安装。请稍候片刻后重试，或重启 AionUi。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断报告已发送",
-      "diagnosticsReportFailed": "诊断报告发送失败",
-      "diagnosticsHint": "如果该问题反复出现，您可以发送诊断报告。"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。",
+      "diagnosticsHint": "报告包含最近的日志和诊断信息。分享前请检查本地文件，不会自动发送。"
     },
     "pendingSlow": {
       "title": "正在启动",
@@ -158,26 +158,26 @@
     "exited": {
       "title": "启动未完成",
       "description": "AionCore 未能完成启动并已退出。请重启应用；若反复出现，请上报诊断信息。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "portReportTimeout": {
       "title": "启动超时",
       "description": "AionCore 未在预期时间内完成启动。请重启应用；若反复出现，请发送诊断。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "startupFailed": {
       "title": "启动失败",
       "description": "AionCore 启动失败。请重启应用；若反复出现，请发送诊断。",
-      "sendDiagnostics": "发送诊断",
-      "diagnosticsSent": "诊断已发送",
-      "diagnosticsReportSuccess": "诊断信息已上报",
-      "diagnosticsReportFailed": "诊断上报失败，请稍后重试"
+      "sendDiagnostics": "将报告保存到本地",
+      "diagnosticsSent": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportSuccess": "已开始下载报告。未发送任何信息。",
+      "diagnosticsReportFailed": "无法生成报告，请重试。"
     }
   },
   "fileAttach.addFiles": "添加文件",

@@ -1,7 +1,6 @@
 !ifndef AIONUI_INSTALLER_ERRORS_SENTRY_NSH
 !define AIONUI_INSTALLER_ERRORS_SENTRY_NSH
 
-!include "${PROJECT_DIR}\resources\windows\support\_sentry-dsn.generated.nsh"
 !include "${PROJECT_DIR}\resources\windows\installer-messages.nsh"
 
 !define AIONUI_E_UNINSTALLER_COPY_OR_REBUILD_FAILED "E1001"
@@ -45,7 +44,7 @@
   ${If} $9 == "no"
     !insertmacro AIONUI_SLOG "event=report-skipped reason=user-declined code=${_CODE}"
   ${ElseIf} $9 == "auto"
-    !insertmacro AIONUI_SLOG "event=report-auto reason=silent code=${_CODE}"
+    !insertmacro AIONUI_SLOG "event=report-local reason=silent code=${_CODE}"
     !insertmacro AIONUI_REPORT_TO_SENTRY_NOUI "${_CODE}" "${_DETAIL}"
   ${Else}
     !insertmacro AIONUI_REPORT_TO_SENTRY "${_CODE}" "${_DETAIL}"
@@ -92,7 +91,7 @@
   Push $9
   InitPluginsDir
   File /oname=$PLUGINSDIR\aionui-report-installer-failure.ps1 "${PROJECT_DIR}\resources\windows\support\report-installer-failure.ps1"
-  nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\aionui-report-installer-failure.ps1" -Dsn "${AIONUI_SENTRY_DSN}" -LogPath "$AionUiSessionLogPath" -Code "${_CODE}" -Detail "${_DETAIL}" -Release "${VERSION}" -Arch "${AIONUI_TARGET_ARCH}" -Session "$AionUiSessionId" -Updated "$AionUiIsUpdated" ${_NO_UI}`
+  nsExec::Exec `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "$PLUGINSDIR\aionui-report-installer-failure.ps1" -LogPath "$AionUiSessionLogPath" -Code "${_CODE}" -Detail "${_DETAIL}" -Release "${VERSION}" -Arch "${AIONUI_TARGET_ARCH}" -Session "$AionUiSessionId" -Updated "$AionUiIsUpdated" ${_NO_UI}`
   Pop $9
   Pop $9
 !macroend

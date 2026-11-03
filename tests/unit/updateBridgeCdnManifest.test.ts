@@ -66,90 +66,29 @@ vi.mock('electron-log', () => ({
   },
 }));
 
-import { afterAll, beforeAll } from 'vitest';
-import { mapCdnManifestToRelease, parseCdnManifest, resolveCdnChannelFile } from '@process/bridge/updateBridge';
-
-// The fixtures below are mac-arm64 assets and pickRecommendedAsset scores by
-// the host platform/arch, so pin the runtime to keep results identical on
-// every CI runner (linux/windows x64 would otherwise filter the assets out).
-const realPlatform = process.platform;
-const realArch = process.arch;
-beforeAll(() => {
-  Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
-  Object.defineProperty(process, 'arch', { value: 'arm64', configurable: true });
-});
-afterAll(() => {
-  Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
-  Object.defineProperty(process, 'arch', { value: realArch, configurable: true });
-});
-
-const SAMPLE_YML = `version: 2.1.45
-files:
-  - url: AionUi-2.1.45-mac-arm64.zip
-    sha512: abc==
-    size: 474779381
-  - url: AionUi-2.1.45-mac-arm64.dmg
-    sha512: def==
-    size: 469685641
-path: AionUi-2.1.45-mac-arm64.zip
-sha512: abc==
-releaseDate: '2026-07-31T14:45:19.381Z'
-`;
-
-describe('resolveCdnChannelFile', () => {
-  it.each([
-    ['win32', 'x64', 'latest.yml'],
-    ['win32', 'arm64', 'latest-win-arm64.yml'],
-    ['darwin', 'x64', 'latest-mac.yml'],
-    ['darwin', 'arm64', 'latest-arm64-mac.yml'],
-    ['linux', 'x64', 'latest-linux.yml'],
-    ['linux', 'arm64', 'latest-linux-arm64.yml'],
-  ] as const)('%s/%s -> %s', (platform, arch, expected) => {
-    expect(resolveCdnChannelFile({ platform: platform as NodeJS.Platform, arch })).toBe(expected);
+import { mapGitHubRelease } from '@process/bridge/updateBridge';
+const release = {
+  tag_name: 'v1.2.3',
+  html_url: 'https://github.com/handochan/aelix-studio/releases/tag/v1.2.3',
+  prerelease: false,
+  draft: false,
+  assets: [
+    {
+      name: 'Studio-linux-x64.deb',
+      browser_download_url: 'https://github.com/handochan/aelix-studio/releases/download/v1.2.3/Studio-linux-x64.deb',
+      size: 100,
+    },
+    { name: 'latest.yml', browser_download_url: 'https://example.invalid/latest.yml', size: 10 },
+  ],
+};
+describe('Studio release mapping', () => {
+  it('preserves release URLs and excludes non-installer assets', () => {
+    expect(mapGitHubRelease(release)?.assets).toEqual([
+      { name: 'Studio-linux-x64.deb', url: release.assets[0].browser_download_url, size: 100, contentType: undefined },
+    ]);
   });
-});
-
-describe('parseCdnManifest', () => {
-  it('parses version, files and releaseDate', () => {
-    const manifest = parseCdnManifest(SAMPLE_YML);
-    expect(manifest).not.toBeNull();
-    expect(manifest?.version).toBe('2.1.45');
-    expect(manifest?.files).toHaveLength(2);
-    expect(manifest?.files[0]).toMatchObject({ url: 'AionUi-2.1.45-mac-arm64.zip', size: 474779381 });
-    expect(manifest?.releaseDate).toBe('2026-07-31T14:45:19.381Z');
-  });
-
-  it('returns null for invalid yml or missing version/files', () => {
-    expect(parseCdnManifest('not: [valid')).toBeNull();
-    expect(parseCdnManifest('files: []')).toBeNull();
-    expect(parseCdnManifest('version: 1.0.0')).toBeNull();
-  });
-});
-
-describe('mapCdnManifestToRelease', () => {
-  it('maps files to CDN-primary assets with GitHub fallback URLs', () => {
-    const manifest = parseCdnManifest(SAMPLE_YML);
-    if (!manifest) throw new Error('manifest should parse');
-    const release = mapCdnManifestToRelease(manifest, 'iOfficeAI/AionUi');
-    expect(release).not.toBeNull();
-    expect(release?.version).toBe('2.1.45');
-    expect(release?.tagName).toBe('v2.1.45');
-    expect(release?.htmlUrl).toBe('');
-    expect(release?.publishedAt).toBe('2026-07-31T14:45:19.381Z');
-    const dmg = release?.assets.find((a) => a.name.endsWith('.dmg'));
-    expect(dmg?.url).toBe('https://static.aionui.com/releases/2.1.45/AionUi-2.1.45-mac-arm64.dmg');
-    expect(dmg?.fallbackUrl).toBe(
-      'https://github.com/iOfficeAI/AionUi/releases/download/v2.1.45/AionUi-2.1.45-mac-arm64.dmg'
-    );
-    expect(dmg?.size).toBe(469685641);
-    expect(release?.recommendedAsset).toBeDefined();
-  });
-
-  it('returns null when version is not valid semver', () => {
-    const release = mapCdnManifestToRelease(
-      { version: 'not-a-version', files: [{ url: 'a.dmg' }] },
-      'iOfficeAI/AionUi'
-    );
-    expect(release).toBeNull();
+  it('rejects non-semver releases and drafts', () => {
+    expect(mapGitHubRelease({ ...release, tag_name: 'latest' })).toBeNull();
+    expect(mapGitHubRelease({ ...release, draft: true })).toBeNull();
   });
 });

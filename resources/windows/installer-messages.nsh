@@ -14,10 +14,10 @@
 !define AIONUI_MSG_INSTALLER_LOG_EN "Installer log"
 !define AIONUI_MSG_BLOCK_SEPARATOR "----------------------------------------"
 
-!define AIONUI_MSG_SEND_REPORT_ZH "是否将此安装失败报告发送给 AionUi 团队？报告会包含错误码和当前安装日志。"
-!define AIONUI_MSG_SEND_REPORT_EN "Send this installer failure report to the AionUi team? The report includes the error code and the current installer log."
+!define AIONUI_MSG_SEND_REPORT_ZH "是否将安装失败报告保存到本地？报告包含错误码和安装日志，不会发送任何信息。"
+!define AIONUI_MSG_SEND_REPORT_EN "Save this installer failure report locally? It includes the error code and installer log. Nothing is sent."
 
-!define AIONUI_MSG_GENERIC_FAILURE_ZH "安装器无法继续。请查看诊断信息、安装日志路径，或将失败报告发送给 AionUi 团队。"
+!define AIONUI_MSG_GENERIC_FAILURE_ZH "安装器无法继续。请查看诊断信息、安装日志路径，或将失败报告保存到本地。"
 !define AIONUI_MSG_GENERIC_ACTION_ZH "请关闭上面列出的程序后重新运行安装器。如果没有列出具体程序，请重启 Windows 后再次运行安装器。"
 
 !define AIONUI_MSG_VERIFY_REQUIRED_FILE_EN "AionUi installation is incomplete. Missing required file:"
@@ -27,13 +27,13 @@
 
 !define AIONUI_MSG_EXTRACT_FAILED_EN "AionUi could not extract the application files correctly."
 !define AIONUI_MSG_EXTRACT_FAILED_ZH "AionUi 无法正确解压应用文件。"
-!define AIONUI_MSG_EXTRACT_FAILED_ACTION_EN "Download a fresh installer and run it again. If it still fails, send the installer report to the AionUi team."
-!define AIONUI_MSG_EXTRACT_FAILED_ACTION_ZH "请重新下载安装器后再次运行。如果仍然失败，请将安装失败报告发送给 AionUi 团队。"
+!define AIONUI_MSG_EXTRACT_FAILED_ACTION_EN "Download a fresh installer and run it again. If it still fails, save the installer report locally."
+!define AIONUI_MSG_EXTRACT_FAILED_ACTION_ZH "请重新下载安装器后再次运行。如果仍然失败，请将安装失败报告保存到本地。"
 
 !define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_EN "AionUi installed, but the bundled AionCore resources are incomplete."
 !define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_ZH "AionUi 已安装部分文件，但内置 AionCore 资源不完整。"
-!define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_ACTION_EN "Download a fresh installer and run it again. If it still fails, send the installer report to the AionUi team."
-!define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_ACTION_ZH "请重新下载安装器后再次运行。如果仍然失败，请将安装失败报告发送给 AionUi 团队。"
+!define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_ACTION_EN "Download a fresh installer and run it again. If it still fails, save the installer report locally."
+!define AIONUI_MSG_BUNDLED_AIONCORE_INCOMPLETE_ACTION_ZH "请重新下载安装器后再次运行。如果仍然失败，请将安装失败报告保存到本地。"
 
 !define AIONUI_MSG_ARCH_MISMATCH_EN "Installation package architecture mismatch."
 !define AIONUI_MSG_ARCH_MISMATCH_ZH "安装包架构不匹配。"

@@ -1,0 +1,102 @@
+name: Studio outbound gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-outbound-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-app-outbound:
+    name: App outbound (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bun install --frozen-lockfile
+      - name: Install audit and display tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace xvfb
+          bunx playwright install-deps chromium
+      - name: Check the attribution parser
+        run: python -B -m unittest discover -s tests/outbound-audit
+      - name: Prove child-process TCP and UDP detection
+        run: |
+          set +e
+          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/studio-preview/fixtures/outboundAudit.py --child-positive-control
+          code=$?
+          set -e
+          test "$code" = 86
+          python - <<'PY'
+          import json
+          report = json.load(open('.local/outbound/positive.json'))
+          assert report['externalAttempts'] == 2 and report['unparsedRecords'] == 0, report
+          PY
+      - name: Prepare the exact pinned runtime
+        run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
+      - name: Build an unpublished installer
+        run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
+      - name: Install the built DEB without downloading application resources
+        run: sudo dpkg -i .local/provider-installer/artifacts/*.deb
+      - name: Require zero attempts from the whole installed app and all descendants
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: |
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/installed-app.json -- python -B scripts/studio-preview/host-release/smoke.py --runtime .local/studio-preview --payload /opt/AionUi/resources/studio-preview --report .local/outbound/permission/qualification.json
+      - name: Preserve all audit results, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-outbound-${{ matrix.target }}
+          include-hidden-files: true
+          path: |
+            .local/outbound/
+            .local/studio-preview/receipt.json
+          if-no-files-found: warn
+
+  local-installer-report:
+    name: Windows local diagnostics
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export and inspect local installer diagnostics
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'synthetic-installer.log'
+          'SYNTHETIC_LOCAL_DIAGNOSTICS' | Set-Content -LiteralPath $log
+          & ./resources/windows/support/report-installer-failure.ps1 -LogPath $log -Code TEST -Detail synthetic -Release 0.0.0 -Arch x64 -Session test -NoUi
+          if ($LASTEXITCODE) { throw 'Local export failed' }
+          $status = Get-Content (Join-Path $env:TEMP 'aionui-installer-report.json') -Raw | ConvertFrom-Json
+          if ($status.status -ne 'saved') { throw 'Report was not saved locally' }
+          $output = Join-Path $env:RUNNER_TEMP 'expanded-report'
+          Expand-Archive -LiteralPath $status.path -DestinationPath $output
+          $metadata = Get-Content (Join-Path $output 'diagnostics.json') -Raw | ConvertFrom-Json
+          if ($metadata.code -ne 'TEST' -or -not $metadata.logIncluded) { throw 'Missing diagnostics' }
+          if ((Get-Content (Join-Path $output 'installer.log') -Raw) -notmatch 'SYNTHETIC_LOCAL_DIAGNOSTICS') { throw 'Missing local log' }
+          Remove-Item -LiteralPath $status.path

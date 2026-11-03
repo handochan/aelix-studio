@@ -7,13 +7,11 @@
 // configureChromium sets app name (dev isolation) and Chromium flags — must run before
 // ANY module that calls app.getPath('userData'), because Electron caches the path on first call.
 import './process/utils/configureChromium';
+import { startupUpdateEnabled } from './process/services/updateFeed';
 import { installGpuCrashHandler } from './process/utils/gpuRecovery';
 import { describeUncaughtError } from './process/utils/describeUncaughtError';
 import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtError';
 import { createRendererRecoveryPolicy } from './process/utils/rendererRecovery';
-import { captureBackendStartupFailure, initSentry, scheduleStartupLogReport, setSentryDeviceId } from './sentry';
-
-initSentry();
 
 import './process/utils/configureConsoleLog';
 import { app, BrowserWindow, ipcMain, nativeImage, powerMonitor, session } from 'electron';
@@ -153,7 +151,7 @@ if (electronSquirrelStartup) {
 }
 
 // Global error handlers for main process
-// Sentry automatically captures these, but we keep the handlers to prevent Electron's default error dialog.
+// Keep local diagnostics and prevent Electron's default error dialog.
 // Control flow is unchanged — both handlers still swallow the failure and keep the process alive; they only
 // log allow-listed attribution first, because a Sentry event for e.g. `read ECONNRESET` otherwise carries
 // nothing but Node-internal frames (TCP.onStreamRead) and cannot be traced back to a subsystem (AIONUI-128).
@@ -270,11 +268,11 @@ ipcMain.handle('backend:recover-corrupted-database', async () => {
             allowPendingOnHealthTimeout: false,
             onHealthTimeout: async (error) => {
               markBackendStartupFailed(error);
-              await captureBackendStartupFailure(error);
+              console.error('[Studio] Backend startup failed:', error);
             },
             onPendingExit: async (error) => {
               markBackendStartupFailed(error);
-              await captureBackendStartupFailure(error);
+              console.error('[Studio] Backend startup failed:', error);
             },
             onReady: (backendPort) => {
               markBackendReady(backendPort, 'backendManager.recoverCorruptedDatabase.lateReady');
@@ -285,7 +283,7 @@ ipcMain.handle('backend:recover-corrupted-database', async () => {
         );
       } catch (error) {
         markBackendStartupFailed(error);
-        await captureBackendStartupFailure(error);
+        console.error('[Studio] Backend startup failed:', error);
         throw error;
       }
     },
@@ -505,8 +503,6 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   });
   console.log(`[AionUi] Main window created (id=${mainWindow.id})`);
 
-  scheduleStartupLogReport(mainWindow);
-
   // Show window after content is ready to prevent FOUC (Flash of Unstyled Content)
   // Use 'ready-to-show' which fires when renderer has painted first frame,
   // combined with 'did-finish-load' as belt-and-suspenders approach.
@@ -545,10 +541,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
 
   // Initialize auto-updater service (skip when disabled via env, e.g. E2E / CI)
   // 初始化自动更新服务（通过环境变量禁用时跳过，例如 E2E / CI 场景）
-  const isCiRuntime = process.env.CI === 'true' || process.env.CI === '1' || process.env.GITHUB_ACTIONS === 'true';
-  const disableAutoUpdater =
-    process.env.AIONUI_DISABLE_AUTO_UPDATE === '1' || process.env.AIONUI_E2E_TEST === '1' || isCiRuntime;
-  if (!disableAutoUpdater) {
+  if (startupUpdateEnabled(process.env)) {
     Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
       .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
         // Create status broadcast callback that emits via ipcBridge (pure emitter, no window binding)
@@ -572,7 +565,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         console.error('[App] Failed to initialize autoUpdaterService:', error);
       });
   } else {
-    console.log('[AionUi] Auto-updater disabled via env/CI guard');
+    console.log('[Studio] Automatic update checks are off; use About to check explicitly.');
   }
 
   // Load the renderer: dev server URL in development, built HTML file in production
@@ -720,8 +713,6 @@ const handleAppReady = async (): Promise<void> => {
     }
   }
 
-  setSentryDeviceId();
-
   // Allow the renderer's Local Font Access queries (window.queryLocalFonts),
   // used by the appearance font picker to enumerate installed fonts. Electron 37
   // surfaces the 'local-fonts' permission as 'unknown' and denies it when no
@@ -849,11 +840,11 @@ const handleAppReady = async (): Promise<void> => {
               if (backendStartupFailureInfo?.reason === 'backend_startup_pending_slow') {
                 return;
               }
-              await captureBackendStartupFailure(error);
+              console.error('[Studio] Backend startup failed:', error);
             },
             onPendingExit: async (error) => {
               markBackendStartupFailed(error);
-              await captureBackendStartupFailure(error);
+              console.error('[Studio] Backend startup failed:', error);
             },
             onReady: (backendPort) => {
               markBackendReady(backendPort, 'backendManager.lateReady');
@@ -871,7 +862,7 @@ const handleAppReady = async (): Promise<void> => {
       },
       captureFailure: async (error) => {
         markBackendStartupFailed(error);
-        await captureBackendStartupFailure(error);
+        console.error('[Studio] Backend startup failed:', error);
       },
       exitApp: (code) => app.exit(code),
       exitOnFailure: isWebUIMode || isResetPasswordMode,

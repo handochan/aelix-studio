@@ -6,9 +6,9 @@
 
 export interface GitHubReleaseAsset {
   name: string;
-  /** Primary download URL — rewritten to CDN for faster download. */
+  /** Primary GitHub release asset download URL. */
   url: string;
-  /** Original GitHub download URL — used as fallback when CDN fails. */
+  /** Optional compatibility fallback URL. */
   fallbackUrl?: string;
   size: number;
   contentType?: string;
@@ -35,7 +35,7 @@ export interface UpdateCheckResult {
 
 export interface UpdateCheckRequest {
   includePrerelease?: boolean;
-  /** Defaults to iOfficeAI/AionUi when omitted */
+  /** Legacy request field; Studio always uses handochan/aelix-studio */
   repo?: string;
 }
 

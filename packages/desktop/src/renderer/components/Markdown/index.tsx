@@ -22,16 +22,11 @@ import { convertLatexDelimiters } from '@renderer/utils/chat/latexDelimiters';
 import LocalImageView from '@renderer/components/media/LocalImageView';
 import CodeBlock from './CodeBlock';
 import LocalFileLink from './LocalFileLink';
+import RemoteImage from './RemoteImage';
 import ShadowView from './ShadowView';
 import { MARKDOWN_REMARK_PLUGINS, MarkdownTable, MarkdownTd } from './markdownComponents';
 import { resolveLocalFileLinkPath, resolveLocalFileLinkReference } from './markdownUtils';
 import type { LocalFileLinkReference } from './markdownUtils';
-
-const isLocalFilePath = (src: string): boolean => {
-  if (src.startsWith('http://') || src.startsWith('https://')) return false;
-  if (src.startsWith('data:')) return false;
-  return true;
-};
 
 type MarkdownViewProps = {
   children: string;
@@ -115,11 +110,16 @@ const MarkdownView: React.FC<MarkdownViewProps> = React.memo(
         td: MarkdownTd,
         img: ({ node: _node, ...rest }: Record<string, unknown>) => {
           const imgProps = rest as React.ImgHTMLAttributes<HTMLImageElement>;
-          if (isLocalFilePath(imgProps.src || '')) {
-            const src = decodeURIComponent(imgProps.src || '');
-            return <LocalImageView src={src} alt={imgProps.alt || ''} className={imgProps.className} />;
+          const src = (imgProps.src || '').trim();
+          if (/^(https?:)?\/\//i.test(src)) {
+            return <RemoteImage src={src} alt={imgProps.alt} className={imgProps.className} />;
           }
-          return <img {...imgProps} alt={imgProps.alt || ''} />;
+          if (/^(data:|blob:)/i.test(src)) {
+            return <img src={src} alt={imgProps.alt || ''} className={imgProps.className} />;
+          }
+          return (
+            <LocalImageView src={decodeURIComponent(src)} alt={imgProps.alt || ''} className={imgProps.className} />
+          );
         },
       }),
       [codeStyle, hiddenCodeCopyButton, handleLinkClick, onLocalFileLink]

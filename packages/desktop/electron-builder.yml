@@ -219,7 +219,7 @@ electronDownload:
 
 publish:
   provider: github
-  owner: iOfficeAI
-  repo: AionUi
+  owner: handochan
+  repo: aelix-studio
   publishAutoUpdate: true
   releaseType: release

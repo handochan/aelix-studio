@@ -1,5 +1,6 @@
 import type { FeedbackDiagnosticsContextInput } from '@/common/types/feedbackDiagnostics';
 import { httpRequest } from '@/common/adapter/httpBridge';
+import { downloadTextContent } from '@/renderer/utils/file/download';
 
 const SUMMARY_PREVIEW_LENGTH = 60;
 const LOG_PREFIX = '[FeedbackReport]';
@@ -239,7 +240,6 @@ function buildSummary(moduleLabel: string, description: string): string {
 
 export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Promise<void> {
   const attachments = [...(input.attachments ?? [])];
-  let eventId: string | undefined;
   let logAttachmentStatus: FeedbackLogAttachmentStatus = input.collectLogs ? 'empty' : 'skipped';
   let logAttachment: FeedbackAttachment | null = null;
   let dbDiagnosticsAttachmentStatus: FeedbackDbDiagnosticsAttachmentStatus = input.collectDbDiagnostics
@@ -269,52 +269,39 @@ export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Pr
     const normalizedDescription = normalizeDescription(input.description);
     const eventSummary = buildSummary(input.moduleLabel, normalizedDescription);
     const contactEmail = input.contactEmail?.trim();
-    const Sentry = await import('@sentry/electron/renderer');
-
-    Sentry.withScope((scope) => {
-      scope.setTag('type', 'user-feedback');
-      scope.setTag('module', input.module);
-      // Attach the optional contact email to THIS feedback event only via the
-      // scoped user, so support can reach the reporter. Intentionally not a
-      // global Sentry.setUser — that would stick this address onto every later
-      // event (including crash reports the user never opted to share it on).
-      if (contactEmail) {
-        scope.setUser({ email: contactEmail });
-      }
-      Object.entries(input.tags ?? {}).forEach(([key, value]) => {
-        if (value.trim()) {
-          scope.setTag(key, value);
-        }
-      });
-
-      eventId = Sentry.captureEvent(
-        {
-          level: 'info',
-          message: eventSummary,
-          extra: {
-            description: normalizedDescription,
-            ...input.extra,
-          },
-        },
-        { attachments }
-      );
-    });
-
-    if (input.flushTimeoutMs !== undefined) {
-      const client = Sentry.getClient();
-      if (!client) {
-        throw new Error(`Failed to flush feedback report${eventId ? ` (${eventId})` : ''}: Sentry is not initialized`);
-      }
-
-      const flushed = await client.flush(input.flushTimeoutMs);
-      if (!flushed) {
-        throw new Error(`Failed to flush feedback report${eventId ? ` (${eventId})` : ''}`);
-      }
-    }
-
-    logFeedbackReport('info', 'submitted', {
+    // Store binary attachments in a self-contained JSON bundle. A local download
+    // works in both Electron and authenticated WebUI without a reporting service.
+    const report = {
+      schema: 'aelix-studio.feedback/1',
+      createdAt: new Date().toISOString(),
       module: input.module,
-      eventId,
+      summary: eventSummary,
+      description: normalizedDescription,
+      contactEmail,
+      tags: input.tags,
+      extra: input.extra,
+      collection: { logs: logAttachmentStatus, database: dbDiagnosticsAttachmentStatus },
+      attachments: attachments.map((attachment) => {
+        let binary = '';
+        for (let offset = 0; offset < attachment.data.length; offset += 8192) {
+          binary += String.fromCharCode(...attachment.data.subarray(offset, offset + 8192));
+        }
+        return {
+          filename: attachment.filename,
+          contentType: attachment.contentType,
+          encoding: 'base64',
+          data: btoa(binary),
+        };
+      }),
+    };
+    downloadTextContent(
+      JSON.stringify(report, null, 2),
+      `aelix-studio-report-${new Date().toISOString().replace(/[:.]/g, '-')}.json`,
+      'application/json'
+    );
+
+    logFeedbackReport('info', 'download-prepared', {
+      module: input.module,
       collectLogs: Boolean(input.collectLogs),
       logAttachment: summarizeLogAttachment(logAttachmentStatus, logAttachment),
       dbDiagnosticsAttachment: summarizeDbDiagnosticsAttachment(dbDiagnosticsAttachmentStatus, dbDiagnosticsAttachment),
@@ -326,7 +313,6 @@ export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Pr
   } catch (error) {
     logFeedbackReport('error', 'failed', {
       module: input.module,
-      eventId,
       collectLogs: Boolean(input.collectLogs),
       logAttachment: summarizeLogAttachment(logAttachmentStatus, logAttachment),
       dbDiagnosticsAttachment: summarizeDbDiagnosticsAttachment(dbDiagnosticsAttachmentStatus, dbDiagnosticsAttachment),
