@@ -3,7 +3,9 @@
 `studio-outbound.yml` builds and installs the current head on Linux x64 and arm64.
 It traces the actual installed app, host, native, ACP and driver processes during
 the existing synthetic loopback session/permission/restart qualification. It uses
-no provider credentials. Installation is a preceding, separate `dpkg` step;
+no provider credentials. A separate 35-second production-default startup audit
+removes the E2E, CI and update-disable guards and uses fresh isolated user roots.
+It still runs after a session audit failure, provided installation succeeded. Installation is a preceding, separate `dpkg` step;
 network-free installer execution is not established by this runtime audit.
 
 The gate runs on draft PRs too. An external attempt exits 86. Missing or

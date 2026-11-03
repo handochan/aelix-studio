@@ -52,7 +52,9 @@ jobs:
           sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils
           bunx playwright install-deps chromium
       - name: Check the attribution parser
-        run: python -B -m unittest discover -s tests/outbound-audit
+        run: |
+          python -B -m unittest discover -s tests/outbound-audit
+          node --test scripts/outbound-audit/startup.test.mjs
       - name: Prove child-process TCP and UDP detection
         run: |
           set +e
@@ -70,6 +72,7 @@ jobs:
       - name: Build an unpublished installer
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
       - name: Install the built DEB without downloading application resources
+        id: install
         run: |
           sha256sum .local/provider-installer/artifacts/*.deb > .local/outbound/installer-sha256.txt
           sudo dpkg -i .local/provider-installer/artifacts/*.deb
@@ -78,6 +81,12 @@ jobs:
           PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
         run: |
           xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/installed-app.json -- python -B scripts/studio-preview/host-release/smoke.py --runtime .local/studio-preview --payload /opt/AionUi/resources/studio-preview --report .local/outbound/permission/qualification.json
+      - name: Audit production startup without test guards
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: |
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/default-startup.json -- node scripts/outbound-audit/startup.mjs .local/outbound/startup-qualification.json
       - name: Preserve all audit results, including failures
         if: always()
         uses: actions/upload-artifact@v4
