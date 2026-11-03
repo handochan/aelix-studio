@@ -55,11 +55,21 @@ let lanPage;
 let foreign;
 let webui;
 let stage = 'startup';
+const lanFailures = [];
 const trace = (next) => {
   stage = next;
   fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
 try {
+  if (executablePath) {
+    const selected = process.env.AELIX_STUDIO_RUNTIME;
+    assert.ok(selected, 'Installed smoke requires the selected helper runtime');
+    const installed = path.join(await app.evaluate(() => process.resourcesPath), 'studio-preview');
+    // Keep the source facade's launch identity identical to the actual app;
+    // Windows filesystem namespace prefixes must not create a second agent recipe.
+    assert.equal(fs.realpathSync.native(selected), fs.realpathSync.native(installed));
+    process.env.AELIX_STUDIO_RUNTIME = installed;
+  }
   page = await app.firstWindow();
   if (executablePath) {
     const require = createRequire(import.meta.url);
@@ -303,13 +313,25 @@ try {
   const lanWindow = app.waitForEvent('window');
   await app.evaluate(({ BrowserWindow }, url) => {
     const window = new BrowserWindow({
-      show: false,
+      show: true,
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     });
     void window.loadURL(url + '/#/settings/model');
   }, lanUrl);
   lanPage = await lanWindow;
   const lanBrowserWindow = await app.browserWindow(lanPage);
+  lanPage.on('response', (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (pathname.startsWith('/api/') && response.status() >= 400 && lanFailures.length < 20)
+      lanFailures.push({ path: pathname, status: response.status() });
+  });
+  lanPage.on('pageerror', (error) => {
+    if (lanFailures.length < 20) lanFailures.push({ pageError: error.message.slice(0, 200) });
+  });
+  await lanBrowserWindow.evaluate((window) => {
+    window.show();
+    window.focus();
+  });
   await lanPage.waitForURL(`${lanUrl}/#/settings/model`, { waitUntil: 'domcontentloaded', timeout: 30000 });
   trace('lan_http_document_loaded');
   assert.deepEqual(await lanPage.evaluate(() => ({ secure: window.isSecureContext, locks: typeof navigator.locks })), {
@@ -390,7 +412,7 @@ try {
 } catch (error) {
   fs.writeFileSync(
     path.join(output, 'ui-failure.json'),
-    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error }) + '\n'
+    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
   );
   if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
