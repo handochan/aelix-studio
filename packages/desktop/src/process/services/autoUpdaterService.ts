@@ -24,7 +24,7 @@ import {
   recordAutoUpdateQuitAndInstall,
   recordAutoUpdateStatus,
 } from './autoUpdateDiagnostics';
-import { buildStudioFeedOptions } from './updateFeed';
+import { buildStudioFeedOptions, startupUpdateEnabled } from './updateFeed';
 
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
@@ -678,6 +678,17 @@ class AutoUpdaterService extends EventEmitter {
     try {
       if (!this._isInitialized) {
         throw new Error('AutoUpdaterService not initialized');
+      }
+
+      // Restoring UI state must not turn a clean launch into a release check.
+      // Previously this path checked GitHub even when automatic checks were off.
+      if (!startupUpdateEnabled(process.env)) {
+        return { success: true, data: { ready: false } };
+      }
+      const updater = autoUpdater as unknown as AutoUpdaterCacheAccess;
+      const helper = await updater.getOrCreateDownloadHelper?.();
+      if (!helper || !fs.existsSync(path.join(helper.cacheDirForPendingUpdate, 'update-info.json'))) {
+        return { success: true, data: { ready: false } };
       }
 
       const checkResult = await this.checkForUpdates();

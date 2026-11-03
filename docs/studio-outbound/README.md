@@ -8,23 +8,24 @@ remaining decisions; the Issue stays open.
 
 ## Inventory against main
 
-| #   | Main behavior at `dac2408`                                     | This draft / remaining work                                                                                                                                                                                                                                                                           |
-| --- | -------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | Startup checks `static.aionui.com`                             | Checks are off by default. Explicit `AELIX_STUDIO_AUTO_UPDATE=1` opts in to Studio Releases; the legacy disable, E2E and CI guards still win. Manual About checks remain available.                                                                                                                   |
-| 2   | Manual check and updater use AionUi/CDN                        | Both use `handochan/aelix-studio`. CDN rewriting and upstream download URLs are rejected. Release notes and installers come from Studio. No feed is published by this work (D13). Real upgrade/rollback and macOS download-only UI acceptance remain open.                                            |
-| 3   | Sentry initializes in main/preload/renderer; creates device ID | All runtime imports, initialization and ID generation are removed. The Vite plugin/DSN/source-map upload wiring is removed. `package.json` and dependency pruning remain held because #35 edits that file. Dormant SDK dependencies remain in the lockfile.                                           |
-| 4   | Scheduled startup log upload                                   | Scheduler and automatic reporting are removed. Local startup diagnostics remain.                                                                                                                                                                                                                      |
-| 5   | Feedback and installation diagnostics send to Sentry           | Explicit report action downloads one local JSON bundle with base64 attachments and collection status. It does not silently add account email. Existing keys in all 13 locales describe local export. Windows installer failure diagnostics produce a local ZIP and never receive a DSN.               |
-| 6   | Host .2 OfficeCLI behavior                                     | Fixed in host #2 / .3+. Studio integration is #35; this branch does not duplicate its host pin. Bundling OfficeCLI for offline first use remains to be accepted in Studio.                                                                                                                            |
-| 7   | Host OfficeCLI update/reinstall                                | Same host/#35 boundary. Missing bundled OfficeCLI still needs visible installed-app acceptance.                                                                                                                                                                                                       |
-| 8   | Host builtin remote-install/tunnel/Moltbook content            | Retired by host #2 / .3+. #35 owns delivery. User-imported content and user-configured MCP/channel connections remain supported.                                                                                                                                                                      |
-| 9   | Monaco loader defaults to jsDelivr                             | Pending: bundle the editor and workers. `monaco-editor` is not a direct installed dependency here. Adding it changes #35's `package.json`; the editor is retained until that integration can be made.                                                                                                 |
-| 10  | Chat Markdown creates remote images automatically              | HTTP(S) and protocol-relative images require a click, including streaming source changes. Failure is visible and retry is explicit. Inline data/blob and local images remain. `srcSet` is not forwarded by the image renderer. General raw-HTML embedded resources are not a renderer-wide allowlist. |
-| 11  | Preview image failure falls back to original URL               | #35 owns `MarkdownViewer.tsx`, its new error strings and tests. Not changed here.                                                                                                                                                                                                                     |
-| 12  | Non-URL browser input goes to Bing                             | Retained pending a configurable search-template design. Removing search or making it unusable is outside the noninteractive boundary. Explicit URL navigation is preserved.                                                                                                                           |
-| 13  | Image-provider calls add AionUi referral headers               | Removed. Explicit provider `baseConfig.defaultHeaders` and configured endpoints are preserved.                                                                                                                                                                                                        |
-| 14  | Host npm/npx defaults                                          | Fixed by host #2 / .3+. #35 owns the pin and settings forwarding. Studio also preflighted disabled chrome-devtools entries; this draft skips that preflight and preserves explicit enablement. The default in-app browser MCP still needs offline bundling.                                           |
-| 15  | Build downloads unpinned AionHub `dist-latest`                 | Still present. Next step: retain functionality with an immutable version/hash manifest or offline resource import; do not silently drop bundled features.                                                                                                                                             |
+| #        | Main behavior at `dac2408`                                     | This draft / remaining work                                                                                                                                                                                                                                                                                  |
+| -------- | -------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| 1        | Startup checks `static.aionui.com`                             | Checks are off by default. Explicit `AELIX_STUDIO_AUTO_UPDATE=1` opts in to Studio Releases; the legacy disable, E2E and CI guards still win. Manual About checks remain available. Automatic cache restoration uses the same opt-in and checks local download metadata before contacting a release service. |
+| 2        | Manual check and updater use AionUi/CDN                        | Both use `handochan/aelix-studio`. CDN rewriting and upstream download URLs are rejected. Release notes and installers come from Studio. No feed is published by this work (D13). Real upgrade/rollback and macOS download-only UI acceptance remain open.                                                   |
+| 3        | Sentry initializes in main/preload/renderer; creates device ID | All runtime imports, initialization and ID generation are removed. The Vite plugin/DSN/source-map upload wiring is removed. `package.json` and dependency pruning remain held because #35 edits that file. Dormant SDK dependencies remain in the lockfile.                                                  |
+| 4        | Scheduled startup log upload                                   | Scheduler and automatic reporting are removed. Local startup diagnostics remain.                                                                                                                                                                                                                             |
+| 5        | Feedback and installation diagnostics send to Sentry           | Explicit report action downloads one local JSON bundle with base64 attachments and collection status. It does not silently add account email. Existing keys in all 13 locales describe local export. Windows installer failure diagnostics produce a local ZIP and never receive a DSN.                      |
+| 6        | Host .2 OfficeCLI behavior                                     | Fixed in host #2 / .3+. Studio integration is #35; this branch does not duplicate its host pin. Bundling OfficeCLI for offline first use remains to be accepted in Studio.                                                                                                                                   |
+| 7        | Host OfficeCLI update/reinstall                                | Same host/#35 boundary. Missing bundled OfficeCLI still needs visible installed-app acceptance.                                                                                                                                                                                                              |
+| 8        | Host builtin remote-install/tunnel/Moltbook content            | Retired by host #2 / .3+. #35 owns delivery. User-imported content and user-configured MCP/channel connections remain supported.                                                                                                                                                                             |
+| 9        | Monaco loader defaults to jsDelivr                             | Pending: bundle the editor and workers. `monaco-editor` is not a direct installed dependency here. Adding it changes #35's `package.json`; the editor is retained until that integration can be made.                                                                                                        |
+| 10       | Chat Markdown creates remote images automatically              | HTTP(S) and protocol-relative images require a click, including streaming source changes. Failure is visible and retry is explicit. Inline data/blob and local images remain. `srcSet` is not forwarded by the image renderer. General raw-HTML embedded resources are not a renderer-wide allowlist.        |
+| 11       | Preview image failure falls back to original URL               | #35 owns `MarkdownViewer.tsx`, its new error strings and tests. Not changed here.                                                                                                                                                                                                                            |
+| 12       | Non-URL browser input goes to Bing                             | Retained pending a configurable search-template design. Removing search or making it unusable is outside the noninteractive boundary. Explicit URL navigation is preserved.                                                                                                                                  |
+| 13       | Image-provider calls add AionUi referral headers               | Removed. Explicit provider `baseConfig.defaultHeaders` and configured endpoints are preserved.                                                                                                                                                                                                               |
+| 14       | Host npm/npx defaults                                          | Fixed by host #2 / .3+. #35 owns the pin and settings forwarding. Studio also preflighted disabled chrome-devtools entries; this draft skips that preflight and preserves explicit enablement. The default in-app browser MCP still needs offline bundling.                                                  |
+| 15       | Build downloads unpinned AionHub `dist-latest`                 | Still present. Next step: retain functionality with an immutable version/hash manifest or offline resource import; do not silently drop bundled features.                                                                                                                                                    |
+| 16 (new) | Browser MCP uses npx and upstream usage statistics             | Disabled chrome-devtools preflight is skipped. The Studio-owned pinned browser MCP opts out of usage statistics and npm background notices, preserving user registry settings. Offline bundling of the MCP remains open.                                                                                     |
 
 Provider/OAuth, explicit MCP, channels, speech recognition, WebUI and local Team
 connections are retained. Internal endpoint/CA/proxy UI, extension-wheel and
@@ -82,7 +83,15 @@ to `npm exec chrome` / libuv threads, not Chromium alone. Source review identifi
 `runBackendMigrations.ts` preflighting `chrome-devtools` even when disabled, and
 the default in-app browser MCP spawning pinned `chrome-devtools-mcp` via npx.
 The disabled preflight is now skipped; explicitly enabled MCP behavior is
-retained. The in-app browser MCP needs offline bundling or a user-selected
+retained. The pinned 0.16.0 SDK's
+[main](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/chrome-devtools-mcp-v0.16.0/src/main.ts)
+enables Clearcut by default, and its
+[sender](https://github.com/ChromeDevTools/chrome-devtools-mcp/blob/chrome-devtools-mcp-v0.16.0/src/telemetry/watchdog/clearcut-sender.ts)
+uses `play.googleapis.com/log`. The owned browser launcher now supplies
+`--no-usage-statistics` and `CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS=1`, and disables
+npm update-notifier/audit/fund. Registry configuration remains unchanged. This
+identifies another cause behind Google-address requests; it does not assign every
+historical request without its missing PID/argv evidence. The in-app browser MCP needs offline bundling or a user-selected
 installation step; it is not silently disabled here. The same run's session audit
 failed before app launch because its driver used system Python; the workflow now
 uses the prepared native Python, retaining the receipt verification.
@@ -124,6 +133,21 @@ finished. Green unit tests do not establish a zero-attempt app.
    offline import and final five-target tests. Disabling or removing visible
    features is not assumed.
 
+The production-startup NetLog also exposed a hidden release lookup:
+`restoreDownloadedUpdateIfAvailable` checked GitHub on every renderer mount.
+The same default-off policy now covers cache restoration, including an explicit
+disable override. Opt-in restoration preserves hash validation of a real cache;
+an empty cache never triggers this lookup. Manual update checks remain available.
+Old cache notification restoration without opt-in is intentionally part of turning
+off automatic checking; it does not prevent an explicit manual check/install.
+
+The reused permission fixture disables CDP and automatic-update test paths. The
+separate production-startup audit has those defaults on but does not exercise a
+browser-tool call. Offline first use of the browser MCP still needs explicit
+installed-app verification after bundling. Some hard-exit traces contain strace
+`???` records. They remain unparsed and fail closed; a measured connection count
+with such records is not complete evidence.
+
 macOS and Windows syscall-level attempt measurements have not been performed.
 Windows CI separately exercises the local installer-report exporter. A sampled
 connection list or successful offline smoke would not replace an attempt audit.
@@ -131,7 +155,7 @@ connection list or successful offline smoke would not replace an attempt audit.
 ## Local source validation
 
 The source gate passed lint (warnings retained), format, TypeScript and all 13
-locale checks. Vitest: **5,012 passed / 7 skipped**; audit tests: **9 passed on Linux** (including a real blocked-thread exit) and **2 startup-environment tests passed**.
+locale checks. Vitest: **5,021 passed / 7 skipped**; audit tests: **9 passed on Linux** (including a real blocked-thread exit) and **2 startup-environment tests passed**.
 A real descendant TCP/UDP positive control detected **2 attempts / 0 unparsed**
 and correctly exited 86. The earlier coverage run completed at **54.24% statements**;
 it predates the final chat-image change and does not meet the repository's 80%

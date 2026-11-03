@@ -30,7 +30,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { buildMcpSpawnCommand, resolveBridgeToken, resolveBrowserUrl } from './browserServerPort';
+import { buildBrowserMcpEnv, buildMcpSpawnCommand, resolveBridgeToken, resolveBrowserUrl } from './browserServerPort';
 
 /**
  * stdio MCP 服务器的 stdout 是协议通道，任何附加输出都会破坏握手。
@@ -158,7 +158,7 @@ const child = spawn(spawnPlan.command, spawnPlan.args, {
   // Pass stdio straight through: this process is a forwarder, and the MCP
   // protocol stream must not be buffered or rewritten in between.
   stdio: 'inherit',
-  env: process.env,
+  env: buildBrowserMcpEnv(process.env),
 });
 
 child.on('error', (error) => {

@@ -102,8 +102,30 @@ export const buildMcpSpawnCommand = (deps: {
   version: string;
   browserUrl: string;
 }): { command: string; args: string[] } => {
-  const mcpArgs = ['-y', `chrome-devtools-mcp@${deps.version}`, '--browser-url', deps.browserUrl];
+  const mcpArgs = [
+    '-y',
+    `chrome-devtools-mcp@${deps.version}`,
+    '--no-usage-statistics',
+    '--browser-url',
+    deps.browserUrl,
+  ];
   return deps.platform === 'win32'
     ? { command: 'cmd.exe', args: ['/c', 'npx', ...mcpArgs] }
     : { command: 'npx', args: mcpArgs };
 };
+
+/** Disable upstream metrics and npm background notices for the Studio-owned browser tool. */
+export function buildBrowserMcpEnv(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const result: NodeJS.ProcessEnv = {};
+  const npmKeys = new Set(['npm_config_update_notifier', 'npm_config_audit', 'npm_config_fund']);
+  for (const [key, value] of Object.entries(environment)) {
+    if (!npmKeys.has(key.toLowerCase().replace(/-/g, '_'))) result[key] = value;
+  }
+  return {
+    ...result,
+    CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1',
+    npm_config_update_notifier: 'false',
+    npm_config_audit: 'false',
+    npm_config_fund: 'false',
+  };
+}

@@ -5,7 +5,8 @@
  */
 
 import path from 'path';
-import { rmSync } from 'fs';
+import fs, { rmSync } from 'fs';
+import os from 'node:os';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -66,6 +67,12 @@ vi.mock('electron-log', () => ({
   },
 }));
 
+const enableAutomaticUpdatesForTest = (): void => {
+  vi.stubEnv('AELIX_STUDIO_AUTO_UPDATE', '1');
+  for (const key of ['CI', 'GITHUB_ACTIONS', 'AIONUI_E2E_TEST', 'AIONUI_DISABLE_AUTO_UPDATE'])
+    vi.stubEnv(key, undefined);
+};
+
 const setPlatform = (platform: NodeJS.Platform): void => {
   Object.defineProperty(process, 'platform', {
     configurable: true,
@@ -81,6 +88,7 @@ describe('AutoUpdaterService', () => {
     vi.clearAllMocks();
     setPlatform(originalPlatform);
     autoUpdaterMock.logger = null;
+    autoUpdaterMock.getOrCreateDownloadHelper.mockReset();
     autoUpdaterMock.autoDownload = true;
     autoUpdaterMock.autoInstallOnAppQuit = false;
     autoUpdaterMock.forceDevUpdateConfig = false;
@@ -101,6 +109,8 @@ describe('AutoUpdaterService', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
     vi.clearAllTimers();
     vi.useRealTimers();
     setPlatform(originalPlatform);
@@ -333,6 +343,8 @@ describe('AutoUpdaterService', () => {
   });
 
   it('restores a completed cached auto-update when the downloaded package validates', async () => {
+    enableAutomaticUpdatesForTest();
+    vi.spyOn(fs, 'existsSync').mockImplementation((file) => file.toString() === '/cache/pending/update-info.json');
     const updateInfo = {
       version: '2.1.14',
       files: [{ url: 'AionUi-2.1.14-mac.zip', sha512: 'sha512-value' }],
@@ -377,6 +389,8 @@ describe('AutoUpdaterService', () => {
   });
 
   it('does not restore a cached auto-update when the downloaded package is missing or invalid', async () => {
+    enableAutomaticUpdatesForTest();
+    vi.spyOn(fs, 'existsSync').mockImplementation((file) => file.toString() === '/cache/pending/update-info.json');
     const updateInfo = {
       version: '2.1.14',
       files: [{ url: 'AionUi-2.1.14-mac.zip', sha512: 'sha512-value' }],
@@ -619,5 +633,62 @@ describe('AutoUpdaterService', () => {
       chdir.mockRestore();
       rmSync(tempRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe('cache-free startup does not check release services', () => {
+  beforeEach(() => {
+    enableAutomaticUpdatesForTest();
+    vi.resetModules();
+    vi.clearAllMocks();
+    autoUpdaterMock.getOrCreateDownloadHelper.mockReset();
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllEnvs();
+  });
+  it('does not contact a release service by default even if an old cache exists', async () => {
+    vi.stubEnv('AELIX_STUDIO_AUTO_UPDATE', undefined);
+    autoUpdaterMock.getOrCreateDownloadHelper.mockResolvedValue({ cacheDirForPendingUpdate: '/old/cache' });
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    expect(await autoUpdaterService.restoreDownloadedUpdateIfAvailable()).toEqual({
+      success: true,
+      data: { ready: false },
+    });
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    expect(autoUpdaterMock.getOrCreateDownloadHelper).not.toHaveBeenCalled();
+  });
+  it('returns no pending update without a release lookup when no download metadata exists', async () => {
+    const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-update-empty-'));
+    try {
+      autoUpdaterMock.getOrCreateDownloadHelper.mockResolvedValue({ cacheDirForPendingUpdate: cache });
+      const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+      autoUpdaterService.initialize();
+      expect(await autoUpdaterService.restoreDownloadedUpdateIfAvailable()).toEqual({
+        success: true,
+        data: { ready: false },
+      });
+      expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+    } finally {
+      fs.rmSync(cache, { recursive: true, force: true });
+    }
+  });
+  it('does not fall back to a release lookup when cache inspection fails', async () => {
+    autoUpdaterMock.getOrCreateDownloadHelper.mockRejectedValue(new Error('cache unavailable'));
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    expect((await autoUpdaterService.restoreDownloadedUpdateIfAvailable()).success).toBe(false);
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
+  });
+  it('honors the explicit automatic-update disable switch before restoring a cached notification', async () => {
+    vi.stubEnv('AIONUI_DISABLE_AUTO_UPDATE', '1');
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    autoUpdaterService.initialize();
+    expect(await autoUpdaterService.restoreDownloadedUpdateIfAvailable()).toEqual({
+      success: true,
+      data: { ready: false },
+    });
+    expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
   });
 });

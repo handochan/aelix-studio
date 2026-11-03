@@ -6,6 +6,7 @@
 
 import { describe, expect, it } from 'vitest';
 import {
+  buildBrowserMcpEnv,
   buildMcpSpawnCommand,
   resolveBridgeToken,
   resolveBrowserUrl,
@@ -143,5 +144,34 @@ describe('buildMcpSpawnCommand — issue #3883', () => {
     const { args } = buildMcpSpawnCommand({ platform: 'win32', version, browserUrl });
     expect(args).not.toContain('chrome-devtools-mcp@latest');
     expect(args).toContain(`chrome-devtools-mcp@${version}`);
+  });
+});
+
+describe('Studio browser MCP network defaults', () => {
+  it.each(['linux', 'darwin', 'win32'])('opts out of upstream metrics on %s', (platform) => {
+    expect(buildMcpSpawnCommand({ platform, version: '0.16.0', browserUrl: 'http://127.0.0.1:61622' }).args).toContain(
+      '--no-usage-statistics'
+    );
+  });
+  it('overrides metrics and npm background notices without changing the user registry', () => {
+    const environment = buildBrowserMcpEnv({
+      NPM_CONFIG_UPDATE_NOTIFIER: 'true',
+      npm_config_audit: 'true',
+      npm_config_registry: 'https://registry.internal',
+      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '',
+    });
+    expect(environment.NPM_CONFIG_UPDATE_NOTIFIER).toBeUndefined();
+    expect(environment).toMatchObject({
+      CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1',
+      npm_config_update_notifier: 'false',
+      npm_config_audit: 'false',
+      npm_config_fund: 'false',
+      npm_config_registry: 'https://registry.internal',
+    });
+  });
+  it('does not mutate inherited settings', () => {
+    const source = { npm_config_update_notifier: 'true' };
+    buildBrowserMcpEnv(source);
+    expect(source.npm_config_update_notifier).toBe('true');
   });
 });
