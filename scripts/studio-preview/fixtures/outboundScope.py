@@ -4,7 +4,7 @@ Executable paths are used privately to identify roots. Reports contain PID/comm
 and network metadata, never argv, environment, payloads or executable paths.
 """
 import ipaddress
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
 
 NETWORK = {'connect', 'sendto', 'sendmsg', 'sendmmsg'}
@@ -45,7 +45,7 @@ def canonical(value):
     return str(Path(value).resolve())
 
 
-def analyze_processes(paths, scope_executables=(), require_executables=()):
+def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False):
     """Scope by successful exec roots plus all forks/threads, never by address/name."""
     selected = {canonical(path) for path in scope_executables}
     required = {canonical(path) for path in require_executables}
@@ -59,7 +59,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
 
     def state(pid, name=None):
         if pid not in states:
-            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0}
+            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False}
             observed_order.append(pid)
         if name and re.fullmatch(r'[A-Za-z0-9_.+ -]{1,64}', name):
             states[pid]['process'] = name
@@ -75,6 +75,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
     def record(pid, line, started):
         nonlocal structural_errors
         item = state(pid)
+        if line.startswith('+++'):
+            if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):
+                item['finished'] = True
+            else:
+                structural_errors += 1
+            return
         match = CALL.match(line)
         if not match:
             if line and not line.startswith(('+++', '---')):
@@ -82,10 +88,13 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
             return
         call = match[1]
         if call in FORK:
-            result = re.search(r'=\s+(-?\d+)(?:<[^>]*>)?(?:\s|$)', line)
+            result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
             if not result:
                 structural_errors += 1; return
             child = int(result[1])
+            translated = re.search(r"/\* (\d+) in strace's PID NS \*/", result[2])
+            if child > 0 and translated:
+                child = int(translated[1])
             if child > 0:
                 if child == pid or child in parents:
                     structural_errors += 1
@@ -103,7 +112,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
                 structural_errors += 1; return
             try:
                 executable = decode_path(filename[1])
-                if not Path(executable).is_absolute():
+                # Trace filenames always follow Linux/POSIX rules, including offline tests on Windows.
+                if not PurePosixPath(executable).is_absolute():
                     if selected: structural_errors += 1
                     return
             except (OSError, ValueError, RuntimeError):
@@ -205,7 +215,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
             if path in ('/proc/self/exe', '/proc/thread-self/exe'):
                 result = image_before(pid, at)
             elif re.fullmatch(r'/proc/\d+/exe', path):
-                result = image_before(int(path.split('/')[2]), at)
+                # A number inside a pathname is namespace-local and has no
+                # typed strace translation. Do not mistake it for a tracer PID.
+                result = None
             elif path.startswith('/proc/'):
                 result = None
             else:
@@ -226,11 +238,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
                 roots.add(pid); matches.add(executable)
                 root_executables[pid] = Path(executable).name
 
-    if selected and states:
+    if require_lifecycle:
+        structural_errors += sum(not item['finished'] for item in states.values())
+    if (selected or require_lifecycle) and states:
         # The traced command is the only permitted parentless task. Every other
         # PID/TID must have a captured fork edge, including reparented descendants.
         structural_errors += sum(pid not in parents for pid in states if pid != observed_order[0])
-        if not roots: structural_errors += 1
+        if selected and not roots: structural_errors += 1
+        structural_errors += sum(child not in states for child in parents)
         structural_errors += len(required - matches)
         for child in parents:
             seen = set()
@@ -252,7 +267,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=()):
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
-                              'inScope': not selected or pid in included, 'root': pid in roots,
+                              'inScope': not selected or pid in included, 'root': pid in roots, 'finished': item['finished'],
                               'destinationAttempts': len(item['events']),
                               'externalAttempts': sum(event['external'] for event in item['events']),
                               'unparsedRecords': item['unparsed']})

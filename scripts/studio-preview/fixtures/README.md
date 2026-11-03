@@ -17,7 +17,9 @@ listens on loopback. Installed source-wheel integrity is checked separately by
 `scripts/release/outbound_audit.py` (Apache-2.0; original SHA-256
 `80d15a8056a498b4f2d8555ae97a53c800881b8a0903c4a75c4b3af1895b8caa`).
 Studio adds PID/comm and fork/exec parsing in `outboundScope.py` and optional
-process-tree selection. Default CLI behavior stays whole-command enforcement:
+process-tree selection. Namespaced fork return values are translated into the
+tracer PID namespace before constructing edges, so sandbox-local PID reuse
+cannot move a child into the wrong tree. Default CLI behavior stays whole-command enforcement:
 
 ```sh
 python -I -B scripts/studio-preview/fixtures/outboundAudit.py --report all.json -- command
@@ -37,7 +39,7 @@ Roots are successful execs of the selected absolute executable paths (existing
 symlinks are resolved). All forks/threads and re-executed/reparented descendants
 remain selected regardless of later executable or comm names. A matching basename
 alone is insufficient. Selection conservatively covers the root PID's whole
-observed lifetime. Missing required roots, missing fork edges, ambiguous PID reuse,
+observed lifetime. Missing required roots, missing fork edges/children, incomplete task lifecycles, ambiguous PID reuse,
 unsupported exec attribution and malformed lineage fail closed. `/proc/self/exe`
 is resolved from captured executable inheritance at fork, not from comm names. The fixed fixture
 uses direct installed executable paths; a transient alias below the host remains
@@ -60,7 +62,7 @@ including Electron/Chromium traffic, are retained for Studio #15. No Chromium
 networking flags are changed. Windows/macOS are functionally tested without an
 OS-level zero-attempt claim.
 
-`strace -f -Y -yy -s 0` follows processes/threads and records only network and
+`strace -f --decode-pids=comm,pidns -yy -s 0` follows processes/threads and records only network and
 fork/exec metadata. With default abbreviation, exec records expose the executable
 filename but replace argv with `[...]` and env with a pointer/count. Integration
 tests assert argument/environment sentinels never enter raw traces or reports.
@@ -68,6 +70,7 @@ Connected FD peers are decoded so inherited external sockets cannot bypass the
 selected gate. Only sendmmsg destination vectors are unabbreviated; their data
 buffers remain suppressed. Unknown peers/vectors fail closed in their process.
 Executable paths are used privately for selection and are omitted from JSON;
-raw traces are deleted. Reported comm names are bounded printable identifiers.
+raw traces are deleted. Terminal records are retained during parsing; missing or
+detached tasks cannot be counted as a complete capture. Reported comm names are bounded printable identifiers.
 This evidence covers the exercised fixture, not arbitrary configured providers,
 installed extensions or proxies.

@@ -92,18 +92,20 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         raise RuntimeError('Linux strace is required; audit cannot be skipped')
     with tempfile.TemporaryDirectory(prefix='host-outbound-audit-') as directory:
         prefix = Path(directory) / 'network'
-        # -f follows all forks/threads. -Y supplies PID/comm, never argv.
+        # -f follows forks/threads; PID namespace translation keeps all edges in
+        # the tracer namespace (Chromium sandboxes can return local PIDs).
         # With -s 0 (and default abbreviation), execve records only its filename:
         # argv is [...] and env is a pointer/count. Tests assert sentinel absence.
         # Only sendmmsg's destination vector is unabbreviated; data stays hidden.
         # -yy exposes connected FD peers, including sockets inherited at exec.
+        # -q retains terminal records, so missing/detached tasks cannot look complete.
         # Raw traces are removed and executable paths never enter JSON reports.
         trace = prefix.with_suffix('.trace')
-        process = subprocess.run(['strace', '-f', '-Y', '-yy', '-qq', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
+        process = subprocess.run(['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
                                   'trace=connect,sendto,sendmsg,sendmmsg,clone,clone3,fork,vfork,execve,execveat',
                                   '-o', str(trace), '--', *command])
         paths = [trace] if trace.exists() else []
-        report, whole = analyze_processes(paths, scope_executables, require_executables)
+        report, whole = analyze_processes(paths, scope_executables, require_executables, True)
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                for name in ('outboundAudit.py', 'outboundScope.py')}
     report['sourceSha256'] = recipes

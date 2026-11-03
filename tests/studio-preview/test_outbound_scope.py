@@ -115,6 +115,23 @@ class ScopedParserTests(unittest.TestCase):
                 scoped, _ = self.parse(self.base() + ['2<host> ' + line])
                 self.assertGreater(scoped['unparsedRecords'], 0)
 
+    def test_missing_child_and_truncated_lifecycle_fail_closed(self):
+        scoped, _ = self.parse(self.base() + ['2<host> clone(child_stack=NULL, flags=SIGCHLD) = 3<lost>'])
+        self.assertGreater(scoped['classificationErrors'], 0)
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory)/'trace'
+            trace.write_text('1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0\n')
+            _scoped, whole = audit.analyze_processes([trace], require_lifecycle=True)
+            self.assertGreater(whole['unparsedRecords'], 0)
+
+    def test_namespaced_fork_return_uses_tracer_pid_without_colliding(self):
+        scoped, _ = self.parse(self.base() + [
+            "2<host> clone(child_stack=NULL, flags=CLONE_NEWPID|SIGCHLD) = 2<worker> /* 99 in strace's PID NS */",
+            '99<worker> execve("/owned/worker", [...], 0x1 /* 1 var */) = 0',
+            f'99<worker> {CONNECT}'])
+        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (1, 0))
+        self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 99)['parentPid'], 2)
+
     def test_c_escaped_unicode_path_matches_without_disclosing_path(self):
         from outboundScope import decode_path
         self.assertEqual(decode_path(r'"/owned/\355\225\234\352\270\200"'), '/owned/한글')
