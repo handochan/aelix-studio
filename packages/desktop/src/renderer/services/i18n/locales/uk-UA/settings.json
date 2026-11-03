@@ -1295,7 +1295,7 @@
   "bugReportAutoInfo": "Звіт містить останні журнали та діагностику. Перевірте локальний файл перед поширенням. Нічого не надсилається автоматично.",
   "bugReportSubmit": "Зберегти звіт локально",
   "bugReportCancel": "Cancel",
-  "bugReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+  "bugReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
   "bugReportError": "Не вдалося підготувати звіт. Спробуйте ще раз.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",

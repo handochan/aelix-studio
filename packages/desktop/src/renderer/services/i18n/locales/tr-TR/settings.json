@@ -827,7 +827,7 @@
   "bugReportAutoInfo": "Rapor son günlükleri ve tanılama bilgilerini içerir. Paylaşmadan önce yerel dosyayı inceleyin. Hiçbir şey otomatik gönderilmez.",
   "bugReportSubmit": "Raporu yerel olarak kaydet",
   "bugReportCancel": "İptal",
-  "bugReportSuccess": "Rapor indirmesi başladı. Hiçbir şey gönderilmedi.",
+  "bugReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
   "bugReportError": "Rapor hazırlanamadı. Lütfen tekrar deneyin.",
   "bugReportModuleSkills": "Skills ve Eklentiler",
   "bugReportModuleWebui": "WebUI ve Uzak Erişim",

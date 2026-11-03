@@ -13,3 +13,30 @@ describe('installer telemetry removal', () => {
     expect(source).not.toContain('_sentry-dsn.generated.nsh');
   });
 });
+
+describe('installer report localization', () => {
+  it('ships the current report strings for every configured locale', () => {
+    const config = JSON.parse(readFileSync('packages/desktop/src/common/config/i18n-config.json', 'utf8')) as {
+      supportedLanguages: string[];
+    };
+    const copy = JSON.parse(readFileSync('resources/windows/support/report-localization.json', 'utf8')) as Record<
+      string,
+      Record<string, string>
+    >;
+    expect(Object.keys(copy).sort()).toEqual([...config.supportedLanguages].sort());
+    for (const language of config.supportedLanguages) {
+      const settings = JSON.parse(
+        readFileSync(`packages/desktop/src/renderer/services/i18n/locales/${language}/settings.json`, 'utf8')
+      ) as Record<string, string>;
+      expect(copy[language]).toEqual({
+        'settings.bugReportSuccess': settings.bugReportSuccess,
+        'settings.bugReportError': settings.bugReportError,
+      });
+    }
+  });
+  it('bundles the localized keys beside the standalone helper', () => {
+    expect(readFileSync('resources/windows/installer-errors-sentry.nsh', 'utf8')).toContain(
+      'File /oname=$PLUGINSDIR\\report-localization.json'
+    );
+  });
+});

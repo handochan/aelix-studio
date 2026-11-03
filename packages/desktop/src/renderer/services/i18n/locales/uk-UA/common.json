@@ -89,8 +89,8 @@
       "description": "У цьому встановленні бракує потрібних локальних ресурсів, тому AionCore не може запуститися. Завантажте та перевстановіть останню версію AionUi. Якщо проблема повториться після перевстановлення, перевірте, чи захисне або антивірусне ПЗ не помістило AionCore у карантин.",
       "downloadLatest": "Завантажити останню версію",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз.",
       "runtimeComponentDescription": "У цій інсталяції бракує потрібних вбудованих компонентів середовища виконання, тому {{resource}} не може запуститися. Перевстановіть найновіший пакет AionUi. Якщо проблема повториться після перевстановлення, перевірте, чи не помістило програмне забезпечення безпеки або антивірус компоненти AionUi у карантин."
     },
@@ -102,8 +102,8 @@
       "title": "Local data migration failed",
       "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     },
     "databaseNewerThanApp": {
@@ -115,16 +115,16 @@
       "title": "Local data repair failed",
       "description": "AionUi відкрився, але AionCore зупинився під час підготовки локальних даних запуску, як-от записи assistants або агентів. Повторне встановлення AionUi може не вирішити проблему. Надішліть діагностичний звіт або зверніться до підтримки, щоб можна було перевірити локальну базу даних.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     },
     "startupDirectory": {
       "title": "Startup directory is unavailable",
       "description": "AionUi opened, but AionCore could not start because the configured work or log directory is missing, unavailable, or blocked by permissions. Check that the configured directories exist and are writable, then restart AionUi.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     },
     "recoverableDatabaseCorruption": {
@@ -133,8 +133,8 @@
       "confirmRebuild": "Зберегти стару БД і створити нову",
       "sendDiagnostics": "Зберегти звіт локально",
       "diagnosticsHint": "Звіт містить останні журнали та діагностику. Перевірте локальний файл перед поширенням. Нічого не надсилається автоматично.",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз.",
       "rebuildFailed": "Не вдалося зберегти стару БД і створити нову",
       "confirmDialog": {
@@ -148,8 +148,8 @@
       "title": "AionUi запускається",
       "description": "Коли це вікно відкрилося, інший процес запуску AionUi усе ще використовував локальні дані. Це тимчасово, і ваші дані в безпеці — перевстановлення не потрібне. Зачекайте трохи та повторіть спробу або перезапустіть AionUi.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз.",
       "diagnosticsHint": "Звіт містить останні журнали та діагностику. Перевірте локальний файл перед поширенням. Нічого не надсилається автоматично."
     },
@@ -161,24 +161,24 @@
       "title": "Запуск не завершено",
       "description": "AionCore не зміг завершити запуск і закрився. Перезапустіть застосунок; якщо це повторюється, надішліть діагностику.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     },
     "portReportTimeout": {
       "title": "Час запуску вичерпано",
       "description": "AionCore не завершив запуск за очікуваний час. Перезапустіть застосунок; якщо це повторюється, надішліть діагностику.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     },
     "startupFailed": {
       "title": "Не вдалося запустити",
       "description": "AionCore не вдалося запустити. Перезапустіть застосунок; якщо це повторюється, надішліть діагностику.",
       "sendDiagnostics": "Зберегти звіт локально",
-      "diagnosticsSent": "Завантаження звіту розпочато. Нічого не надіслано.",
-      "diagnosticsReportSuccess": "Завантаження звіту розпочато. Нічого не надіслано.",
+      "diagnosticsSent": "Звіт підготовлено локально. Нічого не надіслано.",
+      "diagnosticsReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
       "diagnosticsReportFailed": "Не вдалося підготувати звіт. Спробуйте ще раз."
     }
   },

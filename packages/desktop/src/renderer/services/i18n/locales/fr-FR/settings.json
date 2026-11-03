@@ -839,7 +839,7 @@
   "bugReportAutoInfo": "Le rapport contient les journaux récents et les diagnostics. Vérifiez le fichier local avant de le partager. Rien n’est envoyé automatiquement.",
   "bugReportSubmit": "Enregistrer le rapport localement",
   "bugReportCancel": "Annuler",
-  "bugReportSuccess": "Le téléchargement du rapport a commencé. Rien n’a été envoyé.",
+  "bugReportSuccess": "Rapport préparé localement. Rien n’a été envoyé.",
   "bugReportError": "Impossible de préparer le rapport. Réessayez.",
   "bugReportModuleSkills": "Compétences et plugins",
   "bugReportModuleWebui": "WebUI et accès distant",

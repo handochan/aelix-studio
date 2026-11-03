@@ -87,8 +87,8 @@
       "description": "目前安裝缺少必要的本機資源，AionCore 無法啟動。請下載並重新安裝最新版 AionUi；如果重新安裝後仍然出現，請檢查系統安全軟體或防毒軟體是否隔離了 AionCore。",
       "downloadLatest": "下載最新版",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。",
       "runtimeComponentDescription": "目前安裝缺少必要的內建執行元件，{{resource}} 無法啟動。請重新安裝最新版 AionUi；如果重新安裝後仍然出現，請檢查系統安全軟體或防毒軟體是否隔離了 AionUi 元件。"
     },
@@ -100,8 +100,8 @@
       "title": "本地資料遷移失敗",
       "description": "AionUi 已開啟，但 AionCore 在初始化本地資料時停止。重新安裝 AionUi 未必能解決此問題。請傳送診斷報告或聯絡支援，以便檢查本地資料庫遷移狀態。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     },
     "databaseNewerThanApp": {
@@ -113,16 +113,16 @@
       "title": "本機資料修復失敗",
       "description": "AionUi 已開啟，但 AionCore 在準備本機啟動資料時停止，例如 assistant 或代理記錄。重新安裝 AionUi 可能無法解決此問題。請傳送診斷報告或聯絡支援，以便檢查本機資料庫。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     },
     "startupDirectory": {
       "title": "啟動目錄無法使用",
       "description": "AionUi 已開啟，但因為設定的工作目錄或日誌目錄不存在、無法存取或權限受限，AionCore 無法啟動。請確認這些目錄存在且可寫入，然後重新啟動 AionUi。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     },
     "recoverableDatabaseCorruption": {
@@ -131,8 +131,8 @@
       "confirmRebuild": "備份舊資料庫並重建新資料庫",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsHint": "報告包含最近的日誌與診斷資訊。分享前請檢查本機檔案，不會自動傳送。",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。",
       "rebuildFailed": "備份舊資料庫並重建新資料庫失敗",
       "confirmDialog": {
@@ -146,8 +146,8 @@
       "title": "AionUi 正在啟動",
       "description": "此視窗開啟時，另一個 AionUi 啟動程序仍在使用本機資料。這是暫時的，您的資料是安全的——無需重新安裝。請稍候片刻後重試，或重新啟動 AionUi。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。",
       "diagnosticsHint": "報告包含最近的日誌與診斷資訊。分享前請檢查本機檔案，不會自動傳送。"
     },
@@ -159,24 +159,24 @@
       "title": "啟動未完成",
       "description": "AionCore 未能完成啟動並已結束。請重新啟動應用程式；若反覆出現，請回報診斷資訊。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     },
     "portReportTimeout": {
       "title": "啟動逾時",
       "description": "AionCore 未在預期時間內完成啟動。請重新啟動應用程式；若反覆出現，請傳送診斷。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     },
     "startupFailed": {
       "title": "啟動失敗",
       "description": "AionCore 啟動失敗。請重新啟動應用程式；若反覆出現，請傳送診斷。",
       "sendDiagnostics": "將報告儲存至本機",
-      "diagnosticsSent": "已開始下載報告，未傳送任何資訊。",
-      "diagnosticsReportSuccess": "已開始下載報告，未傳送任何資訊。",
+      "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
+      "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportFailed": "無法產生報告，請重試。"
     }
   },

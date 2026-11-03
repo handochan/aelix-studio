@@ -839,7 +839,7 @@
   "bugReportAutoInfo": "گزارش شامل گزارش‌های اخیر و اطلاعات تشخیصی است. پیش از اشتراک‌گذاری، فایل محلی را بررسی کنید. هیچ چیزی خودکار ارسال نمی‌شود.",
   "bugReportSubmit": "ذخیره گزارش در دستگاه",
   "bugReportCancel": "لغو",
-  "bugReportSuccess": "بارگیری گزارش آغاز شد. چیزی ارسال نشد.",
+  "bugReportSuccess": "گزارش در دستگاه آماده شد. چیزی ارسال نشد.",
   "bugReportError": "گزارش آماده نشد. دوباره تلاش کنید.",
   "bugReportModuleSkills": "مهارت‌ها و پلاگین‌ها",
   "bugReportModuleWebui": "WebUI و دسترسی ریموت",

@@ -827,7 +827,7 @@
   "bugReportAutoInfo": "El informe incluye registros recientes y diagnósticos. Revisa el archivo local antes de compartirlo. No se envía nada automáticamente.",
   "bugReportSubmit": "Guardar informe localmente",
   "bugReportCancel": "Cancelar",
-  "bugReportSuccess": "Se inició la descarga del informe. No se envió nada.",
+  "bugReportSuccess": "Informe preparado localmente. No se envió nada.",
   "bugReportError": "No se pudo preparar el informe. Inténtalo de nuevo.",
   "bugReportModuleSkills": "Habilidades y plugins",
   "bugReportModuleWebui": "WebUI y acceso remoto",

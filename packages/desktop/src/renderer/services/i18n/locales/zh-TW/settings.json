@@ -839,7 +839,7 @@
   "bugReportAutoInfo": "報告包含最近的日誌與診斷資訊。分享前請檢查本機檔案，不會自動傳送。",
   "bugReportSubmit": "將報告儲存至本機",
   "bugReportCancel": "取消",
-  "bugReportSuccess": "已開始下載報告，未傳送任何資訊。",
+  "bugReportSuccess": "已在本機產生報告，未傳送任何資訊。",
   "bugReportError": "無法產生報告，請重試。",
   "bugReportModuleSkills": "Skills 與插件",
   "bugReportModuleWebui": "WebUI 與遠端連線",

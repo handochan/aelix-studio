@@ -839,7 +839,7 @@
   "bugReportAutoInfo": "The report includes recent logs and diagnostics. Review the local file before sharing it; nothing is sent automatically.",
   "bugReportSubmit": "Save report locally",
   "bugReportCancel": "Cancel",
-  "bugReportSuccess": "Report download started. Nothing was sent.",
+  "bugReportSuccess": "Report prepared locally. Nothing was sent.",
   "bugReportError": "Could not prepare the report. Please try again.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",

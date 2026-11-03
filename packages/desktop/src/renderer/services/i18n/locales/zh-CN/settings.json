@@ -839,7 +839,7 @@
   "bugReportAutoInfo": "报告包含最近的日志和诊断信息。分享前请检查本地文件，不会自动发送。",
   "bugReportSubmit": "将报告保存到本地",
   "bugReportCancel": "取消",
-  "bugReportSuccess": "已开始下载报告。未发送任何信息。",
+  "bugReportSuccess": "已在本地生成报告，未发送任何信息。",
   "bugReportError": "无法生成报告，请重试。",
   "bugReportModuleSkills": "Skills 与插件",
   "bugReportModuleWebui": "WebUI 与远程连接",

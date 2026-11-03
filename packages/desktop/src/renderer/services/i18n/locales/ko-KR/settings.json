@@ -827,7 +827,7 @@
   "bugReportAutoInfo": "보고서에는 최근 로그와 진단 정보가 포함됩니다. 공유하기 전에 로컬 파일을 확인하세요. 자동으로 전송하지 않습니다.",
   "bugReportSubmit": "보고서를 로컬 파일로 저장",
   "bugReportCancel": "취소",
-  "bugReportSuccess": "보고서 다운로드를 시작했습니다. 외부로 전송하지 않았습니다.",
+  "bugReportSuccess": "로컬 보고서를 준비했습니다. 외부로 전송하지 않았습니다.",
   "bugReportError": "보고서를 준비하지 못했습니다. 다시 시도해 주세요.",
   "bugReportModuleSkills": "Skills 및 플러그인",
   "bugReportModuleWebui": "WebUI 및 원격 연결",

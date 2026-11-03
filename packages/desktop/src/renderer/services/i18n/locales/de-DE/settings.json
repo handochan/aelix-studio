@@ -829,7 +829,7 @@
   "bugReportAutoInfo": "Der Bericht enthält aktuelle Protokolle und Diagnosedaten. Prüfen Sie die lokale Datei vor dem Teilen. Es wird nichts automatisch gesendet.",
   "bugReportSubmit": "Bericht lokal speichern",
   "bugReportCancel": "Abbrechen",
-  "bugReportSuccess": "Berichtsdownload gestartet. Es wurde nichts gesendet.",
+  "bugReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
   "bugReportError": "Der Bericht konnte nicht erstellt werden. Bitte erneut versuchen.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote-Zugriff",

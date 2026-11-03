@@ -87,8 +87,8 @@
       "description": "This installation is missing required local resources, so AionCore cannot start. Please download and reinstall the latest AionUi. If the issue returns after reinstalling, check whether security or antivirus software quarantined AionCore.",
       "downloadLatest": "Download latest",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again.",
       "runtimeComponentDescription": "This installation is missing required bundled runtime components, so {{resource}} cannot start. Reinstall the latest AionUi package. If it still happens after reinstalling, check whether security or antivirus software quarantined AionUi components."
     },
@@ -100,8 +100,8 @@
       "title": "Local data migration failed",
       "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     },
     "databaseNewerThanApp": {
@@ -113,16 +113,16 @@
       "title": "Local data repair failed",
       "description": "AionUi opened, but AionCore stopped while preparing local startup data such as assistant or agent records. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     },
     "startupDirectory": {
       "title": "Startup directory is unavailable",
       "description": "AionUi opened, but AionCore could not start because the configured work or log directory is missing, unavailable, or blocked by permissions. Check that the configured directories exist and are writable, then restart AionUi.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     },
     "recoverableDatabaseCorruption": {
@@ -131,8 +131,8 @@
       "confirmRebuild": "Back up old DB and rebuild new DB",
       "sendDiagnostics": "Save report locally",
       "diagnosticsHint": "The report includes recent logs and diagnostics. Review the local file before sharing it; nothing is sent automatically.",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again.",
       "rebuildFailed": "Failed to back up old DB and rebuild new DB",
       "confirmDialog": {
@@ -146,8 +146,8 @@
       "title": "AionUi is starting up",
       "description": "Another AionUi startup was still using the local data when this window opened. This is temporary and your data is safe — no reinstall is needed. Please wait a moment and try again, or restart AionUi.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again.",
       "diagnosticsHint": "The report includes recent logs and diagnostics. Review the local file before sharing it; nothing is sent automatically."
     },
@@ -159,24 +159,24 @@
       "title": "Startup didn't complete",
       "description": "AionCore couldn't finish starting and has exited. Please restart the app; if this keeps happening, please send diagnostics.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     },
     "portReportTimeout": {
       "title": "Startup timed out",
       "description": "AionCore didn't finish starting within the expected time. Please restart the app; if this keeps happening, please send diagnostics.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     },
     "startupFailed": {
       "title": "Startup failed",
       "description": "AionCore failed to start. Please restart the app; if this keeps happening, please send diagnostics.",
       "sendDiagnostics": "Save report locally",
-      "diagnosticsSent": "Report download started. Nothing was sent.",
-      "diagnosticsReportSuccess": "Report download started. Nothing was sent.",
+      "diagnosticsSent": "Report prepared locally. Nothing was sent.",
+      "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportFailed": "Could not prepare the report. Please try again."
     }
   },

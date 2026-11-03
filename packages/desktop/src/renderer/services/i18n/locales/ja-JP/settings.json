@@ -827,7 +827,7 @@
   "bugReportAutoInfo": "レポートには最近のログと診断情報が含まれます。共有する前にローカルファイルを確認してください。自動送信はされません。",
   "bugReportSubmit": "レポートをローカルに保存",
   "bugReportCancel": "キャンセル",
-  "bugReportSuccess": "レポートのダウンロードを開始しました。外部には送信されていません。",
+  "bugReportSuccess": "レポートをローカルで作成しました。外部には送信されていません。",
   "bugReportError": "レポートを作成できませんでした。再試行してください。",
   "bugReportModuleSkills": "Skills とプラグイン",
   "bugReportModuleWebui": "WebUI とリモート接続",
