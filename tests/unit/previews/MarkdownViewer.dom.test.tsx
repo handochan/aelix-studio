@@ -305,3 +305,13 @@ describe('remote image host boundary', () => {
     );
   });
 });
+
+describe('protocol-relative remote images', () => {
+  it('keeps a protocol-relative URL behind the same host failure boundary', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockRejectedValue(new Error('unsupported remote URL'));
+    const { container } = render(<MarkdownViewer content='![Remote chart](//example.invalid/image.png)' />);
+    await screen.findByText('Remote chart: preview.remoteImageFailed');
+    expect(container.querySelector('img')).toBeNull();
+    expect(ipcBridge.fs.fetchRemoteImage.invoke).toHaveBeenCalledWith({ url: '//example.invalid/image.png' });
+  });
+});

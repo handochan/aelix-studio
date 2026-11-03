@@ -42,7 +42,7 @@ interface MarkdownPreviewProps {
 
 const isDataOrRemoteUrl = (value?: string): boolean => {
   if (!value) return false;
-  return /^(https?:|data:|blob:|file:)/i.test(value);
+  return /^(https?:|data:|blob:|file:|\/\/)/i.test(value);
 };
 
 const isAbsoluteLocalPath = (value?: string): boolean => {
@@ -125,7 +125,7 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
       }
 
       if (isDataOrRemoteUrl(src)) {
-        if (/^https?:/i.test(src)) {
+        if (/^(https?:|\/\/)/i.test(src)) {
           resolveImage(src, async () => {
             const dataUrl = await ipcBridge.fs.fetchRemoteImage.invoke({ url: src });
             if (!/^data:image\//i.test(dataUrl)) throw new Error('Invalid remote image response');
