@@ -331,13 +331,43 @@ def main(args):
                             '--runtime', str(runtime), '--helper-runtime', str(payload)],
                            check=True, cwd=ROOT, env=environment, timeout=420)
             permission_output = output.parent / 'permission/qualification.json'
+            permission_output.parent.mkdir(parents=True, exist_ok=True)
             permission_command = [str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-release/smoke.py'),
                                   '--runtime', str(runtime), '--payload', str(payload), '--report', str(permission_output)]
             if sys.platform == 'linux':
-                # Audit the actual installed app/host/native tree, with only loopback fixtures.
-                permission_command = [sys.executable, '-I', '-B', str(Path(__file__).parents[1] / 'fixtures/outboundAudit.py'),
-                                      '--report', str(permission_output.with_name('outbound.json')), '--', *permission_command]
+                auditor = Path(__file__).parents[1] / 'fixtures/outboundAudit.py'
+                installed_python = payload / 'python/bin/python3'
+                # Check the exact installed native executable and its child tree first.
+                # These intentional attempts must fail the same scoped gate with 86.
+                for control in ('positive-control', 'child-positive-control'):
+                    control_report = permission_output.with_name('outbound-' + control + '.json')
+                    result = subprocess.run([sys.executable, '-I', '-B', str(auditor),
+                                             '--scope-executable', str(core), '--scope-executable', str(installed_python),
+                                             '--require-executable', str(installed_python), '--report', str(control_report),
+                                             '--whole-report', str(control_report.with_name('outbound-app-' + control + '.json')),
+                                             '--', str(installed_python), '-I', '-B', str(auditor), '--' + control],
+                                            cwd=ROOT, env=environment, timeout=60)
+                    control_data = json.loads(control_report.read_text())
+                    if (result.returncode != 86 or control_data['externalAttempts'] != 2
+                            or control_data['unparsedRecords'] != 0 or not control_data['rootPids']
+                            or {event['syscall'] for event in control_data['external']} != {'connect', 'sendto'}):
+                        raise ValueError('Installed native scoped outbound positive control did not detect both attempts')
+                # Every fork/thread below the pinned host or installed native is enforced.
+                # Electron/Chromium and other siblings remain in the whole-app report.
+                permission_command = [sys.executable, '-I', '-B', str(auditor),
+                                      '--scope-executable', str(core), '--scope-executable', str(installed_python),
+                                      '--require-executable', str(core),
+                                      '--report', str(permission_output.with_name('outbound.json')),
+                                      '--whole-report', str(permission_output.with_name('outbound-app.json')),
+                                      '--', *permission_command]
             subprocess.run(permission_command, check=True, cwd=ROOT, env=environment, timeout=420)
+            if sys.platform == 'linux':
+                scoped = json.loads(permission_output.with_name('outbound.json').read_text())
+                whole = json.loads(permission_output.with_name('outbound-app.json').read_text())
+                if (scoped['status'] != 'passed' or scoped['scope'] != 'selected-process-trees'
+                        or scoped['externalAttempts'] != 0 or scoped['unparsedRecords'] != 0 or not scoped['rootPids']
+                        or whole['scope'] != 'all' or whole['enforcement'] != 'report-only'):
+                    raise ValueError('Installed host/native outbound gate or whole-app report is invalid')
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
             if permission['status'] != 'passed' or not permission['installer'] or permission['defaultHostOverride']:
                 raise ValueError('Installed default host permission acceptance failed')
@@ -357,6 +387,12 @@ def main(args):
                           installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
                           installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
                           cleanOSAccount=False, crossVersionUpgrade=False)
+            if sys.platform == 'linux':
+                report.update(outboundScope='host-and-installed-native-process-trees',
+                              outboundGateSha256=digest(permission_output.with_name('outbound.json')),
+                              wholeAppOutboundSha256=digest(permission_output.with_name('outbound-app.json')),
+                              hostNativeExternalAttempts=scoped['externalAttempts'], hostNativeUnparsedRecords=scoped['unparsedRecords'],
+                              wholeAppExternalAttempts=whole['externalAttempts'], wholeAppUnparsedRecords=whole['unparsedRecords'])
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
         finally:

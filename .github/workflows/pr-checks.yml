@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bunx playwright install-deps chromium
-          sudo apt-get install -y strace
+          sudo apt-get install -y strace gcc
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
       - name: Prepare exact native and ACP source wheels with the released host
@@ -139,16 +139,6 @@ jobs:
           else
             python -B scripts/studio-preview/packaging/acceptance.py --runtime .local/studio-preview
           fi
-      - name: Verify outbound audit parent/child positive controls (Linux)
-        if: runner.os == 'Linux'
-        run: |
-          for control in positive-control child-positive-control; do
-            set +e
-            python -I -B scripts/studio-preview/fixtures/outboundAudit.py --report ".local/studio-provider/outbound-$control.json" -- python -I -B scripts/studio-preview/fixtures/outboundAudit.py "--$control"
-            control_status=$?
-            set -e
-            test "$control_status" -eq 86
-          done
       - name: Save installer qualification evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -162,7 +152,7 @@ jobs:
             .local/provider-installer/installer-copy-failure.json
             .local/provider-installer/permission/qualification.json
             .local/provider-installer/permission/renderer-result.json
-            .local/provider-installer/permission/outbound.json
+            .local/provider-installer/permission/outbound*.json
             .local/provider-installer/permission/*.png
             resources/bundled-aioncore/**/build-receipt.json
             resources/bundled-aioncore/**/manifest.json

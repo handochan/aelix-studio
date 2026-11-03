@@ -3,76 +3,30 @@
 Counts attempted connect/sendto/sendmsg/sendmmsg destinations, including failed
 syscalls, from exec through final child exit. Unix/kernel IPC and loopback are
 allowed; DNS port 53 is denied even on loopback (a local resolver may forward it).
-Raw traces use -s 0 and are deleted; reports contain addresses/counts, no payloads.
+Raw traces use -s 0 and are deleted; reports contain PID/comm and network metadata, no payloads.
+Optional executable roots select descendant trees; the default remains whole-command enforcement.
 Exit 86 means detected outbound attempts; 87 means incomplete/unparseable evidence.
 """
 import argparse
-import ipaddress
+import hashlib
 import json
 import os
 from pathlib import Path
-import re
 import shutil
 import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from outboundScope import analyze_processes
+
 DENIED = 86
 INCOMPLETE = 87
-CALL = re.compile(r'^(connect|sendto|sendmsg|sendmmsg)\(')
-ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 
 
 def analyze(paths):
-    events, unknown = [], 0
-    for path in sorted(paths):
-        pending = None
-        for line in path.read_text().splitlines():
-            if '<unfinished ...>' in line:
-                if pending is not None:
-                    unknown += 1
-                pending = line.replace('<unfinished ...>', '')
-                continue
-            if line.startswith('<... ') and ' resumed>' in line:
-                if pending is None:
-                    unknown += 1
-                    continue
-                line = pending + line.split(' resumed>', 1)[1]
-                pending = None
-            if not CALL.match(line):
-                if line and not line.startswith(('+++', '---')):
-                    unknown += 1
-                continue
-            call = CALL.match(line).group(1)
-            destinations = ADDR.findall(line)
-            if not destinations:
-                # NULL means send on a connected socket (its connect was traced).
-                if 'sa_family=AF_' in line and not any(
-                    family in line for family in ('AF_UNIX', 'AF_NETLINK', 'AF_UNSPEC')
-                ):
-                    unknown += 1
-                continue
-            for destination in destinations:
-                match = re.search(r'(?:inet_addr\(|inet_pton\(AF_INET6, )"([^"]+)"', destination)
-                port = re.search(r'sin6?_port=htons\((\d+)\)', destination)
-                if match is None or port is None:
-                    unknown += 1
-                    continue
-                try:
-                    address = ipaddress.ip_address(match.group(1))
-                except ValueError:
-                    unknown += 1
-                    continue
-                effective = address.ipv4_mapped if isinstance(address, ipaddress.IPv6Address) else None
-                local = (effective or address).is_loopback and int(port.group(1)) != 53
-                events.append({'syscall': call, 'address': str(address), 'port': int(port.group(1)),
-                               'external': not local, 'failed': bool(re.search(r'= -1\b', line))})
-        if pending is not None:
-            unknown += 1
-    external = [event for event in events if event['external']]
-    return {'schema': 'aelix-studio-host.outbound-audit/1', 'traceFiles': len(paths),
-            'destinationAttempts': len(events), 'externalAttempts': len(external),
-            'unparsedRecords': unknown, 'external': external}
+    """Legacy whole-command parser entry point, retained for existing callers."""
+    return analyze_processes(paths)[0]
 
 
 def npm_config_paths():
@@ -117,7 +71,7 @@ def npm_proxy_configured(paths):
     return False
 
 
-def audit(command, report_path):
+def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -138,15 +92,30 @@ def audit(command, report_path):
         raise RuntimeError('Linux strace is required; audit cannot be skipped')
     with tempfile.TemporaryDirectory(prefix='host-outbound-audit-') as directory:
         prefix = Path(directory) / 'network'
-        # -ff follows forks/threads and waits for all descendants. -s 0 suppresses
-        # buffer contents; do not add execve/read/write tracing (secrets/payloads).
-        process = subprocess.run(['strace', '-ff', '-qq', '-s', '0', '-e',
-                                  'trace=connect,sendto,sendmsg,sendmmsg', '-o', str(prefix), '--', *command])
-        paths = list(prefix.parent.glob(prefix.name + '.*'))
-        report = analyze(paths)
+        # -f follows all forks/threads. -Y supplies PID/comm, never argv.
+        # With -s 0 (and default abbreviation), execve records only its filename:
+        # argv is [...] and env is a pointer/count. Tests assert sentinel absence.
+        # Only sendmmsg's destination vector is unabbreviated; data stays hidden.
+        # -yy exposes connected FD peers, including sockets inherited at exec.
+        # Raw traces are removed and executable paths never enter JSON reports.
+        trace = prefix.with_suffix('.trace')
+        process = subprocess.run(['strace', '-f', '-Y', '-yy', '-qq', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
+                                  'trace=connect,sendto,sendmsg,sendmmsg,clone,clone3,fork,vfork,execve,execveat',
+                                  '-o', str(trace), '--', *command])
+        paths = [trace] if trace.exists() else []
+        report, whole = analyze_processes(paths, scope_executables, require_executables)
+    recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
+               for name in ('outboundAudit.py', 'outboundScope.py')}
+    report['sourceSha256'] = recipes
+    whole['sourceSha256'] = recipes
+    if whole_report_path is not None:
+        whole.update(commandExitCode=process.returncode, status='reported', enforcement='report-only')
+        whole_report_path.parent.mkdir(parents=True, exist_ok=True)
+        whole_report_path.write_text(json.dumps(whole, indent=2) + '\n')
     report['commandExitCode'] = process.returncode
-    complete = bool(report['traceFiles']) and report['unparsedRecords'] == 0
+    complete = bool(report['traceFiles']) and report['processCount'] > 0 and report['unparsedRecords'] == 0
     code = INCOMPLETE if not complete else DENIED if report['externalAttempts'] else process.returncode
+    report['enforcement'] = 'blocking'
     report['status'] = 'passed' if code == 0 else 'failed'
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + '\n')
@@ -172,6 +141,9 @@ def positive_control():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
+    parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
+    parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
     parser.add_argument('--positive-control', action='store_true')
     parser.add_argument('--child-positive-control', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER)
@@ -184,7 +156,16 @@ def main():
     command = args.command[1:] if args.command[:1] == ['--'] else args.command
     if not command or not args.report:
         parser.error('--report and command after -- are required')
-    return audit(command, args.report)
+    if args.whole_report and args.whole_report.resolve() == args.report.resolve():
+        parser.error('Scoped and whole reports must use different paths')
+    if args.whole_report and not args.scope_executable:
+        parser.error('--whole-report requires --scope-executable')
+    if any(path.resolve() not in [item.resolve() for item in args.scope_executable] for path in args.require_executable):
+        parser.error('--require-executable must also be selected by --scope-executable')
+    for path in args.scope_executable:
+        if not path.is_file(): parser.error('Scope executable must exist')
+    return audit(command, args.report, scope_executables=args.scope_executable,
+                 require_executables=args.require_executable, whole_report_path=args.whole_report)
 
 
 if __name__ == '__main__':

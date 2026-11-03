@@ -22,9 +22,11 @@ D13에 따라 Studio의 첫 공개 릴리스는 공동 Beta다. 이 절이 현�
 
 1단계 PR #34는 main `dac2408`에 병합됐다. native `e19ab55e17e871a40356fc9802f3f6669ca727de`와
 ACP `16d6555b08825d1d63c3b082de2b10a1152562c0` exact pin은 유지한다.
-2단계는 새 worktree/branch에서 `host-v0.2.2-aelix.3`으로 개발·시험한다(host PR #12·#15 포함).
-최종 pin은 host #7 / PR #19 보안 수정 뒤 나오는 **aelix.4**다(사용자 판정 2026-11-03).
-4개 pin 파일은 release tag 하나에서 생성하고, aelix.4 갱신·재검증까지 PR은 draft로 둔다.
+2단계 PR #35는 `host-v0.2.2-aelix.4`(`c516fa9`, host PR #12·#15·#19 포함)를 최종 pin으로 받는다.
+4개 pin 파일은 release tag 하나에서 생성하고, 기존 owned 산출물을 보관한 뒤 새로 준비·빌드한다.
+사용자 판정(2026-11-03)으로 외부 접속 gate는 host와 installed-native의 자식 프로세스 트리다.
+positive control 검출·unparsed 0은 유지하고 앱 전체 결과는 artifact 보고로 남긴다.
+앱 전체 0건과 Electron 정책은 Studio #15가 맡는다. 전체 검증 후 PR을 ready로 제출한다.
 범위와 실제 검증 경계는 [기준선](../studio-preview/README.md)을 따른다.
 #29의 기존 미커밋 runtime-controls 작업은 별도 checkout에 보존하며 섞지 않는다.
 

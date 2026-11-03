@@ -1,4 +1,4 @@
-# Studio #28 Beta candidate baseline — phase two (draft)
+# Studio #28 Beta candidate baseline — phase two
 
 Current executable pins are in [baseline.json](../../scripts/studio-preview/baseline.json).
 The historical Preview evidence below describes older commits and public beta.2 wheels.
@@ -68,9 +68,9 @@ The initial [ownership map](../studio-release-train/README.md#모듈-소유권-m
 records native/ACP/host/Studio authority and the retired #25 path.
 
 PR #34 (aelix.2) was merged at `dac2408`. Phase two implements the host PR #12/#15
-integration below in a new draft PR on the same Issue. Development qualification
-uses aelix.3; the final aelix.4 pin and renewed acceptance remain pending. No main
-push, tag, release or merge is authorized here.
+integration below in PR #35 on the same Issue. Initial aelix.3 qualification is
+historical; final qualification uses aelix.4 and the user-approved host/native
+process-tree audit boundary. No main push, tag, release or merge is authorized here.
 
 ---
 
@@ -190,25 +190,36 @@ known 16 MiB frame and aggregate-history limits remain. Studio #4 remains open
 until review and authorized repository delivery are accepted; local host success
 is not a merge, CI, installer or product-release claim.
 
-## Studio #28 phase two — draft baseline
+## Studio #28 phase two — final pin and audit boundary
 
-Phase two uses the immutable `host-v0.2.2-aelix.3` release during development and
-qualification. The final pin is **aelix.4**, after host #7 / PR #19 resolves the
-security advisories (including calamine RUSTSEC-2026-0436). Keep the phase-two PR
-draft until that release is adopted and the complete gate/installer matrix is
-rerun. This is not public Beta or security-release acceptance.
+Phase two pins immutable `host-v0.2.2-aelix.4`, source
+`c516fa946ef48adc0119dbf37367e02216b22e70`, after host #7 / PR #19. This includes
+calamine 0.38 (RUSTSEC-2026-0436) and the other host security updates; the approved
+RUSTSEC-2024-0449 exception remains. This is not public joint-Beta acceptance.
 
 Use the [host release generator and environment contract](../../scripts/studio-preview/host-release/README.md)
 to update all four pin files together. Runtime npm/image settings are inherited
-from the operator's launch environment; unset remains the host's blocked default.
-There is no new settings UI. Build Node downloads require the explicit mirror.
+from the operator's launch environment; unset retains host defaults. Build Node
+downloads require the explicit mirror. Old owned runtime/payload/resources are
+archived before fresh preparation and installer builds.
 
-New tests cover remote-image failure without direct URL fallback, the four ACP
-error codes and structured HTTP 502 payloads, MCP warning reason/replacement, and
-environment forwarding. The installed-host permission smoke also checks default
-remote-image rejection and a missing local MCP command: its reason appears once
-in the UI even after repeated failure notices. Linux process-tree syscall auditing
-covers the actual installed app/host/native/ACP permission smoke with a loopback fixture;
-parent/child TCP/UDP positive controls are separate from the zero-attempt run.
-This audit runs only on Linux and does not establish zero outbound attempts on Windows/macOS, arbitrary configured providers, or
-user-installed extensions. Actual results and SHAs belong to the PR/Issue handoff.
+Tests cover remote-image failure without direct URL fallback, the four ACP
+application errors and structured HTTP 502 payloads, MCP warning/replacement,
+and environment forwarding. Installed-host checks also exercise default image
+rejection, unavailable-MCP reason and replacement, Ask/Yolo and full restarts.
+
+The user decision on 2026-11-03 separates the Linux syscall audit by process tree:
+
+- **Gate:** the actual installed host and installed-native Python roots plus all
+  descendant processes/threads. Any external attempt, scoped unparsed record,
+  missing required root or ambiguous process attribution fails. Installed-native
+  direct/child TCP/UDP controls must each detect two attempts with unparsed 0.
+- **Report only:** the entire app/driver tree, including Electron/Chromium. Counts,
+  PID/parent/comm and unparsed records are retained in `outbound-app.json` for
+  Studio #15, which owns the eventual whole-app zero-attempt policy.
+
+The [audit options and attribution rules](../../scripts/studio-preview/fixtures/README.md)
+retain whole-command blocking as the default for other callers. This change adds
+no address exceptions or Chromium policy flags. Windows/macOS functional results
+are separate from Linux OS-level auditing. Actual head/CI counts are recorded in
+PR #35 and Issue #28; historical aelix.3 whole-app failures are preserved there.

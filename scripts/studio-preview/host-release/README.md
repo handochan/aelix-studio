@@ -1,6 +1,6 @@
 # Immutable Studio host release
 
-`default.json` pins `host-v0.2.2-aelix.3`, its source commit/tree, five archive
+`default.json` pins `host-v0.2.2-aelix.4`, its source commit/tree, five archive
 SHA-256 values and release provenance. `provenance.json` is the byte-preserved
 published release asset. The release also publishes `aelix-studio-host-checksums.txt`;
 its archive digests are pinned in `default.json`. The source archive/build/patch flow is retired.
@@ -47,9 +47,13 @@ outputs before replacing files. Normal runtime preparation still verifies archiv
 binary and receipt bytes. A pin change requires fresh resource/runtime preparation,
 installer builds, and all acceptance tests; old `.local` outputs must not be reused.
 
-Phase two develops and tests with aelix.3. The draft PR must remain draft until
-host #7 / PR #19 is merged and the final aelix.4 release is pinned and requalified.
-The native and ACP exact pins are unchanged.
+Phase two initially tested aelix.3 and now pins the final aelix.4 release from
+host #7 / PR #19. Native and ACP exact pins are unchanged. Every pin change is
+qualified with fresh owned outputs; previous runtime/payload/resources are archived.
+The Linux acceptance gate is zero external attempts and zero unparsed records
+inside the host and installed-native descendant trees, with detected direct/child
+positive controls. The whole app is reported separately for Studio #15; Chromium
+policy is unchanged. See the [audit contract](../fixtures/README.md).
 
 ## Host environment
 
