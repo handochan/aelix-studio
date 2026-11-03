@@ -28,6 +28,13 @@ jobs:
       CSC_IDENTITY_AUTO_DISCOVERY: 'false'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Record audited source
+        run: |
+          mkdir -p .local/outbound
+          git rev-parse HEAD > .local/outbound/source-head.txt
+          git rev-parse 'HEAD^{tree}' > .local/outbound/source-tree.txt
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -42,7 +49,7 @@ jobs:
       - name: Install audit and display tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y strace xvfb
+          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils
           bunx playwright install-deps chromium
       - name: Check the attribution parser
         run: python -B -m unittest discover -s tests/outbound-audit
@@ -63,7 +70,9 @@ jobs:
       - name: Build an unpublished installer
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
       - name: Install the built DEB without downloading application resources
-        run: sudo dpkg -i .local/provider-installer/artifacts/*.deb
+        run: |
+          sha256sum .local/provider-installer/artifacts/*.deb > .local/outbound/installer-sha256.txt
+          sudo dpkg -i .local/provider-installer/artifacts/*.deb
       - name: Require zero attempts from the whole installed app and all descendants
         env:
           PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
@@ -85,6 +94,8 @@ jobs:
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Export and inspect local installer diagnostics
         shell: pwsh
         run: |
