@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "无法确认消息的执行结果",
         "body": "模型或工具可能已经运行。再次发送前，请先检查对话记录。"
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "会话正在使用",
+        "body": "此会话已在其他位置打开。请在锁释放后重新打开。",
+        "bodyNative": "已在 CLI 或其他 Aelix 进程中打开。请在该进程释放锁后重新打开会话。",
+        "bodyAcp": "已在其他 Studio 窗口中打开。请在该窗口释放锁后重新打开会话。"
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "发送后轮次失败",
+        "body": "模型或工具可能已运行。此轮次不会自动重发。再次发送前请检查历史记录。"
+      },
+      "USER_AGENT_BUSY": {
+        "title": "代理正忙",
+        "body": "请等待当前轮次结束，或取消后再继续。"
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "操作被拒绝",
+        "body": "代理拒绝了此操作。请检查详情和配置后再继续。",
+        "restrictionsUnenforceable": "无法执行请求的限制：{{methods}}。继续前请检查限制设置。",
+        "profileUnavailable": "配置文件不可用：{{profile}}。请恢复配置文件或开始新会话。",
+        "extensionOwnedByLaunch": "此扩展由启动配置控制：{{source}}。请在该配置中修改。",
+        "runtimeControlRequired": "此操作需要运行时控制。请使用会话运行时控件。",
+        "clientActionRequired": "此操作需要客户端操作。请在 Studio 中完成请求的操作。"
       }
     }
   },

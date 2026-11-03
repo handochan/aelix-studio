@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "Das Ergebnis dieser Nachricht ist unbekannt",
         "body": "Das Modell oder die Werkzeuge wurden möglicherweise bereits ausgeführt. Prüfen Sie den Gesprächsverlauf, bevor Sie diese Nachricht erneut senden."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Sitzung wird verwendet",
+        "body": "Diese Sitzung ist andernorts geöffnet. Öffnen Sie sie nach Freigabe der Sperre erneut.",
+        "bodyNative": "In der CLI oder einem anderen Aelix-Prozess geöffnet. Öffnen Sie die Sitzung nach Freigabe durch diesen Prozess erneut.",
+        "bodyAcp": "In einem anderen Studio-Fenster geöffnet. Öffnen Sie die Sitzung nach Freigabe durch dieses Fenster erneut."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "Durchlauf nach dem Senden fehlgeschlagen",
+        "body": "Modell oder Werkzeuge wurden möglicherweise bereits ausgeführt. Dieser Durchlauf wird nicht automatisch erneut gesendet. Prüfen Sie zuvor den Verlauf."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "Agent ist beschäftigt",
+        "body": "Warten Sie auf das Ende des aktuellen Durchlaufs oder brechen Sie ihn ab."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "Vorgang abgelehnt",
+        "body": "Der Agent hat diesen Vorgang abgelehnt. Prüfen Sie Details und Konfiguration.",
+        "restrictionsUnenforceable": "Die angeforderten Einschränkungen sind nicht durchsetzbar: {{methods}}. Prüfen Sie die Einschränkungen.",
+        "profileUnavailable": "Profil nicht verfügbar: {{profile}}. Stellen Sie es wieder her oder starten Sie eine neue Sitzung.",
+        "extensionOwnedByLaunch": "Diese Erweiterung wird durch die Startkonfiguration verwaltet: {{source}}. Ändern Sie diese Konfiguration.",
+        "runtimeControlRequired": "Dieser Vorgang erfordert Laufzeitsteuerung. Verwenden Sie die Laufzeitsteuerung der Sitzung.",
+        "clientActionRequired": "Dieser Vorgang erfordert eine Client-Aktion. Führen Sie die angeforderte Aktion in Studio aus."
       }
     }
   },

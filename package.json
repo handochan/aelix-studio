@@ -263,7 +263,7 @@
     "node": ">=22 <25"
   },
   "aioncoreSourcePolicy": "scripts/studio-preview/host-release/default.json",
-  "aioncoreVersion": "host-v0.2.2-aelix.2",
+  "aioncoreVersion": "host-v0.2.2-aelix.3",
   "electronRebuild": {
     "electronVersion": "^37.3.1"
   },

@@ -110,6 +110,7 @@ vi.mock('@icon-park/react', () => ({
 
 import MarkdownViewer from '@/renderer/pages/conversation/Preview/components/viewers/MarkdownViewer';
 import { ipcBridge } from '@/common';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 const fileMetadata = (path: string) => ({
   name: path.split(/[\\/]/).pop() || path,
@@ -268,5 +269,39 @@ describe('MarkdownViewer', () => {
       expect(screen.getByRole('img', { name: 'image' })).toHaveAttribute('src', 'data:image/jpeg;base64,abc123');
     });
     expect(previewMocks.openPreview).not.toHaveBeenCalled();
+  });
+});
+
+describe('remote image host boundary', () => {
+  it.each([
+    [
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/fs/fetch-remote-image',
+        status: 403,
+        body: { code: 'REMOTE_IMAGE_DISABLED', error: 'disabled' },
+      }),
+      'preview.remoteImageDisabled',
+    ],
+    [new Error('connection failed'), 'preview.remoteImageFailed'],
+  ])('shows the fetch failure without loading the original URL', async (error, reason) => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockRejectedValue(error);
+    const { container } = render(<MarkdownViewer content='![Remote chart](https://example.invalid/image.png)' />);
+    await screen.findByText(`Remote chart: ${reason}`);
+    expect(container.querySelector('img')).toBeNull();
+    expect(ipcBridge.fs.fetchRemoteImage.invoke).toHaveBeenCalledWith({ url: 'https://example.invalid/image.png' });
+  });
+  it('rejects an HTTP URL returned instead of image data', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockResolvedValue('https://example.invalid/unsafe.png');
+    const { container } = render(<MarkdownViewer content='![](https://example.invalid/image.png)' />);
+    await screen.findByText('preview.remoteImageFailed');
+    expect(container.querySelector('img')).toBeNull();
+  });
+  it('renders only host-provided image data after a successful fetch', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockResolvedValue('data:image/png;base64,aGVsbG8=');
+    render(<MarkdownViewer content='![Safe chart](https://example.invalid/image.png)' />);
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Safe chart' })).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
+    );
   });
 });

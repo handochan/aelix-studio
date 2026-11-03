@@ -176,5 +176,7 @@
   "zoomIn": "放大",
   "zoomOut": "缩小",
   "zoomReset": "重置视图",
-  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭"
+  "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭",
+  "remoteImageDisabled": "主机设置已禁用远程图片。",
+  "remoteImageFailed": "主机无法加载此远程图片。已阻止直接加载。"
 }

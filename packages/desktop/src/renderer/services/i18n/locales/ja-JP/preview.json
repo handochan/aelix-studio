@@ -176,5 +176,7 @@
   "zoomIn": "拡大",
   "zoomOut": "縮小",
   "zoomReset": "表示をリセット",
-  "diagramZoomHint": "スクロールでズーム • ドラッグで移動 • ESC で閉じる"
+  "diagramZoomHint": "スクロールでズーム • ドラッグで移動 • ESC で閉じる",
+  "remoteImageDisabled": "ホスト設定によりリモート画像は無効です。",
+  "remoteImageFailed": "ホストがこのリモート画像を読み込めませんでした。直接読み込みはブロックされています。"
 }

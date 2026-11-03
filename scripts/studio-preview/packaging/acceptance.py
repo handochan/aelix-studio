@@ -331,9 +331,13 @@ def main(args):
                             '--runtime', str(runtime), '--helper-runtime', str(payload)],
                            check=True, cwd=ROOT, env=environment, timeout=420)
             permission_output = output.parent / 'permission/qualification.json'
-            subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-release/smoke.py'),
-                            '--runtime', str(runtime), '--payload', str(payload), '--report', str(permission_output)],
-                           check=True, cwd=ROOT, env=environment, timeout=420)
+            permission_command = [str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-release/smoke.py'),
+                                  '--runtime', str(runtime), '--payload', str(payload), '--report', str(permission_output)]
+            if sys.platform == 'linux':
+                # Audit the actual installed app/host/native tree, with only loopback fixtures.
+                permission_command = [sys.executable, '-I', '-B', str(Path(__file__).parents[1] / 'fixtures/outboundAudit.py'),
+                                      '--report', str(permission_output.with_name('outbound.json')), '--', *permission_command]
+            subprocess.run(permission_command, check=True, cwd=ROOT, env=environment, timeout=420)
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
             if permission['status'] != 'passed' or not permission['installer'] or permission['defaultHostOverride']:
                 raise ValueError('Installed default host permission acceptance failed')

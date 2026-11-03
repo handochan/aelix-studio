@@ -6,6 +6,8 @@
 
 import { joinPath } from '@/common/chat/chatLib';
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
+import { useTranslation } from 'react-i18next';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import CodeBlock from '@/renderer/components/Markdown/CodeBlock';
 import LocalFileLink from '@/renderer/components/Markdown/LocalFileLink';
@@ -106,11 +108,15 @@ const useImageResolverCache = () => {
 };
 
 const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, workspace, docFileRef, ...props }) => {
+  const { t } = useTranslation();
+  const [remoteFailure, setRemoteFailure] = useState<'remoteImageDisabled' | 'remoteImageFailed'>();
   const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(undefined);
   const resolveImage = useImageResolverCache();
 
   useEffect(() => {
     let cancelled = false;
+    setResolvedSrc(undefined);
+    setRemoteFailure(undefined);
 
     const loadImage = () => {
       if (!src) {
@@ -120,16 +126,24 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
 
       if (isDataOrRemoteUrl(src)) {
         if (/^https?:/i.test(src)) {
-          resolveImage(src, () => ipcBridge.fs.fetchRemoteImage.invoke({ url: src }))
+          resolveImage(src, async () => {
+            const dataUrl = await ipcBridge.fs.fetchRemoteImage.invoke({ url: src });
+            if (!/^data:image\//i.test(dataUrl)) throw new Error('Invalid remote image response');
+            return dataUrl;
+          })
             .then((dataUrl) => {
               if (!cancelled) {
                 setResolvedSrc(dataUrl);
               }
             })
             .catch((error) => {
-              console.error('[MarkdownPreview] Failed to fetch remote image:', src, error);
               if (!cancelled) {
-                setResolvedSrc(src);
+                setResolvedSrc(undefined);
+                setRemoteFailure(
+                  isBackendHttpError(error) && error.code === 'REMOTE_IMAGE_DISABLED'
+                    ? 'remoteImageDisabled'
+                    : 'remoteImageFailed'
+                );
               }
             });
           return;
@@ -198,6 +212,15 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
       cancelled = true;
     };
   }, [src, baseDir, resolveImage, workspace, docFileRef]);
+
+  if (remoteFailure) {
+    return (
+      <span role='img' aria-label={alt}>
+        {alt ? `${alt}: ` : ''}
+        {t(`preview.${remoteFailure}`)}
+      </span>
+    );
+  }
 
   if (!resolvedSrc) {
     return alt ? <span>{alt}</span> : null;

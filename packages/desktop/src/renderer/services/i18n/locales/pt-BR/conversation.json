@@ -358,6 +358,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "O resultado desta mensagem é desconhecido",
         "body": "O modelo ou as ferramentas podem já ter sido executados. Confira o histórico da conversa antes de enviar esta mensagem novamente."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Sessão em uso",
+        "body": "Esta sessão está aberta em outro lugar. Abra-a novamente após a liberação do bloqueio.",
+        "bodyNative": "Aberta na CLI ou em outro processo Aelix. Reabra após esse processo liberar o bloqueio.",
+        "bodyAcp": "Aberta em outra janela do Studio. Reabra após essa janela liberar o bloqueio."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "O turno falhou após o envio",
+        "body": "O modelo ou as ferramentas podem já ter sido executados. Este turno não será reenviado automaticamente. Confira o histórico antes de reenviar."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "O agente está ocupado",
+        "body": "Aguarde o turno atual terminar ou cancele-o antes de continuar."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "Operação recusada",
+        "body": "O agente recusou esta operação. Confira os detalhes e a configuração.",
+        "restrictionsUnenforceable": "Não é possível aplicar as restrições solicitadas: {{methods}}. Revise as restrições.",
+        "profileUnavailable": "Perfil indisponível: {{profile}}. Restaure-o ou inicie uma nova sessão.",
+        "extensionOwnedByLaunch": "Esta extensão é controlada pela configuração de inicialização: {{source}}. Altere essa configuração.",
+        "runtimeControlRequired": "Esta operação exige controle de execução. Use os controles de execução da sessão.",
+        "clientActionRequired": "Esta operação exige uma ação do cliente. Conclua a ação solicitada no Studio."
       }
     }
   },

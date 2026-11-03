@@ -43,7 +43,10 @@ vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string }) => {
       const value = resolveConversationKey(key);
-      return typeof value === 'string' ? value : (options?.defaultValue ?? key);
+      const text = typeof value === 'string' ? value : (options?.defaultValue ?? key);
+      return text.replace(/{{(\w+)}}/g, (_match, name: string) =>
+        String((options as Record<string, unknown>)?.[name] ?? '')
+      );
     },
     i18n: { language: 'en' },
   }),
@@ -66,9 +69,14 @@ vi.mock('@renderer/components/Markdown', () => ({
 }));
 
 import MessageTips from '@/renderer/pages/conversation/Messages/components/MessageTips';
-import type { AgentStreamErrorInfo, IMessageTips } from '@/common/chat/chatLib';
+import type { AgentStreamErrorInfo, IMessageTips, IResponseMessage } from '@/common/chat/chatLib';
+import { composeMessage, transformMessage } from '@/common/chat/chatLib';
 
 const requiredAgentErrorCodes = [
+  'USER_AGENT_SESSION_LOCKED',
+  'USER_AGENT_TURN_FAILED_AFTER_DISPATCH',
+  'USER_AGENT_BUSY',
+  'USER_AGENT_OPERATION_REFUSED',
   'AIONUI_CONVERSATION_BUSY',
   'USER_AGENT_HANDSHAKE_FAILED',
   'USER_AGENT_HANDSHAKE_TIMEOUT',
@@ -619,5 +627,87 @@ describe('agent error locale copy', () => {
         }
       }
     }
+  });
+});
+
+describe('host ACP application error display', () => {
+  afterEach(cleanup);
+  it.each([
+    ['USER_AGENT_SESSION_LOCKED', { lockedBy: 'native' }, 'CLI or another Aelix process'],
+    ['USER_AGENT_SESSION_LOCKED', { lockedBy: 'acp' }, 'another Studio window'],
+    ['USER_AGENT_SESSION_LOCKED', undefined, 'lock is released'],
+    ['USER_AGENT_TURN_FAILED_AFTER_DISPATCH', undefined, 'may already have run'],
+    ['USER_AGENT_BUSY', undefined, 'cancel it before continuing'],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'restrictions_unenforceable', methods: ['tools/write'] }, 'tools/write'],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'profile_unavailable', profile: 'team' }, 'Restore the profile'],
+    [
+      'USER_AGENT_OPERATION_REFUSED',
+      { kind: 'extension_owned_by_launch', source: '/operator/extension' },
+      '/operator/extension',
+    ],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'runtime_control_required' }, 'runtime controls'],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'client_action_required' }, 'requested action in Studio'],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'future_kind' }, 'agent refused this operation'],
+    ['USER_AGENT_OPERATION_REFUSED', null, 'agent refused this operation'],
+  ])('renders %s with its specific explanation', (code, data, expected) => {
+    render(
+      <MessageTips
+        message={buildTips('error', 'failure', {
+          message: 'upstream failure',
+          code,
+          data,
+          protocol_code: -32004,
+          retryable: false,
+          detail: 'ACP original detail',
+        })}
+      />
+    );
+    expect(screen.getByText(new RegExp(expected as string))).toBeInTheDocument();
+    expect(screen.getByText(/ACP: -32004/)).toHaveTextContent('ACP original detail');
+    expect(screen.queryByRole('button', { name: /retry|reconnect/i })).not.toBeInTheDocument();
+  });
+  it('renders the host MCP reason as a warning without a retry action', () => {
+    render(
+      <MessageTips
+        message={buildTips('warning', "MCP server 'blocked': OUTBOUND_DISABLED", undefined, {
+          code: 'MCP_SERVER_UNAVAILABLE',
+          params: { server_id: 'blocked' },
+        })}
+      />
+    );
+    expect(screen.getByText("MCP server 'blocked': OUTBOUND_DISABLED")).toBeInTheDocument();
+    expect(screen.queryByRole('button')).not.toBeInTheDocument();
+  });
+});
+
+describe('live MCP warning replacement', () => {
+  afterEach(cleanup);
+  it('updates one visible card while retaining a different server warning', () => {
+    const notice = (server: string, reason: string) =>
+      transformMessage({
+        type: 'tips',
+        conversation_id: 'c',
+        msg_id: reason + server,
+        data: {
+          content: `${server}: ${reason}`,
+          severity: 'warning',
+          code: 'MCP_SERVER_UNAVAILABLE',
+          params: { server_id: server },
+          supersedes_key: `mcp-unavailable:${server}`,
+        },
+      } as unknown as IResponseMessage) as IMessageTips;
+    let list = composeMessage(notice('one', 'old reason'), []);
+    list = composeMessage(notice('two', 'other reason'), list);
+    list = composeMessage(notice('one', 'new reason'), list);
+    render(
+      <>
+        {list.map((item) => (
+          <MessageTips key={item.id} message={item as IMessageTips} />
+        ))}
+      </>
+    );
+    expect(screen.queryByText('one: old reason')).not.toBeInTheDocument();
+    expect(screen.getByText('one: new reason')).toBeInTheDocument();
+    expect(screen.getByText('two: other reason')).toBeInTheDocument();
   });
 });

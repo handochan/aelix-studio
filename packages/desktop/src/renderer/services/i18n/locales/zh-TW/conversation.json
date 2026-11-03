@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "無法確認訊息的執行結果",
         "body": "模型或工具可能已經執行。再次傳送前，請先檢查對話紀錄。"
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "工作階段使用中",
+        "body": "此工作階段已在其他位置開啟。請在鎖定解除後重新開啟。",
+        "bodyNative": "已在 CLI 或其他 Aelix 處理程序中開啟。請在該處理程序解除鎖定後重新開啟。",
+        "bodyAcp": "已在其他 Studio 視窗中開啟。請在該視窗解除鎖定後重新開啟。"
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "傳送後回合失敗",
+        "body": "模型或工具可能已執行。此回合不會自動重送。再次傳送前請檢查歷程記錄。"
+      },
+      "USER_AGENT_BUSY": {
+        "title": "代理程式忙碌中",
+        "body": "請等待目前回合結束，或取消後再繼續。"
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "操作遭拒",
+        "body": "代理程式拒絕了此操作。請檢查詳細資訊和設定後再繼續。",
+        "restrictionsUnenforceable": "無法執行要求的限制：{{methods}}。繼續前請檢查限制設定。",
+        "profileUnavailable": "設定檔無法使用：{{profile}}。請還原設定檔或開始新的工作階段。",
+        "extensionOwnedByLaunch": "此擴充功能由啟動設定管理：{{source}}。請在該設定中修改。",
+        "runtimeControlRequired": "此操作需要執行階段控制。請使用工作階段的執行階段控制項。",
+        "clientActionRequired": "此操作需要用戶端動作。請在 Studio 中完成要求的動作。"
       }
     }
   },

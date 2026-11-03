@@ -84,16 +84,40 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
           defaultValue: t('conversation.agentError.fallbackTitle'),
         })
       : t('conversation.agentError.fallbackTitle');
+    const errorData =
+      structuredError.data && typeof structuredError.data === 'object' && !Array.isArray(structuredError.data)
+        ? (structuredError.data as Record<string, unknown>)
+        : {};
+    const lockedBy = errorData.lockedBy;
+    const refusedKind = errorData.kind;
+    const bodyVariant =
+      errorCode === 'USER_AGENT_SESSION_LOCKED' && (lockedBy === 'native' || lockedBy === 'acp')
+        ? lockedBy === 'native'
+          ? 'bodyNative'
+          : 'bodyAcp'
+        : errorCode === 'USER_AGENT_OPERATION_REFUSED' &&
+            typeof refusedKind === 'string' &&
+            [
+              'restrictions_unenforceable',
+              'profile_unavailable',
+              'extension_owned_by_launch',
+              'runtime_control_required',
+              'client_action_required',
+            ].includes(refusedKind)
+          ? refusedKind.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase())
+          : structuredError.workspacePath
+            ? 'bodyWithPath'
+            : 'body';
     const body = errorCode
-      ? t(
-          structuredError.workspacePath
-            ? `conversation.agentError.codes.${errorCode}.bodyWithPath`
-            : `conversation.agentError.codes.${errorCode}.body`,
-          {
-            workspacePath: structuredError.workspacePath,
-            defaultValue: structuredError.message || content,
-          }
-        )
+      ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
+          workspacePath: structuredError.workspacePath,
+          methods: Array.isArray(errorData.methods)
+            ? errorData.methods.filter((item): item is string => typeof item === 'string').join(', ')
+            : '',
+          profile: typeof errorData.profile === 'string' ? errorData.profile : '',
+          source: typeof errorData.source === 'string' ? errorData.source : '',
+          defaultValue: structuredError.message || content,
+        })
       : structuredError.message || content;
     const ownershipLabel = ownership
       ? t(`conversation.agentError.ownership.${ownership}`, {
@@ -113,6 +137,7 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
       : null;
     const detailParts = [
       errorCode ? `${t('conversation.agentError.errorCode')}: ${errorCode}` : '',
+      structuredError.protocol_code !== undefined ? `ACP: ${structuredError.protocol_code}` : '',
       structuredError.detail || structuredError.message,
     ].filter(Boolean);
     const feedbackTags: Record<string, string> = {};
