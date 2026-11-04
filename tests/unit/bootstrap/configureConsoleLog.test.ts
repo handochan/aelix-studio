@@ -97,6 +97,13 @@ describe('configureConsoleLog', () => {
     expect(log.initialize).toHaveBeenCalledOnce();
   });
 
+  it('does not create a session while installing renderer logging', async () => {
+    const log = await loadConfigureConsoleLog(true);
+    const options = log.initialize.mock.calls[0][0] as { getSessions: () => object[] };
+    expect(options.getSessions()).toEqual([]);
+    expect(console.error).toBe(log.functions.error);
+  });
+
   it('keeps stdout console transport available during development', async () => {
     const log = await loadConfigureConsoleLog(false);
 
