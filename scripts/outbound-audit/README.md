@@ -4,7 +4,11 @@
 It traces the actual installed app, host, native, ACP and driver processes during
 the existing synthetic loopback session/permission/restart qualification. It uses
 no provider credentials. A separate 35-second production-default startup audit
-removes the E2E, CI and update-disable guards and uses fresh isolated user roots.
+removes the E2E/CI guards and uses fresh isolated user roots. Both audits seed
+`update.autoCheck: false` in the same `aionui-config.txt` used by the settings
+switch. No update-disable environment variable or address exemption is used. A
+separate default-on check cancels HTTP requests before egress, requires a Studio
+Releases request and verifies blocked networking produces no error dialog.
 It still runs after a session audit failure, provided installation succeeded. Installation is a preceding, separate `dpkg` step;
 network-free installer execution is not established by this runtime audit.
 

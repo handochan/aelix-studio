@@ -116,6 +116,7 @@ class CachedUpdateProvider extends Provider<UpdateInfo> {
 
 class AutoUpdaterService extends EventEmitter {
   private _isInitialized = false;
+  private _backgroundCheckInProgress = false;
   private _eventHandlersSetup = false;
   private _allowPrerelease = false;
   private _statusBroadcastCallback: StatusBroadcastCallback | null = null;
@@ -389,6 +390,7 @@ class AutoUpdaterService extends EventEmitter {
     }
 
     register('checking-for-update', () => {
+      if (this._backgroundCheckInProgress) return;
       log.info('Checking for updates...');
       this.resetNativeInstallReady();
       this.broadcastStatus({ status: 'checking' });
@@ -460,6 +462,10 @@ class AutoUpdaterService extends EventEmitter {
     });
 
     register('error', (error: Error) => {
+      if (this._backgroundCheckInProgress) {
+        log.info('[auto-update] Startup check unavailable', error.message);
+        return;
+      }
       if (this._ignoreActiveDownloadEvents) {
         log.debug('[auto-update] Ignoring error after cancellation');
         return;
@@ -961,11 +967,14 @@ class AutoUpdaterService extends EventEmitter {
    */
   async checkForUpdatesAndNotify(): Promise<void> {
     try {
+      this._backgroundCheckInProgress = true;
       // Ensure clean state: prevent stale allowDowngrade=true from prior setAllowPrerelease(true) calls
       autoUpdater.allowDowngrade = false;
-      await autoUpdater.checkForUpdatesAndNotify();
+      await autoUpdater.checkForUpdates();
     } catch (error) {
-      log.error('Auto-update check failed:', error);
+      log.info('Auto-update startup check unavailable:', error);
+    } finally {
+      this._backgroundCheckInProgress = false;
     }
   }
 }

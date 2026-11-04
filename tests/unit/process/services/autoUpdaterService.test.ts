@@ -342,6 +342,20 @@ describe('AutoUpdaterService', () => {
     await expect(download).resolves.toEqual({ success: true });
   });
 
+  it('suppresses startup network errors while preserving manual errors', async () => {
+    const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
+    const broadcast = vi.fn();
+    autoUpdaterService.initialize(broadcast);
+    autoUpdaterMock.checkForUpdates.mockImplementation(async () => {
+      autoUpdaterService.triggerEventForTest('error', new Error('Network blocked'));
+      throw new Error('Network blocked');
+    });
+    await expect(autoUpdaterService.checkForUpdatesAndNotify()).resolves.toBeUndefined();
+    expect(broadcast).not.toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }));
+    autoUpdaterService.triggerEventForTest('error', new Error('Manual request blocked'));
+    expect(broadcast).toHaveBeenCalledWith(expect.objectContaining({ status: 'error' }));
+  });
+
   it.each([true, false])('restores a local checksum-verified cache without GitHub, valid=%s', async (valid) => {
     const cache = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-offline-update-'));
     try {

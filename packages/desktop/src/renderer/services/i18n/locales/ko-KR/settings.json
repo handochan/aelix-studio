@@ -1451,5 +1451,8 @@
     "unauthenticated": "Native 인증을 관리하려면 이 WebUI 호스트에 로그인하세요.",
     "failed": "Native 작업이 실패했습니다 ({{code}}). 다시 시도하기 전에 native 상태를 새로고침하세요.",
     "manualCallback": "인증 코드 또는 리디렉션 URL을 붙여넣으세요."
-  }
+  },
+  "autoUpdateCheck": "시작할 때 업데이트 확인",
+  "autoUpdateCheckDescription": "Aelix Studio Releases를 확인하고 알립니다. 오프라인에서는 꺼 두세요.",
+  "autoUpdateSaveFailed": "업데이트 설정을 저장하지 못했습니다."
 }

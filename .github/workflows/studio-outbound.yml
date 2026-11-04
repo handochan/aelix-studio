@@ -90,6 +90,11 @@ jobs:
           PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
         run: |
           xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/default-startup.json -- node scripts/outbound-audit/startup.mjs .local/outbound/startup-qualification.json
+      - name: Qualify default-on Studio update checks with blocked network
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: xvfb-run -a node scripts/outbound-audit/startupUpdates.mjs .local/outbound/default-updates.json
       - name: Preserve all audit results, including failures
         if: always()
         uses: actions/upload-artifact@v4

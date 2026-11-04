@@ -1449,5 +1449,8 @@
     "unauthenticated": "Yerel kimlik bilgilerini yönetmek için bu WebUI sunucusuna giriş yapın.",
     "failed": "Yerel işlem başarısız ({{code}}). Yeniden denemeden önce yerel durumu yenileyin.",
     "manualCallback": "Yetkilendirme kodunu veya yönlendirme URL’sini yapıştırın."
-  }
+  },
+  "autoUpdateCheck": "Başlangıçta güncellemeleri denetle",
+  "autoUpdateCheckDescription": "Aelix Studio Releases denetlenir ve bildirilir. Çevrimdışı kullanımda kapatın.",
+  "autoUpdateSaveFailed": "Güncelleme tercihi kaydedilemedi."
 }

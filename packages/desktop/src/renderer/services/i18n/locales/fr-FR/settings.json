@@ -1449,5 +1449,8 @@
     "unauthenticated": "Connectez-vous à cet hôte WebUI pour gérer les identifiants natifs.",
     "failed": "Échec de l’opération native ({{code}}). Actualisez l’état natif avant de réessayer.",
     "manualCallback": "Collez le code d’autorisation ou l’URL de redirection."
-  }
+  },
+  "autoUpdateCheck": "Vérifier les mises à jour au démarrage",
+  "autoUpdateCheckDescription": "Consulte Aelix Studio Releases et vous avertit. Désactivez pour une utilisation hors ligne.",
+  "autoUpdateSaveFailed": "Impossible d’enregistrer le choix des mises à jour."
 }

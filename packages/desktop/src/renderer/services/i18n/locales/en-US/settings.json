@@ -1449,5 +1449,8 @@
     "unauthenticated": "Sign in to this WebUI host before managing native credentials.",
     "failed": "Native operation failed ({{code}}). Refresh native status before trying again.",
     "manualCallback": "Paste the authorization code or redirect URL."
-  }
+  },
+  "autoUpdateCheck": "Check for updates at startup",
+  "autoUpdateCheckDescription": "Check Aelix Studio Releases and notify you. Turn off for offline use.",
+  "autoUpdateSaveFailed": "Could not save the update preference."
 }

@@ -1449,5 +1449,8 @@
     "unauthenticated": "Melden Sie sich an diesem WebUI-Host an, um native Zugangsdaten zu verwalten.",
     "failed": "Nativer Vorgang fehlgeschlagen ({{code}}). Aktualisieren Sie vor einem erneuten Versuch den nativen Status.",
     "manualCallback": "Autorisierungscode oder Weiterleitungs-URL einfügen."
-  }
+  },
+  "autoUpdateCheck": "Beim Start nach Updates suchen",
+  "autoUpdateCheckDescription": "Prüft Aelix Studio Releases und benachrichtigt Sie. Für Offline-Nutzung ausschalten.",
+  "autoUpdateSaveFailed": "Die Update-Einstellung konnte nicht gespeichert werden."
 }

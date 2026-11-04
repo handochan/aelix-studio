@@ -1449,5 +1449,8 @@
     "unauthenticated": "Inicia sesión en este host WebUI para gestionar credenciales nativas.",
     "failed": "Falló la operación nativa ({{code}}). Actualiza el estado nativo antes de volver a intentarlo.",
     "manualCallback": "Pega el código de autorización o la URL de redirección."
-  }
+  },
+  "autoUpdateCheck": "Buscar actualizaciones al iniciar",
+  "autoUpdateCheckDescription": "Consulta Aelix Studio Releases y le avisa. Desactive para uso sin conexión.",
+  "autoUpdateSaveFailed": "No se pudo guardar la preferencia de actualización."
 }

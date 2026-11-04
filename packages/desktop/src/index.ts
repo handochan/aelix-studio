@@ -539,7 +539,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   registerWindowMaximizeListeners(mainWindow);
   attachWindowBoundsPersistence(mainWindow, (bounds) => ProcessConfig.set('window.bounds', bounds));
 
-  // Initialize manual update handling without starting a background request.
+  // Initialize updates; the persisted preference is checked again at the startup delay.
   Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
     .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
       initializeDesktopUpdates(autoUpdaterService, {
@@ -547,7 +547,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         beforeQuit: async () => {
           await backendManager.stop();
         },
-        env: process.env,
+        readAutoCheck: async () => (await ProcessConfig.get('update.autoCheck')) !== false,
         discontinued: Boolean(process.env.IS_DISCONTINUED_BUILD),
       });
     })

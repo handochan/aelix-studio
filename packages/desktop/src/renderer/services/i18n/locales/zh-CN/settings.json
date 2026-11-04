@@ -1450,5 +1450,8 @@
     "unauthenticated": "管理原生凭据前，请登录此 WebUI 主机。",
     "failed": "原生操作失败（{{code}}）。请在重试前刷新原生状态。",
     "manualCallback": "粘贴授权码或重定向 URL。"
-  }
+  },
+  "autoUpdateCheck": "启动时检查更新",
+  "autoUpdateCheckDescription": "检查 Aelix Studio Releases 并通知您。离线使用时可关闭。",
+  "autoUpdateSaveFailed": "无法保存更新设置。"
 }

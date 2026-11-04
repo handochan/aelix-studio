@@ -43,6 +43,12 @@ async function main() {
   ]) {
     fs.mkdirSync(environment[key], { recursive: true });
   }
+  const config = path.join(environment.XDG_CONFIG_HOME, 'AionUi/config/aionui-config.txt');
+  fs.mkdirSync(path.dirname(config), { recursive: true });
+  fs.writeFileSync(
+    config,
+    Buffer.from(encodeURIComponent(JSON.stringify({ 'update.autoCheck': false }))).toString('base64')
+  );
   const report = {
     schema: 'aelix-studio.default-startup/1',
     status: 'failed',

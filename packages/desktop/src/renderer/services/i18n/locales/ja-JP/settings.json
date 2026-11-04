@@ -1451,5 +1451,8 @@
     "unauthenticated": "ネイティブ認証を管理するには、この WebUI ホストにログインしてください。",
     "failed": "ネイティブ操作に失敗しました（{{code}}）。再試行前にネイティブ状態を更新してください。",
     "manualCallback": "認証コードまたはリダイレクト URL を貼り付けてください。"
-  }
+  },
+  "autoUpdateCheck": "起動時に更新を確認",
+  "autoUpdateCheckDescription": "Aelix Studio Releases を確認して通知します。オフラインでは無効にしてください。",
+  "autoUpdateSaveFailed": "更新設定を保存できませんでした。"
 }

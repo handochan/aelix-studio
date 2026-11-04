@@ -1,4 +1,4 @@
-/** Studio updates are user initiated and use only the Studio release repository. */
+/** Studio updates are automatic or user initiated and use only the Studio release repository. */
 import type { GithubOptions } from 'builder-util-runtime';
 import type { BeforeQuitAndInstallCallback, StatusBroadcastCallback } from './autoUpdaterService';
 
@@ -8,16 +8,9 @@ export function buildStudioFeedOptions(): GithubOptions {
   return { provider: 'github', owner: 'handochan', repo: 'aelix-studio' };
 }
 
-/** Automatic checks require explicit operator opt-in; legacy disable guards still win. */
-export function startupUpdateEnabled(env: NodeJS.ProcessEnv): boolean {
-  return (
-    env.AELIX_STUDIO_AUTO_UPDATE === '1' &&
-    env.AIONUI_DISABLE_AUTO_UPDATE !== '1' &&
-    env.AIONUI_E2E_TEST !== '1' &&
-    env.CI !== 'true' &&
-    env.CI !== '1' &&
-    env.GITHUB_ACTIONS !== 'true'
-  );
+/** Default on; the persisted desktop setting is the sole automatic-check preference. */
+export function startupUpdateEnabled(value: unknown): boolean {
+  return value !== false;
 }
 
 type UpdateLifecycle = {
@@ -32,7 +25,7 @@ export function initializeDesktopUpdates(
   options: {
     broadcast: StatusBroadcastCallback;
     beforeQuit: BeforeQuitAndInstallCallback;
-    env: NodeJS.ProcessEnv;
+    readAutoCheck: () => Promise<boolean>;
     discontinued: boolean;
   },
   schedule: (callback: () => void, delay: number) => void = (callback, delay) => {
@@ -41,9 +34,16 @@ export function initializeDesktopUpdates(
 ): void {
   updater.initialize(options.broadcast);
   updater.setBeforeQuitAndInstall(options.beforeQuit);
-  if (startupUpdateEnabled(options.env) && !options.discontinued) {
+  if (!options.discontinued) {
     schedule(() => {
-      void updater.checkForUpdatesAndNotify();
+      void options
+        .readAutoCheck()
+        .then((enabled) => {
+          if (startupUpdateEnabled(enabled)) return updater.checkForUpdatesAndNotify();
+        })
+        .catch(() => {
+          /* An unreadable setting must not produce an error window. */
+        });
     }, 3000);
   }
 }
