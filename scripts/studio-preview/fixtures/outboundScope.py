@@ -98,6 +98,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
 
     def record(pid, line, started):
         item = state(pid)
+        # Joining an unfinished entry can introduce whitespace immediately
+        # after '('; it is lexical whitespace, not an unknown destination.
+        line = re.sub(r'^(\w+\()\s+', r'\1', line)
         udp_records.append((pid, line, started))
         if line.startswith('+++'):
             if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):

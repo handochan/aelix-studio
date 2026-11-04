@@ -45,11 +45,15 @@ def analyze(records, ring_evidence, tgid):
                 sock = current[int(attempted[2])][0]; sock['written'] = True
                 writes.append((pid, sequence, attempted[1], sock))
             continue  # Common parser owns incomplete/unknown records.
-        call, args, result = match[1], match[2], int(match[3])
+        call, args, result = match[1], match[2].strip(), int(match[3])
         first = re.match(r'(-?\d+)(?:<[^>]*>)?', args)
         fd = int(first[1]) if first else None
         if call == 'socket' and result >= 0:
-            if re.fullmatch(r'AF_INET6?,\s*SOCK_DGRAM(?:\|SOCK_\w+)*,\s*(?:IPPROTO_UDP|IPPROTO_IP|0)', args):
+            fields = [value.strip() for value in args.split(',')]
+            flags = {value.strip() for value in fields[1].split('|')} if len(fields) == 3 else set()
+            if (len(fields) == 3 and fields[0] in {'AF_INET','AF_INET6'}
+                    and 'SOCK_DGRAM' in flags and flags <= {'SOCK_DGRAM','SOCK_CLOEXEC','SOCK_NONBLOCK'}
+                    and fields[2] in {'IPPROTO_UDP','IPPROTO_IP','0'}):
                 if result in current:
                     current[result][0]['invalid'] = True
                     issue(pid, 'udp_fd_reused_without_close')

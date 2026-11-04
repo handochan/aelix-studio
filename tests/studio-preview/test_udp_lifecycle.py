@@ -113,6 +113,16 @@ class UdpLifecycleTests(unittest.TestCase):
         self.assertGreater(report['classificationErrors'],0)
         self.assertEqual(report['udpConnectOnly'],0)
 
+    def test_resumed_socket_and_write_argument_spacing_retains_udp_identity(self):
+        lines=['1<app> socket( <unfinished ...>',
+               '1<app> <... socket resumed>AF_INET6, SOCK_DGRAM| SOCK_CLOEXEC, IPPROTO_IP ) = 3<UDPv6:[123]>',CONNECT,
+               '1<app> write( <unfinished ...>',
+               '1<app> <... write resumed>3<UDPv6:[123]>, ""..., 7) = -1 ENOTCONN',CLOSE,END]
+        report=self.parse(lines)
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(2,0,0))
+        report=self.parse(lines[:3]+[CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
+
     def test_tcp_connect_remains_an_attempt_even_without_data(self):
         report=self.parse([CONNECT.replace('UDPv6','TCPv6'),END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
