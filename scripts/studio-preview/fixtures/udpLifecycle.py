@@ -38,7 +38,7 @@ def analyze(records, ring_evidence, tgid):
                         sock['invalid'] = True; issue(pid, 'udp_association_open_at_exit')
             tables.pop(pid, None)
             continue
-        match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
+        match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line)
         if not match:
             attempted = re.match(r'^(\w+)\((\d+)(?:<[^>]*>)?', line)
             if attempted and attempted[1] in WRITES and int(attempted[2]) in current:
@@ -50,7 +50,9 @@ def analyze(records, ring_evidence, tgid):
         fd = int(first[1]) if first else None
         if call == 'socket' and result >= 0:
             if re.fullmatch(r'AF_INET6?,\s*SOCK_DGRAM(?:\|SOCK_\w+)*,\s*(?:IPPROTO_UDP|IPPROTO_IP|0)', args):
-                if result in current: issue(pid, 'udp_fd_reused_without_close')
+                if result in current:
+                    current[result][0]['invalid'] = True
+                    issue(pid, 'udp_fd_reused_without_close')
                 sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets)}
                 sockets.append(sock); current[result] = (sock, 'SOCK_CLOEXEC' in args)
         elif call in ('clone', 'clone3', 'fork', 'vfork') and result > 0:
@@ -80,6 +82,9 @@ def analyze(records, ring_evidence, tgid):
                 source = current.get(fd)
                 # dup2(fd, fd) is a no-op, including its CLOEXEC flag.
                 if call == 'dup2' and fd == result: continue
+                if result in current and call not in ('dup2','dup3'):
+                    current[result][0]['invalid'] = True
+                    issue(pid,'udp_fd_reused_without_close')
                 remove(pid, result)
                 if source: current[result] = (source[0], 'CLOEXEC' in args)
         elif call == 'fcntl' and result == 0 and 'F_SETFD' in args and fd in current:

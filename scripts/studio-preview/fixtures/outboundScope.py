@@ -112,7 +112,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 classification_issue('unknown_record', pid)
             return
         call = match[1]
-        if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\s.*)?$', line):
+        if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):
             item['unparsed'] += 1
         if call in UDP_META: return
         if call in FD_META:
@@ -229,7 +229,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         # unselected parent. Decode the peer at send time; its connect need not
         # have happened inside the selected tree. -yy provides kernel FD peers.
         null_count = (1 if call in ('send', 'write', 'writev') and re.match(r'\w+\(\d+<(?:TCP|UDP)(?:v6)?:\[[^>]*->', line) else
-                      1 if call == 'sendto' and re.search(r', NULL, 0\)\s+=', line) else
+                      1 if call == 'sendto' and re.search(r', NULL, 0\s*\)\s+=', line) else
                       len(re.findall(r'msg_name=NULL', line)) if call in ('sendmsg', 'sendmmsg') else 0)
         if not destinations and not any(family in line for family in ('AF_UNIX', 'AF_NETLINK', 'AF_UNSPEC')):
             if call == 'connect' or call in ('send', 'sendto', 'sendmsg', 'sendmmsg') and not null_count:

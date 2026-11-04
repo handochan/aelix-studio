@@ -97,6 +97,22 @@ class UdpLifecycleTests(unittest.TestCase):
                            '2<thread> +++ exited with 0 +++',CLOSE,END])
         self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
 
+    def test_resumed_null_destination_whitespace_and_deleted_fd_annotation_are_complete(self):
+        report=self.parse(['1<app> sendto(3<TCP:[127.0.0.1:1234->127.0.0.1:4321]>, ""..., 7, MSG_NOSIGNAL, NULL, 0 <unfinished ...>',
+                           '1<app> <... sendto resumed>) = 7',
+                           '1<app> dup(4</tmp/old>(deleted) ) = 5</tmp/old>(deleted)',END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['destinationAttempts']),(0,0,1))
+
+    def test_non_closing_dup_cannot_hide_a_missing_udp_close(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> dup(4</tmp/local>) = 3</tmp/local>',END])
+        self.assertIn('udp_fd_reused_without_close',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_impossible_socket_fd_reuse_is_not_a_proven_closed_association(self):
+        report=self.parse([SOCKET,CONNECT,SOCKET,CLOSE,END])
+        self.assertGreater(report['classificationErrors'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
     def test_tcp_connect_remains_an_attempt_even_without_data(self):
         report=self.parse([CONNECT.replace('UDPv6','TCPv6'),END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
