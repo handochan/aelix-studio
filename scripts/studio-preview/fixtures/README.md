@@ -163,9 +163,10 @@ register-pointer path and the common P/N/socket correlation rules are unchanged.
 
 It also attaches all enter/exit tracepoints for `connect`,
 `sendto`, `sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`, plus
-required concrete kprobes `__sys_connect_file`, `kernel_connect`,
+required concrete kprobes `kernel_connect`,
 `sock_write_iter`, `sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`,
-`udp_sendmsg`, `udpv6_sendmsg`, `inet_sendmsg` and `inet6_sendmsg`.
+`udp_sendmsg`, `udpv6_sendmsg`, `inet_sendmsg`, `inet6_sendmsg`,
+`__ip4_datagram_connect` and `__ip6_datagram_connect`.
 Attachment/fields/BTF/privilege failures are fatal. These work jointly with P/N
 and the io_uring opcode policy: direct attempts remain recorded even when LSM
 denies execution; normal/async socket WRITEV goes through `sock_write_iter`;
@@ -182,13 +183,19 @@ and [message dispatch](https://github.com/torvalds/linux/blob/v6.8/net/socket.c#
 reach the socket security/protocol layer; [io_uring send](https://github.com/torvalds/linux/blob/v6.8/io_uring/net.c#L414)
 also reaches it. The protocol probes provide an additional independent check. See the concrete
 [VFS socket write](https://github.com/torvalds/linux/blob/v7.0/net/socket.c#L1175-L1195),
-[file connect](https://github.com/torvalds/linux/blob/v7.0/net/socket.c#L2072), and
 [IP send dispatch](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/af_inet.c#L858) paths.
-The file-connect probe never casts an arbitrary file's `private_data`: it reads
-the copied request's `ss_family` using the validated BTF storage type/length.
-AF_UNSPEC=0 is valid only for that request-family hook and a corresponding
-known P/N CONNECT. Other hooks observe socket families through their typed
-callback/protocol contracts. Unsupported families and IP socket operations
+Direct CONNECT attempts are accounted for by P/N even when LSM or address
+validation prevents protocol execution. TCP protocol hooks and internal IPv4/IPv6
+datagram connect functions observe execution; `kernel_connect` observes kernel
+helpers. The internal datagram hooks include Linux 7's UDP wrappers, which
+bypass the public `ip4_datagram_connect`/`ip6_datagram_connect` wrappers
+([IPv4](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/udp.c#L2196-L2202),
+[IPv6](https://github.com/torvalds/linux/blob/v7.0/net/ipv6/udp.c#L1307-L1313)).
+AF_UNSPEC disconnect exits the generic datagram dispatcher without starting
+protocol connect or transmitting payload; its known P/N invocation remains
+recorded. No request-family or arbitrary file-private-data adapter is used.
+Families come from the actual socket's `sk.__sk_common.skc_family`, including
+the typed VFS write callback. Zero/unsupported families and IP operations
 without a decoded or FD-lifecycle-derived destination fail classification.
 LSM permission checks are not used as operation identity. Supplemental kallsyms
 same-address alias groups can diagnose optimized permission wrappers; they

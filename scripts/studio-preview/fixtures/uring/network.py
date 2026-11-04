@@ -9,9 +9,10 @@ import re
 import platform
 
 CALLS = ('connect', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4')
-SOCKET_ARGUMENTS = {'__sys_connect_file':'file','kernel_connect':'socket','sock_write_iter':'kiocb',
+SOCKET_ARGUMENTS = {'kernel_connect':'socket','sock_write_iter':'kiocb',
                     'sock_sendmsg':'socket','tcp_v4_connect':'sock','tcp_v6_connect':'sock',
-                    'udp_sendmsg':'sock','udpv6_sendmsg':'sock','inet_sendmsg':'socket','inet6_sendmsg':'socket'}
+                    'udp_sendmsg':'sock','udpv6_sendmsg':'sock','inet_sendmsg':'socket','inet6_sendmsg':'socket',
+                    '__ip4_datagram_connect':'sock','__ip6_datagram_connect':'sock'}
 SOCKET_HOOKS = tuple(SOCKET_ARGUMENTS)
 HOOKS = (*SOCKET_HOOKS, 'create_io_thread')
 
@@ -64,11 +65,9 @@ def requirements(root):
     return formats
 
 
-def program(normalize, pre_entry=None, connect_address_type='sockaddr_storage'):
+def program(normalize, pre_entry=None):
     """Record metadata only: task IDs, call, FD, return value and socket family."""
     architecture = platform.machine()
-    if connect_address_type not in ('sockaddr_storage','__kernel_sockaddr_storage'):
-        raise RuntimeError('kernel_connect_address_type_unsupported')
     # Native ABI only. Compatibility syscall multiplexers must not bypass the
     # named probes. Constants are kernel v6.8 arch/*/include/asm/thread_info.h:
     # x86 TS_COMPAT/TIF_ADDR32 and arm64 TIF_32BIT. Unknown architectures fail.
@@ -130,13 +129,10 @@ NORMALIZE
     for number, hook in enumerate(SOCKET_HOOKS, 1):
         kind=SOCKET_ARGUMENTS[hook]
         if kind=='sock':family='$emit=1; $sk=(struct sock*)arg0; $family=$sk->__sk_common.skc_family;'
-        elif kind=='socket':family='$emit=1; $sock=(struct socket*)arg0; $family=$sock->ops->family;'
-        elif kind=='file':family='''$emit=1; $family=-1; $address=(struct ADDRESS_TYPE*)arg1;
-  if ((int32)arg2>=(int32)sizeof($address->ss_family)) { $family=$address->ss_family; }
-'''.replace('ADDRESS_TYPE',connect_address_type)
+        elif kind=='socket':family='$emit=1; $sock=(struct socket*)arg0; $family=$sock->sk->__sk_common.skc_family;'
         else:
             family='''$emit=1; $iocb=(struct kiocb*)arg0; $file=$iocb->ki_filp;
-  $sock=(struct socket*)$file->private_data; $family=$sock->ops->family;
+  $sock=(struct socket*)$file->private_data; $family=$sock->sk->__sk_common.skc_family;
 '''
         source += '''
 kprobe:HOOK /@tracked[tid]/ {
@@ -149,8 +145,7 @@ NORMALIZE
   }
 }
 '''.replace('HOOK', hook).replace('FAMILY', family).replace('NUMBER', str(number)).replace(
-        'LAYOUT_CHECK','if ($family<0) { @socket_layout_error=count(); }' if kind=='file' else
-        'if ($family==0) { @socket_layout_error=count(); }')
+        'LAYOUT_CHECK','if ($family==0) { @socket_layout_error=count(); }')
     return source.replace('NORMALIZE', normalize).replace('/@tracked[tid]', '/tid != @audit_root_tid && @tracked[tid]')
 
 
@@ -262,10 +257,9 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 error('kernel_network_return_unmatched', pid)
             returns[key] = event
         else:
-            request_family=1<=event['value']<=len(SOCKET_HOOKS) and SOCKET_HOOKS[event['value']-1]=='__sys_connect_file'
-            if not 1 <= event['value'] <= len(SOCKET_HOOKS) or event['result']<0 or event['result']==0 and not request_family:
+            if not 1 <= event['value'] <= len(SOCKET_HOOKS) or event['result']<=0:
                 error('kernel_socket_probe_invalid', pid)
-            elif event['result'] not in (0,1,2,10,16):error('kernel_socket_family_unsupported',pid)
+            elif event['result'] not in (1,2,10,16):error('kernel_socket_family_unsupported',pid)
             hooks.append(event)
     decoded = defaultdict(deque)
     for pid, line, sequence in sorted(records,key=lambda item:item[2]):
@@ -312,9 +306,8 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
     for event in hooks:
         key = (event['pid'], event['ordinal']); entry = calls.get(key)
         returned=returns.get(key)
-        file_connect=1<=event['value']<=len(SOCKET_HOOKS) and SOCKET_HOOKS[event['value']-1]=='__sys_connect_file'
         if (key in matched and entry and returned and entry['call'] == event['call'] and
-                entry['time'] <= event['time'] <= returned['time'] and (not file_connect or entry['call']==1)):
+                entry['time'] <= event['time'] <= returned['time']):
             if (event['result'] in (2,10) and known_destinations is not None and
                     (event['pid'],matched_sequences.get(key)) not in known_destinations):
                 error('kernel_socket_destination_unparsed',event['pid'])
@@ -331,7 +324,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
         attributed = event['pid'] if event['pid'] in states else next(iter(owners)) if len(owners)==1 else None
         error('kernel_socket_operation_strace_missing', attributed,
               hook=SOCKET_HOOKS[event['value']-1] if 1<=event['value']<=len(SOCKET_HOOKS) else 'invalid',
-              familySource='request' if file_connect else 'socket',
+              familySource='socket',
               ordinal=event['ordinal'],kernelCall=event['call'],family=event['result'],
               time=event['time'],entryTime=entry['time'] if entry else None,
               returnTime=returned['time'] if returned else None)

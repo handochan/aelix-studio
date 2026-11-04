@@ -2,7 +2,7 @@
 from uring.network import program as network_program
 
 
-def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None, connect_address_type='sockaddr_storage'):
+def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None):
     normalize='''
   $t=(struct task_struct*)curtask;
   $level=$t->thread_pid->level;
@@ -124,6 +124,6 @@ END {
   clear(@io_birth);
 }
 '''
-    source += network_program(normalize,pre_entry,connect_address_type)
+    source += network_program(normalize,pre_entry)
     return source.replace('NORMALIZE',normalize).replace('OFFSET',str(numbers_offset)).replace(
         'NAMESPACE',str(namespace_inode)).replace('ROOT_PID',str(root_pid)).replace('SUBMIT /',submit+' /')

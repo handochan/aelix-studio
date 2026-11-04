@@ -480,8 +480,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     'kernelBtfSha256': kernel_capture.get('kernelBtfSha256'),
                     'socketSymbols': kernel_capture.get('socketSymbols'),
                     'socketSignatureSha256': kernel_capture.get('socketSignatureSha256'),
-                    'socketFamilySource': {'__sys_connect_file':'request','otherSocketProbes':'socket'},
-                    'socketConnectAddressType': kernel_capture.get('socketConnectAddressType'),
+                    'socketFamilySource': 'socket',
+                    'socketFamilyField': 'socket.sk.__sk_common.skc_family',
                     'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
                     'socketProbes': kernel_capture.get('socketProbes', [])}
                     if network_evidence is not None else {'recorded': False}),

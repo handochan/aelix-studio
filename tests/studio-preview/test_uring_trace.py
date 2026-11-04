@@ -219,6 +219,7 @@ class PreEntrySelectionTests(unittest.TestCase):
                 with self.assertRaisesRegex(RuntimeError,'signature_mismatch'):entry.btf_signature('ptrace_notify',path)
 
 
+
 class KernelNetworkCorrelationTests(unittest.TestCase):
     def fixture(self):
         return {'complete':True,'lostEvents':0,'pidNamespaceVerified':True,
@@ -324,13 +325,12 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
             result=self.run_policy(capture,[(10,'connect(3, {}) = 0',1)])
             self.assertTrue(result['issues']);self.assertEqual(result['resolved'],[])
 
-    def test_unspec_is_only_valid_for_a_known_connect_request_and_ip_peers_must_parse(self):
-        for hook,call in ((1,1),(2,1),(1,5)):
+    def test_socket_family_zero_is_never_proof_and_ip_destinations_must_parse(self):
+        for hook in range(1,len(network.SOCKET_HOOKS)+1):
             capture=self.fixture()
-            self.add(capture,self.event(call=call),self.event('X',call=call,time=4),
-                     self.event('H',call=call,value=hook,result=0,time=3))
-            result=self.run_policy(capture,[(10,network.CALLS[call-1]+'(3, {}) = 0',1)])
-            self.assertEqual(bool(result['issues']),not(hook==1 and call==1))
+            self.add(capture,self.event(),self.event('X',time=4),
+                     self.event('H',value=hook,result=0,time=3))
+            self.assertTrue(self.run_policy(capture,[(10,'connect(3, {}) = 0',1)])['issues'])
         capture=self.fixture()
         self.add(capture,self.event(),self.event('X',time=4),self.event('H',value=1,result=2,time=3))
         for peers,failed in ((set(),True),({(10,1)},False)):

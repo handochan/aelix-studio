@@ -13,7 +13,7 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from uring.probe import event_formats,event_fields,pid_numbers_offset
 from uring.program import program
-from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_ARGUMENTS, symbol_evidence
+from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, symbol_evidence
 from uring.entry import select as select_entry, btf_signature
 
 
@@ -86,6 +86,11 @@ def parse(raw,stderr,returncode,namespace_inode):
     output=raw+'\n'+stderr
     lost=sum(int(value) for value in re.findall(r'(?:lost|dropped)\s+(\d+)',output,re.I))
     if not lost and re.search(r'\blost\b|\bdropped\b',output,re.I):lost=1
+    if counts.get('socket_layout_error',0):
+        invalid.extend([{'reason':'kernel_socket_metadata_invalid','pid':event['pid'],
+            'hook':SOCKET_HOOKS[event['value']-1],'family':event['result'],'kernelCall':event['call']}
+            for event in network if event['kind']=='H' and 1<=event['value']<=len(SOCKET_HOOKS) and
+            event['result']<=0][:16])
     complete=(returncode==0 and ready and done and counts.get('root',0)==1 and len(roots)==1 and not invalid
               and not stderr.strip() and not lost and all(counts.get(k,0)==v for k,v in expected.items())
               and counts.get('state',0)==len(states) and bool(states)
@@ -130,10 +135,6 @@ def broker(directory,root_pid,namespace_inode):
         worker_signature=json.dumps(btf_signature('create_io_thread'),sort_keys=True)
         socket_signatures={name:btf_signature(name,first_parameter='ptr:struct:'+kind)
                            for name,kind in SOCKET_ARGUMENTS.items()}
-        address_parameters=socket_signatures['__sys_connect_file']['parameters']
-        if (len(address_parameters)<3 or address_parameters[1] not in
-                ('ptr:struct:sockaddr_storage','ptr:struct:__kernel_sockaddr_storage') or address_parameters[2]!='s32'):
-            raise RuntimeError('kernel_connect_address_signature_mismatch')
         symbols=symbol_evidence()
         failed=tracefs/'events/io_uring/io_uring_req_failed/format'
         if not failed.is_file() or not {'ctx','opcode'}<=event_fields(failed.read_text()):
@@ -142,8 +143,7 @@ def broker(directory,root_pid,namespace_inode):
         if not completion.is_file() or not {'ctx','req'}<=event_fields(completion.read_text()):
             raise RuntimeError('io_uring_completion_tracepoint_missing')
         offset=pid_numbers_offset()
-        connect_address_type=address_parameters[1].removeprefix('ptr:struct:')
-        text=program(root_pid,namespace_inode,offset,submit,pre_entry,connect_address_type)
+        text=program(root_pid,namespace_inode,offset,submit,pre_entry)
         metadata={'tool':'bpftrace','toolVersion':subprocess.check_output(['bpftrace','--version'],text=True).strip(),
                   'kernel':os.uname().release,'tracepoints':[*formats,'io_uring_req_failed','io_uring_complete'],
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
@@ -153,7 +153,6 @@ def broker(directory,root_pid,namespace_inode):
                   'kernelBtfSha256':hashlib.sha256(Path('/sys/kernel/btf/vmlinux').read_bytes()).hexdigest(),
                   'socketSymbols':symbols,'socketSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
                                                                   for name,value in socket_signatures.items()},
-                  'socketConnectAddressType':connect_address_type,
                   'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
                   'workerSignatureSha256':hashlib.sha256(worker_signature.encode()).hexdigest()}
         source=directory/'capture.bt';source.write_text(text)

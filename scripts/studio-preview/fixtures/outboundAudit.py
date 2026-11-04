@@ -150,7 +150,8 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         paths = [trace] if trace.exists() else []
         if not evidence.get('complete'):
             print('Kernel capture incomplete: '+json.dumps({key:evidence.get(key) for key in
-                  ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode')}),file=sys.stderr)
+                  ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode',
+                   'preEntryProbe','socketSymbols')}),file=sys.stderr)
         report, whole = analyze_processes(paths, scope_executables, require_executables, True,evidence)
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                for name in ('outboundAudit.py', 'outboundScope.py', 'udpLifecycle.py')}
