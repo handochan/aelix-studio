@@ -154,8 +154,9 @@ be rejected (exit 87, exactly one forbidden opcode), while existing socket and
 host-child controls retain exit 86. All control runs are separate from functional
 zero-attempt sessions. No runtime, Node, host pin or runtime override is changed.
 
-Whole-app results, including Electron/Chromium traffic and unsupported APIs, remain
-report-only artifacts for Studio #15. No Chromium networking flags are changed.
+Within these scoped host/native sessions, the separate whole-command report
+remains diagnostic. Studio #15 separately enforces the whole installed app with
+this same auditor and no executable-root selection.
 
 `strace -f --decode-pids=comm,pidns -yy -s 0` follows processes/threads and records only network and
 fork/exec, accepted-peer and ring descriptor metadata. With default abbreviation, exec records expose the executable
