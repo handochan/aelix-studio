@@ -47,6 +47,18 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 
 class ScopedParserTests(unittest.TestCase):
+    def test_unparsed_kind_diagnostics_preserve_failures_without_trace_content(self):
+        cases=[('close(7</private/SECRET_TRACE_PATH> <unfinished ...>', 'pending_at_end:close'),
+               ('fcntl(7, F_GETFL) = ?', 'result:fcntl'),
+               ('write(7<socket:[123]>, ..., 8) = 8','socket_peer:write')]
+        for line,kind in cases:
+            with self.subTest(kind=kind):
+                scoped,_=self.parse(self.base()+['2<host> '+line,'2<host> +++ exited with 0 +++',
+                                                  '1<app> +++ exited with 0 +++'],lifecycle=True)
+                task=next(item for item in scoped['processes'] if item['pid']==2)
+                self.assertEqual(task['unparsedRecordKinds'],{kind:1})
+                self.assertEqual(scoped['unparsedRecords'],1)
+                self.assertNotIn('SECRET_TRACE_PATH',json.dumps(scoped))
     def test_kernel_corroboration_discharges_only_exact_terminal_register_holes(self):
         capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,
                  'eventCount':0,'events':[],'network':{'complete':True,'eventCount':0,'events':[],
@@ -101,6 +113,7 @@ class ScopedParserTests(unittest.TestCase):
                 _,whole=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
                 self.assertEqual(whole['unparsedRecords'],0)
                 self.assertEqual(whole['kernelResolvedResultFields'],1)
+                self.assertFalse(any(task['unparsedRecordKinds'] for task in whole['processes']))
                 _,strict=audit.analyze_processes([trace],require_lifecycle=True)
                 self.assertGreater(strict['unparsedRecords'],0)
 

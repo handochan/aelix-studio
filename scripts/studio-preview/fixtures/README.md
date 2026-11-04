@@ -291,6 +291,10 @@ never recovered by this rule. Overlapping raw syscall states remain failed and
 include bounded numeric old/new syscall metadata for diagnosis.
 Every other unknown strace record remains fatal. App and host/native reports
 use this one implementation and the same `sourceSha256` policy inventory.
+Each task's residual `unparsedRecordKinds` records fixed reason codes and
+allowlisted syscall names with counts. It contains no trace text, FD annotation,
+path, argv or buffer. Independent register/result proofs remove their own keyed
+counts; this diagnostic never exempts or resolves a record by itself.
 Synthetic controls exercise hidden network activity, no network execution,
 seccomp ambiguity, loss, missing identity/range/return, and missing attachments;
 actual installed-app shutdown races provide additional real-trace coverage

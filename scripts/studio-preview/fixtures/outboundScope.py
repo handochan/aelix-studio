@@ -68,17 +68,24 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     terminal_stops = {}
     terminal_at, terminal_shapes = {}, {}
     register_holes, hole_resumes = {}, set()
-    result_holes = set()
+    result_holes = {}
     invalid_terminal_stops = set()
 
     def state(pid, name=None):
         if pid not in states:
             states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False,
-                           'io_uring': [], 'external_accepts':0}
+                           'io_uring': [], 'external_accepts':0,'unparsed_kinds':{}}
             observed_order.append(pid)
         if name and re.fullmatch(r'[A-Za-z0-9_.+ -]{1,64}', name):
             states[pid]['process'] = name
         return states[pid]
+
+    def unparsed(pid, kind, count=1, call=None):
+        item=state(pid)
+        key=kind+(':'+call if call in NETWORK | FD_META | UDP_META else '')
+        item['unparsed']+=count
+        item['unparsed_kinds'][key]=item['unparsed_kinds'].get(key,0)+count
+        if item['unparsed_kinds'][key]==0:del item['unparsed_kinds'][key]
 
     def classification_issue(reason, pid=None, call=None):
         # Only fixed reason codes and numeric task identities enter reports.
@@ -88,14 +95,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         if call in FORK | EXEC: issue['syscall'] = call
         classification_issues.append(issue)
 
-    def unknown(pid, call):
+    def unknown(pid, call, kind='incomplete'):
         if call in NETWORK:
-            state(pid)['unparsed'] += 1
+            unparsed(pid,kind,call=call)
         elif call in IO_URING:
             state(pid)['io_uring'].append(call)
             io_calls.append({'pid':pid,'call':call,'result':None,'fd':None,'flags':None,'sequence':0})
         elif call in FD_META | UDP_META:
-            state(pid)['unparsed'] += 1
+            unparsed(pid,kind,call=call)
         else:
             classification_issue('incomplete_syscall', pid, call)
 
@@ -119,8 +126,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             return
         call = match[1]
         if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):
-            item['unparsed'] += 1
-            if call in NETWORK: result_holes.add((pid,started))
+            unparsed(pid,'result',call=call)
+            if call in NETWORK: result_holes[(pid,started)]=call
         if call in UDP_META: return
         if call in FD_META:
             # Only ring-labelled descriptors and bulk close operations matter.
@@ -206,7 +213,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 port = int(port)
                 if not 0 <= port <= 65535: raise ValueError('Invalid port')
             except ValueError:
-                item['unparsed'] += 1; return
+                unparsed(pid,'invalid_destination',call=call); return
             effective = parsed.ipv4_mapped if isinstance(parsed, ipaddress.IPv6Address) else None
             local = (effective or parsed).is_loopback and port != 53
             if accepted and not local:item['external_accepts']+=1
@@ -218,20 +225,20 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         destinations = ADDR.findall(line)
         if not destinations and 'sa_family=AF_' in line and not any(
                 family in line for family in ('AF_UNIX', 'AF_NETLINK', 'AF_UNSPEC')):
-            item['unparsed'] += 1
+            unparsed(pid,'unknown_address_family',call=call)
         for value in destinations:
             address = re.search(r'(?:inet_addr\(|inet_pton\(AF_INET6, )"([^"]+)"', value)
             port = re.search(r'sin6?_port=htons\((\d+)\)', value)
             if not address or not port:
-                item['unparsed'] += 1; continue
+                unparsed(pid,'address_fields',call=call); continue
             destination(address[1], port[1])
         if accepted and not destinations and not any(family in line for family in ('AF_UNIX','UNIX')):
             peer=re.search(r'=\s+\d+<(?:TCP|UDP)(?:v6)?:\[(.*?)\]>',line)
             if peer and '->' in peer[1]:
                 address,separator,port=peer[1].rsplit('->',1)[1].rpartition(':')
                 if separator:destination(address,port)
-                else:item['unparsed']+=1
-            else:item['unparsed']+=1
+                else:unparsed(pid,'accept_peer',call=call)
+            else:unparsed(pid,'accept_peer',call=call)
         # A selected child can inherit an already-connected socket from an
         # unselected parent. Decode the peer at send time; its connect need not
         # have happened inside the selected tree. -yy provides kernel FD peers.
@@ -240,11 +247,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                       len(re.findall(r'msg_name=NULL', line)) if call in ('sendmsg', 'sendmmsg') else 0)
         if not destinations and not any(family in line for family in ('AF_UNIX', 'AF_NETLINK', 'AF_UNSPEC')):
             if call == 'connect' or call in ('send', 'sendto', 'sendmsg', 'sendmmsg') and not null_count:
-                item['unparsed'] += 1
+                unparsed(pid,'destination',call=call)
         if call in ('write', 'writev') and re.match(r'\w+\(\d+<socket:', line):
-            item['unparsed'] += 1
+            unparsed(pid,'socket_peer',call=call)
         if call == 'sendmmsg' and 'msg_name=' not in line:
-            item['unparsed'] += 1
+            unparsed(pid,'message_vector',call=call)
         if null_count:
             fd = re.match(r'^\w+\(\d+<(.+?)>,', line)
             peer = fd[1] if fd else ''
@@ -252,11 +259,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 return
             connection = re.fullmatch(r'(?:TCP|UDP)(?:v6)?:\[(.*)\]', peer)
             if not connection or '->' not in connection[1]:
-                item['unparsed'] += null_count
+                unparsed(pid,'send_peer',null_count,call)
             else:
                 address, separator, port = connection[1].rsplit('->', 1)[1].rpartition(':')
                 if not separator:
-                    item['unparsed'] += null_count
+                    unparsed(pid,'send_peer',null_count,call)
                 else:
                     for _ in range(null_count): destination(address, port)
 
@@ -303,7 +310,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             resumed = RESUMED.match(line)
             if '<unfinished ...>' in line:
                 if pid in pending:
-                    unknown(pid, pending[pid][0])
+                    unknown(pid, pending[pid][0],'overwritten_entry')
                 if not call:
                     classification_issue('unknown_unfinished_syscall', pid); continue
                 pending[pid] = (call[1], line.replace('<unfinished ...>', ''), sequence)
@@ -312,14 +319,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             if resumed:
                 previous = pending.pop(pid, None)
                 if not previous or resumed[1] != previous[0]:
-                    unknown(pid, resumed[1]); continue
+                    unknown(pid, resumed[1],'unmatched_resume'); continue
                 line = previous[1] + line.split(' resumed>', 1)[1]
                 started = previous[2]
             record(pid, line, started)
     for pid, (call, _line, _started) in pending.items():
         if kernel_capture is not None and call in NETWORK:
             record(pid,_line,_started)
-        else: unknown(pid, call)
+        else: unknown(pid, call,'pending_at_end')
     for pid, at in terminal_stops.items():
         if pid in invalid_terminal_stops or terminal_at.get(pid, 0) <= at:
             classification_issue('unknown_unfinished_syscall', pid)
@@ -328,7 +335,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             # An attributable decode failure remains unparsed in this PID's
             # tree. It blocks selected trees and whole-command enforcement;
             # an unselected sibling is retained in the report-only measurement.
-            state(pid)['unparsed'] += register_holes[pid]
+            unparsed(pid,'register_stub',register_holes[pid])
 
     # Resolve /proc/self/exe from the captured executable inherited at fork,
     # never from the auditor's /proc or from a mutable process/thread name.
@@ -437,12 +444,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                                              {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
                                              {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']})
         for evidence in network_evidence['resolved']:
-            states[evidence['pid']]['unparsed'] -= evidence['records']
+            unparsed(evidence['pid'],'register_stub',-evidence['records'])
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
         for evidence in network_evidence['resultFields']:
             key=(evidence['pid'],evidence['sequence'])
             if key in result_holes:
-                states[evidence['pid']]['unparsed']-=1
+                unparsed(evidence['pid'],'result',-1,result_holes[key])
 
     for pid, item in states.items():
         for event in item['events']:
@@ -484,7 +491,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                               'destinationAttempts': len(item['events']),
                               'externalAttempts': sum(event['external'] for event in item['events']),
                               'ioUringSyscalls': item['io_uring'],
-                              'unparsedRecords': item['unparsed']})
+                              'unparsedRecords': item['unparsed'],
+                              'unparsedRecordKinds':dict(sorted(item['unparsed_kinds'].items()))})
         return {'schema': 'aelix-studio-host.outbound-audit/1', 'scope': scope,
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
