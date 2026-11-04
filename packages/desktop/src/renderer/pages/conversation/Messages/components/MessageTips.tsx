@@ -90,12 +90,49 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
         : {};
     const lockedBy = errorData.lockedBy;
     const refusedKind = errorData.kind;
+    const methods = Array.isArray(errorData.methods)
+      ? errorData.methods.filter((item): item is string => typeof item === 'string' && !!item.trim()).join(', ')
+      : '';
+    const profile = typeof errorData.profile === 'string' ? errorData.profile.trim() : '';
+    const rawSource = typeof errorData.source === 'string' ? errorData.source : '';
+    const source =
+      rawSource
+        .trim()
+        .replace(/[\\/]+$/, '')
+        .split(/[\\/]/)
+        .pop() ?? '';
+    const hasRefusalContext =
+      refusedKind === 'restrictions_unenforceable'
+        ? !!methods
+        : refusedKind === 'profile_unavailable'
+          ? !!profile
+          : refusedKind === 'extension_owned_by_launch'
+            ? !!source
+            : true;
+    // Redact the launch-owned source only at display/diagnosis time. Persisted
+    // protocol data and the original error remain untouched.
+    const displayDetail = (value?: string) => {
+      if (
+        errorCode !== 'USER_AGENT_OPERATION_REFUSED' ||
+        refusedKind !== 'extension_owned_by_launch' ||
+        !rawSource ||
+        !source
+      ) {
+        return value;
+      }
+      // Technical detail can contain the JSON-escaped spelling of a Windows path.
+      return [JSON.stringify(rawSource).slice(1, -1), rawSource].reduce(
+        (text, fullPath) => text?.split(fullPath).join(source),
+        value
+      );
+    };
     const bodyVariant =
       errorCode === 'USER_AGENT_SESSION_LOCKED' && (lockedBy === 'native' || lockedBy === 'acp')
         ? lockedBy === 'native'
           ? 'bodyNative'
           : 'bodyAcp'
         : errorCode === 'USER_AGENT_OPERATION_REFUSED' &&
+            hasRefusalContext &&
             typeof refusedKind === 'string' &&
             [
               'restrictions_unenforceable',
@@ -105,17 +142,17 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
               'client_action_required',
             ].includes(refusedKind)
           ? refusedKind.replace(/_([a-z])/g, (_match, letter: string) => letter.toUpperCase())
-          : structuredError.workspacePath
-            ? 'bodyWithPath'
-            : 'body';
+          : errorCode === 'USER_AGENT_OPERATION_REFUSED'
+            ? 'body'
+            : structuredError.workspacePath
+              ? 'bodyWithPath'
+              : 'body';
     const body = errorCode
       ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
           workspacePath: structuredError.workspacePath,
-          methods: Array.isArray(errorData.methods)
-            ? errorData.methods.filter((item): item is string => typeof item === 'string').join(', ')
-            : '',
-          profile: typeof errorData.profile === 'string' ? errorData.profile : '',
-          source: typeof errorData.source === 'string' ? errorData.source : '',
+          methods,
+          profile,
+          source,
           defaultValue: structuredError.message || content,
         })
       : structuredError.message || content;
@@ -138,7 +175,7 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
     const detailParts = [
       errorCode ? `${t('conversation.agentError.errorCode')}: ${errorCode}` : '',
       structuredError.protocol_code !== undefined ? `ACP: ${structuredError.protocol_code}` : '',
-      structuredError.detail || structuredError.message,
+      displayDetail(structuredError.detail || structuredError.message),
     ].filter(Boolean);
     const feedbackTags: Record<string, string> = {};
     if (errorCode) {

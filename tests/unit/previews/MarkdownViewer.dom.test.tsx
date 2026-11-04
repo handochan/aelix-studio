@@ -315,3 +315,41 @@ describe('protocol-relative remote images', () => {
     expect(ipcBridge.fs.fetchRemoteImage.invoke).toHaveBeenCalledWith({ url: '//example.invalid/image.png' });
   });
 });
+
+describe('raw HTML srcset host boundary after rehype raw and sanitize', () => {
+  beforeEach(() => {
+    vi.mocked(ipcBridge.fs.getImageBase64.invoke).mockReset().mockResolvedValue('data:image/png;base64,local');
+  });
+  it.each([
+    'https://example.invalid/a.png 1x, local.png 2x',
+    'local.png 1x, //example.invalid/a.png 2x',
+    'HTTPS&#58;//example.invalid/a.png 1x',
+  ])('removes remote source and img candidate lists before rendering: %s', async (srcset) => {
+    const { container } = render(
+      <MarkdownViewer
+        file_path='/owned/doc.md'
+        content={`<picture><source srcset="${srcset}"><img src="local.png" srcset="${srcset}" alt="local"></picture>`}
+      />
+    );
+    await waitFor(() =>
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,local')
+    );
+    expect(container.querySelector('source')?.hasAttribute('srcset')).toBe(false);
+    expect(container.querySelector('img')?.hasAttribute('srcset')).toBe(false);
+  });
+  it.each(['local.png 1x, larger.png 2x', 'data:image/png;base64,aGVsbG8= 1x'])(
+    'preserves non-remote source candidates: %s',
+    async (srcset) => {
+      const { container } = render(
+        <MarkdownViewer
+          file_path='/owned/doc.md'
+          content={`<picture><source srcset="${srcset}"><img src="local.png" alt="local"></picture>`}
+        />
+      );
+      await waitFor(() =>
+        expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,local')
+      );
+      expect(container.querySelector('source')?.getAttribute('srcset')).toBe(srcset);
+    }
+  );
+});

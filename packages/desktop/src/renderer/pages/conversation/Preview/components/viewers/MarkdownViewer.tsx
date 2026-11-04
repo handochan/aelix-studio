@@ -50,6 +50,30 @@ const isAbsoluteLocalPath = (value?: string): boolean => {
   return /^([a-zA-Z]:\\|\\\\|\/)/.test(value);
 };
 
+type PreviewHtmlNode = {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: PreviewHtmlNode[];
+};
+
+// Run after raw HTML parsing and sanitization, before any DOM is created.
+// Drop mixed remote/local candidate lists as a unit; local/data-only lists keep
+// their existing behavior. srcset URLs can contain commas (notably data URLs).
+const stripRemoteImageSrcsets = () => (tree: PreviewHtmlNode) => {
+  const visit = (node: PreviewHtmlNode) => {
+    if ((node.tagName === 'img' || node.tagName === 'source') && node.properties) {
+      const srcSet = node.properties.srcSet;
+      if (typeof srcSet === 'string' && /(?:^|[\s,])(?:https?:|[\\/]{2})/i.test(srcSet)) {
+        delete node.properties.srcSet;
+      }
+    }
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+};
+const PREVIEW_REHYPE_PLUGINS = [...SANITIZED_HTML_REHYPE_PLUGINS, stripRemoteImageSrcsets];
+
 // Join a project-relative directory with a relative image src, resolving `.`/`..`
 // segments. Project `relative_path` is always POSIX ('/'-separated) regardless of
 // host OS, so this stays cross-platform (no node `path`, which would use '\' on win).
@@ -393,7 +417,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
           >
             <ReactMarkdown
               remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-              rehypePlugins={SANITIZED_HTML_REHYPE_PLUGINS}
+              rehypePlugins={PREVIEW_REHYPE_PLUGINS}
               components={components}
             >
               {previewSource}

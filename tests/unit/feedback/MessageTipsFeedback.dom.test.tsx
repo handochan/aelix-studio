@@ -52,6 +52,9 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const talkToButlerMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+vi.mock('@/renderer/hooks/assistant/useTalkToButler', () => ({ useTalkToButler: () => talkToButlerMock }));
+
 const openFeedbackMock = vi.fn(() => Promise.resolve());
 vi.mock('@/renderer/hooks/context/FeedbackContext', () => ({
   useFeedback: () => ({ openFeedback: openFeedbackMock }),
@@ -640,11 +643,7 @@ describe('host ACP application error display', () => {
     ['USER_AGENT_BUSY', undefined, 'cancel it before continuing'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'restrictions_unenforceable', methods: ['tools/write'] }, 'tools/write'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'profile_unavailable', profile: 'team' }, 'Restore the profile'],
-    [
-      'USER_AGENT_OPERATION_REFUSED',
-      { kind: 'extension_owned_by_launch', source: '/operator/extension' },
-      '/operator/extension',
-    ],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'extension_owned_by_launch', source: '/operator/extension' }, 'extension'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'runtime_control_required' }, 'runtime controls'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'client_action_required' }, 'requested action in Studio'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'future_kind' }, 'agent refused this operation'],
@@ -666,6 +665,49 @@ describe('host ACP application error display', () => {
     expect(screen.getByText(/ACP: -32004/)).toHaveTextContent('ACP original detail');
     expect(screen.queryByRole('button', { name: /retry|reconnect/i })).not.toBeInTheDocument();
   });
+  it.each([
+    { kind: 'restrictions_unenforceable' },
+    { kind: 'profile_unavailable' },
+    { kind: 'extension_owned_by_launch' },
+    { kind: 'restrictions_unenforceable', methods: [] },
+    { kind: 'restrictions_unenforceable', methods: ['', '  ', null] },
+    { kind: 'profile_unavailable', profile: ' ' },
+    { kind: 'extension_owned_by_launch', source: '' },
+    { kind: 'extension_owned_by_launch', source: '/' },
+  ])('uses the generic refusal body when context is empty: $kind', (data) => {
+    render(
+      <MessageTips
+        message={buildTips('error', 'failure', {
+          code: 'USER_AGENT_OPERATION_REFUSED',
+          message: 'upstream',
+          data,
+          workspacePath: '/workspace',
+        })}
+      />
+    );
+    expect(screen.getByText(enConversation.agentError.codes.USER_AGENT_OPERATION_REFUSED.body)).toBeInTheDocument();
+  });
+  it.each(['/private/operator/extension.py', String.raw`C:\private\operator\extension.py`])(
+    'shows only a source basename in the body and Butler prompt: %s',
+    async (source) => {
+      talkToButlerMock.mockClear();
+      const message = buildTips('error', 'failure', {
+        code: 'USER_AGENT_OPERATION_REFUSED',
+        message: `Launch owns ${source}`,
+        detail: JSON.stringify({ source }),
+        data: { kind: 'extension_owned_by_launch', source },
+      });
+      const before = JSON.stringify(message);
+      const { container } = render(<MessageTips message={message} />);
+      expect(container.textContent).not.toContain(source);
+      await userEvent.click(screen.getByRole('button', { name: 'settings.talkToButler.solveWithButler' }));
+      const prompt = talkToButlerMock.mock.calls[0][0].prompt as string;
+      expect(prompt).toContain('extension.py');
+      expect(prompt).not.toContain(source);
+      expect(prompt).not.toContain(JSON.stringify(source).slice(1, -1));
+      expect(JSON.stringify(message)).toBe(before);
+    }
+  );
   it('renders the host MCP reason as a warning without a retry action', () => {
     render(
       <MessageTips
