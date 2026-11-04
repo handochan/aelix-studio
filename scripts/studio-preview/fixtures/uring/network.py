@@ -188,7 +188,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             not capture.get('pidNamespaceVerified') or not isinstance(network, dict) or
             not network.get('complete')):
         error('kernel_network_capture_incomplete')
-        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], eventCount=0)
+        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], operationDiagnostics=[], eventCount=0)
     for task in network.get('tasks', []):
         pid = task['pid']
         if task['start'] <= 0 or task['start'] > task['end']:
@@ -423,6 +423,13 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 networkEntries=len(entries[pid]),socketEvents=sum(e['pid']==pid for e in hooks),
                 returnValueKnown=False,fdClosureInferred=False,
                 reason='known_close_missing_return_no_unmatched_kernel_network_activity'))
+    diagnostics=[]
+    for key,sequence in matched_sequences.items():
+        entry=calls[key];observed=[event for event in hooks if (event['pid'],event['ordinal'])==key]
+        diagnostics.append(dict(pid=key[0],sequence=sequence,fd=entry['value'],
+            socketHooks=sorted({SOCKET_HOOKS[event['value']-1] for event in observed if 1<=event['value']<=len(SOCKET_HOOKS)}),
+            socketFamilies=sorted({event['result'] for event in observed}),
+            fileModes=sorted({event['result'] for event in files[key]}),reconciled=not issues))
     return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
                 nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],
-                metadataFields=metadata,eventCount=len(events))
+                metadataFields=metadata,operationDiagnostics=diagnostics,eventCount=len(events))

@@ -295,6 +295,11 @@ Each task's residual `unparsedRecordKinds` records fixed reason codes and
 allowlisted syscall names with counts. It contains no trace text, FD annotation,
 path, argv or buffer. Independent register/result proofs remove their own keyed
 counts; this diagnostic never exempts or resolves a record by itself.
+`externalOperationDiagnostics` preserves numeric TID/sequence/FD, fixed socket
+kind and kernel hook names, families and file modes, plus associated UDP writes.
+It contains no FD labels, paths, buffers or kernel pointers and never changes
+classification. This distinguishes an actual write from an association-only
+probe when investigating a failed gate.
 `close(decimalFD<optional annotation>) = ?` has a fully interpreted entry but
 no usable return. Only a terminated task with complete kernel reconciliation
 and no unmatched network action may account for that missing field. These

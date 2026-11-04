@@ -476,6 +476,19 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             event['udpAssociationOnly'] = event['syscall'] == 'connect' and key in exempt
             if event['udpAssociationOnly']: event['external'] = False
 
+    raw_records={(pid,seq):line for pid,line,seq,*_ in udp_records}
+    operation_diagnostics={(item['pid'],item['sequence']):item for item in
+                           (network_evidence or {}).get('operationDiagnostics',[])}
+    def descriptor_diagnostic(key):
+        match=re.match(r'^\w+\(\s*(-?\d+)(?:<([^>]*)>)?',raw_records.get(key,''))
+        label=match[2] if match and match[2] else ''
+        kind=('tcp' if label.startswith(('TCP:','TCPv6:')) else
+              'udp' if label.startswith(('UDP:','UDPv6:')) else
+              'unix' if label.startswith('UNIX') else 'netlink' if label.startswith('NETLINK') else
+              'file' if label.startswith('/') else 'other')
+        return {'pid':key[0],'sequence':key[1],'fd':int(match[1]) if match else None,
+                'straceSocketKind':kind,'kernel':operation_diagnostics.get(key)}
+
     def report(pids, scope):
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
@@ -504,6 +517,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         nonnetwork=[evidence for evidence in (network_evidence or {}).get('nonNetworkWrites',[]) if evidence['pid'] in pids]
         result_fields=[evidence for evidence in (network_evidence or {}).get('resultFields',[]) if evidence['pid'] in pids]
         metadata_fields=[evidence for evidence in (network_evidence or {}).get('metadataFields',[]) if evidence['pid'] in pids]
+        external_diagnostics=[]
+        for key,event in event_keys.items():
+            if key[0] in pids and event['external']:
+                external_diagnostics.append({**descriptor_diagnostic(key),'syscall':event['syscall'],
+                    'udpWriteAssociations':[{**descriptor_diagnostic((pid,seq)),'syscall':call}
+                        for pid,seq,call,connects in udp_writes if key in connects]})
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
@@ -531,6 +550,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'kernelResultFields':result_fields,
                 'kernelMetadataResolvedRecords':sum(evidence['records'] for evidence in metadata_fields),
                 'kernelMetadataResolutions':metadata_fields,
+                'externalOperationDiagnostics':external_diagnostics,
                 'kernelNetwork': ({'recorded': kernel_capture.get('complete', False),
                     'eventCount': network_evidence['eventCount'],
                     'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),

@@ -47,6 +47,20 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 
 class ScopedParserTests(unittest.TestCase):
+    def test_external_diagnostics_keep_protocol_and_write_provenance_without_raw_content(self):
+        records=['1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>',
+            '1<app> '+CONNECT.replace('connect(3,','connect(3<UDPv6:[123]>,') ,
+            '1<app> write(3<UDPv6:[123]>, "SECRET_PAYLOAD", 14) = 14',
+            '1<app> close(3<UDPv6:[123]>) = 0','1<app> +++ exited with 0 +++']
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace';trace.write_text('\n'.join(records)+'\n')
+            _,report=audit.analyze_processes([trace],require_lifecycle=True)
+        diagnostic=report['externalOperationDiagnostics'][0]
+        self.assertEqual((diagnostic['straceSocketKind'],diagnostic['fd']),('udp',3))
+        self.assertEqual(diagnostic['udpWriteAssociations'][0]['syscall'],'write')
+        self.assertEqual(report['externalAttempts'],2)
+        self.assertNotIn('SECRET_PAYLOAD',json.dumps(report))
+
     def test_complete_kernel_lifetime_resolves_only_known_close_return_without_claiming_closure(self):
         capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
             'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],

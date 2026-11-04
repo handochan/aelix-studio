@@ -376,6 +376,8 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
         result=self.run_policy(capture,[(10,'connect(3, {sa_family=AF_INET}) = 0',1)])
         self.assertEqual(result['issues'],[])
         self.assertEqual(result['resolved'][0]['socketEvents'],2)
+        self.assertEqual(result['operationDiagnostics'],[dict(pid=10,sequence=1,fd=3,
+            socketHooks=['kernel_connect','tcp_v4_connect'],socketFamilies=[2],fileModes=[],reconciled=True)])
 
     def test_seccomp_emulated_success_cannot_substitute_for_hidden_executed_call(self):
         capture=self.fixture()
