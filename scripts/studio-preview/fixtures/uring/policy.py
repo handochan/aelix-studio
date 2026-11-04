@@ -111,7 +111,11 @@ def reconcile(capture, calls, all_pids, selected_pids):
                 if ring is not None:table[result]=(ring,True)
             continue
         if result is None:
+            if kind=='close' and call.get('genericClose') and fd not in table:continue
             by_pid[call['pid']].append({'reason':'io_uring_descriptor_result_unknown','pid':call['pid']});continue
+        if kind=='unshare':
+            if result==0:tables[group]=dict(table)
+            continue
         if kind=='close_range' and result==0:
             if call.get('unshare'):
                 table=dict(table);tables[group]=table
@@ -125,6 +129,7 @@ def reconcile(capture, calls, all_pids, selected_pids):
         if kind=='close' and result==0:
             table.pop(fd,None);continue
         if call.get('duplicate') and isinstance(result,int) and result>=0:
+            if kind=='dup2' and fd==result:continue
             if fd in table:table[result]=(table[fd][0],call.get('cloexec',False))
             else:table.pop(result,None)
             continue
@@ -132,6 +137,7 @@ def reconcile(capture, calls, all_pids, selected_pids):
             table[fd]=(table[fd][0],call.get('cloexec',False));continue
         if kind not in ('io_uring_enter','io_uring_register','mmap','mmap2'):continue
         if isinstance(result,int) and result<0 and (kind in ('mmap','mmap2') or call.get('error')=='EBADF'):continue
+        if kind in ('mmap','mmap2') and call.get('genericMetadata') and isinstance(fd,int) and fd not in table:continue
         if call.get('registeredRing'):
             by_pid[call['pid']].append({'reason':'io_uring_registered_ring_mode_unsupported','pid':call['pid']});continue
         if fd not in table:

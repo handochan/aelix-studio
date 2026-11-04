@@ -174,7 +174,7 @@ def parse(fields):
                 file=int(fields[10]) if fields[0]=='V' else None)
 
 
-def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None):
+def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None, metadata_allowed=()):
     """Cross-check all kernel activity, even when strace has no decode failure."""
     issues = []; resolved = []; entries = defaultdict(list); tasks = {}; mapping = {}
     def error(reason, pid=None, **metadata):
@@ -188,7 +188,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             not capture.get('pidNamespaceVerified') or not isinstance(network, dict) or
             not network.get('complete')):
         error('kernel_network_capture_incomplete')
-        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], eventCount=0)
+        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], eventCount=0)
     for task in network.get('tasks', []):
         pid = task['pid']
         if task['start'] <= 0 or task['start'] > task['end']:
@@ -282,7 +282,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 error('kernel_socket_probe_invalid', pid)
             elif event['result'] not in (1,2,10,16):error('kernel_socket_family_unsupported',pid)
             hooks.append(event)
-    decoded = defaultdict(deque)
+    decoded = defaultdict(deque); close_fields=[]; close_keys=set()
     for key,observed in files.items():
         entry=calls.get(key);returned=returns.get(key)
         for event in observed:
@@ -295,6 +295,14 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
         result = re.search(r'\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
         if call and call[1] in CALLS:
             decoded[pid].append((CALLS.index(call[1])+1, int(call[2]), int(result[1]) if result else None, sequence))
+        # Only the return is unreadable. A complete close entry cannot create an
+        # FD alias; its unknown return must never be used as closure evidence.
+        close=re.fullmatch(r'close\(\s*(-?\d+)(?:<.*>)?\s*\)\s+=\s+\?(?:\s.*)?',line)
+        if close and (pid,sequence) in metadata_allowed:
+            if (pid,sequence) in close_keys:
+                error('kernel_metadata_record_duplicated',pid);continue
+            close_keys.add((pid,sequence))
+            close_fields.append((pid,sequence,int(close[1])))
     matched = set(); matched_sequences={}
     not_executed = defaultdict(list); nonexecution=[]; nonnetwork=[]; result_fields=[]
     terminal_pids=states if terminal_pids is None else terminal_pids
@@ -398,6 +406,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
               ordinal=event['ordinal'],kernelCall=event['call'],nativeSyscall=event.get('nativeSyscall'),family=event['result'],
               time=event['time'],entryTime=entry['time'] if entry else None,
               returnTime=returned['time'] if returned else None)
+    metadata=[]
     if not issues:
         for pid, count in holes.items():
             task = tasks[pid]
@@ -406,5 +415,14 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 networkEntries=len(entries[pid]), socketEvents=sum(e['pid']==pid for e in hooks),
                 preEntryInvocations=len(pre[pid]), notExecutedOrdinals=not_executed[pid],
                 reason='complete_task_lifetime_no_unmatched_kernel_network_activity'))
+        for pid,sequence,fd in close_fields:
+            if pid not in terminal_pids:continue
+            task=tasks[pid]
+            metadata.append(dict(pid=pid,kernelPid=task['kernelPid'],sequence=sequence,syscall='close',fd=fd,
+                records=1,rangeStart=task['start'],rangeEnd=task['end'],
+                networkEntries=len(entries[pid]),socketEvents=sum(e['pid']==pid for e in hooks),
+                returnValueKnown=False,fdClosureInferred=False,
+                reason='known_close_missing_return_no_unmatched_kernel_network_activity'))
     return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
-                nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],eventCount=len(events))
+                nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],
+                metadataFields=metadata,eventCount=len(events))

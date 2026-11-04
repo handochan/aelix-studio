@@ -127,17 +127,29 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         call = match[1]
         if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):
             unparsed(pid,'result',call=call)
-            if call in NETWORK: result_holes[(pid,started)]=call
-        if call in UDP_META: return
+            if call in NETWORK or call=='close': result_holes[(pid,started)]=call
+        if call in UDP_META:
+            if call=='unshare' and 'CLONE_FILES' in line:
+                result=re.search(r'\)\s+=\s+(-?\d+)(?:\s.*)?$',line)
+                io_calls.append({'pid':pid,'call':'unshare','sequence':started,
+                                 'result':int(result[1]) if result else None})
+            return
         if call in FD_META:
-            # Only ring-labelled descriptors and bulk close operations matter.
-            # Ordinary file paths and mmap addresses never enter reports.
-            if call not in ('close_range','dup2','dup3') and not re.search(r'anon_inode[^>]*io_uring',line):return
+            # Track numeric FD transitions even when -yy could not annotate a
+            # ring alias. File paths and mmap addresses never enter reports.
+            ring_label=bool(re.search(r'anon_inode[^>]*io_uring',line))
+            unknown_close=call=='close' and (pid,started) in result_holes
             args=re.match(r'^\w+\((-?\d+)(?:<[^>]*>)?(?:,\s*(\d+))?',line)
             ring_fd=re.search(r'(-?\d+)<anon_inode[^>]*io_uring[^>]*>',line)
+            mapped_fd=re.match(r'^\w+\([^,]*,[^,]*,[^,]*,[^,]*,\s*(-?\d+)',line) if call in ('mmap','mmap2') else None
             result=re.search(r'\)\s+=\s+(-?\d+|0x[0-9a-f]+)',line)
             entry={'pid':pid,'call':call,'sequence':started,'result':int(result[1],0) if result else None,
-                   'fd':int(ring_fd[1]) if call in ('mmap','mmap2') and ring_fd else int(args[1]) if args else None}
+                   'fd':((int(mapped_fd[1]) if mapped_fd else int(ring_fd[1]) if ring_fd else None)
+                         if call in ('mmap','mmap2') else int(args[1]) if args else None),
+                   'genericMetadata':not ring_label and call not in ('close_range','dup2','dup3')}
+            if unknown_close:
+                entry['result']=None
+                entry['genericClose']=not ring_label
             entry.update(cloexec='CLOEXEC' in line,duplicate=call.startswith('dup') or 'F_DUPFD' in line,
                          setfd='F_SETFD' in line,lastFd=(int(args[2]) if args and args[2] else
                          0xffffffff if call=='close_range' and '~0U' in line else None))
@@ -439,10 +451,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                      ('udp_lifetime_unparsed_register','udp_duplicate_untracked_fd')}
         eligible={pid:count for pid,count in eligible.items() if pid not in blocked_udp}
         if classification_issues: eligible = {}
+        blocked_metadata={issue['pid'] for issue in udp_issues} | {
+            pid for pid,issues in ring_evidence['issuesByPid'].items() if issues}
+        metadata_allowed={key for key,call in result_holes.items() if call=='close' and key[0] not in blocked_metadata}
+        if classification_issues:metadata_allowed=set()
         network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
                                              {pid: tgid(pid) for pid in states},parents,
                                              {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
-                                             {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']})
+                                             {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']},
+                                             metadata_allowed=metadata_allowed)
         for evidence in network_evidence['resolved']:
             unparsed(evidence['pid'],'register_stub',-evidence['records'])
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
@@ -450,6 +467,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             key=(evidence['pid'],evidence['sequence'])
             if key in result_holes:
                 unparsed(evidence['pid'],'result',-1,result_holes[key])
+        for evidence in network_evidence['metadataFields']:
+            unparsed(evidence['pid'],'result',-1,'close')
 
     for pid, item in states.items():
         for event in item['events']:
@@ -484,6 +503,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         nonexecution = [evidence for evidence in (network_evidence or {}).get('notExecuted', []) if evidence['pid'] in pids]
         nonnetwork=[evidence for evidence in (network_evidence or {}).get('nonNetworkWrites',[]) if evidence['pid'] in pids]
         result_fields=[evidence for evidence in (network_evidence or {}).get('resultFields',[]) if evidence['pid'] in pids]
+        metadata_fields=[evidence for evidence in (network_evidence or {}).get('metadataFields',[]) if evidence['pid'] in pids]
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
@@ -509,6 +529,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'kernelNonNetworkWrites':nonnetwork,
                 'kernelResolvedResultFields':len(result_fields),
                 'kernelResultFields':result_fields,
+                'kernelMetadataResolvedRecords':sum(evidence['records'] for evidence in metadata_fields),
+                'kernelMetadataResolutions':metadata_fields,
                 'kernelNetwork': ({'recorded': kernel_capture.get('complete', False),
                     'eventCount': network_evidence['eventCount'],
                     'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),

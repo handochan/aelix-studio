@@ -14,6 +14,49 @@ END = '1<app> +++ exited with 0 +++'
 
 
 class UdpLifecycleTests(unittest.TestCase):
+    def test_no_network_kernel_proof_does_not_recover_udp_close_uncertainty(self):
+        tasks=[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                    parentKernelPid=1000) for pid,kernel in [(1,101),(1000,1000)]]
+        events=[dict(kind=kind,time=time,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=1,
+                     ordinal=1,value=3,result=result)
+                for kind,time,result in [('P',10,0),('N',20,0),('X',30,-101)]]
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
+                 'root':{'kernelPid':1000},'network':{'complete':True,'eventCount':3,'events':events,'tasks':tasks}}
+        report=self.parse([SOCKET,CONNECT,'1<app> close(3<UDPv6:[123]>) = ?',
+            '1<app> dup2(9</dev/null>, 3) = 3</dev/null>',END],capture)
+        self.assertIn('udp_close_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual((report['udpConnectOnly'],report['kernelMetadataResolvedRecords']),(0,0))
+        self.assertGreater(report['unparsedRecords'],0)
+    def test_unknown_udp_close_is_permanent_even_after_other_known_retirement(self):
+        from udpLifecycle import analyze
+        closers=['dup2(9</dev/null>, 3<UDPv6:[123]>) = 3</dev/null>',
+                 'close_range(3, 3, 0) = 0','execve("/owned/next", [...], 0x1) = 0',
+                 CLOSE.split(' ',1)[1]]
+        for closer in closers:
+            records=[(1,SOCKET.split(' ',1)[1],1),(1,CONNECT.split(' ',1)[1],2),
+                     (1,'close(3<UDPv6:[123]>) = ?',3),(1,closer,4),
+                     (1,'+++ exited with 0 +++',5)]
+            exempt,_,issues=analyze(records,None,lambda pid:pid)
+            self.assertEqual(exempt,set(),closer)
+            self.assertIn('udp_close_result_unknown',{issue['reason'] for issue in issues})
+
+    def test_unknown_close_of_an_inherited_duplicate_invalidates_all_owners(self):
+        from udpLifecycle import analyze
+        for flags in ('SIGCHLD','CLONE_FILES|CLONE_THREAD|SIGCHLD'):
+            records=[(1,SOCKET.split(' ',1)[1],1),(1,CONNECT.split(' ',1)[1],2),
+                (1,'dup(3<UDPv6:[123]>) = 5<UDPv6:[123]>',3),
+                (1,f'clone(child_stack=NULL, flags={flags}) = 2',4),
+                (2,'close(5<UDPv6:[123]>) = ?',5),
+                (2,'close_range(3, 5, 0) = 0',6),(1,'close_range(3, 5, 0) = 0',7),
+                (2,'+++ exited with 0 +++',8),(1,'+++ exited with 0 +++',9)]
+            exempt,_,issues=analyze(records,None,lambda pid:pid)
+            self.assertEqual(exempt,set())
+            self.assertEqual({issue['pid'] for issue in issues if issue['reason']=='udp_close_result_unknown'},{1,2})
+
+    def test_unknown_close_of_an_untracked_udp_fd_fails(self):
+        from udpLifecycle import analyze
+        _,_,issues=analyze([(1,'close(7<UDP:[123]>) = ?',1),(1,'+++ exited with 0 +++',2)],None,lambda pid:pid)
+        self.assertIn('udp_close_untracked_fd',{issue['reason'] for issue in issues})
     def test_register_hole_cannot_hide_dup_of_live_udp_even_before_connect(self):
         from udpLifecycle import analyze
         socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1];close=CLOSE.split(' ',1)[1]

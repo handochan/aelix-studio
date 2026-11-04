@@ -75,6 +75,8 @@ class AuditedSessions:
                       wholeAppKernelNonNetworkWriteInvocations=whole.get('kernelNonNetworkWriteInvocations',0),
                       kernelResolvedResultFields=scoped.get('kernelResolvedResultFields',0),
                       wholeAppKernelResolvedResultFields=whole.get('kernelResolvedResultFields',0),
+                      kernelMetadataResolvedRecords=scoped.get('kernelMetadataResolvedRecords',0),
+                      wholeAppKernelMetadataResolvedRecords=whole.get('kernelMetadataResolvedRecords',0),
                       wholeAppUdpConnectOnly=whole.get('udpConnectOnly',0),
                       wholeAppClassificationErrors=whole['classificationErrors'],
                       ioUringOpcodes=scoped.get('ioUring',{}).get('opcodeCounts',{}),

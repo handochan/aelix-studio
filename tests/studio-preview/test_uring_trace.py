@@ -71,6 +71,25 @@ spec_ops=importlib.util.spec_from_file_location('uring_ops',SOURCE.with_name('po
 ops=importlib.util.module_from_spec(spec_ops);spec_ops.loader.exec_module(ops)
 
 class OperationPolicyTests(unittest.TestCase):
+    def test_noop_dup2_keeps_ring_cloexec_before_exec(self):
+        capture,calls=self.fixture()
+        calls.extend([{'call':'dup2','pid':10,'fd':5,'result':5,'sequence':2,'duplicate':True,'cloexec':False},
+                      {'call':'exec','pid':10,'result':0,'sequence':3},
+                      {'call':'io_uring_enter','pid':10,'fd':5,'result':1,'sequence':4}])
+        checked=ops.reconcile(capture,calls,{10},{10})
+        self.assertIn('io_uring_descriptor_unattributed',{issue['reason'] for issue in checked['issuesByPid'][10]})
+    def test_unlabelled_unknown_close_still_fails_for_a_tracked_ring_fd(self):
+        capture,calls=self.fixture()
+        calls.append({'call':'close','pid':10,'fd':5,'result':None,'sequence':2,'genericClose':True})
+        checked=ops.reconcile(capture,calls,{10},{10})
+        self.assertIn('io_uring_descriptor_result_unknown',{issue['reason'] for issue in checked['issuesByPid'][10]})
+
+    def test_generic_nonring_close_does_not_relax_existing_ring_label_contract(self):
+        for generic in (False,True):
+            capture,calls=self.fixture()
+            calls.append({'call':'close','pid':10,'fd':999,'result':None,'sequence':2,'genericClose':generic})
+            checked=ops.reconcile(capture,calls,{10},{10})
+            self.assertEqual(bool(checked['issuesByPid'].get(10)),not generic)
     def fixture(self,opcode=29,pid=10,sqpoll=False,issuer=None):
         events=[{'kind':'create','time':1,'ctx':'opaque','pid':pid,'tgid':pid,'fd':5,'flags':2 if sqpoll else 0,'sqpollKernelPid':issuer if sqpoll else 0},
                 {'kind':'submit','time':2,'ctx':'opaque','pid':issuer or pid,'tgid':pid,'opcode':opcode,'sqpoll':sqpoll,
@@ -223,6 +242,34 @@ class PreEntrySelectionTests(unittest.TestCase):
 
 
 class KernelNetworkCorrelationTests(unittest.TestCase):
+    def test_known_close_missing_return_has_a_separate_no_network_proof(self):
+        checked=network.reconcile(self.fixture(),[(10,'close(3<anon_inode:inotify>) = ?',7)],{},
+            {10},None,metadata_allowed={(10,7)})
+        self.assertEqual(checked['issues'],[])
+        evidence=checked['metadataFields'][0]
+        self.assertEqual((evidence['pid'],evidence['kernelPid'],evidence['sequence'],evidence['fd']),(10,110,7,3))
+        self.assertEqual((evidence['returnValueKnown'],evidence['fdClosureInferred']),(False,False))
+        self.assertEqual((evidence['rangeStart'],evidence['rangeEnd']),(1,100))
+
+    def test_other_fd_metadata_or_partial_close_entries_never_get_metadata_proof(self):
+        for line in ['close(?) = ?','close(3 <unfinished ...>','dup(3) = ?',
+                     'unshare(CLONE_FILES) = ?','fcntl(3, F_DUPFD, 0) = ?', 'mmap(NULL, 1, 0, 0, 3, 0) = ?']:
+            checked=network.reconcile(self.fixture(),[(10,line,7)],{}, {10},None,metadata_allowed={(10,7)})
+            self.assertEqual(checked['metadataFields'],[],line)
+
+    def test_missing_kernel_coverage_hidden_network_or_incomplete_task_blocks_close_proof(self):
+        import copy
+        for fault in ('loss','namespace','task','network','unterminated','duplicate'):
+            capture=copy.deepcopy(self.fixture());records=[(10,'close(3) = ?',7)]
+            terminal={10}
+            if fault=='loss':capture['lostEvents']=1
+            if fault=='namespace':capture['pidNamespaceVerified']=False
+            if fault=='task':capture['network']['tasks']=[]
+            if fault=='network':self.add(capture,self.event('H',value=4,result=2,time=3))
+            if fault=='unterminated':terminal=set()
+            if fault=='duplicate':records*=2
+            checked=network.reconcile(capture,records,{}, {10},None,terminal_pids=terminal,metadata_allowed={(10,7)})
+            self.assertEqual(checked['metadataFields'],[],fault)
     def fixture(self):
         return {'complete':True,'lostEvents':0,'pidNamespaceVerified':True,
                 'network':{'complete':True,'eventCount':0,'events':[],

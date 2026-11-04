@@ -59,6 +59,13 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
         match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line)
         if not match:
             attempted = re.match(r'^(\w+)\((\d+)(?:<[^>]*>)?', line)
+            if attempted and attempted[1]=='close':
+                fd=int(attempted[2])
+                if fd in current:
+                    sock=current[fd][0];sock['invalid']=True
+                    for owner in sock['owners']|{pid}:issue(owner,'udp_close_result_unknown')
+                elif re.match(r'^close\(\d+<UDP(?:v6)?:',line):
+                    issue(pid,'udp_close_untracked_fd')
             if attempted and attempted[1] in WRITES and int(attempted[2]) in current:
                 sock = current[int(attempted[2])][0]; sock['written'] = True
                 writes.append((pid, sequence, attempted[1], sock))

@@ -47,6 +47,79 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 
 class ScopedParserTests(unittest.TestCase):
+    def test_complete_kernel_lifetime_resolves_only_known_close_return_without_claiming_closure(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace'
+            trace.write_text('1<app> execve("/owned/app", [...], 0x1) = 0\n'
+                '1<app> close(7<anon_inode:inotify>) = ?\n1<app> +++ exited with 0 +++\n')
+            _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+            self.assertEqual((report['unparsedRecords'],report['classificationErrors'],report['kernelMetadataResolvedRecords']),(0,0,1))
+            self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
+            self.assertEqual(report['processes'][0]['unparsedRecordKinds'],{})
+            _,strict=audit.analyze_processes([trace],require_lifecycle=True)
+            self.assertEqual((strict['unparsedRecords'],strict['kernelMetadataResolvedRecords']),(1,0))
+
+    def test_unknown_close_cannot_lose_a_tracked_ring_when_fd_annotation_is_missing(self):
+        for fd,blocked in ((5,True),(6,False)):
+            capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+                'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+                'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+                'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                              parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('1<app> execve("/owned/app", [...], 0x1) = 0\n'
+                    '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>\n'
+                    f'1<app> close({fd}) = ?\n1<app> +++ exited with 0 +++\n')
+                _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(report['kernelMetadataResolvedRecords'],0 if blocked else 1)
+                if blocked:self.assertIn('io_uring_descriptor_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+                else:self.assertEqual(report['unparsedRecords'],0)
+
+    def test_unlabelled_ring_alias_and_cloexec_changes_cannot_escape_unknown_close_failure(self):
+        cases=[['1<app> dup(5) = 6','1<app> close(6) = ?'],
+               ['1<app> fcntl(5, F_DUPFD, 0) = 6','1<app> close(6) = ?'],
+               ['1<app> fcntl(5, F_SETFD, 0) = 0','1<app> execve("/owned/next", [...], 0x1) = 0',
+                '1<app> close(5) = ?'],
+               ['1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                '2<child> unshare(CLONE_FILES) = 0','2<child> close(5<anon_inode:[io_uring]>) = 0',
+                '2<child> +++ exited with 0 +++','1<app> close(5) = ?']]
+        for records in cases:
+            child=any(line.startswith('2<') for line in records)
+            tasks=[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                        parentKernelPid=100 if pid==1 else 101) for pid,kernel in [(1,101),(100,100),*([(2,102)] if child else [])]]
+            capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+                'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+                'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],'tasks':tasks}}
+            with self.subTest(records=records),tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1) = 0',
+                    '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',*records,
+                    '1<app> +++ exited with 0 +++'])+'\n')
+                _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(report['kernelMetadataResolvedRecords'],0)
+                self.assertIn('io_uring_descriptor_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+
+    def test_unlabelled_borrowed_ring_mapping_is_still_rejected(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+            'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                          parentKernelPid=100 if pid==1 else 101) for pid,kernel in [(1,101),(2,102),(100,100)]]}}
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                '1<app> execve("/owned/app", [...], 0x1) = 0',
+                '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+                '1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                '2<child> mmap(NULL, 4096, PROT_READ, MAP_SHARED, 5, 0) = 0x7000',
+                '2<child> close(5) = 0','2<child> +++ exited with 0 +++',
+                '1<app> +++ exited with 0 +++'])+'\n')
+            _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+            self.assertIn('io_uring_borrowed_ring_mapping_unsupported',{issue['reason'] for issue in report['classificationIssues']})
+
     def test_unparsed_kind_diagnostics_preserve_failures_without_trace_content(self):
         cases=[('close(7</private/SECRET_TRACE_PATH> <unfinished ...>', 'pending_at_end:close'),
                ('fcntl(7, F_GETFL) = ?', 'result:fcntl'),

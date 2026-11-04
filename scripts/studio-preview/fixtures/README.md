@@ -295,6 +295,24 @@ Each task's residual `unparsedRecordKinds` records fixed reason codes and
 allowlisted syscall names with counts. It contains no trace text, FD annotation,
 path, argv or buffer. Independent register/result proofs remove their own keyed
 counts; this diagnostic never exempts or resolves a record by itself.
+`close(decimalFD<optional annotation>) = ?` has a fully interpreted entry but
+no usable return. Only a terminated task with complete kernel reconciliation
+and no unmatched network action may account for that missing field. These
+`kernelMetadataResolutions`/`kernelMetadataResolvedRecords` retain TID, range,
+sequence and FD, with `returnValueKnown=false` and `fdClosureInferred=false`.
+The original FD record and unknown result remain in both ledgers. A targeted
+tracked UDP object becomes permanently invalid for an unknown close result,
+including all inherited/duplicated owners; later dup2, close_range, CLOEXEC exec
+or another close cannot erase this failure. An untracked UDP-labelled close
+also fails. Generic unknown closes are checked against tracked ring FD tables
+even when the FD annotation is missing; existing ring-labelled unknown records
+keep their failure contract. UDP/ring failures block this metadata resolution.
+Numeric close/dup/fcntl transitions and standalone `unshare(CLONE_FILES)` feed
+the ring ledger even without an FD annotation. This retains unlabelled aliases,
+CLOEXEC changes and independently unshared tables. Generic mappings are ignored
+only for decoded numeric descriptors outside that ledger; borrowed ring mappings
+remain unsupported. `dup2(fd, fd)` retains its original CLOEXEC state.
+Partial close arguments, missing entries and other FD mutations stay fatal.
 Synthetic controls exercise hidden network activity, no network execution,
 seccomp ambiguity, loss, missing identity/range/return, and missing attachments;
 actual installed-app shutdown races provide additional real-trace coverage
