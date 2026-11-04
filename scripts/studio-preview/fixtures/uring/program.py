@@ -68,6 +68,7 @@ NORMALIZE
   if (@net_seq[tid]) { delete(@net_seq[tid]); }
   if (@net_call[tid]) { delete(@net_call[tid]); delete(@net_fd[tid]); }
   if (@pre_seq[tid]) { delete(@pre_seq[tid]); delete(@pre_call[tid]); }
+  if (@raw_active[tid]) { delete(@raw_active[tid]); delete(@raw_id[tid]); }
 }
 tracepoint:io_uring:io_uring_create {
   if (@tracked[tid] || @tracked[pid]) {
@@ -121,7 +122,7 @@ END {
   clear(@tracked); clear(@owned); clear(@flags); clear(@root_seen); clear(@audit_level); clear(@pending);
   clear(@birth); clear(@net_seq); clear(@net_call); clear(@net_fd); clear(@audit_root_tid);
   clear(@kernel_parent); clear(@pre_seq); clear(@pre_call);
-  clear(@io_birth);
+  clear(@io_birth); clear(@raw_active); clear(@raw_id);
 }
 '''
     source += network_program(normalize,pre_entry)

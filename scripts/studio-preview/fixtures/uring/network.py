@@ -43,21 +43,15 @@ def symbol_evidence(path=None):
 def requirements(root):
     """Require every attachment and field; attachment itself is also checked."""
     formats = {}
-    raw = root / 'events/raw_syscalls/sys_enter/format'
-    if not raw.is_file() or not re.search(r'field:[^;]*\bid\s*;', raw.read_text()):
-        raise RuntimeError('kernel_raw_syscall_tracepoint_missing')
-    formats['raw_syscalls/sys_enter'] = raw.read_text()
-    for call in CALLS:
-        for direction, fields in [('enter', {'__syscall_nr', 'fd'}), ('exit', {'__syscall_nr', 'ret'})]:
-            name = f'sys_{direction}_{call}'
-            path = root / f'events/syscalls/{name}/format'
-            if not path.is_file():
-                raise RuntimeError('kernel_network_tracepoint_missing_' + name)
-            value = path.read_text()
-            from uring.probe import event_fields
-            if not fields <= event_fields(value):
-                raise RuntimeError('kernel_network_tracepoint_fields_missing_' + name)
-            formats['syscalls/' + name] = value
+    from uring.probe import event_fields
+    for direction,fields in [('enter',{'id'}),('exit',{'id','ret'})]:
+        path=root/f'events/raw_syscalls/sys_{direction}/format'
+        if not path.is_file():raise RuntimeError('kernel_raw_syscall_tracepoint_missing_'+direction)
+        value=path.read_text()
+        if not fields<=event_fields(value):raise RuntimeError('kernel_raw_syscall_fields_missing_'+direction)
+        if direction=='enter' and not re.search(r'field:[^;]*\bargs\s*\[\s*6\s*\]\s*;',value):
+            raise RuntimeError('kernel_raw_syscall_arguments_missing')
+        formats['raw_syscalls/sys_'+direction]=value
     path = root / 'available_filter_functions'
     available = {line.split()[0] for line in path.read_text().splitlines() if line.strip()}
     if not set(HOOKS) <= available:
@@ -68,8 +62,8 @@ def requirements(root):
 def program(normalize, pre_entry=None):
     """Record metadata only: task IDs, call, FD, return value and socket family."""
     architecture = platform.machine()
-    # Native ABI only. Compatibility syscall multiplexers must not bypass the
-    # named probes. Constants are kernel v6.8 arch/*/include/asm/thread_info.h:
+    # Native ABI only. Compatibility multiplexers must not bypass native
+    # syscall decoding. Constants are kernel v6.8 arch/*/include/asm/thread_info.h:
     # x86 TS_COMPAT/TIF_ADDR32 and arm64 TIF_32BIT. Unknown architectures fail.
     if architecture == 'x86_64':
         incompatible = '($t->thread_info.status & 2) || ($t->thread_info.flags & (1 << 29)) || (args->id & 0x40000000)'
@@ -81,14 +75,36 @@ def program(normalize, pre_entry=None):
         numbers = (203,206,211,269,64,66,202,242)
     else:
         raise RuntimeError('kernel_network_architecture_unsupported')
-    source = '''
+    select = '\n'.join(f'  if ($syscall=={number}) {{ $call={index}; }}'
+                       for index, number in enumerate(numbers, 1))
+    source = r'''
 tracepoint:raw_syscalls:sys_enter /@tracked[tid]/ {
   $t=(struct task_struct*)curtask;
   if (INCOMPATIBLE) { @unsupported_abi=count(); }
+  if (@raw_active[tid] || @net_call[tid]) { @raw_state_overlap=count(); }
+  @raw_id[tid]=args->id; @raw_active[tid]=1;
+  $syscall=args->id; $call=0;
+SELECT
+  if ($call) {
+NORMALIZE
+    if (!@pre_seq[tid] || @pre_call[tid]!=$call) { @pre_mismatch=count(); }
+    @net_seq[tid]=@pre_seq[tid]; @net_call[tid]=$call;
+    @net_fd[tid]=(int32)args->args[0];
+    @network_count=count();
+    printf("N|%llu|%d|%d|%d|%d|%d|%llu|%d|%d\n",nsecs,pid,tid,$nspid,$nstgid,$call,@net_seq[tid],@net_fd[tid],0);
+  }
 }
-'''.replace('INCOMPATIBLE', incompatible)
-    select = '\n'.join(f'  if ($syscall=={number}) {{ $call={index}; }}'
-                       for index, number in enumerate(numbers, 1))
+tracepoint:raw_syscalls:sys_exit /@tracked[tid]/ {
+  if (@net_call[tid]) {
+NORMALIZE
+    if (!@raw_active[tid] || @raw_id[tid]!=args->id) { @network_return_id_error=count(); }
+    @network_count=count();
+    printf("X|%llu|%d|%d|%d|%d|%d|%llu|%d|%lld\n",nsecs,pid,tid,$nspid,$nstgid,@net_call[tid],@net_seq[tid],@net_fd[tid],args->ret);
+    delete(@net_call[tid]); delete(@net_fd[tid]);
+  }
+  if (@raw_active[tid]) { delete(@raw_active[tid]); delete(@raw_id[tid]); }
+}
+'''.replace('INCOMPATIBLE',incompatible).replace('SELECT',select)
     from uring.entry import registers as pre_registers
     pre_entry=pre_entry or {'symbol':'syscall_trace_enter'}
     source += '''
@@ -109,23 +125,6 @@ SELECT
 '''.replace('PRE_REGISTERS',pre_registers(pre_entry)).replace('REGISTERS', registers).replace('SELECT', select).replace(
         'PRE_INCOMPATIBLE', incompatible.replace('args->id','$syscall')).replace('ENTRY',pre_entry['symbol']).replace(
         ' EXTRA',' && arg0==133 && arg1==1' if pre_entry['symbol']=='ptrace_notify' else '')
-    for number, call in enumerate(CALLS, 1):
-        source += '''
-tracepoint:syscalls:sys_enter_CALL /@tracked[tid]/ {
-NORMALIZE
-  if (!@pre_seq[tid] || @pre_call[tid]!=NUMBER) { @pre_mismatch=count(); }
-  @net_seq[tid]=@pre_seq[tid]; @net_call[tid]=NUMBER;
-  @net_fd[tid]=args->fd;
-  @network_count=count();
-  printf("N|%llu|%d|%d|%d|%d|%d|%llu|%d|%d\\n",nsecs,pid,tid,$nspid,$nstgid,NUMBER,@net_seq[tid],args->fd,0);
-}
-tracepoint:syscalls:sys_exit_CALL /@tracked[tid] && @net_call[tid]==NUMBER/ {
-NORMALIZE
-  @network_count=count();
-  printf("X|%llu|%d|%d|%d|%d|%d|%llu|%d|%lld\\n",nsecs,pid,tid,$nspid,$nstgid,NUMBER,@net_seq[tid],@net_fd[tid],args->ret);
-  delete(@net_call[tid]); delete(@net_fd[tid]);
-}
-'''.replace('CALL', call).replace('NUMBER', str(number))
     for number, hook in enumerate(SOCKET_HOOKS, 1):
         kind=SOCKET_ARGUMENTS[hook]
         if kind=='sock':family='$emit=1; $sk=(struct sock*)arg0; $family=$sk->__sk_common.skc_family;'
@@ -141,7 +140,8 @@ NORMALIZE
   LAYOUT_CHECK
   if ($emit) {
   @network_count=count();
-  printf("H|%llu|%d|%d|%d|%d|%d|%llu|%d|%d\\n",nsecs,pid,tid,$nspid,$nstgid,@net_call[tid],@net_seq[tid],NUMBER,$family);
+  $native=-1; if (@raw_active[tid]) { $native=@raw_id[tid]; }
+  printf("H|%llu|%d|%d|%d|%d|%d|%llu|%d|%d|%lld\\n",nsecs,pid,tid,$nspid,$nstgid,@net_call[tid],@net_seq[tid],NUMBER,$family,$native);
   }
 }
 '''.replace('HOOK', hook).replace('FAMILY', family).replace('NUMBER', str(number)).replace(
@@ -150,12 +150,13 @@ NORMALIZE
 
 
 def parse(fields):
-    if len(fields) != 10 or fields[0] not in ('P', 'N', 'X', 'H'):
+    if fields[0] not in ('P','N','X','H') or len(fields)!=(11 if fields[0]=='H' else 10):
         raise ValueError('invalid_kernel_network_record')
-    values = list(map(int, fields[1:]))
+    values = list(map(int, fields[1:10]))
     time, kernel_tgid, kernel_pid, pid, tgid, call, ordinal, value, result = values
     return dict(kind=fields[0], time=time, kernelTgid=kernel_tgid, kernelPid=kernel_pid,
-                pid=pid, tgid=tgid, call=call, ordinal=ordinal, value=value, result=result)
+                pid=pid, tgid=tgid, call=call, ordinal=ordinal, value=value, result=result,
+                nativeSyscall=int(fields[10]) if len(fields)==11 else None)
 
 
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None):
@@ -325,7 +326,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
         error('kernel_socket_operation_strace_missing', attributed,
               hook=SOCKET_HOOKS[event['value']-1] if 1<=event['value']<=len(SOCKET_HOOKS) else 'invalid',
               familySource='socket',
-              ordinal=event['ordinal'],kernelCall=event['call'],family=event['result'],
+              ordinal=event['ordinal'],kernelCall=event['call'],nativeSyscall=event.get('nativeSyscall'),family=event['result'],
               time=event['time'],entryTime=entry['time'] if entry else None,
               returnTime=returned['time'] if returned else None)
     if not issues:

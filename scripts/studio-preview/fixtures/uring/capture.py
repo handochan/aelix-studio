@@ -39,7 +39,7 @@ def parse(raw,stderr,returncode,namespace_inode):
         if line.startswith('TICK|'):sampling=True;continue
         if line=='TICKEND':sampling=False;continue
         match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead|network|task|worker)_count:\s*(\d+)',line)
-        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|pre_layout_error|socket_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
+        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|network_return_id_error|raw_state_overlap|pre_layout_error|socket_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
         if match:
             if not sampling:counts[match[1]]=int(match[2])
             continue
@@ -99,7 +99,8 @@ def parse(raw,stderr,returncode,namespace_inode):
               and not counts.get('untracked_sqpoll',0) and not counts.get('unmatched_completion',0)
               and not counts.get('namespace_error',0)
               and not counts.get('unsupported_abi',0)
-              and not counts.get('pre_mismatch',0)
+              and not counts.get('pre_mismatch',0) and not counts.get('network_return_id_error',0)
+              and not counts.get('raw_state_overlap',0)
               and not counts.get('pre_layout_error',0)
               and not counts.get('socket_layout_error',0)
               and not counts.get('worker_error',0) and counts.get('worker',0)==len(workers)

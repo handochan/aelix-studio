@@ -158,6 +158,8 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
         for extra in ('@network_count: 1\n', '@task_count: 2\n', '@unsupported_abi: 1\n',
                       '@worker_enter: 1\n','@worker_return: 1\n','@worker_error: 1\n',
                       '@socket_layout_error: 1\n',
+                      '@network_return_id_error: 1\n',
+                      '@raw_state_overlap: 1\n',
                       'N|2|100|100|10|10|1|1|3|0\n'):
             with self.subTest(extra=extra):
                 self.assertFalse(capture_module.parse(self.RAW+extra,'',0,123)['complete'])
@@ -185,7 +187,7 @@ class PreEntrySelectionTests(unittest.TestCase):
             (self.CONFIG+'CONFIG_X86_64=y\n','7.0.0',4096)]:
             with self.assertRaises(RuntimeError):entry.stack_layout(text,release,page)
 
-    @patch('uring.entry.os.sysconf',return_value=4096)
+    @patch('uring.entry.os.sysconf',return_value=4096,create=True)
     def test_missing_inline_symbol_uses_only_verified_native_x64_ptrace_entry(self,_page):
         self.assertEqual(entry.select({'syscall_trace_enter'},'aarch64')['symbol'],'syscall_trace_enter')
         with tempfile.TemporaryDirectory() as directory:
@@ -370,13 +372,15 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory)
             path=root/'events/raw_syscalls/sys_enter/format';path.parent.mkdir(parents=True)
-            path.write_text('field:long id;')
-            for call in network.CALLS:
-                for direction,field in [('enter','fd'),('exit','ret')]:
-                    path=root/f'events/syscalls/sys_{direction}_{call}/format'
-                    path.parent.mkdir(parents=True);path.write_text(f'field:int __syscall_nr; field:long {field};')
+            path.write_text('field:long id; field:unsigned long args[6];')
+            path=root/'events/raw_syscalls/sys_exit/format';path.parent.mkdir(parents=True)
+            path.write_text('field:long id; field:long ret;')
             path=root/'available_filter_functions';path.write_text('\n'.join(network.HOOKS))
-            self.assertEqual(len(network.requirements(root)),17)
+            self.assertEqual(len(network.requirements(root)),2)
+            enter=root/'events/raw_syscalls/sys_enter/format'
+            enter.write_text('field:long id; field:unsigned long args[5];')
+            with self.assertRaisesRegex(RuntimeError,'arguments_missing'):network.requirements(root)
+            enter.write_text('field:long id; field:unsigned long args[6];')
             for hook in network.HOOKS:
                 path.write_text('\n'.join(item for item in network.HOOKS if item!=hook))
                 with self.assertRaisesRegex(RuntimeError,'probe_missing'):network.requirements(root)
@@ -398,7 +402,8 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
 
     def test_metadata_decoder_rejects_truncated_or_non_numeric_events(self):
         self.assertEqual(network.parse('N|2|110|110|10|10|1|1|3|0'.split('|'))['value'],3)
-        for line in ('N|2|110','H|x|110|110|10|10|0|0|1|2'):
+        self.assertEqual(network.parse('H|2|110|110|10|10|5|1|3|1|64'.split('|'))['nativeSyscall'],64)
+        for line in ('N|2|110','H|x|110|110|10|10|0|0|1|2','H|2|110|110|10|10|0|0|1|2'):
             with self.assertRaises(ValueError):network.parse(line.split('|'))
 
 

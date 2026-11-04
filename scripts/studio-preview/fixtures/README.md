@@ -161,8 +161,15 @@ argument names or fentry availability. The complete BTF hash and signature
 hashes are retained. The report retains `preEntryProbe` and signature provenance. ARM's direct
 register-pointer path and the common P/N/socket correlation rules are unchanged.
 
-It also attaches all enter/exit tracepoints for `connect`,
-`sendto`, `sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`, plus
+It also requires `raw_syscalls:sys_enter` and `raw_syscalls:sys_exit`, decoding
+the native kernel ID, first argument (fd), and result for `connect`, `sendto`,
+`sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`. It does not rely
+on per-syscall named events: the Azure measurements exposed socket writes with
+no corresponding named write event. Raw argument-array/ID/result fields are
+mandatory, and entry/return IDs must agree. Other calls retain only an active
+kernel ID for unmatched-operation diagnostics, never argument buffers. This
+`nativeSyscall` is the current kernel event, not a cached strace annotation.
+The same recorder also attaches
 required concrete kprobes `kernel_connect`,
 `sock_write_iter`, `sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`,
 `udp_sendmsg`, `udpv6_sendmsg`, `inet_sendmsg`, `inet6_sendmsg`,
@@ -172,7 +179,7 @@ and the io_uring opcode policy: direct attempts remain recorded even when LSM
 denies execution; normal/async socket WRITEV goes through `sock_write_iter`;
 kernel sends use `sock_sendmsg`; IP send dispatch and TCP/UDP protocol functions
 cover direct send syscalls that bypass public `sock_sendmsg`. Unmatched concrete
-operations are fatal. `raw_syscalls:sys_enter` additionally rejects compatibility ABIs
+operations are fatal. The raw entry additionally rejects compatibility ABIs
 whose syscall multiplexers are outside this native 64-bit policy. It never reads
 registers through ptrace. Running-kernel BTF supplies task/socket layouts.
 
