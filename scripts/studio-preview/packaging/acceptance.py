@@ -49,6 +49,20 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+def write_failure_receipt(output):
+    """Preserve this run's completed failed audit evidence, never a stale pass."""
+    try:
+        current = json.loads(output.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        current = {}
+    # main() first resets the file to running. Only a newly completed failed
+    # audit can carry these fields when the final mandatory failure is raised.
+    if current.get('status') == 'failed' and current.get('failedAudits') and 'auditedSessions' in current:
+        return
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps({'status': 'failed', 'target': host_target()}) + '\n', encoding='utf-8')
+
+
 
 def long_path(path):
     path = Path(path).resolve()
@@ -403,6 +417,5 @@ if __name__ == '__main__':
         main(args)
     except BaseException:
         output = Path(args.output).resolve()
-        output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(json.dumps({'status': 'failed', 'target': host_target()}) + '\n', encoding='utf-8')
+        write_failure_receipt(output)
         raise
