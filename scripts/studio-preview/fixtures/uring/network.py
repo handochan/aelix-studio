@@ -423,9 +423,10 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 networkEntries=len(entries[pid]),socketEvents=sum(e['pid']==pid for e in hooks),
                 returnValueKnown=False,fdClosureInferred=False,
                 reason='known_close_missing_return_no_unmatched_kernel_network_activity'))
-    diagnostics=[]
+    diagnostics=[]; hooks_by_invocation=defaultdict(list)
+    for event in hooks:hooks_by_invocation[(event['pid'],event['ordinal'])].append(event)
     for key,sequence in matched_sequences.items():
-        entry=calls[key];observed=[event for event in hooks if (event['pid'],event['ordinal'])==key]
+        entry=calls[key];observed=hooks_by_invocation[key]
         diagnostics.append(dict(pid=key[0],sequence=sequence,fd=entry['value'],
             socketHooks=sorted({SOCKET_HOOKS[event['value']-1] for event in observed if 1<=event['value']<=len(SOCKET_HOOKS)}),
             socketFamilies=sorted({event['result'] for event in observed}),
