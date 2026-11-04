@@ -403,12 +403,12 @@ int main(void) {
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root/'worker.c'
-            source.write_text('#define _GNU_SOURCE\n#include <sys/socket.h>\n#include <stdlib.h>\n'
+            source.write_text('#define _GNU_SOURCE\n#include <sys/socket.h>\n#include <stdlib.h>\n#include <unistd.h>\n'
                               'int main(int argc,char **argv){int fd=atoi(argv[1]);'
                               'struct iovec iov={.iov_base="SYNTHETIC_PAYLOAD_SECRET",.iov_len=24};'
                               'struct mmsghdr m[2]={0};'
                               'for(int i=0;i<2;i++){m[i].msg_hdr.msg_iov=&iov;m[i].msg_hdr.msg_iovlen=1;}'
-                              'sendmmsg(fd,m,2,0);return 0;}\n')
+                              'sendmmsg(fd,m,2,0);close(fd);return 0;}\n')
             worker = root/'worker'
             subprocess.run(['cc',str(source),'-o',str(worker)],check=True)
             driver = root/'driver.py'
@@ -421,7 +421,7 @@ int main(void) {
                               'receiver=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n'
                               'receiver.bind((ip,0))\n'
                               's.connect(receiver.getsockname())\n'
-                              'subprocess.run([sys.argv[1],str(s.fileno())],pass_fds=(s.fileno(),))\n')
+                              'subprocess.run([sys.argv[1],str(s.fileno())],pass_fds=(s.fileno(),))\ns.close();receiver.close()\n')
             from unittest.mock import patch
             original = audit.analyze_processes
             def inspect(paths, *args):

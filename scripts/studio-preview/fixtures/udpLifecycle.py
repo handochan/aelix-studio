@@ -31,18 +31,24 @@ def analyze(records, ring_evidence, tgid):
             # every association. Process exit is not proof of an explicit close.
             if not any(other is current for task, other in tables.items() if task != pid):
                 for sock, _ in current.values():
-                    if sock['connects']: issue(pid, 'udp_association_open_at_exit')
+                    if sock['connects']:
+                        sock['invalid'] = True; issue(pid, 'udp_association_open_at_exit')
             tables.pop(pid, None)
             continue
-        match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s.*)?$', line)
-        if not match: continue  # Common parser owns incomplete/unknown records.
+        match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
+        if not match:
+            attempted = re.match(r'^(\w+)\((\d+)(?:<[^>]*>)?', line)
+            if attempted and attempted[1] in WRITES and int(attempted[2]) in current:
+                sock = current[int(attempted[2])][0]; sock['written'] = True
+                writes.append((pid, sequence, attempted[1], sock))
+            continue  # Common parser owns incomplete/unknown records.
         call, args, result = match[1], match[2], int(match[3])
         first = re.match(r'(-?\d+)(?:<[^>]*>)?', args)
         fd = int(first[1]) if first else None
         if call == 'socket' and result >= 0:
-            if re.match(r'AF_INET6?,\s*SOCK_DGRAM\b', args):
+            if re.fullmatch(r'AF_INET6?,\s*SOCK_DGRAM(?:\|SOCK_\w+)*,\s*(?:IPPROTO_UDP|IPPROTO_IP|0)', args):
                 if result in current: issue(pid, 'udp_fd_reused_without_close')
-                sock = {'connects': [], 'written': False, 'owners': {pid}, 'id': len(sockets)}
+                sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets)}
                 sockets.append(sock); current[result] = (sock, 'SOCK_CLOEXEC' in args)
         elif call in ('clone', 'clone3', 'fork', 'vfork') and result > 0:
             translated = re.search(r"/\* (\d+) in strace's PID NS \*/", line)
@@ -89,7 +95,8 @@ def analyze(records, ring_evidence, tgid):
             elif re.match(r'\d+<UDP(?:v6)?:', args): issue(pid, 'udp_write_untracked_fd')
     for pid, current in tables.items():
         for sock, _ in current.values():
-            if sock['connects']: issue(pid, 'udp_association_missing_close')
+            if sock['connects']:
+                sock['invalid'] = True; issue(pid, 'udp_association_missing_close')
     exempt = set(); contaminated = set()
     for sock in sockets:
         if not sock['connects']: continue
@@ -98,9 +105,10 @@ def analyze(records, ring_evidence, tgid):
             for submission in ring['submissions']:
                 if submission['opcode'] in WRITE_OPCODES and (
                         ring['creatorTgid'] in groups or submission.get('tgid') in groups):
+                    sock['invalid'] = True
                     for pid in sock['owners']: issue(pid, 'udp_io_uring_write_fd_unproven')
         if sock['written']: contaminated.update(sock['connects'])
-        else: exempt.update(sock['connects'])
+        elif not sock.get('invalid'): exempt.update(sock['connects'])
     return exempt, [(pid, sequence, call, sock['connects']) for pid, sequence, call, sock in writes], issues
 
 

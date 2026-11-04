@@ -59,6 +59,33 @@ class UdpLifecycleTests(unittest.TestCase):
                            '1<app> io_uring_enter(5<anon_inode:[io_uring]>, 1, 1, 0, NULL, 0) = 1',CLOSE,END],capture)
         self.assertIn('udp_io_uring_write_fd_unproven',{r['reason'] for r in report['classificationIssues']})
 
+    def test_process_sharing_table_before_socket_creation_cannot_hide_ring_write(self):
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':2,
+                 'events':[{'kind':'create','time':1,'ctx':'ring','pid':2,'tgid':2,'fd':5,'flags':0},
+                           {'kind':'submit','time':2,'ctx':'ring','pid':2,'tgid':2,'opcode':2,'sqpoll':False}]}
+        report=self.parse(['1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',SOCKET,CONNECT,
+                           '2<child> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+                           '2<child> io_uring_enter(5<anon_inode:[io_uring]>, 1, 1, 0, NULL, 0) = 1',
+                           '2<child> +++ exited with 0 +++',CLOSE,END],capture)
+        self.assertIn('udp_io_uring_write_fd_unproven',{r['reason'] for r in report['classificationIssues']})
+
+    def test_unknown_write_result_cannot_be_classified_as_unsent(self):
+        for result in ('? ERESTARTSYS (To be restarted)', '?', 'malformed'):
+            report=self.parse([SOCKET,CONNECT,f'1<app> write(3<UDPv6:[123]>, ""..., 7) = {result}',CLOSE,END])
+            self.assertEqual(report['udpConnectOnly'],0)
+            self.assertGreater(report['unparsedRecords'],0)
+
+    def test_unknown_sockaddr_is_incomplete(self):
+        report=self.parse(['1<app> connect(2, 0x123456, 16) = -1 EFAULT',END])
+        self.assertGreater(report['unparsedRecords'],0)
+
+    def test_zero_protocol_alias_is_udp_but_ping_sockets_are_not(self):
+        for protocol in ('0','IPPROTO_IP'):
+            report=self.parse([SOCKET.replace('IPPROTO_UDP',protocol),CONNECT,CLOSE,END])
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(0,1))
+        report=self.parse([SOCKET.replace('IPPROTO_UDP','IPPROTO_ICMPV6'),CONNECT,CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+
     def test_tcp_connect_remains_an_attempt_even_without_data(self):
         report=self.parse([CONNECT.replace('UDPv6','TCPv6'),END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
