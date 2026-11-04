@@ -103,7 +103,8 @@ class AuditedSessions:
             self.run(control, [self.native, '-I', '-B', self.auditor, '--' + control], env=env,
                      timeout=60, required=(self.native,), expected_external=2, defer_failure=defer_failure)
             report = json.loads((self.directory / ('outbound-' + control + '.json')).read_text())
-            assert {event['syscall'] for event in report['external']} == {'connect', 'sendto'}
+            if {event['syscall'] for event in report['external']} != {'connect', 'sendto'}:
+                raise RuntimeError('Positive control syscall mismatch: ' + control)
         fixture = self.auditor.with_name('hostOutboundControl.py')
         proof = self.directory / 'outbound-host-control-fixture.json'
         self.run('host-control', [sys.executable, '-I', '-B', fixture, '--host', self.core,
@@ -113,15 +114,20 @@ class AuditedSessions:
                  defer_failure=defer_failure)
         observed = json.loads(proof.read_text())
         report = json.loads((self.directory / 'outbound-host-control.json').read_text())
-        assert observed['privateNetworkNamespace'] and observed['onlyLoopbackInterface'] and observed['defaultRoutes'] == 0
-        assert observed['hostPid'] in report['rootPids'] and observed['childPid'] not in report['rootPids']
-        assert {event['pid'] for event in report['external']} == {observed['childPid']}
-        assert {event['syscall'] for event in report['external']} == {'connect', 'sendto'}
+        if not (observed['privateNetworkNamespace'] and observed['onlyLoopbackInterface'] and observed['defaultRoutes'] == 0):
+            raise RuntimeError('Host control network namespace mismatch')
+        if not (observed['hostPid'] in report['rootPids'] and observed['childPid'] not in report['rootPids']):
+            raise RuntimeError('Host control root mismatch')
+        if {event['pid'] for event in report['external']} != {observed['childPid']}:
+            raise RuntimeError('Host control child mismatch')
+        if {event['syscall'] for event in report['external']} != {'connect', 'sendto'}:
+            raise RuntimeError('Host control syscall mismatch')
         parents = {p['pid']: p['parentPid'] for p in report['processes']}
         current = observed['childPid']
         seen = set()
         while current != observed['hostPid']:
-            assert current not in seen and current in parents, 'Missing host-child lineage'
+            if current in seen or current not in parents:
+                raise RuntimeError('Missing host-child lineage')
             seen.add(current); current = parents[current]
         self.controls[-1].update(hostChildLineageVerified=True, privateNetworkNamespace=True,
                                  fixtureSha256=digest(proof), fixtureRecipeSha256=digest(fixture))

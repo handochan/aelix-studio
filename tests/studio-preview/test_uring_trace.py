@@ -139,6 +139,19 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
         self.assertTrue(result['complete'])
         self.assertEqual(result['events'][-1]['kind'],'retire')
 
+    def test_lost_events_on_either_output_stream_keep_count_and_failure_reason(self):
+        for stdout,stderr in [('Lost 7 events\n',''),('','Lost 7 events\n')]:
+            with self.subTest(stdout=stdout,stderr=stderr):
+                result=capture_module.parse(self.RAW+stdout,stderr,0,123)
+                self.assertFalse(result['complete'])
+                self.assertEqual(result['lostEvents'],7)
+                self.assertEqual(result['reason'],'io_uring_kernel_events_lost')
+
+    def test_losses_on_both_streams_are_counted_together(self):
+        result=capture_module.parse(self.RAW+'Lost 3 events\n','Lost 5 events\n',0,123)
+        self.assertEqual(result['lostEvents'],8)
+        self.assertFalse(result['complete'])
+
 
 class RingDescriptorTests(unittest.TestCase):
     fixture=OperationPolicyTests.fixture

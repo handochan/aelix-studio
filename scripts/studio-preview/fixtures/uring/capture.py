@@ -43,6 +43,7 @@ def parse(raw,stderr,returncode,namespace_inode):
         if other:
             if not sampling:counts[other[1]]=int(other[2])
             continue
+        if re.fullmatch(r'\s*(?:lost|dropped)\s+\d+\s+events?\s*',line,re.I):continue
         if not line.strip():continue
         fields=line.split('|')
         try:
@@ -67,8 +68,9 @@ def parse(raw,stderr,returncode,namespace_inode):
         except ValueError:invalid.append('invalid_record')
     expected={kind:sum(e['kind']==label for e in events)
               for kind,label in [('create','create'),('submit','submit'),('failed','failed'),('retire','retire'),('complete','complete')]}
-    lost=sum(int(value) for value in re.findall(r'(?:lost|dropped)\s+(\d+)',stderr,re.I))
-    if not lost and re.search(r'\blost\b|\bdropped\b',stderr,re.I):lost=1
+    output=raw+'\n'+stderr
+    lost=sum(int(value) for value in re.findall(r'(?:lost|dropped)\s+(\d+)',output,re.I))
+    if not lost and re.search(r'\blost\b|\bdropped\b',output,re.I):lost=1
     complete=(returncode==0 and ready and done and counts.get('root',0)==1 and len(roots)==1 and not invalid
               and not stderr.strip() and not lost and all(counts.get(k,0)==v for k,v in expected.items())
               and counts.get('state',0)==len(states) and bool(states)
@@ -77,7 +79,8 @@ def parse(raw,stderr,returncode,namespace_inode):
               and not counts.get('untracked_sqpoll',0) and not counts.get('unmatched_completion',0)
               and not counts.get('namespace_error',0))
     return dict(schema='aelix.io-uring-kernel-capture/1',status='captured' if complete else 'failed',
-        complete=complete,lostEvents=lost,eventCount=len(events),events=events,
+        complete=complete,lostEvents=lost,reason='io_uring_kernel_events_lost' if lost else None,
+        eventCount=len(events),events=events,
         pidNamespaceVerified=complete,namespaceInode=namespace_inode,root=roots[0] if len(roots)==1 else None,
         kernelCounts=counts,recordErrors=invalid,recorderExitCode=returncode,drained=complete,
         captureChecks={'ready':ready,'done':done,'rootCount':len(roots),'sampleCount':len(states),

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SCRIPT = ROOT / 'scripts/studio-preview/fixtures/outboundAudit.py'
@@ -19,6 +20,29 @@ HOST = '/owned/aelix-studio-host'
 PYTHON = '/owned/native/python3'
 CONNECT = 'connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("203.0.113.1")}, 16) = -1 ENETUNREACH (Network unreachable)'
 LOCAL = CONNECT.replace('203.0.113.1', '127.0.0.1')
+
+
+class CaptureStartupFailureTests(unittest.TestCase):
+    def test_start_failure_is_preserved_even_when_broker_evidence_is_unavailable(self):
+        for broker_error in (False,True):
+            with self.subTest(broker_error=broker_error), tempfile.TemporaryDirectory() as directory:
+                capture=Mock()
+                capture.start.side_effect=RuntimeError('kernel_tracepoint_unavailable')
+                if broker_error:capture.stop.side_effect=OSError('missing broker result')
+                else:capture.stop.return_value={'status':'failed','complete':False,'lostEvents':0,
+                    'pidNamespaceVerified':False,'events':[],'eventCount':0,'reason':'kernel_recorder_sudo_required'}
+                process=Mock(pid=123,returncode=0);process.poll.return_value=0
+                report=Path(directory)/'report.json'
+                with patch.dict(os.environ,{},clear=True), patch.object(audit.sys,'platform','linux'), \
+                     patch.object(audit.shutil,'which',return_value='/usr/bin/strace'), \
+                     patch.object(audit,'npm_proxy_configured',return_value=False), \
+                     patch.object(audit,'Capture',return_value=capture), \
+                     patch.object(audit.subprocess,'Popen',return_value=process):
+                    code=audit.audit(['/owned/command'],report)
+                evidence=json.loads(report.read_text())['ioUring']['capture']
+                self.assertEqual(code,87)
+                self.assertEqual(evidence['reason'],'kernel_tracepoint_unavailable')
+                self.assertIn({'reason':'kernel_tracepoint_unavailable'},evidence['recordErrors'])
 
 
 class ScopedParserTests(unittest.TestCase):

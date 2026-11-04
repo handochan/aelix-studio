@@ -129,13 +129,14 @@ remain only in the whole-app report; unresolvable ownership is globally blocking
 Per-session `ioUring` reports include opcode counts, ring ownership/submissions,
 namespace evidence, kernel event counters and capture status.
 
-An ordinary new client socket must establish its peer through traced `connect`,
+An ordinary new TCP/UDP client socket must establish its peer through traced `connect`,
 or a rejected ring `CONNECT`, before connected `READV`/`WRITEV` can send data.
 Server-side connections can instead originate in `accept`/`accept4`, so these are
 also traced: non-loopback or unresolved accepted peers fail selected-tree
 qualification. Unconnected UDP vectored writes cannot choose a peer; destination
 selecting `SEND*` ring operations are rejected. Previously connected inherited or
-SCM-passed sockets retain the S3 limitation below. Allowed file operations do not
+SCM-passed sockets and protocol-specific connections such as SCTP connectx retain
+the S3 limitations below. Allowed file operations do not
 claim packet/device or remote-filesystem transport auditing; the fixture uses
 owned local files and loopback transports. This is not a runtime sandbox.
 
@@ -162,7 +163,9 @@ filename but replace argv with `[...]` and env with a pointer/count. Integration
 tests assert argument/environment sentinels never enter raw traces or reports.
 Connected FD peers are decoded for inherited sockets sent through the traced
 `sendto`, `sendmsg`, and `sendmmsg` calls. Sends through `write()` or `writev()`
-on inherited sockets are **not traced**; this is not a claim to cover every socket API. Only sendmmsg destination vectors are unabbreviated; their data
+on inherited sockets are **not traced**. Protocol-specific connection APIs such as
+`setsockopt(IPPROTO_SCTP, SCTP_SOCKOPT_CONNECTX)` are also **not traced**; this is not
+a claim to cover every socket API. Only sendmmsg destination vectors are unabbreviated; their data
 buffers remain suppressed. Unknown peers/vectors fail closed in their process.
 Executable paths are used privately for selection and are omitted from JSON;
 raw traces are deleted. Terminal records are retained during parsing; missing or

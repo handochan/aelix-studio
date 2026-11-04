@@ -16,6 +16,34 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 
+def invalid_control_fixture(case):
+    """Exercise real control validation under an optimized Python interpreter."""
+    with tempfile.TemporaryDirectory() as directory:
+        root=Path(directory)
+        audit=module.AuditedSessions(Path('/owned/host'),Path('/owned/python'),root)
+        def run(name,*_args,**_options):
+            data={'external':[{'syscall':'connect','pid':20},{'syscall':'sendto','pid':20}],
+                  'rootPids':[10],'processes':[{'pid':20,'parentPid':10}]}
+            proof={'privateNetworkNamespace':True,'onlyLoopbackInterface':True,'defaultRoutes':0,
+                   'hostPid':10,'childPid':20}
+            if name==case and case in ('positive-control','child-positive-control'):
+                data['external'][1]['syscall']='connect'
+            if name=='host-control':
+                if case=='namespace':proof['onlyLoopbackInterface']=False
+                elif case=='roots':data['rootPids'].append(20)
+                elif case=='child':data['external'][0]['pid']=30
+                elif case=='syscalls':data['external'][1]['syscall']='connect'
+                elif case=='missing-lineage':data['processes']=[]
+                elif case=='cycle':data['processes'][0]['parentPid']=20
+                (root/'outbound-host-control-fixture.json').write_text(json.dumps(proof))
+            (root/('outbound-'+name+'.json')).write_text(json.dumps(data))
+            audit.controls.append({'name':name})
+        audit.run=run
+        with patch.object(module.os,'readlink',return_value='net:[1]'), \
+             patch.object(module.tempfile,'TemporaryDirectory',side_effect=RuntimeError('reached_opcode_controls')):
+            audit.positive_controls({})
+
+
 class SessionReceiptTests(unittest.TestCase):
     def run_report(self, root, *, attempts=0, unparsed=0, classification=0, exit_code=0):
         audit = module.AuditedSessions(Path('/owned/host'), Path('/owned/python'), root)
@@ -71,6 +99,21 @@ class SessionReceiptTests(unittest.TestCase):
                 audit.run('provider',['/owned/provider-smoke'],env={},timeout=1)
             self.assertTrue(run.call_args.kwargs['check'])
             self.assertEqual(audit.sessions,[])
+
+    def test_invalid_positive_controls_still_fail_with_python_optimization(self):
+        expected={'positive-control':'Positive control syscall mismatch',
+                  'child-positive-control':'Positive control syscall mismatch',
+                  'namespace':'Host control network namespace mismatch',
+                  'roots':'Host control root mismatch','child':'Host control child mismatch',
+                  'syscalls':'Host control syscall mismatch',
+                  'missing-lineage':'Missing host-child lineage','cycle':'Missing host-child lineage'}
+        code="import runpy,sys;runpy.run_path(sys.argv[1])['invalid_control_fixture'](sys.argv[2])"
+        for case,message in expected.items():
+            with self.subTest(case=case):
+                result=subprocess.run([sys.executable,'-I','-B','-O','-c',code,str(Path(__file__).resolve()),case],
+                                      capture_output=True,text=True,timeout=10)
+                self.assertNotEqual(result.returncode,0)
+                self.assertIn(message,result.stderr)
 
 
 @unittest.skipUnless(sys.platform=='linux','Linux tracing required')

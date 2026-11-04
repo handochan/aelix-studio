@@ -116,10 +116,15 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
             os.kill(process.pid,signal.SIGCONT)
             process.wait()
             evidence=capture.stop()
-        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):
+        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
             if process.poll() is None:process.kill();process.wait()
             try:evidence=capture.stop()
             except (OSError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
+            reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__
+            if evidence.get('reason') and evidence['reason']!=reason:
+                evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
+            evidence.update(status='failed',complete=False,reason=reason)
+            evidence.setdefault('recordErrors',[]).append({'reason':reason})
         process.returncode=process.returncode if process.returncode is not None else INCOMPLETE
         paths = [trace] if trace.exists() else []
         if not evidence.get('complete'):
