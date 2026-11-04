@@ -43,3 +43,26 @@ test('preserves only the display transport and OS runtime required to launch an 
   assert.equal(environment.SystemRoot, 'C:\\Windows');
   assert.equal(environment.UNRELATED, undefined);
 });
+
+test('update measurement follows private and future sessions without creating a default session', async () => {
+  const { installStartupUpdateProbe } = await import('./startupUpdates.mjs');
+  const handlers = new Map();
+  const callbacks = [];
+  const createSession = () => ({ webRequest: { onBeforeRequest: (handler) => callbacks.push(handler) } });
+  const existing = createSession();
+  const api = {
+    app: { on: (name, handler) => handlers.set(name, handler) },
+    webContents: { getAllWebContents: () => [{ session: existing }] },
+    dialog: {},
+  };
+  installStartupUpdateProbe(api);
+  handlers.get('session-created')(createSession());
+  handlers.get('web-contents-created')({}, { session: existing });
+  assert.equal(callbacks.length, 2);
+  let decision;
+  callbacks[1]({ url: 'https://github.com/handochan/aelix-studio/releases.atom' }, (value) => {
+    decision = value;
+  });
+  assert.deepEqual(decision, { cancel: true });
+  assert.deepEqual(globalThis.__studioUpdateRequests, ['https://github.com/handochan/aelix-studio/releases.atom']);
+});

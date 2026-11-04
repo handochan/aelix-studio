@@ -16,7 +16,13 @@ const source = path.join(
   root,
   'packages/desktop/src/renderer/pages/conversation/Preview/components/editors/OfflineMonacoEditor.tsx'
 );
-const report = { schema: 'aelix.monaco-offline/1', status: 'failed', externalRequests: 0, credentials: false };
+const report = {
+  schema: 'aelix.monaco-offline/1',
+  status: 'failed',
+  externalRequests: 0,
+  credentials: false,
+  fixtureNoSandbox: true,
+};
 let server, app, dictionaries;
 try {
   await fs.writeFile(
@@ -96,7 +102,7 @@ try {
   env.MONACO_FIXTURE_FILE = path.join(dist, 'index.html');
   if (dictionaries) env.MONACO_DICTIONARY_URL = dictionaries.url;
   app = await electron.launch({
-    args: [...(process.getuid?.() === 0 ? ['--no-sandbox'] : []), entry],
+    args: ['--no-sandbox', entry],
     env,
     cwd: root,
     timeout: 60000,
