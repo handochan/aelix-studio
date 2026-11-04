@@ -157,6 +157,7 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
     def test_network_output_loss_abi_and_task_coverage_fail_closed(self):
         for extra in ('@network_count: 1\n', '@task_count: 2\n', '@unsupported_abi: 1\n',
                       '@worker_enter: 1\n','@worker_return: 1\n','@worker_error: 1\n',
+                      '@socket_layout_error: 1\n',
                       'N|2|100|100|10|10|1|1|3|0\n'):
             with self.subTest(extra=extra):
                 self.assertFalse(capture_module.parse(self.RAW+extra,'',0,123)['complete'])
@@ -198,11 +199,24 @@ class PreEntrySelectionTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError,'config_missing'):
             entry.select({'ptrace_notify'},'x86_64','7.0.0',[])
 
-    def test_signatures_require_actual_kernel_register_or_notification_arguments(self):
-        self.assertTrue(entry.signature_valid({'symbol':'syscall_trace_enter'},'    struct pt_regs * regs\n'))
-        self.assertTrue(entry.signature_valid({'symbol':'ptrace_notify'},'    int exit_code\n    unsigned long message\n'))
-        for signature in ('    int exit_code\n','    long message\n','    void * regs\n'):
-            self.assertFalse(entry.signature_valid({'symbol':'ptrace_notify'},signature))
+    def test_btf_signature_uses_parameter_types_instead_of_formatted_names(self):
+        import struct
+        for endian in ('<','>'):
+            with self.subTest(endian=endian),tempfile.TemporaryDirectory() as directory:
+                strings=b'\0int\0unsigned long\0ptrace_notify\0'
+                types=b''.join([
+                    struct.pack(endian+'IIII',1,1<<24,4,0x01000020),
+                    struct.pack(endian+'IIII',5,1<<24,8,64),
+                    struct.pack(endian+'IIIIIII',0,(13<<24)|2,1,0,1,0,2),
+                    struct.pack(endian+'III',19,(12<<24)|1,3),
+                ])
+                header=struct.pack(endian+'HBBIIIII',0xeb9f,1,0,24,0,len(types),len(types),len(strings))
+                path=Path(directory)/'btf';path.write_bytes(header+types+strings)
+                self.assertEqual(entry.btf_signature('ptrace_notify',path),{'parameters':['s32','u64'],'return':'s32'})
+                with self.assertRaisesRegex(RuntimeError,'function_missing'):entry.btf_signature('missing',path)
+                broken=bytearray(types);struct.pack_into(endian+'I',broken,16+8,4)
+                path.write_bytes(header+broken+strings)
+                with self.assertRaisesRegex(RuntimeError,'signature_mismatch'):entry.btf_signature('ptrace_notify',path)
 
 
 class KernelNetworkCorrelationTests(unittest.TestCase):
@@ -310,6 +324,19 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
             result=self.run_policy(capture,[(10,'connect(3, {}) = 0',1)])
             self.assertTrue(result['issues']);self.assertEqual(result['resolved'],[])
 
+    def test_unspec_is_only_valid_for_a_known_connect_request_and_ip_peers_must_parse(self):
+        for hook,call in ((1,1),(2,1),(1,5)):
+            capture=self.fixture()
+            self.add(capture,self.event(call=call),self.event('X',call=call,time=4),
+                     self.event('H',call=call,value=hook,result=0,time=3))
+            result=self.run_policy(capture,[(10,network.CALLS[call-1]+'(3, {}) = 0',1)])
+            self.assertEqual(bool(result['issues']),not(hook==1 and call==1))
+        capture=self.fixture()
+        self.add(capture,self.event(),self.event('X',time=4),self.event('H',value=1,result=2,time=3))
+        for peers,failed in ((set(),True),({(10,1)},False)):
+            checked=network.reconcile(capture,[(10,'connect(3, {}) = 0',1)],{10:2},{10},None,known_destinations=peers)
+            self.assertEqual(bool(checked['issues']),failed)
+
     def test_socket_write_without_syscall_entry_is_fatal_including_io_uring(self):
         capture=self.fixture();self.add(capture,self.event('H',call=0,ordinal=0,value=7,result=10))
         result=self.run_policy(capture)
@@ -353,6 +380,21 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
             for hook in network.HOOKS:
                 path.write_text('\n'.join(item for item in network.HOOKS if item!=hook))
                 with self.assertRaisesRegex(RuntimeError,'probe_missing'):network.requirements(root)
+
+    def test_alias_evidence_never_publishes_addresses_or_assumes_masked_symbols(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'symbols'
+            path.write_text('ffffffff82000000 r socket_file_ops\n'
+                            'ffffffff81000000 T security_socket_sendmsg\n'
+                            'ffffffff81000000 T security_socket_recvmsg\n')
+            evidence=network.symbol_evidence(path)
+            self.assertEqual(evidence['securityAliasGroups'],[['security_socket_recvmsg','security_socket_sendmsg']])
+            self.assertNotIn('ffffffff',str(evidence))
+            for contents in ('','0000000000000000 T security_socket_sendmsg\n'):
+                path.write_text(contents)
+                self.assertFalse(network.symbol_evidence(path)['securityAddressesVisible'])
+            path.write_text('ffffffff82000000 T security_socket_sendmsg\nffffffff83000000 T security_socket_sendmsg\n')
+            with self.assertRaises(RuntimeError):network.symbol_evidence(path)
 
     def test_metadata_decoder_rejects_truncated_or_non_numeric_events(self):
         self.assertEqual(network.parse('N|2|110|110|10|10|1|1|3|0'.split('|'))['value'],3)

@@ -155,16 +155,23 @@ with CONFIG_X86_FRED, zero otherwise. BTF supplies register/field sizes. Every
 entry checks that the actual stack VM area's address equals task.stack and its
 page count equals the derived size; any disagreement fails. Missing config,
 probe, BTF signature or an unsupported layout never falls back to guessing.
-The report retains `preEntryProbe` and signature provenance. ARM's direct
+Function contracts are decoded from live BTF FUNC/FUNC_PROTO types (pointer
+targets and integer width/signedness), rather than formatted `kfunc -lv`
+argument names or fentry availability. The complete BTF hash and signature
+hashes are retained. The report retains `preEntryProbe` and signature provenance. ARM's direct
 register-pointer path and the common P/N/socket correlation rules are unchanged.
 
 It also attaches all enter/exit tracepoints for `connect`,
 `sendto`, `sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`, plus
-required kprobes `security_socket_connect`, `security_socket_sendmsg`,
-`sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`, `udp_sendmsg` and
-`udpv6_sendmsg`. Attachment/fields/BTF/privilege failures are fatal. This covers
-network syscall execution and the socket layer, including vectored writes and
-io_uring sends. `raw_syscalls:sys_enter` additionally rejects compatibility ABIs
+required concrete kprobes `__sys_connect_file`, `kernel_connect`,
+`sock_write_iter`, `sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`,
+`udp_sendmsg`, `udpv6_sendmsg`, `inet_sendmsg` and `inet6_sendmsg`.
+Attachment/fields/BTF/privilege failures are fatal. These work jointly with P/N
+and the io_uring opcode policy: direct attempts remain recorded even when LSM
+denies execution; normal/async socket WRITEV goes through `sock_write_iter`;
+kernel sends use `sock_sendmsg`; IP send dispatch and TCP/UDP protocol functions
+cover direct send syscalls that bypass public `sock_sendmsg`. Unmatched concrete
+operations are fatal. `raw_syscalls:sys_enter` additionally rejects compatibility ABIs
 whose syscall multiplexers are outside this native 64-bit policy. It never reads
 registers through ptrace. Running-kernel BTF supplies task/socket layouts.
 
@@ -173,7 +180,21 @@ puts syscall tracepoints **after** ptrace and seccomp; their absence alone does
 not identify an interrupted call. Linux [socket write dispatch](https://github.com/torvalds/linux/blob/v6.8/net/socket.c#L1143-L1161)
 and [message dispatch](https://github.com/torvalds/linux/blob/v6.8/net/socket.c#L740-L769)
 reach the socket security/protocol layer; [io_uring send](https://github.com/torvalds/linux/blob/v6.8/io_uring/net.c#L414)
-also reaches it. The protocol probes provide an additional independent check.
+also reaches it. The protocol probes provide an additional independent check. See the concrete
+[VFS socket write](https://github.com/torvalds/linux/blob/v7.0/net/socket.c#L1175-L1195),
+[file connect](https://github.com/torvalds/linux/blob/v7.0/net/socket.c#L2072), and
+[IP send dispatch](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/af_inet.c#L858) paths.
+The file-connect probe never casts an arbitrary file's `private_data`: it reads
+the copied request's `ss_family` using the validated BTF storage type/length.
+AF_UNSPEC=0 is valid only for that request-family hook and a corresponding
+known P/N CONNECT. Other hooks observe socket families through their typed
+callback/protocol contracts. Unsupported families and IP socket operations
+without a decoded or FD-lifecycle-derived destination fail classification.
+LSM permission checks are not used as operation identity. Supplemental kallsyms
+same-address alias groups can diagnose optimized permission wrappers; they
+never exempt an operation and contain public names, not kernel addresses.
+A receive-only AF_UNIX regression checks that receiving data is not invented
+as a send operation. No family/time/unknown-record matching is relaxed.
 Only metadata is recorded: monotonic timestamps, normalized TID/TGID, syscall,
 per-thread ordinal, fd, result and socket family; no buffers/argv/paths. The
 recorder's stopped root is strace itself; its own output writes are outside the

@@ -398,18 +398,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states))
         classification_issues.extend(ring_evidence['globalIssues'])
 
-    network_evidence = None
-    if kernel_capture is not None:
-        from uring.network import reconcile as reconcile_network
-        eligible = {pid: count for pid, count in register_holes.items()
-                    if pid not in invalid_terminal_stops and killed_at.get(pid, 0) > terminal_stops[pid]}
-        if classification_issues: eligible = {}
-        network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
-                                             {pid: tgid(pid) for pid in states},parents,
-                                             {pid for pid,item in states.items() if item['finished']} if not classification_issues else set())
-        for evidence in network_evidence['resolved']:
-            states[evidence['pid']]['unparsed'] -= evidence['records']
-
     from udpLifecycle import analyze as analyze_udp
     exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid)
     for issue in udp_issues:
@@ -421,6 +409,19 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             if origin:
                 states[pid]['events'].append({**origin, 'pid': pid, 'process': states[pid]['process'],
                     'syscall': call, '_sequence': sequence, 'failed': True})
+    network_evidence = None
+    if kernel_capture is not None:
+        from uring.network import reconcile as reconcile_network
+        eligible = {pid: count for pid, count in register_holes.items()
+                    if pid not in invalid_terminal_stops and killed_at.get(pid, 0) > terminal_stops[pid]}
+        if classification_issues: eligible = {}
+        network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
+                                             {pid: tgid(pid) for pid in states},parents,
+                                             {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
+                                             {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']})
+        for evidence in network_evidence['resolved']:
+            states[evidence['pid']]['unparsed'] -= evidence['records']
+
     for pid, item in states.items():
         for event in item['events']:
             key = (pid, event.pop('_sequence'))
@@ -476,6 +477,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     'eventCount': network_evidence['eventCount'],
                     'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),
                     'preEntryProbe': kernel_capture.get('preEntryProbe'),
+                    'kernelBtfSha256': kernel_capture.get('kernelBtfSha256'),
+                    'socketSymbols': kernel_capture.get('socketSymbols'),
+                    'socketSignatureSha256': kernel_capture.get('socketSignatureSha256'),
+                    'socketFamilySource': {'__sys_connect_file':'request','otherSocketProbes':'socket'},
+                    'socketConnectAddressType': kernel_capture.get('socketConnectAddressType'),
                     'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
                     'socketProbes': kernel_capture.get('socketProbes', [])}
                     if network_evidence is not None else {'recorded': False}),

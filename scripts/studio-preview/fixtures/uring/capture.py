@@ -13,8 +13,8 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from uring.probe import event_formats,event_fields,pid_numbers_offset
 from uring.program import program
-from uring.network import requirements as network_requirements, parse as parse_network, HOOKS
-from uring.entry import select as select_entry, signature_valid
+from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_ARGUMENTS, symbol_evidence
+from uring.entry import select as select_entry, btf_signature
 
 
 def samples(raw):
@@ -39,7 +39,7 @@ def parse(raw,stderr,returncode,namespace_inode):
         if line.startswith('TICK|'):sampling=True;continue
         if line=='TICKEND':sampling=False;continue
         match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead|network|task|worker)_count:\s*(\d+)',line)
-        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|pre_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
+        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|pre_layout_error|socket_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
         if match:
             if not sampling:counts[match[1]]=int(match[2])
             continue
@@ -96,6 +96,7 @@ def parse(raw,stderr,returncode,namespace_inode):
               and not counts.get('unsupported_abi',0)
               and not counts.get('pre_mismatch',0)
               and not counts.get('pre_layout_error',0)
+              and not counts.get('socket_layout_error',0)
               and not counts.get('worker_error',0) and counts.get('worker',0)==len(workers)
               and counts.get('worker_enter',0)==counts.get('worker_return',0)
               and counts.get('worker_return',0)>=len(workers)
@@ -124,12 +125,16 @@ def broker(directory,root_pid,namespace_inode):
         formats.update(network_requirements(tracefs))
         available={line.split()[0] for line in (tracefs/'available_filter_functions').read_text().splitlines() if line.strip()}
         pre_entry=select_entry(available)
-        signature=subprocess.check_output(['bpftrace','-lv','kfunc:'+pre_entry['symbol']],text=True,stderr=subprocess.STDOUT)
-        if not signature_valid(pre_entry,signature):
-            raise RuntimeError('kernel_pre_ptrace_probe_signature_missing')
-        worker_signature=subprocess.check_output(['bpftrace','-lv','kfunc:create_io_thread'],text=True,stderr=subprocess.STDOUT)
-        if not re.search(r'^\s+struct task_struct \* retval\s*$',worker_signature,re.M):
-            raise RuntimeError('kernel_io_worker_probe_signature_missing')
+        metadata={'kernel':os.uname().release,'preEntryProbe':pre_entry}
+        signature=json.dumps(btf_signature(pre_entry['symbol']),sort_keys=True)
+        worker_signature=json.dumps(btf_signature('create_io_thread'),sort_keys=True)
+        socket_signatures={name:btf_signature(name,first_parameter='ptr:struct:'+kind)
+                           for name,kind in SOCKET_ARGUMENTS.items()}
+        address_parameters=socket_signatures['__sys_connect_file']['parameters']
+        if (len(address_parameters)<3 or address_parameters[1] not in
+                ('ptr:struct:sockaddr_storage','ptr:struct:__kernel_sockaddr_storage') or address_parameters[2]!='s32'):
+            raise RuntimeError('kernel_connect_address_signature_mismatch')
+        symbols=symbol_evidence()
         failed=tracefs/'events/io_uring/io_uring_req_failed/format'
         if not failed.is_file() or not {'ctx','opcode'}<=event_fields(failed.read_text()):
             raise RuntimeError('io_uring_failed_request_tracepoint_missing')
@@ -137,13 +142,18 @@ def broker(directory,root_pid,namespace_inode):
         if not completion.is_file() or not {'ctx','req'}<=event_fields(completion.read_text()):
             raise RuntimeError('io_uring_completion_tracepoint_missing')
         offset=pid_numbers_offset()
-        text=program(root_pid,namespace_inode,offset,submit,pre_entry)
+        connect_address_type=address_parameters[1].removeprefix('ptr:struct:')
+        text=program(root_pid,namespace_inode,offset,submit,pre_entry,connect_address_type)
         metadata={'tool':'bpftrace','toolVersion':subprocess.check_output(['bpftrace','--version'],text=True).strip(),
                   'kernel':os.uname().release,'tracepoints':[*formats,'io_uring_req_failed','io_uring_complete'],
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
                                   dict(formats,io_uring_req_failed=failed.read_text(),io_uring_complete=completion.read_text()).items()},
                   'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset,
                   'socketProbes':list(HOOKS),'preEntryProbe':pre_entry,
+                  'kernelBtfSha256':hashlib.sha256(Path('/sys/kernel/btf/vmlinux').read_bytes()).hexdigest(),
+                  'socketSymbols':symbols,'socketSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+                                                                  for name,value in socket_signatures.items()},
+                  'socketConnectAddressType':connect_address_type,
                   'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
                   'workerSignatureSha256':hashlib.sha256(worker_signature.encode()).hexdigest()}
         source=directory/'capture.bt';source.write_text(text)

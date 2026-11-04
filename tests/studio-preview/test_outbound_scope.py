@@ -485,6 +485,33 @@ int main(void) {
 
 
 class TracerSelectionTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('strace'), 'Linux audit runtime test')
+    def test_receiving_socket_data_does_not_create_an_unmatched_send_operation(self):
+        import socket
+        import threading
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);endpoint=root/'local.sock';report=root/'report.json'
+            server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+            server.bind(str(endpoint));server.listen();server.settimeout(0.1)
+            stop=threading.Event()
+            def serve():
+                while not stop.is_set():
+                    try:connection,_=server.accept()
+                    except socket.timeout:continue
+                    except OSError:return
+                    with connection:connection.sendall(b'control')
+                    return
+            worker=threading.Thread(target=serve);worker.start()
+            try:
+                code='import socket,os,sys;s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);assert s.recvmsg(3)[0]==b"con";assert os.readv(s.fileno(),[bytearray(4)])==4;s.close()'
+                result=audit.audit([sys.executable,'-I','-B','-c',code,str(endpoint)],report)
+                data=json.loads(report.read_text())
+                self.assertEqual(result,0)
+                self.assertEqual((data['externalAttempts'],data['unparsedRecords'],data['classificationErrors']),(0,0,0))
+                self.assertTrue(data['kernelNetwork']['recorded'])
+            finally:
+                stop.set();server.close();worker.join(timeout=5)
+
     def test_pinned_binary_is_selected_without_relying_on_sudo_path(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);binary=root/'.local/strace-toolchain/bin/strace'
