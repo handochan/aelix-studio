@@ -2,10 +2,34 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { createConnection } from 'node:net';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDictionaryServer } from '@/process/resources/dictionaryServer';
 
 const roots: string[] = [];
+async function requestHosts(url: string, hosts: string[], protocol = 'HTTP/1.1'): Promise<number> {
+  const address = new URL(url);
+  return new Promise((resolve, reject) => {
+    const socket = createConnection({ host: address.hostname, port: Number(address.port) });
+    let response = '';
+    socket.setEncoding('utf8');
+    socket.setTimeout(3000, () => socket.destroy(new Error('Dictionary response timed out')));
+    socket.on('error', reject);
+    socket.on('data', (chunk: string) => {
+      response += chunk;
+    });
+    socket.on('end', () => {
+      const status = /^HTTP\/1\.[01] (\d{3})/.exec(response);
+      if (status) resolve(Number(status[1]));
+      else reject(new Error('Dictionary response had no HTTP status'));
+    });
+    socket.on('connect', () =>
+      socket.write(
+        `GET /en-us-10-1.bdic ${protocol}\r\n${hosts.map((host) => `Host: ${host}\r\n`).join('')}Connection: close\r\n\r\n`
+      )
+    );
+  });
+}
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -33,6 +57,41 @@ async function fixture(corrupt = false) {
   return root;
 }
 describe('bundled dictionary feed', () => {
+  it.each(['rebind.invalid', '127.0.0.1.rebind.invalid', 'localhost', '127.0.0.2', '[::1]', '2130706433'])(
+    'rejects a DNS rebinding or alternate Host authority %s',
+    async (host) => {
+      const unavailable = vi.fn();
+      const { server, url } = await createDictionaryServer(await fixture(), unavailable);
+      try {
+        expect(await requestHosts(url, [`${host}:${new URL(url).port}`])).toBe(403);
+        expect(unavailable).not.toHaveBeenCalled();
+        expect(await requestHosts(url, [new URL(url).host])).toBe(200);
+      } finally {
+        server.close();
+      }
+    }
+  );
+  it('rejects a missing or incorrect bound port', async () => {
+    const { server, url } = await createDictionaryServer(await fixture());
+    try {
+      expect(await requestHosts(url, ['127.0.0.1'])).toBe(403);
+      const wrong = Number(new URL(url).port) === 1 ? 2 : 1;
+      expect(await requestHosts(url, [`127.0.0.1:${wrong}`])).toBe(403);
+      expect(await requestHosts(url, [], 'HTTP/1.0')).toBe(403);
+    } finally {
+      server.close();
+    }
+  });
+  it('rejects duplicate Host fields even when one is the correct authority', async () => {
+    const { server, url } = await createDictionaryServer(await fixture());
+    try {
+      const host = new URL(url).host;
+      expect([400, 403]).toContain(await requestHosts(url, [host, 'rebind.invalid']));
+      expect([400, 403]).toContain(await requestHosts(url, [host, host]));
+    } finally {
+      server.close();
+    }
+  });
   it('serves a case-normalized dictionary only on IPv4 loopback', async () => {
     const { server, url } = await createDictionaryServer(await fixture());
     try {

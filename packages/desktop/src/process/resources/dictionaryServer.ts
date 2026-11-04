@@ -15,6 +15,18 @@ export async function createDictionaryServer(
   if (index.schema !== 'aelix.spellcheck-assets/1' || !index.assets || typeof index.assets !== 'object')
     throw new Error('Invalid bundled dictionary index');
   const server = createServer((request, response) => {
+    const address = server.address();
+    const hosts = request.rawHeaders.filter((header, index) => index % 2 === 0 && header.toLowerCase() === 'host');
+    if (
+      !address ||
+      typeof address === 'string' ||
+      hosts.length !== 1 ||
+      request.headers.host !== `${address.address}:${address.port}`
+    ) {
+      response.writeHead(403);
+      response.end();
+      return;
+    }
     void (async () => {
       const name = (request.url ?? '').slice(1).toLowerCase();
       const item = /^[a-z0-9-]+\.bdic$/.test(name) ? index.assets[name] : undefined;
