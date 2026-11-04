@@ -475,6 +475,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'kernelNetwork': ({'recorded': kernel_capture.get('complete', False),
                     'eventCount': network_evidence['eventCount'],
                     'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),
+                    'preEntryProbe': kernel_capture.get('preEntryProbe'),
                     'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
                     'socketProbes': kernel_capture.get('socketProbes', [])}
                     if network_evidence is not None else {'recorded': False}),

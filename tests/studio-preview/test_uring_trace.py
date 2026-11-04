@@ -3,6 +3,7 @@ import importlib.util
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 SOURCE=ROOT/'scripts/studio-preview/fixtures/uring/probe.py'
@@ -162,6 +163,46 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
 
 
 from uring import network
+from uring import entry
+
+
+class PreEntrySelectionTests(unittest.TestCase):
+    CONFIG='CONFIG_X86_64=y\nCONFIG_VMAP_STACK=y\n# CONFIG_KASAN is not set\n# CONFIG_X86_FRED is not set\n'
+
+    def test_x64_stack_formula_uses_running_config_and_rejects_unknown_layouts(self):
+        for kasan in (False,True):
+            for fred in (False,True):
+                text=self.CONFIG
+                if kasan:text=text.replace('# CONFIG_KASAN is not set','CONFIG_KASAN=y')
+                if fred:text=text.replace('# CONFIG_X86_FRED is not set','CONFIG_X86_FRED=y')
+                layout=entry.stack_layout(text,'7.0.0-1017-azure',4096)
+                self.assertEqual(layout['threadBytes'],32768 if kasan else 16384)
+                self.assertEqual(layout['paddingBytes'],16 if fred else 0)
+        for text,release,page in [(self.CONFIG,'7.1.0',4096),(self.CONFIG,'7.0.0',65536),
+            (self.CONFIG.replace('CONFIG_VMAP_STACK=y','CONFIG_VMAP_STACK=n'),'7.0.0',4096),
+            (self.CONFIG.replace('# CONFIG_X86_FRED is not set\n',''),'7.0.0',4096),
+            (self.CONFIG+'CONFIG_X86_64=y\n','7.0.0',4096)]:
+            with self.assertRaises(RuntimeError):entry.stack_layout(text,release,page)
+
+    @patch('uring.entry.os.sysconf',return_value=4096)
+    def test_missing_inline_symbol_uses_only_verified_native_x64_ptrace_entry(self,_page):
+        self.assertEqual(entry.select({'syscall_trace_enter'},'aarch64')['symbol'],'syscall_trace_enter')
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'config';path.write_text(self.CONFIG)
+            chosen=entry.select({'ptrace_notify'},'x86_64','7.0.0',[path])
+            self.assertEqual(chosen['threadBytes'],16384)
+            self.assertEqual(chosen['symbol'],'ptrace_notify')
+            self.assertEqual(len(chosen['configSha256']),64)
+        for available,arch in [(set(),'x86_64'),({'ptrace_notify'},'aarch64')]:
+            with self.assertRaisesRegex(RuntimeError,'missing'):entry.select(available,arch,configs=[])
+        with self.assertRaisesRegex(RuntimeError,'config_missing'):
+            entry.select({'ptrace_notify'},'x86_64','7.0.0',[])
+
+    def test_signatures_require_actual_kernel_register_or_notification_arguments(self):
+        self.assertTrue(entry.signature_valid({'symbol':'syscall_trace_enter'},'    struct pt_regs * regs\n'))
+        self.assertTrue(entry.signature_valid({'symbol':'ptrace_notify'},'    int exit_code\n    unsigned long message\n'))
+        for signature in ('    int exit_code\n','    long message\n','    void * regs\n'):
+            self.assertFalse(entry.signature_valid({'symbol':'ptrace_notify'},signature))
 
 
 class KernelNetworkCorrelationTests(unittest.TestCase):

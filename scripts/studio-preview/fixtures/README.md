@@ -131,8 +131,9 @@ remain only in the whole-app report; unresolvable ownership is globally blocking
 Per-session `ioUring` reports include opcode counts, ring ownership/submissions,
 namespace evidence, kernel event counters and capture status.
 
-The **same capture** first requires a `syscall_trace_enter` kprobe, before
-ptrace/seccomp. Its BTF signature must accept `struct pt_regs *regs`; the native
+The **same capture** first selects a verified point before the tracer's register
+read. Where available, `syscall_trace_enter` runs before ptrace/seccomp. Its BTF
+signature must accept `struct pt_regs *regs`; the native
 x64 `orig_ax`/`di` or arm64 `syscallno`/`orig_x0` layout supplies the syscall/fd.
 It numbers **all** invocations per TID and records network/write invocations
 before any tracer register read. Native syscall numbers come from Linux's
@@ -140,6 +141,22 @@ before any tracer register read. Native syscall numbers come from Linux's
 and [arm64 generic ABI](https://github.com/torvalds/linux/blob/v6.8/include/uapi/asm-generic/unistd.h).
 Kernel-read failure, ABI incompatibility, signature or function absence fails.
 Both the pre-entry hook and the post-seccomp raw entry reject non-native ABIs.
+
+Linux 7 x64 [inlines this helper](https://github.com/torvalds/linux/blob/v7.0/include/linux/entry-common.h#L81-L115).
+There the required alternative is `ptrace_notify` with **both** syscall-entry
+message 1 and syscall-stop signal 133 (SIGTRAP|0x80), before
+[ptrace_stop and any tracer register read](https://github.com/torvalds/linux/blob/v7.0/kernel/signal.c#L2514-L2525).
+The saved register address follows Linux's own
+[task_pt_regs macro](https://github.com/torvalds/linux/blob/v7.0/arch/x86/include/asm/processor.h#L648-L652).
+Only native x64 kernels 6.8–7.0 with readable running-kernel config and VMAP_STACK
+are supported for this alternative. The config hash is retained. PAGE_SIZE must
+be 4096; THREAD_SIZE is PAGE_SIZE<<(2+CONFIG_KASAN), and the top padding is 16
+with CONFIG_X86_FRED, zero otherwise. BTF supplies register/field sizes. Every
+entry checks that the actual stack VM area's address equals task.stack and its
+page count equals the derived size; any disagreement fails. Missing config,
+probe, BTF signature or an unsupported layout never falls back to guessing.
+The report retains `preEntryProbe` and signature provenance. ARM's direct
+register-pointer path and the common P/N/socket correlation rules are unchanged.
 
 It also attaches all enter/exit tracepoints for `connect`,
 `sendto`, `sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`, plus

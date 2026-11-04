@@ -11,7 +11,7 @@ import platform
 CALLS = ('connect', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4')
 SOCKET_HOOKS = ('security_socket_connect', 'security_socket_sendmsg', 'sock_sendmsg',
                 'tcp_v4_connect', 'tcp_v6_connect', 'udp_sendmsg', 'udpv6_sendmsg')
-HOOKS = (*SOCKET_HOOKS, 'syscall_trace_enter', 'create_io_thread')
+HOOKS = (*SOCKET_HOOKS, 'create_io_thread')
 
 
 def requirements(root):
@@ -35,11 +35,11 @@ def requirements(root):
     path = root / 'available_filter_functions'
     available = {line.split()[0] for line in path.read_text().splitlines() if line.strip()}
     if not set(HOOKS) <= available:
-        raise RuntimeError('kernel_socket_probe_missing')
+        raise RuntimeError('kernel_socket_probe_missing_'+'_'.join(sorted(set(HOOKS)-available)))
     return formats
 
 
-def program(normalize):
+def program(normalize, pre_entry=None):
     """Record metadata only: task IDs, call, FD, return value and socket family."""
     architecture = platform.machine()
     # Native ABI only. Compatibility syscall multiplexers must not bypass the
@@ -63,10 +63,12 @@ tracepoint:raw_syscalls:sys_enter /@tracked[tid]/ {
 '''.replace('INCOMPATIBLE', incompatible)
     select = '\n'.join(f'  if ($syscall=={number}) {{ $call={index}; }}'
                        for index, number in enumerate(numbers, 1))
+    from uring.entry import registers as pre_registers
+    pre_entry=pre_entry or {'symbol':'syscall_trace_enter'}
     source += '''
-kprobe:syscall_trace_enter /@tracked[tid]/ {
+kprobe:ENTRY /@tracked[tid] EXTRA/ {
 NORMALIZE
-  $r=(struct pt_regs*)arg0;
+  PRE_REGISTERS
   REGISTERS
   if (PRE_INCOMPATIBLE) { @unsupported_abi=count(); }
   @pre_seq[tid]=@pre_seq[tid]+1;
@@ -78,7 +80,9 @@ SELECT
     printf("P|%llu|%d|%d|%d|%d|%d|%llu|%d|%d\\n",nsecs,pid,tid,$nspid,$nstgid,$call,@pre_seq[tid],(int32)$fd,0);
   }
 }
-'''.replace('REGISTERS', registers).replace('SELECT', select).replace('PRE_INCOMPATIBLE', incompatible.replace('args->id','$syscall'))
+'''.replace('PRE_REGISTERS',pre_registers(pre_entry)).replace('REGISTERS', registers).replace('SELECT', select).replace(
+        'PRE_INCOMPATIBLE', incompatible.replace('args->id','$syscall')).replace('ENTRY',pre_entry['symbol']).replace(
+        ' EXTRA',' && arg0==133 && arg1==1' if pre_entry['symbol']=='ptrace_notify' else '')
     for number, call in enumerate(CALLS, 1):
         source += '''
 tracepoint:syscalls:sys_enter_CALL /@tracked[tid]/ {
@@ -123,10 +127,11 @@ def parse(fields):
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None):
     """Cross-check all kernel activity, even when strace has no decode failure."""
     issues = []; resolved = []; entries = defaultdict(list); tasks = {}; mapping = {}
-    def error(reason, pid=None):
+    def error(reason, pid=None, **metadata):
         issue = {'reason': reason}
         if pid in states: issue['pid'] = pid
         elif pid is not None: issue['unattributedPid'] = pid
+        issue.update(metadata)
         issues.append(issue)
     network = capture.get('network')
     if (not capture.get('complete') or capture.get('lostEvents') != 0 or
@@ -277,7 +282,11 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             seen.add(task['kernelPid']); task=mapping.get(task.get('parentKernelPid'))
         if task and task['pid'] in states: owners.add(task['pid'])
         attributed = event['pid'] if event['pid'] in states else next(iter(owners)) if len(owners)==1 else None
-        error('kernel_socket_operation_strace_missing', attributed)
+        error('kernel_socket_operation_strace_missing', attributed,
+              hook=SOCKET_HOOKS[event['value']-1] if 1<=event['value']<=len(SOCKET_HOOKS) else 'invalid',
+              ordinal=event['ordinal'],kernelCall=event['call'],family=event['result'],
+              time=event['time'],entryTime=entry['time'] if entry else None,
+              returnTime=returned['time'] if returned else None)
     if not issues:
         for pid, count in holes.items():
             task = tasks[pid]

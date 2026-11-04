@@ -14,6 +14,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from uring.probe import event_formats,event_fields,pid_numbers_offset
 from uring.program import program
 from uring.network import requirements as network_requirements, parse as parse_network, HOOKS
+from uring.entry import select as select_entry, signature_valid
 
 
 def samples(raw):
@@ -38,7 +39,7 @@ def parse(raw,stderr,returncode,namespace_inode):
         if line.startswith('TICK|'):sampling=True;continue
         if line=='TICKEND':sampling=False;continue
         match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead|network|task|worker)_count:\s*(\d+)',line)
-        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|worker_error|worker_enter|worker_return):\s*(\d+)',line)
+        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|pre_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
         if match:
             if not sampling:counts[match[1]]=int(match[2])
             continue
@@ -94,6 +95,7 @@ def parse(raw,stderr,returncode,namespace_inode):
               and not counts.get('namespace_error',0)
               and not counts.get('unsupported_abi',0)
               and not counts.get('pre_mismatch',0)
+              and not counts.get('pre_layout_error',0)
               and not counts.get('worker_error',0) and counts.get('worker',0)==len(workers)
               and counts.get('worker_enter',0)==counts.get('worker_return',0)
               and counts.get('worker_return',0)>=len(workers)
@@ -120,8 +122,10 @@ def broker(directory,root_pid,namespace_inode):
             subprocess.run(['mount','-t','tracefs','tracefs',str(tracefs)],check=True,capture_output=True);mounted=True
         submit,formats=event_formats(tracefs)
         formats.update(network_requirements(tracefs))
-        signature=subprocess.check_output(['bpftrace','-lv','kfunc:syscall_trace_enter'],text=True,stderr=subprocess.STDOUT)
-        if not re.search(r'^\s+struct pt_regs \* regs\s*$',signature,re.M):
+        available={line.split()[0] for line in (tracefs/'available_filter_functions').read_text().splitlines() if line.strip()}
+        pre_entry=select_entry(available)
+        signature=subprocess.check_output(['bpftrace','-lv','kfunc:'+pre_entry['symbol']],text=True,stderr=subprocess.STDOUT)
+        if not signature_valid(pre_entry,signature):
             raise RuntimeError('kernel_pre_ptrace_probe_signature_missing')
         worker_signature=subprocess.check_output(['bpftrace','-lv','kfunc:create_io_thread'],text=True,stderr=subprocess.STDOUT)
         if not re.search(r'^\s+struct task_struct \* retval\s*$',worker_signature,re.M):
@@ -133,13 +137,13 @@ def broker(directory,root_pid,namespace_inode):
         if not completion.is_file() or not {'ctx','req'}<=event_fields(completion.read_text()):
             raise RuntimeError('io_uring_completion_tracepoint_missing')
         offset=pid_numbers_offset()
-        text=program(root_pid,namespace_inode,offset,submit)
+        text=program(root_pid,namespace_inode,offset,submit,pre_entry)
         metadata={'tool':'bpftrace','toolVersion':subprocess.check_output(['bpftrace','--version'],text=True).strip(),
                   'kernel':os.uname().release,'tracepoints':[*formats,'io_uring_req_failed','io_uring_complete'],
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
                                   dict(formats,io_uring_req_failed=failed.read_text(),io_uring_complete=completion.read_text()).items()},
                   'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset,
-                  'socketProbes':list(HOOKS),
+                  'socketProbes':list(HOOKS),'preEntryProbe':pre_entry,
                   'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
                   'workerSignatureSha256':hashlib.sha256(worker_signature.encode()).hexdigest()}
         source=directory/'capture.bt';source.write_text(text)
