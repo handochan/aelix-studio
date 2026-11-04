@@ -14,6 +14,70 @@ END = '1<app> +++ exited with 0 +++'
 
 
 class UdpLifecycleTests(unittest.TestCase):
+    def test_register_hole_cannot_hide_dup_of_live_udp_even_before_connect(self):
+        from udpLifecycle import analyze
+        socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1];close=CLOSE.split(' ',1)[1]
+        for intervals in ([(2,2,3)],[(2,3,5)]):
+            records=[(1,socket,1),(1,connect,4),(1,close,6),(1,'+++ exited with 0 +++',9)]
+            exempt,_,issues=analyze(records,None,lambda _pid:1,intervals)
+            self.assertEqual(exempt,set())
+            self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in issues})
+
+    def test_close_before_hole_needs_completion_not_only_entry(self):
+        from udpLifecycle import analyze
+        socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1]
+        closers=[CLOSE.split(' ',1)[1], 'close_range(3, 3, 0) = 0',
+                 'dup2(9</tmp/local>, 3<UDPv6:[123]>) = 3</tmp/local>',
+                 'execve("/owned/next", [...], 0x1) = 0']
+        for closer in closers:
+            for completion,blocked in ((4,False),(7,True)):
+                records=[(1,socket,1,1),(1,connect,2,2),(1,closer,4,completion),
+                         (1,'+++ exited with 0 +++',9,9)]
+                exempt,_,issues=analyze(records,None,lambda _pid:1,[(2,5,6)])
+                self.assertEqual(bool(issues),blocked,(closer,completion,issues))
+                self.assertEqual(bool(exempt),not blocked)
+
+    def test_udp_created_during_hole_is_potentially_mutated_but_after_hole_is_not(self):
+        from udpLifecycle import analyze
+        for start,blocked in ((4,True),(9,False)):
+            records=[(1,SOCKET.split(' ',1)[1],start),
+                     (1,CONNECT.split(' ',1)[1],start+1),(1,CLOSE.split(' ',1)[1],start+2),
+                     (1,'+++ exited with 0 +++',start+3)]
+            exempt,_,issues=analyze(records,None,lambda _pid:1,[(2,3,6)])
+            self.assertEqual(bool(issues),blocked)
+            self.assertEqual(bool(exempt),not blocked)
+
+    def test_known_dup_during_pending_close_cannot_lose_a_udp_alias(self):
+        from udpLifecycle import analyze
+        for duplicate in ('dup(3<UDPv6:[123]>) = 5<UDPv6:[123]>',
+                          'fcntl(3<UDPv6:[123]>, F_DUPFD_CLOEXEC, 0) = 5<UDPv6:[123]>'):
+            records=[(1,SOCKET.split(' ',1)[1],1,1),(1,CONNECT.split(' ',1)[1],2,2),
+                (1,'clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2',3,3),
+                (1,CLOSE.split(' ',1)[1],4,7),(2,duplicate,5,5),
+                (2,'+++ exited with 0 +++',11,11),(1,'+++ exited with 0 +++',12,12)]
+            for intervals in ((),[(2,8,10)]):
+                exempt,_,issues=analyze(records,None,lambda _pid:1,intervals)
+                self.assertEqual(exempt,set())
+                self.assertIn('udp_duplicate_untracked_fd',{issue['reason'] for issue in issues})
+                if intervals:self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in issues})
+
+    def test_kernel_no_network_proof_cannot_discharge_a_live_udp_alias_hole(self):
+        tasks=[{'pid':pid,'tgid':1,'kernelPid':pid+100,'kernelTgid':101,'start':1,'end':100,
+                'lastOrdinal':10,'parentKernelPid':1000 if pid==1 else 101} for pid in (1,2)]
+        tasks.append({'pid':1000,'tgid':1000,'kernelPid':1000,'kernelTgid':1000,'start':1,'end':100,'lastOrdinal':0})
+        events=[{'kind':kind,'time':time,'pid':1,'tgid':1,'kernelPid':101,'kernelTgid':101,
+                 'call':1,'ordinal':1,'value':3,'result':result}
+                for kind,time,result in [('P',10,0),('N',20,0),('X',30,-101)]]
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,
+                 'root':{'kernelPid':1000,'pid':1000},'eventCount':0,'events':[],
+                 'network':{'complete':True,'tasks':tasks,'events':events,'eventCount':3}}
+        report=self.parse([SOCKET,CONNECT,
+            '1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2<thread>',
+            '2<thread> ???( <unfinished ...>',CLOSE,'2<thread> +++ exited with 0 +++',END],capture)
+        self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual(report['kernelResolvedRecords'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
     def parse(self, lines, capture=None):
         with tempfile.TemporaryDirectory() as directory:
             trace=Path(directory)/'trace';trace.write_text('\n'.join(lines)+'\n')

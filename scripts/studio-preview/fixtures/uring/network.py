@@ -263,7 +263,8 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             elif event['result'] not in (1,2,10,16):error('kernel_socket_family_unsupported',pid)
             hooks.append(event)
     decoded = defaultdict(deque)
-    for pid, line, sequence in sorted(records,key=lambda item:item[2]):
+    for record in sorted(records,key=lambda item:item[2]):
+        pid,line,sequence=record[:3]
         call = re.match(r'^(\w+)\(\s*(-?\d+)', line)
         result = re.search(r'\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
         if call and call[1] in CALLS and result:

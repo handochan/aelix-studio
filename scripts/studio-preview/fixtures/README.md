@@ -53,12 +53,14 @@ reports include counts, PID/parent/comm, root identities and parser source hashe
 Classification failures also include fixed reason codes and numeric task IDs in
 `classificationIssues`; no raw trace text or executable path is included.
 An exact `???( <unfinished ...>` register-decoding stub, optionally followed by
-`<... ??? resumed>) = ?`, then that task's signal-death record is retained as a
+`<... ??? resumed>) = ?`, then that task's termination record is retained as a
 register hole. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
 does not identify the syscall. Issue #15 decision 6629110086 permits resolving
 these records only with complete independent kernel corroboration below. There
-must be complete fork ancestry, no pending fork/exec and no other intervening or
-subsequent task records. Without corroboration, they remain blocking unparsed
+must be complete fork ancestry, no pending fork/exec and no subsequent known
+syscall or post-termination record. With kernel evidence, signal notifications
+and normal exit delimiters may accompany the exact register stub; they confer
+no exemption themselves. Without corroboration, the records remain blocking
 records in selected-tree and whole-command enforcement alike.
 Missing ancestry/lifecycle, interrupted fork/exec, other unknown records or any
 ambiguous attribution remain classification errors that block every scope.
@@ -242,6 +244,19 @@ identity reuse, namespace mismatch, counter disagreement and any loss fail.
 Already-fatal UDP/io_uring classifications retain additional socket evidence as
 `kernelCorroboration` on the existing issue; this preserves control counts and
 never qualifies a hole for resolution.
+
+A no-network kernel proof cannot rule out an unseen FD mutation. Candidate
+register intervals overlapping any possibly live UDP socket invalidate its
+association exemption and keep the register hole unresolved. This includes a
+socket duplicated before its later connect. Socket creation starts possible
+lifetime at entry; close/close_range/dup replacement/exec cannot prove removal
+before their **completion** record, including joined unfinished calls. Closed
+before the interval remains distinct from a pending close. The guard preserves
+shared/inherited tables and reports `udp_lifetime_unparsed_register`; it never
+guesses that an unknown syscall left FD ownership unchanged.
+Successful UDP-labeled dup/F_DUPFD calls whose source is missing from the
+ledger also fail. A pending close cannot silently discard that known alias;
+possibly affected associations remain invalid with unbounded uncertain lifetime.
 
 Only a TID with no unmatched kernel activity over its **entire** verified
 lifetime may discharge the exact terminal register holes. This proves absence

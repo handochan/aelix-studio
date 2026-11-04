@@ -65,7 +65,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     observed_order = []
     udp_records = []
     pending = {}
-    terminal_stops, killed_at = {}, {}
+    terminal_stops = {}
+    terminal_at, terminal_shapes = {}, {}
     register_holes, hole_resumes = {}, set()
     invalid_terminal_stops = set()
 
@@ -102,11 +103,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         # Joining an unfinished entry can introduce whitespace immediately
         # after '('; it is lexical whitespace, not an unknown destination.
         line = re.sub(r'^(\w+\()\s+', r'\1', line)
-        udp_records.append((pid, line, started))
+        udp_records.append((pid, line, started, sequence))
         if line.startswith('+++'):
             if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):
                 item['finished'] = True
-                if line.startswith('+++ killed by '): killed_at[pid] = started
+                if line.startswith(('+++ killed by ','+++ exited with ')):terminal_at[pid]=started
             else:
                 classification_issue('unknown_terminal_record', pid)
             return
@@ -269,19 +270,25 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 pid, name, line = legacy_pid, None, raw
                 if selected and line: classification_issue('missing_task_prefix', pid)
             state(pid, name)
-            # strace can fail to read registers when a task is killed at a
-            # syscall-entry stop. Its exact stub has no resumed syscall, exec
-            # success or fork result. Attribute it to its captured PID only if
-            # the next/last record for that task is its signal-death record.
-            # Missing edges, pending fork/exec and every other unknown stay fatal.
+            # Keep register stubs blocking until independent kernel proof.
+            # With kernel evidence, signal notifications and normal termination
+            # can delimit the same final hole. Known calls, ambiguous edges,
+            # pending fork/exec and post-termination records remain fatal.
             unreadable_resume = line == '<... ??? resumed>) = ?'
-            if pid in terminal_stops and (not line.startswith('+++ killed by ') or pid in killed_at) and not unreadable_resume:
-                invalid_terminal_stops.add(pid)
+            signal_record=line.startswith('--- SIG')
+            final_record=line.startswith('+++ killed by ') or kernel_capture is not None and line.startswith('+++ exited with ')
+            if pid in terminal_stops:
+                shape=('signal' if signal_record else 'resume' if unreadable_resume else
+                       'exit' if final_record else 'register-entry' if line=='???( <unfinished ...>' else 'other')
+                if len(terminal_shapes[pid])<8:terminal_shapes[pid].append(shape)
+                if pid in terminal_at or not (final_record or unreadable_resume or kernel_capture is not None and signal_record):
+                    invalid_terminal_stops.add(pid)
             if line == '???( <unfinished ...>':
                 if pid in pending or pid in terminal_stops:
                     invalid_terminal_stops.add(pid)
                 terminal_stops[pid] = sequence
                 register_holes[pid] = register_holes.get(pid, 0) + 1
+                terminal_shapes.setdefault(pid,['register-entry'])
                 continue
             if unreadable_resume:
                 if pid not in terminal_stops or pid in hole_resumes:
@@ -310,8 +317,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     for pid, (call, _line, _started) in pending.items():
         unknown(pid, call)
     for pid, at in terminal_stops.items():
-        if pid in invalid_terminal_stops or killed_at.get(pid, 0) <= at:
+        if pid in invalid_terminal_stops or terminal_at.get(pid, 0) <= at:
             classification_issue('unknown_unfinished_syscall', pid)
+            classification_issues[-1]['registerRecordKinds']=terminal_shapes[pid]
         else:
             # An attributable decode failure remains unparsed in this PID's
             # tree. It blocks selected trees and whole-command enforcement;
@@ -399,7 +407,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         classification_issues.extend(ring_evidence['globalIssues'])
 
     from udpLifecycle import analyze as analyze_udp
-    exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid)
+    intervals=[(pid,start,terminal_at[pid]) for pid,start in terminal_stops.items()
+               if pid not in invalid_terminal_stops and terminal_at.get(pid,0)>start] if kernel_capture is not None else []
+    exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid, intervals)
     for issue in udp_issues:
         state(issue['pid'])
     event_keys = {(pid, event['_sequence']): event for pid, item in states.items() for event in item['events']}
@@ -413,7 +423,10 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     if kernel_capture is not None:
         from uring.network import reconcile as reconcile_network
         eligible = {pid: count for pid, count in register_holes.items()
-                    if pid not in invalid_terminal_stops and killed_at.get(pid, 0) > terminal_stops[pid]}
+                    if pid not in invalid_terminal_stops and terminal_at.get(pid, 0) > terminal_stops[pid]}
+        blocked_udp={issue['pid'] for issue in udp_issues if issue['reason'] in
+                     ('udp_lifetime_unparsed_register','udp_duplicate_untracked_fd')}
+        eligible={pid:count for pid,count in eligible.items() if pid not in blocked_udp}
         if classification_issues: eligible = {}
         network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
                                              {pid: tgid(pid) for pid in states},parents,
@@ -421,6 +434,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                                              {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']})
         for evidence in network_evidence['resolved']:
             states[evidence['pid']]['unparsed'] -= evidence['records']
+            evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
 
     for pid, item in states.items():
         for event in item['events']:

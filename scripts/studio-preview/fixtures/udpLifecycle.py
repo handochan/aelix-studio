@@ -11,8 +11,9 @@ WRITES = {'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev'}
 WRITE_OPCODES = {2, 5, 9, 23, 26, 47, 48, 50, 57, 58, 60}
 
 
-def analyze(records, ring_evidence, tgid):
+def analyze(records, ring_evidence, tgid, unknown_intervals=()):
     tables = {}; sockets = []; issues = []; writes = []
+    completed=0; last_sequence=0
 
     def issue(pid, reason):
         entry = {'pid': pid, 'reason': reason}
@@ -21,11 +22,26 @@ def analyze(records, ring_evidence, tgid):
     def table(pid):
         return tables.setdefault(pid, {})
 
-    def remove(pid, fd):
-        table(pid).pop(fd, None)
+    def released(sock):
+        sock['lastRelease']=max(sock.get('lastRelease',0),completed)
 
-    for pid, line, sequence in sorted(records, key=lambda item: item[2]):
-        current = table(pid)
+    def remove(pid, fd):
+        entry=table(pid).pop(fd,None)
+        if entry:released(entry[0])
+
+    def retire():
+        if not sockets:return
+        live={sock['id'] for current in tables.values() for sock,_ in current.values()}
+        for sock in sockets:
+            if sock['id'] not in live and 'lifetimeEnd' not in sock and not sock.get('untrackedAlias'):
+                sock['lifetimeEnd']=max(last_sequence,sock.get('lastRelease',0))
+
+    for record in sorted(records,key=lambda item:item[2]):
+        retire()
+        pid,line,sequence=record[:3]
+        completed=record[3] if len(record)>3 else sequence
+        last_sequence=sequence
+        current=table(pid)
         if line.startswith('+++'):
             # A process must close its associations before its last task exits,
             # including tables shared with another TGID. A surviving thread may
@@ -36,6 +52,8 @@ def analyze(records, ring_evidence, tgid):
                 for sock, _ in current.values():
                     if sock['connects']:
                         sock['invalid'] = True; issue(pid, 'udp_association_open_at_exit')
+            if not table_survives:
+                for sock,_ in current.values():released(sock)
             tables.pop(pid, None)
             continue
         match = re.match(r'^(\w+)\((.*)\)\s+=\s+(-?\d+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line)
@@ -57,7 +75,7 @@ def analyze(records, ring_evidence, tgid):
                 if result in current:
                     current[result][0]['invalid'] = True
                     issue(pid, 'udp_fd_reused_without_close')
-                sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets)}
+                sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets),'lifetimeStart':sequence}
                 sockets.append(sock); current[result] = (sock, 'SOCK_CLOEXEC' in args)
         elif call in ('clone', 'clone3', 'fork', 'vfork') and result > 0:
             translated = re.search(r"/\* (\d+) in strace's PID NS \*/", line)
@@ -65,6 +83,8 @@ def analyze(records, ring_evidence, tgid):
             tables[child] = current if 'CLONE_FILES' in args else dict(current)
             for sock, _ in current.values(): sock['owners'].add(child)
         elif call in ('execve', 'execveat') and result == 0:
+            for sock,cloexec in current.values():
+                if cloexec:released(sock)
             tables[pid] = {f: entry for f, entry in current.items() if not entry[1]}
         elif call == 'unshare' and result == 0 and 'CLONE_FILES' in args:
             tables[pid] = dict(current)
@@ -84,6 +104,15 @@ def analyze(records, ring_evidence, tgid):
         elif call in ('dup', 'dup2', 'dup3') or call == 'fcntl' and 'F_DUPFD' in args:
             if result >= 0:
                 source = current.get(fd)
+                if source is None and (re.match(r'\d+<UDP(?:v6)?:',args) or re.search(r'=\s+\d+<UDP(?:v6)?:',line)):
+                    issue(pid,'udp_duplicate_untracked_fd')
+                    # A joined close may have removed the numeric descriptor
+                    # before its completion. Never lose a proven UDP duplicate.
+                    for candidate in sockets:
+                        if candidate['lifetimeStart']<=sequence<=candidate.get('lifetimeEnd',float('inf')):
+                            candidate['invalid']=True;candidate['untrackedAlias']=True
+                            candidate.pop('lifetimeEnd',None)
+                            for owner in candidate['owners']:issue(owner,'udp_duplicate_untracked_fd')
                 # dup2(fd, fd) is a no-op, including its CLOEXEC flag.
                 if call == 'dup2' and fd == result: continue
                 if result in current and call not in ('dup2','dup3'):
@@ -105,6 +134,16 @@ def analyze(records, ring_evidence, tgid):
             # Kernel FD labels reveal imports (SCM_RIGHTS/pidfd_getfd) whose
             # acquisition/lifecycle was not captured: never exempt those.
             elif re.match(r'\d+<UDP(?:v6)?:', args): issue(pid, 'udp_write_untracked_fd')
+    retire()
+    # A register hole can hide a descriptor mutation even without networking.
+    # Entry starts possible lifetime; removal cannot be proved before completion.
+    for suspect,start,end in unknown_intervals:
+        for sock in sockets:
+            if (sock['connects'] and sock['lifetimeStart']<=end and
+                    start<=sock.get('lifetimeEnd',float('inf'))):
+                sock['invalid']=True
+                for owner in sock['owners']|{suspect}:
+                    issue(owner,'udp_lifetime_unparsed_register')
     for pid, current in tables.items():
         for sock, _ in current.values():
             if sock['connects']:

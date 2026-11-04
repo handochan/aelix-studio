@@ -54,20 +54,32 @@ class ScopedParserTests(unittest.TestCase):
                            'parentKernelPid':1000 if pid==1 else 101} for pid in (1,2)]}}
         capture['root']={'kernelPid':1000,'pid':1000}
         capture['network']['tasks'].append({'pid':1000,'tgid':1000,'kernelPid':1000,'kernelTgid':1000,'start':1,'end':100,'lastOrdinal':0})
-        for hidden_network in (False,True):
-            with self.subTest(hidden_network=hidden_network),tempfile.TemporaryDirectory() as directory:
-                trace=Path(directory)/'trace'
-                trace.write_text('\n'.join(self.base()+['2<host> ???( <unfinished ...>',
-                    '2<host> <... ??? resumed>) = ?', '2<host> +++ killed by SIGKILL +++',
-                    '1<app> +++ exited with 0 +++'])+'\n')
-                if hidden_network:
-                    capture['network']['events']=[{'kind':'H','time':10,'pid':2,'tgid':2,
-                        'kernelPid':102,'kernelTgid':102,'call':0,'ordinal':0,'value':7,'result':10}]
-                    capture['network']['eventCount']=1
-                scoped,whole=audit.analyze_processes([trace],(HOST,),(HOST,),True,capture)
-                self.assertEqual(scoped['kernelResolvedRecords'],0 if hidden_network else 2)
-                self.assertEqual(whole['kernelResolvedRecords'],scoped['kernelResolvedRecords'])
-                self.assertEqual(scoped['unparsedRecords']>0,hidden_network)
+        for ending in ('+++ killed by SIGKILL +++','+++ exited with 0 +++'):
+            for signals in (False,True):
+                for hidden_network in (False,True):
+                    with self.subTest(ending=ending,signals=signals,hidden=hidden_network),tempfile.TemporaryDirectory() as directory:
+                        capture['network'].update(events=[],eventCount=0)
+                        trace=Path(directory)/'trace'
+                        lines=self.base()+['2<host> ???( <unfinished ...>']
+                        if signals:lines+=['2<host> --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER} ---']
+                        lines+=['2<host> <... ??? resumed>) = ?', '2<host> '+ending,'1<app> +++ exited with 0 +++']
+                        trace.write_text('\n'.join(lines)+'\n')
+                        if hidden_network:
+                            capture['network']['events']=[{'kind':'H','time':10,'pid':2,'tgid':2,
+                                'kernelPid':102,'kernelTgid':102,'call':0,'ordinal':0,'value':7,'result':10}]
+                            capture['network']['eventCount']=1
+                        scoped,whole=audit.analyze_processes([trace],(HOST,),(HOST,),True,capture)
+                        self.assertEqual(scoped['kernelResolvedRecords'],0 if hidden_network else 2)
+                        self.assertEqual(whole['kernelResolvedRecords'],scoped['kernelResolvedRecords'])
+                        self.assertEqual(scoped['unparsedRecords']>0,hidden_network)
+        capture['network'].update(events=[],eventCount=0)
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace'
+            trace.write_text('\n'.join(self.base()+['2<host> ???( <unfinished ...>',
+                '1<app> +++ exited with 0 +++'])+'\n')
+            scoped,_=audit.analyze_processes([trace],(HOST,),(HOST,),True,capture)
+            self.assertGreater(scoped['unparsedRecords'],0)
+            self.assertEqual(scoped['kernelResolvedRecords'],0)
 
     def parse(self, lines, roots=(HOST, PYTHON), required=(HOST,), lifecycle=False):
         with tempfile.TemporaryDirectory() as directory:
