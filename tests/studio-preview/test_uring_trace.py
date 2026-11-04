@@ -256,6 +256,72 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
         self.assertEqual(result['resolved'],[])
         self.assertIn('kernel_network_strace_entry_missing',[item['reason'] for item in result['issues']])
 
+    def test_actual_vfs_regular_or_pipe_write_is_non_network_without_a_strace_record(self):
+        for call in (5,6):
+            for mode,kind in ((0x8000,'regular'),(0x1000,'pipe')):
+                capture=self.fixture();file=self.event('V',call=call,value=1 if call==5 else 2,result=mode,time=3)
+                file['file']=123
+                self.add(capture,self.event(call=call),file,self.event('X',call=call,result=7,time=4))
+                checked=self.run_policy(capture)
+                self.assertEqual(checked['issues'],[])
+                self.assertEqual(checked['resolved'][0]['records'],2)
+                self.assertEqual(checked['nonNetworkWrites'][0]['fileKinds'],[kind])
+                self.assertNotIn('file',checked['nonNetworkWrites'][0])
+
+    def test_eventfd_proof_must_bind_every_unknown_mode_file_object(self):
+        for callback_file,extra_mode,accepted in ((123,None,True),(456,None,False),(123,0xc000,False)):
+            capture=self.fixture()
+            base=self.event('V',call=5,value=1,result=0,time=3);base['file']=123
+            callback=self.event('V',call=5,value=3,result=0,time=4);callback['file']=callback_file
+            events=[self.event(call=5),base,callback,self.event('X',call=5,result=8,time=6)]
+            if extra_mode is not None:
+                extra=self.event('V',call=5,value=1,result=extra_mode,time=5);extra['file']=789;events.append(extra)
+            self.add(capture,*events)
+            checked=self.run_policy(capture)
+            self.assertEqual(not bool(checked['issues']),accepted)
+            if accepted:self.assertEqual(checked['nonNetworkWrites'][0]['fileKinds'],['eventfd'])
+
+    def test_missing_vfs_or_socket_unsupported_mode_or_socket_operation_stays_fatal(self):
+        for mode,socket in ((None,False),(0,False),(0xc000,False),(0x2000,False),(0x8000,True)):
+            capture=self.fixture();events=[self.event(call=5),self.event('X',call=5,result=7,time=5)]
+            if mode is not None:
+                item=self.event('V',call=5,value=1,result=mode,time=3);item['file']=123;events.append(item)
+            if socket:events.append(self.event('H',call=5,value=1,result=2,time=4))
+            self.add(capture,*events)
+            checked=self.run_policy(capture)
+            self.assertTrue(checked['issues']);self.assertEqual(checked['resolved'],[])
+
+    def test_known_call_missing_result_needs_actual_exit_or_terminal_nonexecution(self):
+        for executed in (False,True):
+            capture=self.fixture();capture['network']['tasks'][0]['lastOrdinal']=1
+            events=([self.event(),self.event('X',result=-9,time=4)] if executed else [self.event('P')])
+            self.add(capture,*events)
+            checked=self.run_policy(capture,[(10,'connect(3, {}) = ?',9)],holes={})
+            self.assertEqual(checked['issues'],[])
+            self.assertEqual(len(checked['resultFields']),1)
+            self.assertEqual(checked['resultFields'][0]['sequence'],9)
+            if not executed:
+                capture['network']['tasks'][0]['lastOrdinal']=2
+                self.assertTrue(self.run_policy(capture,[(10,'connect(3, {}) = ?',9)])['issues'])
+
+    def test_incomplete_write_can_use_actual_vfs_proof_but_not_socket_or_missing_observation(self):
+        for mode in (None,0xc000,0x8000):
+            capture=self.fixture();self.add(capture,self.event(call=5))
+            if mode is not None:
+                event=self.event('V',call=5,value=1,result=mode,time=3);event['file']=123
+                self.add(capture,event)
+            checked=self.run_policy(capture,[(10,'write(3, ',9)],holes={})
+            self.assertEqual(not bool(checked['issues']),mode==0x8000)
+            self.assertEqual(len(checked['resultFields']),int(mode==0x8000))
+
+    def test_missing_result_never_excuses_unknown_peer_or_unmatched_network_action(self):
+        capture=self.fixture();self.add(capture,self.event(),self.event('H',value=4,result=2,time=3),
+                                          self.event('X',time=4))
+        checked=network.reconcile(capture,[(10,'connect(3, {}) = ?',9)],{10:2},{10},None,
+                                  known_destinations=set())
+        self.assertEqual(checked['resultFields'],[])
+        self.assertTrue(checked['issues'])
+
     def test_successful_decoded_call_corroborates_all_socket_layers(self):
         capture=self.fixture()
         self.add(capture,self.event(),self.event('H',value=1,result=2,time=3),

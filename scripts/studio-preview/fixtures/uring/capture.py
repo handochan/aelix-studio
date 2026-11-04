@@ -13,7 +13,7 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from uring.probe import event_formats,event_fields,pid_numbers_offset
 from uring.program import program
-from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, symbol_evidence
+from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, FILE_WRITE_HOOKS, symbol_evidence
 from uring.entry import select as select_entry, btf_signature
 
 
@@ -53,8 +53,12 @@ def parse(raw,stderr,returncode,namespace_inode):
             if fields[0]=='ROOT' and len(fields)==6:
                 roots.append(dict(time=int(fields[1]),kernelTgid=int(fields[2]),kernelPid=int(fields[3]),
                                   pid=int(fields[4]),level=int(fields[5])))
-            elif fields[0] in ('P','N','X','H'):
+            elif fields[0] in ('P','N','X','H','V'):
                 network.append(parse_network(fields))
+            elif fields[0]=='OVERLAP' and len(fields)==8:
+                invalid.append(dict(reason='kernel_raw_state_overlap',time=int(fields[1]),kernelPid=int(fields[2]),
+                    pid=int(fields[3]),previousSyscall=int(fields[4]),nextSyscall=int(fields[5]),
+                    networkCall=int(fields[6]),ordinal=int(fields[7])))
             elif fields[0]=='T' and len(fields)==10:
                 flags=int(fields[8])
                 if not 0<=flags<=0xffffffff: raise ValueError('invalid_kernel_task_flag')
@@ -136,6 +140,7 @@ def broker(directory,root_pid,namespace_inode):
         worker_signature=json.dumps(btf_signature('create_io_thread'),sort_keys=True)
         socket_signatures={name:btf_signature(name,first_parameter='ptr:struct:'+kind)
                            for name,kind in SOCKET_ARGUMENTS.items()}
+        socket_signatures.update({name:btf_signature(name,first_parameter='ptr:struct:file') for name in FILE_WRITE_HOOKS})
         symbols=symbol_evidence()
         failed=tracefs/'events/io_uring/io_uring_req_failed/format'
         if not failed.is_file() or not {'ctx','opcode'}<=event_fields(failed.read_text()):
@@ -150,7 +155,7 @@ def broker(directory,root_pid,namespace_inode):
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
                                   dict(formats,io_uring_req_failed=failed.read_text(),io_uring_complete=completion.read_text()).items()},
                   'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset,
-                  'socketProbes':list(HOOKS),'preEntryProbe':pre_entry,
+                  'socketProbes':list(SOCKET_HOOKS),'fileWriteProbes':list(FILE_WRITE_HOOKS),'preEntryProbe':pre_entry,
                   'kernelBtfSha256':hashlib.sha256(Path('/sys/kernel/btf/vmlinux').read_bytes()).hexdigest(),
                   'socketSymbols':symbols,'socketSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
                                                                   for name,value in socket_signatures.items()},

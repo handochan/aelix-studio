@@ -87,6 +87,38 @@ class ScopedParserTests(unittest.TestCase):
             trace.write_text('\n'.join(lines) + '\n')
             return audit.analyze_processes([trace], roots, required, lifecycle)
 
+    def test_pending_known_write_result_is_recovered_only_by_terminal_kernel_proof(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'events':[],'eventCount':0,
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':1,
+            'events':[dict(kind='P',time=3,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=5,ordinal=1,value=3,result=0)],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=1,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        for ending in ('write(3,  <unfinished ...>','write(3, ..., 1) = ?'):
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
+                    '1<app> '+ending,'1<app> +++ killed by SIGKILL +++'])+'\n')
+                _,whole=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(whole['unparsedRecords'],0)
+                self.assertEqual(whole['kernelResolvedResultFields'],1)
+                _,strict=audit.analyze_processes([trace],require_lifecycle=True)
+                self.assertGreater(strict['unparsedRecords'],0)
+
+    def test_pending_sendto_final_null_peer_requires_an_interpreted_fd_peer(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'events':[],'eventCount':0,
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':1,
+            'events':[dict(kind='P',time=3,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=2,ordinal=1,value=3,result=0)],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=1,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        for peer,valid in [('UNIX-STREAM:[42->43]',True),('TCP:[127.0.0.1:4000->127.0.0.1:4001]',True),('socket:[42]',False)]:
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
+                    f'1<app> sendto(3<{peer}>, ..., 1, 0, NULL, 0 <unfinished ...>',
+                    '1<app> +++ killed by SIGKILL +++'])+'\n')
+                _,whole=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(whole['unparsedRecords']==0,valid)
+
     def base(self):
         return ['1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
                 '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 2<host>',

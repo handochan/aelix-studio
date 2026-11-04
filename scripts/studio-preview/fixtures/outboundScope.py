@@ -68,6 +68,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     terminal_stops = {}
     terminal_at, terminal_shapes = {}, {}
     register_holes, hole_resumes = {}, set()
+    result_holes = set()
     invalid_terminal_stops = set()
 
     def state(pid, name=None):
@@ -119,6 +120,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         call = match[1]
         if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):
             item['unparsed'] += 1
+            if call in NETWORK: result_holes.add((pid,started))
         if call in UDP_META: return
         if call in FD_META:
             # Only ring-labelled descriptors and bulk close operations matter.
@@ -234,7 +236,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         # unselected parent. Decode the peer at send time; its connect need not
         # have happened inside the selected tree. -yy provides kernel FD peers.
         null_count = (1 if call in ('send', 'write', 'writev') and re.match(r'\w+\(\d+<(?:TCP|UDP)(?:v6)?:\[[^>]*->', line) else
-                      1 if call == 'sendto' and re.search(r', NULL, 0\s*\)\s+=', line) else
+                      1 if call == 'sendto' and re.search(r', NULL, 0\s*(?:\)\s+=|$)', line) else
                       len(re.findall(r'msg_name=NULL', line)) if call in ('sendmsg', 'sendmmsg') else 0)
         if not destinations and not any(family in line for family in ('AF_UNIX', 'AF_NETLINK', 'AF_UNSPEC')):
             if call == 'connect' or call in ('send', 'sendto', 'sendmsg', 'sendmmsg') and not null_count:
@@ -315,7 +317,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 started = previous[2]
             record(pid, line, started)
     for pid, (call, _line, _started) in pending.items():
-        unknown(pid, call)
+        if kernel_capture is not None and call in NETWORK:
+            record(pid,_line,_started)
+        else: unknown(pid, call)
     for pid, at in terminal_stops.items():
         if pid in invalid_terminal_stops or terminal_at.get(pid, 0) <= at:
             classification_issue('unknown_unfinished_syscall', pid)
@@ -435,6 +439,10 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         for evidence in network_evidence['resolved']:
             states[evidence['pid']]['unparsed'] -= evidence['records']
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
+        for evidence in network_evidence['resultFields']:
+            key=(evidence['pid'],evidence['sequence'])
+            if key in result_holes:
+                states[evidence['pid']]['unparsed']-=1
 
     for pid, item in states.items():
         for event in item['events']:
@@ -467,6 +475,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 else: issues.append(issue)
         resolutions = [evidence for evidence in (network_evidence or {}).get('resolved', []) if evidence['pid'] in pids]
         nonexecution = [evidence for evidence in (network_evidence or {}).get('notExecuted', []) if evidence['pid'] in pids]
+        nonnetwork=[evidence for evidence in (network_evidence or {}).get('nonNetworkWrites',[]) if evidence['pid'] in pids]
+        result_fields=[evidence for evidence in (network_evidence or {}).get('resultFields',[]) if evidence['pid'] in pids]
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
@@ -487,6 +497,10 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'kernelResolutions': resolutions,
                 'kernelNotExecutedInvocations': len(nonexecution),
                 'kernelNotExecuted': nonexecution,
+                'kernelNonNetworkWriteInvocations':len(nonnetwork),
+                'kernelNonNetworkWrites':nonnetwork,
+                'kernelResolvedResultFields':len(result_fields),
+                'kernelResultFields':result_fields,
                 'kernelNetwork': ({'recorded': kernel_capture.get('complete', False),
                     'eventCount': network_evidence['eventCount'],
                     'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),
@@ -497,7 +511,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     'socketFamilySource': 'socket',
                     'socketFamilyField': 'socket.sk.__sk_common.skc_family',
                     'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
-                    'socketProbes': kernel_capture.get('socketProbes', [])}
+                    'socketProbes': kernel_capture.get('socketProbes', []),
+                    'fileWriteProbes': kernel_capture.get('fileWriteProbes', [])}
                     if network_evidence is not None else {'recorded': False}),
                 'external': external, 'processes': processes,
                 'ioUring': ({'recorded':kernel_capture.get('complete',False),'opcodeCounts':ring_evidence['selectedOpcodeCounts'] if scope=='selected-process-trees' else ring_evidence['opcodeCounts'],

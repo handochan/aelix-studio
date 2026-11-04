@@ -14,7 +14,8 @@ SOCKET_ARGUMENTS = {'kernel_connect':'socket','sock_write_iter':'kiocb',
                     'udp_sendmsg':'sock','udpv6_sendmsg':'sock','inet_sendmsg':'socket','inet6_sendmsg':'socket',
                     '__ip4_datagram_connect':'sock','__ip6_datagram_connect':'sock'}
 SOCKET_HOOKS = tuple(SOCKET_ARGUMENTS)
-HOOKS = (*SOCKET_HOOKS, 'create_io_thread')
+FILE_WRITE_HOOKS = ('vfs_write','vfs_writev','eventfd_write')
+HOOKS = (*SOCKET_HOOKS,*FILE_WRITE_HOOKS, 'create_io_thread')
 
 
 def symbol_evidence(path=None):
@@ -81,7 +82,11 @@ def program(normalize, pre_entry=None):
 tracepoint:raw_syscalls:sys_enter /@tracked[tid]/ {
   $t=(struct task_struct*)curtask;
   if (INCOMPATIBLE) { @unsupported_abi=count(); }
-  if (@raw_active[tid] || @net_call[tid]) { @raw_state_overlap=count(); }
+  if (@raw_active[tid] || @net_call[tid]) {
+    @raw_state_overlap=count();
+NORMALIZE
+    printf("OVERLAP|%llu|%d|%d|%lld|%lld|%d|%llu\n",nsecs,tid,$nspid,@raw_id[tid],args->id,@net_call[tid],@pre_seq[tid]);
+  }
   @raw_id[tid]=args->id; @raw_active[tid]=1;
   $syscall=args->id; $call=0;
 SELECT
@@ -146,17 +151,27 @@ NORMALIZE
 }
 '''.replace('HOOK', hook).replace('FAMILY', family).replace('NUMBER', str(number)).replace(
         'LAYOUT_CHECK','if ($family==0) { @socket_layout_error=count(); }')
+    for number,hook in enumerate(FILE_WRITE_HOOKS,1):
+        source+='''
+kprobe:HOOK /@tracked[tid] && (@net_call[tid]==5 || @net_call[tid]==6)/ {
+NORMALIZE
+  $file=(struct file*)arg0;
+  @network_count=count();
+  printf("V|%llu|%d|%d|%d|%d|%d|%llu|%d|%u|%llu\\n",nsecs,pid,tid,$nspid,$nstgid,@net_call[tid],@net_seq[tid],NUMBER,$file->f_inode->i_mode & 0xf000,(uint64)$file);
+}
+'''.replace('HOOK',hook).replace('NUMBER',str(number))
     return source.replace('NORMALIZE', normalize).replace('/@tracked[tid]', '/tid != @audit_root_tid && @tracked[tid]')
 
 
 def parse(fields):
-    if fields[0] not in ('P','N','X','H') or len(fields)!=(11 if fields[0]=='H' else 10):
+    if fields[0] not in ('P','N','X','H','V') or len(fields)!=(11 if fields[0] in ('H','V') else 10):
         raise ValueError('invalid_kernel_network_record')
     values = list(map(int, fields[1:10]))
     time, kernel_tgid, kernel_pid, pid, tgid, call, ordinal, value, result = values
     return dict(kind=fields[0], time=time, kernelTgid=kernel_tgid, kernelPid=kernel_pid,
                 pid=pid, tgid=tgid, call=call, ordinal=ordinal, value=value, result=result,
-                nativeSyscall=int(fields[10]) if len(fields)==11 else None)
+                nativeSyscall=int(fields[10]) if fields[0]=='H' else None,
+                file=int(fields[10]) if fields[0]=='V' else None)
 
 
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None):
@@ -173,7 +188,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             not capture.get('pidNamespaceVerified') or not isinstance(network, dict) or
             not network.get('complete')):
         error('kernel_network_capture_incomplete')
-        return dict(issues=issues, resolved=resolved, notExecuted=[], eventCount=0)
+        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], eventCount=0)
     for task in network.get('tasks', []):
         pid = task['pid']
         if task['start'] <= 0 or task['start'] > task['end']:
@@ -230,7 +245,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 error('kernel_strace_fork_parent_mismatch',pid)
     events = network.get('events', [])
     if network.get('eventCount') != len(events): error('kernel_network_event_count_mismatch')
-    calls = {}; returns = {}; hooks = []; pre = defaultdict(list); pre_keys = {}
+    calls = {}; returns = {}; hooks = []; files=defaultdict(list); pre = defaultdict(list); pre_keys = {}
     for event in sorted(events, key=lambda item: item['time']):
         pid = event['pid']; task = mapping.get(event['kernelPid'])
         if (not task or task['kernelPid'] != event['kernelPid'] or
@@ -257,25 +272,55 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             if (key in returns or not entry or entry['call'] != event['call'] or entry['value'] != event['value']):
                 error('kernel_network_return_unmatched', pid)
             returns[key] = event
+        elif event['kind']=='V':
+            if (event['call'] not in (5,6) or not 1<=event['value']<=len(FILE_WRITE_HOOKS) or
+                    not isinstance(event.get('file'),int) or event['file']<=0):
+                error('kernel_file_write_observation_invalid',pid)
+            files[key].append(event)
         else:
             if not 1 <= event['value'] <= len(SOCKET_HOOKS) or event['result']<=0:
                 error('kernel_socket_probe_invalid', pid)
             elif event['result'] not in (1,2,10,16):error('kernel_socket_family_unsupported',pid)
             hooks.append(event)
     decoded = defaultdict(deque)
+    for key,observed in files.items():
+        entry=calls.get(key);returned=returns.get(key)
+        for event in observed:
+            if (not entry or event['call']!=entry['call'] or event['time']<entry['time'] or
+                    returned and event['time']>returned['time']):
+                error('kernel_file_write_context_invalid',event['pid'])
     for record in sorted(records,key=lambda item:item[2]):
         pid,line,sequence=record[:3]
         call = re.match(r'^(\w+)\(\s*(-?\d+)', line)
         result = re.search(r'\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
-        if call and call[1] in CALLS and result:
-            decoded[pid].append((CALLS.index(call[1])+1, int(call[2]), int(result[1]), sequence))
+        if call and call[1] in CALLS:
+            decoded[pid].append((CALLS.index(call[1])+1, int(call[2]), int(result[1]) if result else None, sequence))
     matched = set(); matched_sequences={}
-    not_executed = defaultdict(list); nonexecution=[]
+    not_executed = defaultdict(list); nonexecution=[]; nonnetwork=[]; result_fields=[]
     terminal_pids=states if terminal_pids is None else terminal_pids
+    def non_socket_write(event):
+        key=(event['pid'],event['ordinal']);entered=calls.get(key);observed=files[key]
+        if not entered or event['call'] not in (5,6) or any((e['pid'],e['ordinal'])==key for e in hooks):return False
+        bases=[e for e in observed if e['value'] in (1,2)]
+        if not bases:return False
+        eventfds={e['file'] for e in observed if e['value']==3}
+        for item in observed:
+            if item['call']!=event['call'] or item['time']<entered['time']:return False
+            if key in returns and item['time']>returns[key]['time']:return False
+            if item['result'] not in (0x8000,0x1000) and not (item['result']==0 and item['file'] in eventfds):return False
+        nonnetwork.append({'pid':event['pid'],'kernelPid':event['kernelPid'],'ordinal':event['ordinal'],
+            'syscall':CALLS[event['call']-1],'fd':event['value'],
+            'kernelReturn':(returns.get(key) or {}).get('result'),
+            'fileKinds':sorted({'eventfd' if e['file'] in eventfds else 'regular' if e['result']==0x8000 else 'pipe' for e in bases}),
+            'probes':sorted({FILE_WRITE_HOOKS[e['value']-1] for e in observed}),
+            'reason':'actual_vfs_non_socket_write_without_socket_operation'})
+        return True
     for pid, observed in pre.items():
         available = decoded[pid]
         for event in observed:
             key = (pid, event['ordinal'])
+            if (not available or available[0][0:2]!=(event['call'],event['value'])) and non_socket_write(event):
+                continue
             if not available:
                 if (pid in terminal_pids and event is observed[-1] and event['ordinal']==tasks[pid].get('lastOrdinal')
                         and key not in calls and key not in returns and not any((hook['pid'],hook['ordinal'])==key for hook in hooks)):
@@ -284,19 +329,42 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                         syscall=CALLS[event['call']-1],fd=event['value'],rangeStart=task['start'],rangeEnd=task['end'],
                         reason='final_pre_entry_without_kernel_execution'))
                     continue
-                error('kernel_network_strace_entry_missing', pid); continue
+                error('kernel_network_strace_entry_missing',pid,syscall=CALLS[event['call']-1],
+                      fd=event['value'],ordinal=event['ordinal'],lastOrdinal=tasks[pid].get('lastOrdinal'),
+                      kernelReturn=(returns.get(key) or {}).get('result'),
+                      socketEvents=sum((hook['pid'],hook['ordinal'])==key for hook in hooks)); continue
             item = available.popleft()
             if item[0:2] != (event['call'],event['value']):
                 error('kernel_network_invocation_mismatch', pid); continue
             if key not in calls:
                 # Pre-entry exists, but ptrace/seccomp/user dispatch prevented
                 # execution. Its interpreted result may be emulated, even 0.
+                if item[2] is None:
+                    if (pid not in terminal_pids or event is not observed[-1] or
+                            event['ordinal']!=tasks[pid].get('lastOrdinal') or key in returns or
+                            any((hook['pid'],hook['ordinal'])==key for hook in hooks)):
+                        error('kernel_partial_call_execution_unproven',pid);continue
+                    result_fields.append(dict(pid=pid,kernelPid=event['kernelPid'],sequence=item[3],
+                        ordinal=event['ordinal'],syscall=CALLS[event['call']-1],fd=event['value'],
+                        rangeStart=tasks[pid]['start'],rangeEnd=tasks[pid]['end'],
+                        reason='final_known_call_not_executed'))
                 matched.add(key); continue
             returned = returns.get(key)
             if returned is None:
+                if item[2] is None and pid in terminal_pids and non_socket_write(event):
+                    result_fields.append(dict(pid=pid,kernelPid=event['kernelPid'],sequence=item[3],
+                        ordinal=event['ordinal'],syscall=CALLS[event['call']-1],fd=event['value'],
+                        rangeStart=tasks[pid]['start'],rangeEnd=tasks[pid]['end'],
+                        reason='known_call_actual_vfs_non_socket_write'))
+                    matched.add(key);continue
                 error('kernel_network_return_missing', pid); continue
             result=returned['result']
-            if (result if result >= 0 else -1) != item[2]:
+            if item[2] is None:
+                result_fields.append(dict(pid=pid,kernelPid=event['kernelPid'],sequence=item[3],
+                    ordinal=event['ordinal'],syscall=CALLS[event['call']-1],fd=event['value'],
+                    rangeStart=tasks[pid]['start'],rangeEnd=tasks[pid]['end'],kernelReturn=result,
+                    reason='known_call_result_from_raw_sys_exit'))
+            elif (result if result >= 0 else -1) != item[2]:
                 error('kernel_network_result_mismatch', pid); continue
             matched.add(key)
             matched_sequences[key]=item[3]
@@ -338,4 +406,5 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 networkEntries=len(entries[pid]), socketEvents=sum(e['pid']==pid for e in hooks),
                 preEntryInvocations=len(pre[pid]), notExecutedOrdinals=not_executed[pid],
                 reason='complete_task_lifetime_no_unmatched_kernel_network_activity'))
-    return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [], eventCount=len(events))
+    return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
+                nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],eventCount=len(events))

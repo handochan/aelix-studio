@@ -171,6 +171,16 @@ no corresponding named write event. Raw argument-array/ID/result fields are
 mandatory, and entry/return IDs must agree. Other calls retain only an active
 kernel ID for unmatched-operation diagnostics, never argument buffers. This
 `nativeSyscall` is the current kernel event, not a cached strace annotation.
+Generic WRITE/WRITEV is not automatically a network operation. Required
+`vfs_write`/`vfs_writev` probes observe the actual referenced file, not an
+entry-time fd-table lookup. An orphan write may be classified non-network only
+with real VFS observations for that same TID/ordinal/WRITE epoch, all observed
+files REG/FIFO or individually proven eventfd, and no socket operation. Mode-0
+eventfd observations require `eventfd_write` for the **same file object**. Socket,
+unsupported mode, missing file evidence, invalid context or any loss stays fatal.
+File identity is BPF-private; reports contain no kernel addresses. These proofs
+are separate `kernelNonNetworkWrites`/`kernelNonNetworkWriteInvocations`, and do
+not bypass the FD-lifecycle guard or infer non-network from return values.
 The same recorder also attaches
 required concrete kprobes `kernel_connect`,
 `sock_write_iter`, `sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`,
@@ -271,6 +281,14 @@ A final pre-entry may also have been killed before strace printed a `???` stub;
 `kernelNotExecutedInvocations`/`kernelNotExecuted` record these proven unexecuted
 invocations separately with TID, range, syscall, fd and ordinal. They require a
 known terminated strace TID and never subtract any unrelated unparsed record.
+Known calls with an unreadable/missing return field retain their decoded call
+and fd in the same ordered invocation matching. `kernelResultFields` and
+`kernelResolvedResultFields` report only that single missing field recovered
+from an exact raw exit, proven final nonexecution, or an actual VFS non-socket
+write. Unknown/missing destination fields, ambiguous ownership, UDP writes and
+FD-lifecycle errors remain blocking. Pending descriptor/fork/exec calls are
+never recovered by this rule. Overlapping raw syscall states remain failed and
+include bounded numeric old/new syscall metadata for diagnosis.
 Every other unknown strace record remains fatal. App and host/native reports
 use this one implementation and the same `sourceSha256` policy inventory.
 Synthetic controls exercise hidden network activity, no network execution,
