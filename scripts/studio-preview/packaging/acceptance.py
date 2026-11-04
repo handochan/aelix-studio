@@ -17,6 +17,8 @@ sys.path.insert(0, str(Path(__file__).parents[1]))
 from prepare import host_target, venv_path
 sys.path.insert(0, str(Path(__file__).parents[1] / 'host-release'))
 from identity import host_identity, macho_code_identity
+sys.path.insert(0, str(Path(__file__).parent))
+from auditedSessions import AuditedSessions
 
 
 # Qualification-only diagnostics never include raw resource bytes or extra filenames.
@@ -217,6 +219,8 @@ def main(args):
             prepared = json.loads((runtime / 'receipt.json').read_text(encoding='utf-8'))
             core = payload.parent / 'bundled-aioncore' / target / ('aelix-studio-host.exe' if sys.platform == 'win32' else 'aelix-studio-host')
             original_core = runtime / prepared['aioncoreBinary']
+            installed_python = payload / ('python/python.exe' if sys.platform == 'win32' else 'python/bin/python3')
+            audits = AuditedSessions(core, installed_python, output.parent / 'permission')
             identity = dict(expectedOriginalSha256=prepared['aioncoreBinarySha256'],
                             observedOriginalSha256=digest(original_core), installedSha256=digest(core),
                             original={}, installed={})
@@ -282,8 +286,11 @@ def main(args):
                                             env=environment, text=True, encoding='utf-8', timeout=30)
             if not json.loads(probe)['bundled']:
                 raise ValueError('Installed Python escaped its bundle')
-            subprocess.run([*wrapper, *isolated, 'acp', '--version'], env=environment,
-                           check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=30)
+            # Version qualification uses the actual installed executable, just
+            # like the GUI/helper. The preceding import probe still exercises relocation.
+            installed_prefix = [str(installed_python), '-I', '-S', '-B', '-X', 'utf8', str(payload / 'launch.py')]
+            audits.run('acp-version', [*wrapper, *installed_prefix, 'acp', '--version'], env=environment,
+                       required=(installed_python,), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=60)
             # Verify the installed source bundle before GUI startup, then check
             # that its PE/ELF/Mach-O loader works with the same system-only PATH.
             # This uses test-driver Node; the installed app still resolves itself.
@@ -314,8 +321,9 @@ def main(args):
             preflight['hostVersion'] = {'status': 'running'}
             save_preflight()
             try:
-                version = subprocess.run([str(core), '--version'], env=environment, capture_output=True, timeout=30)
-            except (subprocess.TimeoutExpired, OSError) as error:
+                version = audits.run('core-version', [str(core), '--version'], env=environment,
+                                     required=(core,), capture_output=True, timeout=60)
+            except (subprocess.SubprocessError, OSError, RuntimeError) as error:
                 failed_preflight('hostVersion', error)
                 raise
             preflight['hostVersion'] = {'status': 'passed' if version.returncode == 0 else 'failed',
@@ -327,52 +335,26 @@ def main(args):
             # The qualifier itself uses development Node; the installed app receives a
             # system-only PATH in providerHostSmoke and retains its Chromium sandbox.
             environment['PATH'] = os.environ['PATH']
-            subprocess.run([str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'providerSmoke.py'),
-                            '--runtime', str(runtime), '--helper-runtime', str(payload)],
-                           check=True, cwd=ROOT, env=environment, timeout=420)
+            audits.run('provider', [str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'providerSmoke.py'),
+                       '--runtime', str(runtime), '--helper-runtime', str(payload)],
+                       required=(core, installed_python), env=environment, timeout=480, defer_failure=True)
             permission_output = output.parent / 'permission/qualification.json'
             permission_output.parent.mkdir(parents=True, exist_ok=True)
             permission_command = [str(venv_path(runtime, 'native')), '-B', str(Path(__file__).parents[1] / 'host-release/smoke.py'),
                                   '--runtime', str(runtime), '--payload', str(payload), '--report', str(permission_output)]
+            # Complete independent functional evidence, retaining every failed
+            # audit. The final receipt and process still fail if any audit fails.
+            audits.run('permission', permission_command, required=(core, installed_python), env=environment,
+                       timeout=480, defer_failure=True)
             if sys.platform == 'linux':
-                auditor = Path(__file__).parents[1] / 'fixtures/outboundAudit.py'
-                installed_python = payload / 'python/bin/python3'
-                # Check the exact installed native executable and its child tree first.
-                # These intentional attempts must fail the same scoped gate with 86.
-                for control in ('positive-control', 'child-positive-control'):
-                    control_report = permission_output.with_name('outbound-' + control + '.json')
-                    result = subprocess.run([sys.executable, '-I', '-B', str(auditor),
-                                             '--scope-executable', str(core), '--scope-executable', str(installed_python),
-                                             '--require-executable', str(installed_python), '--report', str(control_report),
-                                             '--whole-report', str(control_report.with_name('outbound-app-' + control + '.json')),
-                                             '--', str(installed_python), '-I', '-B', str(auditor), '--' + control],
-                                            cwd=ROOT, env=environment, timeout=60)
-                    control_data = json.loads(control_report.read_text())
-                    if (result.returncode != 86 or control_data['externalAttempts'] != 2
-                            or control_data['unparsedRecords'] != 0 or not control_data['rootPids']
-                            or {event['syscall'] for event in control_data['external']} != {'connect', 'sendto'}):
-                        raise ValueError('Installed native scoped outbound positive control did not detect both attempts')
-                # Every fork/thread below the pinned host or installed native is enforced.
-                # Electron/Chromium and other siblings remain in the whole-app report.
-                permission_command = [sys.executable, '-I', '-B', str(auditor),
-                                      '--scope-executable', str(core), '--scope-executable', str(installed_python),
-                                      '--require-executable', str(core),
-                                      '--report', str(permission_output.with_name('outbound.json')),
-                                      '--whole-report', str(permission_output.with_name('outbound-app.json')),
-                                      '--', *permission_command]
-            subprocess.run(permission_command, check=True, cwd=ROOT, env=environment, timeout=420)
-            if sys.platform == 'linux':
-                scoped = json.loads(permission_output.with_name('outbound.json').read_text())
-                whole = json.loads(permission_output.with_name('outbound-app.json').read_text())
-                if (scoped['status'] != 'passed' or scoped['scope'] != 'selected-process-trees'
-                        or scoped['externalAttempts'] != 0 or scoped['unparsedRecords'] != 0 or not scoped['rootPids']
-                        or whole['scope'] != 'all' or whole['enforcement'] != 'report-only'):
-                    raise ValueError('Installed host/native outbound gate or whole-app report is invalid')
+                audits.positive_controls(environment, defer_failure=True)
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
             if permission['status'] != 'passed' or not permission['installer'] or permission['defaultHostOverride']:
                 raise ValueError('Installed default host permission acceptance failed')
-            report = dict(status='passed', target=target,
-                          permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output), artifactKind=kind, artifactSha256=digest(artifact),
+            report = dict(status='failed' if audits.failed else 'passed', failedAudits=audits.failed, target=target,
+                          permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output),
+                          auditedSessions=audits.sessions, outboundControls=audits.controls,
+                          artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
@@ -389,10 +371,14 @@ def main(args):
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if sys.platform == 'linux':
                 report.update(outboundScope='host-and-installed-native-process-trees',
+                              auditedSessionsSha256=digest(permission_output.with_name('outbound-sessions.json')),
                               outboundGateSha256=digest(permission_output.with_name('outbound.json')),
                               wholeAppOutboundSha256=digest(permission_output.with_name('outbound-app.json')),
-                              hostNativeExternalAttempts=scoped['externalAttempts'], hostNativeUnparsedRecords=scoped['unparsedRecords'],
-                              wholeAppExternalAttempts=whole['externalAttempts'], wholeAppUnparsedRecords=whole['unparsedRecords'])
+                              hostNativeExternalAttempts=sum(item['externalAttempts'] for item in audits.sessions),
+                              hostNativeUnparsedRecords=sum(item['unparsedRecords'] for item in audits.sessions),
+                              hostNativeClassificationErrors=sum(item['classificationErrors'] for item in audits.sessions),
+                              wholeAppExternalAttempts=sum(item['wholeAppExternalAttempts'] for item in audits.sessions),
+                              wholeAppUnparsedRecords=sum(item['wholeAppUnparsedRecords'] for item in audits.sessions))
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
         finally:
@@ -401,6 +387,8 @@ def main(args):
         if not report['ownedTestAppRemoved']:
             raise ValueError('Owned installer files remain after cleanup')
         output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+        if audits.failed:
+            raise RuntimeError('Installed host/native outbound audit failed: ' + ', '.join(audits.failed))
 
 
 if __name__ == '__main__':

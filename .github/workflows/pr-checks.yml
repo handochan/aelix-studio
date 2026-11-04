@@ -90,7 +90,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bunx playwright install-deps chromium
-          sudo apt-get install -y strace gcc
+          sudo apt-get install -y strace gcc liburing-dev pkg-config iproute2
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
       - name: Prepare exact native and ACP source wheels with the released host

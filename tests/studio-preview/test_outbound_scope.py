@@ -194,6 +194,30 @@ class ScopedParserTests(unittest.TestCase):
                     '2<host> +++ exited with 0 +++', '1<app> +++ exited with 0 +++'], lifecycle=True)
                 self.assertGreater(scoped['classificationErrors'], 0)
 
+    def test_io_uring_is_classified_inside_selected_tree_including_failed_calls(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<host> io_uring_setup(2, {...}) = -1 EPERM (Operation not permitted)',
+            '2<host> io_uring_enter(9, 1, 1, 0, NULL, 8) = -1 EBADF (Bad file descriptor)',
+            '2<host> io_uring_register(9, 0, NULL, 0) = -1 EBADF (Bad file descriptor)'])
+        self.assertEqual(scoped['externalAttempts'], 0)
+        self.assertEqual(scoped['classificationErrors'], 3)
+        self.assertEqual({i['syscall'] for i in scoped['classificationIssues']},
+                         {'io_uring_setup', 'io_uring_enter', 'io_uring_register'})
+
+    def test_io_uring_of_known_sibling_is_retained_only_in_whole_report(self):
+        scoped, whole = self.parse(self.base() + [
+            '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3<sibling>',
+            '3<sibling> io_uring_setup(2, {...}) = 9'])
+        self.assertEqual(scoped['classificationErrors'], 0)
+        self.assertEqual(whole['classificationErrors'], 1)
+        self.assertEqual(next(p for p in whole['processes'] if p['pid'] == 3)['ioUringSyscalls'], ['io_uring_setup'])
+
+    def test_unfinished_io_uring_in_selected_child_never_becomes_zero(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<host> clone(child_stack=NULL, flags=SIGCHLD) = 3<renamed>',
+            '3<renamed> io_uring_enter(9, 1, 1, 0, NULL, 8 <unfinished ...>'])
+        self.assertEqual(scoped['classificationErrors'], 1)
+
     def test_c_escaped_unicode_path_matches_without_disclosing_path(self):
         from outboundScope import decode_path
         self.assertEqual(decode_path(r'"/owned/\355\225\234\352\270\200"'), '/owned/한글')
@@ -207,6 +231,54 @@ class ScopedTraceTests(unittest.TestCase):
     def setUpClass(cls):
         if not shutil.which('strace') or not shutil.which('cc'):
             raise RuntimeError('Scoped Linux integration tests require strace and cc')
+
+    def test_real_io_uring_connect_cannot_pass_as_zero_network(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root/'uring.c'
+            source.write_text('''#define _GNU_SOURCE
+#include <unistd.h>
+#include <sys/syscall.h>
+#include <linux/io_uring.h>
+#include <sys/socket.h>
+#include <arpa/inet.h>
+#ifdef USE_LIBURING
+#include <liburing.h>
+#endif
+int main(void) {
+#ifdef USE_LIBURING
+    struct io_uring ring;
+    if (io_uring_queue_init(2, &ring, 0) == 0) {
+        int fd = socket(AF_INET, SOCK_STREAM, 0);
+        struct sockaddr_in address = {.sin_family=AF_INET,.sin_port=htons(9)};
+        inet_pton(AF_INET, "127.0.0.1", &address.sin_addr);
+        io_uring_prep_connect(io_uring_get_sqe(&ring), fd, (void*)&address, sizeof(address));
+        io_uring_submit(&ring);
+        struct io_uring_cqe *completion;
+        if (io_uring_wait_cqe(&ring, &completion) == 0) io_uring_cqe_seen(&ring, completion);
+        close(fd); io_uring_queue_exit(&ring);
+    }
+#else
+    struct io_uring_params params = {0};
+    long fd = syscall(SYS_io_uring_setup, 2, &params);
+    if (fd >= 0) close(fd);
+#endif
+    syscall(SYS_io_uring_enter, -1, 0, 0, 0, 0, 0);
+    syscall(SYS_io_uring_register, -1, 0, 0, 0);
+    return 0;
+}
+''')
+            binary = root/'uring-control'
+            linked = shutil.which('pkg-config') and subprocess.run(['pkg-config','--exists','liburing']).returncode == 0
+            flags = ['-DUSE_LIBURING','-luring'] if linked else []
+            subprocess.run(['cc',str(source),'-o',str(binary),*flags],check=True)
+            result = subprocess.run([sys.executable,'-B',str(SCRIPT),'--report',str(root/'report.json'),
+                                     '--scope-executable',str(binary),'--require-executable',str(binary),
+                                     '--',str(binary)],capture_output=True,text=True,timeout=30)
+            report = json.loads((root/'report.json').read_text())
+            self.assertEqual(result.returncode,87,result.stderr)
+            self.assertGreaterEqual(report['classificationErrors'],3)
+            self.assertEqual(report['externalAttempts'],0)
 
     def test_real_different_executable_child_blocks(self):
         with tempfile.TemporaryDirectory() as directory:

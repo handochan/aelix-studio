@@ -102,7 +102,7 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         # Raw traces are removed and executable paths never enter JSON reports.
         trace = prefix.with_suffix('.trace')
         process = subprocess.run(['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
-                                  'trace=connect,sendto,sendmsg,sendmmsg,clone,clone3,fork,vfork,execve,execveat',
+                                  'trace=connect,sendto,sendmsg,sendmmsg,io_uring_setup,io_uring_enter,io_uring_register,clone,clone3,fork,vfork,execve,execveat',
                                   '-o', str(trace), '--', *command])
         paths = [trace] if trace.exists() else []
         report, whole = analyze_processes(paths, scope_executables, require_executables, True)

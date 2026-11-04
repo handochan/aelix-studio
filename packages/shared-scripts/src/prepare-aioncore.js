@@ -27,8 +27,6 @@ function prepareManagedResources(binaryPath, targetDir) {
     env: {
       ...process.env,
       AIONUI_BUNDLED_MANAGED_RESOURCES: '',
-      // Build operators choose the mirror; an unset value must never enable downloads.
-      AELIX_STUDIO_HOST_NODE_MIRROR: process.env.AELIX_STUDIO_HOST_NODE_MIRROR,
     },
   });
 

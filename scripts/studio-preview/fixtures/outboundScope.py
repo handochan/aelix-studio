@@ -10,6 +10,7 @@ import re
 NETWORK = {'connect', 'sendto', 'sendmsg', 'sendmmsg'}
 FORK = {'clone', 'clone3', 'fork', 'vfork'}
 EXEC = {'execve', 'execveat'}
+IO_URING = {'io_uring_setup', 'io_uring_enter', 'io_uring_register'}
 PREFIX = re.compile(r'^(\d+)(?:<([^>]*)>)?\s+(.*)$')
 CALL = re.compile(r'^(\w+)\(')
 RESUMED = re.compile(r'^<\.\.\. (\w+) resumed>')
@@ -61,7 +62,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
 
     def state(pid, name=None):
         if pid not in states:
-            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False}
+            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False, 'io_uring': []}
             observed_order.append(pid)
         if name and re.fullmatch(r'[A-Za-z0-9_.+ -]{1,64}', name):
             states[pid]['process'] = name
@@ -78,6 +79,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     def unknown(pid, call):
         if call in NETWORK:
             state(pid)['unparsed'] += 1
+        elif call in IO_URING:
+            state(pid)['io_uring'].append(call)
         else:
             classification_issue('incomplete_syscall', pid, call)
 
@@ -96,6 +99,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 classification_issue('unknown_record', pid)
             return
         call = match[1]
+        if call in IO_URING:
+            # Submission queues may perform networking without connect/send*
+            # syscalls. Even denied setup or an inherited-ring enter/register
+            # makes this task's network evidence unsupported, never zero.
+            item['io_uring'].append(call)
+            return
         if call in FORK:
             result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
             if not result:
@@ -296,19 +305,23 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
         processes = []
+        issues = classification_issues + [
+            {'reason': 'unsupported_io_uring', 'pid': pid, 'syscall': call}
+            for pid in sorted(pids) for call in states[pid]['io_uring']]
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
                               'inScope': not selected or pid in included, 'root': pid in roots, 'finished': item['finished'],
                               'destinationAttempts': len(item['events']),
                               'externalAttempts': sum(event['external'] for event in item['events']),
+                              'ioUringSyscalls': item['io_uring'],
                               'unparsedRecords': item['unparsed']})
         return {'schema': 'aelix-studio-host.outbound-audit/1', 'scope': scope,
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
-                'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(classification_issues),
-                'classificationErrors': len(classification_issues), 'classificationIssues': classification_issues,
+                'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),
+                'classificationErrors': len(issues), 'classificationIssues': issues,
                 'external': external, 'processes': processes}
 
     whole = report(set(states), 'all')

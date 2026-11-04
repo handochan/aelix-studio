@@ -51,9 +51,9 @@ describe('managed resource build environment', () => {
     const root = mkdtempSync(join(tmpdir(), 'studio-managed-env-'));
     try {
       require(key).prepareManagedResources('synthetic-host', root);
-      expect(exec.mock.calls[0][2]).toMatchObject({
-        env: { AELIX_STUDIO_HOST_NODE_MIRROR: mirror, AIONUI_BUNDLED_MANAGED_RESOURCES: '' },
-      });
+      const childEnvironment = exec.mock.calls[0][2].env;
+      expect(childEnvironment.AELIX_STUDIO_HOST_NODE_MIRROR).toBe(mirror);
+      expect(childEnvironment.AIONUI_BUNDLED_MANAGED_RESOURCES).toBe('');
     } finally {
       exec.mockRestore();
       vi.unstubAllEnvs();

@@ -64,20 +64,58 @@ No network addresses are newly exempted: only loopback/Unix IPC is allowed, with
 DNS port 53 counted as external even on loopback. Proxy preflight remains strict.
 
 Linux installer acceptance selects the pinned installed host and installed Python,
-covering ACP/native children plus independent native helpers. It first verifies
-both direct and child TCP/UDP positive controls using that installed Python;
-each must produce two attempts, unparsed 0 and exit 86. The zero-attempt functional
-run must then exit 0 with observed host roots and unparsed 0. Whole-app results,
-including Electron/Chromium traffic, are retained for Studio #15. No Chromium
-networking flags are changed. Windows/macOS are functionally tested without an
+covering ACP/native children plus independent native helpers. Four separate
+functional sessions use the same scoped auditor: `acp-version`, `core-version`,
+`provider` (Provider UI/LAN and helper qualification), and `permission` (21 checks,
+including restarts and failed Yolo-to-Ask transition). Each requires zero selected
+external attempts, unparsed records and classification errors, plus observed
+required executable roots. Windows/macOS run these functionally without an
 OS-level zero-attempt claim.
+
+`acceptance.json.auditedSessions` lists the audited sessions and report hashes;
+`permission/outbound-sessions.json` also records failures as they occur. Session
+reports are `outbound-<session>.json` and `outbound-app-<session>.json`; permission
+retains the original `outbound.json` / `outbound-app.json` names. Receipt counts
+aggregate the functional sessions; positive controls are separate in
+`outboundControls`. Independent functional evidence is completed even after an
+audit failure; failed sessions remain failed in the ledger, the final receipt is
+failed, and qualification exits nonzero. No failed audit can become green.
+The legacy single-report hashes still name permission's
+reports. The existing workflow artifact glob retains all reports and the ledger.
+
+Installed-native direct/child TCP/UDP controls each require two attempts, unparsed
+0 and exit 86. A third control selects **only the installed host** and asks its MCP
+test API to launch an installed-Python child making the same TEST-NET attempts.
+It verifies the captured fork ancestry from that exact child's PID to the host,
+with no independent native root that could hide a missing host edge. The fixture
+awaits bundled-runtime validation before shutdown instead of cancelling startup
+probes. Image fetch
+is unsuitable here because the host's image-host whitelist rejects TEST-NET URLs
+before connecting. This uses an explicit test-only MCP command, without npx.
+The host control runs under `sudo unshare --net`, with only loopback enabled and
+no default routes; it asserts that isolation before starting the host. No TEST-NET
+packet can leave an external interface. It is separate from functional runs and
+requires exit 86, two attempts, unparsed/classification 0 and a graceful host exit.
+Namespace setup failure fails qualification; there is no permissive fallback.
+
+The collector also traces `io_uring_setup`, `io_uring_enter` and
+`io_uring_register`, including denied calls. Any such call in a selected tree is
+an `unsupported_io_uring` classification error: submission-queue networking is
+not decoded and cannot pass as zero. Calls in known non-selected siblings remain
+in the whole-app report with their PID/syscall; ambiguous lineage remains globally
+blocking. Linux tests use a liburing loopback-connect probe (raw setup/enter/register
+syscalls if liburing is unavailable); a kernel-denied setup still must fail closed.
+
+Whole-app results, including Electron/Chromium traffic and unsupported APIs, remain
+report-only artifacts for Studio #15. No Chromium networking flags are changed.
 
 `strace -f --decode-pids=comm,pidns -yy -s 0` follows processes/threads and records only network and
 fork/exec metadata. With default abbreviation, exec records expose the executable
 filename but replace argv with `[...]` and env with a pointer/count. Integration
 tests assert argument/environment sentinels never enter raw traces or reports.
-Connected FD peers are decoded so inherited external sockets cannot bypass the
-selected gate. Only sendmmsg destination vectors are unabbreviated; their data
+Connected FD peers are decoded for inherited sockets sent through the traced
+`sendto`, `sendmsg`, and `sendmmsg` calls. Sends through `write()` or `writev()`
+on inherited sockets are **not traced**; this is not a claim to cover every socket API. Only sendmmsg destination vectors are unabbreviated; their data
 buffers remain suppressed. Unknown peers/vectors fail closed in their process.
 Executable paths are used privately for selection and are omitted from JSON;
 raw traces are deleted. Terminal records are retained during parsing; missing or
