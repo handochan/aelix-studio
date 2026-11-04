@@ -55,7 +55,7 @@ remaining product decisions before promoting this draft.
 
 ## IPv6-only investigation harness
 
-`ipv6Capture.py`, `ipv6Probe.cjs` and `ipv6Peer.py` are isolated diagnostic tools;
+`ipv6Capture.py`, `ipv6Probe.cjs` and `ipv6Peer.py` are historical diagnostic tools at source `20019f5`;
 they are not imported by Studio or the production gate. They refuse a namespace
 with interfaces other than loopback at startup and require a disposable Docker
 `--network none` container. The fixture disables spelling only to isolate this
@@ -85,6 +85,8 @@ docker run --rm --init --network none \
 
 Omit `--candidate` for the current engine only. The output directory must be new.
 The 54-byte snap length stores Ethernet/IPv6 headers only. Dropped, incomplete or
-undrained captures and failed UDP capture controls abort the experiment. The
-unchanged auditor is separately required to retain exit 86/87; the research
-command completing successfully does not mean the app audit passed.
+undrained captures and failed UDP capture controls abort the experiment. The historical harness expects the pre-decision auditor/report format and exit
+86/87. Reproducing that historical comparison requires the matching `20019f5`
+auditor passed through `--audit-script`; it is not a current-policy validation
+command. Current policy is qualified only by the shared auditor and transport
+controls above. The recorded 76 connects / zero packets are retained in the study.
