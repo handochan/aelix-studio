@@ -27,9 +27,12 @@ def analyze(records, ring_evidence, tgid):
     for pid, line, sequence in sorted(records, key=lambda item: item[2]):
         current = table(pid)
         if line.startswith('+++'):
-            # Threads may share an FD table; final table owner must have closed
-            # every association. Process exit is not proof of an explicit close.
-            if not any(other is current for task, other in tables.items() if task != pid):
+            # A process must close its associations before its last task exits,
+            # including tables shared with another TGID. A surviving thread may
+            # retain the same table; losing the last table holder still fails.
+            table_survives = any(other is current for task, other in tables.items() if task != pid)
+            process_survives = any(tgid(task) == tgid(pid) for task in tables if task != pid)
+            if not table_survives or not process_survives:
                 for sock, _ in current.values():
                     if sock['connects']:
                         sock['invalid'] = True; issue(pid, 'udp_association_open_at_exit')

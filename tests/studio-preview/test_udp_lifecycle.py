@@ -86,6 +86,17 @@ class UdpLifecycleTests(unittest.TestCase):
         report=self.parse([SOCKET.replace('IPPROTO_UDP','IPPROTO_ICMPV6'),CONNECT,CLOSE,END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
 
+    def test_last_task_of_process_cannot_leave_udp_open_in_another_process_table(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                           '2<child> +++ exited with 0 +++',CLOSE,END])
+        self.assertGreater(report['classificationErrors'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_surviving_thread_may_close_the_same_process_shared_table(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2<thread>',
+                           '2<thread> +++ exited with 0 +++',CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
+
     def test_tcp_connect_remains_an_attempt_even_without_data(self):
         report=self.parse([CONNECT.replace('UDPv6','TCPv6'),END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
