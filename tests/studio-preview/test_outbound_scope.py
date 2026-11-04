@@ -218,6 +218,28 @@ class ScopedParserTests(unittest.TestCase):
             '3<renamed> io_uring_enter(9, 1, 1, 0, NULL, 8 <unfinished ...>'])
         self.assertEqual(scoped['classificationErrors'], 1)
 
+    def test_only_loopback_accepted_socket_can_precede_allowed_ring_writes(self):
+        for address,expected in [('127.0.0.1',0),('203.0.113.1',1)]:
+            with self.subTest(address=address):
+                accepted=f'accept4(3, {{sa_family=AF_INET, sin_port=htons(12345), sin_addr=inet_addr("{address}")}}, [16], SOCK_CLOEXEC) = 5'
+                scoped,_=self.parse(self.base()+['2<host> '+accepted])
+                self.assertEqual(scoped['classificationErrors'],expected)
+        scoped,_=self.parse(self.base()+['2<host> accept4(3, NULL, NULL, 0) = 5<socket:[123]>'])
+        self.assertEqual(scoped['unparsedRecords'],1)
+
+    def test_numeric_setup_flags_with_strace_comments_match_kernel_creation(self):
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':2,
+                 'events':[{'kind':'create','time':1,'ctx':'opaque','pid':2,'tgid':2,'fd':5,'flags':65536},
+                           {'kind':'submit','time':2,'ctx':'opaque','pid':2,'tgid':2,'opcode':29,'sqpoll':False}]}
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace'
+            trace.write_text('\n'.join(self.base()+[
+                '2<host> io_uring_setup(256, {flags=0x10000 /* IORING_SETUP_??? */}) = 5<anon_inode:[io_uring]>',
+                '2<host> io_uring_enter(5<anon_inode:[io_uring]>, 1, 0, 0, NULL, 8) = 1'])+'\n')
+            scoped,_=audit.analyze_processes([trace],(HOST,),(HOST,),False,capture)
+        self.assertEqual(scoped['classificationIssues'],[])
+        self.assertEqual(scoped['ioUring']['opcodeCounts'],{'EPOLL_CTL':1})
+
     def test_c_escaped_unicode_path_matches_without_disclosing_path(self):
         from outboundScope import decode_path
         self.assertEqual(decode_path(r'"/owned/\355\225\234\352\270\200"'), '/owned/한글')
@@ -277,7 +299,7 @@ int main(void) {
                                      '--',str(binary)],capture_output=True,text=True,timeout=30)
             report = json.loads((root/'report.json').read_text())
             self.assertEqual(result.returncode,87,result.stderr)
-            self.assertGreaterEqual(report['classificationErrors'],3)
+            self.assertGreaterEqual(report['classificationErrors'],1)
             self.assertEqual(report['externalAttempts'],0)
 
     def test_real_different_executable_child_blocks(self):

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 
 
 def digest(path):
@@ -28,7 +29,7 @@ class AuditedSessions:
             'positiveControls': self.controls, 'recipeSha256': digest(Path(__file__))}, indent=2) + '\n')
 
     def run(self, name, command, *, env, timeout, required=(), expected_external=None,
-            roots=None, namespace=False, defer_failure=False, **options):
+            roots=None, namespace=False, defer_failure=False, expected_ring_opcode=None, **options):
         if not self.enabled:
             return subprocess.run(command, check=True, cwd=self.root, env=env, timeout=timeout, **options)
         if not re.fullmatch(r'[a-z][a-z0-9-]*', name): raise ValueError('Invalid audit session name')
@@ -48,10 +49,10 @@ class AuditedSessions:
                 if not shutil.which(tool): raise RuntimeError('Host control requires ' + tool)
             audited = ['sudo', '-n', shutil.which('unshare'), '--net', '--', '/bin/sh', '-c',
                        'ip link set lo up && exec "$@"', 'host-control', *audited]
-        expected_code = 0 if expected_external is None else 86
+        expected_code = 87 if expected_ring_opcode is not None else 0 if expected_external is None else 86
         record = {'name': name, 'status': 'running', 'expectedAuditExitCode': expected_code,
                   'report': report.name, 'wholeAppReport': whole_path.name}
-        collection = self.sessions if expected_external is None else self.controls
+        collection = self.sessions if expected_external is None and expected_ring_opcode is None else self.controls
         collection.append(record); self.save()
         try:
             result = subprocess.run(audited, cwd=self.root, env=env, timeout=timeout, **options)
@@ -65,11 +66,28 @@ class AuditedSessions:
             record[field] = scoped[field]
         record.update(reportSha256=digest(report), wholeAppReportSha256=digest(whole_path),
                       commandExitCode=scoped.get('commandExitCode'),
+                      ioUringOpcodes=scoped.get('ioUring',{}).get('opcodeCounts',{}),
+                      wholeAppIoUringOpcodes=whole.get('ioUring',{}).get('opcodeCounts',{}),
                       wholeAppExternalAttempts=whole['externalAttempts'], wholeAppUnparsedRecords=whole['unparsedRecords'])
         valid = (result.returncode == expected_code and scoped['scope'] == 'selected-process-trees'
                  and scoped['enforcement'] == 'blocking' and scoped['externalAttempts'] == (expected_external or 0)
                  and scoped['unparsedRecords'] == 0 and scoped['classificationErrors'] == 0 and scoped['rootPids']
-                 and whole['scope'] == 'all' and whole['enforcement'] == 'report-only')
+                 and whole['scope'] == 'all' and whole['enforcement'] == 'report-only'
+                 and scoped.get('ioUring',{}).get('recorded') and scoped['ioUring']['capture']['complete']
+                 and scoped['ioUring']['capture']['drained'] and scoped['ioUring']['capture']['lostEvents']==0)
+        if expected_ring_opcode is not None:
+            issues=scoped['classificationIssues']
+            valid=(result.returncode==87 and scoped['externalAttempts']==0 and scoped['unparsedRecords']==1
+                   and scoped['classificationErrors']==1 and len(issues)==1
+                   and issues[0].get('reason')=='io_uring_opcode_not_allowed'
+                   and issues[0].get('opcode')==expected_ring_opcode and scoped['rootPids']
+                   and scoped['ioUring']['recorded'] and scoped['ioUring']['capture']['complete']
+                   and scoped['ioUring']['capture']['lostEvents']==0
+                   and scoped['ioUring']['capture']['drained']
+                   and scoped['scope']=='selected-process-trees' and scoped['enforcement']=='blocking'
+                   and whole['scope']=='all' and whole['enforcement']=='report-only'
+                   and scoped.get('commandExitCode')==0)
+            record['expectedRejectedOpcode']=expected_ring_opcode
         if valid: record['status'] = 'passed'
         self.save()
         if not valid and not (defer_failure and scoped.get('commandExitCode') == 0):
@@ -108,3 +126,16 @@ class AuditedSessions:
         self.controls[-1].update(hostChildLineageVerified=True, privateNetworkNamespace=True,
                                  fixtureSha256=digest(proof), fixtureRecipeSha256=digest(fixture))
         self.save()
+        # These network operations use an owned loopback target. They must be
+        # rejected by opcode, without an address/name exception or real egress.
+        sys.path.insert(0,str(self.auditor.parent))
+        from uring.probe import CONTROL_C
+        with tempfile.TemporaryDirectory(prefix='studio-uring-control-') as directory:
+            source=Path(directory)/'control.c';source.write_text(CONTROL_C)
+            binary=Path(directory)/'control'
+            subprocess.run(['cc',str(source),'-o',str(binary),'-luring'],check=True,capture_output=True)
+            for sqpoll in (False,True):
+                code='import subprocess,sys;raise SystemExit(subprocess.run(sys.argv[1:]).returncode)'
+                self.run('uring-connect-sqpoll' if sqpoll else 'uring-connect',
+                    [self.native,'-I','-B','-c',code,str(binary),*(['sqpoll'] if sqpoll else [])],
+                    env=env,timeout=90,required=(self.native,),expected_ring_opcode=16,defer_failure=defer_failure)

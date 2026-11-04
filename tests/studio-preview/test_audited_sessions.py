@@ -24,7 +24,7 @@ class SessionReceiptTests(unittest.TestCase):
             report = Path(argv[argv.index('--report') + 1])
             whole = Path(argv[argv.index('--whole-report') + 1])
             data = dict(scope='selected-process-trees', enforcement='blocking', externalAttempts=attempts,
-                        unparsedRecords=unparsed, classificationErrors=classification, processCount=1, rootPids=[1], commandExitCode=0)
+                        unparsedRecords=unparsed, classificationErrors=classification, processCount=1, rootPids=[1], commandExitCode=0, ioUring=dict(recorded=True,opcodeCounts={},capture=dict(complete=True,drained=True,lostEvents=0)))
             report.write_text(json.dumps(data)); whole.write_text(json.dumps(dict(data, scope='all', enforcement='report-only')))
             return subprocess.CompletedProcess(argv, exit_code)
         return audit, result

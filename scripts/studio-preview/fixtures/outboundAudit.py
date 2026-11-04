@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import os
+import signal
 from pathlib import Path
 import shutil
 import subprocess
@@ -19,6 +20,7 @@ import tempfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from outboundScope import analyze_processes
+from uring.capture import Capture
 
 DENIED = 86
 INCOMPLETE = 87
@@ -101,13 +103,30 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         # -q retains terminal records, so missing/detached tasks cannot look complete.
         # Raw traces are removed and executable paths never enter JSON reports.
         trace = prefix.with_suffix('.trace')
-        process = subprocess.run(['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
-                                  'trace=connect,sendto,sendmsg,sendmmsg,io_uring_setup,io_uring_enter,io_uring_register,clone,clone3,fork,vfork,execve,execveat',
-                                  '-o', str(trace), '--', *command])
+        trace_command = ['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
+                                  'trace=connect,sendto,sendmsg,sendmmsg,accept,accept4,io_uring_setup,io_uring_enter,io_uring_register,close,close_range,mmap,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork,execve,execveat',
+                                  '-o', str(trace), '--', *command]
+        marker=Path(directory)/'stopped.json'
+        capture=Capture(Path(directory))
+        process=subprocess.Popen([sys.executable,'-I','-B',str(Path(__file__).with_name('uring')/'capture.py'),
+                                  '--exec-stop',str(marker),'--',*trace_command],start_new_session=True)
+        try:
+            capture.start(process.pid)
+            if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
+            os.kill(process.pid,signal.SIGCONT)
+            process.wait()
+            evidence=capture.stop()
+        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):
+            if process.poll() is None:process.kill();process.wait()
+            try:evidence=capture.stop()
+            except (OSError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
+        process.returncode=process.returncode if process.returncode is not None else INCOMPLETE
         paths = [trace] if trace.exists() else []
-        report, whole = analyze_processes(paths, scope_executables, require_executables, True)
+        report, whole = analyze_processes(paths, scope_executables, require_executables, True,evidence)
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                for name in ('outboundAudit.py', 'outboundScope.py')}
+    recipes.update({f'uring/{path.name}':hashlib.sha256(path.read_bytes()).hexdigest()
+                    for path in Path(__file__).with_name('uring').glob('*.py')})
     report['sourceSha256'] = recipes
     whole['sourceSha256'] = recipes
     if whole_report_path is not None:

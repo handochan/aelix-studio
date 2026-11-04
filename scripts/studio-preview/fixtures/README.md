@@ -98,19 +98,66 @@ packet can leave an external interface. It is separate from functional runs and
 requires exit 86, two attempts, unparsed/classification 0 and a graceful host exit.
 Namespace setup failure fails qualification; there is no permissive fallback.
 
-The collector also traces `io_uring_setup`, `io_uring_enter` and
-`io_uring_register`, including denied calls. Any such call in a selected tree is
-an `unsupported_io_uring` classification error: submission-queue networking is
-not decoded and cannot pass as zero. Calls in known non-selected siblings remain
-in the whole-app report with their PID/syscall; ambiguous lineage remains globally
-blocking. Linux tests use a liburing loopback-connect probe (raw setup/enter/register
-syscalls if liburing is unavailable); a kernel-denied setup still must fail closed.
+Linux io_uring auditing pairs the syscall trace with a sudo **bpftrace** recorder.
+It records `io_uring:io_uring_create`, `io_uring_submit_req` (or the older
+`io_uring_submit_sqe`), and `io_uring_req_failed` for SQEs rejected before normal
+submission. Scheduler fork/exec/exit tracepoints bound the command's descendant
+domain. SQPOLL task identity is read from the ring's running-kernel BTF layout at
+creation; these kernel tasks are included in lifecycle accounting even when
+they do not pass through the ordinary fork tracepoint. No process-name filter or address exception selects ring traffic.
+
+The recorder starts before a stopped, unprivileged strace root is resumed. It
+records creator PID/TGID, ctx, fd, flags, issuing task and opcode. Running-kernel
+BTF supplies PID structure offsets; kernel initial-namespace IDs are normalized
+to the auditor/strace namespace, including nested renderer namespaces. SQPOLL
+submissions use ctx ownership rather than the kernel thread's process name.
+Published ctx IDs are capture-local opaque identifiers with creation generations,
+not raw kernel pointers. Ring fd/flags/TGID must match successful strace setup;
+missing or inconsistent rings fail. Denied setup cannot create a usable ring and
+must have no corresponding create event. Imported/unattributed descriptors,
+registered-ring indices, unsupported setup modes or borrowed ring-buffer mappings and ambiguous identity
+fail closed. Descriptor inheritance, dup, close, mmap and exec are reconciled.
+
+The fixed allowlist is the explicit enum and submission sites in
+[Node v24.11.0's libuv Linux source](https://github.com/nodejs/node/blob/v24.11.0/deps/uv/src/unix/linux.c#L138-L151):
+`READV`, `WRITEV`, `FSYNC`, `OPENAT`, `CLOSE`, `STATX`, `EPOLL_CTL`, `RENAMEAT`,
+`UNLINKAT`, `MKDIRAT`, `SYMLINKAT`, `LINKAT`, `FTRUNCATE`. The pinned source uses
+vectored read/write, so ordinary `READ`/`WRITE` opcodes are not automatically added.
+Every other opcode fails, including `CONNECT`, `SEND*`, `SENDMSG*`, `SOCKET`,
+`ACCEPT`, `URING_CMD` and unknown/future values. Known outside-tree rings/operations
+remain only in the whole-app report; unresolvable ownership is globally blocking.
+Per-session `ioUring` reports include opcode counts, ring ownership/submissions,
+namespace evidence, kernel event counters and capture status.
+
+An ordinary new client socket must establish its peer through traced `connect`,
+or a rejected ring `CONNECT`, before connected `READV`/`WRITEV` can send data.
+Server-side connections can instead originate in `accept`/`accept4`, so these are
+also traced: non-loopback or unresolved accepted peers fail selected-tree
+qualification. Unconnected UDP vectored writes cannot choose a peer; destination
+selecting `SEND*` ring operations are rejected. Previously connected inherited or
+SCM-passed sockets retain the S3 limitation below. Allowed file operations do not
+claim packet/device or remote-filesystem transport auditing; the fixture uses
+owned local files and loopback transports. This is not a runtime sandbox.
+
+Missing tracepoints/BTF, sudo/attach failure, early recorder termination, unknown
+records, event count mismatch, helper errors or perf-buffer loss all fail closed.
+Per-CPU kernel counters must equal consumed create/submission/failure/completion/
+retirement records; positive strace submission counts cannot exceed recorded
+requests. The recorder drains only after fresh observations show all tracked
+tasks exited and every observed request completed. Untracked SQPOLL tasks or
+unmatched completions fail; recording does not stop merely because strace exited.
+There is no fallback to syscall-only acceptance. The two Linux CI capability jobs
+first record real liburing `CONNECT` in normal/SQPOLL modes and check PID/fd
+correlation. Installer controls additionally require normal/SQPOLL `CONNECT` to
+be rejected (exit 87, exactly one forbidden opcode), while existing socket and
+host-child controls retain exit 86. All control runs are separate from functional
+zero-attempt sessions. No runtime, Node, host pin or runtime override is changed.
 
 Whole-app results, including Electron/Chromium traffic and unsupported APIs, remain
 report-only artifacts for Studio #15. No Chromium networking flags are changed.
 
 `strace -f --decode-pids=comm,pidns -yy -s 0` follows processes/threads and records only network and
-fork/exec metadata. With default abbreviation, exec records expose the executable
+fork/exec, accepted-peer and ring descriptor metadata. With default abbreviation, exec records expose the executable
 filename but replace argv with `[...]` and env with a pointer/count. Integration
 tests assert argument/environment sentinels never enter raw traces or reports.
 Connected FD peers are decoded for inherited sockets sent through the traced

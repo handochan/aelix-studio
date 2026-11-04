@@ -7,10 +7,15 @@ import ipaddress
 from pathlib import Path, PurePosixPath
 import re
 
-NETWORK = {'connect', 'sendto', 'sendmsg', 'sendmmsg'}
+NETWORK = {'connect', 'sendto', 'sendmsg', 'sendmmsg', 'accept', 'accept4'}
+FD_META = {'close','close_range','mmap','mmap2','dup','dup2','dup3','fcntl'}
 FORK = {'clone', 'clone3', 'fork', 'vfork'}
 EXEC = {'execve', 'execveat'}
 IO_URING = {'io_uring_setup', 'io_uring_enter', 'io_uring_register'}
+SETUP_FLAGS = {name:1<<index for index,name in enumerate([
+    'IOPOLL','SQPOLL','SQ_AFF','CQSIZE','CLAMP','ATTACH_WQ','R_DISABLED','SUBMIT_ALL',
+    'COOP_TASKRUN','TASKRUN_FLAG','SQE128','CQE32','SINGLE_ISSUER','DEFER_TASKRUN',
+    'NO_MMAP','REGISTERED_FD_ONLY','NO_SQARRAY','HYBRID_IOPOLL'])}
 PREFIX = re.compile(r'^(\d+)(?:<([^>]*)>)?\s+(.*)$')
 CALL = re.compile(r'^(\w+)\(')
 RESUMED = re.compile(r'^<\.\.\. (\w+) resumed>')
@@ -46,13 +51,14 @@ def canonical(value):
     return str(Path(value).resolve())
 
 
-def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False):
+def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
     """Scope by successful exec roots plus all forks/threads, never by address/name."""
     selected = {canonical(path) for path in scope_executables}
     required = {canonical(path) for path in require_executables}
     states, parents, roots, matches = {}, {}, set(), set()
     root_executables = {}
     fork_at, executions = {}, {}
+    clone_threads, io_calls = {}, []
     sequence = 0
     classification_issues = []
     observed_order = []
@@ -62,7 +68,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
 
     def state(pid, name=None):
         if pid not in states:
-            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False, 'io_uring': []}
+            states[pid] = {'pid': pid, 'process': 'unknown', 'events': [], 'unparsed': 0, 'finished': False,
+                           'io_uring': [], 'external_accepts':0}
             observed_order.append(pid)
         if name and re.fullmatch(r'[A-Za-z0-9_.+ -]{1,64}', name):
             states[pid]['process'] = name
@@ -81,6 +88,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             state(pid)['unparsed'] += 1
         elif call in IO_URING:
             state(pid)['io_uring'].append(call)
+        elif call in FD_META:
+            state(pid)['unparsed'] += 1
         else:
             classification_issue('incomplete_syscall', pid, call)
 
@@ -99,11 +108,42 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 classification_issue('unknown_record', pid)
             return
         call = match[1]
+        if call in FD_META:
+            # Only ring-labelled descriptors and bulk close operations matter.
+            # Ordinary file paths and mmap addresses never enter reports.
+            if call not in ('close_range','dup2','dup3') and not re.search(r'anon_inode[^>]*io_uring',line):return
+            args=re.match(r'^\w+\((-?\d+)(?:<[^>]*>)?(?:,\s*(\d+))?',line)
+            ring_fd=re.search(r'(-?\d+)<anon_inode[^>]*io_uring[^>]*>',line)
+            result=re.search(r'\)\s+=\s+(-?\d+|0x[0-9a-f]+)',line)
+            entry={'pid':pid,'call':call,'sequence':started,'result':int(result[1],0) if result else None,
+                   'fd':int(ring_fd[1]) if call in ('mmap','mmap2') and ring_fd else int(args[1]) if args else None}
+            entry.update(cloexec='CLOEXEC' in line,duplicate=call.startswith('dup') or 'F_DUPFD' in line,
+                         setfd='F_SETFD' in line,lastFd=(int(args[2]) if args and args[2] else
+                         0xffffffff if call=='close_range' and '~0U' in line else None))
+            entry['unshare']='CLOSE_RANGE_UNSHARE' in line
+            io_calls.append(entry);return
         if call in IO_URING:
             # Submission queues may perform networking without connect/send*
             # syscalls. Even denied setup or an inherited-ring enter/register
             # makes this task's network evidence unsupported, never zero.
             item['io_uring'].append(call)
+            result=re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(?:\s.*)?$',line)
+            entry={'pid':pid,'call':call,'sequence':started,'result':int(result[1]) if result else None}
+            error=re.search(r'=\s+-1\s+(\w+)',line)
+            entry['error']=error[1] if error else None
+            entry['registeredRing']='REGISTERED_RING' in line or 'REGISTER_RING_FDS' in line
+            if call=='io_uring_setup':
+                flag_match=re.search(r'\bflags=([^,}]+)',line)
+                value=0
+                try:
+                    for token in (re.sub(r'/\*.*?\*/','',flag_match[1]).strip().split('|') if flag_match else ['UNKNOWN']):
+                        value |= SETUP_FLAGS[token.removeprefix('IORING_SETUP_')] if token.startswith('IORING_SETUP_') else int(token,0)
+                    entry['flags']=value
+                except (KeyError,ValueError):entry['flags']=None
+            else:
+                fd=re.match(r'^\w+\((-?\d+)(?:<[^>]*>)?,',line)
+                entry['fd']=int(fd[1]) if fd else None
+            io_calls.append(entry)
             return
         if call in FORK:
             result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
@@ -119,6 +159,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 else:
                     parents[child] = pid
                     fork_at[child] = started
+                    clone_threads[child] = 'CLONE_THREAD' in line
+                    io_calls.append({'call':'fork','pid':pid,'child':child,'shareFiles':'CLONE_FILES' in line,
+                                     'sequence':started,'result':child})
             return
         if call in EXEC:
             if not re.search(r'=\s+0(?:\s|$)', line):
@@ -137,9 +180,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             except (OSError, ValueError, RuntimeError):
                 classification_issue('invalid_exec_filename', pid, call); return
             executions.setdefault(pid, []).append((started, executable))
+            io_calls.append({'call':'exec','pid':pid,'sequence':started,'result':0})
             return
         if call not in NETWORK:
             classification_issue('unknown_syscall', pid); return
+        accepted=call in ('accept','accept4')
+        if accepted and re.search(r'=\s+-1\b',line):return
         def destination(address, port):
             try:
                 parsed = ipaddress.ip_address(address.strip('[]'))
@@ -149,8 +195,10 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 item['unparsed'] += 1; return
             effective = parsed.ipv4_mapped if isinstance(parsed, ipaddress.IPv6Address) else None
             local = (effective or parsed).is_loopback and port != 53
+            if accepted and not local:item['external_accepts']+=1
             item['events'].append({'pid': pid, 'process': item['process'], 'syscall': call,
-                                   'address': str(parsed), 'port': port, 'external': not local,
+                                   'address': str(parsed), 'port': port, 'external': not local and not accepted,
+                                   'direction':'inbound' if accepted else 'outbound',
                                    'failed': bool(re.search(r'= -1\b', line))})
 
         destinations = ADDR.findall(line)
@@ -163,6 +211,13 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             if not address or not port:
                 item['unparsed'] += 1; continue
             destination(address[1], port[1])
+        if accepted and not destinations and not any(family in line for family in ('AF_UNIX','UNIX')):
+            peer=re.search(r'=\s+\d+<(?:TCP|UDP)(?:v6)?:\[(.*?)\]>',line)
+            if peer and '->' in peer[1]:
+                address,separator,port=peer[1].rsplit('->',1)[1].rpartition(':')
+                if separator:destination(address,port)
+                else:item['unparsed']+=1
+            else:item['unparsed']+=1
         # A selected child can inherit an already-connected socket from an
         # unselected parent. Decode the peer at send time; its connect need not
         # have happened inside the selected tree. -yy provides kernel FD peers.
@@ -301,13 +356,31 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         if not more: break
         included.update(more)
 
+    ring_evidence=None
+    if kernel_capture is not None:
+        from uring.policy import reconcile
+        def tgid(pid):
+            seen=set()
+            while clone_threads.get(pid):
+                if pid in seen:return None
+                seen.add(pid);pid=parents.get(pid)
+            return pid
+        for call in io_calls:
+            call['tgid']=tgid(call['pid'])
+            if call['call']=='fork':call['childTgid']=tgid(call['child'])
+        ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states))
+        classification_issues.extend(ring_evidence['globalIssues'])
+
     def report(pids, scope):
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
         processes = []
-        issues = classification_issues + [
-            {'reason': 'unsupported_io_uring', 'pid': pid, 'syscall': call}
-            for pid in sorted(pids) for call in states[pid]['io_uring']]
+        issues = classification_issues + ([issue for pid in pids for issue in ring_evidence['issuesByPid'].get(pid,[])]
+            if ring_evidence is not None else [
+                {'reason': 'unsupported_io_uring', 'pid': pid, 'syscall': call}
+                for pid in sorted(pids) for call in states[pid]['io_uring']])
+        issues += [{'reason':'unsupported_external_accept','pid':pid} for pid in pids
+                   for _ in range(states[pid]['external_accepts'])]
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
@@ -322,7 +395,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
                 'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),
                 'classificationErrors': len(issues), 'classificationIssues': issues,
-                'external': external, 'processes': processes}
+                'external': external, 'processes': processes,
+                'ioUring': ({'recorded':kernel_capture.get('complete',False),'opcodeCounts':ring_evidence['selectedOpcodeCounts'] if scope=='selected-process-trees' else ring_evidence['opcodeCounts'],
+                             'policy':'node-v24.11.0-libuv-explicit-file-and-epoll',
+                             'capture':{k:kernel_capture.get(k) for k in ('complete','drained','lostEvents','eventCount','namespaceInode','pidNamespaceVerified','root','kernelCounts','recordErrors','recorderExitCode','tool','toolVersion','kernel','tracepoints','formatSha256','programSha256','pidNumbersOffset','reason','diagnostics')},
+                             'rings':[r for r in ring_evidence['rings'] if r['creatorPid'] in pids]}
+                            if ring_evidence is not None else {'recorded':False})}
 
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole

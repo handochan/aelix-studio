@@ -67,6 +67,7 @@ jobs:
         with:
           name: io-uring-trace-probe-${{ matrix.os }}
           path: .local/io-uring-trace-probe*.json
+          include-hidden-files: true
 
   provider-preview:
     name: Provider Preview installer (${{ matrix.target }})
@@ -117,7 +118,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bunx playwright install-deps chromium
-          sudo apt-get install -y strace gcc liburing-dev pkg-config iproute2
+          sudo apt-get install -y strace gcc liburing-dev pkg-config iproute2 bpftrace
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
       - name: Prepare exact native and ACP source wheels with the released host
