@@ -59,6 +59,10 @@ def parse(raw,stderr,returncode,namespace_inode):
                 invalid.append(dict(reason='kernel_raw_state_overlap',time=int(fields[1]),kernelPid=int(fields[2]),
                     pid=int(fields[3]),previousSyscall=int(fields[4]),nextSyscall=int(fields[5]),
                     networkCall=int(fields[6]),ordinal=int(fields[7])))
+            elif fields[0]=='PREMISMATCH' and len(fields)==8:
+                invalid.append(dict(reason='kernel_pre_entry_mismatch',time=int(fields[1]),kernelPid=int(fields[2]),
+                    pid=int(fields[3]),ordinal=int(fields[4]),preEntryCall=int(fields[5]),
+                    executedCall=int(fields[6]),executedSyscall=int(fields[7])))
             elif fields[0]=='T' and len(fields)==10:
                 flags=int(fields[8])
                 if not 0<=flags<=0xffffffff: raise ValueError('invalid_kernel_task_flag')

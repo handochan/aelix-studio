@@ -183,6 +183,12 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
             with self.subTest(extra=extra):
                 self.assertFalse(capture_module.parse(self.RAW+extra,'',0,123)['complete'])
 
+    def test_pre_entry_mismatch_keeps_numeric_identity_and_remains_fatal(self):
+        result=capture_module.parse(self.RAW+'PREMISMATCH|12|123|10|7|0|5|64\n@pre_mismatch: 1\n','',0,123)
+        self.assertFalse(result['complete'])
+        self.assertEqual(result['recordErrors'],[dict(reason='kernel_pre_entry_mismatch',time=12,
+            kernelPid=123,pid=10,ordinal=7,preEntryCall=0,executedCall=5,executedSyscall=64)])
+
 
 from uring import network
 from uring import entry

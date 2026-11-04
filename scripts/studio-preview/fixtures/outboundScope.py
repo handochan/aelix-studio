@@ -460,6 +460,13 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                                              {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
                                              {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']},
                                              metadata_allowed=metadata_allowed)
+        kernel_tcp={(operation['pid'],operation['sequence']) for operation in network_evidence['operationDiagnostics']
+                    if set(operation['socketHooks']) & {'tcp_v4_connect','tcp_v6_connect'}}
+        conflicts=exempt & kernel_tcp
+        conflict_pids={pid for pid,_sequence in conflicts}
+        for pid in sorted(conflict_pids):udp_issues.append({'pid':pid,'reason':'udp_kernel_tcp_connect_conflict'})
+        exempt.difference_update(conflicts)
+        network_evidence['metadataFields']=[item for item in network_evidence['metadataFields'] if item['pid'] not in conflict_pids]
         for evidence in network_evidence['resolved']:
             unparsed(evidence['pid'],'register_stub',-evidence['records'])
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]

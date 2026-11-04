@@ -92,7 +92,10 @@ NORMALIZE
 SELECT
   if ($call) {
 NORMALIZE
-    if (!@pre_seq[tid] || @pre_call[tid]!=$call) { @pre_mismatch=count(); }
+    if (!@pre_seq[tid] || @pre_call[tid]!=$call) {
+      @pre_mismatch=count();
+      printf("PREMISMATCH|%llu|%d|%d|%llu|%d|%d|%lld\n",nsecs,tid,$nspid,@pre_seq[tid],@pre_call[tid],$call,args->id);
+    }
     @net_seq[tid]=@pre_seq[tid]; @net_call[tid]=$call;
     @net_fd[tid]=(int32)args->args[0];
     @network_count=count();

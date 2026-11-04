@@ -585,14 +585,22 @@ int main(void) {
             driver = root/'driver.py'
             # Use an owned UDP receiver on this machine's non-loopback interface.
             # This is external under the audit policy, without relying on remote replies.
-            driver.write_text('import socket,subprocess,sys\n'
+            driver.write_text('import fcntl,os,socket,sys\nfrom multiprocessing import get_context\n'
+                              'ready=get_context("fork").Semaphore(0)\n'
                               's=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n'
                               's.connect(("203.0.113.1",9))\n'
                               'ip=s.getsockname()[0]\n'
                               'receiver=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n'
                               'receiver.bind((ip,0))\n'
                               's.connect(receiver.getsockname())\n'
-                              'subprocess.run([sys.argv[1],str(s.fileno())],pass_fds=(s.fileno(),))\ns.close();receiver.close()\n')
+                              'fcntl.fcntl(s.fileno(),fcntl.F_SETFD,0)\n'
+                              'child=os.fork()\n'
+                              'if child==0:\n'
+                              ' ready.acquire()\n'
+                              ' os.execv(sys.argv[1],[sys.argv[1],str(s.fileno())])\n'
+                              'ready.release()\n'
+                              '_,status=os.waitpid(child,0)\n'
+                              'assert status==0\ns.close();receiver.close()\n')
             from unittest.mock import patch
             original = audit.analyze_processes
             def inspect(paths, *args):

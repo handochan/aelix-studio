@@ -295,11 +295,35 @@ Each task's residual `unparsedRecordKinds` records fixed reason codes and
 allowlisted syscall names with counts. It contains no trace text, FD annotation,
 path, argv or buffer. Independent register/result proofs remove their own keyed
 counts; this diagnostic never exempts or resolves a record by itself.
+Pre-entry mismatches remain fatal. Their `kernel_pre_entry_mismatch` record
+retains only timestamp, kernel/namespace TID, ordinal, decoded old/new call and
+executed syscall number so a failed capture can be investigated without raw
+registers, paths, payloads or kernel pointers.
 `externalOperationDiagnostics` preserves numeric TID/sequence/FD, fixed socket
 kind and kernel hook names, families and file modes, plus associated UDP writes.
 It contains no FD labels, paths, buffers or kernel pointers and never changes
 classification. This distinguishes an actual write from an association-only
 probe when investigating a failed gate.
+Every successful socket acquisition, including TCP, permanently invalidates a
+tracked UDP object if its numeric FD collides with that object. Entry-ordered
+unfinished/resumed records cannot prove when a shared-table allocation took
+effect. No completion-order guess is used to grant an exemption. A decoded TCP
+FD annotation or independently matched kernel TCP connect also blocks a UDP-only
+exemption. The latter records `udp_kernel_tcp_connect_conflict`; socket reuse
+records `udp_fd_reused_without_close`. Both remain failed after later closes.
+An unfinished UDP-related descriptor mutation, use, independent inheritance or
+unsharing has no proven point of effect between its entry and completion. It
+records `udp_descriptor_completion_order_unproven` and permanently prevents an
+exemption for the involved object and its owners, even after later successful
+closes. This includes newly created sockets, pending dup aliases, pending
+release and whole-table copies. No observation is reordered and no allocation
+or release time is inferred from the syscall entry or exit alone. Resolving
+these conflicts would require additional kernel FD/object identity evidence.
+The ordinary inherited-UDP positive controls use an untraced shared semaphore to hold
+the child until the parent has returned from fork. They still inherit and
+duplicate the real UDP FD and send through it; no audit option changes. Separate
+unfinished-fork/dup/close controls deliberately retain ambiguous ordering and
+must fail. This keeps positive-control detection distinct from uncertainty.
 `close(decimalFD<optional annotation>) = ?` has a fully interpreted entry but
 no usable return. Only a terminated task with complete kernel reconciliation
 and no unmatched network action may account for that missing field. These

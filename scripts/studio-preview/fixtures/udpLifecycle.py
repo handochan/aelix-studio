@@ -36,6 +36,11 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
             if sock['id'] not in live and 'lifetimeEnd' not in sock and not sock.get('untrackedAlias'):
                 sock['lifetimeEnd']=max(last_sequence,sock.get('lastRelease',0))
 
+    def pending_state(sock, pid):
+        if completed > sequence:
+            sock['invalid']=True
+            for owner in sock['owners']|{pid}:issue(owner,'udp_descriptor_completion_order_unproven')
+
     for record in sorted(records,key=lambda item:item[2]):
         retire()
         pid,line,sequence=record[:3]
@@ -66,29 +71,45 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
                     for owner in sock['owners']|{pid}:issue(owner,'udp_close_result_unknown')
                 elif re.match(r'^close\(\d+<UDP(?:v6)?:',line):
                     issue(pid,'udp_close_untracked_fd')
-            if attempted and attempted[1] in WRITES and int(attempted[2]) in current:
-                sock = current[int(attempted[2])][0]; sock['written'] = True
-                writes.append((pid, sequence, attempted[1], sock))
+            if attempted and attempted[1] in WRITES:
+                if int(attempted[2]) in current:
+                    sock = current[int(attempted[2])][0]; sock['written'] = True; sock['invalid']=True
+                    for owner in sock['owners']|{pid}:issue(owner,'udp_write_result_unknown')
+                    writes.append((pid, sequence, attempted[1], sock))
+                elif re.match(r'^\w+\(\d+<UDP(?:v6)?:',line):issue(pid,'udp_write_untracked_fd')
             continue  # Common parser owns incomplete/unknown records.
         call, args, result = match[1], match[2].strip(), int(match[3])
         first = re.match(r'(-?\d+)(?:<[^>]*>)?', args)
         fd = int(first[1]) if first else None
+        if fd in current and call in WRITES | {'connect','close','dup','dup2','dup3','fcntl'}:
+            pending_state(current[fd][0],pid)
+        if call in ('dup2','dup3') and result in current:
+            pending_state(current[result][0],pid)
+        if result == 0 and (call in ('execve','execveat') or call == 'unshare' and 'CLONE_FILES' in args):
+            for sock,_ in current.values():pending_state(sock,pid)
         if call == 'socket' and result >= 0:
+            # The returned descriptor can be allocated after another thread's
+            # interleaved acquisition, not at this syscall's entry stop. Never
+            # treat a later TCP socket as the earlier pending UDP object.
+            if result in current:
+                previous=current[result][0];previous['invalid']=True
+                for owner in previous['owners']|{pid}:issue(owner,'udp_fd_reused_without_close')
+                remove(pid,result)
             fields = [value.strip() for value in args.split(',')]
             flags = {value.strip() for value in fields[1].split('|')} if len(fields) == 3 else set()
             if (len(fields) == 3 and fields[0] in {'AF_INET','AF_INET6'}
                     and 'SOCK_DGRAM' in flags and flags <= {'SOCK_DGRAM','SOCK_CLOEXEC','SOCK_NONBLOCK'}
                     and fields[2] in {'IPPROTO_UDP','IPPROTO_IP','0'}):
-                if result in current:
-                    current[result][0]['invalid'] = True
-                    issue(pid, 'udp_fd_reused_without_close')
                 sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets),'lifetimeStart':sequence}
                 sockets.append(sock); current[result] = (sock, 'SOCK_CLOEXEC' in args)
+                pending_state(sock,pid)
         elif call in ('clone', 'clone3', 'fork', 'vfork') and result > 0:
             translated = re.search(r"/\* (\d+) in strace's PID NS \*/", line)
             child = int(translated[1]) if translated else result
             tables[child] = current if 'CLONE_FILES' in args else dict(current)
             for sock, _ in current.values(): sock['owners'].add(child)
+            if 'CLONE_FILES' not in args:
+                for sock,_ in current.values():pending_state(sock,pid)
         elif call in ('execve', 'execveat') and result == 0:
             for sock,cloexec in current.values():
                 if cloexec:released(sock)
@@ -103,9 +124,11 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
                 issue(pid, 'udp_close_range_unknown'); continue
             last = 0xffffffff if end[1] == '~0U' else int(end[1])
             if 'UNSHARE' in args:
+                for sock,_ in current.values():pending_state(sock,pid)
                 current = dict(current); tables[pid] = current
             for f in list(current):
                 if fd <= f <= last:
+                    pending_state(current[f][0],pid)
                     if 'CLOEXEC' in args: current[f] = (current[f][0], True)
                     else: remove(pid, f)
         elif call in ('dup', 'dup2', 'dup3') or call == 'fcntl' and 'F_DUPFD' in args:
@@ -130,6 +153,9 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
         elif call == 'fcntl' and result == 0 and 'F_SETFD' in args and fd in current:
             current[fd] = (current[fd][0], 'FD_CLOEXEC' in args)
         elif call == 'connect' and fd in current:
+            if re.match(r'\d+<TCP(?:v6)?:',args):
+                current[fd][0]['invalid']=True
+                for owner in current[fd][0]['owners']|{pid}:issue(owner,'udp_descriptor_kind_conflict')
             # Only IP destination connect events can be deferred. Disconnect
             # (AF_UNSPEC) does not erase an earlier association or write.
             if 'sa_family=AF_INET' in args:
@@ -192,6 +218,9 @@ def control(mode):
             c.write_text(source)
             subprocess.run(['cc',str(c),'-o',str(binary),'-luring'],check=True,capture_output=True)
             return subprocess.run([str(binary)],check=True).returncode
+    if mode=='inherit-dup-send':
+        from multiprocessing import get_context
+        ready=get_context('fork').Semaphore(0)
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as connection:
         try: connection.connect(('203.0.113.1',443))
         except OSError: pass
@@ -201,10 +230,15 @@ def control(mode):
         elif mode == 'inherit-dup-send':
             child = os.fork()
             if child == 0:
+                # Wait on an untraced semaphore until the parent has returned from
+                # fork. Keep inheritance distinct from the separate tests for
+                # uncertain descriptor mutation across unfinished syscalls.
+                ready.acquire()
                 with socket.socket(fileno=os.dup(connection.fileno())) as duplicate:
                     try: duplicate.send(b'control')
                     except OSError: pass
                 connection.close(); os._exit(0)
+            ready.release()
             _, status = os.waitpid(child,0)
             if status: raise RuntimeError('UDP child control failed')
     return 0
