@@ -1442,3 +1442,21 @@ describe('BackendLifecycleManager.start peer retry', () => {
     expect(attemptStart).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('explicit host outbound settings', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  it('forwards operator npm/image settings unchanged', () => {
+    vi.stubEnv('AELIX_STUDIO_HOST_NPM_REGISTRY', 'https://mirror.example/npm/');
+    vi.stubEnv('AELIX_STUDIO_HOST_REMOTE_IMAGES', '1');
+    expect(buildSpawnEnv()).toMatchObject({
+      AELIX_STUDIO_HOST_NPM_REGISTRY: 'https://mirror.example/npm/',
+      AELIX_STUDIO_HOST_REMOTE_IMAGES: '1',
+    });
+  });
+  it('does not invent npm/image opt-ins when unset', () => {
+    vi.stubEnv('AELIX_STUDIO_HOST_NPM_REGISTRY', undefined);
+    vi.stubEnv('AELIX_STUDIO_HOST_REMOTE_IMAGES', undefined);
+    expect(buildSpawnEnv().AELIX_STUDIO_HOST_NPM_REGISTRY).toBeUndefined();
+    expect(buildSpawnEnv().AELIX_STUDIO_HOST_REMOTE_IMAGES).toBeUndefined();
+  });
+});

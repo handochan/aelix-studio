@@ -30,6 +30,8 @@ on:
 
 env:
   BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
+  # Explicit build-time source; runtime smokes use their isolated environment.
+  AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
   AIONUI_HUB_TAG: 'dist-ebc6a2b'
   # Discontinued-build flag: only AionUi's final `-final` tag (e.g.
   # v2.1.40-final) produces a build that guides users to the AionPro website.

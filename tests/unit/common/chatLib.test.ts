@@ -565,3 +565,25 @@ describe('transformMessage', () => {
     });
   });
 });
+
+describe('ACP error payload preservation', () => {
+  it.each([
+    null,
+    { lockedBy: 'native', sessionId: 'session', holder: null },
+    { kind: 'restrictions_unenforceable', methods: ['tools/write'] },
+  ])('preserves opaque camelCase data through normalization', (data) => {
+    const result = normalizeAgentStreamError({
+      message: 'locked',
+      code: 'USER_AGENT_SESSION_LOCKED',
+      protocol_code: -33001,
+      data,
+      retryable: false,
+    });
+    expect(result).toMatchObject({ protocol_code: -33001, data, retryable: false });
+  });
+  it('discards malformed protocol codes without coercion', () => {
+    expect(
+      normalizeAgentStreamError({ message: 'busy', code: 'USER_AGENT_BUSY', protocol_code: '-32000' })?.protocol_code
+    ).toBeUndefined();
+  });
+});

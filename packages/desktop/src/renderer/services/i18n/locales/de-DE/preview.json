@@ -176,5 +176,7 @@
   "zoomIn": "Vergrößern",
   "zoomOut": "Verkleinern",
   "zoomReset": "Ansicht zurücksetzen",
-  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen"
+  "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
+  "remoteImageDisabled": "Remote-Bilder sind durch die Host-Einstellungen deaktiviert.",
+  "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert."
 }

@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "The outcome of this message is unknown",
         "body": "The model or tools may already have run. Check the conversation history before sending this message again."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Session in use",
+        "body": "This session is open elsewhere. Reopen it after the lock is released.",
+        "bodyNative": "Already open in the CLI or another Aelix process. Reopen the session after that process releases it.",
+        "bodyAcp": "Already open in another Studio window. Reopen the session after that window releases it."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "Turn failed after dispatch",
+        "body": "The model or tools may already have run. This turn will not be sent again automatically. Check the history before sending again."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "Agent is busy",
+        "body": "Wait for the current turn to finish, or cancel it before continuing."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "Operation refused",
+        "body": "The agent refused this operation. Check the details and configuration before continuing.",
+        "restrictionsUnenforceable": "The requested restrictions cannot be enforced: {{methods}}. Review the restrictions before continuing.",
+        "profileUnavailable": "The profile is unavailable: {{profile}}. Restore the profile or start a new session.",
+        "extensionOwnedByLaunch": "This extension is controlled by the launch configuration: {{source}}. Change that configuration to manage it.",
+        "runtimeControlRequired": "This operation requires runtime control. Use the session runtime controls.",
+        "clientActionRequired": "This operation requires a client action. Complete the requested action in Studio."
       }
     }
   },

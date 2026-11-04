@@ -110,6 +110,7 @@ vi.mock('@icon-park/react', () => ({
 
 import MarkdownViewer from '@/renderer/pages/conversation/Preview/components/viewers/MarkdownViewer';
 import { ipcBridge } from '@/common';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 const fileMetadata = (path: string) => ({
   name: path.split(/[\\/]/).pop() || path,
@@ -269,4 +270,86 @@ describe('MarkdownViewer', () => {
     });
     expect(previewMocks.openPreview).not.toHaveBeenCalled();
   });
+});
+
+describe('remote image host boundary', () => {
+  it.each([
+    [
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/fs/fetch-remote-image',
+        status: 403,
+        body: { code: 'REMOTE_IMAGE_DISABLED', error: 'disabled' },
+      }),
+      'preview.remoteImageDisabled',
+    ],
+    [new Error('connection failed'), 'preview.remoteImageFailed'],
+  ])('shows the fetch failure without loading the original URL', async (error, reason) => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockRejectedValue(error);
+    const { container } = render(<MarkdownViewer content='![Remote chart](https://example.invalid/image.png)' />);
+    await screen.findByText(`Remote chart: ${reason}`);
+    expect(container.querySelector('img')).toBeNull();
+    expect(ipcBridge.fs.fetchRemoteImage.invoke).toHaveBeenCalledWith({ url: 'https://example.invalid/image.png' });
+  });
+  it('rejects an HTTP URL returned instead of image data', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockResolvedValue('https://example.invalid/unsafe.png');
+    const { container } = render(<MarkdownViewer content='![](https://example.invalid/image.png)' />);
+    await screen.findByText('preview.remoteImageFailed');
+    expect(container.querySelector('img')).toBeNull();
+  });
+  it('renders only host-provided image data after a successful fetch', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockResolvedValue('data:image/png;base64,aGVsbG8=');
+    render(<MarkdownViewer content='![Safe chart](https://example.invalid/image.png)' />);
+    await waitFor(() =>
+      expect(screen.getByRole('img', { name: 'Safe chart' })).toHaveAttribute('src', 'data:image/png;base64,aGVsbG8=')
+    );
+  });
+});
+
+describe('protocol-relative remote images', () => {
+  it('keeps a protocol-relative URL behind the same host failure boundary', async () => {
+    vi.mocked(ipcBridge.fs.fetchRemoteImage.invoke).mockRejectedValue(new Error('unsupported remote URL'));
+    const { container } = render(<MarkdownViewer content='![Remote chart](//example.invalid/image.png)' />);
+    await screen.findByText('Remote chart: preview.remoteImageFailed');
+    expect(container.querySelector('img')).toBeNull();
+    expect(ipcBridge.fs.fetchRemoteImage.invoke).toHaveBeenCalledWith({ url: '//example.invalid/image.png' });
+  });
+});
+
+describe('raw HTML srcset host boundary after rehype raw and sanitize', () => {
+  beforeEach(() => {
+    vi.mocked(ipcBridge.fs.getImageBase64.invoke).mockReset().mockResolvedValue('data:image/png;base64,local');
+  });
+  it.each([
+    'https://example.invalid/a.png 1x, local.png 2x',
+    'local.png 1x, //example.invalid/a.png 2x',
+    'HTTPS&#58;//example.invalid/a.png 1x',
+  ])('removes remote source and img candidate lists before rendering: %s', async (srcset) => {
+    const { container } = render(
+      <MarkdownViewer
+        file_path='/owned/doc.md'
+        content={`<picture><source srcset="${srcset}"><img src="local.png" srcset="${srcset}" alt="local"></picture>`}
+      />
+    );
+    await waitFor(() =>
+      expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,local')
+    );
+    expect(container.querySelector('source')?.hasAttribute('srcset')).toBe(false);
+    expect(container.querySelector('img')?.hasAttribute('srcset')).toBe(false);
+  });
+  it.each(['local.png 1x, larger.png 2x', 'data:image/png;base64,aGVsbG8= 1x'])(
+    'preserves non-remote source candidates: %s',
+    async (srcset) => {
+      const { container } = render(
+        <MarkdownViewer
+          file_path='/owned/doc.md'
+          content={`<picture><source srcset="${srcset}"><img src="local.png" alt="local"></picture>`}
+        />
+      );
+      await waitFor(() =>
+        expect(container.querySelector('img')?.getAttribute('src')).toBe('data:image/png;base64,local')
+      );
+      expect(container.querySelector('source')?.getAttribute('srcset')).toBe(srcset);
+    }
+  );
 });

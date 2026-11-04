@@ -176,5 +176,7 @@
   "zoomIn": "확대",
   "zoomOut": "축소",
   "zoomReset": "보기 재설정",
-  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기"
+  "diagramZoomHint": "스크롤로 확대 • 드래그로 이동 • ESC로 닫기",
+  "remoteImageDisabled": "호스트 설정에서 원격 이미지를 차단했습니다.",
+  "remoteImageFailed": "호스트가 이 원격 이미지를 불러오지 못했습니다. 직접 불러오기는 차단됩니다."
 }

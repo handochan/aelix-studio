@@ -89,10 +89,27 @@ try {
   const assistants = await api('/api/assistants');
   const assistant = assistants.find((item) => item.name === 'Permission recovery synthetic ACP');
   assert.ok(assistant);
+  const imageDenial = await api(
+    '/api/fs/fetch-remote-image',
+    'POST',
+    { url: 'https://example.invalid/blocked.png' },
+    [403]
+  );
+  assert.equal(imageDenial.code, 'REMOTE_IMAGE_DISABLED');
+  checks.push('remote_images_disabled_with_reason');
+  // An unavailable local MCP command must produce a persisted warning, never a download.
+  const blockedMcp = await api('/api/mcp/servers', 'POST', {
+    name: 'Synthetic unavailable MCP',
+    transport: { type: 'stdio', command: path.join(sandbox, 'missing-mcp-command'), args: [], env: {} },
+  });
   const conv = await api('/api/conversations', 'POST', {
     name: 'Permission recovery',
     assistant: { id: assistant.id },
-    extra: { workspace: path.join(sandbox, 'workspace'), custom_workspace: true },
+    extra: {
+      workspace: path.join(sandbox, 'workspace'),
+      custom_workspace: true,
+      selected_mcp_server_ids: [blockedMcp.id],
+    },
   });
   const route = `/api/conversations/${conv.id}`;
   conversationRoute = route;
@@ -106,6 +123,24 @@ try {
   await expect(page.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
   await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
   checks.push('renderer_starts_ask');
+  const mcpWarning = page.getByText(
+    /MCP server 'Synthetic unavailable MCP': The configured MCP command or runtime is unavailable/
+  );
+  await expect(mcpWarning).toBeVisible({ timeout: 30000 });
+  checks.push('unavailable_mcp_reason_visible');
+  await api(`${route}/runtime/restart`, 'POST');
+  await expect(mcpWarning).toHaveCount(1);
+  await expect(mcpWarning).toBeVisible();
+  const mcpRows = await api(`${route}/messages?limit=100`);
+  const rows = mcpRows.items;
+  const notices = rows
+    .filter((item) => item.type === 'tips')
+    .map((item) => (typeof item.content === 'string' ? JSON.parse(item.content) : item.content))
+    .filter((item) => item.code === 'MCP_SERVER_UNAVAILABLE');
+  assert.ok(notices.length >= 2, 'Restart must persist a fresh MCP failure notice');
+  assert.equal(new Set(notices.map((item) => item.supersedes_key)).size, 1);
+  checks.push('mcp_supersedes_one_visible_warning');
+  await page.screenshot({ path: path.join(output, 'blocked-mcp.png') });
   async function select(mode) {
     await selector.click();
     await page.getByTestId(`aionrs-mode-option-${mode}`).click();

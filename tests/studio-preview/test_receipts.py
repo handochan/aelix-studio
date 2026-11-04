@@ -149,5 +149,26 @@ class ReceiptTests(unittest.TestCase):
             self.assertEqual(json.loads(report.read_text())['status'], 'failed')
 
 
+
+
+class FailedAuditReceiptTests(unittest.TestCase):
+    def test_completed_failed_audit_evidence_survives_the_mandatory_nonzero_exit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)/'acceptance.json'
+            current = {'status':'failed','failedAudits':['provider'], 'auditedSessions':[{'name':'provider','status':'failed'}]}
+            output.write_text(json.dumps(current))
+            acceptance.write_failure_receipt(output)
+            self.assertEqual(json.loads(output.read_text()),current)
+
+    def test_running_or_old_passed_receipt_never_survives_a_failure(self):
+        for status in ('running','passed'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                output=Path(directory)/'acceptance.json'
+                output.write_text(json.dumps({'status':status,'auditedSessions':[{'status':'passed'}]}))
+                acceptance.write_failure_receipt(output)
+                self.assertEqual(json.loads(output.read_text())['status'],'failed')
+                self.assertNotIn('auditedSessions',json.loads(output.read_text()))
+
+
 if __name__ == '__main__':
     unittest.main()

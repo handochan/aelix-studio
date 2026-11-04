@@ -178,6 +178,8 @@ export type AgentStreamErrorInfo = {
   ownership?: AgentErrorOwnership;
   detail?: string;
   workspacePath?: string;
+  protocol_code?: number;
+  data?: unknown;
   retryable?: boolean;
   feedback_recommended?: boolean;
   resolution?: AgentErrorResolution;
@@ -639,6 +641,8 @@ export const normalizeAgentStreamError = (value: unknown): AgentStreamErrorInfo 
     return undefined;
   }
 
+  const protocol_code =
+    typeof value.protocol_code === 'number' && Number.isFinite(value.protocol_code) ? value.protocol_code : undefined;
   const code = typeof value.code === 'string' ? value.code : undefined;
   const ownership =
     typeof value.ownership === 'string' && AGENT_ERROR_OWNERSHIPS.has(value.ownership as AgentErrorOwnership)
@@ -659,13 +663,17 @@ export const normalizeAgentStreamError = (value: unknown): AgentStreamErrorInfo 
     retryable === undefined &&
     feedback_recommended === undefined &&
     !resolution &&
-    !rawError
+    !rawError &&
+    protocol_code === undefined &&
+    value.data === undefined
   ) {
     return undefined;
   }
 
   return {
     message: value.message,
+    ...(protocol_code !== undefined ? { protocol_code } : {}),
+    ...(value.data !== undefined ? { data: value.data } : {}),
     ...(code ? { code } : {}),
     ...(ownership ? { ownership } : {}),
     ...(detail ? { detail } : {}),
