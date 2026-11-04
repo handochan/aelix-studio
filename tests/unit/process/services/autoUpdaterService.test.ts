@@ -7,6 +7,7 @@
 import path from 'path';
 import fs, { rmSync } from 'fs';
 import os from 'node:os';
+import type { UpdateInfoAndProvider } from 'electron-updater/out/AppUpdater';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -370,15 +371,29 @@ describe('AutoUpdaterService', () => {
         .digest('base64');
       fs.writeFileSync(
         path.join(pending, 'update-info.json'),
-        JSON.stringify({ fileName, sha512, studioVersion: '2.1.14' })
+        JSON.stringify({ fileName, sha512, studioVersion: '2.1.14', isAdminRightsRequired: true })
       );
-      autoUpdaterMock.getOrCreateDownloadHelper.mockResolvedValue(new DownloadedUpdateHelper(cache));
-      autoUpdaterMock.downloadUpdate.mockResolvedValue(undefined);
+      const helper = new DownloadedUpdateHelper(cache);
+      autoUpdaterMock.getOrCreateDownloadHelper.mockResolvedValue(helper);
+      autoUpdaterMock.downloadUpdate.mockImplementation(async () => {
+        const { info, provider } = (autoUpdaterMock as unknown as { updateInfoAndProvider: UpdateInfoAndProvider })
+          .updateInfoAndProvider;
+        // Real executeDownload's cached done(false) handoff must retain NSIS elevation.
+        await helper.setDownloadedFile(
+          path.join(pending, fileName),
+          null,
+          info,
+          provider.resolveFiles(info)[0],
+          fileName,
+          false
+        );
+      });
       vi.stubEnv('AIONUI_DISABLE_AUTO_UPDATE', '1');
       const { autoUpdaterService } = await import('@/process/services/autoUpdaterService');
       autoUpdaterService.initialize();
       const result = await autoUpdaterService.restoreDownloadedUpdateIfAvailable();
       expect(result.data.ready).toBe(valid);
+      if (valid) expect(helper.downloadedFileInfo?.isAdminRightsRequired).toBe(true);
       expect(autoUpdaterMock.checkForUpdates).not.toHaveBeenCalled();
       expect(autoUpdaterMock.downloadUpdate).toHaveBeenCalledTimes(valid ? 1 : 0);
     } finally {

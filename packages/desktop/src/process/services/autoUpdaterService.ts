@@ -730,7 +730,11 @@ class AutoUpdaterService extends EventEmitter {
       const filePath = path.join(helper.cacheDirForPendingUpdate, cached.fileName);
       const fileInfo: ResolvedUpdateFileInfo = {
         url: pathToFileURL(filePath),
-        info: { url: cached.fileName, sha512: cached.sha512 },
+        info: {
+          url: cached.fileName,
+          sha512: cached.sha512,
+          isAdminRightsRequired: 'isAdminRightsRequired' in cached && cached.isAdminRightsRequired === true,
+        },
       };
       const info: UpdateInfo = {
         version,
