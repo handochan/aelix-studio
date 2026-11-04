@@ -49,8 +49,13 @@ jobs:
       - name: Install audit and display tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils bpftrace gcc liburing-dev iproute2
+          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils bpftrace gcc make liburing-dev iproute2 xz-utils
           bunx playwright install-deps chromium
+      - name: Prepare the shared pinned syscall tracer
+        run: |
+          if [ "$(uname -m)" = x86_64 ]; then sudo apt-get install -y gcc-multilib; fi
+          bash scripts/outbound-audit/bundles/prepareStrace.sh
+          echo "$PWD/.local/strace-toolchain/bin" >> "$GITHUB_PATH"
       - name: Check the attribution parser
         run: |
           python -B -m unittest discover -s tests/studio-preview
@@ -136,6 +141,7 @@ jobs:
           include-hidden-files: true
           path: |
             .local/outbound/
+            .local/strace-toolchain/receipt.json
             .local/studio-preview/receipt.json
           if-no-files-found: warn
 

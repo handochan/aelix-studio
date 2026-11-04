@@ -455,3 +455,28 @@ int main(void) {
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual((scoped['externalAttempts'],scoped['unparsedRecords']),(0,0))
             self.assertGreater(scoped['destinationAttempts'],0)
+
+
+class TracerSelectionTests(unittest.TestCase):
+    def test_pinned_binary_is_selected_without_relying_on_sudo_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);binary=root/'.local/strace-toolchain/bin/strace'
+            binary.parent.mkdir(parents=True);binary.write_text('fixture')
+            with patch.object(audit.shutil,'which',return_value='/usr/bin/strace'):
+                self.assertEqual(audit.resolve_strace(root),str(binary))
+
+    def test_unsupported_abi_diagnostic_is_detected_without_retaining_contents(self):
+        warning='strace: WARNING: Proper structure decoding for this personality is not supported, please consider building strace with mpers support enabled.'
+        self.assertEqual(audit.unsupported_personalities(warning),1)
+        self.assertEqual(audit.unsupported_personalities('normal synthetic application diagnostics'),0)
+
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('strace'), 'Linux audit runtime test')
+    def test_unsupported_personality_warning_blocks_an_otherwise_successful_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report=Path(directory)/'report.json'
+            warning='strace: WARNING: Proper structure decoding for this personality is not supported, please consider building strace with mpers support enabled.'
+            code=audit.audit([sys.executable,'-I','-B','-c','import sys;sys.stderr.write('+repr(warning+'\n')+')'],report)
+            data=json.loads(report.read_text())
+            self.assertEqual(code,87)
+            self.assertEqual(data['straceDiagnostics']['unsupportedPersonalities'],1)
+            self.assertIn({'reason':'unsupported_strace_personality'},data['classificationIssues'])

@@ -76,3 +76,15 @@ the real local HTML worker, rejects any remote request and records worker errors
 The macOS engine fixture passed with 0 remote requests and 0 worker errors; that
 is renderer-request evidence, not an OS-level outbound audit. Linux CI runs the
 same fixture under the common whole-tree blocking auditor.
+
+## Shared syscall tracer
+
+Both Linux gates prepare unmodified strace 7.3 from the official release archive,
+SHA-256 `529634c40910895a9a1f3c5c1e65da2ca9ed72fb158dfc4bcc89efdf05e39b72`.
+`prepareStrace.sh` records source/binary/compiler provenance. The recorder keeps
+ordinary ptrace mode, `-s 0`, all existing syscall/lifecycle filters and io_uring
+capture. It does not use `--seccomp-bpf` (which can hide seccomp-denied attempts)
+or infer an unknown syscall from strace's cached `--syscall-number` output.
+Unknown records still fail. Version 7.3 passed the local ordering fixture and
+unchanged UDP controls; no claim is made that it eliminates all register-read
+races. Exact-head Linux CI remains the acceptance condition.
