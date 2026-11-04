@@ -63,7 +63,7 @@ def parse(raw,stderr,returncode,namespace_inode):
                     if fields[8] not in ('0','1'):raise ValueError('Invalid SQPOLL flag')
                     event.update(opcode=int(fields[7]),sqpoll=fields[8]=='1')
                 events.append(event)
-            else:invalid.append('unknown_record')
+            else:invalid.append({'reason':'unknown_record','sample':re.sub(r'0x[0-9a-fA-F]+|\d{5,}','<number>',line)[:160]})
         except ValueError:invalid.append('invalid_record')
     expected={kind:sum(e['kind']==label for e in events)
               for kind,label in [('create','create'),('submit','submit'),('failed','failed'),('retire','retire'),('complete','complete')]}
@@ -79,7 +79,10 @@ def parse(raw,stderr,returncode,namespace_inode):
     return dict(schema='aelix.io-uring-kernel-capture/1',status='captured' if complete else 'failed',
         complete=complete,lostEvents=lost,eventCount=len(events),events=events,
         pidNamespaceVerified=complete,namespaceInode=namespace_inode,root=roots[0] if len(roots)==1 else None,
-        kernelCounts=counts,recordErrors=invalid,recorderExitCode=returncode,drained=complete)
+        kernelCounts=counts,recordErrors=invalid,recorderExitCode=returncode,drained=complete,
+        captureChecks={'ready':ready,'done':done,'rootCount':len(roots),'sampleCount':len(states),
+                       'stderrEmpty':not stderr.strip()},
+        diagnostics=[re.sub(r'0x[0-9a-fA-F]+','<address>',line)[:240] for line in stderr.splitlines()][:24])
 
 
 def broker(directory,root_pid,namespace_inode):
@@ -106,7 +109,11 @@ def broker(directory,root_pid,namespace_inode):
                   'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset}
         source=directory/'capture.bt';source.write_text(text)
         with (directory/'events.raw').open('w') as stdout,(directory/'recorder.stderr').open('w') as stderr:
-            env=dict(os.environ,BPFTRACE_PERF_RB_PAGES='1024',BPFTRACE_MAP_KEYS_MAX='65536',BPFTRACE_MAX_MAP_KEYS='65536')
+            env=dict(os.environ,BPFTRACE_PERF_RB_PAGES='1024')
+            version=re.search(r'v(\d+)\.(\d+)',metadata['toolVersion'])
+            if version is None:raise RuntimeError('bpftrace_version_unknown')
+            map_key='BPFTRACE_MAP_KEYS_MAX' if tuple(map(int,version.groups()))<(0,20) else 'BPFTRACE_MAX_MAP_KEYS'
+            env[map_key]='65536'
             # -k diagnoses failed map updates/output helpers. -kk also labels
             # expected hash-map absence as a failed lookup on bpftrace 0.17.
             # Critical task/namespace reads are checked explicitly in BPF and
