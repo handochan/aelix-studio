@@ -52,12 +52,14 @@ report has `enforcement: report-only` and never changes the gate result. Both
 reports include counts, PID/parent/comm, root identities and parser source hashes.
 Classification failures also include fixed reason codes and numeric task IDs in
 `classificationIssues`; no raw trace text or executable path is included.
-An exact `???( <unfinished ...>` register-decoding stub immediately followed by
-that task's signal-death record remains an unparsed record of its captured PID.
-This strace [register-read fallback](https://github.com/strace/strace/blob/v6.1/src/syscall.c#L1355)
-cannot resume after task death. It is attributable only with complete fork
-ancestry, no pending fork/exec and no intervening/subsequent task records. The
-same stub in a selected tree still fails; whole-command enforcement also fails.
+An exact `???( <unfinished ...>` register-decoding stub, optionally followed by
+`<... ??? resumed>) = ?`, then that task's signal-death record is retained as a
+register hole. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
+does not identify the syscall. Issue #15 decision 6629110086 permits resolving
+these records only with complete independent kernel corroboration below. There
+must be complete fork ancestry, no pending fork/exec and no other intervening or
+subsequent task records. Without corroboration, they remain blocking unparsed
+records in selected-tree and whole-command enforcement alike.
 Missing ancestry/lifecycle, interrupted fork/exec, other unknown records or any
 ambiguous attribution remain classification errors that block every scope.
 No network addresses are newly exempted: only loopback/Unix IPC is allowed, with
@@ -128,6 +130,91 @@ Every other opcode fails, including `CONNECT`, `SEND*`, `SENDMSG*`, `SOCKET`,
 remain only in the whole-app report; unresolvable ownership is globally blocking.
 Per-session `ioUring` reports include opcode counts, ring ownership/submissions,
 namespace evidence, kernel event counters and capture status.
+
+The **same capture** first requires a `syscall_trace_enter` kprobe, before
+ptrace/seccomp. Its BTF signature must accept `struct pt_regs *regs`; the native
+x64 `orig_ax`/`di` or arm64 `syscallno`/`orig_x0` layout supplies the syscall/fd.
+It numbers **all** invocations per TID and records network/write invocations
+before any tracer register read. Native syscall numbers come from Linux's
+[x64 syscall table](https://github.com/torvalds/linux/blob/v6.8/arch/x86/entry/syscalls/syscall_64.tbl)
+and [arm64 generic ABI](https://github.com/torvalds/linux/blob/v6.8/include/uapi/asm-generic/unistd.h).
+Kernel-read failure, ABI incompatibility, signature or function absence fails.
+Both the pre-entry hook and the post-seccomp raw entry reject non-native ABIs.
+
+It also attaches all enter/exit tracepoints for `connect`,
+`sendto`, `sendmsg`, `sendmmsg`, `write`, `writev`, `accept` and `accept4`, plus
+required kprobes `security_socket_connect`, `security_socket_sendmsg`,
+`sock_sendmsg`, `tcp_v4_connect`, `tcp_v6_connect`, `udp_sendmsg` and
+`udpv6_sendmsg`. Attachment/fields/BTF/privilege failures are fatal. This covers
+network syscall execution and the socket layer, including vectored writes and
+io_uring sends. `raw_syscalls:sys_enter` additionally rejects compatibility ABIs
+whose syscall multiplexers are outside this native 64-bit policy. It never reads
+registers through ptrace. Running-kernel BTF supplies task/socket layouts.
+
+Why both layers: Linux [syscall entry ordering](https://github.com/torvalds/linux/blob/v6.8/kernel/entry/common.c#L43-L61)
+puts syscall tracepoints **after** ptrace and seccomp; their absence alone does
+not identify an interrupted call. Linux [socket write dispatch](https://github.com/torvalds/linux/blob/v6.8/net/socket.c#L1143-L1161)
+and [message dispatch](https://github.com/torvalds/linux/blob/v6.8/net/socket.c#L740-L769)
+reach the socket security/protocol layer; [io_uring send](https://github.com/torvalds/linux/blob/v6.8/io_uring/net.c#L414)
+also reaches it. The protocol probes provide an additional independent check.
+Only metadata is recorded: monotonic timestamps, normalized TID/TGID, syscall,
+per-thread ordinal, fd, result and socket family; no buffers/argv/paths. The
+recorder's stopped root is strace itself; its own output writes are outside the
+audited command, while all descendants remain tracked without CPU restrictions.
+
+Kernel network event totals and task-exit totals must equal consumed records.
+Each strace TID needs a unique kernel identity and complete birth-to-exit range
+in the auditor's PID namespace, with matching kernel/normalized TGID. Extra userspace descendants of a known tracee fail. The tracer's own
+capability-probe siblings are distinguished only by verified fork topology;
+any unmatched networking there still fails globally. io-wq/SQPOLL workers
+require kernel-set IO/USER flags, complete creator ancestry and an owned ring.
+A required `create_io_thread` entry/return probe records them **before wakeup**,
+including io-wq retries scheduled back to the owner with task_work. Ordinary
+`sched_process_fork` alone does not cover this copy_process path. Birth/exit
+records, BTF return signature and consumed worker counters must agree. See
+[worker creation](https://github.com/torvalds/linux/blob/v6.8/kernel/fork.c#L2836-L2850)
+and [owner-context retry](https://github.com/torvalds/linux/blob/v6.8/io_uring/io-wq.c#L362-L386). Worker names confer no permission.
+Independent creation-entry/return counters (including error returns) must
+balance; duplicate outstanding entries fail. This detects missed kretprobe
+returns, which can occur independently of perf-buffer loss
+([kernel kretprobe limits](https://docs.kernel.org/trace/kprobes.html#how-does-a-return-probe-work)).
+Every **pre-entry invocation** must match the ordered decoded call/fd, including
+failed and emulated-success calls, without skips. Post-seccomp entries/returns
+and socket hooks must map to that same per-TID invocation ordinal. A successful
+strace result alone does **not** prove execution: seccomp ERRNO(0), user
+notification or SIGSYS emulation may fake success. The separate pre-entry
+prevents an emulated decoded call from substituting for a hidden executed call.
+Missing returns for executed decoded calls,
+unmatched socket operations (including asynchronous writes), missing lifetimes,
+identity reuse, namespace mismatch, counter disagreement and any loss fail.
+Already-fatal UDP/io_uring classifications retain additional socket evidence as
+`kernelCorroboration` on the existing issue; this preserves control counts and
+never qualifies a hole for resolution.
+
+Only a TID with no unmatched kernel activity over its **entire** verified
+lifetime may discharge the exact terminal register holes. This proves absence
+of missed network execution, without guessing that the unknown syscall was
+non-network or using a cached syscall number. `kernelResolvedRecords` and
+`kernelResolutions` separately retain each normalized/kernel TID, record count,
+monotonic range, pre-entry/execution/socket-event counts and fixed proof code.
+An otherwise-unmatched **final** pre-entry can prove nonexecution only when its
+ordinal equals the TID's final all-syscall ordinal and it has no post-entry or
+socket hook. `notExecutedOrdinals` records this additional proof separately.
+A final pre-entry may also have been killed before strace printed a `???` stub;
+`kernelNotExecutedInvocations`/`kernelNotExecuted` record these proven unexecuted
+invocations separately with TID, range, syscall, fd and ordinal. They require a
+known terminated strace TID and never subtract any unrelated unparsed record.
+Every other unknown strace record remains fatal. App and host/native reports
+use this one implementation and the same `sourceSha256` policy inventory.
+Synthetic controls exercise hidden network activity, no network execution,
+seccomp ambiguity, loss, missing identity/range/return, and missing attachments;
+actual installed-app shutdown races provide additional real-trace coverage
+when they occur. A deterministic signal race cannot guarantee a strace register
+read failure, so passing synthetic controls does not claim a real race occurred.
+The fifth transport control, `uring-async-writev`, forces `IOSQE_ASYNC` and
+requires a real pre-wakeup worker birth, balanced creation counters and complete
+worker exit. It retains the WRITEV rejection (87, external/unparsed/classification
+1/1/1), while the original four transport control results remain unchanged.
 
 An ordinary new TCP/UDP client socket must establish its peer through traced `connect`,
 or a rejected ring `CONNECT`, before connected `READV`/`WRITEV` can send data.

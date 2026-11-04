@@ -66,6 +66,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     udp_records = []
     pending = {}
     terminal_stops, killed_at = {}, {}
+    register_holes, hole_resumes = {}, set()
     invalid_terminal_stops = set()
 
     def state(pid, name=None):
@@ -273,12 +274,21 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             # success or fork result. Attribute it to its captured PID only if
             # the next/last record for that task is its signal-death record.
             # Missing edges, pending fork/exec and every other unknown stay fatal.
-            if pid in terminal_stops and (not line.startswith('+++ killed by ') or pid in killed_at):
+            unreadable_resume = line == '<... ??? resumed>) = ?'
+            if pid in terminal_stops and (not line.startswith('+++ killed by ') or pid in killed_at) and not unreadable_resume:
                 invalid_terminal_stops.add(pid)
             if line == '???( <unfinished ...>':
                 if pid in pending or pid in terminal_stops:
                     invalid_terminal_stops.add(pid)
                 terminal_stops[pid] = sequence
+                register_holes[pid] = register_holes.get(pid, 0) + 1
+                continue
+            if unreadable_resume:
+                if pid not in terminal_stops or pid in hole_resumes:
+                    classification_issue('unknown_resumed_syscall', pid)
+                else:
+                    hole_resumes.add(pid)
+                    register_holes[pid] += 1
                 continue
             call = CALL.match(line)
             resumed = RESUMED.match(line)
@@ -306,7 +316,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             # An attributable decode failure remains unparsed in this PID's
             # tree. It blocks selected trees and whole-command enforcement;
             # an unselected sibling is retained in the report-only measurement.
-            state(pid)['unparsed'] += 1
+            state(pid)['unparsed'] += register_holes[pid]
 
     # Resolve /proc/self/exe from the captured executable inherited at fork,
     # never from the auditor's /proc or from a mutable process/thread name.
@@ -388,6 +398,18 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states))
         classification_issues.extend(ring_evidence['globalIssues'])
 
+    network_evidence = None
+    if kernel_capture is not None:
+        from uring.network import reconcile as reconcile_network
+        eligible = {pid: count for pid, count in register_holes.items()
+                    if pid not in invalid_terminal_stops and killed_at.get(pid, 0) > terminal_stops[pid]}
+        if classification_issues: eligible = {}
+        network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
+                                             {pid: tgid(pid) for pid in states},parents,
+                                             {pid for pid,item in states.items() if item['finished']} if not classification_issues else set())
+        for evidence in network_evidence['resolved']:
+            states[evidence['pid']]['unparsed'] -= evidence['records']
+
     from udpLifecycle import analyze as analyze_udp
     exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid)
     for issue in udp_issues:
@@ -415,6 +437,21 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 for pid in sorted(pids) for call in states[pid]['io_uring']])
         issues += [{'reason':'unsupported_external_accept','pid':pid} for pid in pids
                    for _ in range(states[pid]['external_accepts'])]
+        if network_evidence is not None:
+            issues = [dict(issue) for issue in issues]
+            for issue in network_evidence['issues']:
+                if issue.get('pid') is not None and issue['pid'] not in pids: continue
+                # Preserve existing control counts while retaining every new
+                # cause on the already-fatal per-task classification. This
+                # never makes evidence eligible for register-hole resolution.
+                existing = next((entry for entry in issues if issue.get('pid') is not None and
+                    entry.get('pid') == issue['pid'] and entry['reason'] in
+                    ('udp_io_uring_write_fd_unproven', 'io_uring_opcode_not_allowed')), None)
+                if existing is not None:
+                    existing.setdefault('kernelCorroboration', []).append(issue)
+                else: issues.append(issue)
+        resolutions = [evidence for evidence in (network_evidence or {}).get('resolved', []) if evidence['pid'] in pids]
+        nonexecution = [evidence for evidence in (network_evidence or {}).get('notExecuted', []) if evidence['pid'] in pids]
         for pid in sorted(pids):
             item = states[pid]
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
@@ -431,6 +468,16 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'udpAssociations': [event for event in events if event['udpAssociationOnly']],
                 'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),
                 'classificationErrors': len(issues), 'classificationIssues': issues,
+                'kernelResolvedRecords': sum(evidence['records'] for evidence in resolutions),
+                'kernelResolutions': resolutions,
+                'kernelNotExecutedInvocations': len(nonexecution),
+                'kernelNotExecuted': nonexecution,
+                'kernelNetwork': ({'recorded': kernel_capture.get('complete', False),
+                    'eventCount': network_evidence['eventCount'],
+                    'preEntrySignatureSha256': kernel_capture.get('preEntrySignatureSha256'),
+                    'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
+                    'socketProbes': kernel_capture.get('socketProbes', [])}
+                    if network_evidence is not None else {'recorded': False}),
                 'external': external, 'processes': processes,
                 'ioUring': ({'recorded':kernel_capture.get('complete',False),'opcodeCounts':ring_evidence['selectedOpcodeCounts'] if scope=='selected-process-trees' else ring_evidence['opcodeCounts'],
                              'policy':'node-v24.11.0-libuv-explicit-file-and-epoll',

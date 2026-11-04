@@ -13,6 +13,7 @@ import time
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 from uring.probe import event_formats,event_fields,pid_numbers_offset
 from uring.program import program
+from uring.network import requirements as network_requirements, parse as parse_network, HOOKS
 
 
 def samples(raw):
@@ -30,13 +31,14 @@ def samples(raw):
 
 def parse(raw,stderr,returncode,namespace_inode):
     events=[];counts={};roots=[];states=samples(raw);ready=done=False;invalid=[];sampling=False
+    network=[];tasks=[];workers=[]
     for line in raw.splitlines():
         if line=='READY':ready=True;continue
         if line=='DONE':done=True;continue
         if line.startswith('TICK|'):sampling=True;continue
         if line=='TICKEND':sampling=False;continue
-        match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead)_count:\s*(\d+)',line)
-        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error):\s*(\d+)',line)
+        match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead|network|task|worker)_count:\s*(\d+)',line)
+        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|worker_error|worker_enter|worker_return):\s*(\d+)',line)
         if match:
             if not sampling:counts[match[1]]=int(match[2])
             continue
@@ -50,6 +52,18 @@ def parse(raw,stderr,returncode,namespace_inode):
             if fields[0]=='ROOT' and len(fields)==6:
                 roots.append(dict(time=int(fields[1]),kernelTgid=int(fields[2]),kernelPid=int(fields[3]),
                                   pid=int(fields[4]),level=int(fields[5])))
+            elif fields[0] in ('P','N','X','H'):
+                network.append(parse_network(fields))
+            elif fields[0]=='T' and len(fields)==10:
+                flags=int(fields[8])
+                if not 0<=flags<=0xffffffff: raise ValueError('invalid_kernel_task_flag')
+                tasks.append(dict(end=int(fields[1]),kernelTgid=int(fields[2]),kernelPid=int(fields[3]),
+                                  pid=int(fields[4]),tgid=int(fields[5]),start=int(fields[6]),
+                                  parentKernelPid=int(fields[7]),kernelThread=bool(flags&0x00200000),
+                                  ioWorker=(flags&0x4010)==0x4010,taskFlags=flags,lastOrdinal=int(fields[9])))
+            elif fields[0]=='W' and len(fields)==6:
+                workers.append(dict(time=int(fields[1]),kernelPid=int(fields[2]),parentKernelPid=int(fields[3]),
+                                    flags=int(fields[4]),start=int(fields[5])))
             elif fields[0]=='STATE' and len(fields)==6:
                 states.append(list(map(int,fields[1:])))
             elif fields[0]=='K' and len(fields)==3:
@@ -77,12 +91,20 @@ def parse(raw,stderr,returncode,namespace_inode):
               and counts.get('born',0)==counts.get('dead',0) and counts.get('born',0)>0
               and counts.get('started_req',0)==counts.get('completed_req',0)
               and not counts.get('untracked_sqpoll',0) and not counts.get('unmatched_completion',0)
-              and not counts.get('namespace_error',0))
+              and not counts.get('namespace_error',0)
+              and not counts.get('unsupported_abi',0)
+              and not counts.get('pre_mismatch',0)
+              and not counts.get('worker_error',0) and counts.get('worker',0)==len(workers)
+              and counts.get('worker_enter',0)==counts.get('worker_return',0)
+              and counts.get('worker_return',0)>=len(workers)
+              and counts.get('network',0)==len(network) and counts.get('task',0)==len(tasks)
+              and len(tasks)==counts.get('dead',0))
     return dict(schema='aelix.io-uring-kernel-capture/1',status='captured' if complete else 'failed',
         complete=complete,lostEvents=lost,reason='io_uring_kernel_events_lost' if lost else None,
         eventCount=len(events),events=events,
         pidNamespaceVerified=complete,namespaceInode=namespace_inode,root=roots[0] if len(roots)==1 else None,
         kernelCounts=counts,recordErrors=invalid,recorderExitCode=returncode,drained=complete,
+        network={'complete':complete,'eventCount':len(network),'events':network,'tasks':tasks,'workers':workers},
         captureChecks={'ready':ready,'done':done,'rootCount':len(roots),'sampleCount':len(states),
                        'stderrEmpty':not stderr.strip()},
         diagnostics=[re.sub(r'0x[0-9a-fA-F]+','<address>',line)[:240] for line in stderr.splitlines()][:24])
@@ -97,6 +119,13 @@ def broker(directory,root_pid,namespace_inode):
             tracefs.mkdir(parents=True,exist_ok=True)
             subprocess.run(['mount','-t','tracefs','tracefs',str(tracefs)],check=True,capture_output=True);mounted=True
         submit,formats=event_formats(tracefs)
+        formats.update(network_requirements(tracefs))
+        signature=subprocess.check_output(['bpftrace','-lv','kfunc:syscall_trace_enter'],text=True,stderr=subprocess.STDOUT)
+        if not re.search(r'^\s+struct pt_regs \* regs\s*$',signature,re.M):
+            raise RuntimeError('kernel_pre_ptrace_probe_signature_missing')
+        worker_signature=subprocess.check_output(['bpftrace','-lv','kfunc:create_io_thread'],text=True,stderr=subprocess.STDOUT)
+        if not re.search(r'^\s+struct task_struct \* retval\s*$',worker_signature,re.M):
+            raise RuntimeError('kernel_io_worker_probe_signature_missing')
         failed=tracefs/'events/io_uring/io_uring_req_failed/format'
         if not failed.is_file() or not {'ctx','opcode'}<=event_fields(failed.read_text()):
             raise RuntimeError('io_uring_failed_request_tracepoint_missing')
@@ -109,7 +138,10 @@ def broker(directory,root_pid,namespace_inode):
                   'kernel':os.uname().release,'tracepoints':[*formats,'io_uring_req_failed','io_uring_complete'],
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
                                   dict(formats,io_uring_req_failed=failed.read_text(),io_uring_complete=completion.read_text()).items()},
-                  'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset}
+                  'programSha256':hashlib.sha256(text.encode()).hexdigest(),'pidNumbersOffset':offset,
+                  'socketProbes':list(HOOKS),
+                  'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
+                  'workerSignatureSha256':hashlib.sha256(worker_signature.encode()).hexdigest()}
         source=directory/'capture.bt';source.write_text(text)
         with (directory/'events.raw').open('w') as stdout,(directory/'recorder.stderr').open('w') as stderr:
             env=dict(os.environ,BPFTRACE_PERF_RB_PAGES='1024')

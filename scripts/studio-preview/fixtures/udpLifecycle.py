@@ -131,13 +131,16 @@ def control(mode):
     import subprocess
     import tempfile
     from pathlib import Path
-    if mode == 'uring-writev':
+    if mode in ('uring-writev','uring-async-writev'):
         from uring.probe import CONTROL_C
         source = CONTROL_C.replace('SOCK_STREAM', 'SOCK_DGRAM').replace('"127.0.0.1"', '"203.0.113.1"')
         source = source.replace('io_uring_prep_connect(io_uring_get_sqe(&ring),fd,(void*)&peer,sizeof(peer));',
             'connect(fd,(void*)&peer,sizeof(peer));\n'
             'struct iovec data={.iov_base="control",.iov_len=7};\n'
             'io_uring_prep_writev(io_uring_get_sqe(&ring),fd,&data,1,0);')
+        if mode == 'uring-async-writev':
+            source=source.replace('if(io_uring_submit(&ring)!=1)',
+                                  'ring.sq.sqes[0].flags |= IOSQE_ASYNC;\n    if(io_uring_submit(&ring)!=1)')
         with tempfile.TemporaryDirectory(prefix='udp-uring-control-') as directory:
             c = Path(directory)/'control.c'; binary = Path(directory)/'control'
             c.write_text(source)
@@ -168,7 +171,7 @@ def verify_controls(auditor, output):
     import sys
     output.mkdir(parents=True, exist_ok=True)
     results = []
-    for mode in ('connect-close','send','inherit-dup-send','uring-writev'):
+    for mode in ('connect-close','send','inherit-dup-send','uring-writev','uring-async-writev'):
         report = output/(mode+'.json')
         command = ['sudo','-n','unshare','--net','--','/bin/sh','-c',
                    'ip link set lo up && exec "$@"','udp-control',
@@ -176,16 +179,20 @@ def verify_controls(auditor, output):
                    sys.executable,'-I','-B',str(auditor),'--udp-control',mode]
         result = subprocess.run(command)
         data = json.loads(report.read_text())
-        expected = 0 if mode=='connect-close' else 87 if mode=='uring-writev' else 86
+        expected = 0 if mode=='connect-close' else 87 if mode.startswith('uring-') else 86
         if not (result.returncode==expected and data.get('commandExitCode')==0
                 and data['ioUring']['recorded'] and data['ioUring']['capture']['drained']
                 and data['ioUring']['capture']['lostEvents']==0):
             raise RuntimeError('Transport control failed: '+mode)
-        if mode=='uring-writev':
+        if mode.startswith('uring-'):
             if not (data['externalAttempts']==1 and data['udpConnectOnly']==0 and data['unparsedRecords']==1
                     and data['classificationErrors']==1
                     and data['classificationIssues'][0]['reason']=='udp_io_uring_write_fd_unproven'):
                 raise RuntimeError('io_uring UDP write control mismatch')
+            if mode=='uring-async-writev':
+                counts=data['ioUring']['capture']['kernelCounts']
+                if not (counts.get('worker',0)>0 and counts.get('worker_enter')==counts.get('worker_return')):
+                    raise RuntimeError('Forced asynchronous write did not qualify IO worker tracking')
         elif not (data['externalAttempts']==(0 if mode=='connect-close' else 2)
                   and data['unparsedRecords']==0 and data['classificationErrors']==0
                   and data['udpConnectOnly']==(1 if mode=='connect-close' else 0)):
