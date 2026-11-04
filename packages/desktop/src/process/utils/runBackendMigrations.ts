@@ -11,6 +11,7 @@ import { httpRequest } from '@/common/adapter/httpBridge';
 import { mcpService } from '@/common/adapter/ipcBridge';
 import type { ImageGenerationModelSetting } from '@/common/config/clientSettings';
 import { BUILTIN_BROWSER_MCP_NAME } from '@/common/config/constants';
+import { resolveBundledNodePath } from '@process/backend/binaryResolver';
 import {
   removeImageGenerationEnvKeys,
   resolveImageGenerationMcpEnv,
@@ -201,16 +202,32 @@ function buildBuiltinBrowserServer(): McpImportServer {
   };
 }
 
-function buildDefaultMcpServers(): McpImportServer[] {
+function bundledChromeArgs(): string[] {
+  return [
+    path.join(path.dirname(getBuiltinMcpScriptPath(BUILTIN_BROWSER_SCRIPT)), 'chrome-devtools-mcp/build/src/index.js'),
+    '--no-usage-statistics',
+  ];
+}
+
+function isOwnedChromeTransport(server?: IMcpServer): boolean {
+  if (server?.transport.type !== 'stdio') return false;
+  const { command, args, env } = server.transport;
+  return (
+    (command === 'npx' &&
+      args?.length === 2 &&
+      args[0] === '-y' &&
+      ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@0.16.0'].includes(args[1])) ||
+    (server.builtin === true &&
+      command === 'node' &&
+      areStringArraysEqual(args, bundledChromeArgs()) &&
+      areStringRecordsEqual(env, { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' }))
+  );
+}
+
+function buildDefaultMcpServers(chromeCommand: string): McpImportServer[] {
   const chromeConfig = {
-    command: 'node',
-    args: [
-      path.join(
-        path.dirname(getBuiltinMcpScriptPath(BUILTIN_BROWSER_SCRIPT)),
-        'chrome-devtools-mcp/build/src/index.js'
-      ),
-      '--no-usage-statistics',
-    ],
+    command: chromeCommand,
+    args: bundledChromeArgs(),
     env: { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' },
   };
 
@@ -318,7 +335,12 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
   const imageEnvResolution = resolveImageGenerationMcpEnv(imageConfig, providers, existingImageEnv);
   logImageGenerationEnvResolution(imageEnvResolution, 'bootstrap');
   const imageServer = buildBuiltinImageGenerationServer(imageEnvResolution, imageConfig);
-  const defaultServers = buildDefaultMcpServers();
+  const existingChromeDevtools = existingByName.get(BUILTIN_CHROME_DEVTOOLS_NAME);
+  const migrateChromeTransport = isOwnedChromeTransport(existingChromeDevtools);
+  // Custom rows do not require the Studio bundle and retain their own transport.
+  const defaultServers = buildDefaultMcpServers(
+    !existingChromeDevtools || migrateChromeTransport ? resolveBundledNodePath() : 'node'
+  );
   const missing = [...defaultServers, imageServer].filter((server) => !existingByName.has(server.name));
   let imageServerUpdated = false;
 
@@ -326,8 +348,8 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
     await mcpService.batchImportServers.invoke({ servers: missing });
   }
 
-  const existingChromeDevtools = existingByName.get(BUILTIN_CHROME_DEVTOOLS_NAME);
   if (
+    migrateChromeTransport &&
     existingChromeDevtools &&
     (existingChromeDevtools.builtin !== true ||
       !existingChromeDevtools.original_json ||
@@ -343,15 +365,8 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
     });
   }
 
-  // Only migrate the exact Studio-owned old package command. Customized user
-  // servers/flags/registries remain user configured connections.
-  if (
-    existingChromeDevtools?.transport.type === 'stdio' &&
-    existingChromeDevtools.transport.command === 'npx' &&
-    existingChromeDevtools.transport.args?.length === 2 &&
-    existingChromeDevtools.transport.args[0] === '-y' &&
-    ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@0.16.0'].includes(existingChromeDevtools.transport.args[1])
-  ) {
+  // Only migrate the exact old defaults; customized commands/flags/env survive.
+  if (migrateChromeTransport && existingChromeDevtools?.transport.type === 'stdio') {
     const bundled = defaultServers.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME)!;
     const transport = {
       ...bundled.transport,

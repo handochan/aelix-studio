@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
 
 import { IMAGE_GEN_ENV_KEYS } from '@/common/config/imageGenerationMcpEnv';
 import { BUILTIN_IMAGE_GEN_NAME, type IMcpServer, type IProvider } from '@/common/config/storage';
@@ -13,6 +14,7 @@ const {
   listServersMock,
   testMcpConnectionMock,
   updateServerMock,
+  resolveBundledNodePathMock,
 } = vi.hoisted(() => ({
   batchImportServersMock: vi.fn(),
   execFileMock: vi.fn(),
@@ -22,9 +24,11 @@ const {
   listServersMock: vi.fn(),
   testMcpConnectionMock: vi.fn(),
   updateServerMock: vi.fn(),
+  resolveBundledNodePathMock: vi.fn(() => '/bundled/node'),
 }));
 
 vi.mock('node:child_process', () => ({ execFile: execFileMock }));
+vi.mock('@process/backend/binaryResolver', () => ({ resolveBundledNodePath: resolveBundledNodePathMock }));
 
 vi.mock('@/common/adapter/httpBridge', () => ({
   httpRequest: httpRequestMock,
@@ -250,7 +254,7 @@ describe('disabled MCP startup preflight', () => {
         id: 'chrome-id',
         data: expect.objectContaining({
           transport: expect.objectContaining({
-            command: 'node',
+            command: '/bundled/node',
             args: expect.arrayContaining(['--no-usage-statistics']),
           }),
         }),
@@ -267,9 +271,54 @@ describe('disabled MCP startup preflight', () => {
     server.transport = { type: 'stdio', command: 'npx', args: ['-y', 'custom-mcp@1.0', '--custom'] };
     listServersMock.mockResolvedValue([server]);
     await runBackendMigrations(configFile as never);
-    expect(updateServerMock.mock.calls.some(([request]) => request.id === 'chrome-id' && request.data.transport)).toBe(
-      false
+    expect(updateServerMock.mock.calls.some(([request]) => request.id === 'chrome-id')).toBe(false);
+    expect(resolveBundledNodePathMock).not.toHaveBeenCalled();
+  });
+  const localArgs = () => [path.join('/mock', 'chrome-devtools-mcp/build/src/index.js'), '--no-usage-statistics'];
+  it('imports a fresh default with an absolute bundled Node command', async () => {
+    listServersMock.mockResolvedValue([]);
+    await runBackendMigrations(configFile as never);
+    const imported = batchImportServersMock.mock.calls[0][0].servers as IMcpServer[];
+    const server = imported.find((row) => row.name === 'chrome-devtools')!;
+    expect(server.transport).toMatchObject({ command: '/bundled/node', args: localArgs() });
+    expect(JSON.parse(server.original_json!).mcpServers['chrome-devtools'].command).toBe('/bundled/node');
+  });
+  it('upgrades the unchanged bundled-node default while preserving disabled state', async () => {
+    const server = chromeServer(false);
+    server.builtin = true;
+    server.transport = {
+      type: 'stdio',
+      command: 'node',
+      args: localArgs(),
+      env: { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' },
+    };
+    listServersMock.mockResolvedValue([server]);
+    await runBackendMigrations(configFile as never);
+    expect(updateServerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'chrome-id',
+        data: expect.objectContaining({ transport: expect.objectContaining({ command: '/bundled/node' }) }),
+      })
     );
+    expect(
+      updateServerMock.mock.calls
+        .filter(([request]) => request.id === 'chrome-id')
+        .every(([request]) => request.data.enabled === undefined)
+    ).toBe(true);
+  });
+  it.each(['command', 'args', 'env', 'ownership'])('preserves a user-edited bundled row (%s)', async (change) => {
+    const server = chromeServer(false);
+    server.builtin = change !== 'ownership';
+    server.transport = {
+      type: 'stdio',
+      command: change === 'command' ? '/custom/node' : 'node',
+      args: [...localArgs(), ...(change === 'args' ? ['--custom'] : [])],
+      env: { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1', ...(change === 'env' ? { CUSTOM: 'yes' } : {}) },
+    };
+    listServersMock.mockResolvedValue([server]);
+    await runBackendMigrations(configFile as never);
+    expect(updateServerMock.mock.calls.some(([request]) => request.id === 'chrome-id')).toBe(false);
+    expect(resolveBundledNodePathMock).not.toHaveBeenCalled();
   });
   it('never probes or tests a disabled chrome-devtools server, even without system npx', async () => {
     listServersMock.mockResolvedValue([chromeServer(false)]);

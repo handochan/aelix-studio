@@ -68,6 +68,33 @@ async function api(route, method = 'GET', body, status = [200, 201, 202]) {
 }
 try {
   await launch();
+  if (executablePath) {
+    await expect
+      .poll(async () => (await api('/api/mcp/servers')).some((row) => row.name === 'chrome-devtools'))
+      .toBe(true);
+    const chrome = (await api('/api/mcp/servers')).find((row) => row.name === 'chrome-devtools');
+    const resources = await app.evaluate(() => process.resourcesPath);
+    const managedRoot = path.join(
+      resources,
+      'bundled-aioncore',
+      `${process.platform}-${process.arch}`,
+      'managed-resources'
+    );
+    const contract = JSON.parse(fs.readFileSync(path.join(managedRoot, 'manifest.json'), 'utf8'));
+    const expectedNode = path.join(managedRoot, contract.node.root, contract.node.executable);
+    assert.equal(chrome.enabled, false);
+    assert.equal(fs.realpathSync(chrome.transport.command), fs.realpathSync(expectedNode));
+    const connection = await api('/api/mcp/test-connection', 'POST', {
+      ...chrome,
+      transport: {
+        ...chrome.transport,
+        env: { ...chrome.transport.env, PATH: path.join(sandbox, 'no-mcp-path-tools') },
+      },
+    });
+    assert.equal(connection.success, true);
+    assert.ok(connection.tools.some((tool) => tool.name === 'navigate_page'));
+    checks.push('default_chrome_mcp_bundled_node_without_path');
+  }
   await api('/api/agents/custom', 'POST', {
     name: 'Permission recovery synthetic ACP',
     command: process.env.RECOVERY_ADAPTER,
