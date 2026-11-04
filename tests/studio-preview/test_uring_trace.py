@@ -46,3 +46,21 @@ class TracepointFormatTests(unittest.TestCase):
             path.write_text(path.read_text().replace('ctx','unavailable'))
             with self.assertRaisesRegex(RuntimeError,'fields_missing'):
                 trace.event_formats(root)
+
+
+class KernelBtfLayoutTests(unittest.TestCase):
+    def test_running_kernel_layout_is_read_in_either_byte_order(self):
+        import struct
+        for endian in ('<','>'):
+            with self.subTest(endian=endian),tempfile.TemporaryDirectory() as directory:
+                strings=b'\0pid\0numbers\0'
+                types=struct.pack(endian+'IIIIII',1,(4<<24)|1,64,5,0,128)
+                header=struct.pack(endian+'HBBIIIII',0xeb9f,1,0,24,0,len(types),len(types),len(strings))
+                path=Path(directory)/'btf';path.write_bytes(header+types+strings)
+                self.assertEqual(trace.pid_numbers_offset(path),16)
+
+    def test_missing_truncated_or_wrong_btf_never_invents_an_offset(self):
+        for raw in (b'',b'not-btf'*8,b'\x9f\xeb'+b'\0'*22):
+            with self.subTest(raw=raw),tempfile.TemporaryDirectory() as directory:
+                path=Path(directory)/'btf';path.write_bytes(raw)
+                with self.assertRaises(RuntimeError):trace.pid_numbers_offset(path)

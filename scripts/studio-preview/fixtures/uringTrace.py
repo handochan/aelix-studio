@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import shlex
 import shutil
+import struct
 import subprocess
 import tempfile
 
@@ -34,15 +35,40 @@ def event_formats(root):
     return submit.parent.name, texts
 
 
-def pid_numbers_offset():
+def pid_numbers_offset(path=Path('/sys/kernel/btf/vmlinux')):
     """Read the running kernel BTF layout; never hardcode architecture offsets."""
-    data=json.loads(subprocess.check_output(['bpftool','-j','btf','dump','file',
-                                            '/sys/kernel/btf/vmlinux','format','raw']))
-    for item in data['types']:
-        if item.get('kind')=='STRUCT' and item.get('name')=='pid':
-            for member in item['members']:
-                if member['name']=='numbers' and member['bits_offset'] % 8 == 0:
-                    return member['bits_offset']//8
+    raw=path.read_bytes()
+    if len(raw)<24 or len(raw)>64*1024*1024: raise RuntimeError('invalid_kernel_btf')
+    endian='<' if raw[:2]==b'\x9f\xeb' else '>' if raw[:2]==b'\xeb\x9f' else None
+    if endian is None: raise RuntimeError('invalid_kernel_btf_magic')
+    magic,version,flags,header,type_off,type_len,str_off,str_len=struct.unpack_from(endian+'HBBIIIII',raw)
+    start,end=header+type_off,header+type_off+type_len
+    strings=raw[header+str_off:header+str_off+str_len]
+    if version!=1 or header<24 or not header<=start<=end<=len(raw) or len(strings)!=str_len:
+        raise RuntimeError('invalid_kernel_btf_header')
+    def name(offset):
+        if not 0<=offset<len(strings):raise RuntimeError('invalid_kernel_btf_string')
+        stop=strings.find(b'\0',offset)
+        if stop<0:raise RuntimeError('invalid_kernel_btf_string')
+        return strings[offset:stop]
+    fixed={0:0,1:4,2:0,3:12,7:0,8:0,9:0,10:0,11:0,12:0,14:4,16:0,17:4,18:0}
+    variable={4:12,5:12,6:8,13:8,15:12,19:12}
+    while start+12<=end:
+        name_off,info,size=struct.unpack_from(endian+'III',raw,start)
+        kind=(info>>24)&31;count=info&65535
+        if kind not in fixed and kind not in variable:raise RuntimeError('unsupported_kernel_btf_type')
+        extra=fixed.get(kind,variable.get(kind,-1)*count)
+        if extra<0 or start+12+extra>end:raise RuntimeError('unsupported_kernel_btf_type')
+        if kind==4 and name(name_off)==b'pid':
+            for index in range(count):
+                member,typ,bits=struct.unpack_from(endian+'III',raw,start+12+index*12)
+                if name(member)==b'numbers':
+                    if info>>31:
+                        if bits>>24:raise RuntimeError('pid_namespace_btf_bitfield')
+                        bits &= 0xffffff
+                    if bits%8:raise RuntimeError('pid_namespace_btf_alignment')
+                    return bits//8
+        start+=12+extra
     raise RuntimeError('pid_namespace_btf_layout_missing')
 
 
@@ -77,7 +103,7 @@ def probe(output, sqpoll=False):
     output.write_text(json.dumps(report, indent=2) + '\n')
     try:
         if os.geteuid() != 0: raise RuntimeError('sudo_required')
-        for command in ('bpftrace', 'bpftool', 'strace', 'cc'):
+        for command in ('bpftrace', 'strace', 'cc'):
             if not shutil.which(command): raise RuntimeError('missing_tool_' + command)
         with tempfile.TemporaryDirectory(prefix='aelix-uring-probe-') as directory:
             temporary = Path(directory)
@@ -163,6 +189,7 @@ END { clear(@ctx); clear(@tracked); }
             finally:
                 if mounted: subprocess.run(['umount',str(root)],check=True,capture_output=True)
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
+        report['status']='failed'
         report['reason']=str(error) if isinstance(error,RuntimeError) else type(error).__name__
     output.write_text(json.dumps(report,indent=2)+'\n')
     return 0 if report['status']=='passed' else 87
