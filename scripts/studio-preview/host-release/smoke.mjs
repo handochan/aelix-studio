@@ -17,7 +17,7 @@ if (executablePath) {
       ? `${process.env.SystemRoot ?? process.env.SYSTEMROOT}\\System32;${process.env.SystemRoot ?? process.env.SYSTEMROOT}`
       : '/usr/bin:/bin';
 }
-let app, page, port, selector, conversationRoute;
+let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
@@ -28,8 +28,13 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
     timeout: 60000,
   });
   // Capture both assertions in the same early main-context evaluation.
-  const identity = await app.evaluate(() => ({ pid: process.pid, backendOverride: process.env.AIONUI_BACKEND_BIN }));
+  const identity = await app.evaluate(() => ({
+    pid: process.pid,
+    backendOverride: process.env.AIONUI_BACKEND_BIN,
+    resourcesPath: process.resourcesPath,
+  }));
   appPids.push(identity.pid);
+  launchResources = identity.resourcesPath;
   if (executablePath) assert.equal(identity.backendOverride, undefined);
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
@@ -75,7 +80,7 @@ try {
       .poll(async () => (await api('/api/mcp/servers')).some((row) => row.name === 'chrome-devtools'))
       .toBe(true);
     const chrome = (await api('/api/mcp/servers')).find((row) => row.name === 'chrome-devtools');
-    const resources = await app.evaluate(() => process.resourcesPath);
+    const resources = launchResources;
     const managedRoot = path.join(
       resources,
       'bundled-aioncore',

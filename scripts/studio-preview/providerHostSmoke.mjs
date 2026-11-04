@@ -61,10 +61,17 @@ const trace = (next) => {
   fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
 try {
+  let archive;
   if (executablePath) {
     const selected = process.env.AELIX_STUDIO_RUNTIME;
     assert.ok(selected, 'Installed smoke requires the selected helper runtime');
-    const installed = path.join(await app.evaluate(() => process.resourcesPath), 'studio-preview');
+    // Read immutable install identity once, before the renderer starts navigating.
+    const identity = await app.evaluate(({ app }) => ({
+      resourcesPath: process.resourcesPath,
+      archive: app.getAppPath(),
+    }));
+    archive = identity.archive;
+    const installed = path.join(identity.resourcesPath, 'studio-preview');
     // Keep the source facade's launch identity identical to the actual app;
     // Windows filesystem namespace prefixes must not create a second agent recipe.
     assert.equal(fs.realpathSync.native(selected), fs.realpathSync.native(installed));
@@ -76,7 +83,6 @@ try {
     const builder = createRequire(require.resolve('electron-builder'));
     const library = createRequire(builder.resolve('app-builder-lib'));
     const asar = library('@electron/asar');
-    const archive = await app.evaluate(({ app }) => app.getAppPath());
     const hash = (bytes) => createHash('sha256').update(bytes).digest('hex');
     for (const name of ['out/main/index.js', 'out/preload/index.js']) {
       assert.equal(
