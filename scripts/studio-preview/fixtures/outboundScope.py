@@ -88,6 +88,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             state(pid)['unparsed'] += 1
         elif call in IO_URING:
             state(pid)['io_uring'].append(call)
+            io_calls.append({'pid':pid,'call':call,'result':None,'fd':None,'flags':None,'sequence':0})
         elif call in FD_META:
             state(pid)['unparsed'] += 1
         else:

@@ -240,6 +240,14 @@ class ScopedParserTests(unittest.TestCase):
         self.assertEqual(scoped['classificationIssues'],[])
         self.assertEqual(scoped['ioUring']['opcodeCounts'],{'EPOLL_CTL':1})
 
+    def test_paired_capture_does_not_erase_unfinished_ring_syscall(self):
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[]}
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace'
+            trace.write_text('\n'.join(self.base()+['2<host> io_uring_setup(8, <unfinished ...>'])+'\n')
+            scoped,_=audit.analyze_processes([trace],(HOST,),(HOST,),False,capture)
+        self.assertGreater(scoped['classificationErrors'],0)
+
     def test_c_escaped_unicode_path_matches_without_disclosing_path(self):
         from outboundScope import decode_path
         self.assertEqual(decode_path(r'"/owned/\355\225\234\352\270\200"'), '/owned/한글')
