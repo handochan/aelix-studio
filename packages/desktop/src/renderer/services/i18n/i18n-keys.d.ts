@@ -1369,6 +1369,8 @@ export type I18nKey =
   | 'preview.html.viewElementInfo'
   | 'preview.loading'
   | 'preview.localEditorUnavailable'
+  | 'preview.localSpellingUnavailableDescription'
+  | 'preview.localSpellingUnavailableTitle'
   | 'preview.maximizePanel'
   | 'preview.mermaidTitle'
   | 'preview.missingFile.openInNewTab'

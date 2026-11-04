@@ -182,5 +182,7 @@
   "diagramZoomHint": "Molette pour zoomer • Glisser pour déplacer • Échap pour fermer",
   "remoteImageDisabled": "Les images distantes sont désactivées par les paramètres de l’hôte.",
   "remoteImageFailed": "L’hôte n’a pas pu charger cette image distante. Le chargement direct est bloqué.",
-  "localEditorUnavailable": "Impossible de charger l’éditeur local. Réparez ou réinstallez les ressources de l’application ; aucun CDN n’a été contacté."
+  "localEditorUnavailable": "Impossible de charger l’éditeur local. Réparez ou réinstallez les ressources de l’application ; aucun CDN n’a été contacté.",
+  "localSpellingUnavailableTitle": "La correction locale est indisponible",
+  "localSpellingUnavailableDescription": "Les dictionnaires locaux n’ont pas pu être chargés. Redémarrez l’application ou réparez/réinstallez ses ressources. Aucun serveur de dictionnaires distant n’est utilisé ; les autres fonctions restent disponibles."
 }

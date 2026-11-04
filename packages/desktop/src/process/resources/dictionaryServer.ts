@@ -6,7 +6,10 @@ import path from 'node:path';
 
 type DictionaryIndex = { schema: string; assets: Record<string, { path: string; sha256: string; bytes: number }> };
 
-export async function createDictionaryServer(directory: string): Promise<{ server: Server; url: string }> {
+export async function createDictionaryServer(
+  directory: string,
+  onUnavailable: () => void = () => {}
+): Promise<{ server: Server; url: string }> {
   const root = await realpath(directory);
   const index = JSON.parse(await readFile(path.join(root, 'index.json'), 'utf8')) as DictionaryIndex;
   if (index.schema !== 'aelix.spellcheck-assets/1' || !index.assets || typeof index.assets !== 'object')
@@ -29,6 +32,7 @@ export async function createDictionaryServer(directory: string): Promise<{ serve
       response.end(bytes);
     })().catch((error: unknown) => {
       console.error('[spellcheck] Local dictionary unavailable', error);
+      onUnavailable();
       response.writeHead(500);
       response.end();
     });

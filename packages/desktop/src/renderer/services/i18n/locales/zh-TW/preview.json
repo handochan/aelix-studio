@@ -182,5 +182,7 @@
   "diagramZoomHint": "滾輪縮放 • 拖曳平移 • ESC 關閉",
   "remoteImageDisabled": "主機設定已停用遠端圖片。",
   "remoteImageFailed": "主機無法載入此遠端圖片。已阻止直接載入。",
-  "localEditorUnavailable": "無法載入本機編輯器。請修復或重新安裝應用程式資源；沒有連線至 CDN。"
+  "localEditorUnavailable": "無法載入本機編輯器。請修復或重新安裝應用程式資源；沒有連線至 CDN。",
+  "localSpellingUnavailableTitle": "本機拼字檢查無法使用",
+  "localSpellingUnavailableDescription": "無法載入本機拼字字典。請重新啟動應用程式或修復、重新安裝資源。不會使用遠端字典伺服器，其他功能仍可使用。"
 }

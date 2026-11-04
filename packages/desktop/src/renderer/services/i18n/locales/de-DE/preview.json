@@ -182,5 +182,7 @@
   "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
   "remoteImageDisabled": "Remote-Bilder sind durch die Host-Einstellungen deaktiviert.",
   "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert.",
-  "localEditorUnavailable": "Der lokale Editor konnte nicht geladen werden. Reparieren oder installieren Sie die App-Ressourcen neu. Es wurde kein CDN kontaktiert."
+  "localEditorUnavailable": "Der lokale Editor konnte nicht geladen werden. Reparieren oder installieren Sie die App-Ressourcen neu. Es wurde kein CDN kontaktiert.",
+  "localSpellingUnavailableTitle": "Lokale Rechtschreibprüfung nicht verfügbar",
+  "localSpellingUnavailableDescription": "Lokale Wörterbücher konnten nicht geladen werden. Starten Sie die App neu oder reparieren/installieren Sie die Ressourcen neu. Es wird kein externer Wörterbuchserver verwendet; andere Funktionen bleiben verfügbar."
 }

@@ -182,5 +182,7 @@
   "diagramZoomHint": "滚轮缩放 • 拖拽平移 • ESC 关闭",
   "remoteImageDisabled": "主机设置已禁用远程图片。",
   "remoteImageFailed": "主机无法加载此远程图片。已阻止直接加载。",
-  "localEditorUnavailable": "无法加载本地编辑器。请修复或重新安装应用资源；没有连接 CDN。"
+  "localEditorUnavailable": "无法加载本地编辑器。请修复或重新安装应用资源；没有连接 CDN。",
+  "localSpellingUnavailableTitle": "本地拼写检查不可用",
+  "localSpellingUnavailableDescription": "无法加载本地拼写词典。请重启应用或修复、重新安装其资源。不会使用远程词典服务器，其他功能仍可使用。"
 }

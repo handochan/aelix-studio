@@ -182,5 +182,7 @@
   "diagramZoomHint": "スクロールでズーム • ドラッグで移動 • ESC で閉じる",
   "remoteImageDisabled": "ホスト設定によりリモート画像は無効です。",
   "remoteImageFailed": "ホストがこのリモート画像を読み込めませんでした。直接読み込みはブロックされています。",
-  "localEditorUnavailable": "ローカルエディターを読み込めませんでした。アプリのリソースを修復または再インストールしてください。CDN には接続していません。"
+  "localEditorUnavailable": "ローカルエディターを読み込めませんでした。アプリのリソースを修復または再インストールしてください。CDN には接続していません。",
+  "localSpellingUnavailableTitle": "ローカルのスペルチェックが利用できません",
+  "localSpellingUnavailableDescription": "ローカル辞書を読み込めませんでした。アプリの再起動、リソースの修復または再インストールを行ってください。外部辞書サーバーは使用せず、他の機能は引き続き利用できます。"
 }
