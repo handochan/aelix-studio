@@ -35,6 +35,7 @@ class CaptureStartupFailureTests(unittest.TestCase):
                 report=Path(directory)/'report.json'
                 with patch.dict(os.environ,{},clear=True), patch.object(audit.sys,'platform','linux'), \
                      patch.object(audit.shutil,'which',return_value='/usr/bin/strace'), \
+                     patch.object(audit,'npm_config_paths',return_value=[]), \
                      patch.object(audit,'npm_proxy_configured',return_value=False), \
                      patch.object(audit,'Capture',return_value=capture), \
                      patch.object(audit.subprocess,'Popen',return_value=process):
