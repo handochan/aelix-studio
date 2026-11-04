@@ -153,7 +153,10 @@
     "tabLimitReached": "标签页数量已达上限（{{count}} 个），已复用最早打开的标签页。",
     "agentFirstUseTitle": "Agent 正在使用应用内浏览器",
     "agentFirstUseContent": "它可以在这个面板里打开网页、点击和读取内容。你的登录状态会被保留。",
-    "agentFirstUseAction": "前往设置"
+    "agentFirstUseAction": "前往设置",
+    "searchConsentTitle": "允许 Bing 搜索？",
+    "searchConsentDescription": "搜索会将查询发送至 {{host}}。允许在此设备上使用 Bing 搜索吗？",
+    "searchDeclined": "未同意连接 Bing，因此没有发送搜索词。您仍可输入网址。"
   },
   "saveConflict": "保存失败：该文件在你打开后已被改动。可重新加载查看其他改动——你的编辑仍在，尚未保存。",
   "persistQuotaExceeded": "本地存储已满，无法再记住该项目打开的标签页。请关闭一些标签页或清理站点数据。",

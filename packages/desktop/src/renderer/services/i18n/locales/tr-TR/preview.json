@@ -153,7 +153,10 @@
     "tabLimitReached": "Sekme sınırına ulaşıldı ({{count}}). En eski sekme yeniden kullanıldı.",
     "agentFirstUseTitle": "Aracı uygulama içi tarayıcıyı kullanıyor",
     "agentFirstUseContent": "Bu panelde sayfa açabilir, tıklayabilir ve içerik okuyabilir. Oturum bilgileriniz korunur.",
-    "agentFirstUseAction": "Ayarları aç"
+    "agentFirstUseAction": "Ayarları aç",
+    "searchConsentTitle": "Bing aramasına izin verilsin mi?",
+    "searchConsentDescription": "Arama sorgunuzu {{host}} adresine gönderir. Bu cihazda Bing aramalarına izin verilsin mi?",
+    "searchDeclined": "Bing erişimi onaylanmadığı için arama gönderilmedi. URL girmeye devam edebilirsiniz."
   },
   "saveConflict": "Kaydedilemedi: bu dosya siz açtıktan sonra diskte değişti. Diğer değişiklikleri görmek için yeniden yükleyin — düzenlemeleriniz kaydedilmemiş olarak duruyor.",
   "persistQuotaExceeded": "Yerel depolama dolu, bu proje için açık sekmeler artık hatırlanamıyor. Bazı sekmeleri kapatın veya site verilerini temizleyin.",

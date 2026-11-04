@@ -70,23 +70,26 @@ const IPV4_RE = /^\d{1,3}(?:\.\d{1,3}){3}(?::\d+)?(?:[/?#].*)?$/;
  * bare hostname, or a search phrase. Anything containing whitespace is treated
  * as a search query.
  */
-export const resolveAddressBarInput = (raw: string): string | null => {
+export const resolveAddressBarDestination = (raw: string): { url: string; search: boolean } | null => {
   const input = raw.trim();
   if (!input) return null;
 
   const lower = input.toLowerCase();
-  if (PASSTHROUGH_SCHEMES.some((scheme) => lower.startsWith(scheme))) return input;
-  if (EXPLICIT_SCHEME_RE.test(input)) return input;
+  if (PASSTHROUGH_SCHEMES.some((scheme) => lower.startsWith(scheme))) return { url: input, search: false };
+  if (EXPLICIT_SCHEME_RE.test(input)) return { url: input, search: false };
 
   // Whitespace never appears in a hostname, so this is a search phrase.
   if (!/\s/.test(input)) {
     if (LOCALHOST_RE.test(input) || IPV4_RE.test(input) || HOST_LIKE_RE.test(input)) {
-      return `https://${input}`;
+      return { url: `https://${input}`, search: false };
     }
   }
 
-  return SEARCH_URL_TEMPLATE.replace('{query}', encodeURIComponent(input));
+  return { url: SEARCH_URL_TEMPLATE.replace('{query}', encodeURIComponent(input)), search: true };
 };
+
+/** Compatibility parser; the address bar gates only destinations marked as search. */
+export const resolveAddressBarInput = (raw: string): string | null => resolveAddressBarDestination(raw)?.url ?? null;
 
 /**
  * 供 tab 标题使用的紧凑标签，页面还没给出标题时用主机名兜底。

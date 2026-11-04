@@ -153,7 +153,10 @@
     "tabLimitReached": "Limite de abas atingido ({{count}}). A aba mais antiga foi reutilizada.",
     "agentFirstUseTitle": "O agente está usando o navegador interno",
     "agentFirstUseContent": "Ele pode abrir páginas, clicar e ler conteúdo neste painel. Seu login é preservado.",
-    "agentFirstUseAction": "Abrir configurações"
+    "agentFirstUseAction": "Abrir configurações",
+    "searchConsentTitle": "Permitir pesquisa do Bing?",
+    "searchConsentDescription": "A pesquisa envia sua consulta para {{host}}. Permitir pesquisas do Bing neste dispositivo?",
+    "searchDeclined": "A pesquisa não foi enviada porque o acesso ao Bing não foi aprovado. Você ainda pode inserir uma URL."
   },
   "saveConflict": "Não foi possível salvar: este arquivo mudou no disco depois que você o abriu. Recarregue para ver as outras alterações — suas edições continuam aqui, não salvas.",
   "persistQuotaExceeded": "O armazenamento local está cheio, então as abas abertas deste projeto não podem mais ser lembradas. Feche algumas abas ou limpe os dados do site.",
