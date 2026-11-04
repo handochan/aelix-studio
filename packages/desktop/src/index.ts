@@ -7,6 +7,7 @@
 // configureChromium sets app name (dev isolation) and Chromium flags — must run before
 // ANY module that calls app.getPath('userData'), because Electron caches the path on first call.
 import './process/utils/configureChromium';
+import { initializeOfflineSpellcheck } from './process/resources/offlineSpellcheck';
 import { initializeDesktopUpdates } from './process/services/updateFeed';
 import { installGpuCrashHandler } from './process/utils/gpuRecovery';
 import { describeUncaughtError } from './process/utils/describeUncaughtError';
@@ -707,6 +708,7 @@ const handleAppReady = async (): Promise<void> => {
   // too so installing this handler preserves Electron's default-grant behaviour
   // and regresses no capability the app already relies on. Runs once, before any
   // window is created.
+  await initializeOfflineSpellcheck();
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(true);
   });

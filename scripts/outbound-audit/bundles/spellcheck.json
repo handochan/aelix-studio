@@ -1,0 +1,609 @@
+{
+  "schema": "aelix.spellcheck-assets/1",
+  "electronVersion": "37.10.3",
+  "chromiumVersion": "138.0.7204.251",
+  "archive": {
+    "url": "https://github.com/electron/electron/releases/download/v37.10.3/hunspell_dictionaries.zip",
+    "sha256": "5e24e43346b1eea53d2ee6d1be3136d6721196914d332a44deedac326af273f0",
+    "bytes": 34406377
+  },
+  "sourceRevision": "41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e",
+  "sourceUrl": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e",
+  "license": "Per-language licenses in README_*; complete upstream COPYING* and LICENSE are included unchanged. README.chromium lists MPL 1.1 / GPL 2.0 / LGPL 2.1 / LGPL 3.0.",
+  "files": [
+    {
+      "name": "COPYING",
+      "sha256": "3f4b73294b050a8c15c9a76071f50d9ae1719a45a3920ff8c1116e5bc5e135ed",
+      "bytes": 73055
+    },
+    {
+      "name": "COPYING.Apache",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "name": "COPYING.LESSER",
+      "sha256": "d7137682540000e5f57ff3cb0b4943b66aa3ac4ecca28614ce46991fc291bd15",
+      "bytes": 7795
+    },
+    {
+      "name": "COPYING.LGPL",
+      "sha256": "5bbcbb737e60fe9deba08ecbd00920cfcc3403ba2e534c64fdeea49d6bb87509",
+      "bytes": 26532
+    },
+    {
+      "name": "COPYING.MIT",
+      "sha256": "379ddd904c597d64e11a88bba68663f59501c9fa59e8124c0f4f32a67a5dc77a",
+      "bytes": 1736
+    },
+    {
+      "name": "COPYING.MPL",
+      "sha256": "53692a2ed6c6a2c6ec9b32dd0b820dfae91e0a1fcdf625ca9ed0bdf8705fcc4f",
+      "bytes": 25755
+    },
+    {
+      "name": "LICENSE",
+      "sha256": "964d01bbfeb19c7c8ab2186d6b45c684b1abe43b31c0b54a994e1f54db63d1b6",
+      "bytes": 73009
+    },
+    {
+      "name": "af-ZA-3-0.bdic",
+      "sha256": "b1cef1b6548dfefb9ba96e01e35db096b2c15e052ff7a32ca431f20b7819879e",
+      "bytes": 2100027
+    },
+    {
+      "name": "bg-BG-3-0.bdic",
+      "sha256": "a25f46ea7b44951b23432b90a86f8bdd4b5eada215d765749213219b261017b5",
+      "bytes": 1057506
+    },
+    {
+      "name": "ca-ES-3-0.bdic",
+      "sha256": "e03b0f6b4f1926e43eef08d6984915fe2615afe81c0fedb5c6b30671c0580504",
+      "bytes": 1156964
+    },
+    {
+      "name": "cs-CZ-3-0.bdic",
+      "sha256": "fd31ba12d939c43cc71d5a00441df9bace5edcdeca735ade0e84e5f10cd410d6",
+      "bytes": 3108527
+    },
+    {
+      "name": "cy-GB-1-0.bdic",
+      "sha256": "58b4bbc81f418ff81926b4d323ea8c2aa100ae8905f151116e1dff68b22314f2",
+      "bytes": 490804
+    },
+    {
+      "name": "da-DK-3-0.bdic",
+      "sha256": "265ce85a15f2e470f7cf4bbefba0b457327af813e444f63c652f666e67de459f",
+      "bytes": 970965
+    },
+    {
+      "name": "de-DE-3-0.bdic",
+      "sha256": "076a470700dbd0aa62bb8b3d24c34e1340bdfe83cbbcfc035ce972f23c140400",
+      "bytes": 6811094
+    },
+    {
+      "name": "el-GR-3-0.bdic",
+      "sha256": "240777a5decb51a1d22756401d8c0155e094d39ba92360aafaaff73a1cbd328c",
+      "bytes": 6452802
+    },
+    {
+      "name": "en-AU-10-0.bdic",
+      "sha256": "897d1ebfacda9db1520a6b197d5f0df533b193e723b76f3ddfd0924fc5ec5521",
+      "bytes": 453781
+    },
+    {
+      "name": "en-AU-10-1.bdic",
+      "sha256": "9e045c63b05e5435cd2045c8db9e2e15239a896d3363298fcbba2a3890d74eb1",
+      "bytes": 453787
+    },
+    {
+      "name": "en-CA-10-0.bdic",
+      "sha256": "29328867a03c50887328ae04e2b9879b100b2e6c1dda14899b184aaf548e51ae",
+      "bytes": 451807
+    },
+    {
+      "name": "en-CA-10-1.bdic",
+      "sha256": "0820d1fbc03198ef2933d3a6aed58a21dca5bb901af2c1db02346a496d4b7bdc",
+      "bytes": 451813
+    },
+    {
+      "name": "en-GB-10-0.bdic",
+      "sha256": "09360839abef9fac75c3261ace41d188e2becbaed666d3a12b83245d15f69fc9",
+      "bytes": 451988
+    },
+    {
+      "name": "en-GB-10-1.bdic",
+      "sha256": "eaed4a709abdbd2f14aa143f25fe9c4c1b44591c7cb1942f75f968fb2fcd3cf8",
+      "bytes": 451994
+    },
+    {
+      "name": "en-GB-oxendict-10-0.bdic",
+      "sha256": "bb514cffce85735699f03253ecdcfd927e6d5f3a05c973e66b5a62f51bff8255",
+      "bytes": 451933
+    },
+    {
+      "name": "en-GB-oxendict-10-1.bdic",
+      "sha256": "4e5104860d54c630eb638cf491734a55353de2316a2015c01245affc19690902",
+      "bytes": 451939
+    },
+    {
+      "name": "en-US-10-0.bdic",
+      "sha256": "7425f501d6146cb1bf051518ce36592c49441785620a3d2da921d160da9614ec",
+      "bytes": 451962
+    },
+    {
+      "name": "en-US-10-1.bdic",
+      "sha256": "a075b01d9b015c616511a9e87da77da3d9881621db32f584e4606ddabf1c1100",
+      "bytes": 451968
+    },
+    {
+      "name": "es-ES-3-0.bdic",
+      "sha256": "e6334dcf080aaeca679db70565762a2c296ff5780c1af263530ac7345736bfa9",
+      "bytes": 785066
+    },
+    {
+      "name": "et-EE-3-0.bdic",
+      "sha256": "282c6ba4a34740dd06bb37de88b7950c8979096bf62cd4e648f1121c86b1d428",
+      "bytes": 2458725
+    },
+    {
+      "name": "fa-IR-9-0.bdic",
+      "sha256": "8c0084622b9ec19f9bb4a024e3df497ecc615a33a095f2e0a5db9eb7a1655031",
+      "bytes": 1044412
+    },
+    {
+      "name": "fo-FO-3-0.bdic",
+      "sha256": "4118aa699106e2a725af1464aaa72f066a8890f3d452ed3c8a9f755e49afb7d4",
+      "bytes": 1537517
+    },
+    {
+      "name": "fr-FR-3-0.bdic",
+      "sha256": "6cffc13b549c33d44180a3a7b13943fe0eadfbe80bcdbccc76f67c55c2012968",
+      "bytes": 1074744
+    },
+    {
+      "name": "he-IL-3-0.bdic",
+      "sha256": "66e9d835e9f40601a46ed5fe1a671a22f7c3440b39d6cb154648681230b7f638",
+      "bytes": 2272411
+    },
+    {
+      "name": "hi-IN-3-0.bdic",
+      "sha256": "7b1eb10f38f57a4638fdb1a9f08fe0765b5791c23ebeec6f5f28de32e4886f9b",
+      "bytes": 223868
+    },
+    {
+      "name": "hr-HR-3-0.bdic",
+      "sha256": "2c412f41b48c80ab8bb04705c6aece9ca0d39f4a5cb1b5098708ca29477c9b60",
+      "bytes": 1588645
+    },
+    {
+      "name": "hu-HU-3-0.bdic",
+      "sha256": "9d4462fa6a49f742b02ce0291033b7df71ccfbe6b23dabaa5513d3b66dbd3be9",
+      "bytes": 2784888
+    },
+    {
+      "name": "hy-1-0.bdic",
+      "sha256": "f6d306587c69cdb1231f44300b0426cc96c5262ee29d7e490af6623f3e56d585",
+      "bytes": 2191121
+    },
+    {
+      "name": "id-ID-3-0.bdic",
+      "sha256": "3726e15a96fcba6d54302386de742c011af68b2de491f099bbf917fc23fd74af",
+      "bytes": 231105
+    },
+    {
+      "name": "it-IT-3-0.bdic",
+      "sha256": "8b83a0d4bba4cfcd4a4e7ee89b703014a00a5c08e721e568a5c552a732827fff",
+      "bytes": 983219
+    },
+    {
+      "name": "ko-3-0.bdic",
+      "sha256": "75b5e033a0d6e1bba1e7ce6aad6f723d84128cda7f2048339c8c498f049f49bc",
+      "bytes": 11476456
+    },
+    {
+      "name": "lt-LT-3-0.bdic",
+      "sha256": "ab581380a130cfc8601556264370510e104a08ac4326daa132e93528e6784710",
+      "bytes": 917849
+    },
+    {
+      "name": "lv-LV-3-0.bdic",
+      "sha256": "6229b4090600e584d06f826b7efb55f338e14cb653779386d4b6feb4d9716667",
+      "bytes": 1828731
+    },
+    {
+      "name": "nb-NO-3-0.bdic",
+      "sha256": "14b5601cbccb6b270ccc421cb687dc490ecb3ad96ffc2bb8bc4ebee5d379168f",
+      "bytes": 1534513
+    },
+    {
+      "name": "nl-NL-3-0.bdic",
+      "sha256": "43eea1bd8149c1a24f4388ade6a261a981ca2e786e7df12e606295a8024b150e",
+      "bytes": 1807935
+    },
+    {
+      "name": "pl-PL-3-0.bdic",
+      "sha256": "a04c51759b6e54f01e628dfc6354ca88a0711d8bcefa6a8c0e8baa04156fb92e",
+      "bytes": 3233589
+    },
+    {
+      "name": "pt-BR-3-0.bdic",
+      "sha256": "6b2850f5a54994a5204a9a88d4b586e9d4e028a0360b67352b04cffdb2a3e0ea",
+      "bytes": 3923495
+    },
+    {
+      "name": "pt-PT-3-0.bdic",
+      "sha256": "a6dfc3332b15a6cdf06be3f28024f22e40e0467cf0400f8ce9c43cf1af2c3f40",
+      "bytes": 407258
+    },
+    {
+      "name": "ro-RO-3-0.bdic",
+      "sha256": "0db54e3f28291d0fd28f049a61a76ade5a98591b6ae16cb7113e2561b0760ec4",
+      "bytes": 1478687
+    },
+    {
+      "name": "ru-RU-3-0.bdic",
+      "sha256": "92dcc64fb0b0c065b443abf9de6fb58116b2a64c49427d3715fa7536ad1c53b8",
+      "bytes": 2309618
+    },
+    {
+      "name": "sh-3-0.bdic",
+      "sha256": "63659ba6cf76c11f3637d04c5e19bd53c586083d76379a887f8f3317885eaead",
+      "bytes": 1473320
+    },
+    {
+      "name": "sh-4-0.bdic",
+      "sha256": "7d2fb58d3e5791e047d97d85d64714eda583351fcfc9dbe076335af77dd6111c",
+      "bytes": 2755632
+    },
+    {
+      "name": "sk-SK-3-0.bdic",
+      "sha256": "c4ef7e950bda27505c9103cd72abc01cd8d3f1a36d85708b9cc6d8e7dd230547",
+      "bytes": 1668425
+    },
+    {
+      "name": "sl-SI-3-0.bdic",
+      "sha256": "92427a12b6796b043bfb99d39b12ed09b0210ab5ab7dcad31e5b2158a7da17d8",
+      "bytes": 2020525
+    },
+    {
+      "name": "sq-3-0.bdic",
+      "sha256": "b4498e4ccc005fa492d7c9bb35b7c88fa307952342333790bba8f16a4a8b5d7f",
+      "bytes": 1645240
+    },
+    {
+      "name": "sr-3-0.bdic",
+      "sha256": "5a995e3735e341875576d34aa08d96f87ce5d46d4a4ef67be38d0a1c02da4fc5",
+      "bytes": 1899637
+    },
+    {
+      "name": "sr-4-0.bdic",
+      "sha256": "ec2660e14e2799fdcbbe897bde440d382869623efe3e63f844105c4e99921a17",
+      "bytes": 3682587
+    },
+    {
+      "name": "sv-SE-3-0.bdic",
+      "sha256": "1823f1ae5ed2b1568924894d6447c2efa5bd5510cd71cd4bd2e9e251ff367447",
+      "bytes": 1487321
+    },
+    {
+      "name": "ta-IN-3-0.bdic",
+      "sha256": "fa354a4e6b27704b9efeee71ed29b6956f93fb5c6f9bd64df39a4e72fb54c9ce",
+      "bytes": 1410211
+    },
+    {
+      "name": "tg-TG-5-0.bdic",
+      "sha256": "d474ac5e044409d54b394b4b8ffb47e7036884d2d1e22e2832e887f3006e75c9",
+      "bytes": 1173108
+    },
+    {
+      "name": "tr-TR-4-0.bdic",
+      "sha256": "3085511d86a0a3bc65d970ae98c4f89a48d5405148297a5d48fab3c8c85e7f70",
+      "bytes": 9644083
+    },
+    {
+      "name": "uk-UA-4-0.bdic",
+      "sha256": "5f3e32ab6ea931636b3c1fd063678b59768c81113a259058497ba920c6ef645d",
+      "bytes": 5026833
+    },
+    {
+      "name": "uk-UA-5-0.bdic",
+      "sha256": "7c2b48c7bbc6f70bd4d74cb050ee7105848506361f5078b4e574bea3c6089e54",
+      "bytes": 5327186
+    },
+    {
+      "name": "vi-VN-3-0.bdic",
+      "sha256": "451ab9d873a39a38a6cabd52f35b4787837a63473d712023c73e59cf9e4a4aca",
+      "bytes": 60036
+    },
+    {
+      "name": "xx-XX-3-0.bdic",
+      "sha256": "b42cd6ba5909f3d723edaaef9a6e738b79da510ad66664fd99ec53f0bc021db3",
+      "bytes": 1982
+    }
+  ],
+  "notices": [
+    {
+      "name": "README.chromium",
+      "sha256": "c5b8ce58626509905a4b9a71f57839f795b1aebe874aa3d61f115d796f2c732e",
+      "bytes": 9763,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README.chromium?format=TEXT"
+    },
+    {
+      "name": "README_bg_BG.txt",
+      "sha256": "d1aecf5b27c93260b844ad47b8e5cb3bdd75145a0e9cb651611c456002060a5e",
+      "bytes": 2426,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_bg_BG.txt?format=TEXT"
+    },
+    {
+      "name": "README_ca_ES.txt",
+      "sha256": "89f5168bcf3c564520e81604d2b53e7edb99d81c187b59458f8c2a09a6b7b7c8",
+      "bytes": 4750,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_ca_ES.txt?format=TEXT"
+    },
+    {
+      "name": "README_cs_CZ.txt",
+      "sha256": "1583fd5d8640e924497124a8786828f17d9b73f8c84be8ba0ed4edf04b0a67ff",
+      "bytes": 19322,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_cs_CZ.txt?format=TEXT"
+    },
+    {
+      "name": "README_cy_GB.txt",
+      "sha256": "10faa1a70f2f002783cda3f0b0af3aa9e5ee6795f16176789fd4df3a887e1425",
+      "bytes": 1465,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_cy_GB.txt?format=TEXT"
+    },
+    {
+      "name": "README_da_DK.txt",
+      "sha256": "08c70c517b1ea1bd59b9d2fcb1a60868fdca75d3931a6affb02f296cf3c15810",
+      "bytes": 1087,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_da_DK.txt?format=TEXT"
+    },
+    {
+      "name": "README_de_DE.txt",
+      "sha256": "b45a23299baa504f16579dd701b5b5e9437d747261436a0f23259e1d114e5d0f",
+      "bytes": 18767,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_de_DE.txt?format=TEXT"
+    },
+    {
+      "name": "README_de_DE_neu.txt",
+      "sha256": "9ef26e87938c4432ba4854663ba0196124880447a007c87d126fae87fdcade8c",
+      "bytes": 5731,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_de_DE_neu.txt?format=TEXT"
+    },
+    {
+      "name": "README_el_GR.txt",
+      "sha256": "421aabb24c2dd7ce5fc8c1d67d0588faedeb29e5f5704e65b50acaa02b8eb859",
+      "bytes": 1811,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_el_GR.txt?format=TEXT"
+    },
+    {
+      "name": "README_en_AU.txt",
+      "sha256": "f0897dcfdf058bcfc93fbc8e7e1b5da4c27ae9e175ee3a9242e887f02eb84a8b",
+      "bytes": 15732,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_en_AU.txt?format=TEXT"
+    },
+    {
+      "name": "README_en_CA.txt",
+      "sha256": "86700e39b2307dda4c087ad3505a1e634a5b4d518ab808c398a16d21ebe957e2",
+      "bytes": 15732,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_en_CA.txt?format=TEXT"
+    },
+    {
+      "name": "README_en_GB.txt",
+      "sha256": "0bcf1616b29dee3fbcbef1428b0c3d4d77f6a36cc88b9e130ee65e5382899029",
+      "bytes": 15740,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_en_GB.txt?format=TEXT"
+    },
+    {
+      "name": "README_en_GB_oxendict.txt",
+      "sha256": "21d3729630ef43ac2623163acee92f26d3505124998df6c7d6a4b404c39eb3e9",
+      "bytes": 15740,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_en_GB_oxendict.txt?format=TEXT"
+    },
+    {
+      "name": "README_en_US.txt",
+      "sha256": "168b4c01cb841f766a72f310b065c04d09cff46376c37a81d799593ce751c371",
+      "bytes": 15732,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_en_US.txt?format=TEXT"
+    },
+    {
+      "name": "README_es_ES.txt",
+      "sha256": "fd1c372edc60847a4c60b5a368864e760e39117adb0a5a80a4bf96a128620f2a",
+      "bytes": 6090,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_es_ES.txt?format=TEXT"
+    },
+    {
+      "name": "README_et_EE.txt",
+      "sha256": "3346f1a79edd24b900e8d7c18f22b90f47a905292ea9705dc43920a6cb7fb7a8",
+      "bytes": 56143,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_et_EE.txt?format=TEXT"
+    },
+    {
+      "name": "README_fa_IR.txt",
+      "sha256": "75c8983fc7e131c9813a7829c9d114e631545740052ed6f576b29d0163a65738",
+      "bytes": 889,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_fa_IR.txt?format=TEXT"
+    },
+    {
+      "name": "README_fr_FR.txt",
+      "sha256": "c22ed899c73989a145655cf7401422a5a682e88da0574e4a8e8c9c1b274b9b60",
+      "bytes": 3227,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_fr_FR.txt?format=TEXT"
+    },
+    {
+      "name": "README_he_IL.txt",
+      "sha256": "ba078442aac0005f7df77ab1d729dcc89d3fe1ceb3bc4f3554bdba221be88f4d",
+      "bytes": 323,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_he_IL.txt?format=TEXT"
+    },
+    {
+      "name": "README_hi_IN.txt",
+      "sha256": "2b373a1e07efe18e89c04c7f69bd540681a5926edcb478a4331d0df387861487",
+      "bytes": 2754,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_hi_IN.txt?format=TEXT"
+    },
+    {
+      "name": "README_hr_HR.txt",
+      "sha256": "85de8935c7e9d1a7f1ded67e707a05e453a0b424d62c687b449a87b513351aa1",
+      "bytes": 116,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_hr_HR.txt?format=TEXT"
+    },
+    {
+      "name": "README_hu_HU.txt",
+      "sha256": "273e34c8acac3f654792f23bfd4c0a6880ec0503bab907dcab882d1f4a3c9c77",
+      "bytes": 826,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_hu_HU.txt?format=TEXT"
+    },
+    {
+      "name": "README_hy.txt",
+      "sha256": "f4b033e9ec603dce229c0a587fbfbec3e3e74269cd712877c8d4e808caab48b0",
+      "bytes": 1776,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_hy.txt?format=TEXT"
+    },
+    {
+      "name": "README_id_ID.txt",
+      "sha256": "0d767ea512daa43c91fdc743071cd7f998bcbd1c875b8aec1c6f73e88be94a7b",
+      "bytes": 39061,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_id_ID.txt?format=TEXT"
+    },
+    {
+      "name": "README_it_IT.txt",
+      "sha256": "c2b8b4b661fb6e2187a0b083fd3e6898f4f1a470d2885f4170708a5dd932d21c",
+      "bytes": 16363,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_it_IT.txt?format=TEXT"
+    },
+    {
+      "name": "README_ko.txt",
+      "sha256": "d10241be766d5e0dca1cf91617bfcf8d3c398745f89366ba807ffe10fb8b9ac5",
+      "bytes": 77276,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_ko.txt?format=TEXT"
+    },
+    {
+      "name": "README_lt_LT.txt",
+      "sha256": "5f26149f4f5dca63f493b893dd95721ea6034dfc5b1b3415c547e1dd0d7f8ffc",
+      "bytes": 3244,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_lt_LT.txt?format=TEXT"
+    },
+    {
+      "name": "README_lv_LV.txt",
+      "sha256": "ab61325f30c79af243e69bb030cea83bfdf3af60b425c17b6cc7ae7e7df09a8e",
+      "bytes": 36323,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_lv_LV.txt?format=TEXT"
+    },
+    {
+      "name": "README_nb_NO.txt",
+      "sha256": "b2e66abb5638ea20533ddb0054bad00bcb86ad7ad9f01bf70ecae5d03bb84357",
+      "bytes": 285,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_nb_NO.txt?format=TEXT"
+    },
+    {
+      "name": "README_nl_NL.txt",
+      "sha256": "9250339bfec3e0aaaf14749e6585d4ae02fdd214d21d2d85af8a78e7f8ed175c",
+      "bytes": 6227,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_nl_NL.txt?format=TEXT"
+    },
+    {
+      "name": "README_pl_PL.txt",
+      "sha256": "43c04d543d1c8b92c47373b3627386c16f2f6d80c108a8ebeae8709e7d1e276c",
+      "bytes": 802,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_pl_PL.txt?format=TEXT"
+    },
+    {
+      "name": "README_pt_BR.txt",
+      "sha256": "36383a89f3f98b5d7b2b7a7620d46ed5867dafb5b1bb2c1c11a15eddb29fdb6a",
+      "bytes": 4414,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_pt_BR.txt?format=TEXT"
+    },
+    {
+      "name": "README_pt_PT.txt",
+      "sha256": "167798180368345350a184011c4e73b30f7bbb1ec4cd92fca136e62c2c7a04cf",
+      "bytes": 2154,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_pt_PT.txt?format=TEXT"
+    },
+    {
+      "name": "README_ro_RO.txt",
+      "sha256": "c3638323e46b9b93b824b3180497ab2c5163d08c46c6ea84c082fffbd46de1b8",
+      "bytes": 1625,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_ro_RO.txt?format=TEXT"
+    },
+    {
+      "name": "README_ru_RU.txt",
+      "sha256": "ab0a15a2977d17936f8361c0644834aaa286aa0f76ff4a707e9435212b1387b2",
+      "bytes": 12070,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_ru_RU.txt?format=TEXT"
+    },
+    {
+      "name": "README_sh.txt",
+      "sha256": "96e212df63ba277d68ab3f8dd177143b7845943bdf098de5a7222f97da5aee04",
+      "bytes": 773,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sh.txt?format=TEXT"
+    },
+    {
+      "name": "README_sk_SK.txt",
+      "sha256": "b011321f5678107216b916f9b0a0b531c1cff90749bc6d623d6d65556905532f",
+      "bytes": 69940,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sk_SK.txt?format=TEXT"
+    },
+    {
+      "name": "README_sl_SI.txt",
+      "sha256": "f029062396d3e2f874110cd1453cd42dd6a96e3cb25f29e8738800d744d80301",
+      "bytes": 1662,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sl_SI.txt?format=TEXT"
+    },
+    {
+      "name": "README_sq.txt",
+      "sha256": "78a024dc1102e9239d37733db0d2b9ac3c8a82de5fd0d53b3023cb12e2e8601b",
+      "bytes": 82,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sq.txt?format=TEXT"
+    },
+    {
+      "name": "README_sr.txt",
+      "sha256": "616a341d2ebc21c2a7a8a0839fdec9942a1f8954a9458cf4d5a214fb4805b54f",
+      "bytes": 782,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sr.txt?format=TEXT"
+    },
+    {
+      "name": "README_sv_SE.txt",
+      "sha256": "058f7939396d5c41182abb0262ebeed8271986f4643745c535ab7a281586dcf1",
+      "bytes": 475,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_sv_SE.txt?format=TEXT"
+    },
+    {
+      "name": "README_ta_IN.txt",
+      "sha256": "53ff26dce17dbce97db07b7682e182514edfd545d86b1f80d130e67709ed5503",
+      "bytes": 2763,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_ta_IN.txt?format=TEXT"
+    },
+    {
+      "name": "README_tg_TG.txt",
+      "sha256": "89d9367af0a3defe237403f2ddf322612853d1d1f3ddd305d249735accbf6d8b",
+      "bytes": 10480,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_tg_TG.txt?format=TEXT"
+    },
+    {
+      "name": "README_tr.txt",
+      "sha256": "5d83af1116926e152359c5259993ade5337a4b51d6afc38b53a36831f96b3cab",
+      "bytes": 79,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_tr.txt?format=TEXT"
+    },
+    {
+      "name": "README_uk_UA.txt",
+      "sha256": "02cf996a1a62da8c990c6d03553d1e4ecc2ad65daa04900251875e086b3036d5",
+      "bytes": 606,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_uk_UA.txt?format=TEXT"
+    },
+    {
+      "name": "README_vi_VN.txt",
+      "sha256": "5a8780e6a04e622b173770c2dab9b4877ad4ded9d3064e12d693464325f8d9ae",
+      "bytes": 2935,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_vi_VN.txt?format=TEXT"
+    },
+    {
+      "name": "README_xx_XX.txt",
+      "sha256": "7831cca45b4f45d34908ed8bdca13bb85fbe4ab0a20e6c7af4fa085019fbd17c",
+      "bytes": 320,
+      "url": "https://chromium.googlesource.com/chromium/deps/hunspell_dictionaries/+/41cdffd71c9948f63c7ad36e1fb0ff519aa7a37e/README_xx_XX.txt?format=TEXT"
+    }
+  ]
+}

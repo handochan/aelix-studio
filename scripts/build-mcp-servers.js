@@ -26,6 +26,7 @@ const SHARED_OPTIONS = {
 };
 
 async function main() {
+  await require('./outbound-audit/bundles/spellcheck.cjs').prepare();
   await Promise.all([
     esbuild.build({
       ...SHARED_OPTIONS,

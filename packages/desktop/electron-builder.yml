@@ -103,6 +103,8 @@ files:
     to: static
 
 extraResources:
+  - from: .local/offline-spellcheck
+    to: offline-spellcheck
   - from: public
     to: .
   - from: resources/app.png
