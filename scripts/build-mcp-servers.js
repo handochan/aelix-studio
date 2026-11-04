@@ -13,6 +13,7 @@
 
 const esbuild = require('esbuild');
 const path = require('path');
+const fs = require('node:fs/promises');
 
 const ROOT = path.resolve(__dirname, '..');
 
@@ -27,6 +28,9 @@ const SHARED_OPTIONS = {
 
 async function main() {
   await require('./outbound-audit/bundles/spellcheck.cjs').prepare();
+  const chromePackage = require.resolve('chrome-devtools-mcp/package.json');
+  if (require(chromePackage).version !== '0.16.0') throw new Error('Unexpected browser MCP version');
+  await fs.cp(path.dirname(chromePackage), path.join(ROOT, 'out/main/chrome-devtools-mcp'), { recursive: true });
   await Promise.all([
     esbuild.build({
       ...SHARED_OPTIONS,

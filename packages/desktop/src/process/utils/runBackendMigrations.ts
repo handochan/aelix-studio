@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { migrateConfigStorage, migrateLegacyMcpConfigToDb, migrateProviders } from '@/common/config/configMigration';
 import { httpRequest } from '@/common/adapter/httpBridge';
@@ -202,8 +203,15 @@ function buildBuiltinBrowserServer(): McpImportServer {
 
 function buildDefaultMcpServers(): McpImportServer[] {
   const chromeConfig = {
-    command: 'npx',
-    args: ['-y', 'chrome-devtools-mcp@latest'],
+    command: 'node',
+    args: [
+      path.join(
+        path.dirname(getBuiltinMcpScriptPath(BUILTIN_BROWSER_SCRIPT)),
+        'chrome-devtools-mcp/build/src/index.js'
+      ),
+      '--no-usage-statistics',
+    ],
+    env: { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' },
   };
 
   return [
@@ -216,6 +224,7 @@ function buildDefaultMcpServers(): McpImportServer[] {
         type: 'stdio',
         command: chromeConfig.command,
         args: chromeConfig.args,
+        env: chromeConfig.env,
       },
       original_json: JSON.stringify({ mcpServers: { [BUILTIN_CHROME_DEVTOOLS_NAME]: chromeConfig } }, null, 2),
     },
@@ -331,6 +340,26 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
         builtin: true,
         original_json: buildOriginalJsonFromTransport(existingChromeDevtools),
       },
+    });
+  }
+
+  // Only migrate the exact Studio-owned old package command. Customized user
+  // servers/flags/registries remain user configured connections.
+  if (
+    existingChromeDevtools?.transport.type === 'stdio' &&
+    existingChromeDevtools.transport.command === 'npx' &&
+    existingChromeDevtools.transport.args?.length === 2 &&
+    existingChromeDevtools.transport.args[0] === '-y' &&
+    ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@0.16.0'].includes(existingChromeDevtools.transport.args[1])
+  ) {
+    const bundled = defaultServers.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME)!;
+    const transport = {
+      ...bundled.transport,
+      env: { ...existingChromeDevtools.transport.env, CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' },
+    };
+    await mcpService.updateServer.invoke({
+      id: existingChromeDevtools.id,
+      data: { transport, original_json: buildOriginalJsonFromTransport({ ...existingChromeDevtools, transport }) },
     });
   }
 

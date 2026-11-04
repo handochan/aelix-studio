@@ -29,3 +29,33 @@ Unknown paths, traversal and checksum mismatch fail locally, with no CDN fallbac
 The spellchecker stays enabled. The `spellcheckSmoke.cjs` fixture verifies real
 Electron dictionary initialization and correction of a misspelled word in a
 fresh user profile on Linux with `--network none`.
+
+## Browser MCP
+
+`chrome-devtools-mcp` is an exact development/build input at `0.16.0`, locked in
+`bun.lock` with npm integrity
+`sha512-Jw+h8OGhpU9UjXl7Mm4yZe8IRzHmC19VNPP48+MI8AkWtCmnsbOsZ0hdoV2oq0veh3T1OcBbZSFHXVpFMBBi9Q==`.
+The upstream npm artifact already includes its dependencies under `build/src/third_party`
+and has no runtime npm dependency entries. Its complete package (including original
+Apache-2.0 license and dependency notices) is copied unchanged beside the wrapper
+and unpacked for external Node. No runtime `npx` or npm installer is used.
+Source: [upstream 0.16.0](https://github.com/ChromeDevTools/chrome-devtools-mcp/tree/chrome-devtools-mcp-v0.16.0).
+
+The in-app wrapper uses `process.execPath` for its child and an absolute sibling
+entry. The outer DB transport remains `node [builtin-mcp-browser.js]`; the pinned
+host's `probe_runtime_command("node")` selects its existing managed Node, without
+entering its npx/registry package resolver. The default-disabled standalone Chrome
+row also uses the local package. Only the exact old Studio-owned `npx -y
+chrome-devtools-mcp@latest`/`@0.16.0` row migrates, preserving enablement and custom
+environment. Customized commands stay user configuration. Disabled-server
+preflight remains skipped; bundled Node rows cannot enter the npx preflight.
+Host source: [pinned runtime command classification](https://github.com/handochan/aelix-studio-host/blob/c516fa9/crates/aionui-runtime/src/node_runtime/mod.rs).
+No host source/pin changes are required.
+
+`browserMcpSmoke.mjs` runs the real wrapper with an empty PATH, an unavailable
+registry and no credentials. It verifies initialize version 0.16.0, tools/list
+(including navigate_page/list_pages), usage-statistics opt-out and clean shutdown.
+The Linux installed-app job repeats it with installed bundled Node and the common
+blocking auditor. Local Linux arm64 with no external network returned 26 tools,
+external/unparsed/classification 0/0/0. Tool execution against a real page is a
+separate browser/host acceptance boundary.

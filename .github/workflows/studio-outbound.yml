@@ -66,7 +66,8 @@ jobs:
           python - <<'PY'
           import json
           report = json.load(open('.local/outbound/positive.json'))
-          assert report['externalAttempts'] == 2 and report['unparsedRecords'] == 0, report
+          if report['externalAttempts'] != 2 or report['unparsedRecords'] != 0:
+              raise RuntimeError('TCP/UDP positive control mismatch')
           PY
       - name: Prove transport and UDP lifecycle controls
         run: python -I -B scripts/studio-preview/fixtures/outboundAudit.py --transport-controls .local/outbound/transport-controls
@@ -90,6 +91,22 @@ jobs:
           PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
         run: |
           xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/default-startup.json -- node scripts/outbound-audit/startup.mjs .local/outbound/startup-qualification.json
+      - name: Qualify bundled browser MCP without PATH tools or registry access
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          python - <<'PYTHON'
+          from pathlib import Path
+          import subprocess
+          import sys
+          nodes = list(Path('/opt/AionUi/resources/bundled-aioncore').glob('*/managed-resources/node/*/bin/node'))
+          if len(nodes) != 1:
+              raise RuntimeError('Expected exactly one installed bundled Node')
+          subprocess.run([sys.executable, '-I', '-B', 'scripts/studio-preview/fixtures/outboundAudit.py',
+              '--report', '.local/outbound/browser-mcp-outbound.json', '--', str(nodes[0]),
+              'scripts/outbound-audit/bundles/browserMcpSmoke.mjs',
+              '/opt/AionUi/resources/app.asar.unpacked/out/main/builtin-mcp-browser.js',
+              '.local/outbound/browser-mcp.json'], check=True)
+          PYTHON
       - name: Qualify default-on Studio update checks with blocked network
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:

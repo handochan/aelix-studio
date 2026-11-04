@@ -242,6 +242,35 @@ describe('disabled MCP startup preflight', () => {
       }
     );
   });
+  it('migrates the owned remote package command to bundled Node without changing enablement', async () => {
+    listServersMock.mockResolvedValue([chromeServer(false)]);
+    await runBackendMigrations(configFile as never);
+    expect(updateServerMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'chrome-id',
+        data: expect.objectContaining({
+          transport: expect.objectContaining({
+            command: 'node',
+            args: expect.arrayContaining(['--no-usage-statistics']),
+          }),
+        }),
+      })
+    );
+    expect(
+      updateServerMock.mock.calls
+        .filter(([request]) => request.id === 'chrome-id')
+        .every(([request]) => request.data.enabled === undefined)
+    ).toBe(true);
+  });
+  it('preserves customized package arguments', async () => {
+    const server = chromeServer(false);
+    server.transport = { type: 'stdio', command: 'npx', args: ['-y', 'custom-mcp@1.0', '--custom'] };
+    listServersMock.mockResolvedValue([server]);
+    await runBackendMigrations(configFile as never);
+    expect(updateServerMock.mock.calls.some(([request]) => request.id === 'chrome-id' && request.data.transport)).toBe(
+      false
+    );
+  });
   it('never probes or tests a disabled chrome-devtools server, even without system npx', async () => {
     listServersMock.mockResolvedValue([chromeServer(false)]);
     await runBackendMigrations(configFile as never);

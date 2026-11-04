@@ -78,41 +78,15 @@ export const resolveBridgeToken = (deps: ResolveBrowserUrlDeps): string | null =
   return raw ? raw : null;
 };
 
-/**
- * 决定用什么命令行拉起 chrome-devtools-mcp。
- *
- * 抽到这里只为可测：browserServer.ts 顶层就 spawn，单测没法 import 它，于是 Windows
- * 那条分支以前完全没有测试覆盖 —— 这正是 issue #3883 能溜过去的原因。
- *
- * Windows 上 npx 是 npx.cmd，批处理文件没有终端无法自己执行，直接 spawn 会抛 EINVAL
- * （CVE-2024-27980 之后 Node 收紧了 .cmd 处理）。这里走 cmd.exe /c 而不是 shell: true，
- * 理由见 browserServer.ts 里的详细说明（DEP0190 + browserUrl 会被 shell 解析）。
- *
- * Decides the command line used to launch chrome-devtools-mcp. Extracted purely for
- * testability: browserServer.ts spawns at module scope so tests cannot import it, which left
- * the Windows branch with no coverage at all — the reason issue #3883 slipped through.
- *
- * On Windows npx is npx.cmd, a batch file that cannot execute without a terminal, so spawning
- * it directly throws EINVAL (Node tightened .cmd handling after CVE-2024-27980). We route
- * through cmd.exe /c rather than shell: true; see browserServer.ts for the full rationale
- * (DEP0190, plus browserUrl would be parsed by the shell).
- */
+/** Execute the pinned local package with the same Node binary as this wrapper. */
 export const buildMcpSpawnCommand = (deps: {
-  platform: string;
-  version: string;
+  nodePath: string;
+  scriptPath: string;
   browserUrl: string;
-}): { command: string; args: string[] } => {
-  const mcpArgs = [
-    '-y',
-    `chrome-devtools-mcp@${deps.version}`,
-    '--no-usage-statistics',
-    '--browser-url',
-    deps.browserUrl,
-  ];
-  return deps.platform === 'win32'
-    ? { command: 'cmd.exe', args: ['/c', 'npx', ...mcpArgs] }
-    : { command: 'npx', args: mcpArgs };
-};
+}): { command: string; args: string[] } => ({
+  command: deps.nodePath,
+  args: [deps.scriptPath, '--no-usage-statistics', '--browser-url', deps.browserUrl],
+});
 
 /** Disable upstream metrics and npm background notices for the Studio-owned browser tool. */
 export function buildBrowserMcpEnv(environment: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
