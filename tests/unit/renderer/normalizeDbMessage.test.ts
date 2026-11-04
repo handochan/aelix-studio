@@ -5,7 +5,7 @@
  */
 
 import { describe, expect, it } from 'vitest';
-import { normalizeDbMessage } from '@/renderer/pages/conversation/Messages/hooks';
+import { normalizeDbMessage, foldSupersededTips } from '@/renderer/pages/conversation/Messages/hooks';
 import type { IMessageText, IMessageTips } from '@/common/chat/chatLib';
 
 describe('normalizeDbMessage', () => {
@@ -208,5 +208,52 @@ describe('normalizeDbMessage', () => {
     expect(normalized.content).toEqual({
       content: 'ordinary assistant response',
     });
+  });
+});
+
+describe('host MCP warning history', () => {
+  it('keeps the latest reason per MCP server when reopening history', () => {
+    const rows = [
+      ['a1', 'server-a', 'OUTBOUND_DISABLED'],
+      ['b1', 'server-b', 'OUTBOUND_CONFIG_INVALID'],
+      ['a2', 'server-a', 'OUTBOUND_CONFIG_INVALID'],
+    ].map(([id, server, reason]) =>
+      normalizeDbMessage({
+        id,
+        type: 'tips',
+        conversation_id: 'c',
+        content: JSON.stringify({
+          content: `MCP server '${server}': ${reason}`,
+          severity: 'warning',
+          code: 'MCP_SERVER_UNAVAILABLE',
+          params: { server_id: server },
+          supersedes_key: `mcp-unavailable:${server}`,
+        }),
+      } as unknown as IMessageTips)
+    );
+    const folded = foldSupersededTips(rows) as IMessageTips[];
+    expect(folded).toHaveLength(2);
+    expect(folded.map((item) => item.content.content)).toEqual([
+      "MCP server 'server-a': OUTBOUND_CONFIG_INVALID",
+      "MCP server 'server-b': OUTBOUND_CONFIG_INVALID",
+    ]);
+    expect(
+      folded.every((item) => item.content.type === 'warning' && item.content.code === 'MCP_SERVER_UNAVAILABLE')
+    ).toBe(true);
+  });
+  it('retains lockedBy and protocol_code when opening a saved structured error', () => {
+    const error = {
+      message: 'locked',
+      code: 'USER_AGENT_SESSION_LOCKED',
+      protocol_code: -33001,
+      data: { lockedBy: 'native', holder: null },
+      retryable: false,
+    };
+    const row = normalizeDbMessage({
+      id: 'e',
+      type: 'tips',
+      content: JSON.stringify({ content: 'locked', type: 'error', error }),
+    } as unknown as IMessageTips) as IMessageTips;
+    expect(row.content.error).toEqual(error);
   });
 });

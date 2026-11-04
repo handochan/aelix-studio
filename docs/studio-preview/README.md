@@ -1,4 +1,4 @@
-# Studio #28 Beta candidate baseline — host `aelix.2`
+# Studio #28 Beta candidate baseline — phase two
 
 Current executable pins are in [baseline.json](../../scripts/studio-preview/baseline.json).
 The historical Preview evidence below describes older commits and public beta.2 wheels.
@@ -6,9 +6,9 @@ It does not establish acceptance for this candidate or for the public joint Beta
 
 | Component               | Exact source / archive SHA-256                                                                                                |
 | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| Studio base             | `ce98f677a41e7f34c5f7f1609508b7e96289f5f2`                                                                                    |
-| Host                    | `host-v0.2.2-aelix.2`, commit `2e1c31006bc0429324e0c37e222575dcdb06b1a2`                                                      |
-| Host provenance         | `c76e162fe1c3659234abc43739f1df11591b33e4ebca9013aee58cdd98fb0439`                                                            |
+| Original baseline base  | `ce98f677a41e7f34c5f7f1609508b7e96289f5f2`                                                                                    |
+| Host                    | See generated `baseline.json` → `aioncore.tag` / `commit`                                                                     |
+| Host provenance         | See generated `baseline.json` → `aioncore.provenanceSha256`                                                                   |
 | Native beta.3 candidate | `e19ab55e17e871a40356fc9802f3f6669ca727de`; source archive `c6088edb122c8e3dec4b954e104bf12ff4db749674b6d540b70c5ac5b1ebf997` |
 | ACP                     | `16d6555b08825d1d63c3b082de2b10a1152562c0`; source archive `6d4b9e4c918ca51345b4b39ff93e31141a4f31decd67f628b7a54c496078c111` |
 
@@ -47,6 +47,7 @@ instructions above. No screen branch or public upgrade policy is added.
 Reproduce on a supported native runner (Node 22+, Bun, Python, uv **0.13.5**):
 
 ```sh
+export AELIX_STUDIO_HOST_NODE_MIRROR=https://nodejs.org/dist/
 python -B scripts/studio-preview/prepare.py --target darwin-arm64
 node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
 .local/studio-preview/native/bin/python -B scripts/studio-preview/packaging/acceptance.py --runtime .local/studio-preview
@@ -66,11 +67,10 @@ Independent review belongs to the separate Claude coordination session.
 The initial [ownership map](../studio-release-train/README.md#모듈-소유권-map-초판--studio-28-aelix2)
 records native/ACP/host/Studio authority and the retired #25 path.
 
-Issue #28 remains open for `aelix.3`: after PR #34 is merged, use a new PR on the same
-Issue for the release containing host PRs #12/#15. Advance
-the pin, remove direct remote-image fallback, add four error-code locales/display and
-`protocol_code`/`data` handling, and forward the agreed host environment settings.
-Those behaviors are intentionally outside this PR. No main push, tag, release or merge occurs.
+PR #34 (aelix.2) was merged at `dac2408`. Phase two implements the host PR #12/#15
+integration below in PR #35 on the same Issue. Initial aelix.3 qualification is
+historical; final qualification uses aelix.4 and the user-approved host/native
+process-tree audit boundary. No main push, tag, release or merge is authorized here.
 
 ---
 
@@ -189,3 +189,37 @@ their existing follow-up Issues. There is no new `/clear` implementation. The
 known 16 MiB frame and aggregate-history limits remain. Studio #4 remains open
 until review and authorized repository delivery are accepted; local host success
 is not a merge, CI, installer or product-release claim.
+
+## Studio #28 phase two — final pin and audit boundary
+
+Phase two pins immutable `host-v0.2.2-aelix.4`, source
+`c516fa946ef48adc0119dbf37367e02216b22e70`, after host #7 / PR #19. This includes
+calamine 0.38 (RUSTSEC-2026-0436) and the other host security updates; the approved
+RUSTSEC-2024-0449 exception remains. This is not public joint-Beta acceptance.
+
+Use the [host release generator and environment contract](../../scripts/studio-preview/host-release/README.md)
+to update all four pin files together. Runtime npm/image settings are inherited
+from the operator's launch environment; unset retains host defaults. Build Node
+downloads require the explicit mirror. Old owned runtime/payload/resources are
+archived before fresh preparation and installer builds.
+
+Tests cover remote-image failure without direct URL fallback, the four ACP
+application errors and structured HTTP 502 payloads, MCP warning/replacement,
+and environment forwarding. Installed-host checks also exercise default image
+rejection, unavailable-MCP reason and replacement, Ask/Yolo and full restarts.
+
+The user decision on 2026-11-03 separates the Linux syscall audit by process tree:
+
+- **Gate:** the actual installed host and installed-native Python roots plus all
+  descendant processes/threads. Any external attempt, scoped unparsed record,
+  missing required root or ambiguous process attribution fails. Installed-native
+  direct/child TCP/UDP controls must each detect two attempts with unparsed 0.
+- **Report only:** the entire app/driver tree, including Electron/Chromium. Counts,
+  PID/parent/comm and unparsed records are retained in `outbound-app.json` for
+  Studio #15, which owns the eventual whole-app zero-attempt policy.
+
+The [audit options and attribution rules](../../scripts/studio-preview/fixtures/README.md)
+retain whole-command blocking as the default for other callers. This change adds
+no address exceptions or Chromium policy flags. Windows/macOS functional results
+are separate from Linux OS-level auditing. Actual head/CI counts are recorded in
+PR #35 and Issue #28; historical aelix.3 whole-app failures are preserved there.

@@ -176,5 +176,7 @@
   "zoomIn": "Yakınlaştır",
   "zoomOut": "Uzaklaştır",
   "zoomReset": "Görünümü sıfırla",
-  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın"
+  "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın",
+  "remoteImageDisabled": "Uzak görüntüler sunucu ayarları tarafından devre dışı bırakıldı.",
+  "remoteImageFailed": "Sunucu bu uzak görüntüyü yükleyemedi. Doğrudan yükleme engellendi."
 }

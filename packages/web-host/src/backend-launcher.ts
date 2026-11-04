@@ -228,6 +228,8 @@ export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
   // build/Release only, and node-gyp-build skips that directory for any
   // non-empty value, aborting the agent before the ACP handshake (#4070).
   const { PREBUILDS_ONLY: _prebuildsOnly, ...parentEnv } = process.env;
+  // Preserve explicit operator host settings (NPM_REGISTRY / REMOTE_IMAGES).
+  // No Studio defaults: unset values retain the host's blocked behavior.
   if (!dirs) return parentEnv;
   return {
     ...parentEnv,

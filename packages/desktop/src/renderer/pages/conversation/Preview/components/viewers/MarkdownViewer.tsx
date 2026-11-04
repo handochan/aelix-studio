@@ -6,6 +6,8 @@
 
 import { joinPath } from '@/common/chat/chatLib';
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
+import { useTranslation } from 'react-i18next';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import CodeBlock from '@/renderer/components/Markdown/CodeBlock';
 import LocalFileLink from '@/renderer/components/Markdown/LocalFileLink';
@@ -40,13 +42,37 @@ interface MarkdownPreviewProps {
 
 const isDataOrRemoteUrl = (value?: string): boolean => {
   if (!value) return false;
-  return /^(https?:|data:|blob:|file:)/i.test(value);
+  return /^(https?:|data:|blob:|file:|\/\/)/i.test(value);
 };
 
 const isAbsoluteLocalPath = (value?: string): boolean => {
   if (!value) return false;
   return /^([a-zA-Z]:\\|\\\\|\/)/.test(value);
 };
+
+type PreviewHtmlNode = {
+  type: string;
+  tagName?: string;
+  properties?: Record<string, unknown>;
+  children?: PreviewHtmlNode[];
+};
+
+// Run after raw HTML parsing and sanitization, before any DOM is created.
+// Drop mixed remote/local candidate lists as a unit; local/data-only lists keep
+// their existing behavior. srcset URLs can contain commas (notably data URLs).
+const stripRemoteImageSrcsets = () => (tree: PreviewHtmlNode) => {
+  const visit = (node: PreviewHtmlNode) => {
+    if ((node.tagName === 'img' || node.tagName === 'source') && node.properties) {
+      const srcSet = node.properties.srcSet;
+      if (typeof srcSet === 'string' && /(?:^|[\s,])(?:https?:|[\\/]{2})/i.test(srcSet)) {
+        delete node.properties.srcSet;
+      }
+    }
+    node.children?.forEach(visit);
+  };
+  visit(tree);
+};
+const PREVIEW_REHYPE_PLUGINS = [...SANITIZED_HTML_REHYPE_PLUGINS, stripRemoteImageSrcsets];
 
 // Join a project-relative directory with a relative image src, resolving `.`/`..`
 // segments. Project `relative_path` is always POSIX ('/'-separated) regardless of
@@ -106,11 +132,15 @@ const useImageResolverCache = () => {
 };
 
 const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, workspace, docFileRef, ...props }) => {
+  const { t } = useTranslation();
+  const [remoteFailure, setRemoteFailure] = useState<'remoteImageDisabled' | 'remoteImageFailed'>();
   const [resolvedSrc, setResolvedSrc] = useState<string | undefined>(undefined);
   const resolveImage = useImageResolverCache();
 
   useEffect(() => {
     let cancelled = false;
+    setResolvedSrc(undefined);
+    setRemoteFailure(undefined);
 
     const loadImage = () => {
       if (!src) {
@@ -119,17 +149,25 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
       }
 
       if (isDataOrRemoteUrl(src)) {
-        if (/^https?:/i.test(src)) {
-          resolveImage(src, () => ipcBridge.fs.fetchRemoteImage.invoke({ url: src }))
+        if (/^(https?:|\/\/)/i.test(src)) {
+          resolveImage(src, async () => {
+            const dataUrl = await ipcBridge.fs.fetchRemoteImage.invoke({ url: src });
+            if (!/^data:image\//i.test(dataUrl)) throw new Error('Invalid remote image response');
+            return dataUrl;
+          })
             .then((dataUrl) => {
               if (!cancelled) {
                 setResolvedSrc(dataUrl);
               }
             })
             .catch((error) => {
-              console.error('[MarkdownPreview] Failed to fetch remote image:', src, error);
               if (!cancelled) {
-                setResolvedSrc(src);
+                setResolvedSrc(undefined);
+                setRemoteFailure(
+                  isBackendHttpError(error) && error.code === 'REMOTE_IMAGE_DISABLED'
+                    ? 'remoteImageDisabled'
+                    : 'remoteImageFailed'
+                );
               }
             });
           return;
@@ -198,6 +236,15 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
       cancelled = true;
     };
   }, [src, baseDir, resolveImage, workspace, docFileRef]);
+
+  if (remoteFailure) {
+    return (
+      <span role='img' aria-label={alt}>
+        {alt ? `${alt}: ` : ''}
+        {t(`preview.${remoteFailure}`)}
+      </span>
+    );
+  }
 
   if (!resolvedSrc) {
     return alt ? <span>{alt}</span> : null;
@@ -370,7 +417,7 @@ const MarkdownPreview: React.FC<MarkdownPreviewProps> = ({
           >
             <ReactMarkdown
               remarkPlugins={MARKDOWN_REMARK_PLUGINS}
-              rehypePlugins={SANITIZED_HTML_REHYPE_PLUGINS}
+              rehypePlugins={PREVIEW_REHYPE_PLUGINS}
               components={components}
             >
               {previewSource}

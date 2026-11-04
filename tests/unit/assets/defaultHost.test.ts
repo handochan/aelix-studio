@@ -264,3 +264,41 @@ describe('verified archive publication', () => {
     expect(fs.readdirSync(root).filter((name: string) => name.endsWith('.partial'))).toEqual([]);
   });
 });
+
+describe('release pin generation', () => {
+  const { releasePolicy } = require('../../../scripts/studio-preview/host-release/pin.cjs');
+  const bytes = fs.readFileSync('scripts/studio-preview/host-release/provenance.json');
+  const provenance = JSON.parse(bytes.toString());
+  const pinned = JSON.parse(fs.readFileSync('scripts/studio-preview/host-release/default.json', 'utf8'));
+  const assets = [
+    { name: pinned.provenanceFile, digest: `sha256:${hash(bytes)}` },
+    ...Object.values(provenance.targets).map((item) => {
+      const spec = item as { archive: string; archiveSha256: string };
+      return { name: spec.archive, digest: `sha256:${spec.archiveSha256}` };
+    }),
+  ];
+  const release = { tag_name: provenance.label, immutable: true, draft: false, prerelease: false, assets };
+  const checksums = assets.map((item) => `${item.digest.slice(7)}  ${item.name}`).join('\n');
+  const commit = { sha: provenance.commit, commit: { tree: { sha: provenance.tree } } };
+  it('regenerates the committed policy from the immutable release inputs', () => {
+    expect(releasePolicy(provenance.label, release, bytes, checksums, commit)).toEqual(pinned);
+  });
+  it('keeps all four pin files and the final formatted manifest hash consistent', () => {
+    const baseline = JSON.parse(fs.readFileSync('scripts/studio-preview/baseline.json', 'utf8'));
+    expect(baseline.aioncore.sourceManifestSha256).toBe(
+      hash(fs.readFileSync('scripts/studio-preview/host-release/default.json'))
+    );
+    expect(require('../../../package.json').aioncoreVersion).toBe(pinned.tag);
+    expect(baseline.aioncore.provenanceSha256).toBe(hash(bytes));
+  });
+  it.each([
+    [{ ...release, immutable: false }, checksums, commit],
+    [release, checksums.replace(assets[1].digest.slice(7), '0'.repeat(64)), commit],
+    [release, checksums, { ...commit, sha: '0'.repeat(40) }],
+  ])('rejects mutable releases, mismatched digests or tag identities', (metadata, sums, source) => {
+    expect(() => releasePolicy(provenance.label, metadata, bytes, sums, source)).toThrow();
+  });
+  it('rejects latest and rewritten upstream tags', () => {
+    expect(() => releasePolicy('latest', release, bytes, checksums, commit)).toThrow('exact host release');
+  });
+});

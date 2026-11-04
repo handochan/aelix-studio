@@ -335,6 +335,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "Bu mesajın sonucu bilinmiyor",
         "body": "Model veya araçlar zaten çalışmış olabilir. Bu mesajı yeniden göndermeden önce konuşma geçmişini kontrol edin."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Oturum kullanımda",
+        "body": "Bu oturum başka bir yerde açık. Kilit kaldırıldıktan sonra yeniden açın.",
+        "bodyNative": "CLI veya başka bir Aelix işleminde açık. İşlem kilidi kaldırdıktan sonra oturumu yeniden açın.",
+        "bodyAcp": "Başka bir Studio penceresinde açık. Pencere kilidi kaldırdıktan sonra oturumu yeniden açın."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "Gönderimden sonra tur başarısız oldu",
+        "body": "Model veya araçlar zaten çalışmış olabilir. Bu tur otomatik olarak yeniden gönderilmez. Yeniden göndermeden önce geçmişi kontrol edin."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "Ajan meşgul",
+        "body": "Devam etmeden önce mevcut turun bitmesini bekleyin veya iptal edin."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "İşlem reddedildi",
+        "body": "Ajan bu işlemi reddetti. Ayrıntıları ve yapılandırmayı kontrol edin.",
+        "restrictionsUnenforceable": "İstenen kısıtlamalar uygulanamıyor: {{methods}}. Kısıtlamaları gözden geçirin.",
+        "profileUnavailable": "Profil kullanılamıyor: {{profile}}. Profili geri yükleyin veya yeni bir oturum başlatın.",
+        "extensionOwnedByLaunch": "Bu uzantı başlatma yapılandırmasıyla yönetiliyor: {{source}}. Bu yapılandırmayı değiştirin.",
+        "runtimeControlRequired": "Bu işlem çalışma zamanı denetimi gerektiriyor. Oturumun çalışma zamanı denetimlerini kullanın.",
+        "clientActionRequired": "Bu işlem istemci eylemi gerektiriyor. Studio’da istenen eylemi tamamlayın."
       }
     }
   },

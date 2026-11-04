@@ -18,6 +18,13 @@ const AIONUI_TRANSPORT_ERROR_CODES = new Set([
   'TEAM_SERVICE_UNAVAILABLE',
 ]);
 
+const AGENT_APPLICATION_ERROR_CODES = new Set([
+  'USER_AGENT_SESSION_LOCKED',
+  'USER_AGENT_TURN_FAILED_AFTER_DISPATCH',
+  'USER_AGENT_BUSY',
+  'USER_AGENT_OPERATION_REFUSED',
+]);
+
 const TEAM_ASSISTANT_ERROR_CODES = new Set([
   'TEAM_ASSISTANT_ID_REQUIRED',
   'TEAM_ASSISTANT_NOT_FOUND',
@@ -33,6 +40,23 @@ const isAgentDisconnectedError = (error: unknown): boolean => {
 };
 
 export const buildSendFailureError = (error: unknown, message: string): AgentStreamErrorInfo => {
+  if (isBackendHttpError(error) && AGENT_APPLICATION_ERROR_CODES.has(error.code)) {
+    const details =
+      error.details && typeof error.details === 'object' && !Array.isArray(error.details)
+        ? (error.details as Record<string, unknown>)
+        : {};
+    return {
+      message,
+      code: error.code,
+      ownership: 'user_agent',
+      detail: typeof details.detail === 'string' ? details.detail : message,
+      ...(typeof details.protocol_code === 'number' ? { protocol_code: details.protocol_code } : {}),
+      ...(details.data !== undefined ? { data: details.data } : {}),
+      retryable: false,
+      feedback_recommended: false,
+    };
+  }
+
   const workspacePathErrorCode = normalizeWorkspacePathErrorCode(error);
   if (workspacePathErrorCode) {
     const workspacePath = getWorkspacePathFromErrorDetails(error);

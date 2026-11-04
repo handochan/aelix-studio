@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "Le résultat de ce message est inconnu",
         "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Vérifiez l’historique de la conversation avant de renvoyer ce message."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Session utilisée",
+        "body": "Cette session est ouverte ailleurs. Rouvrez-la après la libération du verrou.",
+        "bodyNative": "Ouverte dans la CLI ou un autre processus Aelix. Rouvrez la session après la libération du verrou par ce processus.",
+        "bodyAcp": "Ouverte dans une autre fenêtre Studio. Rouvrez la session après la libération du verrou par cette fenêtre."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "Échec du tour après envoi",
+        "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Ce tour ne sera pas renvoyé automatiquement. Vérifiez l’historique avant tout nouvel envoi."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "L’agent est occupé",
+        "body": "Attendez la fin du tour en cours ou annulez-le avant de continuer."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "Opération refusée",
+        "body": "L’agent a refusé cette opération. Vérifiez les détails et la configuration.",
+        "restrictionsUnenforceable": "Les restrictions demandées ne peuvent pas être appliquées : {{methods}}. Vérifiez les restrictions.",
+        "profileUnavailable": "Profil indisponible : {{profile}}. Restaurez-le ou démarrez une nouvelle session.",
+        "extensionOwnedByLaunch": "Cette extension est gérée par la configuration de lancement : {{source}}. Modifiez cette configuration.",
+        "runtimeControlRequired": "Cette opération nécessite le contrôle de l’exécution. Utilisez les commandes d’exécution de la session.",
+        "clientActionRequired": "Cette opération nécessite une action du client. Effectuez l’action demandée dans Studio."
       }
     }
   },

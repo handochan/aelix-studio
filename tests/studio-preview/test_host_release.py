@@ -112,3 +112,28 @@ class NativeFailureRelayTests(unittest.TestCase):
                 if process.poll() is None: process.kill();process.wait()
                 for stream in (process.stdin, process.stdout, process.stderr):
                     if stream: stream.close()
+
+
+class OutboundAuditTests(unittest.TestCase):
+    def setUp(self):
+        spec = importlib.util.spec_from_file_location('outbound_audit_fixture', ROOT / 'scripts/studio-preview/fixtures/outboundAudit.py')
+        self.audit = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.audit)
+
+    def analyze(self, lines):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / 'network.1'
+            trace.write_text(lines)
+            return self.audit.analyze([trace])
+
+    def test_failed_tcp_and_udp_and_loopback_dns_count_as_outbound(self):
+        result = self.analyze('connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("192.0.2.1")}, 16) = -1 ENETUNREACH (Network unreachable)\n'
+                              'sendto(3, "", 0, 0, {sa_family=AF_INET, sin_port=htons(53), sin_addr=inet_addr("127.0.0.1")}, 16) = -1 ENETUNREACH (Network unreachable)\n')
+        self.assertEqual(result['externalAttempts'], 2)
+        self.assertEqual(result['unparsedRecords'], 0)
+
+    def test_loopback_model_is_allowed_but_incomplete_trace_is_not(self):
+        result = self.analyze('connect(3, {sa_family=AF_INET, sin_port=htons(4321), sin_addr=inet_addr("127.0.0.1")}, 16) = 0\n'
+                              'connect(4,  <unfinished ...>\n')
+        self.assertEqual(result['externalAttempts'], 0)
+        self.assertEqual(result['unparsedRecords'], 1)

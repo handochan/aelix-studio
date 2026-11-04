@@ -1,36 +1,36 @@
 {
   "schema": "aelix-studio-host.release-provenance/1",
-  "label": "host-v0.2.2-aelix.2",
+  "label": "host-v0.2.2-aelix.4",
   "kind": "release",
   "repository": "handochan/aelix-studio-host",
-  "commit": "2e1c31006bc0429324e0c37e222575dcdb06b1a2",
-  "tree": "5a3d563bc731f13ed144e79015f52c41777a4b55",
+  "commit": "c516fa946ef48adc0119dbf37367e02216b22e70",
+  "tree": "098cd53cc80a2a90fa4c5bebdc9cdf281811977c",
   "workspaceVersion": "0.2.2",
   "upstream": {
     "repository": "iOfficeAI/AionCore",
     "tag": "v0.2.2",
     "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
-    "commitsSinceUpstream": 20
+    "commitsSinceUpstream": 41
   },
   "build": {
-    "workflow": "handochan/aelix-studio-host/.github/workflows/release.yml@refs/tags/host-v0.2.2-aelix.2",
+    "workflow": "handochan/aelix-studio-host/.github/workflows/release.yml@refs/tags/host-v0.2.2-aelix.4",
     "event": "push",
-    "runId": "41563478551",
+    "runId": "41649966124",
     "runAttempt": "1",
-    "runUrl": "https://github.com/handochan/aelix-studio-host/actions/runs/41563478551"
+    "runUrl": "https://github.com/handochan/aelix-studio-host/actions/runs/41649966124"
   },
   "rustToolchain": "1.95.0",
-  "cargoLockSha256": "9330b7429f5870bc50d3450e41ce1730ab08798314d42eb7bff9b8ee4631d59a",
+  "cargoLockSha256": "c48ed576c42241cda69d6d09a020e14c6c8d9e16c33515f40f42a48ca6568d9c",
   "licenseSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
   "noticeSha256": "71a13b8d813f6a81805972b796141aaeccde761b71afc06b56672cd276113c3f",
   "targets": {
     "darwin-arm64": {
       "rustTarget": "aarch64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.2-aarch64-apple-darwin.tar.gz",
-      "archiveSha256": "30d0f3a417668130adaac83a1ff7275e2270d10760967dc5b70b72612dc0b791",
+      "archive": "aelix-studio-host-0.2.2-aelix.4-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "775be47355919b19388dada39285a1ed77da49a6556e47424aecbb23e0ce171b",
       "binary": "aelix-studio-host",
-      "binarySha256": "3edd0f06d8251e7f4905de95870ad2eaf487bab090e9c7d33440a5cbcc4460f1",
-      "binaryCodeSha256": "5c13bb33947c348f9bd06689ebd64e709aff12847aeb09e61fcbe17e74b14cdc",
+      "binarySha256": "b3b7432c0fb2effac0a792b1bc4dff268bef1c74d7401c754e4568a240ca6c27",
+      "binaryCodeSha256": "882930de6795e4d944c09d348688c2ad00f329937fe3ac30b976bd4b485141d7",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -44,6 +44,10 @@
           "startup_listening_event",
           "health",
           "update_check_disabled_by_default",
+          "remote_images_disabled_by_default",
+          "implicit_runtime_policy_enabled",
+          "retired_builtins_absent",
+          "officecli_missing_does_not_install",
           "custom_agent_registration",
           "custom_agent_assistant",
           "conversation_create",
@@ -52,18 +56,19 @@
           "unavailable_model_rejected",
           "prompt_reply_persisted",
           "runtime_idle_after_turn",
-          "graceful_shutdown"
+          "graceful_shutdown",
+          "remote_images_opt_in_setting"
         ],
         "version": "aelix-studio-host 0.2.2"
       }
     },
     "darwin-x64": {
       "rustTarget": "x86_64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.2-x86_64-apple-darwin.tar.gz",
-      "archiveSha256": "50819854f085e2f0ee74b40710f1ff34a556b89d78be35311cc501ad752b1bec",
+      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-apple-darwin.tar.gz",
+      "archiveSha256": "55910bb7764f8f8de2d5181f0ac736d79b2ca2394316ead0aa504b2f43973f3a",
       "binary": "aelix-studio-host",
-      "binarySha256": "aa902da08109497bc367ab38a48c1d8417e2525c804c6026531f18c8e829a1e6",
-      "binaryCodeSha256": "e64c88dc6a7eb3d05a9c151a04b91fdd0e6e44dfcf796cf8812d3cc631a35a5a",
+      "binarySha256": "1285cfc76e957eeb46184be961d5a495e4dc323b5abd85e2eb4cd6d4b2f5bfd3",
+      "binaryCodeSha256": "b226414c005bf007f085f1d7acfc6d67db3a8ca00a57e8bd9578602710a51910",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -77,6 +82,10 @@
           "startup_listening_event",
           "health",
           "update_check_disabled_by_default",
+          "remote_images_disabled_by_default",
+          "implicit_runtime_policy_enabled",
+          "retired_builtins_absent",
+          "officecli_missing_does_not_install",
           "custom_agent_registration",
           "custom_agent_assistant",
           "conversation_create",
@@ -85,24 +94,25 @@
           "unavailable_model_rejected",
           "prompt_reply_persisted",
           "runtime_idle_after_turn",
-          "graceful_shutdown"
+          "graceful_shutdown",
+          "remote_images_opt_in_setting"
         ],
         "version": "aelix-studio-host 0.2.2"
       }
     },
     "linux-arm64": {
       "rustTarget": "aarch64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.2-aarch64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "3eb24f28c3eda322fab3671782d63aed85badb4ee758a72151de09154d65a50d",
+      "archive": "aelix-studio-host-0.2.2-aelix.4-aarch64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "bc6d756d91e4c35e838171464358615326ae0165f67c840b791b9abafdda1109",
       "binary": "aelix-studio-host",
-      "binarySha256": "5db2c9ea0a4f635769bb985d6ceca22fc92dbcb2da6e4d5769742fc63cc05160",
-      "binaryCodeSha256": "5db2c9ea0a4f635769bb985d6ceca22fc92dbcb2da6e4d5769742fc63cc05160",
+      "binarySha256": "1a93578cfa9eb1ec6c25fbe03469142e0a6897a30f6c0950919dcd430ef418a9",
+      "binaryCodeSha256": "1a93578cfa9eb1ec6c25fbe03469142e0a6897a30f6c0950919dcd430ef418a9",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:6a6b589f51f1540c23f21b3bea3bcb51a58e061d0b6e272b26af69b91b72bd1b",
+        "imageId": "sha256:f98ad946a619df21f4341799ff6fdd2975c20f41519e82e8d612dee96ac28b8b",
         "platform": "linux/arm64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
@@ -115,6 +125,10 @@
           "startup_listening_event",
           "health",
           "update_check_disabled_by_default",
+          "remote_images_disabled_by_default",
+          "implicit_runtime_policy_enabled",
+          "retired_builtins_absent",
+          "officecli_missing_does_not_install",
           "custom_agent_registration",
           "custom_agent_assistant",
           "conversation_create",
@@ -123,24 +137,25 @@
           "unavailable_model_rejected",
           "prompt_reply_persisted",
           "runtime_idle_after_turn",
-          "graceful_shutdown"
+          "graceful_shutdown",
+          "remote_images_opt_in_setting"
         ],
         "version": "aelix-studio-host 0.2.2"
       }
     },
     "linux-x64": {
       "rustTarget": "x86_64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.2-x86_64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "2a6e23642b5ac77915713fc45c626a8aeab483b9a84cbc0546ab550f7f249a81",
+      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "9051c17bcde150d6443e06076c2bd10629023cb56c3106e8c750eb7d4a04e0be",
       "binary": "aelix-studio-host",
-      "binarySha256": "f25576135319af29dc919399254ae34c036cf2b330ce76e406a899235dda9d2a",
-      "binaryCodeSha256": "f25576135319af29dc919399254ae34c036cf2b330ce76e406a899235dda9d2a",
+      "binarySha256": "b5b20acf086c9b53602e781cf0b8c1835c3b50074f00d22d298f904b5a30c703",
+      "binaryCodeSha256": "b5b20acf086c9b53602e781cf0b8c1835c3b50074f00d22d298f904b5a30c703",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:e29974615f1325c74b3248af57a4a5fe23f9a8301bdb980d157fd6890997e123",
+        "imageId": "sha256:941c4281a2e928daba433af8d018996fdabc2716db3cdb8a2ed03b441596be50",
         "platform": "linux/amd64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
@@ -153,6 +168,10 @@
           "startup_listening_event",
           "health",
           "update_check_disabled_by_default",
+          "remote_images_disabled_by_default",
+          "implicit_runtime_policy_enabled",
+          "retired_builtins_absent",
+          "officecli_missing_does_not_install",
           "custom_agent_registration",
           "custom_agent_assistant",
           "conversation_create",
@@ -161,18 +180,19 @@
           "unavailable_model_rejected",
           "prompt_reply_persisted",
           "runtime_idle_after_turn",
-          "graceful_shutdown"
+          "graceful_shutdown",
+          "remote_images_opt_in_setting"
         ],
         "version": "aelix-studio-host 0.2.2"
       }
     },
     "win32-x64": {
       "rustTarget": "x86_64-pc-windows-msvc",
-      "archive": "aelix-studio-host-0.2.2-aelix.2-x86_64-pc-windows-msvc.zip",
-      "archiveSha256": "249c3e164ff030146d4e0ddf82642027bef74f201328416be7b2197083b780c7",
+      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-pc-windows-msvc.zip",
+      "archiveSha256": "398401e18a62982d36291de6c656a928ce3ae5d6b17b4a035659c5bdf89b7b34",
       "binary": "aelix-studio-host.exe",
-      "binarySha256": "4a59a0ddaa7c862c27dbaf0ef266fe9a2077822a07ffcac5d0b6471b04148fcd",
-      "binaryCodeSha256": "4a59a0ddaa7c862c27dbaf0ef266fe9a2077822a07ffcac5d0b6471b04148fcd",
+      "binarySha256": "e615e6a0cb2c948793b32d9bfbd4a2c7a24eb86934767e9f4ec2f441213c862e",
+      "binaryCodeSha256": "e615e6a0cb2c948793b32d9bfbd4a2c7a24eb86934767e9f4ec2f441213c862e",
       "rustFlags": "-C target-feature=+crt-static",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -186,6 +206,10 @@
           "startup_listening_event",
           "health",
           "update_check_disabled_by_default",
+          "remote_images_disabled_by_default",
+          "implicit_runtime_policy_enabled",
+          "retired_builtins_absent",
+          "officecli_missing_does_not_install",
           "custom_agent_registration",
           "custom_agent_assistant",
           "conversation_create",
@@ -194,7 +218,8 @@
           "unavailable_model_rejected",
           "prompt_reply_persisted",
           "runtime_idle_after_turn",
-          "graceful_shutdown"
+          "graceful_shutdown",
+          "remote_images_opt_in_setting"
         ],
         "version": "aelix-studio-host 0.2.2"
       }

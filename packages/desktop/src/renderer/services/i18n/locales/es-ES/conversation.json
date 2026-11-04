@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "Se desconoce el resultado de este mensaje",
         "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. Revisa el historial de la conversación antes de volver a enviar este mensaje."
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "Sesión en uso",
+        "body": "Esta sesión está abierta en otro lugar. Vuelva a abrirla cuando se libere el bloqueo.",
+        "bodyNative": "Abierta en la CLI u otro proceso de Aelix. Vuelva a abrirla cuando ese proceso libere el bloqueo.",
+        "bodyAcp": "Abierta en otra ventana de Studio. Vuelva a abrirla cuando esa ventana libere el bloqueo."
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "El turno falló después del envío",
+        "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. No se reenviará automáticamente. Revise el historial antes de reenviar."
+      },
+      "USER_AGENT_BUSY": {
+        "title": "El agente está ocupado",
+        "body": "Espere a que termine el turno actual o cancélelo antes de continuar."
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "Operación rechazada",
+        "body": "El agente rechazó esta operación. Revise los detalles y la configuración.",
+        "restrictionsUnenforceable": "No se pueden aplicar las restricciones solicitadas: {{methods}}. Revise las restricciones.",
+        "profileUnavailable": "Perfil no disponible: {{profile}}. Restáurelo o inicie una nueva sesión.",
+        "extensionOwnedByLaunch": "Esta extensión se controla desde la configuración de inicio: {{source}}. Modifíquela allí.",
+        "runtimeControlRequired": "Esta operación requiere control de ejecución. Use los controles de ejecución de la sesión.",
+        "clientActionRequired": "Esta operación requiere una acción del cliente. Complete la acción solicitada en Studio."
       }
     }
   },

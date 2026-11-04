@@ -688,7 +688,7 @@ const normalizeDbTipsMessage = (msg: TMessage): TMessage => {
     existingContent?.type === 'info'
       ? existingContent.type
       : 'error';
-  const tipType = normalizeTipType(parsed.type, fallbackType);
+  const tipType = normalizeTipType(parsed.type ?? parsed.severity, fallbackType);
   const code =
     typeof parsed.code === 'string'
       ? parsed.code

@@ -352,6 +352,29 @@
       "USER_AGENT_PROMPT_OUTCOME_UNKNOWN": {
         "title": "メッセージの実行結果を確認できません",
         "body": "モデルやツールがすでに実行された可能性があります。再送信する前に会話履歴を確認してください。"
+      },
+      "USER_AGENT_SESSION_LOCKED": {
+        "title": "セッションは使用中です",
+        "body": "このセッションは別の場所で開かれています。ロック解除後に開き直してください。",
+        "bodyNative": "CLI または別の Aelix プロセスで開かれています。そのプロセスがロックを解除してから開き直してください。",
+        "bodyAcp": "別の Studio ウィンドウで開かれています。そのウィンドウがロックを解除してから開き直してください。"
+      },
+      "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
+        "title": "送信後にターンが失敗しました",
+        "body": "モデルやツールがすでに実行された可能性があります。自動再送は行いません。再送前に履歴を確認してください。"
+      },
+      "USER_AGENT_BUSY": {
+        "title": "エージェントは処理中です",
+        "body": "現在のターンが終わるまで待つか、キャンセルしてから続けてください。"
+      },
+      "USER_AGENT_OPERATION_REFUSED": {
+        "title": "操作が拒否されました",
+        "body": "エージェントがこの操作を拒否しました。詳細と設定を確認してから続けてください。",
+        "restrictionsUnenforceable": "要求された制限を適用できません：{{methods}}。続行前に制限を確認してください。",
+        "profileUnavailable": "プロファイルを利用できません：{{profile}}。復元するか、新しいセッションを開始してください。",
+        "extensionOwnedByLaunch": "この拡張機能は起動設定で管理されています：{{source}}。その設定を変更してください。",
+        "runtimeControlRequired": "この操作にはランタイム制御が必要です。セッションのランタイム操作を使用してください。",
+        "clientActionRequired": "この操作にはクライアント側の操作が必要です。Studio で要求された操作を完了してください。"
       }
     }
   },

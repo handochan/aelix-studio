@@ -181,3 +181,33 @@ describe('buildSendFailureError', () => {
     expect(result.rawError).toBeUndefined();
   });
 });
+
+describe('ACP application HTTP failures', () => {
+  it.each([
+    ['USER_AGENT_SESSION_LOCKED', -33001, { lockedBy: 'native', holder: null }],
+    ['USER_AGENT_TURN_FAILED_AFTER_DISPATCH', -33002, { cause: 'lost' }],
+    ['USER_AGENT_BUSY', -32000, undefined],
+    ['USER_AGENT_OPERATION_REFUSED', -32004, { kind: 'profile_unavailable', profile: 'team' }],
+  ])('keeps %s structured and never offers replay or reconnect', (code, protocol_code, data) => {
+    const result = buildSendFailureError(
+      httpError(502, code as string, 'upstream failure', { protocol_code, data, detail: 'original ACP detail' }),
+      'send failed'
+    );
+    expect(result).toMatchObject({
+      code,
+      protocol_code,
+      detail: 'original ACP detail',
+      ownership: 'user_agent',
+      retryable: false,
+      feedback_recommended: false,
+    });
+    expect(result.data).toEqual(data);
+    expect(result.resolution).toBeUndefined();
+  });
+  it('handles missing or malformed details without creating a retryable internal error', () => {
+    expect(buildSendFailureError(httpError(502, 'USER_AGENT_BUSY', 'busy', null), 'busy')).toMatchObject({
+      code: 'USER_AGENT_BUSY',
+      retryable: false,
+    });
+  });
+});
