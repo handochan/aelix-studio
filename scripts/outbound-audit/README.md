@@ -16,18 +16,28 @@ attempts with no unparsed records. No address exceptions or report-only mode are
 provided. CI artifacts retain counts, addresses and PID/comm, never socket
 payloads or command arguments. Temporary strace output is deleted.
 
-`destinationPolicy.py` is copied byte-for-byte from PR #35's
-`fixtures/outboundAudit.py` at `a141d456759e48636e6972cb1f458b1a5644c7d5`.
-PR #35 later split its parser into a scoped module and changed its API (head
-`28ddf60c893d87eca354973bf1518dbb4502df0e`). This private snapshot avoids editing
-or conflicting with those shared files. The wrapper always enforces the whole
-command tree; it does not inherit a host-only or report-only selection.
+The compatibility CLI imports main's `scripts/studio-preview/fixtures/outboundAudit.py`
+directly, with no scope selection. There is one parser, destination policy, lifecycle
+policy and io_uring recorder for app-wide and host/native gates. `--whole-report`
+is only the existing host-scoped diagnostic output; the separate app gate always
+enforces the whole tree. Linux requires strace, bpftrace/BTF/tracepoints and sudo.
+Capture failures/lost events remain fatal, with no syscall-only fallback.
 
-Run on Linux with strace 6.1 or newer:
+TCP connects and every UDP write/send attempt (including failed attempts through
+inherited/duplicated FDs) are denied outside loopback. Only proven closed, unsent
+UDP associations are reported separately as `udpConnectOnly`, without an address
+exception. Missing closes, open-at-exit descriptors and unknown imported UDP FD
+lifecycles fail. FD aliases follow fork, CLONE_FILES, dup/fcntl, close_range and
+exec CLOEXEC. Because kernel submissions do not expose their target FD, any ring
+write in a process that held such an association conservatively fails: relative
+timing cannot prove a nonoverlap. The existing libuv operation allowlist and
+normal/SQPOLL CONNECT rejections remain intact.
 
 ```sh
-python -B scripts/outbound-audit/audit.py --report .local/outbound/app.json -- command args
+python -I -B scripts/outbound-audit/audit.py --report .local/outbound/app.json -- command args
+python -B -m unittest discover -s tests/studio-preview
 python -B -m unittest discover -s tests/outbound-audit
+python -I -B scripts/studio-preview/fixtures/outboundAudit.py --transport-controls .local/outbound/controls
 ```
 
 Process names identify threads, not the originating product feature. Attribute

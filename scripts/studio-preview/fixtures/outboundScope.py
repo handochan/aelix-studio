@@ -7,7 +7,8 @@ import ipaddress
 from pathlib import Path, PurePosixPath
 import re
 
-NETWORK = {'connect', 'sendto', 'sendmsg', 'sendmmsg', 'accept', 'accept4'}
+NETWORK = {'connect', 'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4'}
+UDP_META = {'socket', 'unshare'}
 FD_META = {'close','close_range','mmap','mmap2','dup','dup2','dup3','fcntl'}
 FORK = {'clone', 'clone3', 'fork', 'vfork'}
 EXEC = {'execve', 'execveat'}
@@ -62,6 +63,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     sequence = 0
     classification_issues = []
     observed_order = []
+    udp_records = []
     pending = {}
     terminal_stops, killed_at = {}, {}
     invalid_terminal_stops = set()
@@ -89,13 +91,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         elif call in IO_URING:
             state(pid)['io_uring'].append(call)
             io_calls.append({'pid':pid,'call':call,'result':None,'fd':None,'flags':None,'sequence':0})
-        elif call in FD_META:
+        elif call in FD_META | UDP_META:
             state(pid)['unparsed'] += 1
         else:
             classification_issue('incomplete_syscall', pid, call)
 
     def record(pid, line, started):
         item = state(pid)
+        udp_records.append((pid, line, started))
         if line.startswith('+++'):
             if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):
                 item['finished'] = True
@@ -109,6 +112,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 classification_issue('unknown_record', pid)
             return
         call = match[1]
+        if call in UDP_META: return
         if call in FD_META:
             # Only ring-labelled descriptors and bulk close operations matter.
             # Ordinary file paths and mmap addresses never enter reports.
@@ -200,7 +204,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             item['events'].append({'pid': pid, 'process': item['process'], 'syscall': call,
                                    'address': str(parsed), 'port': port, 'external': not local and not accepted,
                                    'direction':'inbound' if accepted else 'outbound',
-                                   'failed': bool(re.search(r'= -1\b', line))})
+                                   '_sequence': started, 'failed': bool(re.search(r'= -1\b', line))})
 
         destinations = ADDR.findall(line)
         if not destinations and 'sa_family=AF_' in line and not any(
@@ -222,14 +226,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         # A selected child can inherit an already-connected socket from an
         # unselected parent. Decode the peer at send time; its connect need not
         # have happened inside the selected tree. -yy provides kernel FD peers.
-        null_count = (1 if call == 'sendto' and re.search(r', NULL, 0\)\s+=', line) else
+        null_count = (1 if call in ('send', 'write', 'writev') and re.match(r'\w+\(\d+<(?:TCP|UDP)(?:v6)?:\[[^>]*->', line) else
+                      1 if call == 'sendto' and re.search(r', NULL, 0\)\s+=', line) else
                       len(re.findall(r'msg_name=NULL', line)) if call in ('sendmsg', 'sendmmsg') else 0)
         if call == 'sendmmsg' and 'msg_name=' not in line:
             item['unparsed'] += 1
         if null_count:
             fd = re.match(r'^\w+\(\d+<(.+?)>,', line)
             peer = fd[1] if fd else ''
-            if peer.startswith(('UNIX', 'NETLINK')):
+            if peer.startswith(('UNIX', 'NETLINK')) or re.fullmatch(r'UDP(?:v6)?:\[[^>]*\]', peer) and '->' not in peer:
                 return
             connection = re.fullmatch(r'(?:TCP|UDP)(?:v6)?:\[(.*)\]', peer)
             if not connection or '->' not in connection[1]:
@@ -357,26 +362,44 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         if not more: break
         included.update(more)
 
+    def tgid(pid):
+        seen=set()
+        while clone_threads.get(pid):
+            if pid in seen:return None
+            seen.add(pid);pid=parents.get(pid)
+        return pid
+
     ring_evidence=None
     if kernel_capture is not None:
         from uring.policy import reconcile
-        def tgid(pid):
-            seen=set()
-            while clone_threads.get(pid):
-                if pid in seen:return None
-                seen.add(pid);pid=parents.get(pid)
-            return pid
         for call in io_calls:
             call['tgid']=tgid(call['pid'])
             if call['call']=='fork':call['childTgid']=tgid(call['child'])
         ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states))
         classification_issues.extend(ring_evidence['globalIssues'])
 
+    from udpLifecycle import analyze as analyze_udp
+    exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid)
+    for issue in udp_issues:
+        state(issue['pid'])
+    event_keys = {(pid, event['_sequence']): event for pid, item in states.items() for event in item['events']}
+    for pid, sequence, call, connects in udp_writes:
+        if (pid, sequence) not in event_keys and connects:
+            origin = event_keys.get(connects[-1])
+            if origin:
+                states[pid]['events'].append({**origin, 'pid': pid, 'process': states[pid]['process'],
+                    'syscall': call, '_sequence': sequence, 'failed': True})
+    for pid, item in states.items():
+        for event in item['events']:
+            key = (pid, event.pop('_sequence'))
+            event['udpAssociationOnly'] = event['syscall'] == 'connect' and key in exempt
+            if event['udpAssociationOnly']: event['external'] = False
+
     def report(pids, scope):
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
         processes = []
-        issues = classification_issues + ([issue for pid in pids for issue in ring_evidence['issuesByPid'].get(pid,[])]
+        issues = classification_issues + [issue for issue in udp_issues if issue['pid'] in pids] + ([issue for pid in pids for issue in ring_evidence['issuesByPid'].get(pid,[])]
             if ring_evidence is not None else [
                 {'reason': 'unsupported_io_uring', 'pid': pid, 'syscall': call}
                 for pid in sorted(pids) for call in states[pid]['io_uring']])
@@ -394,6 +417,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
+                'udpConnectOnly': sum(event['udpAssociationOnly'] for event in events),
+                'udpAssociations': [event for event in events if event['udpAssociationOnly']],
                 'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),
                 'classificationErrors': len(issues), 'classificationIssues': issues,
                 'external': external, 'processes': processes,

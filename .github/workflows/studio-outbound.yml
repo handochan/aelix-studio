@@ -49,16 +49,17 @@ jobs:
       - name: Install audit and display tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils
+          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils bpftrace gcc liburing-dev iproute2
           bunx playwright install-deps chromium
       - name: Check the attribution parser
         run: |
+          python -B -m unittest discover -s tests/studio-preview
           python -B -m unittest discover -s tests/outbound-audit
           node --test scripts/outbound-audit/startup.test.mjs
       - name: Prove child-process TCP and UDP detection
         run: |
           set +e
-          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/outbound-audit/destinationPolicy.py --child-positive-control
+          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/studio-preview/fixtures/outboundAudit.py --child-positive-control
           code=$?
           set -e
           test "$code" = 86
@@ -67,6 +68,8 @@ jobs:
           report = json.load(open('.local/outbound/positive.json'))
           assert report['externalAttempts'] == 2 and report['unparsedRecords'] == 0, report
           PY
+      - name: Prove transport and UDP lifecycle controls
+        run: python -I -B scripts/studio-preview/fixtures/outboundAudit.py --transport-controls .local/outbound/transport-controls
       - name: Prepare the exact pinned runtime
         run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
       - name: Build an unpublished installer

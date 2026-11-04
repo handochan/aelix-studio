@@ -104,7 +104,7 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         # Raw traces are removed and executable paths never enter JSON reports.
         trace = prefix.with_suffix('.trace')
         trace_command = ['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
-                                  'trace=connect,sendto,sendmsg,sendmmsg,accept,accept4,io_uring_setup,io_uring_enter,io_uring_register,close,close_range,mmap,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork,execve,execveat',
+                                  'trace=socket,unshare,connect,sendto,sendmsg,sendmmsg,write,writev,accept,accept4,io_uring_setup,io_uring_enter,io_uring_register,close,close_range,mmap,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork,execve,execveat',
                                   '-o', str(trace), '--', *command]
         marker=Path(directory)/'stopped.json'
         capture=Capture(Path(directory))
@@ -132,7 +132,7 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
                   ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode')}),file=sys.stderr)
         report, whole = analyze_processes(paths, scope_executables, require_executables, True,evidence)
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-               for name in ('outboundAudit.py', 'outboundScope.py')}
+               for name in ('outboundAudit.py', 'outboundScope.py', 'udpLifecycle.py')}
     recipes.update({f'uring/{path.name}':hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in Path(__file__).with_name('uring').glob('*.py')})
     report['sourceSha256'] = recipes
@@ -173,10 +173,18 @@ def main():
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
     parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
+    parser.add_argument('--transport-controls', type=Path)
+    parser.add_argument('--udp-control', choices=['connect-close', 'send', 'inherit-dup-send', 'uring-writev'])
     parser.add_argument('--positive-control', action='store_true')
     parser.add_argument('--child-positive-control', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.transport_controls:
+        from udpLifecycle import verify_controls
+        return verify_controls(Path(__file__).resolve(), args.transport_controls.resolve())
+    if args.udp_control:
+        from udpLifecycle import control
+        return control(args.udp_control)
     if args.child_positive_control:
         return subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()), '--positive-control']).returncode
     if args.positive_control:

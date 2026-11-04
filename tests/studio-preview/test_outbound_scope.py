@@ -131,7 +131,8 @@ class ScopedParserTests(unittest.TestCase):
         scoped, _ = self.parse(self.base() + [
             '2<host> sendto(8<TCP:[127.0.0.1:123->203.0.113.1:443]>, ""..., 3, 0, NULL, 0) = 3',
             '2<host> sendmsg(9<UDPv6:[[::1]:123->[::1]:53]>, {msg_name=NULL, msg_iov=[...]}, 0) = 3'])
-        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (2, 0))
+        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (2, 1))
+        self.assertIn('udp_write_untracked_fd', {i['reason'] for i in scoped['classificationIssues']})
 
     def test_unknown_socket_peer_and_abbreviated_vector_are_incomplete(self):
         for line in ['sendto(8<socket:[123]>, ""..., 3, 0, NULL, 0) = 3',

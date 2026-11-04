@@ -172,3 +172,15 @@ raw traces are deleted. Terminal records are retained during parsing; missing or
 detached tasks cannot be counted as a complete capture. Reported comm names are bounded printable identifiers.
 This evidence covers the exercised fixture, not arbitrary configured providers,
 installed extensions or proxies.
+
+## Shared Studio #15 transport policy
+
+The app-wide blocking gate now invokes this same auditor without selecting roots.
+The scoped host/native gate keeps its scope and blocking behavior. UDP connect
+associations alone are separately recorded only after a complete, closed FD
+lifecycle with no send/write via any inherited or duplicate alias. TCP connects
+and UDP writes remain attempts, including failed calls. Open-at-exit or missing
+closes fail. io_uring WRITEV in a process that held an unsent UDP association fails
+when the target FD cannot be proved unrelated; this conservatively includes
+uncertain overlap. No destination-name/address exemption is used. See
+[the app gate](../../outbound-audit/README.md) for commands and controls.
