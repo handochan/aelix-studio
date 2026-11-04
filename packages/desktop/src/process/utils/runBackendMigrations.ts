@@ -5,6 +5,7 @@
  */
 
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { migrateConfigStorage, migrateLegacyMcpConfigToDb, migrateProviders } from '@/common/config/configMigration';
 import { httpRequest } from '@/common/adapter/httpBridge';
@@ -26,6 +27,7 @@ type MigrationStepResult = boolean;
 type McpImportServer = Partial<IMcpServer> & Pick<IMcpServer, 'name' | 'transport'>;
 type BackendClientPreferences = Record<string, unknown>;
 const BUILTIN_CHROME_DEVTOOLS_NAME = 'chrome-devtools';
+const CHROME_TRANSPORT_RECEIPT = 'migration.chromeDevtoolsOwnedTransport_v1';
 
 /**
  * 内置「应用内浏览器」MCP。
@@ -61,11 +63,11 @@ const CLEANUP_STEPS: Array<{
   run: () => Promise<void>;
 }> = [{ name: 'cleanupLegacyClientPreferences', run: async () => cleanupLegacyClientPreferences() }];
 
-async function fetchBackendClientPreferences(): Promise<BackendClientPreferences> {
+async function fetchBackendClientPreferences(): Promise<BackendClientPreferences | null> {
   try {
     return (await httpRequest<BackendClientPreferences>('GET', '/api/settings/client')) || {};
   } catch {
-    return {};
+    return null;
   }
 }
 
@@ -209,19 +211,79 @@ function bundledChromeArgs(): string[] {
   ];
 }
 
-function isOwnedChromeTransport(server?: IMcpServer): boolean {
-  if (server?.transport.type !== 'stdio') return false;
+function chromeTransportFingerprint(server: {
+  transport: IMcpServer['transport'];
+  original_json?: IMcpServer['original_json'];
+}): string {
+  const transport = server.transport;
+  if (transport.type !== 'stdio') return '';
+  const env = transport.env || {};
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        command: transport.command,
+        args: transport.args || [],
+        env: Object.fromEntries(
+          Object.keys(env)
+            .toSorted()
+            .map((key) => [key, env[key]])
+        ),
+        original_json: server.original_json || '',
+      })
+    )
+    .digest('hex');
+}
+
+function isOwnedChromeTransport(server: IMcpServer | undefined, prefs: BackendClientPreferences): boolean {
+  if (server?.transport.type !== 'stdio' || server.builtin !== true) return false;
   const { command, args, env } = server.transport;
+  const value = prefs[CHROME_TRANSPORT_RECEIPT];
+  const receipt = value && typeof value === 'object' ? (value as Record<string, unknown>) : {};
+  const pending =
+    receipt.pending && typeof receipt.pending === 'object' ? (receipt.pending as Record<string, unknown>) : {};
+  // A recorded state is authoritative: edits must never fall through to legacy matching.
+  if (receipt.schema === 1 && (receipt.id === server.id || pending.id === server.id || pending.id === null)) {
+    const fingerprint = chromeTransportFingerprint(server);
+    return (
+      (receipt.id === server.id && receipt.sha256 === fingerprint) ||
+      ((pending.id === server.id || pending.id === null) && pending.sha256 === fingerprint)
+    );
+  }
   return (
     (command === 'npx' &&
       args?.length === 2 &&
       args[0] === '-y' &&
-      ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@0.16.0'].includes(args[1])) ||
-    (server.builtin === true &&
-      command === 'node' &&
+      ['chrome-devtools-mcp@latest', 'chrome-devtools-mcp@0.16.0'].includes(args[1]) &&
+      areStringRecordsEqual(env, {})) ||
+    (command === 'node' &&
       areStringArraysEqual(args, bundledChromeArgs()) &&
       areStringRecordsEqual(env, { CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' }))
   );
+}
+
+async function prepareChromeTransportOwnership(expected: McpImportServer, previous?: IMcpServer): Promise<void> {
+  // Write intent before changing the row. A failed final write can then be retried
+  // using only an exact stored-state fingerprint, including after another app move.
+  await httpRequest<void>('PUT', '/api/settings/client', {
+    [CHROME_TRANSPORT_RECEIPT]: {
+      schema: 1,
+      ...(previous ? { id: previous.id, sha256: chromeTransportFingerprint(previous) } : {}),
+      pending: { id: previous?.id ?? null, sha256: chromeTransportFingerprint(expected) },
+    },
+  });
+}
+
+async function recordChromeTransportOwnership(stored: IMcpServer, expected: McpImportServer): Promise<void> {
+  if (
+    stored.name !== BUILTIN_CHROME_DEVTOOLS_NAME ||
+    stored.builtin !== true ||
+    !isSameStdioTransport(stored.transport, expected.transport) ||
+    stored.original_json !== expected.original_json
+  )
+    return;
+  await httpRequest<void>('PUT', '/api/settings/client', {
+    [CHROME_TRANSPORT_RECEIPT]: { schema: 1, id: stored.id, sha256: chromeTransportFingerprint(stored) },
+  });
 }
 
 function buildDefaultMcpServers(chromeCommand: string): McpImportServer[] {
@@ -320,11 +382,12 @@ function buildOriginalJsonFromTransport(server: Pick<IMcpServer, 'name' | 'descr
 }
 
 async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<void> {
-  const [backendPrefs, fileImageConfig, providers] = await Promise.all([
+  const [loadedBackendPrefs, fileImageConfig, providers] = await Promise.all([
     fetchBackendClientPreferences(),
     configFile.get('tools.imageGenerationModel').catch((): undefined => undefined),
     fetchProviders(),
   ]);
+  const backendPrefs = loadedBackendPrefs || {};
   const imageConfig = resolveImageGenerationMigrationConfig(backendPrefs, fileImageConfig);
   const imageConfigSource = resolveImageGenerationMigrationConfigSource(backendPrefs, fileImageConfig);
   const existing = await mcpService.listServers.invoke();
@@ -336,7 +399,8 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
   logImageGenerationEnvResolution(imageEnvResolution, 'bootstrap');
   const imageServer = buildBuiltinImageGenerationServer(imageEnvResolution, imageConfig);
   const existingChromeDevtools = existingByName.get(BUILTIN_CHROME_DEVTOOLS_NAME);
-  const migrateChromeTransport = isOwnedChromeTransport(existingChromeDevtools);
+  const migrateChromeTransport =
+    loadedBackendPrefs !== null && isOwnedChromeTransport(existingChromeDevtools, backendPrefs);
   // Custom rows do not require the Studio bundle and retain their own transport.
   const defaultServers = buildDefaultMcpServers(
     !existingChromeDevtools || migrateChromeTransport ? resolveBundledNodePath() : 'node'
@@ -345,24 +409,11 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
   let imageServerUpdated = false;
 
   if (missing.length > 0) {
-    await mcpService.batchImportServers.invoke({ servers: missing });
-  }
-
-  if (
-    migrateChromeTransport &&
-    existingChromeDevtools &&
-    (existingChromeDevtools.builtin !== true ||
-      !existingChromeDevtools.original_json ||
-      existingChromeDevtools.original_json.trim() === '' ||
-      existingChromeDevtools.original_json.trim() === '{}')
-  ) {
-    await mcpService.updateServer.invoke({
-      id: existingChromeDevtools.id,
-      data: {
-        builtin: true,
-        original_json: buildOriginalJsonFromTransport(existingChromeDevtools),
-      },
-    });
+    const expected = missing.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME);
+    if (expected) await prepareChromeTransportOwnership(expected);
+    const imported = await mcpService.batchImportServers.invoke({ servers: missing });
+    const chrome = imported.find((server) => server.name === BUILTIN_CHROME_DEVTOOLS_NAME);
+    if (chrome && expected) await recordChromeTransportOwnership(chrome, expected);
   }
 
   // Only migrate the exact old defaults; customized commands/flags/env survive.
@@ -372,10 +423,24 @@ async function ensureBootstrapMcpServersInDb(configFile: ConfigFile): Promise<vo
       ...bundled.transport,
       env: { ...existingChromeDevtools.transport.env, CHROME_DEVTOOLS_MCP_NO_USAGE_STATISTICS: '1' },
     };
-    await mcpService.updateServer.invoke({
-      id: existingChromeDevtools.id,
-      data: { transport, original_json: buildOriginalJsonFromTransport({ ...existingChromeDevtools, transport }) },
-    });
+    const original_json = buildOriginalJsonFromTransport({ ...existingChromeDevtools, transport });
+    const expected = { name: BUILTIN_CHROME_DEVTOOLS_NAME, transport, original_json };
+    if (
+      !isSameStdioTransport(existingChromeDevtools.transport, transport) ||
+      existingChromeDevtools.original_json !== original_json
+    ) {
+      await prepareChromeTransportOwnership(expected, existingChromeDevtools);
+      const stored = await mcpService.updateServer.invoke({
+        id: existingChromeDevtools.id,
+        data: { transport, original_json },
+      });
+      await recordChromeTransportOwnership(stored, expected);
+    } else {
+      const receipt = backendPrefs[CHROME_TRANSPORT_RECEIPT];
+      if (receipt && typeof receipt === 'object' && 'pending' in receipt) {
+        await recordChromeTransportOwnership(existingChromeDevtools, expected);
+      }
+    }
   }
 
   const refreshedServers = await mcpService.listServers.invoke();
