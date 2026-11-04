@@ -97,7 +97,7 @@
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Local data migration failed. Speichern Sie die Diagnose lokal zur Prüfung oder zur Weitergabe an den Support. Es wird nichts automatisch gesendet.",
       "sendDiagnostics": "Bericht lokal speichern",
       "diagnosticsSent": "Bericht lokal erstellt. Es wurde nichts gesendet.",
       "diagnosticsReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
@@ -110,7 +110,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "AionUi wurde geöffnet, aber AionCore wurde beim Vorbereiten lokaler Startdaten wie Assistant- oder Agent-Datensätzen beendet. Eine Neuinstallation von AionUi behebt dies möglicherweise nicht. Senden Sie einen Diagnosebericht oder wenden Sie sich an den Support, damit die lokale Datenbank geprüft werden kann.",
+      "description": "Local data repair failed. Speichern Sie die Diagnose lokal zur Prüfung oder zur Weitergabe an den Support. Es wird nichts automatisch gesendet.",
       "sendDiagnostics": "Bericht lokal speichern",
       "diagnosticsSent": "Bericht lokal erstellt. Es wurde nichts gesendet.",
       "diagnosticsReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
@@ -156,7 +156,7 @@
     },
     "exited": {
       "title": "Start nicht abgeschlossen",
-      "description": "AionCore konnte den Start nicht abschließen und wurde beendet. Bitte starten Sie die App neu; wenn dies wiederholt auftritt, senden Sie bitte eine Diagnose.",
+      "description": "Start nicht abgeschlossen. Speichern Sie die Diagnose lokal zur Prüfung oder zur Weitergabe an den Support. Es wird nichts automatisch gesendet.",
       "sendDiagnostics": "Bericht lokal speichern",
       "diagnosticsSent": "Bericht lokal erstellt. Es wurde nichts gesendet.",
       "diagnosticsReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
@@ -164,7 +164,7 @@
     },
     "portReportTimeout": {
       "title": "Zeitüberschreitung beim Start",
-      "description": "AionCore konnte den Start nicht innerhalb der erwarteten Zeit abschließen. Bitte starten Sie die App neu; wenn dies wiederholt auftritt, senden Sie bitte eine Diagnose.",
+      "description": "Zeitüberschreitung beim Start. Speichern Sie die Diagnose lokal zur Prüfung oder zur Weitergabe an den Support. Es wird nichts automatisch gesendet.",
       "sendDiagnostics": "Bericht lokal speichern",
       "diagnosticsSent": "Bericht lokal erstellt. Es wurde nichts gesendet.",
       "diagnosticsReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
@@ -172,7 +172,7 @@
     },
     "startupFailed": {
       "title": "Start fehlgeschlagen",
-      "description": "AionCore konnte nicht gestartet werden. Bitte starten Sie die App neu; wenn dies wiederholt auftritt, senden Sie bitte eine Diagnose.",
+      "description": "Start fehlgeschlagen. Speichern Sie die Diagnose lokal zur Prüfung oder zur Weitergabe an den Support. Es wird nichts automatisch gesendet.",
       "sendDiagnostics": "Bericht lokal speichern",
       "diagnosticsSent": "Bericht lokal erstellt. Es wurde nichts gesendet.",
       "diagnosticsReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",

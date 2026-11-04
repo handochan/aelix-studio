@@ -97,5 +97,7 @@
   "requestDetails": "Detalhes da solicitação:",
   "delivery": {
     "pending": "Não lido"
-  }
+  },
+  "remoteImageLoad": "Carregar imagem",
+  "remoteImageConsent": "Esta imagem remota está oculta. Carregá-la conecta a {{host}}."
 }

@@ -70,6 +70,8 @@ describe('Studio update download boundaries', () => {
   afterEach(() => vi.unstubAllGlobals());
   it.each([
     'https://static.aionui.com/releases/1/a.deb',
+    'https://objects.githubusercontent.com/a.deb',
+    'https://github-releases.githubusercontent.com/a.deb',
     'https://github.com/iOfficeAI/AionUi/releases/download/v1/a.deb',
     'http://github.com/handochan/aelix-studio/releases/download/v1/a.deb',
   ])('rejects an upstream or insecure download %s before connecting', async (url) => {

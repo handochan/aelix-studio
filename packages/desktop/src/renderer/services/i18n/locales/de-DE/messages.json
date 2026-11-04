@@ -97,5 +97,7 @@
   "requestDetails": "Anfragedetails:",
   "delivery": {
     "pending": "Ungelesen"
-  }
+  },
+  "remoteImageLoad": "Bild laden",
+  "remoteImageConsent": "Dieses externe Bild ist ausgeblendet. Beim Laden wird eine Verbindung zu {{host}} hergestellt."
 }

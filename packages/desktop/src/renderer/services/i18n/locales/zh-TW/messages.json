@@ -97,5 +97,7 @@
   "requestDetails": "請求內容：",
   "delivery": {
     "pending": "未讀"
-  }
+  },
+  "remoteImageLoad": "載入圖片",
+  "remoteImageConsent": "此遠端圖片已隱藏。載入時將連線至 {{host}}。"
 }

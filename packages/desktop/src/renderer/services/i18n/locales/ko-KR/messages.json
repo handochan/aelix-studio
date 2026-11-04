@@ -97,5 +97,7 @@
   "requestDetails": "요청 내용:",
   "delivery": {
     "pending": "읽지 않음"
-  }
+  },
+  "remoteImageLoad": "이미지 불러오기",
+  "remoteImageConsent": "외부 이미지를 숨겼습니다. 불러오면 {{host}}에 연결합니다."
 }

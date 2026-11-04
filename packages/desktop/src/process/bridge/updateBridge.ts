@@ -203,7 +203,7 @@ export function mapGitHubRelease(release: GitHubReleaseApi): UpdateReleaseInfo |
   };
 }
 
-const assertAllowedUrl = async (rawUrl: string) => {
+const assertAllowedUrl = async (rawUrl: string, redirected = false) => {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -216,6 +216,7 @@ const assertAllowedUrl = async (rawUrl: string) => {
   }
   if (
     !ALLOWED_DOWNLOAD_HOSTS.has(parsed.hostname) ||
+    (!redirected && parsed.hostname !== 'github.com') ||
     (parsed.hostname === 'github.com' && !parsed.pathname.startsWith('/handochan/aelix-studio/releases/download/'))
   ) {
     throw new Error((await getI18n()).t('update.errors.hostNotAllowed', { host: parsed.hostname }));
@@ -226,7 +227,7 @@ const fetchWithAllowlistedRedirects = async (rawUrl: string, signal: AbortSignal
   let current = rawUrl;
 
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
-    await assertAllowedUrl(current);
+    await assertAllowedUrl(current, i > 0);
 
     const res = await fetch(current, {
       signal,

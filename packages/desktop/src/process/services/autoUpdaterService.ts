@@ -8,6 +8,8 @@ import { autoUpdater } from 'electron-updater';
 import type { ProgressInfo, ResolvedUpdateFileInfo, UpdateInfo } from 'electron-updater';
 import type { UpdateInfoAndProvider } from 'electron-updater/out/AppUpdater';
 import type { DownloadedUpdateHelper } from 'electron-updater/out/DownloadedUpdateHelper';
+import { Provider, type ProviderRuntimeOptions } from 'electron-updater/out/providers/Provider';
+import { pathToFileURL } from 'node:url';
 import { findFile } from 'electron-updater/out/providers/Provider';
 import { CancellationError, CancellationToken } from 'builder-util-runtime';
 import type { AutoUpdateReadyResult } from '@/common/update/updateTypes';
@@ -24,7 +26,7 @@ import {
   recordAutoUpdateQuitAndInstall,
   recordAutoUpdateStatus,
 } from './autoUpdateDiagnostics';
-import { buildStudioFeedOptions, startupUpdateEnabled } from './updateFeed';
+import { buildStudioFeedOptions } from './updateFeed';
 
 const FORCE_DEV_AUTO_UPDATE_ENV = 'AIONUI_FORCE_DEV_AUTO_UPDATE';
 const DEBUG_AUTO_UPDATE_CURRENT_VERSION_ENV = 'AIONUI_DEBUG_AUTO_UPDATE_CURRENT_VERSION';
@@ -97,6 +99,19 @@ type AutoUpdaterCacheAccess = {
 /** Events emitted by AutoUpdaterService */
 export interface AutoUpdaterEvents {
   'update-status': (status: AutoUpdateStatus) => void;
+}
+
+/** A cache restore can only resolve a local file, even if it changes after validation. */
+class CachedUpdateProvider extends Provider<UpdateInfo> {
+  constructor(private readonly file: ResolvedUpdateFileInfo) {
+    super({ isUseMultipleRangeRequest: false } as ProviderRuntimeOptions);
+  }
+  getLatestVersion(): Promise<UpdateInfo> {
+    return Promise.reject(new Error('Local update cache has no release service'));
+  }
+  resolveFiles(): ResolvedUpdateFileInfo[] {
+    return [this.file];
+  }
 }
 
 class AutoUpdaterService extends EventEmitter {
@@ -421,6 +436,7 @@ class AutoUpdaterService extends EventEmitter {
         return;
       }
       log.info('Update downloaded');
+      void this.saveCachedVersion(info.version);
       this._activeDownloadPromise = null;
       this._activeDownloadCancellationToken = null;
       this._downloadedUpdateVersion = info.version;
@@ -680,26 +696,44 @@ class AutoUpdaterService extends EventEmitter {
         throw new Error('AutoUpdaterService not initialized');
       }
 
-      // Restoring UI state must not turn a clean launch into a release check.
-      // Previously this path checked GitHub even when automatic checks were off.
-      if (!startupUpdateEnabled(process.env)) {
-        return { success: true, data: { ready: false } };
-      }
       const updater = autoUpdater as unknown as AutoUpdaterCacheAccess;
       const helper = await updater.getOrCreateDownloadHelper?.();
-      if (!helper || !fs.existsSync(path.join(helper.cacheDirForPendingUpdate, 'update-info.json'))) {
+      if (!helper) return { success: true, data: { ready: false } };
+      const metadataPath = path.join(helper.cacheDirForPendingUpdate, 'update-info.json');
+      if (!fs.existsSync(metadataPath)) return { success: true, data: { ready: false } };
+      const cached: unknown = JSON.parse(await fs.promises.readFile(metadataPath, 'utf8'));
+      if (
+        !cached ||
+        typeof cached !== 'object' ||
+        !('fileName' in cached) ||
+        !('sha512' in cached) ||
+        typeof cached.fileName !== 'string' ||
+        typeof cached.sha512 !== 'string' ||
+        path.basename(cached.fileName) !== cached.fileName ||
+        cached.fileName.includes('\\')
+      ) {
         return { success: true, data: { ready: false } };
       }
-
-      const checkResult = await this.checkForUpdates();
-      if (!checkResult.success || !checkResult.updateInfo) {
-        return {
-          success: checkResult.success,
-          data: { ready: false },
-          error: checkResult.error,
-        };
+      const version =
+        'studioVersion' in cached && typeof cached.studioVersion === 'string'
+          ? cached.studioVersion
+          : cached.fileName.match(/(\d+\.\d+\.\d+(?:-(?:alpha|beta|rc|dev)[.\d]*)?)/)?.[1];
+      if (!version || !parse(version) || !gt(version, app.getVersion())) {
+        return { success: true, data: { ready: false } };
       }
-
+      const filePath = path.join(helper.cacheDirForPendingUpdate, cached.fileName);
+      const fileInfo: ResolvedUpdateFileInfo = {
+        url: pathToFileURL(filePath),
+        info: { url: cached.fileName, sha512: cached.sha512 },
+      };
+      const info: UpdateInfo = {
+        version,
+        files: [fileInfo.info],
+        path: cached.fileName,
+        sha512: cached.sha512,
+        releaseDate: '',
+      };
+      updater.updateInfoAndProvider = { info, provider: new CachedUpdateProvider(fileInfo) };
       const cachedUpdate = await this.getValidCachedDownloadedUpdate();
       if (!cachedUpdate) {
         return { success: true, data: { ready: false } };
@@ -716,13 +750,10 @@ class AutoUpdaterService extends EventEmitter {
 
       const data: AutoUpdateReadyResult = {
         ready: true,
-        version: checkResult.updateInfo.version,
+        version: info.version,
         currentVersion: autoUpdater.currentVersion?.version,
         filePath: cachedUpdate.filePath,
       };
-      if (typeof checkResult.updateInfo.releaseNotes === 'string') {
-        data.releaseNotes = checkResult.updateInfo.releaseNotes;
-      }
       if (typeof cachedUpdate.fileInfo.info.size === 'number') {
         data.size = cachedUpdate.fileInfo.info.size;
       }
@@ -739,6 +770,20 @@ class AutoUpdaterService extends EventEmitter {
         data: { ready: false },
         error: message,
       };
+    }
+  }
+
+  private async saveCachedVersion(version: string): Promise<void> {
+    try {
+      const helper = await (autoUpdater as unknown as AutoUpdaterCacheAccess).getOrCreateDownloadHelper?.();
+      if (!helper) return;
+      const metadata = path.join(helper.cacheDirForPendingUpdate, 'update-info.json');
+      const info: unknown = JSON.parse(await fs.promises.readFile(metadata, 'utf8'));
+      if (info && typeof info === 'object') {
+        await fs.promises.writeFile(metadata, JSON.stringify({ ...info, studioVersion: version }) + '\n');
+      }
+    } catch (error) {
+      log.warn('[auto-update] Could not save local cached version', error);
     }
   }
 

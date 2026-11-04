@@ -28,15 +28,18 @@ function RemoteImageContent({ src, alt, className }: RemoteImageProps): React.Re
   }
   return (
     <span className='inline-flex flex-col gap-4px text-t-secondary' title={url}>
+      <span>{t('messages.remoteImageConsent', { host })}</span>
       {failed && <span role='status'>{t('messages.imageLoadFailed')}</span>}
       <Button
         size='small'
-        onClick={() => {
+        onClick={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
           setFailed(false);
           setRequested(true);
         }}
       >
-        {t('common.download')} · {alt ? `${alt} (${host})` : host}
+        {t('messages.remoteImageLoad')} · {alt ? `${alt} (${host})` : host}
       </Button>
     </span>
   );

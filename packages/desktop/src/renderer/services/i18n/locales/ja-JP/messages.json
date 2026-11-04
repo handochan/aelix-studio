@@ -97,5 +97,7 @@
   "requestDetails": "リクエスト内容:",
   "delivery": {
     "pending": "未読"
-  }
+  },
+  "remoteImageLoad": "画像を読み込む",
+  "remoteImageConsent": "外部画像を非表示にしています。読み込むと {{host}} に接続します。"
 }

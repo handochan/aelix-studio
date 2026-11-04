@@ -97,5 +97,7 @@
   "requestDetails": "جزئیات درخواست:",
   "delivery": {
     "pending": "خوانده‌نشده"
-  }
+  },
+  "remoteImageLoad": "بارگیری تصویر",
+  "remoteImageConsent": "این تصویر راه دور پنهان است. بارگیری آن به {{host}} متصل می‌شود."
 }

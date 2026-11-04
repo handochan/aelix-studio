@@ -98,7 +98,7 @@
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Local data migration failed. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
       "sendDiagnostics": "Raporu yerel olarak kaydet",
       "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
       "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
@@ -111,7 +111,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "AionUi açıldı, ancak AionCore assistant veya agent kayıtları gibi yerel başlangıç verilerini hazırlarken durdu. AionUi'yi yeniden yüklemek bu sorunu çözmeyebilir. Yerel veritabanının incelenebilmesi için tanılama raporu gönderin veya destek ekibiyle iletişime geçin.",
+      "description": "Local data repair failed. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
       "sendDiagnostics": "Raporu yerel olarak kaydet",
       "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
       "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
@@ -157,7 +157,7 @@
     },
     "exited": {
       "title": "Başlatma tamamlanmadı",
-      "description": "AionCore başlatmayı tamamlayamadı ve kapandı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
+      "description": "Başlatma tamamlanmadı. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
       "sendDiagnostics": "Raporu yerel olarak kaydet",
       "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
       "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
@@ -165,7 +165,7 @@
     },
     "portReportTimeout": {
       "title": "Başlatma zaman aşımına uğradı",
-      "description": "AionCore beklenen süre içinde başlatmayı tamamlayamadı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
+      "description": "Başlatma zaman aşımına uğradı. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
       "sendDiagnostics": "Raporu yerel olarak kaydet",
       "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
       "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
@@ -173,7 +173,7 @@
     },
     "startupFailed": {
       "title": "Başlatma başarısız oldu",
-      "description": "AionCore başlatılamadı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
+      "description": "Başlatma başarısız oldu. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
       "sendDiagnostics": "Raporu yerel olarak kaydet",
       "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
       "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",

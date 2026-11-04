@@ -98,7 +98,7 @@
     },
     "dataMigration": {
       "title": "本地資料遷移失敗",
-      "description": "AionUi 已開啟，但 AionCore 在初始化本地資料時停止。重新安裝 AionUi 未必能解決此問題。請傳送診斷報告或聯絡支援，以便檢查本地資料庫遷移狀態。",
+      "description": "本地資料遷移失敗. 將診斷資訊儲存在本機以供檢查或自行交給支援人員。不會自動傳送。",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
@@ -111,7 +111,7 @@
     },
     "localDataRepair": {
       "title": "本機資料修復失敗",
-      "description": "AionUi 已開啟，但 AionCore 在準備本機啟動資料時停止，例如 assistant 或代理記錄。重新安裝 AionUi 可能無法解決此問題。請傳送診斷報告或聯絡支援，以便檢查本機資料庫。",
+      "description": "本機資料修復失敗. 將診斷資訊儲存在本機以供檢查或自行交給支援人員。不會自動傳送。",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
@@ -157,7 +157,7 @@
     },
     "exited": {
       "title": "啟動未完成",
-      "description": "AionCore 未能完成啟動並已結束。請重新啟動應用程式；若反覆出現，請回報診斷資訊。",
+      "description": "啟動未完成. 將診斷資訊儲存在本機以供檢查或自行交給支援人員。不會自動傳送。",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
@@ -165,7 +165,7 @@
     },
     "portReportTimeout": {
       "title": "啟動逾時",
-      "description": "AionCore 未在預期時間內完成啟動。請重新啟動應用程式；若反覆出現，請傳送診斷。",
+      "description": "啟動逾時. 將診斷資訊儲存在本機以供檢查或自行交給支援人員。不會自動傳送。",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",
@@ -173,7 +173,7 @@
     },
     "startupFailed": {
       "title": "啟動失敗",
-      "description": "AionCore 啟動失敗。請重新啟動應用程式；若反覆出現，請傳送診斷。",
+      "description": "啟動失敗. 將診斷資訊儲存在本機以供檢查或自行交給支援人員。不會自動傳送。",
       "sendDiagnostics": "將報告儲存至本機",
       "diagnosticsSent": "已在本機產生報告，未傳送任何資訊。",
       "diagnosticsReportSuccess": "已在本機產生報告，未傳送任何資訊。",

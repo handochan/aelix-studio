@@ -98,7 +98,7 @@
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Local data migration failed. Save diagnostics locally for inspection or to share with support. Nothing is sent automatically.",
       "sendDiagnostics": "Save report locally",
       "diagnosticsSent": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
@@ -111,7 +111,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "AionUi opened, but AionCore stopped while preparing local startup data such as assistant or agent records. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database can be inspected.",
+      "description": "Local data repair failed. Save diagnostics locally for inspection or to share with support. Nothing is sent automatically.",
       "sendDiagnostics": "Save report locally",
       "diagnosticsSent": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
@@ -157,7 +157,7 @@
     },
     "exited": {
       "title": "Startup didn't complete",
-      "description": "AionCore couldn't finish starting and has exited. Please restart the app; if this keeps happening, please send diagnostics.",
+      "description": "Startup didn't complete. Save diagnostics locally for inspection or to share with support. Nothing is sent automatically.",
       "sendDiagnostics": "Save report locally",
       "diagnosticsSent": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
@@ -165,7 +165,7 @@
     },
     "portReportTimeout": {
       "title": "Startup timed out",
-      "description": "AionCore didn't finish starting within the expected time. Please restart the app; if this keeps happening, please send diagnostics.",
+      "description": "Startup timed out. Save diagnostics locally for inspection or to share with support. Nothing is sent automatically.",
       "sendDiagnostics": "Save report locally",
       "diagnosticsSent": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",
@@ -173,7 +173,7 @@
     },
     "startupFailed": {
       "title": "Startup failed",
-      "description": "AionCore failed to start. Please restart the app; if this keeps happening, please send diagnostics.",
+      "description": "Startup failed. Save diagnostics locally for inspection or to share with support. Nothing is sent automatically.",
       "sendDiagnostics": "Save report locally",
       "diagnosticsSent": "Report prepared locally. Nothing was sent.",
       "diagnosticsReportSuccess": "Report prepared locally. Nothing was sent.",

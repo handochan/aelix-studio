@@ -1272,6 +1272,8 @@ export type I18nKey =
   | 'messages.permissionRequest'
   | 'messages.permissionResponseFailed'
   | 'messages.processing'
+  | 'messages.remoteImageConsent'
+  | 'messages.remoteImageLoad'
   | 'messages.requestDetails'
   | 'messages.responseSentSuccessfully'
   | 'messages.scrollToBottom'

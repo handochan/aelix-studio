@@ -204,7 +204,7 @@ describe('MarkdownView local file links', () => {
     );
 
     expect(container.querySelector('img')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /common.download.*example.com/ }));
+    fireEvent.click(screen.getByRole('button', { name: /messages.remoteImageLoad.*example.com/ }));
     const image = container.querySelector('img');
     expect(image).toHaveAttribute('src', 'https://example.com/generated.png');
     expect(image).toHaveAttribute('alt', '');

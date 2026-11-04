@@ -98,7 +98,7 @@
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
+      "description": "Local data migration failed. Salve o diagnóstico localmente para análise ou para compartilhar com o suporte. Nada é enviado automaticamente.",
       "sendDiagnostics": "Salvar relatório localmente",
       "diagnosticsSent": "Relatório preparado localmente. Nada foi enviado.",
       "diagnosticsReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
@@ -111,7 +111,7 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "O AionUi abriu, mas o AionCore parou ao preparar dados locais de inicialização, como registros de assistants ou agentes. Reinstalar o AionUi pode não corrigir o problema. Envie um relatório de diagnóstico ou entre em contato com o suporte para que o banco de dados local possa ser inspecionado.",
+      "description": "Local data repair failed. Salve o diagnóstico localmente para análise ou para compartilhar com o suporte. Nada é enviado automaticamente.",
       "sendDiagnostics": "Salvar relatório localmente",
       "diagnosticsSent": "Relatório preparado localmente. Nada foi enviado.",
       "diagnosticsReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
@@ -157,7 +157,7 @@
     },
     "exited": {
       "title": "A inicialização não foi concluída",
-      "description": "O AionCore não conseguiu concluir a inicialização e foi encerrado. Reinicie o aplicativo; se isso continuar acontecendo, envie o diagnóstico.",
+      "description": "A inicialização não foi concluída. Salve o diagnóstico localmente para análise ou para compartilhar com o suporte. Nada é enviado automaticamente.",
       "sendDiagnostics": "Salvar relatório localmente",
       "diagnosticsSent": "Relatório preparado localmente. Nada foi enviado.",
       "diagnosticsReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
@@ -165,7 +165,7 @@
     },
     "portReportTimeout": {
       "title": "Tempo de inicialização esgotado",
-      "description": "O AionCore não concluiu a inicialização dentro do tempo esperado. Reinicie o aplicativo; se isso continuar acontecendo, envie o diagnóstico.",
+      "description": "Tempo de inicialização esgotado. Salve o diagnóstico localmente para análise ou para compartilhar com o suporte. Nada é enviado automaticamente.",
       "sendDiagnostics": "Salvar relatório localmente",
       "diagnosticsSent": "Relatório preparado localmente. Nada foi enviado.",
       "diagnosticsReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
@@ -173,7 +173,7 @@
     },
     "startupFailed": {
       "title": "Falha na inicialização",
-      "description": "O AionCore não conseguiu iniciar. Reinicie o aplicativo; se isso continuar acontecendo, envie o diagnóstico.",
+      "description": "Falha na inicialização. Salve o diagnóstico localmente para análise ou para compartilhar com o suporte. Nada é enviado automaticamente.",
       "sendDiagnostics": "Salvar relatório localmente",
       "diagnosticsSent": "Relatório preparado localmente. Nada foi enviado.",
       "diagnosticsReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
