@@ -170,7 +170,7 @@ def verify_controls(auditor, output):
                 and data['ioUring']['capture']['lostEvents']==0):
             raise RuntimeError('Transport control failed: '+mode)
         if mode=='uring-writev':
-            if not (data['externalAttempts']==0 and data['unparsedRecords']==1
+            if not (data['externalAttempts']==1 and data['udpConnectOnly']==0 and data['unparsedRecords']==1
                     and data['classificationErrors']==1
                     and data['classificationIssues'][0]['reason']=='udp_io_uring_write_fd_unproven'):
                 raise RuntimeError('io_uring UDP write control mismatch')
