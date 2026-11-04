@@ -72,13 +72,25 @@ jobs:
       - name: Prove transport and UDP lifecycle controls
         run: python -I -B scripts/studio-preview/fixtures/outboundAudit.py --transport-controls .local/outbound/transport-controls
       - name: Prepare the exact pinned runtime
+        env:
+          AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
         run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
       - name: Build an unpublished installer
+        env:
+          AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
       - name: Install the built DEB without downloading application resources
         id: install
         run: |
           sha256sum .local/provider-installer/artifacts/*.deb > .local/outbound/installer-sha256.txt
+          python - <<'PYTHON'
+          import json
+          from pathlib import Path
+          files = list(Path('.local/provider-installer/artifacts').glob('*.deb'))
+          if len(files) != 1:
+              raise RuntimeError('Expected one installer artifact')
+          Path('.local/outbound/installer-size.json').write_text(json.dumps({'name': files[0].name, 'bytes': files[0].stat().st_size}) + '\n')
+          PYTHON
           sudo dpkg -i .local/provider-installer/artifacts/*.deb
       - name: Require zero attempts from the whole installed app and all descendants
         env:

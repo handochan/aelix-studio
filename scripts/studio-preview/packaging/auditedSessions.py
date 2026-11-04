@@ -66,6 +66,9 @@ class AuditedSessions:
             record[field] = scoped[field]
         record.update(reportSha256=digest(report), wholeAppReportSha256=digest(whole_path),
                       commandExitCode=scoped.get('commandExitCode'),
+                      udpConnectOnly=scoped.get('udpConnectOnly',0),
+                      wholeAppUdpConnectOnly=whole.get('udpConnectOnly',0),
+                      wholeAppClassificationErrors=whole['classificationErrors'],
                       ioUringOpcodes=scoped.get('ioUring',{}).get('opcodeCounts',{}),
                       wholeAppIoUringOpcodes=whole.get('ioUring',{}).get('opcodeCounts',{}),
                       wholeAppExternalAttempts=whole['externalAttempts'], wholeAppUnparsedRecords=whole['unparsedRecords'])
