@@ -59,3 +59,20 @@ The Linux installed-app job repeats it with installed bundled Node and the commo
 blocking auditor. Local Linux arm64 with no external network returned 26 tools,
 external/unparsed/classification 0/0/0. Tool execution against a real page is a
 separate browser/host acceptance boundary.
+
+## Monaco
+
+The explicit `monaco-editor` dependency is fixed at 0.55.1 (the version previously
+resolved as a peer). The HTML viewer loads it lazily through Vite ESM chunks.
+Editor, JSON, CSS, HTML and TypeScript/JavaScript workers all use Vite's local
+`?worker` entries. `loader.config({ monaco })` supplies the bundled instance, so
+the React loader never needs its default CDN. Original editor capabilities stay
+available; a local bundle failure shows a translated recovery explanation.
+Integration follows the [maintainer's Vite instructions](https://github.com/suren-atoyan/monaco-react#use-monaco-editor-as-an-npm-package).
+
+`monacoSmoke.mjs` builds the real component and opens it from `file:` with Electron,
+matching the packaged renderer origin. It edits an HTML model and formats it via
+the real local HTML worker, rejects any remote request and records worker errors.
+The macOS engine fixture passed with 0 remote requests and 0 worker errors; that
+is renderer-request evidence, not an OS-level outbound audit. Linux CI runs the
+same fixture under the common whole-tree blocking auditor.

@@ -181,5 +181,6 @@
   "zoomReset": "Ansicht zurücksetzen",
   "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
   "remoteImageDisabled": "Remote-Bilder sind durch die Host-Einstellungen deaktiviert.",
-  "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert."
+  "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert.",
+  "localEditorUnavailable": "Der lokale Editor konnte nicht geladen werden. Reparieren oder installieren Sie die App-Ressourcen neu. Es wurde kein CDN kontaktiert."
 }

@@ -181,5 +181,6 @@
   "zoomReset": "Restablecer vista",
   "diagramZoomHint": "Desplazarse para ampliar • Arrastrar para mover • ESC para cerrar",
   "remoteImageDisabled": "Las imágenes remotas están desactivadas en la configuración del host.",
-  "remoteImageFailed": "El host no pudo cargar esta imagen remota. La carga directa está bloqueada."
+  "remoteImageFailed": "El host no pudo cargar esta imagen remota. La carga directa está bloqueada.",
+  "localEditorUnavailable": "No se pudo cargar el editor local. Repare o reinstale los recursos de la aplicación; no se contactó ningún CDN."
 }

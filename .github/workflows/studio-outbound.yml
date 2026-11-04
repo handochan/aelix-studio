@@ -107,6 +107,10 @@ jobs:
               '/opt/AionUi/resources/app.asar.unpacked/out/main/builtin-mcp-browser.js',
               '.local/outbound/browser-mcp.json'], check=True)
           PYTHON
+      - name: Require a fully local Monaco editor and HTML worker
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          xvfb-run -a python -I -B scripts/studio-preview/fixtures/outboundAudit.py --report .local/outbound/monaco-outbound.json -- node scripts/outbound-audit/bundles/monacoSmoke.mjs .local/outbound/monaco.json
       - name: Qualify default-on Studio update checks with blocked network
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         env:

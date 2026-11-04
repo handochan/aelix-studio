@@ -181,5 +181,6 @@
   "zoomReset": "Reset view",
   "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close",
   "remoteImageDisabled": "Remote images are disabled by the host settings.",
-  "remoteImageFailed": "The host could not load this remote image. Direct loading is blocked."
+  "remoteImageFailed": "The host could not load this remote image. Direct loading is blocked.",
+  "localEditorUnavailable": "The local editor could not be loaded. Repair or reinstall the application resources; no CDN was contacted."
 }

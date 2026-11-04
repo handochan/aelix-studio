@@ -5,7 +5,7 @@
  */
 
 import { Message } from '@arco-design/web-react';
-import MonacoEditor from '@monaco-editor/react';
+import MonacoEditor from '../editors/OfflineMonacoEditor';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 
