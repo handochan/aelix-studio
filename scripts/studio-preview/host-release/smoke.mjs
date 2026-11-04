@@ -27,11 +27,13 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
     env: appEnv,
     timeout: 60000,
   });
-  appPids.push(await app.evaluate(() => process.pid));
+  // Capture both assertions in the same early main-context evaluation.
+  const identity = await app.evaluate(() => ({ pid: process.pid, backendOverride: process.env.AIONUI_BACKEND_BIN }));
+  appPids.push(identity.pid);
+  if (executablePath) assert.equal(identity.backendOverride, undefined);
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);
-  if (executablePath) assert.equal(await app.evaluate(() => process.env.AIONUI_BACKEND_BIN), undefined);
   // Backend readiness precedes the authenticated startup router. Wait for its
   // Guid surface before navigating so an initial redirect cannot replace us.
   await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
