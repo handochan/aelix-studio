@@ -29,7 +29,6 @@ export type SubmitFeedbackReportInput = {
   contactEmail?: string;
   description: string;
   extra?: FeedbackEventExtra;
-  flushTimeoutMs?: number;
   module: string;
   moduleLabel: string;
   tags?: FeedbackEventTags;
@@ -307,7 +306,6 @@ export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Pr
       dbDiagnosticsAttachment: summarizeDbDiagnosticsAttachment(dbDiagnosticsAttachmentStatus, dbDiagnosticsAttachment),
       attachmentCount: attachments.length,
       attachments: summarizeAttachments(attachments),
-      flushTimeoutMs: input.flushTimeoutMs,
       tagKeys: Object.keys(input.tags ?? {}),
     });
   } catch (error) {
@@ -318,7 +316,6 @@ export async function submitFeedbackReport(input: SubmitFeedbackReportInput): Pr
       dbDiagnosticsAttachment: summarizeDbDiagnosticsAttachment(dbDiagnosticsAttachmentStatus, dbDiagnosticsAttachment),
       attachmentCount: attachments.length,
       attachments: summarizeAttachments(attachments),
-      flushTimeoutMs: input.flushTimeoutMs,
       error,
     });
     throw error;
