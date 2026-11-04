@@ -57,7 +57,7 @@ try {
     )
   );
   assert.ok(releases.length > 0, 'Default-on startup must request Studio Releases');
-  assert.deepEqual(evidence.requests,releases,'Default-on checks must request only Studio Releases');
+  assert.deepEqual(evidence.requests, releases, 'Default-on checks must request only Studio Releases');
   assert.equal(evidence.errorDialogs, 0, 'Blocked startup checks must not display error dialogs');
   report.updateRequests = releases;
   report.errorDialogs = evidence.errorDialogs;
