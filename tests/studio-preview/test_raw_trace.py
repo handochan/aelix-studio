@@ -47,6 +47,7 @@ class RawPrototypeTests(unittest.TestCase):
         for arch,number,fd in [('aarch64','syscallno','orig_x0'),('x86_64','orig_ax','di')]:
             source=self.source(arch);exit_block=source.split('rawtracepoint:sys_exit',1)[1].split('kfunc:',1)[0]
             self.assertIn('((struct pt_regs*)arg0)->'+number,exit_block)
+            self.assertIn('(int64)(int32)((struct pt_regs*)arg0)->'+number,exit_block)
             self.assertIn('(int64)arg1',exit_block)
             self.assertIn('((struct pt_regs*)arg0)->'+fd,source)
         self.assertIn('args->exit_code',self.source('x86_64'))

@@ -48,11 +48,12 @@ def convert(source, submit, architecture=None):
     registers={'x86_64':('orig_ax','di'),'aarch64':('syscallno','orig_x0')}.get(architecture)
     if registers is None:raise RuntimeError('kernel_raw_architecture_unsupported')
     number,first=registers
+    # syscall_get_nr returns int on both native ABIs; the TP widens it to long.
     req='((struct io_kiocb*)arg0)'
     failed='((struct io_kiocb*)arg1)'
     fields={
         'sys_enter':{'id':'(int64)arg1','args[0]':'((struct pt_regs*)arg0)->'+first},
-        'sys_exit':{'id':'((struct pt_regs*)arg0)->'+number,'ret':'(int64)arg1'},
+        'sys_exit':{'id':'(int64)(int32)((struct pt_regs*)arg0)->'+number,'ret':'(int64)arg1'},
         'sched_process_exec':{},
         'sched_process_fork':{'parent_pid':'((struct task_struct*)arg0)->pid',
                               'child_pid':'((struct task_struct*)arg1)->pid'},
