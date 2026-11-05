@@ -319,6 +319,21 @@ closes. This includes newly created sockets, pending dup aliases, pending
 release and whole-table copies. No observation is reordered and no allocation
 or release time is inferred from the syscall entry or exit alone. Resolving
 these conflicts would require additional kernel FD/object identity evidence.
+The same owner-TGID uncertainty rule covers io_uring `CLOSE` (opcode19): it may
+release a UDP FD, and the recorder does not expose its target FD. It records
+`udp_io_uring_close_fd_unproven`; a later connect cannot inherit the old UDP
+identity. The global file-opcode allowlist and original controls are unchanged.
+See Linux's [io_close implementation](https://github.com/torvalds/linux/blob/v7.0/io_uring/openclose.c).
+**G12 coverage remains unaccepted:** the current trace excludes `ioctl`,
+`recvmsg` and `pidfd_getfd`; the kernel network channel does not observe FD
+acquisition, flag changes or object identity. For example, an untraced
+`FIONCLEX` can retain a UDP FD across exec while the current model assumes
+CLOEXEC retired it. A complete network reconciliation therefore does not
+establish complete FD lifecycle evidence. The PR must remain draft pending a
+scope decision and additional FD observation; zero reports are observations,
+not final G12 acceptance. No excluded address or ignored failure resolves this.
+See Linux's [ioctl implementation](https://github.com/torvalds/linux/blob/v7.0/fs/ioctl.c)
+and Issue #15 for the outstanding decision.
 The ordinary inherited-UDP positive controls use an untraced shared semaphore to hold
 the child until the parent has returned from fork. They still inherit and
 duplicate the real UDP FD and send through it; no audit option changes. Separate
@@ -336,6 +351,11 @@ or another close cannot erase this failure. An untracked UDP-labelled close
 also fails. Generic unknown closes are checked against tracked ring FD tables
 even when the FD annotation is missing; existing ring-labelled unknown records
 keep their failure contract. UDP/ring failures block this metadata resolution.
+An unknown close also spans its entry through the task's terminal record.
+A later socket or duplicate acquiring that numeric FD in the same shared table
+records `udp_unknown_close_overlaps_fd_acquisition`, permanently invalidates
+the UDP object/owners and blocks metadata resolution. Thus a close preceding
+the object's creation cannot be hidden by the no-unmatched-network proof.
 Numeric close/dup/fcntl transitions and standalone `unshare(CLONE_FILES)` feed
 the ring ledger even without an FD annotation. This retains unlabelled aliases,
 CLOEXEC changes and independently unshared tables. Generic mappings are ignored

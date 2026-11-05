@@ -9,10 +9,14 @@ import re
 
 WRITES = {'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev'}
 WRITE_OPCODES = {2, 5, 9, 23, 26, 47, 48, 50, 57, 58, 60}
+FD_MUTATING_OPCODES = {19}  # CLOSE may release a UDP descriptor too.
 
 
 def analyze(records, ring_evidence, tgid, unknown_intervals=()):
-    tables = {}; sockets = []; issues = []; writes = []
+    tables = {}; sockets = []; issues = []; writes = []; acquisitions=[]; unknown_closes=[]
+    ordered=sorted(records,key=lambda item:item[2])
+    task_ends={record[0]:record[2] for record in ordered if record[1].startswith('+++')}
+    final_sequence=max((record[2] for record in ordered),default=0)+1
     completed=0; last_sequence=0
 
     def issue(pid, reason):
@@ -41,7 +45,7 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
             sock['invalid']=True
             for owner in sock['owners']|{pid}:issue(owner,'udp_descriptor_completion_order_unproven')
 
-    for record in sorted(records,key=lambda item:item[2]):
+    for record in ordered:
         retire()
         pid,line,sequence=record[:3]
         completed=record[3] if len(record)>3 else sequence
@@ -66,6 +70,7 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
             attempted = re.match(r'^(\w+)\((\d+)(?:<[^>]*>)?', line)
             if attempted and attempted[1]=='close':
                 fd=int(attempted[2])
+                unknown_closes.append((current,fd,pid,sequence,task_ends.get(pid,final_sequence)))
                 if fd in current:
                     sock=current[fd][0];sock['invalid']=True
                     for owner in sock['owners']|{pid}:issue(owner,'udp_close_result_unknown')
@@ -102,6 +107,7 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
                     and fields[2] in {'IPPROTO_UDP','IPPROTO_IP','0'}):
                 sock = {'connects': [], 'written': False, 'owners': {task for task, shared in tables.items() if shared is current}, 'id': len(sockets),'lifetimeStart':sequence}
                 sockets.append(sock); current[result] = (sock, 'SOCK_CLOEXEC' in args)
+                acquisitions.append((current,result,sequence,sock))
                 pending_state(sock,pid)
         elif call in ('clone', 'clone3', 'fork', 'vfork') and result > 0:
             translated = re.search(r"/\* (\d+) in strace's PID NS \*/", line)
@@ -149,7 +155,9 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
                     current[result][0]['invalid'] = True
                     issue(pid,'udp_fd_reused_without_close')
                 remove(pid, result)
-                if source: current[result] = (source[0], 'CLOEXEC' in args)
+                if source:
+                    current[result] = (source[0], 'CLOEXEC' in args)
+                    acquisitions.append((current,result,sequence,source[0]))
         elif call == 'fcntl' and result == 0 and 'F_SETFD' in args and fd in current:
             current[fd] = (current[fd][0], 'FD_CLOEXEC' in args)
         elif call == 'connect' and fd in current:
@@ -168,6 +176,14 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
             # acquisition/lifecycle was not captured: never exempt those.
             elif re.match(r'\d+<UDP(?:v6)?:', args): issue(pid, 'udp_write_untracked_fd')
     retire()
+    # A decoded close with an unknown return has no proven effect time. The
+    # original entry can precede a socket/alias acquired by another task in the
+    # same shared table; no-network proof does not establish its FD lifecycle.
+    for shared,fd,closer,start,end in unknown_closes:
+        for acquired,number,when,sock in acquisitions:
+            if acquired is shared and number==fd and start<when<end:
+                sock['invalid']=True
+                for owner in sock['owners']|{closer}:issue(owner,'udp_unknown_close_overlaps_fd_acquisition')
     # A register hole can hide a descriptor mutation even without networking.
     # Entry starts possible lifetime; removal cannot be proved before completion.
     for suspect,start,end in unknown_intervals:
@@ -187,10 +203,12 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
         groups = {tgid(pid) for pid in sock['owners']}
         for ring in (ring_evidence or {}).get('rings', []):
             for submission in ring['submissions']:
-                if submission['opcode'] in WRITE_OPCODES and (
+                if submission['opcode'] in WRITE_OPCODES | FD_MUTATING_OPCODES and (
                         ring['creatorTgid'] in groups or submission.get('tgid') in groups):
                     sock['invalid'] = True
-                    for pid in sock['owners']: issue(pid, 'udp_io_uring_write_fd_unproven')
+                    reason=('udp_io_uring_write_fd_unproven' if submission['opcode'] in WRITE_OPCODES
+                            else 'udp_io_uring_close_fd_unproven')
+                    for pid in sock['owners']: issue(pid, reason)
         if sock['written']: contaminated.update(sock['connects'])
         elif not sock.get('invalid'): exempt.update(sock['connects'])
     return exempt, [(pid, sequence, call, sock['connects']) for pid, sequence, call, sock in writes], issues
