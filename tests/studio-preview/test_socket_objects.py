@@ -54,6 +54,26 @@ class SocketObjectTests(unittest.TestCase):
         self.assertEqual((result['verified'],result['exempt'],result['issues']),(True,{(1,3)},[]))
         self.assertNotIn('socket',result['objects'][0])
 
+    def test_pending_close_metadata_requires_the_same_complete_object_release_for_D(self):
+        for final_free in (True,False):
+            capture,_=self.fixture()
+            capture['network']['tasks']=[task for task in capture['network']['tasks'] if task['pid']!=2]
+            if not final_free:
+                capture['udpObjects']['events'].pop();capture['udpObjects']['eventCount']-=1
+            lines=['1<app> execve("/owned/app", [...], 0x1) = 0',
+                '1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>',
+                '1<app> connect(3<UDPv6:[123]>, {sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr)}, 28) = -1 ENETUNREACH',
+                '1<app> close(3<UDPv6:[123]> <unfinished ...>', '1<app> +++ exited with 0 +++']
+            with self.subTest(final_free=final_free),tempfile.TemporaryDirectory() as directory:
+                path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
+                report=audit.analyze_processes([path],require_lifecycle=True,kernel_capture=capture)[0]
+                self.assertEqual(report['udpConnectOnly'],int(final_free))
+                self.assertEqual(report['kernelMetadataResolvedRecords'],int(final_free))
+                if final_free:
+                    self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors']),(0,0,0))
+                    self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
+                else:self.assertGreater(report['classificationErrors'],0)
+
     def test_any_protocol_or_output_send_prevents_D_even_after_alias_import(self):
         for kind,hook in [('S',2),('S',3),('L',7),('L',8),('L',9),('L',10)]:
             capture,network=self.fixture();events=capture['udpObjects']['events']

@@ -267,16 +267,31 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
         self.assertEqual((evidence['returnValueKnown'],evidence['fdClosureInferred']),(False,False))
         self.assertEqual((evidence['rangeStart'],evidence['rangeEnd']),(1,100))
 
+    def test_pending_close_with_all_arguments_decoded_never_infers_fd_closure(self):
+        for line in ('close(3', 'close(3<anon_inode:inotify> ', 'close(3<TCP:[127.0.0.1:1->127.0.0.1:2]>'):
+            with self.subTest(line=line):
+                checked=network.reconcile(self.fixture(),[(10,line,7)],{},
+                    {10},None,metadata_allowed={(10,7)})
+                self.assertEqual(checked['issues'],[])
+                self.assertEqual(len(checked['metadataFields']),1)
+                evidence=checked['metadataFields'][0]
+                self.assertEqual((evidence['fd'],evidence['returnValueKnown'],evidence['fdClosureInferred']),(3,False,False))
+                self.assertEqual(evidence['straceEntryForm'],'pending_complete_arguments')
+
     def test_other_fd_metadata_or_partial_close_entries_never_get_metadata_proof(self):
-        for line in ['close(?) = ?','close(3 <unfinished ...>','dup(3) = ?',
+        for line in ['close(?) = ?','close(', 'close(3<inotify', 'close(3, 4',
+                     'close(3<anon_inode:inotify>, 4<extra>', 'close(3<anon_inode:inotify> garbage<extra>',
+                     'close(3<anon_inode:inotify> garbage>', 'close(3<anon_inode:inotify>, 4<extra>) = ?',
+                     'close(3 <unfinished ...>','dup(3) = ?',
                      'unshare(CLONE_FILES) = ?','fcntl(3, F_DUPFD, 0) = ?', 'mmap(NULL, 1, 0, 0, 3, 0) = ?']:
             checked=network.reconcile(self.fixture(),[(10,line,7)],{}, {10},None,metadata_allowed={(10,7)})
             self.assertEqual(checked['metadataFields'],[],line)
 
     def test_missing_kernel_coverage_hidden_network_or_incomplete_task_blocks_close_proof(self):
         import copy
-        for fault in ('loss','namespace','task','network','unterminated','duplicate'):
-            capture=copy.deepcopy(self.fixture());records=[(10,'close(3) = ?',7)]
+        for fault,line in ((fault,line) for fault in ('loss','namespace','task','network','unterminated','duplicate')
+                           for line in ('close(3) = ?', 'close(3 ')):
+            capture=copy.deepcopy(self.fixture());records=[(10,line,7)]
             terminal={10}
             if fault=='loss':capture['lostEvents']=1
             if fault=='namespace':capture['pidNamespaceVerified']=False

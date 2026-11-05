@@ -314,14 +314,19 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
         result = re.search(r'\)\s+=\s+(-?\d+)(?:<.*>)?(?:\s.*)?$', line)
         if call and call[1] in CALLS:
             decoded[pid].append((CALLS.index(call[1])+1, int(call[2]), int(result[1]) if result else None, sequence))
-        # Only the return is unreadable. A complete close entry cannot create an
-        # FD alias; its unknown return must never be used as closure evidence.
-        close=re.fullmatch(r'close\(\s*(-?\d+)(?:<.*>)?\s*\)\s+=\s+\?(?:\s.*)?',line)
+        # close has exactly one native argument. strace may print its complete
+        # FD but never reach the closing parenthesis at task termination. Both
+        # forms retain an unknown result and cannot establish FD closure.
+        close_argument=r'close\(\s*(-?\d+)(?:<(?:[^<>]|->)*>)?\s*'
+        close=re.fullmatch(close_argument+r'\)\s+=\s+\?(?:\s.*)?',line)
+        pending_close=(re.fullmatch(close_argument,line)
+                       if '<unfinished ...>' not in line else None)
+        close=close or pending_close
         if close and (pid,sequence) in metadata_allowed:
             if (pid,sequence) in close_keys:
                 error('kernel_metadata_record_duplicated',pid);continue
             close_keys.add((pid,sequence))
-            close_fields.append((pid,sequence,int(close[1])))
+            close_fields.append((pid,sequence,int(close[1]),bool(pending_close)))
     matched = set(); matched_sequences={}
     not_executed = defaultdict(list); nonexecution=[]; nonnetwork=[]; result_fields=[]
     terminal_pids=states if terminal_pids is None else terminal_pids
@@ -434,13 +439,14 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 networkEntries=len(entries[pid]), socketEvents=sum(e['pid']==pid for e in hooks),
                 preEntryInvocations=len(pre[pid]), notExecutedOrdinals=not_executed[pid],
                 reason='complete_task_lifetime_no_unmatched_kernel_network_activity'))
-        for pid,sequence,fd in close_fields:
+        for pid,sequence,fd,pending_close in close_fields:
             if pid not in terminal_pids:continue
             task=tasks[pid]
             metadata.append(dict(pid=pid,kernelPid=task['kernelPid'],sequence=sequence,syscall='close',fd=fd,
                 records=1,rangeStart=task['start'],rangeEnd=task['end'],
                 networkEntries=len(entries[pid]),socketEvents=sum(e['pid']==pid for e in hooks),
                 returnValueKnown=False,fdClosureInferred=False,
+                straceEntryForm='pending_complete_arguments' if pending_close else 'decoded_missing_return',
                 reason='known_close_missing_return_no_unmatched_kernel_network_activity'))
     diagnostics=[]; hooks_by_invocation=defaultdict(list)
     for event in hooks:hooks_by_invocation[(event['pid'],event['ordinal'])].append(event)

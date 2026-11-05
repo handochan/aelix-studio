@@ -463,7 +463,12 @@ unit traces can no longer establish D. Original direct/child/host controls remai
 and normal/SQPOLL CONNECT remain 87.
 
 `close(decimalFD<optional annotation>) = ?` retains a known entry with an unknown
-return. Only a terminated task with complete kernel reconciliation and no unmatched
+return. The shutdown form `close(decimalFD<optional annotation> <unfinished ...>`
+also has the complete argument of this one-argument native syscall, even though
+strace never prints the closing parenthesis. It enters the same proof and ring
+ledger with an unknown result; a truncated FD/annotation or extra argument does
+not qualify. `straceEntryForm` distinguishes these two forms. Only a terminated
+task with complete kernel reconciliation and no unmatched
 network action may account for that field. `kernelMetadataResolutions` retains TID,
 range, sequence and FD with `returnValueKnown=false` and `fdClosureInferred=false`.
 It never proves FD closure. UDP descriptor uncertainty can be superseded only by

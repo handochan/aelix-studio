@@ -336,7 +336,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 started = previous[2]
             record(pid, line, started)
     for pid, (call, _line, _started) in pending.items():
-        if kernel_capture is not None and call in NETWORK:
+        if kernel_capture is not None and call in NETWORK | {'close'}:
             record(pid,_line,_started)
         else: unknown(pid, call,'pending_at_end')
     for pid, at in terminal_stops.items():
