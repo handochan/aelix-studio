@@ -42,6 +42,10 @@ vi.mock('@/renderer/components/settings/SettingsModal/settingsViewContext', () =
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    systemSettings: {
+      getAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(true) },
+      setAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(undefined) },
+    },
     shell: { openFile: { invoke: vi.fn() } },
     autoUpdate: { quitAndInstall: { invoke: vi.fn(() => Promise.resolve()) } },
   },

@@ -108,7 +108,10 @@ log.hooks.push((message, _transport) => {
 
 // Patch global console so every console.log/warn/error from any module
 // goes through electron-log (and thus to the file transport).
-log.initialize();
+// Do not instantiate defaultSession from electron-log's synchronous ready
+// callback: offline dictionaries must be configured before the first session.
+// Future sessions still receive the logging preload before any window is made.
+log.initialize({ getSessions: () => [] });
 
 // log.initialize() only patches the renderer via preload.
 // Explicitly redirect main-process console to electron-log.

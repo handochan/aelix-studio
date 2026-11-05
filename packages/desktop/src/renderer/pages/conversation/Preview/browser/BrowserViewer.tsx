@@ -4,13 +4,15 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback } from 'react';
+import { Modal, Message } from '@arco-design/web-react';
+import { useTranslation } from 'react-i18next';
+import React, { useCallback, useEffect, useRef } from 'react';
 import WebviewHost from '@/renderer/components/media/WebviewHost';
 import {
   BROWSER_BLANK_URL,
   BROWSER_SESSION_PARTITION,
   browserTabLabelFromUrl,
-  resolveAddressBarInput,
+  resolveAddressBarDestination,
 } from './constants';
 
 export interface BrowserViewerProps {
@@ -40,7 +42,50 @@ export interface BrowserViewerProps {
  * the browser can be restored after a restart.
  */
 const BrowserViewer: React.FC<BrowserViewerProps> = ({ url, tabId, onUrlChange, onTitleChange, onFaviconChange }) => {
+  const { t } = useTranslation();
+  const intent = useRef(0);
+  const granted = useRef(false);
+  useEffect(() => {
+    intent.current++;
+    return () => {
+      intent.current++;
+    };
+  }, [url]);
   const handleUrlChange = useCallback((next: string) => onUrlChange(tabId, next), [tabId, onUrlChange]);
+
+  const resolveInput = useCallback(
+    (raw: string): string | null => {
+      const request = ++intent.current;
+      const destination = resolveAddressBarDestination(raw);
+      if (!destination || !destination.search) return destination?.url ?? null;
+      try {
+        granted.current ||= localStorage.getItem('studio.bingSearchConsent') === '1';
+      } catch {
+        /* Ask when storage is unavailable. */
+      }
+      if (granted.current) return destination.url;
+      Modal.confirm({
+        title: t('preview.browser.searchConsentTitle'),
+        content: t('preview.browser.searchConsentDescription', { host: 'www.bing.com' }),
+        okText: t('common.confirm'),
+        cancelText: t('common.cancel'),
+        onOk: () => {
+          granted.current = true;
+          try {
+            localStorage.setItem('studio.bingSearchConsent', '1');
+          } catch {
+            /* Consent remains scoped to this view. */
+          }
+          if (request === intent.current) handleUrlChange(destination.url);
+        },
+        onCancel: () => {
+          Message.info(t('preview.browser.searchDeclined'));
+        },
+      });
+      return null;
+    },
+    [handleUrlChange, t]
+  );
 
   const handleTitleChange = useCallback(
     (title: string) => {
@@ -71,7 +116,7 @@ const BrowserViewer: React.FC<BrowserViewerProps> = ({ url, tabId, onUrlChange, 
       partition={BROWSER_SESSION_PARTITION}
       showNavBar
       className='bg-bg-1'
-      resolveUrlInput={resolveAddressBarInput}
+      resolveUrlInput={resolveInput}
       onUrlChange={handleUrlChange}
       onTitleChange={handleTitleChange}
       onFaviconChange={handleFaviconChange}

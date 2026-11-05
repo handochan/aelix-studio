@@ -1292,11 +1292,11 @@
   "bugReportScreenshotLabel": "Screenshots",
   "bugReportScreenshotDropzoneText": "Click, drag, or paste screenshots here",
   "bugReportScreenshotFormats": "Supports PNG, JPG, GIF",
-  "bugReportAutoInfo": "System info and logs from the last 3 days will be automatically attached to help us locate the issue faster",
-  "bugReportSubmit": "Submit",
+  "bugReportAutoInfo": "Звіт містить останні журнали та діагностику. Перевірте локальний файл перед поширенням. Нічого не надсилається автоматично.",
+  "bugReportSubmit": "Зберегти звіт локально",
   "bugReportCancel": "Cancel",
-  "bugReportSuccess": "Report submitted, thank you for your feedback",
-  "bugReportError": "Submission failed, please try again later",
+  "bugReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
+  "bugReportError": "Не вдалося підготувати звіт. Спробуйте ще раз.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",
   "bugReportModuleMcp": "MCP & Tools",
@@ -1464,5 +1464,8 @@
     "unauthenticated": "Увійдіть на цей хост WebUI для керування нативними обліковими даними.",
     "failed": "Помилка нативної операції ({{code}}). Оновіть нативний стан перед повторною спробою.",
     "manualCallback": "Вставте код авторизації або URL переспрямування."
-  }
+  },
+  "autoUpdateCheck": "Перевіряти оновлення під час запуску",
+  "autoUpdateCheckDescription": "Перевіряє Aelix Studio Releases і сповіщає. Вимкніть для автономної роботи.",
+  "autoUpdateSaveFailed": "Не вдалося зберегти налаштування оновлень."
 }

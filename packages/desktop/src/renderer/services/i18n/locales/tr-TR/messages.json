@@ -97,5 +97,7 @@
   "requestDetails": "İstek ayrıntıları:",
   "delivery": {
     "pending": "Okunmadı"
-  }
+  },
+  "remoteImageLoad": "Resmi yükle",
+  "remoteImageConsent": "Bu uzak resim gizlendi. Yüklemek {{host}} sunucusuna bağlanır."
 }

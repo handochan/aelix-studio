@@ -97,5 +97,7 @@
   "requestDetails": "Request details:",
   "delivery": {
     "pending": "Unread"
-  }
+  },
+  "remoteImageLoad": "Load image",
+  "remoteImageConsent": "This remote image is hidden. Loading it connects to {{host}}."
 }

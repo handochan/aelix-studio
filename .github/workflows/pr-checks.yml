@@ -56,17 +56,24 @@ jobs:
         with:
           ref: ${{ inputs.commit_sha || github.ref }}
       - name: Install tracepoint probe tools
-        run: sudo apt-get update && sudo apt-get install -y bpftrace strace gcc liburing-dev xz-utils
+        run: sudo apt-get update && sudo apt-get install -y bpftrace strace gcc make liburing-dev xz-utils
+      - name: Prepare the shared pinned syscall tracer
+        run: |
+          if [ "$(uname -m)" = x86_64 ]; then sudo apt-get install -y gcc-multilib; fi
+          bash scripts/outbound-audit/bundles/prepareStrace.sh
+          echo "$PWD/.local/strace-toolchain/bin" >> "$GITHUB_PATH"
       - name: Record an actual io_uring CONNECT with sudo
-        run: sudo -n python3 -I -B scripts/studio-preview/fixtures/uringTrace.py --probe .local/io-uring-trace-probe.json
+        run: sudo -n env "PATH=$PWD/.local/strace-toolchain/bin:$PATH" python3 -I -B scripts/studio-preview/fixtures/uringTrace.py --probe .local/io-uring-trace-probe.json
       - name: Verify SQPOLL context ownership with sudo
-        run: sudo -n python3 -I -B scripts/studio-preview/fixtures/uringTrace.py --probe .local/io-uring-trace-probe-sqpoll.json --sqpoll
+        run: sudo -n env "PATH=$PWD/.local/strace-toolchain/bin:$PATH" python3 -I -B scripts/studio-preview/fixtures/uringTrace.py --probe .local/io-uring-trace-probe-sqpoll.json --sqpoll
       - name: Preserve tracepoint capability evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: io-uring-trace-probe-${{ matrix.os }}
-          path: .local/io-uring-trace-probe*.json
+          path: |
+            .local/io-uring-trace-probe*.json
+            .local/strace-toolchain/receipt.json
           include-hidden-files: true
 
   provider-preview:
@@ -118,7 +125,13 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           bunx playwright install-deps chromium
-          sudo apt-get install -y strace gcc liburing-dev pkg-config iproute2 bpftrace xz-utils
+          sudo apt-get install -y strace gcc make liburing-dev pkg-config iproute2 bpftrace xz-utils
+      - name: Prepare the shared pinned syscall tracer
+        if: runner.os == 'Linux'
+        run: |
+          if [ "$(uname -m)" = x86_64 ]; then sudo apt-get install -y gcc-multilib; fi
+          bash scripts/outbound-audit/bundles/prepareStrace.sh
+          echo "$PWD/.local/strace-toolchain/bin" >> "$GITHUB_PATH"
       - name: Check preparation boundaries
         run: python -B -m unittest discover -s tests/studio-preview
       - name: Prepare exact native and ACP source wheels with the released host
@@ -173,6 +186,7 @@ jobs:
         with:
           name: provider-preview-${{ matrix.target }}
           path: |
+            .local/strace-toolchain/receipt.json
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
             .local/provider-installer/host-preflight.json

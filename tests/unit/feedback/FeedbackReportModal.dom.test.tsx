@@ -48,20 +48,8 @@ vi.mock('@/renderer/hooks/context/AuthContext', () => ({
   useAuth: () => ({ user: authMock.user }),
 }));
 
-const sentryMocks = vi.hoisted(() => {
-  const setTag = vi.fn();
-  const setUser = vi.fn();
-  return {
-    setTag,
-    setUser,
-    captureEvent: vi.fn(),
-    withScope: vi.fn((callback: (scope: { setTag: typeof setTag; setUser: typeof setUser }) => void) => {
-      callback({ setTag, setUser });
-    }),
-  };
-});
-
-vi.mock('@sentry/electron/renderer', () => sentryMocks);
+const downloadMock = vi.hoisted(() => vi.fn());
+vi.mock('@/renderer/utils/file/download', () => ({ downloadTextContent: downloadMock }));
 
 import FeedbackReportModal, {
   type PrefilledScreenshot,
@@ -81,10 +69,7 @@ describe('FeedbackReportModal — prefill', () => {
     (window as unknown as { electronAPI?: unknown }).electronAPI = undefined;
     window.location.hash = '';
     authMock.user = null;
-    sentryMocks.setTag.mockClear();
-    sentryMocks.setUser.mockClear();
-    sentryMocks.captureEvent.mockClear();
-    sentryMocks.withScope.mockClear();
+    downloadMock.mockClear();
   });
 
   afterEach(() => {
@@ -172,7 +157,7 @@ describe('FeedbackReportModal — prefill', () => {
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
-  it('submits feedback tags and extra context to Sentry', async () => {
+  it('includes feedback tags and extra context in the local report', async () => {
     const user = userEvent.setup();
     const onCancel = vi.fn();
     renderModal(
@@ -197,25 +182,13 @@ describe('FeedbackReportModal — prefill', () => {
     await user.click(screen.getByText('settings.bugReportSubmit'));
 
     await waitFor(() => {
-      expect(sentryMocks.captureEvent).toHaveBeenCalledTimes(1);
+      expect(downloadMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(sentryMocks.setTag).toHaveBeenCalledWith('type', 'user-feedback');
-    expect(sentryMocks.setTag).toHaveBeenCalledWith('module', 'conversation-session');
-    expect(sentryMocks.setTag).toHaveBeenCalledWith('agent_error_code', 'USER_LLM_PROVIDER_AUTH_FAILED');
-    expect(sentryMocks.setTag).toHaveBeenCalledWith('agent_error_ownership', 'user_llm_provider');
-    expect(sentryMocks.captureEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        extra: {
-          description: 'provider failed',
-          agent_error: {
-            code: 'USER_LLM_PROVIDER_AUTH_FAILED',
-            ownership: 'user_llm_provider',
-          },
-        },
-      }),
-      expect.objectContaining({ attachments: [] })
-    );
+    expect(JSON.parse(downloadMock.mock.calls[0][0])).toMatchObject({
+      tags: { agent_error_code: 'USER_LLM_PROVIDER_AUTH_FAILED', agent_error_ownership: 'user_llm_provider' },
+      extra: { agent_error: { code: 'USER_LLM_PROVIDER_AUTH_FAILED', ownership: 'user_llm_provider' } },
+    });
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
@@ -269,7 +242,7 @@ describe('FeedbackReportModal — prefill', () => {
     expect(options.method).toBe('GET');
   });
 
-  it('attaches the signed-in account email to the feedback event', async () => {
+  it('does not silently include the signed-in account email', async () => {
     authMock.user = { id: 'u1', username: 'user-one', email: '  me@account.com  ' };
     const user = userEvent.setup();
     renderModal(<FeedbackReportModal visible={true} onCancel={vi.fn()} defaultModule='conversation-session' />);
@@ -278,12 +251,10 @@ describe('FeedbackReportModal — prefill', () => {
     await user.click(screen.getByText('settings.bugReportSubmit'));
 
     await waitFor(() => {
-      expect(sentryMocks.captureEvent).toHaveBeenCalledTimes(1);
+      expect(downloadMock).toHaveBeenCalledTimes(1);
     });
 
-    // The account email rides along on THIS event's scoped user (trimmed), with
-    // no visible field for the reporter to fill in or edit.
-    expect(sentryMocks.setUser).toHaveBeenCalledWith({ email: 'me@account.com' });
+    expect(JSON.parse(downloadMock.mock.calls[0][0]).contactEmail).toBeUndefined();
   });
 
   it('submits without a scoped user when the signed-in user has no email', async () => {
@@ -295,10 +266,10 @@ describe('FeedbackReportModal — prefill', () => {
     await user.click(screen.getByText('settings.bugReportSubmit'));
 
     await waitFor(() => {
-      expect(sentryMocks.captureEvent).toHaveBeenCalledTimes(1);
+      expect(downloadMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(sentryMocks.setUser).not.toHaveBeenCalled();
+    expect(JSON.parse(downloadMock.mock.calls[0][0]).contactEmail).toBeUndefined();
   });
 
   it('no longer renders the contact email field or its account-fill button', () => {

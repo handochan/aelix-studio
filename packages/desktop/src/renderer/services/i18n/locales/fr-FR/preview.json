@@ -153,7 +153,10 @@
     "tabLimitReached": "Limite d'onglets atteinte ({{count}}). L'onglet le plus ancien a été réutilisé.",
     "agentFirstUseTitle": "L'agent utilise le navigateur intégré",
     "agentFirstUseContent": "Il peut ouvrir des pages, cliquer et lire du contenu dans ce panneau. Votre connexion est conservée.",
-    "agentFirstUseAction": "Ouvrir les paramètres"
+    "agentFirstUseAction": "Ouvrir les paramètres",
+    "searchConsentTitle": "Autoriser la recherche Bing ?",
+    "searchConsentDescription": "La recherche envoie votre requête à {{host}}. Autoriser Bing sur cet appareil ?",
+    "searchDeclined": "La recherche n’a pas été envoyée car l’accès à Bing n’a pas été approuvé. Vous pouvez toujours saisir une URL."
   },
   "saveConflict": "Échec de l'enregistrement : ce fichier a changé sur le disque depuis que vous l'avez ouvert. Rechargez pour voir les autres modifications — vos modifications sont toujours là, non enregistrées.",
   "persistQuotaExceeded": "Le stockage local est plein : les onglets ouverts de ce projet ne peuvent plus être mémorisés. Fermez des onglets ou effacez les données du site.",
@@ -178,5 +181,8 @@
   "zoomReset": "Réinitialiser la vue",
   "diagramZoomHint": "Molette pour zoomer • Glisser pour déplacer • Échap pour fermer",
   "remoteImageDisabled": "Les images distantes sont désactivées par les paramètres de l’hôte.",
-  "remoteImageFailed": "L’hôte n’a pas pu charger cette image distante. Le chargement direct est bloqué."
+  "remoteImageFailed": "L’hôte n’a pas pu charger cette image distante. Le chargement direct est bloqué.",
+  "localEditorUnavailable": "Impossible de charger l’éditeur local. Réparez ou réinstallez les ressources de l’application ; aucun CDN n’a été contacté.",
+  "localSpellingUnavailableTitle": "La correction locale est indisponible",
+  "localSpellingUnavailableDescription": "Les dictionnaires locaux n’ont pas pu être chargés. Redémarrez l’application ou réparez/réinstallez ses ressources. Aucun serveur de dictionnaires distant n’est utilisé ; les autres fonctions restent disponibles."
 }

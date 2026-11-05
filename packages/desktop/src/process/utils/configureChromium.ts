@@ -11,6 +11,9 @@ import * as path from 'path';
 import os from 'os';
 import { getDevAppName } from '@/common/platform';
 import { applyGpuRecoveryFlags } from './gpuRecovery';
+import { configureBackgroundNetworking } from '../startup/backgroundNetworking';
+
+configureBackgroundNetworking(app);
 
 // ============ E2E test isolation ============
 // When running under E2E with an explicit sandbox dir, redirect userData there

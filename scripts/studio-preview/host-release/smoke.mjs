@@ -17,7 +17,7 @@ if (executablePath) {
       ? `${process.env.SystemRoot ?? process.env.SYSTEMROOT}\\System32;${process.env.SystemRoot ?? process.env.SYSTEMROOT}`
       : '/usr/bin:/bin';
 }
-let app, page, port, selector, conversationRoute;
+let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
@@ -27,11 +27,18 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
     env: appEnv,
     timeout: 60000,
   });
-  appPids.push(await app.evaluate(() => process.pid));
+  // Capture both assertions in the same early main-context evaluation.
+  const identity = await app.evaluate(() => ({
+    pid: process.pid,
+    backendOverride: process.env.AIONUI_BACKEND_BIN,
+    resourcesPath: process.resourcesPath,
+  }));
+  appPids.push(identity.pid);
+  launchResources = identity.resourcesPath;
+  if (executablePath) assert.equal(identity.backendOverride, undefined);
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);
-  if (executablePath) assert.equal(await app.evaluate(() => process.env.AIONUI_BACKEND_BIN), undefined);
   // Backend readiness precedes the authenticated startup router. Wait for its
   // Guid surface before navigating so an initial redirect cannot replace us.
   await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
@@ -68,6 +75,33 @@ async function api(route, method = 'GET', body, status = [200, 201, 202]) {
 }
 try {
   await launch();
+  if (executablePath) {
+    await expect
+      .poll(async () => (await api('/api/mcp/servers')).some((row) => row.name === 'chrome-devtools'))
+      .toBe(true);
+    const chrome = (await api('/api/mcp/servers')).find((row) => row.name === 'chrome-devtools');
+    const resources = launchResources;
+    const managedRoot = path.join(
+      resources,
+      'bundled-aioncore',
+      `${process.platform}-${process.arch}`,
+      'managed-resources'
+    );
+    const contract = JSON.parse(fs.readFileSync(path.join(managedRoot, 'manifest.json'), 'utf8'));
+    const expectedNode = path.join(managedRoot, contract.node.root, contract.node.executable);
+    assert.equal(chrome.enabled, false);
+    assert.equal(fs.realpathSync(chrome.transport.command), fs.realpathSync(expectedNode));
+    const connection = await api('/api/mcp/test-connection', 'POST', {
+      ...chrome,
+      transport: {
+        ...chrome.transport,
+        env: { ...chrome.transport.env, PATH: path.join(sandbox, 'no-mcp-path-tools') },
+      },
+    });
+    assert.equal(connection.success, true);
+    assert.ok(connection.tools.some((tool) => tool.name === 'navigate_page'));
+    checks.push('default_chrome_mcp_bundled_node_without_path');
+  }
   await api('/api/agents/custom', 'POST', {
     name: 'Permission recovery synthetic ACP',
     command: process.env.RECOVERY_ADAPTER,

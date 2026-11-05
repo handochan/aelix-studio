@@ -1,0 +1,2246 @@
+{
+  "schema": "aelix-studio.ipv6-probe-investigation/1",
+  "kernel": "Linux 43bad4db77c8 7.0.11-orbstack-00360-gc9bc4d96ac70 #1 SMP PREEMPT Thu Jun  4 16:40:25 UTC 2026 aarch64 GNU/Linux",
+  "tcpdump": "tcpdump version 4.99.3",
+  "strace": "strace -- version 6.1",
+  "recipes": {
+    "ipv6Capture.py": "2bd73a31603cf931a01a5472dd8e82fb191176b17db2d295dda906aee222552f",
+    "ipv6Probe.cjs": "44982d78d7912112ca0a51cbb1b8b6e19cf76fdf2e8e433d69ae098e6eb47da7",
+    "ipv6Peer.py": "e2290e6c12f8e5691cd00fac49a26a88cf8a2ba639d895327d32438698e9d770"
+  },
+  "records": [
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "0155e097dcccc44e28ebb264237cd39987cd836d40c22bcebae15a56abfdf932"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "a0319286aca0fae77eb6dad6104110c319f5c7406ab79dece0b6363870ea6814"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "d37cd1b5dcff3b57dbc91dc17555a93b9542765662fe71b1252ef5a1b68c4725"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "5e834da4054327fa9e319875add22fee62b86f1a9bec62bd8c14609182ba4850"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "production",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "23164531ff1ee69d22e0c2176de464bee5400114ec9a476f2ae6a0a8258db7cc"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "864d6e8de102615f54e607edde07e0f1cb8def03b50383bf3679615eee258f16"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "production",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "11a08973a82dfc89e54741f0121938104845023b1d874f4bb86af36871e92bbf"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "e0706df57d9552b902e712df5ab44f50759cb441da2a9312bd9ca9b6a416693e"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "builtin-on",
+        "resolver": {
+          "enableBuiltInResolver": true,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "772cc6d0e43ed2fc6b4c9b21bf4bbbd63a850748cc7f48e1718518f7cd36ade0"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "353c425d8631bd909ced124438ca2e7b0bcbc1bcea380d879f517a27be41b79f"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "builtin-on",
+        "resolver": {
+          "enableBuiltInResolver": true,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "5ee9806b524254181c5c335ab2097231c7b00adc7a68b9d285a8ec450d885f7d"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "8e78cb0ee3ecbdc757bdf9c98354843f5e631c5d374ce0a5d3fcd19690c75b27"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "happy-api",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableHappyEyeballs": true
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "5a3d9b144236039adb504b9bac9b211d0d210ba80e7ebb1bc575a60a31ee9c03"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "0f280411314e141d63c9ef75db8c32230a943959f1aeaa541bafc1699fc4ee21"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "happy-api",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableHappyEyeballs": true
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "0c1fa7d09dd77e78c5a6e773192f9c9cb92b52b6ca61dcc07181bf1117fe9772"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "ff22177cac776a63b89337cbd5f895f3cb1db28c984b829cb2b04a10eac2ea9e"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "additional-off",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableAdditionalDnsQueryTypes": false
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "0871dcf5488858d74bc57d9bde4367116be2cd33336c5db055944d0d99d9ffef"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "51c95eb37ad437b7ac1c6d469778e0d906c0c846de4b45bb4adcade76aa392f9"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "additional-off",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableAdditionalDnsQueryTypes": false
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "419f60ca0c4d24a9b21a616cfcdb6e4b47d525c6b571bf2a796ba5d0ae2fee61"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "b5cfd2e97f386b83d250d8aa23112b0dc157f4ef44d187c44c4c351a65205660"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "override",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "EnableIPv6ReachabilityOverride",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "67d2b85887eaec09dcca1bf8cd30644bc5c2affc5ff6505374d6708f40bbde3b"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "40bc3591875dbbb32bc7b5e0efe45e0c031e43ee8613ac13e9ebef95e4592985"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "override",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "EnableIPv6ReachabilityOverride",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "d6bbf04e315e1320bb70e331cf2a956949757bc23da2f0cd163afca52f9acbb6"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "f78761369bfd4c57393875d8f58f10bd832e404c5aea350b69011a120d3aac82"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "happy-feature",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "HappyEyeballsV3",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "42ae6f80d4fca302e1b97e43af9e54ca5c9ce39d1581487b30d233fdb8f3b106"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "b208f0154839e29c4d7e482b463d27d733bf87f0034eb9f6b51047fcf233f798"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "happy-feature",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "HappyEyeballsV3",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "e0d223435631ea9291e752d36cb0cfe2e42000b4468fdedb43938c54e5238aa7"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "6a08cdee5d0b9df05c3ba91afd886051c19d31d5291bff37606992e0cba6f1c2"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "host-rules",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "971771986e5d25445a675dbbdc73372cf136b12876d8b217554591eec213af08"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "13eb148573e80d2129f224819868cbd5ab2db6d1414ecb2215f2a80d1ce54ac1"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "host-rules",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "4ea588235563fbf1e8029b35768dd2fd9103faf1453aa750645a17748490984c"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "e47fa9791eda7691a1307cfd70a5d6766edccbdd4f9acf943b79e8e1804329cd"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "ff62367b811684988aaa62675c282406ccc944aecd32e4b0d34fc4faea4bad4b"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "d5205cb8703588041763304fd7c4f3a94f53274f2f05a6836ce7cc6e52db32be"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "1585b38733c212923521f6c5929e24916e10f30752a05d92e95836e0e34feddf"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "142a41d3c5856428980fa6d7371b3507adeed04261ae29eb50fbba511de75390"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "production",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "94c38bb52bc6238b9cc1e36cfdbc820f629b3dfdbeb39ec9d48a5391d051d2a7"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "6766a7fb6a96317fe1c46b1fa2d55615ee01a513eef4f8250af0aaadf42ee729"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "production",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "dda33c82519799986f28f69d25c72fa937ab265e5a0398e08b347a95b5bbb424"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "b63ad7830af6af991aa32614d2b675d41319211549bca3b108c234114e8abe11"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "override",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "EnableIPv6ReachabilityOverride",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "c2f924481f07224119e30ab4c830b546035f263e803f0b3d51a9136d432992ac"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "486a99788b49e25f3a7890d3fcfa89c5889fc1e30b5354d9d72cf8ca166bb139"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "override",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off"
+        },
+        "switches": {
+          "enable": "EnableIPv6ReachabilityOverride",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "d72ec6245d09f907420f8dd2ccea756fb0c9e5c31bcd520d6a25fb22df6bd849"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "c0c0cd52feee86d386ff285d7ae83817903d8ed596d9b52856e32323ed9913a4"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "happy-api",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableHappyEyeballs": true
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": false,
+            "error": "ERR_NAME_NOT_RESOLVED"
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": [
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)",
+          "-1 ENETUNREACH (Network is unreachable)"
+        ],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 12,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 12,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 6,
+          "2001:db8:15::1": 6
+        },
+        "kernelDropped": 0,
+        "sha256": "f4d16fa36126887051a16ee45972be9ae14d78ea96d55a190309e3c718b80873"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 1,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "432b66b294c7bf9396ce74bc5097a71bc99fca26088415434197f9da57374f8a"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": false,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "happy-api",
+        "resolver": {
+          "enableBuiltInResolver": false,
+          "secureDnsMode": "off",
+          "enableHappyEyeballs": true
+        },
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          },
+          {
+            "label": "ipv6Literal",
+            "ok": true
+          },
+          {
+            "label": "ipv6Hostname",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 3,
+        "probeConnectResults": ["0", "0", "0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 24,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 24,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 12,
+          "2001:db8:15::1": 12
+        },
+        "kernelDropped": 0,
+        "sha256": "18d5326c48a303ee2c871843fd77d57bc29b781e6c6f1e544774ec5215f2e418"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 2,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "a75db561d5f4ad618202c2c1125e3aa7301820453d476a3df99364b9cf56ec40"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": true,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 1,
+        "probeConnectResults": ["-1 ENETUNREACH (Network is unreachable)"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 3,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 2,
+        "otherProtocol": 0,
+        "destinations": {
+          "ff02::1:ff00:2": 1,
+          "2001:db8:15::1": 1,
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "7266ab0692eaa6bb2e1654904caa560064d76aeac857a07e754ce6bedda78aa8"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": true,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "0fb85f984f528d4add5b9708df5a596e963abc66b3d211855a1d12396b4f5d43",
+      "app": {
+        "versions": {
+          "electron": "37.10.3",
+          "chrome": "138.0.7204.251",
+          "node": "22.21.1"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 1,
+        "probeConnectResults": ["0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 4,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 2,
+        "otherProtocol": 0,
+        "destinations": {
+          "ff02::1:ff00:2": 1,
+          "2001:db8:15::1": 1,
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "642511eabf736a56cc3cfcf2b963091e97bd2fbc488e8114164a3ba22fd991cc"
+      }
+    },
+    {
+      "route": "absent",
+      "coldNeighborProbeOnly": true,
+      "routeLookup": "RTNETLINK answers: Network is unreachable\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 1,
+        "probeConnectResults": ["-1 ENETUNREACH (Network is unreachable)"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 3,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 1,
+        "icmpv6": 2,
+        "otherProtocol": 0,
+        "destinations": {
+          "ff02::1:ff00:2": 1,
+          "2001:db8:15::1": 1,
+          "2001:db8:15::2": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "0269c18aff0b88a40f04a78dd136b17f2d3fe2330a71c6a5eee1079086279c7c"
+      }
+    },
+    {
+      "route": "present",
+      "coldNeighborProbeOnly": true,
+      "routeLookup": "2001:4860:4860::8888 via 2001:db8:15::2 dev probe0 src 2001:db8:15::1 metric 1024 pref medium\n",
+      "executableSha256": "af8a7beea3d3f1d9db242f5ef4f00e0f71bb6e693dd54cb671e66012b58fb69f",
+      "app": {
+        "versions": {
+          "electron": "45.2.2",
+          "chrome": "156.0.8078.80",
+          "node": "24.22.2"
+        },
+        "variant": "default",
+        "switches": {
+          "enable": "",
+          "disable": ""
+        },
+        "results": [
+          {
+            "label": "ipv4",
+            "ok": true
+          }
+        ]
+      },
+      "syscalls": {
+        "probeConnects": 1,
+        "probeConnectResults": ["0"],
+        "probeSendCalls": 0,
+        "unknownSyscallRecords": 0
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      },
+      "positive": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 4,
+        "toProbe": 1,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 2,
+        "icmpv6": 2,
+        "otherProtocol": 0,
+        "destinations": {
+          "ff02::1:ff00:2": 1,
+          "2001:db8:15::1": 1,
+          "2001:db8:15::2": 1,
+          "2001:4860:4860::8888": 1
+        },
+        "kernelDropped": 0,
+        "sha256": "133ce85f4b2b502d5d7d9b61b0bc9cca01ee69e1f8588ea26999e9dfc6c7aa76"
+      }
+    }
+  ],
+  "unchangedAuditChecks": [
+    {
+      "route": "absent",
+      "exitCode": 86,
+      "audit": {
+        "schema": "aelix-studio.outbound-audit/1",
+        "scope": "command-and-all-descendants",
+        "traceThreads": 76,
+        "destinationAttempts": 2,
+        "externalAttempts": 1,
+        "unparsedRecords": 0,
+        "interruptedSyscalls": 0,
+        "processes": [
+          {
+            "tid": 2993,
+            "processNames": ["Chrome_ChildIOT"],
+            "destinationAttempts": 2,
+            "externalAttempts": 1,
+            "external": [
+              {
+                "syscall": "connect",
+                "address": "2001:4860:4860::8888",
+                "port": 443,
+                "external": true,
+                "failed": true
+              }
+            ]
+          }
+        ],
+        "commandExitCode": 0,
+        "status": "failed"
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      }
+    },
+    {
+      "route": "present",
+      "exitCode": 86,
+      "audit": {
+        "schema": "aelix-studio.outbound-audit/1",
+        "scope": "command-and-all-descendants",
+        "traceThreads": 77,
+        "destinationAttempts": 3,
+        "externalAttempts": 1,
+        "unparsedRecords": 0,
+        "interruptedSyscalls": 0,
+        "processes": [
+          {
+            "tid": 3081,
+            "processNames": ["Chrome_ChildIOT"],
+            "destinationAttempts": 3,
+            "externalAttempts": 1,
+            "external": [
+              {
+                "syscall": "connect",
+                "address": "2001:4860:4860::8888",
+                "port": 443,
+                "external": true,
+                "failed": false
+              }
+            ]
+          }
+        ],
+        "commandExitCode": 0,
+        "status": "failed"
+      },
+      "wire": {
+        "snaplen": 54,
+        "linkType": 1,
+        "frames": 0,
+        "toProbe": 0,
+        "fromProbe": 0,
+        "tcp": 0,
+        "udp": 0,
+        "icmpv6": 0,
+        "otherProtocol": 0,
+        "destinations": {},
+        "kernelDropped": 0,
+        "sha256": "7f4259b16ebdda735c9199369e9752aca7fb3ec2d53389134c1493beb7fb0f8e"
+      }
+    }
+  ],
+  "scope": {
+    "productHeadBeforeInvestigation": "92dcebfbff43cc4cf2ffea1bbf32cb269c2d3317",
+    "platform": "Linux arm64 Docker / isolated routed namespaces",
+    "probeAddress": "2001:4860:4860::8888",
+    "publicInternetIpv6RouteMeasured": false,
+    "captureSnaplen": 54,
+    "captureInterface": "owned non-loopback veth",
+    "auditPolicyChanged": false,
+    "productConfigurationChanged": false
+  },
+  "reviewedSupportedVersions": [
+    {
+      "electron": "43.8.7",
+      "chromium": "150.0.7871.250",
+      "verification": "source only"
+    },
+    {
+      "electron": "44.10.2",
+      "chromium": "152.0.7977.169",
+      "verification": "source only"
+    },
+    {
+      "electron": "45.2.2",
+      "chromium": "156.0.8078.80",
+      "verification": "source and separate binary",
+      "zipSha256": "ebecf43f3c348fd589bf3bfa5643842deb0993da94ce5604255799ac9d4512d1"
+    }
+  ],
+  "unchangedAuditHashes": {
+    "scripts/outbound-audit/audit.py": "1a60fe356e9a290af9be753802c0ca6e1b98f2262bf25cdc884d8f035f59af09",
+    "scripts/outbound-audit/destinationPolicy.py": "80d15a8056a498b4f2d8555ae97a53c800881b8a0903c4a75c4b3af1895b8caa",
+    ".github/workflows/studio-outbound.yml": "134aa040d4515585f41be9b287b8f37e60b884e75ef0d6dff980e6ddda7b0a49"
+  }
+}

@@ -12,6 +12,7 @@ import hashlib
 import json
 import os
 import signal
+import re
 from pathlib import Path
 import shutil
 import subprocess
@@ -73,6 +74,17 @@ def npm_proxy_configured(paths):
     return False
 
 
+def resolve_strace(root=None):
+    """Use the same prepared binary even across sudo's secure_path boundary."""
+    root = Path(root) if root is not None else Path(__file__).resolve().parents[3]
+    pinned = root / '.local/strace-toolchain/bin/strace'
+    return str(pinned) if pinned.is_file() else shutil.which('strace')
+
+
+def unsupported_personalities(stderr):
+    return len(re.findall(r'Proper structure decoding for this\s+personality is not supported', stderr, re.I))
+
+
 def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
@@ -90,7 +102,8 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         report_path.write_text(json.dumps({'schema': 'aelix-studio-host.outbound-audit/1', 'status': 'failed', 'reason': reason}) + '\n')
         print('Audit refused: npm configuration may hide destination attempts', file=sys.stderr)
         return INCOMPLETE
-    if sys.platform != 'linux' or shutil.which('strace') is None:
+    tracer = resolve_strace()
+    if sys.platform != 'linux' or tracer is None:
         raise RuntimeError('Linux strace is required; audit cannot be skipped')
     with tempfile.TemporaryDirectory(prefix='host-outbound-audit-') as directory:
         prefix = Path(directory) / 'network'
@@ -103,13 +116,15 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         # -q retains terminal records, so missing/detached tasks cannot look complete.
         # Raw traces are removed and executable paths never enter JSON reports.
         trace = prefix.with_suffix('.trace')
-        trace_command = ['strace', '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
-                                  'trace=connect,sendto,sendmsg,sendmmsg,accept,accept4,io_uring_setup,io_uring_enter,io_uring_register,close,close_range,mmap,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork,execve,execveat',
+        trace_command = [tracer, '-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '0', '-e', 'abbrev=!sendmmsg', '-e',
+                                  'trace=socket,unshare,connect,sendto,sendmsg,sendmmsg,write,writev,accept,accept4,io_uring_setup,io_uring_enter,io_uring_register,close,close_range,mmap,dup,dup2,dup3,fcntl,clone,clone3,fork,vfork,execve,execveat',
                                   '-o', str(trace), '--', *command]
         marker=Path(directory)/'stopped.json'
         capture=Capture(Path(directory))
+        stderr_path=Path(directory)/'command.stderr'
+        stderr_stream=stderr_path.open('wb')
         process=subprocess.Popen([sys.executable,'-I','-B',str(Path(__file__).with_name('uring')/'capture.py'),
-                                  '--exec-stop',str(marker),'--',*trace_command],start_new_session=True)
+                                  '--exec-stop',str(marker),'--',*trace_command],start_new_session=True,stderr=stderr_stream)
         try:
             capture.start(process.pid)
             if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
@@ -125,16 +140,37 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
                 evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
             evidence.update(status='failed',complete=False,reason=reason)
             evidence.setdefault('recordErrors',[]).append({'reason':reason})
+        stderr_stream.close()
+        stderr=stderr_path.read_bytes()
+        # Restore command diagnostics, but never retain them in JSON/artifacts.
+        if hasattr(sys.stderr,'buffer'):sys.stderr.buffer.write(stderr);sys.stderr.buffer.flush()
+        else:sys.stderr.write(stderr.decode('utf8','replace'))
+        unsupported=unsupported_personalities(stderr.decode('utf8','replace'))
         process.returncode=process.returncode if process.returncode is not None else INCOMPLETE
         paths = [trace] if trace.exists() else []
         if not evidence.get('complete'):
             print('Kernel capture incomplete: '+json.dumps({key:evidence.get(key) for key in
-                  ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode')}),file=sys.stderr)
+                  ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode',
+                   'preEntryProbe','socketSymbols')}),file=sys.stderr)
         report, whole = analyze_processes(paths, scope_executables, require_executables, True,evidence)
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
-               for name in ('outboundAudit.py', 'outboundScope.py')}
+               for name in ('outboundAudit.py', 'outboundScope.py', 'udpLifecycle.py')}
     recipes.update({f'uring/{path.name}':hashlib.sha256(path.read_bytes()).hexdigest()
                     for path in Path(__file__).with_name('uring').glob('*.py')})
+    tracer_metadata=None
+    if evidence.get('complete'):
+        version=subprocess.check_output([tracer,'--version'],text=True)
+        tracer_metadata={'version':version.splitlines()[0],
+                         'optionalFeatures':version.split('Optional features enabled:',1)[-1].strip(),
+                         'binarySha256':hashlib.sha256(Path(tracer).read_bytes()).hexdigest()}
+    for measurement in {id(report):report,id(whole):whole}.values():
+        measurement['straceDiagnostics']={'unsupportedPersonalities':unsupported}
+        if unsupported:
+            measurement['classificationIssues'].append({'reason':'unsupported_strace_personality'})
+            measurement['classificationErrors']+=1
+            measurement['unparsedRecords']+=1
+    report['strace'] = tracer_metadata
+    whole['strace'] = tracer_metadata
     report['sourceSha256'] = recipes
     whole['sourceSha256'] = recipes
     if whole_report_path is not None:
@@ -173,10 +209,19 @@ def main():
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
     parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
+    parser.add_argument('--transport-controls', type=Path)
+    from uring.socketObjects import CONTROL_MODES
+    parser.add_argument('--udp-control', choices=['connect-close', 'send', 'inherit-dup-send', 'uring-writev', 'uring-async-writev', *CONTROL_MODES])
     parser.add_argument('--positive-control', action='store_true')
     parser.add_argument('--child-positive-control', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.transport_controls:
+        from udpLifecycle import verify_controls
+        return verify_controls(Path(__file__).resolve(), args.transport_controls.resolve())
+    if args.udp_control:
+        from udpLifecycle import control
+        return control(args.udp_control)
     if args.child_positive_control:
         return subprocess.run([sys.executable, '-I', '-B', str(Path(__file__).resolve()), '--positive-control']).returncode
     if args.positive_control:

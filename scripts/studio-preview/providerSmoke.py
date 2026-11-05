@@ -105,6 +105,11 @@ async def main(args):
         sandbox = Path(temporary).resolve()
         for name in ('home', 'agent', 'workspace', 'extensions'):
             (sandbox / name).mkdir()
+        import base64
+        from urllib.parse import quote
+        config = sandbox / 'studio/config/aionui-config.txt'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False}), safe='').encode()).decode())
         # Bound only the synthetic transport failure: native and SDK defaults
         # can otherwise keep Windows' closed-port probe retrying beyond the UI assertion.
         settings = sandbox / 'agent/settings.json'
@@ -121,7 +126,7 @@ async def main(args):
                    AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(helper_runtime),
                    PROVIDER_SANDBOX=str(sandbox), PROVIDER_ENDPOINT=fixture.endpoint, PROVIDER_OUTPUT=str(output),
                    AIONUI_BACKEND_BIN=str(binary), AIONUI_E2E_TEST='1', AIONUI_DISABLE_DEVTOOLS='1',
-                   AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'), AIONUI_DISABLE_AUTO_UPDATE='1',
+                   AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
                    AIONUI_CDP_PORT='0', AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
         process = await asyncio.create_subprocess_exec('node', '--import', 'tsx',

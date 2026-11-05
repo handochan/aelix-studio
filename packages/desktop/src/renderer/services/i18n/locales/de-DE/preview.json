@@ -153,7 +153,10 @@
     "tabLimitReached": "Tab-Limit erreicht ({{count}}). Der älteste Tab wurde wiederverwendet.",
     "agentFirstUseTitle": "Der Agent nutzt den integrierten Browser",
     "agentFirstUseContent": "Er kann in diesem Bereich Seiten öffnen, klicken und Inhalte lesen. Deine Anmeldung bleibt erhalten.",
-    "agentFirstUseAction": "Einstellungen öffnen"
+    "agentFirstUseAction": "Einstellungen öffnen",
+    "searchConsentTitle": "Bing-Suche erlauben?",
+    "searchConsentDescription": "Die Suchanfrage wird an {{host}} gesendet. Bing-Suchen auf diesem Gerät erlauben?",
+    "searchDeclined": "Die Suche wurde ohne Zustimmung zum Bing-Zugriff nicht gesendet. URLs können weiterhin eingegeben werden."
   },
   "saveConflict": "Speichern fehlgeschlagen: Diese Datei wurde auf der Festplatte geändert, nachdem Sie sie geöffnet haben. Neu laden, um die anderen Änderungen zu sehen — Ihre Bearbeitungen sind noch da, ungespeichert.",
   "persistQuotaExceeded": "Der lokale Speicher ist voll, offene Tabs dieses Projekts können nicht mehr gemerkt werden. Schließen Sie einige Tabs oder löschen Sie die Websitedaten.",
@@ -178,5 +181,8 @@
   "zoomReset": "Ansicht zurücksetzen",
   "diagramZoomHint": "Scrollen zum Zoomen • Ziehen zum Verschieben • ESC zum Schließen",
   "remoteImageDisabled": "Remote-Bilder sind durch die Host-Einstellungen deaktiviert.",
-  "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert."
+  "remoteImageFailed": "Der Host konnte dieses Remote-Bild nicht laden. Direktes Laden wird blockiert.",
+  "localEditorUnavailable": "Der lokale Editor konnte nicht geladen werden. Reparieren oder installieren Sie die App-Ressourcen neu. Es wurde kein CDN kontaktiert.",
+  "localSpellingUnavailableTitle": "Lokale Rechtschreibprüfung nicht verfügbar",
+  "localSpellingUnavailableDescription": "Lokale Wörterbücher konnten nicht geladen werden. Starten Sie die App neu oder reparieren/installieren Sie die Ressourcen neu. Es wird kein externer Wörterbuchserver verwendet; andere Funktionen bleiben verfügbar."
 }

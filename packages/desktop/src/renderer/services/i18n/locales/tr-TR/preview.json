@@ -153,7 +153,10 @@
     "tabLimitReached": "Sekme sınırına ulaşıldı ({{count}}). En eski sekme yeniden kullanıldı.",
     "agentFirstUseTitle": "Aracı uygulama içi tarayıcıyı kullanıyor",
     "agentFirstUseContent": "Bu panelde sayfa açabilir, tıklayabilir ve içerik okuyabilir. Oturum bilgileriniz korunur.",
-    "agentFirstUseAction": "Ayarları aç"
+    "agentFirstUseAction": "Ayarları aç",
+    "searchConsentTitle": "Bing aramasına izin verilsin mi?",
+    "searchConsentDescription": "Arama sorgunuzu {{host}} adresine gönderir. Bu cihazda Bing aramalarına izin verilsin mi?",
+    "searchDeclined": "Bing erişimi onaylanmadığı için arama gönderilmedi. URL girmeye devam edebilirsiniz."
   },
   "saveConflict": "Kaydedilemedi: bu dosya siz açtıktan sonra diskte değişti. Diğer değişiklikleri görmek için yeniden yükleyin — düzenlemeleriniz kaydedilmemiş olarak duruyor.",
   "persistQuotaExceeded": "Yerel depolama dolu, bu proje için açık sekmeler artık hatırlanamıyor. Bazı sekmeleri kapatın veya site verilerini temizleyin.",
@@ -178,5 +181,8 @@
   "zoomReset": "Görünümü sıfırla",
   "diagramZoomHint": "Yakınlaştırmak için kaydırın • Taşımak için sürükleyin • ESC ile kapatın",
   "remoteImageDisabled": "Uzak görüntüler sunucu ayarları tarafından devre dışı bırakıldı.",
-  "remoteImageFailed": "Sunucu bu uzak görüntüyü yükleyemedi. Doğrudan yükleme engellendi."
+  "remoteImageFailed": "Sunucu bu uzak görüntüyü yükleyemedi. Doğrudan yükleme engellendi.",
+  "localEditorUnavailable": "Yerel düzenleyici yüklenemedi. Uygulama kaynaklarını onarın veya yeniden yükleyin; CDN bağlantısı kurulmadı.",
+  "localSpellingUnavailableTitle": "Yerel yazım denetimi kullanılamıyor",
+  "localSpellingUnavailableDescription": "Yerel sözlükler yüklenemedi. Uygulamayı yeniden başlatın veya kaynaklarını onarın/yeniden yükleyin. Uzak sözlük sunucusu kullanılmaz; diğer özellikler kullanılabilir."
 }

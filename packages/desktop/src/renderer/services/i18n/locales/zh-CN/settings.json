@@ -836,11 +836,11 @@
   "bugReportScreenshotUploaded": "（已上传 {{count}} 张）",
   "bugReportScreenshotDropzoneText": "点击、拖拽或粘贴截图到此处",
   "bugReportScreenshotFormats": "支持 PNG、JPG、GIF",
-  "bugReportAutoInfo": "提交时将自动附带系统信息和最近 3 天的日志，帮助我们更快定位问题",
-  "bugReportSubmit": "提交",
+  "bugReportAutoInfo": "报告包含最近的日志和诊断信息。分享前请检查本地文件，不会自动发送。",
+  "bugReportSubmit": "将报告保存到本地",
   "bugReportCancel": "取消",
-  "bugReportSuccess": "问题已提交，感谢反馈",
-  "bugReportError": "提交失败，请稍后重试",
+  "bugReportSuccess": "已在本地生成报告，未发送任何信息。",
+  "bugReportError": "无法生成报告，请重试。",
   "bugReportModuleSkills": "Skills 与插件",
   "bugReportModuleWebui": "WebUI 与远程连接",
   "bugReportModuleMcp": "MCP 与工具",
@@ -1450,5 +1450,8 @@
     "unauthenticated": "管理原生凭据前，请登录此 WebUI 主机。",
     "failed": "原生操作失败（{{code}}）。请在重试前刷新原生状态。",
     "manualCallback": "粘贴授权码或重定向 URL。"
-  }
+  },
+  "autoUpdateCheck": "启动时检查更新",
+  "autoUpdateCheckDescription": "检查 Aelix Studio Releases 并通知您。离线使用时可关闭。",
+  "autoUpdateSaveFailed": "无法保存更新设置。"
 }

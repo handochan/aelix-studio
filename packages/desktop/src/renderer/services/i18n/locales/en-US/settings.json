@@ -836,11 +836,11 @@
   "bugReportScreenshotUploaded": "({{count}} uploaded)",
   "bugReportScreenshotDropzoneText": "Click, drag, or paste screenshots here",
   "bugReportScreenshotFormats": "Supports PNG, JPG, GIF",
-  "bugReportAutoInfo": "System info and logs from the last 3 days will be automatically attached to help us locate the issue faster",
-  "bugReportSubmit": "Submit",
+  "bugReportAutoInfo": "The report includes recent logs and diagnostics. Review the local file before sharing it; nothing is sent automatically.",
+  "bugReportSubmit": "Save report locally",
   "bugReportCancel": "Cancel",
-  "bugReportSuccess": "Report submitted, thank you for your feedback",
-  "bugReportError": "Submission failed, please try again later",
+  "bugReportSuccess": "Report prepared locally. Nothing was sent.",
+  "bugReportError": "Could not prepare the report. Please try again.",
   "bugReportModuleSkills": "Skills & Plugins",
   "bugReportModuleWebui": "WebUI & Remote Access",
   "bugReportModuleMcp": "MCP & Tools",
@@ -1449,5 +1449,8 @@
     "unauthenticated": "Sign in to this WebUI host before managing native credentials.",
     "failed": "Native operation failed ({{code}}). Refresh native status before trying again.",
     "manualCallback": "Paste the authorization code or redirect URL."
-  }
+  },
+  "autoUpdateCheck": "Check for updates at startup",
+  "autoUpdateCheckDescription": "Check Aelix Studio Releases and notify you. Turn off for offline use.",
+  "autoUpdateSaveFailed": "Could not save the update preference."
 }

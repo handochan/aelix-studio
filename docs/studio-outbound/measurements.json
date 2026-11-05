@@ -1,0 +1,438 @@
+{
+  "schema": "aelix-studio.outbound-checkpoint/1",
+  "base": "dac2408",
+  "historicalHead": "a141d456759e48636e6972cb1f458b1a5644c7d5",
+  "historicalRun": "https://github.com/handochan/aelix-studio/actions/runs/41643585460",
+  "historical": {
+    "linux-arm64": {
+      "traceFiles": 1475,
+      "destinationAttempts": 317,
+      "externalAttempts": 232,
+      "unparsedRecords": 0,
+      "commandExitCode": 0,
+      "reportSha256": "ba2c01c8d907354702da24d0a25a059175c1626b06a73fd448dbab5cc80a1249"
+    },
+    "linux-x64": {
+      "traceFiles": 1490,
+      "destinationAttempts": 324,
+      "externalAttempts": 238,
+      "unparsedRecords": 4,
+      "commandExitCode": 0,
+      "reportSha256": "88db66f73354c25bedbac7def7a751f50e6e026dfd703d593777b76c166cb01d"
+    }
+  },
+  "localDiagnostics": {
+    "before-startup": {
+      "schema": "aelix-studio.outbound-audit/1",
+      "scope": "command-and-all-descendants",
+      "traceThreads": 67,
+      "destinationAttempts": 22,
+      "externalAttempts": 10,
+      "unparsedRecords": 0,
+      "interruptedSyscalls": 0,
+      "processes": [
+        {
+          "tid": 84,
+          "processNames": ["Chrome_ChildIOT"],
+          "destinationAttempts": 17,
+          "externalAttempts": 10,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "172.217.209.100",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "211.114.66.77",
+              "port": 443,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "211.114.66.77",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            }
+          ]
+        }
+      ]
+    },
+    "before-permission": {
+      "schema": "aelix-studio.outbound-audit/1",
+      "scope": "command-and-all-descendants",
+      "traceThreads": 337,
+      "destinationAttempts": 116,
+      "externalAttempts": 35,
+      "unparsedRecords": 0,
+      "interruptedSyscalls": 0,
+      "processes": [
+        {
+          "tid": 99,
+          "processNames": ["Chrome_ChildIOT"],
+          "destinationAttempts": 20,
+          "externalAttempts": 13,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "172.217.209.100",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "0.250.250.200",
+              "port": 53,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "211.114.66.77",
+              "port": 443,
+              "external": true,
+              "failed": false
+            },
+            {
+              "syscall": "connect",
+              "address": "211.114.66.77",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            }
+          ]
+        },
+        {
+          "tid": 414,
+          "processNames": ["Chrome_ChildIOT"],
+          "destinationAttempts": 21,
+          "externalAttempts": 13,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            }
+          ]
+        },
+        {
+          "tid": 703,
+          "processNames": ["Chrome_ChildIOT"],
+          "destinationAttempts": 11,
+          "externalAttempts": 4,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            }
+          ]
+        },
+        {
+          "tid": 953,
+          "processNames": ["Chrome_ChildIOT"],
+          "destinationAttempts": 12,
+          "externalAttempts": 5,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "connect",
+              "address": "2001:4860:4860::8888",
+              "port": 443,
+              "external": true,
+              "failed": true
+            }
+          ]
+        }
+      ]
+    },
+    "positive": {
+      "schema": "aelix-studio.outbound-audit/1",
+      "scope": "command-and-all-descendants",
+      "traceThreads": 2,
+      "destinationAttempts": 2,
+      "externalAttempts": 2,
+      "unparsedRecords": 0,
+      "interruptedSyscalls": 0,
+      "processes": [
+        {
+          "tid": 13,
+          "processNames": ["python3"],
+          "destinationAttempts": 2,
+          "externalAttempts": 2,
+          "external": [
+            {
+              "syscall": "connect",
+              "address": "203.0.113.1",
+              "port": 443,
+              "external": true,
+              "failed": true
+            },
+            {
+              "syscall": "sendto",
+              "address": "203.0.113.1",
+              "port": 53,
+              "external": true,
+              "failed": false
+            }
+          ]
+        }
+      ],
+      "commandExitCode": 0,
+      "status": "failed"
+    }
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "zh-CN": {
+    "settings.bugReportSuccess": "已在本地生成报告，未发送任何信息。",
+    "settings.bugReportError": "无法生成报告，请重试。"
+  },
+  "en-US": {
+    "settings.bugReportSuccess": "Report prepared locally. Nothing was sent.",
+    "settings.bugReportError": "Could not prepare the report. Please try again."
+  },
+  "ja-JP": {
+    "settings.bugReportSuccess": "レポートをローカルで作成しました。外部には送信されていません。",
+    "settings.bugReportError": "レポートを作成できませんでした。再試行してください。"
+  },
+  "zh-TW": {
+    "settings.bugReportSuccess": "已在本機產生報告，未傳送任何資訊。",
+    "settings.bugReportError": "無法產生報告，請重試。"
+  },
+  "ko-KR": {
+    "settings.bugReportSuccess": "로컬 보고서를 준비했습니다. 외부로 전송하지 않았습니다.",
+    "settings.bugReportError": "보고서를 준비하지 못했습니다. 다시 시도해 주세요."
+  },
+  "tr-TR": {
+    "settings.bugReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+    "settings.bugReportError": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
+  },
+  "ru-RU": {
+    "settings.bugReportSuccess": "Отчёт подготовлен локально. Ничего не отправлено.",
+    "settings.bugReportError": "Не удалось подготовить отчёт. Повторите попытку."
+  },
+  "uk-UA": {
+    "settings.bugReportSuccess": "Звіт підготовлено локально. Нічого не надіслано.",
+    "settings.bugReportError": "Не вдалося підготувати звіт. Спробуйте ще раз."
+  },
+  "pt-BR": {
+    "settings.bugReportSuccess": "Relatório preparado localmente. Nada foi enviado.",
+    "settings.bugReportError": "Não foi possível preparar o relatório. Tente novamente."
+  },
+  "de-DE": {
+    "settings.bugReportSuccess": "Bericht lokal erstellt. Es wurde nichts gesendet.",
+    "settings.bugReportError": "Der Bericht konnte nicht erstellt werden. Bitte erneut versuchen."
+  },
+  "es-ES": {
+    "settings.bugReportSuccess": "Informe preparado localmente. No se envió nada.",
+    "settings.bugReportError": "No se pudo preparar el informe. Inténtalo de nuevo."
+  },
+  "fr-FR": {
+    "settings.bugReportSuccess": "Rapport préparé localement. Rien n’a été envoyé.",
+    "settings.bugReportError": "Impossible de préparer le rapport. Réessayez."
+  },
+  "fa-IR": {
+    "settings.bugReportSuccess": "گزارش در دستگاه آماده شد. چیزی ارسال نشد.",
+    "settings.bugReportError": "گزارش آماده نشد. دوباره تلاش کنید."
+  }
+}

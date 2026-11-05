@@ -1,58 +1,56 @@
-/**
- * @license
- * Copyright 2025 AionUi (aionui.com)
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import { describe, expect, it, vi } from 'vitest';
-import type { UpdateInfo } from 'electron-updater';
-import type { AppUpdater } from 'electron-updater/out/AppUpdater';
-import type { ProviderRuntimeOptions } from 'electron-updater/out/providers/Provider';
-import { CdnGenericProvider } from '@/process/services/cdnGenericProvider';
-import { buildCdnFeedOptions, CDN_UPDATE_BASE_URL } from '@/process/services/updateFeed';
+import { buildStudioFeedOptions, startupUpdateEnabled, initializeDesktopUpdates } from '@/process/services/updateFeed';
 
-const makeRuntimeOptions = (): ProviderRuntimeOptions => ({
-  isUseMultipleRangeRequest: true,
-  platform: 'darwin',
-  executor: {
-    request: vi.fn(),
-  } as unknown as ProviderRuntimeOptions['executor'],
-});
-
-describe('CDN update feed options', () => {
-  it('builds a custom electron-updater provider pointed at the release CDN', () => {
-    const options = buildCdnFeedOptions();
-
-    expect(options.provider).toBe('custom');
-    expect(options.url).toBe(CDN_UPDATE_BASE_URL);
-    expect(options.updateProvider).toBe(CdnGenericProvider);
+describe('Studio update preference', () => {
+  it('uses only the Studio GitHub release repository', () => {
+    expect(buildStudioFeedOptions()).toEqual({ provider: 'github', owner: 'handochan', repo: 'aelix-studio' });
+  });
+  it('checks by default and honors the persisted false value', () => {
+    expect(startupUpdateEnabled(undefined)).toBe(true);
+    expect(startupUpdateEnabled(true)).toBe(true);
+    expect(startupUpdateEnabled(false)).toBe(false);
   });
 });
 
-describe('CdnGenericProvider', () => {
-  it('resolves relative update files under the version directory', () => {
-    const provider = new CdnGenericProvider(
-      {
-        provider: 'custom',
-        url: 'https://static.aionui.com/releases',
-      },
-      {} as AppUpdater,
-      makeRuntimeOptions()
-    );
-
-    const files = provider.resolveFiles({
-      version: '2.1.14',
-      files: [
-        {
-          url: 'AionUi-2.1.14-mac-arm64.dmg',
-          sha512: 'sha512-value',
-        },
-      ],
-      path: 'AionUi-2.1.14-mac-arm64.dmg',
-      sha512: 'sha512-value',
-      releaseDate: '2026-06-08T00:00:00.000Z',
-    } satisfies UpdateInfo);
-
-    expect(files[0]?.url.href).toBe('https://static.aionui.com/releases/2.1.14/AionUi-2.1.14-mac-arm64.dmg');
+describe('manual and background update lifecycle', () => {
+  const setup = (enabled = true, discontinued = false) => {
+    const updater = {
+      initialize: vi.fn(),
+      setBeforeQuitAndInstall: vi.fn(),
+      checkForUpdatesAndNotify: vi.fn().mockResolvedValue(undefined),
+    };
+    const options = {
+      readAutoCheck: vi.fn().mockResolvedValue(enabled),
+      discontinued,
+      broadcast: vi.fn(),
+      beforeQuit: vi.fn(),
+    };
+    const schedule = vi.fn();
+    initializeDesktopUpdates(updater, options, schedule);
+    return { updater, options, schedule };
+  };
+  it('keeps manual status and host cleanup initialized with automatic checks off', async () => {
+    const { updater, options, schedule } = setup(false);
+    schedule.mock.calls[0][0]();
+    await vi.waitFor(() => expect(options.readAutoCheck).toHaveBeenCalled());
+    expect(updater.initialize).toHaveBeenCalledWith(options.broadcast);
+    expect(updater.setBeforeQuitAndInstall).toHaveBeenCalledWith(options.beforeQuit);
+    expect(updater.checkForUpdatesAndNotify).not.toHaveBeenCalled();
+  });
+  it('checks by default after the startup delay', async () => {
+    const { updater, schedule } = setup();
+    expect(updater.checkForUpdatesAndNotify).not.toHaveBeenCalled();
+    schedule.mock.calls[0][0]();
+    await vi.waitFor(() => expect(updater.checkForUpdatesAndNotify).toHaveBeenCalledOnce());
+  });
+  it('does not check if the preference was disabled during the delay', async () => {
+    const { updater, options, schedule } = setup();
+    options.readAutoCheck.mockResolvedValue(false);
+    schedule.mock.calls[0][0]();
+    await Promise.resolve();
+    expect(updater.checkForUpdatesAndNotify).not.toHaveBeenCalled();
+  });
+  it('does not schedule a discontinued-build check', () => {
+    expect(setup(true, true).schedule).not.toHaveBeenCalled();
   });
 });

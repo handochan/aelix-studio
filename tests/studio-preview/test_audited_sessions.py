@@ -123,6 +123,6 @@ class RealSessionTests(unittest.TestCase):
             audit=module.AuditedSessions(Path('/bin/true'),Path(sys.executable),Path(directory))
             with self.assertRaisesRegex(RuntimeError,'provider'):
                 audit.run('provider',[sys.executable,'-I','-B',str(audit.auditor),'--positive-control'],
-                          required=(audit.native,),env=os.environ,timeout=30)
+                          required=(audit.native,),env=os.environ,timeout=60)
             self.assertEqual(audit.sessions[0]['auditExitCode'],86)
             self.assertEqual(audit.sessions[0]['externalAttempts'],2)

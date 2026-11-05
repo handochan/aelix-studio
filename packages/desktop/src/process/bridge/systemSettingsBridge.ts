@@ -31,6 +31,13 @@ export function onLanguageChanged(listener: LanguageChangeListener): void {
 }
 
 export function initSystemSettingsBridge(): void {
+  ipcBridge.systemSettings.getAutoUpdateEnabled.provider(
+    async () => (await ProcessConfig.get('update.autoCheck')) !== false
+  );
+  ipcBridge.systemSettings.setAutoUpdateEnabled.provider(async ({ enabled }) => {
+    if (typeof enabled !== 'boolean') throw new TypeError('Expected boolean update setting');
+    await ProcessConfig.set('update.autoCheck', enabled);
+  });
   ipcBridge.systemSettings.getCloseToTray.provider(async () => readCloseToTraySetting());
 
   ipcBridge.systemSettings.setCloseToTray.provider(async ({ enabled }) => {

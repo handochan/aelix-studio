@@ -97,5 +97,7 @@
   "requestDetails": "请求内容：",
   "delivery": {
     "pending": "未读"
-  }
+  },
+  "remoteImageLoad": "加载图片",
+  "remoteImageConsent": "此远程图片已隐藏。加载时将连接 {{host}}。"
 }

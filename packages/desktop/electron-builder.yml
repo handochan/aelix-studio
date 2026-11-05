@@ -103,6 +103,8 @@ files:
     to: static
 
 extraResources:
+  - from: .local/offline-spellcheck
+    to: offline-spellcheck
   - from: public
     to: .
   - from: resources/app.png
@@ -207,6 +209,7 @@ asarUnpack:
   # Builtin MCP server scripts must be unpacked so external node processes can execute them
   - 'out/main/builtin-mcp-image-gen.js'
   - 'out/main/builtin-mcp-browser.js'
+  - 'out/main/chrome-devtools-mcp/**/*'
   - 'out/main/team-mcp-stdio.js'
 
 # Compression level: normal for faster builds, maximum for smallest size
@@ -219,7 +222,7 @@ electronDownload:
 
 publish:
   provider: github
-  owner: iOfficeAI
-  repo: AionUi
+  owner: handochan
+  repo: aelix-studio
   publishAutoUpdate: true
   releaseType: release

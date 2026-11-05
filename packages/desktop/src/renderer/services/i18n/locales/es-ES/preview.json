@@ -153,7 +153,10 @@
     "tabLimitReached": "Se alcanzó el límite de pestañas ({{count}}). Se reutilizó la pestaña más antigua.",
     "agentFirstUseTitle": "El agente está usando el navegador integrado",
     "agentFirstUseContent": "Puede abrir páginas, hacer clic y leer contenido en este panel. Tu sesión se conserva.",
-    "agentFirstUseAction": "Abrir ajustes"
+    "agentFirstUseAction": "Abrir ajustes",
+    "searchConsentTitle": "¿Permitir la búsqueda de Bing?",
+    "searchConsentDescription": "La consulta se envía a {{host}}. ¿Permitir búsquedas de Bing en este dispositivo?",
+    "searchDeclined": "No se envió la búsqueda porque no se autorizó el acceso a Bing. Aún puede introducir una URL."
   },
   "saveConflict": "No se pudo guardar: este archivo cambió en el disco después de que lo abrieras. Vuelve a cargarlo para ver los otros cambios; tus ediciones siguen aquí, sin guardar.",
   "persistQuotaExceeded": "El almacenamiento local está lleno, así que ya no se pueden recordar las pestañas abiertas de este proyecto. Cierra algunas pestañas o borra los datos del sitio.",
@@ -178,5 +181,8 @@
   "zoomReset": "Restablecer vista",
   "diagramZoomHint": "Desplazarse para ampliar • Arrastrar para mover • ESC para cerrar",
   "remoteImageDisabled": "Las imágenes remotas están desactivadas en la configuración del host.",
-  "remoteImageFailed": "El host no pudo cargar esta imagen remota. La carga directa está bloqueada."
+  "remoteImageFailed": "El host no pudo cargar esta imagen remota. La carga directa está bloqueada.",
+  "localEditorUnavailable": "No se pudo cargar el editor local. Repare o reinstale los recursos de la aplicación; no se contactó ningún CDN.",
+  "localSpellingUnavailableTitle": "La ortografía local no está disponible",
+  "localSpellingUnavailableDescription": "No se pudieron cargar los diccionarios locales. Reinicie la aplicación o repare/reinstale sus recursos. No se usa un servidor de diccionarios remoto; las demás funciones siguen disponibles."
 }

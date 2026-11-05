@@ -153,7 +153,10 @@
     "tabLimitReached": "Browser tab limit reached ({{count}}). The oldest tab was reused.",
     "agentFirstUseTitle": "The agent is using the in-app browser",
     "agentFirstUseContent": "It can open pages, click and read content in this panel. Your sign-in state is kept between sessions.",
-    "agentFirstUseAction": "Open settings"
+    "agentFirstUseAction": "Open settings",
+    "searchConsentTitle": "Allow Bing search?",
+    "searchConsentDescription": "Searching sends your query to {{host}}. Allow Bing searches on this device?",
+    "searchDeclined": "Search was not sent because Bing access was not approved. You can still enter a URL."
   },
   "saveConflict": "Could not save: this file changed on disk since you opened it. Reload to see the other changes — your edits are still here, unsaved.",
   "persistQuotaExceeded": "Local storage is full, so open tabs can no longer be remembered for this project. Close some tabs or clear site data.",
@@ -178,5 +181,8 @@
   "zoomReset": "Reset view",
   "diagramZoomHint": "Scroll to zoom • Drag to pan • ESC to close",
   "remoteImageDisabled": "Remote images are disabled by the host settings.",
-  "remoteImageFailed": "The host could not load this remote image. Direct loading is blocked."
+  "remoteImageFailed": "The host could not load this remote image. Direct loading is blocked.",
+  "localEditorUnavailable": "The local editor could not be loaded. Repair or reinstall the application resources; no CDN was contacted.",
+  "localSpellingUnavailableTitle": "Local spelling is unavailable",
+  "localSpellingUnavailableDescription": "Local spelling dictionaries could not be loaded. Restart the app or repair/reinstall its resources. No remote dictionary server is used; other app features remain available."
 }

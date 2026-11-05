@@ -40,10 +40,32 @@ const AboutModalContent: React.FC = () => {
   const isPageMode = viewMode === 'page';
   const isElectron = isElectronDesktop();
 
+  const [autoCheck, setAutoCheck] = useState(true);
+  const [autoCheckSaving, setAutoCheckSaving] = useState(false);
   const [includePrerelease, setIncludePrerelease] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const [updateReadyState, setLocalUpdateReadyState] = useState<UpdateReadyState>(() => getUpdateReadyState());
   const [checking, setChecking] = useState(false);
+
+  useEffect(() => {
+    if (isElectron)
+      void ipcBridge.systemSettings.getAutoUpdateEnabled
+        .invoke()
+        .then(setAutoCheck)
+        .catch(() => {});
+  }, [isElectron]);
+
+  const changeAutoCheck = async (enabled: boolean) => {
+    setAutoCheckSaving(true);
+    try {
+      await ipcBridge.systemSettings.setAutoUpdateEnabled.invoke({ enabled });
+      setAutoCheck(enabled);
+    } catch {
+      Message.error(t('settings.autoUpdateSaveFailed'));
+    } finally {
+      setAutoCheckSaving(false);
+    }
+  };
 
   useEffect(() => {
     const saved = localStorage.getItem('update.includePrerelease');
@@ -117,7 +139,7 @@ const AboutModalContent: React.FC = () => {
     },
     {
       title: t('settings.updateLog'),
-      url: 'https://github.com/iOfficeAI/AionUi/releases',
+      url: 'https://github.com/handochan/aelix-studio/releases',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
@@ -174,6 +196,20 @@ const AboutModalContent: React.FC = () => {
             {/* Check Update Section */}
             {isElectron && (
               <div className='flex flex-col items-center gap-12px w-full max-w-300px bg-fill-2 p-16px rounded-lg'>
+                <div className='flex flex-col gap-8px w-full'>
+                  <div className='flex items-center justify-between gap-8px'>
+                    <Typography.Text>{t('settings.autoUpdateCheck')}</Typography.Text>
+                    <Switch
+                      aria-label={t('settings.autoUpdateCheck')}
+                      checked={autoCheck}
+                      loading={autoCheckSaving}
+                      onChange={(enabled) => void changeAutoCheck(enabled)}
+                    />
+                  </div>
+                  <Typography.Text className='text-12px text-t-secondary'>
+                    {t('settings.autoUpdateCheckDescription')}
+                  </Typography.Text>
+                </div>
                 <Button
                   type='primary'
                   long

@@ -351,6 +351,7 @@ childProcess.execSync = function mockedExecSync(command) {
         env: {
           ...process.env,
           AIONUI_PREPARE_CALLS_FILE: callsPath,
+          SENTRY_DSN: 'https://synthetic@example.invalid/1',
           NODE_OPTIONS: [process.env.NODE_OPTIONS, `--require=${hookPath}`].filter(Boolean).join(' '),
         },
       });

@@ -113,6 +113,11 @@ def setup(api):
         wrapper = sandbox / 'native-wrapper.py'
         wrapper.write_text((HERE.parent / 'fixtures/nativeFailure.py').read_text() +
             f'\nrun(Path({str(sandbox)!r}), Path({str(payload)!r}), Path({str(extension)!r}), sys.argv[1:])\n', encoding='utf-8')
+        import base64
+        from urllib.parse import quote
+        config = sandbox / 'studio/config/aionui-config.txt'
+        config.parent.mkdir(parents=True, exist_ok=True)
+        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False}), safe='').encode()).decode())
         command = [*prefix, 'acp', '--aelix', str(python), '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B',
                    '--aelix-arg=-Xutf8', '--aelix-arg=' + str(wrapper), '--provider', 'fixture', '--model', 'one',
                    '--state-dir', str(sandbox / 'acp')]
@@ -125,7 +130,7 @@ def setup(api):
                    RECOVERY_OBSERVER_ARGS=json.dumps([str(python), *prefix]),
                    RECOVERY_APP_EXECUTABLE=os.environ['PROVIDER_APP_EXECUTABLE'],
                    AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
-                   AIONUI_DISABLE_DEVTOOLS='1', AIONUI_DISABLE_AUTO_UPDATE='1', AIONUI_CDP_PORT='0',
+                   AIONUI_DISABLE_DEVTOOLS='1', AIONUI_CDP_PORT='0',
                    AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
         env = gui_environment(env)

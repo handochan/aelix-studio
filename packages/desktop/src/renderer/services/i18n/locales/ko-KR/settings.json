@@ -824,11 +824,11 @@
   "bugReportScreenshotUploaded": "({{count}}장 업로드됨)",
   "bugReportScreenshotDropzoneText": "클릭, 드래그 또는 여기에 스크린샷 붙여넣기",
   "bugReportScreenshotFormats": "PNG, JPG, GIF 지원",
-  "bugReportAutoInfo": "제출 시 시스템 정보와 최근 3일간의 로그가 자동으로 첨부되어 문제를 더 빠르게 파악할 수 있습니다",
-  "bugReportSubmit": "제출",
+  "bugReportAutoInfo": "보고서에는 최근 로그와 진단 정보가 포함됩니다. 공유하기 전에 로컬 파일을 확인하세요. 자동으로 전송하지 않습니다.",
+  "bugReportSubmit": "보고서를 로컬 파일로 저장",
   "bugReportCancel": "취소",
-  "bugReportSuccess": "보고가 제출되었습니다. 피드백 감사합니다",
-  "bugReportError": "제출에 실패했습니다. 나중에 다시 시도해 주세요",
+  "bugReportSuccess": "로컬 보고서를 준비했습니다. 외부로 전송하지 않았습니다.",
+  "bugReportError": "보고서를 준비하지 못했습니다. 다시 시도해 주세요.",
   "bugReportModuleSkills": "Skills 및 플러그인",
   "bugReportModuleWebui": "WebUI 및 원격 연결",
   "bugReportModuleMcp": "MCP 및 도구",
@@ -1451,5 +1451,8 @@
     "unauthenticated": "Native 인증을 관리하려면 이 WebUI 호스트에 로그인하세요.",
     "failed": "Native 작업이 실패했습니다 ({{code}}). 다시 시도하기 전에 native 상태를 새로고침하세요.",
     "manualCallback": "인증 코드 또는 리디렉션 URL을 붙여넣으세요."
-  }
+  },
+  "autoUpdateCheck": "시작할 때 업데이트 확인",
+  "autoUpdateCheckDescription": "Aelix Studio Releases를 확인하고 알립니다. 오프라인에서는 꺼 두세요.",
+  "autoUpdateSaveFailed": "업데이트 설정을 저장하지 못했습니다."
 }

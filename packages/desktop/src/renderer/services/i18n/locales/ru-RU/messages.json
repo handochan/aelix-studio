@@ -101,5 +101,7 @@
   "requestDetails": "Детали запроса:",
   "delivery": {
     "pending": "Непрочитано"
-  }
+  },
+  "remoteImageLoad": "Загрузить изображение",
+  "remoteImageConsent": "Удалённое изображение скрыто. Загрузка подключит к {{host}}."
 }

@@ -47,11 +47,181 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 
 class ScopedParserTests(unittest.TestCase):
+    def test_external_diagnostics_keep_protocol_and_write_provenance_without_raw_content(self):
+        records=['1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>',
+            '1<app> '+CONNECT.replace('connect(3,','connect(3<UDPv6:[123]>,') ,
+            '1<app> write(3<UDPv6:[123]>, "SECRET_PAYLOAD", 14) = 14',
+            '1<app> close(3<UDPv6:[123]>) = 0','1<app> +++ exited with 0 +++']
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace';trace.write_text('\n'.join(records)+'\n')
+            _,report=audit.analyze_processes([trace],require_lifecycle=True)
+        diagnostic=report['externalOperationDiagnostics'][0]
+        self.assertEqual((diagnostic['straceSocketKind'],diagnostic['fd']),('udp',3))
+        self.assertEqual(diagnostic['udpWriteAssociations'][0]['syscall'],'write')
+        self.assertEqual(report['externalAttempts'],2)
+        self.assertNotIn('SECRET_PAYLOAD',json.dumps(report))
+
+    def test_complete_kernel_lifetime_resolves_only_known_close_return_without_claiming_closure(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        for ending in ('close(7<anon_inode:inotify>) = ?', 'close(7<anon_inode:inotify> <unfinished ...>'):
+            with self.subTest(ending=ending),tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace'
+                trace.write_text('1<app> execve("/owned/app", [...], 0x1) = 0\n'
+                    f'1<app> {ending}\n1<app> +++ exited with 0 +++\n')
+                _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual((report['unparsedRecords'],report['classificationErrors'],report['kernelMetadataResolvedRecords']),(0,0,1))
+                self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
+                self.assertEqual(report['processes'][0]['unparsedRecordKinds'],{})
+                _,strict=audit.analyze_processes([trace],require_lifecycle=True)
+                self.assertEqual((strict['unparsedRecords'],strict['kernelMetadataResolvedRecords']),(1,0))
+
+    def test_unknown_close_cannot_lose_a_tracked_ring_when_fd_annotation_is_missing(self):
+        for fd,blocked,ending in ((fd,blocked,ending) for fd,blocked in ((5,True),(6,False))
+                                  for ending in (') = ?', ' <unfinished ...>')):
+            capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+                'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+                'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+                'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                              parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('1<app> execve("/owned/app", [...], 0x1) = 0\n'
+                    '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>\n'
+                    f'1<app> close({fd}{ending}\n1<app> +++ exited with 0 +++\n')
+                _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(report['kernelMetadataResolvedRecords'],0 if blocked else 1)
+                if blocked:self.assertIn('io_uring_descriptor_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+                else:self.assertEqual(report['unparsedRecords'],0)
+
+    def test_unlabelled_ring_alias_and_cloexec_changes_cannot_escape_unknown_close_failure(self):
+        cases=[['1<app> dup(5) = 6','1<app> close(6) = ?'],
+               ['1<app> fcntl(5, F_DUPFD, 0) = 6','1<app> close(6) = ?'],
+               ['1<app> fcntl(5, F_SETFD, 0) = 0','1<app> execve("/owned/next", [...], 0x1) = 0',
+                '1<app> close(5) = ?'],
+               ['1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                '2<child> unshare(CLONE_FILES) = 0','2<child> close(5<anon_inode:[io_uring]>) = 0',
+                '2<child> +++ exited with 0 +++','1<app> close(5) = ?']]
+        cases += [[line[:-5]+' <unfinished ...>' if line.endswith(') = ?') else line
+                   for line in records] for records in cases]
+        for records in cases:
+            child=any(line.startswith('2<') for line in records)
+            tasks=[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                        parentKernelPid=100 if pid==1 else 101) for pid,kernel in [(1,101),(100,100),*([(2,102)] if child else [])]]
+            capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+                'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+                'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],'tasks':tasks}}
+            with self.subTest(records=records),tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1) = 0',
+                    '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',*records,
+                    '1<app> +++ exited with 0 +++'])+'\n')
+                _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(report['kernelMetadataResolvedRecords'],0)
+                self.assertIn('io_uring_descriptor_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+
+    def test_unlabelled_borrowed_ring_mapping_is_still_rejected(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':1,
+            'events':[dict(kind='create',time=10,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,fd=5,flags=0,sqpollKernelPid=0)],
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':0,'events':[],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                          parentKernelPid=100 if pid==1 else 101) for pid,kernel in [(1,101),(2,102),(100,100)]]}}
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                '1<app> execve("/owned/app", [...], 0x1) = 0',
+                '1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+                '1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                '2<child> mmap(NULL, 4096, PROT_READ, MAP_SHARED, 5, 0) = 0x7000',
+                '2<child> close(5) = 0','2<child> +++ exited with 0 +++',
+                '1<app> +++ exited with 0 +++'])+'\n')
+            _,report=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+            self.assertIn('io_uring_borrowed_ring_mapping_unsupported',{issue['reason'] for issue in report['classificationIssues']})
+
+    def test_unparsed_kind_diagnostics_preserve_failures_without_trace_content(self):
+        cases=[('close(7</private/SECRET_TRACE_PATH> <unfinished ...>', 'pending_at_end:close'),
+               ('fcntl(7, F_GETFL) = ?', 'result:fcntl'),
+               ('write(7<socket:[123]>, ..., 8) = 8','socket_peer:write')]
+        for line,kind in cases:
+            with self.subTest(kind=kind):
+                scoped,_=self.parse(self.base()+['2<host> '+line,'2<host> +++ exited with 0 +++',
+                                                  '1<app> +++ exited with 0 +++'],lifecycle=True)
+                task=next(item for item in scoped['processes'] if item['pid']==2)
+                self.assertEqual(task['unparsedRecordKinds'],{kind:1})
+                self.assertEqual(scoped['unparsedRecords'],1)
+                self.assertNotIn('SECRET_TRACE_PATH',json.dumps(scoped))
+    def test_kernel_corroboration_discharges_only_exact_terminal_register_holes(self):
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,
+                 'eventCount':0,'events':[],'network':{'complete':True,'eventCount':0,'events':[],
+                 'tasks':[{'pid':pid,'tgid':pid,'kernelPid':pid+100,'kernelTgid':pid+100,'start':1,'end':100,'lastOrdinal':10,
+                           'parentKernelPid':1000 if pid==1 else 101} for pid in (1,2)]}}
+        capture['root']={'kernelPid':1000,'pid':1000}
+        capture['network']['tasks'].append({'pid':1000,'tgid':1000,'kernelPid':1000,'kernelTgid':1000,'start':1,'end':100,'lastOrdinal':0})
+        for ending in ('+++ killed by SIGKILL +++','+++ exited with 0 +++'):
+            for signals in (False,True):
+                for hidden_network in (False,True):
+                    with self.subTest(ending=ending,signals=signals,hidden=hidden_network),tempfile.TemporaryDirectory() as directory:
+                        capture['network'].update(events=[],eventCount=0)
+                        trace=Path(directory)/'trace'
+                        lines=self.base()+['2<host> ???( <unfinished ...>']
+                        if signals:lines+=['2<host> --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER} ---']
+                        lines+=['2<host> <... ??? resumed>) = ?', '2<host> '+ending,'1<app> +++ exited with 0 +++']
+                        trace.write_text('\n'.join(lines)+'\n')
+                        if hidden_network:
+                            capture['network']['events']=[{'kind':'H','time':10,'pid':2,'tgid':2,
+                                'kernelPid':102,'kernelTgid':102,'call':0,'ordinal':0,'value':7,'result':10}]
+                            capture['network']['eventCount']=1
+                        scoped,whole=audit.analyze_processes([trace],(HOST,),(HOST,),True,capture)
+                        self.assertEqual(scoped['kernelResolvedRecords'],0 if hidden_network else 2)
+                        self.assertEqual(whole['kernelResolvedRecords'],scoped['kernelResolvedRecords'])
+                        self.assertEqual(scoped['unparsedRecords']>0,hidden_network)
+        capture['network'].update(events=[],eventCount=0)
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace'
+            trace.write_text('\n'.join(self.base()+['2<host> ???( <unfinished ...>',
+                '1<app> +++ exited with 0 +++'])+'\n')
+            scoped,_=audit.analyze_processes([trace],(HOST,),(HOST,),True,capture)
+            self.assertGreater(scoped['unparsedRecords'],0)
+            self.assertEqual(scoped['kernelResolvedRecords'],0)
+
     def parse(self, lines, roots=(HOST, PYTHON), required=(HOST,), lifecycle=False):
         with tempfile.TemporaryDirectory() as directory:
             trace = Path(directory) / 'network.trace'
             trace.write_text('\n'.join(lines) + '\n')
             return audit.analyze_processes([trace], roots, required, lifecycle)
+
+    def test_pending_known_write_result_is_recovered_only_by_terminal_kernel_proof(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'events':[],'eventCount':0,
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':1,
+            'events':[dict(kind='P',time=3,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=5,ordinal=1,value=3,result=0)],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=1,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        for ending in ('write(3,  <unfinished ...>','write(3, ..., 1) = ?'):
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
+                    '1<app> '+ending,'1<app> +++ killed by SIGKILL +++'])+'\n')
+                _,whole=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(whole['unparsedRecords'],0)
+                self.assertEqual(whole['kernelResolvedResultFields'],1)
+                self.assertFalse(any(task['unparsedRecordKinds'] for task in whole['processes']))
+                _,strict=audit.analyze_processes([trace],require_lifecycle=True)
+                self.assertGreater(strict['unparsedRecords'],0)
+
+    def test_pending_sendto_final_null_peer_requires_an_interpreted_fd_peer(self):
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'events':[],'eventCount':0,
+            'root':{'kernelPid':100},'network':{'complete':True,'eventCount':1,
+            'events':[dict(kind='P',time=3,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=2,ordinal=1,value=3,result=0)],
+            'tasks':[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=1,
+                          parentKernelPid=100) for pid,kernel in [(1,101),(100,100)]]}}
+        for peer,valid in [('UNIX-STREAM:[42->43]',True),('TCP:[127.0.0.1:4000->127.0.0.1:4001]',True),('socket:[42]',False)]:
+            with tempfile.TemporaryDirectory() as directory:
+                trace=Path(directory)/'trace';trace.write_text('\n'.join([
+                    '1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
+                    f'1<app> sendto(3<{peer}>, ..., 1, 0, NULL, 0 <unfinished ...>',
+                    '1<app> +++ killed by SIGKILL +++'])+'\n')
+                _,whole=audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)
+                self.assertEqual(whole['unparsedRecords']==0,valid)
 
     def base(self):
         return ['1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
@@ -131,7 +301,8 @@ class ScopedParserTests(unittest.TestCase):
         scoped, _ = self.parse(self.base() + [
             '2<host> sendto(8<TCP:[127.0.0.1:123->203.0.113.1:443]>, ""..., 3, 0, NULL, 0) = 3',
             '2<host> sendmsg(9<UDPv6:[[::1]:123->[::1]:53]>, {msg_name=NULL, msg_iov=[...]}, 0) = 3'])
-        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (2, 0))
+        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (2, 1))
+        self.assertIn('udp_write_untracked_fd', {i['reason'] for i in scoped['classificationIssues']})
 
     def test_unknown_socket_peer_and_abbreviated_vector_are_incomplete(self):
         for line in ['sendto(8<socket:[123]>, ""..., 3, 0, NULL, 0) = 3',
@@ -256,6 +427,11 @@ class ScopedParserTests(unittest.TestCase):
         capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':2,
                  'events':[{'kind':'create','time':1,'ctx':'opaque','pid':2,'tgid':2,'fd':5,'flags':65536},
                            {'kind':'submit','time':2,'ctx':'opaque','pid':2,'tgid':2,'opcode':29,'sqpoll':False}]}
+        capture['network']={'complete':True,'events':[],'eventCount':0,
+                            'tasks':[{'pid':pid,'tgid':pid,'kernelPid':pid,'kernelTgid':pid,'start':1,'end':10,'lastOrdinal':10,
+                                      'parentKernelPid':1000 if pid==1 else 1} for pid in (1,2)]}
+        capture['root']={'kernelPid':1000,'pid':1000}
+        capture['network']['tasks'].append({'pid':1000,'tgid':1000,'kernelPid':1000,'kernelTgid':1000,'start':1,'end':10,'lastOrdinal':0})
         with tempfile.TemporaryDirectory() as directory:
             trace=Path(directory)/'trace'
             trace.write_text('\n'.join(self.base()+[
@@ -402,25 +578,33 @@ int main(void) {
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root/'worker.c'
-            source.write_text('#define _GNU_SOURCE\n#include <sys/socket.h>\n#include <stdlib.h>\n'
+            source.write_text('#define _GNU_SOURCE\n#include <sys/socket.h>\n#include <stdlib.h>\n#include <unistd.h>\n'
                               'int main(int argc,char **argv){int fd=atoi(argv[1]);'
                               'struct iovec iov={.iov_base="SYNTHETIC_PAYLOAD_SECRET",.iov_len=24};'
                               'struct mmsghdr m[2]={0};'
                               'for(int i=0;i<2;i++){m[i].msg_hdr.msg_iov=&iov;m[i].msg_hdr.msg_iovlen=1;}'
-                              'sendmmsg(fd,m,2,0);return 0;}\n')
+                              'sendmmsg(fd,m,2,0);close(fd);return 0;}\n')
             worker = root/'worker'
             subprocess.run(['cc',str(source),'-o',str(worker)],check=True)
             driver = root/'driver.py'
             # Use an owned UDP receiver on this machine's non-loopback interface.
             # This is external under the audit policy, without relying on remote replies.
-            driver.write_text('import socket,subprocess,sys\n'
+            driver.write_text('import fcntl,os,socket,sys\nfrom multiprocessing import get_context\n'
+                              'ready=get_context("fork").Semaphore(0)\n'
                               's=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n'
                               's.connect(("203.0.113.1",9))\n'
                               'ip=s.getsockname()[0]\n'
                               'receiver=socket.socket(socket.AF_INET,socket.SOCK_DGRAM)\n'
                               'receiver.bind((ip,0))\n'
                               's.connect(receiver.getsockname())\n'
-                              'subprocess.run([sys.argv[1],str(s.fileno())],pass_fds=(s.fileno(),))\n')
+                              'fcntl.fcntl(s.fileno(),fcntl.F_SETFD,0)\n'
+                              'child=os.fork()\n'
+                              'if child==0:\n'
+                              ' ready.acquire()\n'
+                              ' os.execv(sys.argv[1],[sys.argv[1],str(s.fileno())])\n'
+                              'ready.release()\n'
+                              '_,status=os.waitpid(child,0)\n'
+                              'assert status==0\ns.close();receiver.close()\n')
             from unittest.mock import patch
             original = audit.analyze_processes
             def inspect(paths, *args):
@@ -430,9 +614,9 @@ int main(void) {
                 result = audit.audit([sys.executable,'-I','-B',str(driver),str(worker)], root/'scoped.json',
                                      scope_executables=(worker,), require_executables=(worker,), whole_report_path=root/'whole.json')
             scoped = json.loads((root/'scoped.json').read_text())
-            self.assertEqual(result,86)
+            self.assertEqual(result,87)
             self.assertEqual(scoped['externalAttempts'],2)
-            self.assertEqual(scoped['unparsedRecords'],0)
+            self.assertIn('udp_socket_cross_scope',{issue['reason'] for issue in scoped['classificationIssues']})
 
 
     def test_real_loopback_accepted_and_connected_sockets_remain_allowed(self):
@@ -454,3 +638,55 @@ int main(void) {
             self.assertEqual(result.returncode,0,result.stderr)
             self.assertEqual((scoped['externalAttempts'],scoped['unparsedRecords']),(0,0))
             self.assertGreater(scoped['destinationAttempts'],0)
+
+
+class TracerSelectionTests(unittest.TestCase):
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('strace'), 'Linux audit runtime test')
+    def test_receiving_socket_data_does_not_create_an_unmatched_send_operation(self):
+        import socket
+        import threading
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);endpoint=root/'local.sock';report=root/'report.json'
+            server=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM)
+            server.bind(str(endpoint));server.listen();server.settimeout(0.1)
+            stop=threading.Event()
+            def serve():
+                while not stop.is_set():
+                    try:connection,_=server.accept()
+                    except socket.timeout:continue
+                    except OSError:return
+                    with connection:connection.sendall(b'control')
+                    return
+            worker=threading.Thread(target=serve);worker.start()
+            try:
+                code='import socket,os,sys;s=socket.socket(socket.AF_UNIX);s.connect(sys.argv[1]);assert s.recvmsg(3)[0]==b"con";assert os.readv(s.fileno(),[bytearray(4)])==4;s.close()'
+                result=audit.audit([sys.executable,'-I','-B','-c',code,str(endpoint)],report)
+                data=json.loads(report.read_text())
+                self.assertEqual(result,0)
+                self.assertEqual((data['externalAttempts'],data['unparsedRecords'],data['classificationErrors']),(0,0,0))
+                self.assertTrue(data['kernelNetwork']['recorded'])
+            finally:
+                stop.set();server.close();worker.join(timeout=5)
+
+    def test_pinned_binary_is_selected_without_relying_on_sudo_path(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);binary=root/'.local/strace-toolchain/bin/strace'
+            binary.parent.mkdir(parents=True);binary.write_text('fixture')
+            with patch.object(audit.shutil,'which',return_value='/usr/bin/strace'):
+                self.assertEqual(audit.resolve_strace(root),str(binary))
+
+    def test_unsupported_abi_diagnostic_is_detected_without_retaining_contents(self):
+        warning='strace: WARNING: Proper structure decoding for this personality is not supported, please consider building strace with mpers support enabled.'
+        self.assertEqual(audit.unsupported_personalities(warning),1)
+        self.assertEqual(audit.unsupported_personalities('normal synthetic application diagnostics'),0)
+
+    @unittest.skipUnless(sys.platform == 'linux' and shutil.which('strace'), 'Linux audit runtime test')
+    def test_unsupported_personality_warning_blocks_an_otherwise_successful_command(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report=Path(directory)/'report.json'
+            warning='strace: WARNING: Proper structure decoding for this personality is not supported, please consider building strace with mpers support enabled.'
+            code=audit.audit([sys.executable,'-I','-B','-c','import sys;sys.stderr.write('+repr(warning+'\n')+')'],report)
+            data=json.loads(report.read_text())
+            self.assertEqual(code,87)
+            self.assertEqual(data['straceDiagnostics']['unsupportedPersonalities'],1)
+            self.assertIn({'reason':'unsupported_strace_personality'},data['classificationIssues'])

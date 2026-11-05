@@ -1,0 +1,169 @@
+name: Studio outbound gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: studio-outbound-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  installed-app-outbound:
+    name: App outbound (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-24.04, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+    env:
+      NODE_OPTIONS: --max-old-space-size=8192
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Record audited source
+        run: |
+          mkdir -p .local/outbound
+          git rev-parse HEAD > .local/outbound/source-head.txt
+          git rev-parse 'HEAD^{tree}' > .local/outbound/source-tree.txt
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: bun install --frozen-lockfile
+      - name: Install audit and display tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y strace xvfb libnotify4 libsecret-1-0 xdg-utils bpftrace gcc make liburing-dev iproute2 xz-utils
+          bunx playwright install-deps chromium
+      - name: Prepare the shared pinned syscall tracer
+        run: |
+          if [ "$(uname -m)" = x86_64 ]; then sudo apt-get install -y gcc-multilib; fi
+          bash scripts/outbound-audit/bundles/prepareStrace.sh
+          echo "$PWD/.local/strace-toolchain/bin" >> "$GITHUB_PATH"
+      - name: Check the attribution parser
+        run: |
+          python -B -m unittest discover -s tests/studio-preview
+          python -B -m unittest discover -s tests/outbound-audit
+          node --test scripts/outbound-audit/startup.test.mjs
+      - name: Prove child-process TCP and UDP detection
+        run: |
+          set +e
+          python -B scripts/outbound-audit/audit.py --report .local/outbound/positive.json -- python -I -B scripts/studio-preview/fixtures/outboundAudit.py --child-positive-control
+          code=$?
+          set -e
+          test "$code" = 86
+          python - <<'PY'
+          import json
+          report = json.load(open('.local/outbound/positive.json'))
+          if report['externalAttempts'] != 2 or report['unparsedRecords'] != 0:
+              raise RuntimeError('TCP/UDP positive control mismatch')
+          PY
+      - name: Prove transport and UDP lifecycle controls
+        run: python -I -B scripts/studio-preview/fixtures/outboundAudit.py --transport-controls .local/outbound/transport-controls
+      - name: Prepare the exact pinned runtime
+        env:
+          AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
+        run: python -B scripts/studio-preview/prepare.py --target ${{ matrix.target }}
+      - name: Build an unpublished installer
+        env:
+          AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
+        run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
+      - name: Install the built DEB without downloading application resources
+        id: install
+        run: |
+          sha256sum .local/provider-installer/artifacts/*.deb > .local/outbound/installer-sha256.txt
+          python - <<'PYTHON'
+          import json
+          from pathlib import Path
+          files = list(Path('.local/provider-installer/artifacts').glob('*.deb'))
+          if len(files) != 1:
+              raise RuntimeError('Expected one installer artifact')
+          Path('.local/outbound/installer-size.json').write_text(json.dumps({'name': files[0].name, 'bytes': files[0].stat().st_size}) + '\n')
+          PYTHON
+          sudo dpkg -i .local/provider-installer/artifacts/*.deb
+      - name: Require zero attempts from the whole installed app and all descendants
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: |
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/installed-app.json -- .local/studio-preview/native/bin/python -B scripts/studio-preview/host-release/smoke.py --runtime .local/studio-preview --payload /opt/AionUi/resources/studio-preview --report .local/outbound/permission/qualification.json
+      - name: Audit production startup without test guards
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: |
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/default-startup.json -- node scripts/outbound-audit/startup.mjs .local/outbound/startup-qualification.json
+      - name: Qualify bundled browser MCP without PATH tools or registry access
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          python - <<'PYTHON'
+          from pathlib import Path
+          import subprocess
+          import sys
+          nodes = list(Path('/opt/AionUi/resources/bundled-aioncore').glob('*/managed-resources/node/*/bin/node'))
+          if len(nodes) != 1:
+              raise RuntimeError('Expected exactly one installed bundled Node')
+          subprocess.run([sys.executable, '-I', '-B', 'scripts/studio-preview/fixtures/outboundAudit.py',
+              '--report', '.local/outbound/browser-mcp-outbound.json', '--', str(nodes[0]),
+              'scripts/outbound-audit/bundles/browserMcpSmoke.mjs',
+              '/opt/AionUi/resources/app.asar.unpacked/out/main/builtin-mcp-browser.js',
+              '.local/outbound/browser-mcp.json'], check=True)
+          PYTHON
+      - name: Require a fully local Monaco editor and HTML worker
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: |
+          xvfb-run -a python -I -B scripts/studio-preview/fixtures/outboundAudit.py --report .local/outbound/monaco-outbound.json -- node scripts/outbound-audit/bundles/monacoSmoke.mjs .local/outbound/monaco.json
+      - name: Qualify default-on Studio update checks with blocked network
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/AionUi/AionUi
+        run: xvfb-run -a node scripts/outbound-audit/startupUpdates.mjs .local/outbound/default-updates.json
+      - name: Preserve all audit results, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: studio-outbound-${{ matrix.target }}
+          include-hidden-files: true
+          path: |
+            .local/outbound/
+            .local/strace-toolchain/receipt.json
+            .local/studio-preview/receipt.json
+          if-no-files-found: warn
+
+  local-installer-report:
+    name: Windows local diagnostics
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Export and inspect local installer diagnostics
+        shell: pwsh
+        run: |
+          $log = Join-Path $env:RUNNER_TEMP 'synthetic-installer.log'
+          'SYNTHETIC_LOCAL_DIAGNOSTICS' | Set-Content -LiteralPath $log
+          & ./resources/windows/support/report-installer-failure.ps1 -LogPath $log -Code TEST -Detail synthetic -Release 0.0.0 -Arch x64 -Session test -NoUi
+          if ($LASTEXITCODE) { throw 'Local export failed' }
+          $status = Get-Content (Join-Path $env:TEMP 'aionui-installer-report.json') -Raw | ConvertFrom-Json
+          if ($status.status -ne 'saved') { throw 'Report was not saved locally' }
+          $output = Join-Path $env:RUNNER_TEMP 'expanded-report'
+          Expand-Archive -LiteralPath $status.path -DestinationPath $output
+          $metadata = Get-Content (Join-Path $output 'diagnostics.json') -Raw | ConvertFrom-Json
+          if ($metadata.code -ne 'TEST' -or -not $metadata.logIncluded) { throw 'Missing diagnostics' }
+          if ((Get-Content (Join-Path $output 'installer.log') -Raw) -notmatch 'SYNTHETIC_LOCAL_DIAGNOSTICS') { throw 'Missing local log' }
+          Remove-Item -LiteralPath $status.path

@@ -22,7 +22,7 @@ vi.mock('@/common', () => ({
   },
 }));
 
-vi.mock('@monaco-editor/react', () => ({
+vi.mock('@/renderer/pages/conversation/Preview/components/editors/OfflineMonacoEditor', () => ({
   default: ({ value }: { value: string }) => <div data-testid='monaco-editor'>{value}</div>,
 }));
 

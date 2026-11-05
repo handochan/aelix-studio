@@ -86,10 +86,10 @@
       "title": "AionUi kurulumu eksik",
       "description": "Bu kurulumda gerekli yerel kaynaklar eksik, bu yüzden AionCore başlatılamıyor. Lütfen en son AionUi sürümünü indirip yeniden kurun. Yeniden kurulumdan sonra sorun tekrarlarsa güvenlik veya antivirüs yazılımının AionCore'u karantinaya alıp almadığını kontrol edin.",
       "downloadLatest": "Son sürümü indir",
-      "sendDiagnostics": "Tanı raporu gönder",
-      "diagnosticsSent": "Tanı raporu gönderildi",
-      "diagnosticsReportSuccess": "Tanı raporu gönderildi",
-      "diagnosticsReportFailed": "Tanı raporu gönderilemedi",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin.",
       "runtimeComponentDescription": "Bu kurulumda gerekli yerleşik çalışma zamanı bileşenleri eksik olduğu için {{resource}} başlatılamıyor. En son AionUi paketini yeniden yükleyin. Yeniden yükledikten sonra da devam ederse güvenlik veya antivirüs yazılımının AionUi bileşenlerini karantinaya alıp almadığını kontrol edin."
     },
     "packageArchitectureMismatch": {
@@ -98,11 +98,11 @@
     },
     "dataMigration": {
       "title": "Local data migration failed",
-      "description": "AionUi opened, but AionCore stopped while initializing local data. Reinstalling AionUi may not fix this. Send a diagnostics report or contact support so the local database migration can be inspected.",
-      "sendDiagnostics": "Send diagnostics",
-      "diagnosticsSent": "Diagnostics sent",
-      "diagnosticsReportSuccess": "Diagnostics report sent",
-      "diagnosticsReportFailed": "Failed to send diagnostics report"
+      "description": "Local data migration failed. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     },
     "databaseNewerThanApp": {
       "title": "Daha yeni bir AionUi sürümü gerekli",
@@ -111,29 +111,29 @@
     },
     "localDataRepair": {
       "title": "Local data repair failed",
-      "description": "AionUi açıldı, ancak AionCore assistant veya agent kayıtları gibi yerel başlangıç verilerini hazırlarken durdu. AionUi'yi yeniden yüklemek bu sorunu çözmeyebilir. Yerel veritabanının incelenebilmesi için tanılama raporu gönderin veya destek ekibiyle iletişime geçin.",
-      "sendDiagnostics": "Send diagnostics",
-      "diagnosticsSent": "Diagnostics sent",
-      "diagnosticsReportSuccess": "Diagnostics report sent",
-      "diagnosticsReportFailed": "Failed to send diagnostics report"
+      "description": "Local data repair failed. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     },
     "startupDirectory": {
       "title": "Startup directory is unavailable",
       "description": "AionUi opened, but AionCore could not start because the configured work or log directory is missing, unavailable, or blocked by permissions. Check that the configured directories exist and are writable, then restart AionUi.",
-      "sendDiagnostics": "Send diagnostics",
-      "diagnosticsSent": "Diagnostics sent",
-      "diagnosticsReportSuccess": "Diagnostics report sent",
-      "diagnosticsReportFailed": "Failed to send diagnostics report"
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     },
     "recoverableDatabaseCorruption": {
       "title": "Yerel veriler bozulmuş",
       "description": "AionUi yerel veritabanının bozulduğunu algıladı ve başlatmaya devam edemiyor. Onaydan sonra eski veritabanı yedeklenecek ve başlatmaya devam etmek için yeni bir yerel veritabanı oluşturulacak. Geçmiş sohbetler artık gösterilmeyecek ve eski veritabanı yedek dosyası olarak saklanacak.",
       "confirmRebuild": "Eski DB'yi yedekle ve yeni DB oluştur",
-      "sendDiagnostics": "Tanılama gönder",
-      "diagnosticsHint": "Tanılama göndermek yerel veritabanını değiştirmez.",
-      "diagnosticsSent": "Tanılama gönderildi",
-      "diagnosticsReportSuccess": "Tanılama raporu gönderildi",
-      "diagnosticsReportFailed": "Tanılama raporu gönderilemedi",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsHint": "Rapor son günlükleri ve tanılama bilgilerini içerir. Paylaşmadan önce yerel dosyayı inceleyin. Hiçbir şey otomatik gönderilmez.",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin.",
       "rebuildFailed": "Eski DB yedeklenip yeni DB oluşturulamadı",
       "confirmDialog": {
         "title": "Veritabanı yeniden oluşturulsun mu?",
@@ -145,11 +145,11 @@
     "transientConcurrentStartup": {
       "title": "AionUi başlatılıyor",
       "description": "Bu pencere açıldığında başka bir AionUi başlatma işlemi yerel verileri hâlâ kullanıyordu. Bu geçicidir ve verileriniz güvende — yeniden yükleme gerekmez. Lütfen biraz bekleyip tekrar deneyin veya AionUi'yi yeniden başlatın.",
-      "sendDiagnostics": "Send diagnostics",
-      "diagnosticsSent": "Diagnostics sent",
-      "diagnosticsReportSuccess": "Diagnostics report sent",
-      "diagnosticsReportFailed": "Failed to send diagnostics report",
-      "diagnosticsHint": "Bu durum tekrar ederse bir tanılama raporu gönderebilirsiniz."
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin.",
+      "diagnosticsHint": "Rapor son günlükleri ve tanılama bilgilerini içerir. Paylaşmadan önce yerel dosyayı inceleyin. Hiçbir şey otomatik gönderilmez."
     },
     "pendingSlow": {
       "title": "Başlatılıyor",
@@ -157,27 +157,27 @@
     },
     "exited": {
       "title": "Başlatma tamamlanmadı",
-      "description": "AionCore başlatmayı tamamlayamadı ve kapandı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
-      "sendDiagnostics": "Tanılama gönder",
-      "diagnosticsSent": "Tanılama gönderildi",
-      "diagnosticsReportSuccess": "Tanılama bildirildi",
-      "diagnosticsReportFailed": "Tanılama gönderilemedi, lütfen tekrar deneyin"
+      "description": "Başlatma tamamlanmadı. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     },
     "portReportTimeout": {
       "title": "Başlatma zaman aşımına uğradı",
-      "description": "AionCore beklenen süre içinde başlatmayı tamamlayamadı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
-      "sendDiagnostics": "Tanılama gönder",
-      "diagnosticsSent": "Tanılama gönderildi",
-      "diagnosticsReportSuccess": "Tanılama bildirildi",
-      "diagnosticsReportFailed": "Tanılama gönderilemedi, lütfen tekrar deneyin"
+      "description": "Başlatma zaman aşımına uğradı. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     },
     "startupFailed": {
       "title": "Başlatma başarısız oldu",
-      "description": "AionCore başlatılamadı. Lütfen uygulamayı yeniden başlatın; sorun devam ederse tanılama gönderin.",
-      "sendDiagnostics": "Tanılama gönder",
-      "diagnosticsSent": "Tanılama gönderildi",
-      "diagnosticsReportSuccess": "Tanılama bildirildi",
-      "diagnosticsReportFailed": "Tanılama gönderilemedi, lütfen tekrar deneyin"
+      "description": "Başlatma başarısız oldu. Tanılamayı incelemek veya destekle paylaşmak için yerel olarak kaydedin. Otomatik gönderim yapılmaz.",
+      "sendDiagnostics": "Raporu yerel olarak kaydet",
+      "diagnosticsSent": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+      "diagnosticsReportFailed": "Rapor hazırlanamadı. Lütfen tekrar deneyin."
     }
   },
   "fileAttach.addFiles": "Dosya ekle",

@@ -836,11 +836,11 @@
   "bugReportScreenshotUploaded": "({{count}} مورد آپلود شد)",
   "bugReportScreenshotDropzoneText": "اسکرین‌شات‌ها را کلیک، بکشید یا جای‌گذاری کنید",
   "bugReportScreenshotFormats": "از PNG، JPG، GIF پشتیبانی می‌شود",
-  "bugReportAutoInfo": "اطلاعات سیستم و لاگ‌های ۳ روز اخیر به‌صورت خودکار پیوست می‌شوند تا سریع‌تر مشکل را پیدا کنیم",
-  "bugReportSubmit": "ارسال",
+  "bugReportAutoInfo": "گزارش شامل گزارش‌های اخیر و اطلاعات تشخیصی است. پیش از اشتراک‌گذاری، فایل محلی را بررسی کنید. هیچ چیزی خودکار ارسال نمی‌شود.",
+  "bugReportSubmit": "ذخیره گزارش در دستگاه",
   "bugReportCancel": "لغو",
-  "bugReportSuccess": "گزارش ارسال شد، ممنون از بازخورد شما",
-  "bugReportError": "ارسال ناموفق بود، لطفاً بعداً دوباره تلاش کنید",
+  "bugReportSuccess": "گزارش در دستگاه آماده شد. چیزی ارسال نشد.",
+  "bugReportError": "گزارش آماده نشد. دوباره تلاش کنید.",
   "bugReportModuleSkills": "مهارت‌ها و پلاگین‌ها",
   "bugReportModuleWebui": "WebUI و دسترسی ریموت",
   "bugReportModuleMcp": "MCP و ابزارها",
@@ -1449,5 +1449,8 @@
     "unauthenticated": "برای مدیریت اطلاعات ورود بومی، به این میزبان WebUI وارد شوید.",
     "failed": "عملیات بومی ناموفق بود ({{code}}). پیش از تلاش مجدد، وضعیت بومی را تازه‌سازی کنید.",
     "manualCallback": "کد مجوز یا نشانی هدایت مجدد را جای‌گذاری کنید."
-  }
+  },
+  "autoUpdateCheck": "بررسی به‌روزرسانی هنگام شروع",
+  "autoUpdateCheckDescription": "Aelix Studio Releases را بررسی و اطلاع‌رسانی می‌کند. برای استفاده آفلاین خاموش کنید.",
+  "autoUpdateSaveFailed": "ذخیره تنظیم به‌روزرسانی انجام نشد."
 }

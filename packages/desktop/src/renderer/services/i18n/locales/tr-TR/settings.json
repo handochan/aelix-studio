@@ -824,11 +824,11 @@
   "bugReportScreenshotUploaded": "({{count}} yüklendi)",
   "bugReportScreenshotDropzoneText": "Ekran görüntülerini buraya tıklayarak, sürükleyerek veya yapıştırarak ekleyin",
   "bugReportScreenshotFormats": "PNG, JPG, GIF desteklenir",
-  "bugReportAutoInfo": "Gönderim sırasında sistem bilgileri ve son 3 günün günlükleri sorunu daha hızlı tespit etmemize yardımcı olmak için otomatik olarak eklenecektir",
-  "bugReportSubmit": "Gönder",
+  "bugReportAutoInfo": "Rapor son günlükleri ve tanılama bilgilerini içerir. Paylaşmadan önce yerel dosyayı inceleyin. Hiçbir şey otomatik gönderilmez.",
+  "bugReportSubmit": "Raporu yerel olarak kaydet",
   "bugReportCancel": "İptal",
-  "bugReportSuccess": "Rapor gönderildi, geri bildiriminiz için teşekkürler",
-  "bugReportError": "Gönderilemedi, lütfen daha sonra tekrar deneyin",
+  "bugReportSuccess": "Rapor yerel olarak hazırlandı. Hiçbir şey gönderilmedi.",
+  "bugReportError": "Rapor hazırlanamadı. Lütfen tekrar deneyin.",
   "bugReportModuleSkills": "Skills ve Eklentiler",
   "bugReportModuleWebui": "WebUI ve Uzak Erişim",
   "bugReportModuleMcp": "MCP ve Araçlar",
@@ -1449,5 +1449,8 @@
     "unauthenticated": "Yerel kimlik bilgilerini yönetmek için bu WebUI sunucusuna giriş yapın.",
     "failed": "Yerel işlem başarısız ({{code}}). Yeniden denemeden önce yerel durumu yenileyin.",
     "manualCallback": "Yetkilendirme kodunu veya yönlendirme URL’sini yapıştırın."
-  }
+  },
+  "autoUpdateCheck": "Başlangıçta güncellemeleri denetle",
+  "autoUpdateCheckDescription": "Aelix Studio Releases denetlenir ve bildirilir. Çevrimdışı kullanımda kapatın.",
+  "autoUpdateSaveFailed": "Güncelleme tercihi kaydedilemedi."
 }

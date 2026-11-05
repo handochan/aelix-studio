@@ -35,7 +35,7 @@ def event_formats(root):
     return submit.parent.name, texts
 
 
-def pid_numbers_offset(path=Path('/sys/kernel/btf/vmlinux')):
+def btf_member_offset(structure, member_name, path=Path('/sys/kernel/btf/vmlinux')):
     """Read the running kernel BTF layout; never hardcode architecture offsets."""
     raw=path.read_bytes()
     if len(raw)<24 or len(raw)>64*1024*1024: raise RuntimeError('invalid_kernel_btf')
@@ -53,23 +53,120 @@ def pid_numbers_offset(path=Path('/sys/kernel/btf/vmlinux')):
         return strings[offset:stop]
     fixed={0:0,1:4,2:0,3:12,7:0,8:0,9:0,10:0,11:0,12:0,14:4,16:0,17:4,18:0}
     variable={4:12,5:12,6:8,13:8,15:12,19:12}
+    types={};identifier=1
     while start+12<=end:
         name_off,info,size=struct.unpack_from(endian+'III',raw,start)
         kind=(info>>24)&31;count=info&65535
         if kind not in fixed and kind not in variable:raise RuntimeError('unsupported_kernel_btf_type')
         extra=fixed.get(kind,variable.get(kind,-1)*count)
         if extra<0 or start+12+extra>end:raise RuntimeError('unsupported_kernel_btf_type')
-        if kind==4 and name(name_off)==b'pid':
+        members=[]
+        if kind in (4,5):
             for index in range(count):
                 member,typ,bits=struct.unpack_from(endian+'III',raw,start+12+index*12)
-                if name(member)==b'numbers':
-                    if info>>31:
-                        if bits>>24:raise RuntimeError('pid_namespace_btf_bitfield')
-                        bits &= 0xffffff
-                    if bits%8:raise RuntimeError('pid_namespace_btf_alignment')
-                    return bits//8
+                bitfield=bits>>24 if info>>31 else 0
+                members.append((name(member),typ,bits & 0xffffff if info>>31 else bits,bitfield))
+        types[identifier]=(kind,name(name_off),size,members)
+        identifier+=1
         start+=12+extra
+    if start!=end:raise RuntimeError('invalid_kernel_btf_truncated')
+    def locate(identifier,trail=()):
+        if identifier in trail or identifier not in types:raise RuntimeError('invalid_kernel_btf_member_reference')
+        kind,label,size,members=types[identifier]
+        if kind not in (4,5):raise RuntimeError('invalid_kernel_btf_anonymous_member')
+        found=[]
+        for label,child,bits,bitfield in members:
+            if label==member_name.encode() or not label:
+                if bitfield:raise RuntimeError('pid_namespace_btf_bitfield')
+                if bits%8:raise RuntimeError('pid_namespace_btf_alignment')
+                if bits>size*8:raise RuntimeError('invalid_kernel_btf_member_bounds')
+                if label:found.append(bits//8)
+                else:found.extend(bits//8+offset for offset in locate(child,(*trail,identifier)))
+        return found
+    matches=[identifier for identifier,(kind,label,_,_) in types.items() if kind==4 and label==structure.encode()]
+    if matches:
+        offsets=[locate(identifier) for identifier in matches]
+        if all(len(values)==1 for values in offsets) and len({(types[key][2],values[0])
+                for key,values in zip(matches,offsets)})==1:return offsets[0][0]
     raise RuntimeError('pid_namespace_btf_layout_missing')
+
+
+def pid_numbers_offset(path=Path('/sys/kernel/btf/vmlinux')):
+    return btf_member_offset('pid', 'numbers', path)
+
+
+class ProgramLoss(RuntimeError):
+    def __init__(self, evidence):
+        super().__init__('kernel_bpf_program_recursion_lost')
+        self.evidence=evidence
+
+
+def program_fdinfo(raw):
+    """recursion_misses is independent of optional run-time BPF statistics."""
+    result={}
+    for key in ('prog_id','prog_type','recursion_misses'):
+        values=re.findall(r'^'+key+r':\s*(\d+)\s*$',raw,re.M)
+        if len(values)!=1:raise RuntimeError('kernel_bpf_program_statistics_missing')
+        result[key]=int(values[0])
+    if result['prog_id']<=0:raise RuntimeError('kernel_bpf_program_identity_invalid')
+    if result['recursion_misses']:raise ProgramLoss(result)
+    return result
+
+
+def hold_programs(pid, minimum):
+    """Retain owned program refs, so post-detach statistics remain readable."""
+    import ctypes
+    import platform
+    number={'x86_64':321,'aarch64':280}.get(platform.machine())
+    if number is None:raise RuntimeError('kernel_bpf_statistics_architecture_unsupported')
+    library=ctypes.CDLL(None,use_errno=True);library.syscall.restype=ctypes.c_long
+    held=[];seen=set()
+    try:
+        for entry in (Path('/proc')/str(pid)/'fd').iterdir():
+            try:target=os.readlink(entry)
+            except FileNotFoundError:continue
+            if target!='anon_inode:bpf-prog':continue
+            info=program_fdinfo(entry.parent.with_name('fdinfo').joinpath(entry.name).read_text())
+            identifier=info['prog_id']
+            if identifier in seen:continue
+            attributes=ctypes.create_string_buffer(struct.pack('III',identifier,0,0))
+            descriptor=library.syscall(number,13,ctypes.byref(attributes),12) # BPF_PROG_GET_FD_BY_ID
+            if descriptor<0:raise RuntimeError('kernel_bpf_program_reference_unavailable')
+            held.append(descriptor);seen.add(identifier)
+        if len(held)<minimum:raise RuntimeError('kernel_bpf_program_coverage_incomplete')
+        return held
+    except Exception:
+        for descriptor in held:os.close(descriptor)
+        raise
+
+
+def program_name(descriptor):
+    """Only the public fixed-size generated program name; no code or pointers."""
+    import ctypes
+    import platform
+    number={'x86_64':321,'aarch64':280}.get(platform.machine())
+    if number is None:raise RuntimeError('kernel_bpf_statistics_architecture_unsupported')
+    library=ctypes.CDLL(None,use_errno=True);library.syscall.restype=ctypes.c_long
+    info=ctypes.create_string_buffer(80)
+    attributes=ctypes.create_string_buffer(struct.pack('IIQ',descriptor,80,ctypes.addressof(info)))
+    if library.syscall(number,15,ctypes.byref(attributes),16)<0:
+        raise RuntimeError('kernel_bpf_program_name_unavailable')
+    name=info.raw[64:80].split(b'\0',1)[0].decode('ascii')
+    if not re.fullmatch(r'[A-Za-z0-9_.$]{1,15}',name):raise RuntimeError('kernel_bpf_program_name_invalid')
+    return name
+
+
+def program_statistics(descriptors):
+    values=[];losses=[]
+    for descriptor in descriptors:
+        try:values.append(program_fdinfo(Path('/proc/self/fdinfo',str(descriptor)).read_text()))
+        except ProgramLoss as error:
+            item=error.evidence
+            try:item['programName']=program_name(descriptor)
+            except (OSError,RuntimeError,ValueError):item['programNameUnavailable']=True
+            losses.append(item)
+    if losses:raise ProgramLoss({'stage':'after-detach','programs':losses})
+    return values
 
 
 CONTROL_C = r'''

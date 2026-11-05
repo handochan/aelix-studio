@@ -196,13 +196,18 @@ describe('MarkdownView local file links', () => {
     expect(link).toHaveAttribute('href', 'https://aionui.com/docs#L10');
   });
 
-  it('adds empty alt text to external raw HTML images without alt text', () => {
+  it('requires consent for raw HTML images and drops alternate network sources', () => {
     const { container } = render(
-      <MarkdownView allowHtml>{'<img src="https://example.com/generated.png" />'}</MarkdownView>
+      <MarkdownView allowHtml>
+        {'<img src="https://example.com/generated.png" srcset="https://other.example/unapproved.png 2x" />'}
+      </MarkdownView>
     );
 
+    expect(container.querySelector('img')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /messages.remoteImageLoad.*example.com/ }));
     const image = container.querySelector('img');
     expect(image).toHaveAttribute('src', 'https://example.com/generated.png');
     expect(image).toHaveAttribute('alt', '');
+    expect(image).not.toHaveAttribute('srcset');
   });
 });

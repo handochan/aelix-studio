@@ -37,6 +37,10 @@ vi.mock('@arco-design/web-react', async (importOriginal) => {
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    systemSettings: {
+      getAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(true) },
+      setAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(undefined) },
+    },
     autoUpdate: {
       quitAndInstall: {
         invoke: mocks.quitAndInstallMock,
@@ -81,6 +85,18 @@ describe('AboutModalContent update ready state', () => {
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('persists the automatic-update switch through desktop settings', async () => {
+    const { ipcBridge } = await import('@/common');
+    render(<AboutModalContent />);
+    const toggle = screen.getByRole('switch', { name: 'settings.autoUpdateCheck' });
+    await waitFor(() => expect(toggle).toHaveAttribute('aria-checked', 'true'));
+    fireEvent.click(toggle);
+    await waitFor(() =>
+      expect(ipcBridge.systemSettings.setAutoUpdateEnabled.invoke).toHaveBeenCalledWith({ enabled: false })
+    );
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
   });
 
   it('replaces check update with ready-to-install when an update package is ready', async () => {

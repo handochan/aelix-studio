@@ -1,0 +1,363 @@
+"""The app and host use exactly one transport/lifecycle classification policy."""
+import importlib.util
+from pathlib import Path
+import tempfile
+import unittest
+
+ROOT = Path(__file__).resolve().parents[2]
+spec = importlib.util.spec_from_file_location('shared_audit', ROOT/'scripts/studio-preview/fixtures/outboundAudit.py')
+audit = importlib.util.module_from_spec(spec); spec.loader.exec_module(audit)
+SOCKET = '1<app> socket(AF_INET6, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP) = 3<UDPv6:[123]>'
+CONNECT = '1<app> connect(3<UDPv6:[123]>, {sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr)}, 28) = -1 ENETUNREACH'
+CLOSE = '1<app> close(3<UDPv6:[123]>) = 0'
+END = '1<app> +++ exited with 0 +++'
+
+
+class UdpLifecycleTests(unittest.TestCase):
+    def test_private_fork_with_unproven_snapshot_completion_stays_failed(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> fork( <unfinished ...>',
+            '2<child> execve("/owned/child", [...], 0x1) = 0',
+            '1<app> <... fork resumed>) = 2',CLOSE,'2<child> +++ exited with 0 +++',END])
+        self.assertEqual(report['udpConnectOnly'],0)
+        self.assertIn('udp_descriptor_completion_order_unproven',{e['reason'] for e in report['classificationIssues']})
+    def test_precompletion_use_or_independent_inheritance_never_gets_a_future_udp_fd(self):
+        from udpLifecycle import analyze
+        socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1];close=CLOSE.split(' ',1)[1]
+        for middle in [[(1,connect,2,2)],
+                       [(1,'fork() = 2',2,2),(2,connect,5,5),(2,close,6,6),(2,'+++ exited with 0 +++',7,7)],
+                       [(1,'clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',2,2),
+                        (2,'unshare(CLONE_FILES) = 0',3,3),(2,connect,5,5),(2,close,6,6),(2,'+++ exited with 0 +++',7,7)],
+                       [(1,'clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',2,2),
+                        (2,'close_range(10, 20, CLOSE_RANGE_UNSHARE) = 0',3,3),
+                        (2,connect,5,5),(2,close,6,6),(2,'+++ exited with 0 +++',7,7)]]:
+            records=[(1,socket,1,4),*middle,(1,close,8,8),(1,'+++ exited with 0 +++',9,9)]
+            exempt,_,issues=analyze(records,None,lambda pid:pid)
+            self.assertEqual(exempt,set())
+            self.assertIn('udp_descriptor_completion_order_unproven',{issue['reason'] for issue in issues})
+
+    def tcp_capture(self):
+        tasks=[dict(pid=pid,tgid=1 if pid in (1,2) else 1000,kernelPid=kernel,
+                    kernelTgid=101 if pid in (1,2) else 1000,start=1,end=100,lastOrdinal=10,
+                    parentKernelPid=101 if pid==2 else 1000) for pid,kernel in [(1,101),(2,102),(1000,1000)]]
+        events=[dict(kind=kind,time=time,pid=2,tgid=1,kernelPid=102,kernelTgid=101,call=1,
+                     ordinal=1,value=value,result=result)
+                for kind,time,value,result in [('P',10,3,0),('N',20,3,0),('H',25,5,10),('X',30,3,-101)]]
+        return {'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
+                'root':{'kernelPid':1000},'network':{'complete':True,'eventCount':4,'events':events,'tasks':tasks}}
+
+    def test_pending_dup_cannot_assign_its_future_alias_to_an_earlier_connect(self):
+        for duplicate in ('dup(3<UDPv6:[123]>', 'fcntl(3<UDPv6:[123]>, F_DUPFD, 0'):
+            lines=[SOCKET,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',
+                f'1<app> {duplicate} <unfinished ...>',
+                '2<thread> '+CONNECT.split(' ',1)[1].replace('3<UDPv6:[123]>','5').replace('ENETUNREACH','EISCONN'),
+                '2<thread> close(5) = 0',
+                f'1<app> <... {duplicate.split("(")[0]} resumed>) = 5<UDPv6:[123]>',
+                CLOSE,'1<app> close(5<UDPv6:[123]>) = 0','2<thread> +++ exited with 0 +++',END]
+            capture=self.tcp_capture();events=capture['network']['events']
+            events[:]=[{**e,'value':5,'result':-106 if e['kind']=='X' else 0} for e in events if e['kind']!='H']
+            capture['network']['eventCount']=len(events)
+            for evidence in (None,capture):
+                report=self.parse(lines,evidence)
+                self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+                self.assertIn('udp_descriptor_completion_order_unproven',{e['reason'] for e in report['classificationIssues']})
+
+    def test_pending_close_cannot_hide_an_unlabelled_open_duplicate(self):
+        lines=[SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',
+            '1<app> close(3<UDPv6:[123]> <unfinished ...>', '2<thread> dup(3) = 5',
+            '1<app> <... close resumed>) = 0','2<thread> +++ exited with 0 +++',END]
+        capture=self.tcp_capture()
+        for e in capture['network']['events']:
+            e.update(pid=1,kernelPid=101)
+            if e['kind']=='H':e['value']=11
+        for evidence in (None,capture):
+            report=self.parse(lines,evidence)
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+            self.assertIn('udp_descriptor_completion_order_unproven',{e['reason'] for e in report['classificationIssues']})
+
+    def test_unknown_udp_write_result_remains_a_lifecycle_failure(self):
+        for prefix,reason in [([SOCKET,CONNECT],'udp_write_result_unknown'),([], 'udp_write_untracked_fd')]:
+            report=self.parse([*prefix,'1<app> write(3<UDPv6:[123]>, ""..., 1) = ?',CLOSE,END])
+            self.assertIn(reason,{item['reason'] for item in report['classificationIssues']})
+            self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_pending_udp_acquisition_cannot_exempt_interleaved_tcp_reuse(self):
+        lines=['1<app> execve("/owned/app", [...], 0x1) = 0',
+            '1<app> clone(child_stack=NULL, flags=CLONE_VM|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD) = 2',
+            '1<app> socket(AF_INET6, SOCK_DGRAM|SOCK_CLOEXEC, IPPROTO_UDP <unfinished ...>',
+            '2<thread> socket(AF_INET6, SOCK_STREAM|SOCK_CLOEXEC, IPPROTO_TCP) = 3<TCPv6:[123]>',
+            '2<thread> '+CONNECT.split(' ',1)[1].replace('UDPv6:[123]','TCPv6:[123]'),
+            '2<thread> close(3<TCPv6:[123]>) = 0',
+            '1<app> <... socket resumed>) = 3<UDPv6:[456]>',
+            '1<app> close(3<UDPv6:[456]>) = 0','2<thread> +++ exited with 0 +++',END]
+        for capture in (None,self.tcp_capture()):
+            report=self.parse(lines,capture)
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+            self.assertIn('udp_fd_reused_without_close',{item['reason'] for item in report['classificationIssues']})
+
+    def test_tcp_fd_label_or_kernel_hook_never_receives_udp_only_exemption(self):
+        for kind,capture in [('TCPv6',None),('UDPv6',self.tcp_capture())]:
+            lines=[SOCKET,'1<app> clone(child_stack=NULL, flags=CLONE_VM|CLONE_FILES|CLONE_SIGHAND|CLONE_THREAD) = 2',
+                '2<thread> '+CONNECT.split(' ',1)[1].replace('UDPv6',kind),
+                '2<thread> '+CLOSE.split(' ',1)[1],'2<thread> +++ exited with 0 +++',END]
+            report=self.parse(lines,capture)
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+            self.assertGreater(report['classificationErrors'],0)
+
+    def test_ring_close_cannot_leave_an_unproven_udp_identity_for_a_later_connect(self):
+        capture=self.tcp_capture()
+        capture['network']['tasks']=[task for task in capture['network']['tasks'] if task['pid']!=2]
+        for e in capture['network']['events']:
+            e.update(pid=1,kernelPid=101)
+            if e['kind']=='X':e['result']=-106
+        events=capture['network']['events'];events[:]=[e for e in events if e['kind']!='H']
+        capture['network']['eventCount']=len(events)
+        capture['events']=[dict(kind='create',time=2,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,
+                               fd=5,flags=0,sqpollKernelPid=0),
+                           dict(kind='submit',time=3,ctx='ring',pid=1,tgid=1,kernelPid=101,kernelTgid=101,
+                                opcode=19,sqpoll=False)]
+        capture['eventCount']=2
+        report=self.parse([SOCKET,'1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+            '1<app> io_uring_enter(5<anon_inode:[io_uring]>, 1, 1, 0, NULL, 0) = 1',
+            CONNECT.replace('3<UDPv6:[123]>','3').replace('ENETUNREACH','EISCONN'),
+            '1<app> close(3) = 0','1<app> close(5<anon_inode:[io_uring]>) = 0',END],capture)
+        self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+        self.assertEqual((report['unparsedRecords'],report['classificationErrors']),(1,1))
+        self.assertIn('udp_io_uring_close_fd_unproven',{issue['reason'] for issue in report['classificationIssues']})
+
+    def test_no_network_kernel_proof_does_not_recover_udp_close_uncertainty(self):
+        tasks=[dict(pid=pid,tgid=pid,kernelPid=kernel,kernelTgid=kernel,start=1,end=100,lastOrdinal=10,
+                    parentKernelPid=1000) for pid,kernel in [(1,101),(1000,1000)]]
+        events=[dict(kind=kind,time=time,pid=1,tgid=1,kernelPid=101,kernelTgid=101,call=1,
+                     ordinal=1,value=3,result=result)
+                for kind,time,result in [('P',10,0),('N',20,0),('X',30,-101)]]
+        capture={'complete':True,'status':'captured','lostEvents':0,'pidNamespaceVerified':True,'eventCount':0,'events':[],
+                 'root':{'kernelPid':1000},'network':{'complete':True,'eventCount':3,'events':events,'tasks':tasks}}
+        report=self.parse([SOCKET,CONNECT,'1<app> close(3<UDPv6:[123]>) = ?',
+            '1<app> dup2(9</dev/null>, 3) = 3</dev/null>',END],capture)
+        self.assertIn('udp_close_result_unknown',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual((report['udpConnectOnly'],report['kernelMetadataResolvedRecords']),(0,0))
+        self.assertGreater(report['unparsedRecords'],0)
+
+    def test_unknown_close_cannot_be_resolved_across_a_future_shared_udp_acquisition(self):
+        for acquire in ([SOCKET.replace('1<app>','2<thread>')],
+                        [SOCKET.replace('1<app>','2<thread>').replace('= 3<','= 4<'),
+                         '2<thread> dup(4<UDPv6:[123]>) = 3<UDPv6:[123]>']):
+            capture=self.tcp_capture()
+            for event in capture['network']['events']:
+                if event['kind']=='H':event['value']=11
+            lines=['1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',
+                '1<app> close(3 <unfinished ...>',*acquire,CONNECT.replace('1<app>','2<thread>'),
+                CLOSE.replace('1<app>','2<thread>'),'2<thread> close(4) = 0',
+                '1<app> <... close resumed>) = ?', '2<thread> +++ exited with 0 +++',END]
+            report=self.parse(lines,capture)
+            self.assertEqual((report['udpConnectOnly'],report['kernelMetadataResolvedRecords']),(0,0))
+            self.assertGreater(report['unparsedRecords'],0)
+            self.assertIn('udp_unknown_close_overlaps_fd_acquisition',{e['reason'] for e in report['classificationIssues']})
+    def test_unknown_udp_close_is_permanent_even_after_other_known_retirement(self):
+        from udpLifecycle import analyze
+        closers=['dup2(9</dev/null>, 3<UDPv6:[123]>) = 3</dev/null>',
+                 'close_range(3, 3, 0) = 0','execve("/owned/next", [...], 0x1) = 0',
+                 CLOSE.split(' ',1)[1]]
+        for closer in closers:
+            records=[(1,SOCKET.split(' ',1)[1],1),(1,CONNECT.split(' ',1)[1],2),
+                     (1,'close(3<UDPv6:[123]>) = ?',3),(1,closer,4),
+                     (1,'+++ exited with 0 +++',5)]
+            exempt,_,issues=analyze(records,None,lambda pid:pid)
+            self.assertEqual(exempt,set(),closer)
+            self.assertIn('udp_close_result_unknown',{issue['reason'] for issue in issues})
+
+    def test_unknown_close_of_an_inherited_duplicate_invalidates_all_owners(self):
+        from udpLifecycle import analyze
+        for flags in ('SIGCHLD','CLONE_FILES|CLONE_THREAD|SIGCHLD'):
+            records=[(1,SOCKET.split(' ',1)[1],1),(1,CONNECT.split(' ',1)[1],2),
+                (1,'dup(3<UDPv6:[123]>) = 5<UDPv6:[123]>',3),
+                (1,f'clone(child_stack=NULL, flags={flags}) = 2',4),
+                (2,'close(5<UDPv6:[123]>) = ?',5),
+                (2,'close_range(3, 5, 0) = 0',6),(1,'close_range(3, 5, 0) = 0',7),
+                (2,'+++ exited with 0 +++',8),(1,'+++ exited with 0 +++',9)]
+            exempt,_,issues=analyze(records,None,lambda pid:pid)
+            self.assertEqual(exempt,set())
+            self.assertEqual({issue['pid'] for issue in issues if issue['reason']=='udp_close_result_unknown'},{1,2})
+
+    def test_unknown_close_of_an_untracked_udp_fd_fails(self):
+        from udpLifecycle import analyze
+        _,_,issues=analyze([(1,'close(7<UDP:[123]>) = ?',1),(1,'+++ exited with 0 +++',2)],None,lambda pid:pid)
+        self.assertIn('udp_close_untracked_fd',{issue['reason'] for issue in issues})
+    def test_register_hole_cannot_hide_dup_of_live_udp_even_before_connect(self):
+        from udpLifecycle import analyze
+        socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1];close=CLOSE.split(' ',1)[1]
+        for intervals in ([(2,2,3)],[(2,3,5)]):
+            records=[(1,socket,1),(1,connect,4),(1,close,6),(1,'+++ exited with 0 +++',9)]
+            exempt,_,issues=analyze(records,None,lambda _pid:1,intervals)
+            self.assertEqual(exempt,set())
+            self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in issues})
+
+    def test_close_before_hole_needs_completion_not_only_entry(self):
+        from udpLifecycle import analyze
+        socket=SOCKET.split(' ',1)[1];connect=CONNECT.split(' ',1)[1]
+        closers=[CLOSE.split(' ',1)[1], 'close_range(3, 3, 0) = 0',
+                 'dup2(9</tmp/local>, 3<UDPv6:[123]>) = 3</tmp/local>',
+                 'execve("/owned/next", [...], 0x1) = 0']
+        for closer in closers:
+            for completion,blocked in ((4,False),(7,True)):
+                records=[(1,socket,1,1),(1,connect,2,2),(1,closer,4,completion),
+                         (1,'+++ exited with 0 +++',9,9)]
+                exempt,_,issues=analyze(records,None,lambda _pid:1,[(2,5,6)])
+                self.assertEqual(bool(issues),blocked,(closer,completion,issues))
+                self.assertEqual(bool(exempt),not blocked)
+
+    def test_udp_created_during_hole_is_potentially_mutated_but_after_hole_is_not(self):
+        from udpLifecycle import analyze
+        for start,blocked in ((4,True),(9,False)):
+            records=[(1,SOCKET.split(' ',1)[1],start),
+                     (1,CONNECT.split(' ',1)[1],start+1),(1,CLOSE.split(' ',1)[1],start+2),
+                     (1,'+++ exited with 0 +++',start+3)]
+            exempt,_,issues=analyze(records,None,lambda _pid:1,[(2,3,6)])
+            self.assertEqual(bool(issues),blocked)
+            self.assertEqual(bool(exempt),not blocked)
+
+    def test_known_dup_during_pending_close_cannot_lose_a_udp_alias(self):
+        from udpLifecycle import analyze
+        for duplicate in ('dup(3<UDPv6:[123]>) = 5<UDPv6:[123]>',
+                          'fcntl(3<UDPv6:[123]>, F_DUPFD_CLOEXEC, 0) = 5<UDPv6:[123]>'):
+            records=[(1,SOCKET.split(' ',1)[1],1,1),(1,CONNECT.split(' ',1)[1],2,2),
+                (1,'clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2',3,3),
+                (1,CLOSE.split(' ',1)[1],4,7),(2,duplicate,5,5),
+                (2,'+++ exited with 0 +++',11,11),(1,'+++ exited with 0 +++',12,12)]
+            for intervals in ((),[(2,8,10)]):
+                exempt,_,issues=analyze(records,None,lambda _pid:1,intervals)
+                self.assertEqual(exempt,set())
+                self.assertIn('udp_duplicate_untracked_fd',{issue['reason'] for issue in issues})
+                if intervals:self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in issues})
+
+    def test_kernel_no_network_proof_cannot_discharge_a_live_udp_alias_hole(self):
+        tasks=[{'pid':pid,'tgid':1,'kernelPid':pid+100,'kernelTgid':101,'start':1,'end':100,
+                'lastOrdinal':10,'parentKernelPid':1000 if pid==1 else 101} for pid in (1,2)]
+        tasks.append({'pid':1000,'tgid':1000,'kernelPid':1000,'kernelTgid':1000,'start':1,'end':100,'lastOrdinal':0})
+        events=[{'kind':kind,'time':time,'pid':1,'tgid':1,'kernelPid':101,'kernelTgid':101,
+                 'call':1,'ordinal':1,'value':3,'result':result}
+                for kind,time,result in [('P',10,0),('N',20,0),('X',30,-101)]]
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,
+                 'root':{'kernelPid':1000,'pid':1000},'eventCount':0,'events':[],
+                 'network':{'complete':True,'tasks':tasks,'events':events,'eventCount':3}}
+        report=self.parse([SOCKET,CONNECT,
+            '1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2<thread>',
+            '2<thread> ???( <unfinished ...>',CLOSE,'2<thread> +++ exited with 0 +++',END],capture)
+        self.assertIn('udp_lifetime_unparsed_register',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual(report['kernelResolvedRecords'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def parse(self, lines, capture=None):
+        with tempfile.TemporaryDirectory() as directory:
+            trace=Path(directory)/'trace';trace.write_text('\n'.join(lines)+'\n')
+            return audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)[0]
+
+    def test_fd_only_closure_without_kernel_object_proof_never_authorizes_D(self):
+        for address in ('2001:db8::1','2001:4860:4860::8888','::ffff:203.0.113.1'):
+            report=self.parse([SOCKET,CONNECT.replace('2001:db8::1',address),CLOSE,END])
+            self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
+            self.assertEqual(report['classificationIssues'],[{'pid':1,'reason':'udp_socket_evidence_missing'}])
+
+    def test_every_write_family_promotes_association_even_on_failure(self):
+        for call,args in [('write','""..., 1'),('writev','[...], 1'),('sendto','""..., 1, 0, NULL, 0'),
+                          ('sendmsg','{msg_name=NULL, msg_iov=[...]}, 0'),('sendmmsg','[{msg_hdr={msg_name=NULL, msg_iov=[...]}}], 1, 0')]:
+            report=self.parse([SOCKET,CONNECT,f'1<app> {call}(3<UDPv6:[123]>, {args}) = -1 ENOTCONN',CLOSE,END])
+            self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(2,0,0),call)
+
+    def test_fork_dup_and_shared_thread_writes_keep_original_socket_identity(self):
+        for flags in ('SIGCHLD','CLONE_FILES|CLONE_THREAD|SIGCHLD'):
+            lines=[SOCKET,CONNECT,f'1<app> clone(child_stack=NULL, flags={flags}) = 2<child>',
+                   '2<child> dup(3<UDPv6:[123]>) = 7<UDPv6:[123]>',
+                   '2<child> writev(7<UDPv6:[123]>, [...], 1) = -1 ENOTCONN',
+                   '2<child> close(7<UDPv6:[123]>) = 0','2<child> close(3<UDPv6:[123]>) = 0',
+                   '2<child> +++ exited with 0 +++',CLOSE,END]
+            report=self.parse(lines)
+            self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(2,0,0))
+
+    def test_missing_close_or_child_exit_with_open_socket_fails(self):
+        for lines in ([SOCKET,CONNECT,END],[SOCKET,CONNECT],
+                      [SOCKET,CONNECT,'1<app> fork() = 2<child>','2<child> +++ exited with 0 +++',CLOSE,END]):
+            self.assertGreater(self.parse(lines)['classificationErrors'],0)
+
+    def test_fd_reuse_does_not_make_a_later_file_write_a_udp_send(self):
+        report=self.parse([SOCKET,CONNECT,CLOSE,'1<app> write(3</tmp/local>, ""..., 1) = 1',END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
+
+    def test_ring_writev_with_unobservable_fd_blocks_udp_exemption(self):
+        # Supply real policy-shaped records: capture reconciliation still checks
+        # creator PID/TGID, flags, setup/enter and kernel submission count.
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':2,
+                 'events':[{'kind':'create','time':1,'ctx':'ring','pid':1,'tgid':1,'fd':5,'flags':0},
+                           {'kind':'submit','time':2,'ctx':'ring','pid':1,'tgid':1,'opcode':2,'sqpoll':False}]}
+        report=self.parse([SOCKET,CONNECT,'1<app> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+                           '1<app> io_uring_enter(5<anon_inode:[io_uring]>, 1, 1, 0, NULL, 0) = 1',CLOSE,END],capture)
+        self.assertIn('udp_io_uring_write_fd_unproven',{r['reason'] for r in report['classificationIssues']})
+
+    def test_process_sharing_table_before_socket_creation_cannot_hide_ring_write(self):
+        capture={'status':'captured','complete':True,'lostEvents':0,'pidNamespaceVerified':True,'eventCount':2,
+                 'events':[{'kind':'create','time':1,'ctx':'ring','pid':2,'tgid':2,'fd':5,'flags':0},
+                           {'kind':'submit','time':2,'ctx':'ring','pid':2,'tgid':2,'opcode':2,'sqpoll':False}]}
+        report=self.parse(['1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',SOCKET,CONNECT,
+                           '2<child> io_uring_setup(8, {flags=0}) = 5<anon_inode:[io_uring]>',
+                           '2<child> io_uring_enter(5<anon_inode:[io_uring]>, 1, 1, 0, NULL, 0) = 1',
+                           '2<child> +++ exited with 0 +++',CLOSE,END],capture)
+        self.assertIn('udp_io_uring_write_fd_unproven',{r['reason'] for r in report['classificationIssues']})
+
+    def test_unknown_write_result_cannot_be_classified_as_unsent(self):
+        for result in ('? ERESTARTSYS (To be restarted)', '?', 'malformed'):
+            report=self.parse([SOCKET,CONNECT,f'1<app> write(3<UDPv6:[123]>, ""..., 7) = {result}',CLOSE,END])
+            self.assertEqual(report['udpConnectOnly'],0)
+            self.assertGreater(report['unparsedRecords'],0)
+
+    def test_unknown_sockaddr_is_incomplete(self):
+        report=self.parse(['1<app> connect(2, 0x123456, 16) = -1 EFAULT',END])
+        self.assertGreater(report['unparsedRecords'],0)
+
+    def test_zero_protocol_alias_is_udp_but_ping_sockets_are_not(self):
+        for protocol in ('0','IPPROTO_IP'):
+            report=self.parse([SOCKET.replace('IPPROTO_UDP',protocol),CONNECT,CLOSE,END])
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+        report=self.parse([SOCKET.replace('IPPROTO_UDP','IPPROTO_ICMPV6'),CONNECT,CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
+
+    def test_last_task_of_process_cannot_leave_udp_open_in_another_process_table(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = 2<child>',
+                           '2<child> +++ exited with 0 +++',CLOSE,END])
+        self.assertGreater(report['classificationErrors'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_surviving_thread_may_close_the_same_process_shared_table(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2<thread>',
+                           '2<thread> +++ exited with 0 +++',CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
+
+    def test_resumed_null_destination_whitespace_and_deleted_fd_annotation_are_complete(self):
+        report=self.parse(['1<app> sendto(3<TCP:[127.0.0.1:1234->127.0.0.1:4321]>, ""..., 7, MSG_NOSIGNAL, NULL, 0 <unfinished ...>',
+                           '1<app> <... sendto resumed>) = 7',
+                           '1<app> dup(4</tmp/old>(deleted) ) = 5</tmp/old>(deleted)',END])
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['destinationAttempts']),(0,0,1))
+
+    def test_non_closing_dup_cannot_hide_a_missing_udp_close(self):
+        report=self.parse([SOCKET,CONNECT,'1<app> dup(4</tmp/local>) = 3</tmp/local>',END])
+        self.assertIn('udp_fd_reused_without_close',{issue['reason'] for issue in report['classificationIssues']})
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_impossible_socket_fd_reuse_is_not_a_proven_closed_association(self):
+        report=self.parse([SOCKET,CONNECT,SOCKET,CLOSE,END])
+        self.assertGreater(report['classificationErrors'],0)
+        self.assertEqual(report['udpConnectOnly'],0)
+
+    def test_resumed_spacing_is_decoded_but_uncertain_udp_order_is_not_exempt(self):
+        lines=['1<app> socket( <unfinished ...>',
+               '1<app> <... socket resumed>AF_INET6, SOCK_DGRAM| SOCK_CLOEXEC, IPPROTO_IP ) = 3<UDPv6:[123]>',CONNECT,
+               '1<app> write( <unfinished ...>',
+               '1<app> <... write resumed>3<UDPv6:[123]>, ""..., 7) = -1 ENOTCONN',CLOSE,END]
+        report=self.parse(lines)
+        self.assertEqual((report['externalAttempts'],report['classificationErrors'],report['udpConnectOnly']),(2,1,0))
+        self.assertEqual(report['processes'][0]['unparsedRecords'],0)
+        report=self.parse(lines[:3]+[CLOSE,END])
+        self.assertEqual((report['externalAttempts'],report['classificationErrors'],report['udpConnectOnly']),(1,1,0))
+
+    def test_tcp_connect_remains_an_attempt_even_without_data(self):
+        report=self.parse([CONNECT.replace('UDPv6','TCPv6'),END])
+        self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
