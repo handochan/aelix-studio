@@ -68,6 +68,17 @@ class RawPrototypeTests(unittest.TestCase):
 
 
 class RawBtfTests(unittest.TestCase):
+    def test_cached_content_cannot_hide_changes_unreadability_or_poisoned_results(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'btf';path.write_bytes(self.blob(4))
+            first=btf_signature('sys_enter',path,tracepoint=True)
+            first['parameters'][0]='poisoned'
+            self.assertEqual(btf_signature('sys_enter',path,tracepoint=True)['parameters'][0],'ptr:struct:pt_regs')
+            path.write_bytes(self.blob(1))
+            with self.assertRaises(RuntimeError):btf_signature('sys_enter',path,tracepoint=True)
+            path.unlink()
+            with self.assertRaises(OSError):btf_signature('sys_enter',path,tracepoint=True)
+
     def blob(self,hidden_type):
         strings=b'\0long\0pt_regs\0btf_trace_sys_enter\0'
         types=struct.pack('<IIII',1,1<<24,8,(1<<24)|64)

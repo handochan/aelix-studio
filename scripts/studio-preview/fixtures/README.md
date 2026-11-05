@@ -406,6 +406,13 @@ nonzero miss fails D. `udpSocketObjects.lossChecks` retains the coverage receipt
 `programLoss` preserves every offending ID, type, generated name when readable,
 and count. `stage=after-detach` is the snapshot time, not when the miss occurred.
 
+BTF requests still read their file on every validation. Only decoding identical
+byte content is cached (one entry); public signature results are fresh values.
+Changed/unreadable data is never served from a path cache. Forty signature
+results were identical before/after this optimization; one local benchmark
+changed 2.620s→0.140s. The real positive unit uses the same 60s envelope as the
+production positive controls; exact detection/exit and loss assertions remain.
+
 Raw arguments are separately checked using each running kernel BTF
 `btf_trace_<event>` TYPEDEF→PTR→FUNC_PROTO. Exactly one validated hidden ptr:void
 data argument is removed, then only known 6.8/7.0 raw prototypes are accepted.
