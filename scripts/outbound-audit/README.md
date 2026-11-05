@@ -28,14 +28,17 @@ enforces the whole tree. Linux requires strace, bpftrace/BTF/tracepoints and sud
 Capture failures/lost events remain fatal, with no syscall-only fallback.
 
 TCP connects and every UDP write/send attempt (including failed attempts through
-inherited/duplicated FDs) are denied outside loopback. Only proven closed, unsent
-UDP associations are reported separately as `udpConnectOnly`, without an address
-exception. Missing closes, open-at-exit descriptors and unknown imported UDP FD
-lifecycles fail. FD aliases follow fork, CLONE_FILES, dup/fcntl, close_range and
-exec CLOEXEC. Because kernel submissions do not expose their target FD, any ring
-write in a process that held such an association conservatively fails: relative
-timing cannot prove a nonoverlap. The existing libuv operation allowlist and
-normal/SQPOLL CONNECT rejections remain intact.
+inherited/duplicated/imported FDs) are denied outside loopback. `udpConnectOnly` (D)
+requires a unique kernel socket-generation connect matching strace, zero protocol
+or IP-output sends, final destructor entry/return before collection ends, and
+complete loss-free namespace/task evidence. FD closure or CLOEXEC inference alone
+never proves D. Missing free, preexisting objects, ambiguous matches and selected/
+unselected object sharing fail. FIONCLEX, SCM_RIGHTS, pidfd_getfd and pending FD
+ordering cannot defeat this object proof. See the shared
+[policy and kernel sources](../studio-preview/fixtures/README.md#udp-socket-object-proof-issue-15-decision-6647325683).
+The existing libuv operation allowlist and normal/SQPOLL CONNECT rejections remain
+intact. Transport controls retain 0/86/86/87/87 and add real FIONCLEX+exec exit/send,
+SCM_RIGHTS-send and pidfd_getfd-send controls.
 
 ```sh
 python -I -B scripts/outbound-audit/audit.py --report .local/outbound/app.json -- command args

@@ -1,8 +1,9 @@
 """Generate the kernel recorder: metadata only, never buffers/argv."""
 from uring.network import program as network_program
+from uring.socketProgram import program as socket_program, CLEANUP
 
 
-def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None):
+def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None, socket_rcu_offset=None, object_specs=None):
     normalize='''
   $t=(struct task_struct*)curtask;
   $level=$t->thread_pid->level;
@@ -17,7 +18,7 @@ def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None):
   }
 '''
     source='''
-BEGIN { printf("READY\\n"); }
+BEGIN { @udp_socket_ready=1; printf("READY\\n"); printf("OBJECTS|1\\n"); }
 tracepoint:sched:sched_process_exec {
   $t=(struct task_struct*)curtask;
   $level=$t->thread_pid->level;
@@ -61,6 +62,17 @@ kretprobe:create_io_thread /@tracked[tid]/ {
 }
 tracepoint:sched:sched_process_exit /@tracked[tid]/ {
 NORMALIZE
+  if (@udp_task_exiting[tid]) { @udp_object_error=count(); }
+  @udp_task_exiting[tid]=nsecs; @udp_task_exit_enter=count();
+  @udp_exit_pid[tid]=$nspid; @udp_exit_tgid[tid]=$nstgid; @udp_exit_kernel_tgid[tid]=pid;
+}
+kprobe:do_task_dead /@tracked[tid]/ {
+  $t=(struct task_struct*)curtask;
+  $nspid=@udp_exit_pid[tid]; $nstgid=@udp_exit_tgid[tid];
+  if (!@udp_task_exiting[tid]) { @udp_object_error=count(); }
+  if (@udp_exit_kernel_tgid[tid]!=pid) { @udp_object_error=count(); }
+  delete(@udp_task_exiting[tid]); @udp_task_exit_return=count();
+  delete(@udp_exit_pid[tid]); delete(@udp_exit_tgid[tid]); delete(@udp_exit_kernel_tgid[tid]);
   @task_count=count();
   printf("T|%llu|%d|%d|%d|%d|%llu|%d|%u|%llu\\n",nsecs,pid,tid,$nspid,$nstgid,@birth[tid],@kernel_parent[tid],$t->flags,@pre_seq[tid]);
   @dead_count=count(); delete(@tracked[tid]); delete(@birth[tid]);
@@ -115,6 +127,8 @@ interval:ms:250 {
   @state_count=count();
   printf("TICK|%llu\\n",nsecs);
   print(@born_count); print(@dead_count); print(@started_req); print(@completed_req);
+  print(@udp_born); print(@udp_freed);
+  print(@udp_stack_enter); print(@udp_stack_return);
   printf("TICKEND\\n");
 }
 END {
@@ -123,8 +137,17 @@ END {
   clear(@birth); clear(@net_seq); clear(@net_call); clear(@net_fd); clear(@audit_root_tid);
   clear(@kernel_parent); clear(@pre_seq); clear(@pre_call);
   clear(@io_birth); clear(@raw_active); clear(@raw_id);
+  clear(@udp_task_exiting);
+  clear(@udp_exit_pid); clear(@udp_exit_tgid); clear(@udp_exit_kernel_tgid);
+OBJECT_CLEANUP
 }
 '''
+    from uring.socketProgram import trampoline_source
+    if object_specs is None:raise RuntimeError('kernel_udp_typed_probes_missing')
+    dead=object_specs['do_task_dead_e']
+    source=source.replace('kprobe:do_task_dead','kfunc:'+dead['symbol'])
     source += network_program(normalize,pre_entry)
+    source += trampoline_source(socket_program(normalize, socket_rcu_offset),object_specs)
+    source = source.replace('OBJECT_CLEANUP', CLEANUP)
     return source.replace('NORMALIZE',normalize).replace('OFFSET',str(numbers_offset)).replace(
         'NAMESPACE',str(namespace_inode)).replace('ROOT_PID',str(root_pid)).replace('SUBMIT /',submit+' /')

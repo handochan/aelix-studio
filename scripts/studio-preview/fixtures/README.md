@@ -304,58 +304,124 @@ kind and kernel hook names, families and file modes, plus associated UDP writes.
 It contains no FD labels, paths, buffers or kernel pointers and never changes
 classification. This distinguishes an actual write from an association-only
 probe when investigating a failed gate.
-Every successful socket acquisition, including TCP, permanently invalidates a
-tracked UDP object if its numeric FD collides with that object. Entry-ordered
-unfinished/resumed records cannot prove when a shared-table allocation took
-effect. No completion-order guess is used to grant an exemption. A decoded TCP
-FD annotation or independently matched kernel TCP connect also blocks a UDP-only
-exemption. The latter records `udp_kernel_tcp_connect_conflict`; socket reuse
-records `udp_fd_reused_without_close`. Both remain failed after later closes.
-An unfinished UDP-related descriptor mutation, use, independent inheritance or
-unsharing has no proven point of effect between its entry and completion. It
-records `udp_descriptor_completion_order_unproven` and permanently prevents an
-exemption for the involved object and its owners, even after later successful
-closes. This includes newly created sockets, pending dup aliases, pending
-release and whole-table copies. No observation is reordered and no allocation
-or release time is inferred from the syscall entry or exit alone. Resolving
-these conflicts would require additional kernel FD/object identity evidence.
-The same owner-TGID uncertainty rule covers io_uring `CLOSE` (opcode19): it may
-release a UDP FD, and the recorder does not expose its target FD. It records
-`udp_io_uring_close_fd_unproven`; a later connect cannot inherit the old UDP
-identity. The global file-opcode allowlist and original controls are unchanged.
-See Linux's [io_close implementation](https://github.com/torvalds/linux/blob/v7.0/io_uring/openclose.c).
-**G12 coverage remains unaccepted:** the current trace excludes `ioctl`,
-`recvmsg` and `pidfd_getfd`; the kernel network channel does not observe FD
-acquisition, flag changes or object identity. For example, an untraced
-`FIONCLEX` can retain a UDP FD across exec while the current model assumes
-CLOEXEC retired it. A complete network reconciliation therefore does not
-establish complete FD lifecycle evidence. The PR must remain draft pending a
-scope decision and additional FD observation; zero reports are observations,
-not final G12 acceptance. No excluded address or ignored failure resolves this.
-See Linux's [ioctl implementation](https://github.com/torvalds/linux/blob/v7.0/fs/ioctl.c)
-and Issue #15 for the outstanding decision.
-The ordinary inherited-UDP positive controls use an untraced shared semaphore to hold
-the child until the parent has returned from fork. They still inherit and
-duplicate the real UDP FD and send through it; no audit option changes. Separate
-unfinished-fork/dup/close controls deliberately retain ambiguous ordering and
-must fail. This keeps positive-control detection distinct from uncertainty.
-`close(decimalFD<optional annotation>) = ?` has a fully interpreted entry but
-no usable return. Only a terminated task with complete kernel reconciliation
-and no unmatched network action may account for that missing field. These
-`kernelMetadataResolutions`/`kernelMetadataResolvedRecords` retain TID, range,
-sequence and FD, with `returnValueKnown=false` and `fdClosureInferred=false`.
-The original FD record and unknown result remain in both ledgers. A targeted
-tracked UDP object becomes permanently invalid for an unknown close result,
-including all inherited/duplicated owners; later dup2, close_range, CLOEXEC exec
-or another close cannot erase this failure. An untracked UDP-labelled close
-also fails. Generic unknown closes are checked against tracked ring FD tables
-even when the FD annotation is missing; existing ring-labelled unknown records
-keep their failure contract. UDP/ring failures block this metadata resolution.
-An unknown close also spans its entry through the task's terminal record.
-A later socket or duplicate acquiring that numeric FD in the same shared table
-records `udp_unknown_close_overlaps_fd_acquisition`, permanently invalidates
-the UDP object/owners and blocks metadata resolution. Thus a close preceding
-the object's creation cannot be hidden by the no-unmatched-network proof.
+
+### UDP socket-object proof (Issue #15 decision 6647325683)
+
+`udpConnectOnly` (D) is counted per interpreted IP `connect`, using kernel socket
+objects, never an FD-number lifecycle. Mandatory `sk_alloc` entry/return establishes
+an allocation generation; `udp_init_sock`/`udpv6_init_sock` binds it only after
+checking IP family, datagram type 2 and UDP protocol 17. UDP-Lite also calls these
+initializers and is unsupported, never silently treated as UDP. Objects created
+before collection are ineligible. Reuse of a freed address creates a new generation.
+
+`inet_dgram_connect` records one outer IPv4/IPv6 datagram invocation. Each D needs
+exactly one object connect matching the same kernel/namespace TID, raw syscall
+ordinal and entry/return interval, themselves matched in order to the strace record.
+Missing or duplicate matches fail. `udp_sendmsg`/`udpv6_sendmsg` record protocol sends
+from any task using the watched object. Global `ip_local_out`/`ip6_local_out` and `ip_send_skb`/`ip6_send_skb` hooks
+also block D for cork flush and kernel/tunnel output using that socket. The
+wrapper can be inlined into `ip_send_skb` (observed on local7.0.11), so its
+out-of-line symbol alone is insufficient. Both lower skb-output hooks are
+mandatory too, and actual IPv4/IPv6 loopback controls must observe protocol
+and IP-output events before the auditor qualifies them. Neither
+FD inheritance, dup, exec flags, untraced FIONCLEX, SCM_RIGHTS nor pidfd_getfd can
+hide a send or prove a release. `receive_fd` (file arg0), `receive_fd_replace`
+(file arg1) and final socket-file release record additional users. FD imports must
+be socket-mode files and not O_PATH handles before private data is read.
+
+D additionally requires zero sends over that entire generation, a final
+`__sk_destruct` entry AND return before collection ends, complete loss-free
+collection and verified namespace/task attribution. `sk_free` is not sufficient:
+TX references, workqueues and RCU can defer the actual free. The final callback is
+watched globally and need not run in a lineage task; its executor is not counted
+as a socket user. Entry saves the old generation per nested callback; return does
+not dereference freed memory or erase a newer allocation at the same address.
+All destructor stack entries/returns and UDP allocation/destruction counters must
+balance. The drain waits for tasks, requests and UDP object frees, rather than
+stopping when strace returns. Opaque object IDs, connect ranges, sender/user PIDs
+and final destructor times are retained in `udpSocketObjects`; raw pointers are not.
+
+For host/native scope, an object used by selected and unselected processes fails
+with `udp_socket_cross_scope`. Unknown external users or namespace mismatch fail
+rather than being attributed to a guessed owner. IPv6-to-IPv4 family mutation
+within one generation is currently unsupported and fails conservatively.
+
+Complete object proof can replace only the UDP-specific FD-order, unknown-close,
+CLOEXEC and ring-target uncertainty rules. Every UDP connect predicted by that
+ledger or labelled UDP in strace must also have exactly one kernel-object match.
+Without this proof, the old conservative UDP failures remain and D is never
+awarded. TCP labels/protocol hooks always veto D. The existing ring FD ledger,
+explicit opcode allowlist, CONNECT rejection and independent syscall reconciliation
+remain blocking; object proof never exempts unknown ring operations. A UDP io_uring
+WRITEV that reaches the protocol still returns87 (1/1/1), and its worker ownership
+must be proved. File WRITEV/CLOSE can no longer taint an unrelated, proven closed
+unsent object solely because the target FD is absent from the ring tracepoint.
+
+Linux source basis (checked 6.8 and7.0; running BTF and attachability required):
+
+- [Allocation, RCU and final destructor](https://github.com/torvalds/linux/blob/v7.0/net/core/sock.c#L2296-L2435),
+  [protocol initialization order](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/af_inet.c#L334-L394),
+  [datagram connect](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/af_inet.c#L576-L600).
+- [UDP send/cork](https://github.com/torvalds/linux/blob/v7.0/net/ipv4/udp.c),
+  [IPv6 and mapped-IPv4 send](https://github.com/torvalds/linux/blob/v7.0/net/ipv6/udp.c),
+  [splice via MSG_SPLICE_PAGES](https://github.com/torvalds/linux/blob/v7.0/fs/splice.c#L795-L884),
+  [io_uring send](https://github.com/torvalds/linux/blob/v7.0/io_uring/net.c).
+- [FD receive](https://github.com/torvalds/linux/blob/v7.0/fs/file.c#L1387-L1420),
+  [O_PATH mode](https://github.com/torvalds/linux/blob/v7.0/include/linux/fs.h),
+  [socket files](https://github.com/torvalds/linux/blob/v7.0/net/socket.c).
+- [Exit ordering](https://github.com/torvalds/linux/blob/v7.0/kernel/exit.c#L947-L1019):
+  `sched_process_exit` precedes `exit_files`/`exit_task_work`. It supplies immutable
+  namespace identity, while required `do_task_dead` supplies the final task range.
+  Announcement/final-event counters must match every tracked task. Late namespace
+  lookup is unsafe after reaping, so cached identity is checked against current
+  kernel TID/TGID. The pre-ptrace version support in `entry.py` is unchanged.
+
+The 17 new object/task attachments use public bpftrace `kfunc`/`kretfunc` (BTF
+fentry/fexit) with typed arguments. They have no kretprobe instance pool that
+could silently omit a return. Every owned BPF program FD is retained with
+`BPF_PROG_GET_FD_BY_ID` before stopping the recorder; after detach its fdinfo must
+still expose an explicit zero `recursion_misses`. Exactly 17 retained programs
+must have TRACING type 26, in addition to the preexisting network/tracepoint
+programs. Missing fields, program references, hooks or a nonzero miss fail D.
+The receipt is retained in `udpSocketObjects.lossChecks`.
+This does not claim a kernel kprobe-profile miss count for the unchanged PMU
+network hooks; their program recursion counters and syscall reconciliation
+remain checked. Source: [BPF trampoline misses](https://github.com/torvalds/linux/blob/v7.0/kernel/bpf/trampoline.c#L1143-L1156),
+[fdinfo counter](https://github.com/torvalds/linux/blob/v6.8/kernel/bpf/syscall.c#L2230-L2284),
+[bpftrace typed probes](https://bpftrace.org/docs/0.21).
+
+Missing symbols, inline-only functions, BTF/signature/layout mismatch, failed map
+updates, unmatched callback returns and event loss fail collection. The BTF member
+reader follows anonymous unions and requires duplicate struct definitions to agree
+on size and offset; offsets are never guessed. `sk_prot_free` is inlined on the
+measured local kernel, so the final destructor return is the required boundary.
+No destination-name/address exception, CPU restriction or ignored failure is used.
+
+The readiness barrier is reviewed for bpftrace 0.17.0 and 0.20.2 only; other versions
+fail. BEGIN runs before attachment, but its printf is not consumed until both
+attachment loops succeed and poll_output starts. Thus observing READY in the
+broker is an attachment-complete barrier for these versions. See
+[bpftrace0.20.2 run](https://github.com/bpftrace/bpftrace/blob/v0.20.2/src/bpftrace.cpp#L1237-L1375)
+and [0.17.0](https://github.com/bpftrace/bpftrace/blob/v0.17.0/src/bpftrace.cpp).
+
+`--transport-controls` keeps the original UDP results 0/86/86/87/87 and adds real
+FIONCLEX+exec exit/send (0/86), SCM_RIGHTS send (86) and pidfd_getfd send (86). IPv4/IPv6 loopback sends must receive the test datagram,
+record both protocol and IP-output layers, and return 0 with D=0.
+Real retention controls also require 87 for an FD received from a pre-collection
+creator, and an object retained by an outside holder beyond collection end.
+The former must fail specifically for missing birth with complete collection;
+the latter must show balanced tasks/requests and an unfreed UDP object in the
+failed drain. Synthetic controls additionally cover ambiguous correspondence,
+address reuse, event loss and cross-scope users. Pure FD-only
+unit traces can no longer establish D. Original direct/child/host controls remain 86
+and normal/SQPOLL CONNECT remain 87.
+
+`close(decimalFD<optional annotation>) = ?` retains a known entry with an unknown
+return. Only a terminated task with complete kernel reconciliation and no unmatched
+network action may account for that field. `kernelMetadataResolutions` retains TID,
+range, sequence and FD with `returnValueKnown=false` and `fdClosureInferred=false`.
+It never proves FD closure. UDP descriptor uncertainty can be superseded only by
+the complete object proof above; ring descriptor uncertainty remains blocking.
 Numeric close/dup/fcntl transitions and standalone `unshare(CLONE_FILES)` feed
 the ring ledger even without an FD annotation. This retains unlabelled aliases,
 CLOEXEC changes and independently unshared tables. Generic mappings are ignored
@@ -405,9 +471,9 @@ this same auditor and no executable-root selection.
 fork/exec, accepted-peer and ring descriptor metadata. With default abbreviation, exec records expose the executable
 filename but replace argv with `[...]` and env with a pointer/count. Integration
 tests assert argument/environment sentinels never enter raw traces or reports.
-Connected FD peers are decoded for inherited sockets sent through the traced
-`sendto`, `sendmsg`, and `sendmmsg` calls. Sends through `write()` or `writev()`
-on inherited sockets are **not traced**. Protocol-specific connection APIs such as
+Connected FD peers are decoded for inherited sockets sent through `sendto`,
+`sendmsg`, `sendmmsg`, `write` and `writev`. These calls are all traced; UDP object
+send/output hooks also catch paths such as splice and io_uring. Protocol-specific connection APIs such as
 `setsockopt(IPPROTO_SCTP, SCTP_SOCKOPT_CONNECTX)` are also **not traced**; this is not
 a claim to cover every socket API. Only sendmmsg destination vectors are unabbreviated; their data
 buffers remain suppressed. Unknown peers/vectors fail closed in their process.
@@ -421,10 +487,7 @@ installed extensions or proxies.
 
 The app-wide blocking gate now invokes this same auditor without selecting roots.
 The scoped host/native gate keeps its scope and blocking behavior. UDP connect
-associations alone are separately recorded only after a complete, closed FD
-lifecycle with no send/write via any inherited or duplicate alias. TCP connects
-and UDP writes remain attempts, including failed calls. Open-at-exit or missing
-closes fail. io_uring WRITEV in a process that held an unsent UDP association fails
-when the target FD cannot be proved unrelated; this conservatively includes
-uncertain overlap. No destination-name/address exemption is used. See
+associations are counted separately only with the complete kernel socket-object
+proof above. TCP connects and UDP sends remain attempts, including failed calls.
+No destination-name/address exemption is used. See
 [the app gate](../../outbound-audit/README.md) for commands and controls.

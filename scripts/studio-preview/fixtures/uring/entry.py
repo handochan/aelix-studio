@@ -120,6 +120,7 @@ def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_paramet
            first_parameter is None and (
            symbol=='syscall_trace_enter' and shape['parameters'] and shape['parameters'][0]=='ptr:struct:pt_regs' or
            symbol=='ptrace_notify' and shape['parameters']==['s32','u64'] or
+           symbol=='do_task_dead' and shape=={'parameters':[],'return':'void'} or
            symbol=='create_io_thread' and shape['return']=='ptr:struct:task_struct'))
     if not valid: raise RuntimeError('kernel_probe_btf_signature_mismatch')
     return shape

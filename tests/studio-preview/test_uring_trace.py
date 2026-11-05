@@ -145,6 +145,14 @@ capture_module=importlib.util.module_from_spec(spec_capture);spec_capture.loader
 class KernelCaptureCompletenessTests(unittest.TestCase):
     RAW='READY\nROOT|1|100|100|10|1\nC|2|123|200|201|20|20|5|0|0\nS|3|123|200|201|20|20|29|0\nK|4|123\nSTATE|5|1|1|1|1\nDONE\n@root_count: 1\n@create_count: 1\n@submit_count: 1\n@complete_count: 1\n@state_count: 1\n@born_count: 1\n@dead_count: 1\n@started_req: 1\n@completed_req: 1\n'
     RAW += 'T|5|100|100|10|10|1|0|0|1\n@task_count: 1\n'
+    RAW += 'OBJECTS|1\n'
+    RAW += '@udp_task_exit_enter: 1\n@udp_task_exit_return: 1\n'
+    def test_recorder_readiness_requires_a_reviewed_attachment_order(self):
+        for version in ('0.17.0','0.20.2'):
+            self.assertEqual(capture_module.recorder_version('bpftrace v'+version),tuple(map(int,version.split('.'))))
+        for version in ('0.21.0','0.17.1','unknown'):
+            with self.assertRaisesRegex(RuntimeError,'readiness_version_unsupported'):
+                capture_module.recorder_version('bpftrace v'+version)
     def test_complete_capture_requires_markers_counters_and_no_diagnostic(self):
         self.assertTrue(capture_module.parse(self.RAW,'',0,123)['complete'])
         for raw,stderr,code in [(self.RAW.replace('DONE',''),' ',0),
@@ -177,6 +185,8 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
         for extra in ('@network_count: 1\n', '@task_count: 2\n', '@unsupported_abi: 1\n',
                       '@worker_enter: 1\n','@worker_return: 1\n','@worker_error: 1\n',
                       '@socket_layout_error: 1\n',
+                      '@udp_alloc_enter: 1\n','@udp_destruct_enter: 1\n','@udp_stack_enter: 1\n',
+                      '@udp_object_count: 1\n','@udp_object_error: 1\n','@udp_task_exit_enter: 2\n',
                       '@network_return_id_error: 1\n',
                       '@raw_state_overlap: 1\n',
                       'N|2|100|100|10|10|1|1|3|0\n'):
@@ -383,6 +393,7 @@ class KernelNetworkCorrelationTests(unittest.TestCase):
         self.assertEqual(result['issues'],[])
         self.assertEqual(result['resolved'][0]['socketEvents'],2)
         self.assertEqual(result['operationDiagnostics'],[dict(pid=10,sequence=1,fd=3,
+            kernelPid=110,kernelTgid=110,tgid=10,ordinal=1,call=1,entryTime=2,returnTime=5,
             socketHooks=['kernel_connect','tcp_v4_connect'],socketFamilies=[2],fileModes=[],reconciled=True)])
 
     def test_seccomp_emulated_success_cannot_substitute_for_hidden_executed_call(self):

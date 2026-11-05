@@ -11,35 +11,46 @@ import sys
 import time
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from uring.probe import event_formats,event_fields,pid_numbers_offset
+from uring.probe import event_formats,event_fields,pid_numbers_offset,btf_member_offset,hold_programs,program_statistics
 from uring.program import program
 from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, FILE_WRITE_HOOKS, symbol_evidence
 from uring.entry import select as select_entry, btf_signature
+from uring.socketProgram import requirements as object_requirements, parse as parse_object, definitions as object_definitions
+
+
+def recorder_version(raw):
+    """READY printf is drained after all attachments in these reviewed sources."""
+    match=re.search(r'\bv(\d+)\.(\d+)\.(\d+)\b',raw)
+    value=tuple(map(int,match.groups())) if match else None
+    if value not in ((0,17,0),(0,20,2)):
+        raise RuntimeError('kernel_recorder_readiness_version_unsupported')
+    return value
 
 
 def samples(raw):
     result=[];current=None
     for line in raw.splitlines():
-        if line.startswith('TICK|'):current=[int(line.split('|')[1]),0,0,0,0]
+        if line.startswith('TICK|'):current=[int(line.split('|')[1]),0,0,0,0,0,0,0,0]
         elif line=='TICKEND':
             if current is not None:result.append(current)
             current=None
         elif current is not None:
-            match=re.fullmatch(r'@(born_count|dead_count|started_req|completed_req):\s*(\d+)',line)
-            if match:current[{'born_count':1,'dead_count':2,'started_req':3,'completed_req':4}[match[1]]]=int(match[2])
+            match=re.fullmatch(r'@(born_count|dead_count|started_req|completed_req|udp_born|udp_freed|udp_stack_enter|udp_stack_return):\s*(\d+)',line)
+            if match:current[{'born_count':1,'dead_count':2,'started_req':3,'completed_req':4,'udp_born':5,'udp_freed':6,'udp_stack_enter':7,'udp_stack_return':8}[match[1]]]=int(match[2])
     return result
 
 
 def parse(raw,stderr,returncode,namespace_inode):
     events=[];counts={};roots=[];states=samples(raw);ready=done=False;invalid=[];sampling=False
-    network=[];tasks=[];workers=[]
+    network=[];tasks=[];workers=[];objects=[];object_schema=0
     for line in raw.splitlines():
         if line=='READY':ready=True;continue
         if line=='DONE':done=True;continue
+        if line=='OBJECTS|1':object_schema+=1;continue
         if line.startswith('TICK|'):sampling=True;continue
         if line=='TICKEND':sampling=False;continue
         match=re.fullmatch(r'@(root|create|submit|failed|retire|complete|state|born|dead|network|task|worker)_count:\s*(\d+)',line)
-        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|network_return_id_error|raw_state_overlap|pre_layout_error|socket_layout_error|worker_error|worker_enter|worker_return):\s*(\d+)',line)
+        other=re.fullmatch(r'@(started_req|completed_req|untracked_sqpoll|unmatched_completion|namespace_error|unsupported_abi|pre_mismatch|network_return_id_error|raw_state_overlap|pre_layout_error|socket_layout_error|worker_error|worker_enter|worker_return|udp_alloc_enter|udp_alloc_return|udp_object_error|udp_object_count|udp_born|udp_freed|udp_destruct_enter|udp_destruct_return|udp_stack_enter|udp_stack_return|udp_task_exit_enter|udp_task_exit_return):\s*(\d+)',line)
         if match:
             if not sampling:counts[match[1]]=int(match[2])
             continue
@@ -55,6 +66,7 @@ def parse(raw,stderr,returncode,namespace_inode):
                                   pid=int(fields[4]),level=int(fields[5])))
             elif fields[0] in ('P','N','X','H','V'):
                 network.append(parse_network(fields))
+            elif fields[0]=='O':objects.append(parse_object(fields))
             elif fields[0]=='OVERLAP' and len(fields)==8:
                 invalid.append(dict(reason='kernel_raw_state_overlap',time=int(fields[1]),kernelPid=int(fields[2]),
                     pid=int(fields[3]),previousSyscall=int(fields[4]),nextSyscall=int(fields[5]),
@@ -116,12 +128,24 @@ def parse(raw,stderr,returncode,namespace_inode):
               and counts.get('worker_return',0)>=len(workers)
               and counts.get('network',0)==len(network) and counts.get('task',0)==len(tasks)
               and len(tasks)==counts.get('dead',0))
+    complete=(complete and object_schema==1 and not counts.get('udp_object_error',0)
+              and counts.get('udp_object_count',0)==len(objects)
+              and counts.get('udp_alloc_enter',0)==counts.get('udp_alloc_return',0)
+              and counts.get('udp_born',0)==sum(e['kind']=='B' for e in objects)
+              and counts.get('udp_freed',0)==sum(e['kind']=='F' for e in objects)
+              and counts.get('udp_destruct_enter',0)==sum(e['kind']=='Q' for e in objects)
+              and counts.get('udp_destruct_return',0)==sum(e['kind']=='F' for e in objects)
+              and counts.get('udp_destruct_enter',0)==counts.get('udp_destruct_return',0))
+    complete=complete and counts.get('udp_stack_enter',0)==counts.get('udp_stack_return',0)
+    complete=(complete and counts.get('udp_task_exit_enter',0)==counts.get('dead',0)
+              and counts.get('udp_task_exit_return',0)==counts.get('dead',0))
     return dict(schema='aelix.io-uring-kernel-capture/1',status='captured' if complete else 'failed',
         complete=complete,lostEvents=lost,reason='io_uring_kernel_events_lost' if lost else None,
         eventCount=len(events),events=events,
         pidNamespaceVerified=complete,namespaceInode=namespace_inode,root=roots[0] if len(roots)==1 else None,
         kernelCounts=counts,recordErrors=invalid,recorderExitCode=returncode,drained=complete,
         network={'complete':complete,'eventCount':len(network),'events':network,'tasks':tasks,'workers':workers},
+        udpObjects={'schema':1,'complete':complete,'eventCount':len(objects),'events':objects},
         captureChecks={'ready':ready,'done':done,'rootCount':len(roots),'sampleCount':len(states),
                        'stderrEmpty':not stderr.strip()},
         diagnostics=[re.sub(r'0x[0-9a-fA-F]+','<address>',line)[:240] for line in stderr.splitlines()][:24])
@@ -129,7 +153,7 @@ def parse(raw,stderr,returncode,namespace_inode):
 
 def broker(directory,root_pid,namespace_inode):
     evidence={'status':'failed','complete':False,'lostEvents':0,'events':[],'eventCount':0,'pidNamespaceVerified':False}
-    process=None;mounted=False;tracefs=Path('/sys/kernel/tracing');metadata={}
+    process=None;mounted=False;tracefs=Path('/sys/kernel/tracing');metadata={};held=[]
     try:
         if os.geteuid()!=0:raise RuntimeError('kernel_recorder_sudo_required')
         if not (tracefs/'events').is_dir():
@@ -139,9 +163,11 @@ def broker(directory,root_pid,namespace_inode):
         formats.update(network_requirements(tracefs))
         available={line.split()[0] for line in (tracefs/'available_filter_functions').read_text().splitlines() if line.strip()}
         pre_entry=select_entry(available)
+        object_signatures=object_requirements(available)
         metadata={'kernel':os.uname().release,'preEntryProbe':pre_entry}
         signature=json.dumps(btf_signature(pre_entry['symbol']),sort_keys=True)
         worker_signature=json.dumps(btf_signature('create_io_thread'),sort_keys=True)
+        exit_signature=json.dumps(btf_signature('do_task_dead'),sort_keys=True)
         socket_signatures={name:btf_signature(name,first_parameter='ptr:struct:'+kind)
                            for name,kind in SOCKET_ARGUMENTS.items()}
         socket_signatures.update({name:btf_signature(name,first_parameter='ptr:struct:file') for name in FILE_WRITE_HOOKS})
@@ -153,7 +179,9 @@ def broker(directory,root_pid,namespace_inode):
         if not completion.is_file() or not {'ctx','req'}<=event_fields(completion.read_text()):
             raise RuntimeError('io_uring_completion_tracepoint_missing')
         offset=pid_numbers_offset()
-        text=program(root_pid,namespace_inode,offset,submit,pre_entry)
+        socket_rcu_offset=btf_member_offset('sock','sk_rcu')
+        object_specs=object_definitions()
+        text=program(root_pid,namespace_inode,offset,submit,pre_entry,socket_rcu_offset,object_specs)
         metadata={'tool':'bpftrace','toolVersion':subprocess.check_output(['bpftrace','--version'],text=True).strip(),
                   'kernel':os.uname().release,'tracepoints':[*formats,'io_uring_req_failed','io_uring_complete'],
                   'formatSha256':{name:hashlib.sha256(value.encode()).hexdigest() for name,value in
@@ -163,14 +191,21 @@ def broker(directory,root_pid,namespace_inode):
                   'kernelBtfSha256':hashlib.sha256(Path('/sys/kernel/btf/vmlinux').read_bytes()).hexdigest(),
                   'socketSymbols':symbols,'socketSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
                                                                   for name,value in socket_signatures.items()},
+                  'udpObjectProbes':list(object_signatures),
+                  'udpSocketRcuOffset':socket_rcu_offset,
+                  'udpTypedProbeDefinitions':object_specs,
+                  'udpObjectSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
+                                              for name,value in object_signatures.items()},
                   'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
                   'workerSignatureSha256':hashlib.sha256(worker_signature.encode()).hexdigest()}
+        metadata['taskExitProbe']={'symbol':'do_task_dead','signatureSha256':hashlib.sha256(exit_signature.encode()).hexdigest(),
+                                   'pairedAnnouncement':'sched_process_exit','identityAt':'sched_process_exit'}
         source=directory/'capture.bt';source.write_text(text)
         with (directory/'events.raw').open('w') as stdout,(directory/'recorder.stderr').open('w') as stderr:
             env=dict(os.environ,BPFTRACE_PERF_RB_PAGES='1024')
-            version=re.search(r'v(\d+)\.(\d+)',metadata['toolVersion'])
-            if version is None:raise RuntimeError('bpftrace_version_unknown')
-            map_key='BPFTRACE_MAP_KEYS_MAX' if tuple(map(int,version.groups()))<(0,20) else 'BPFTRACE_MAX_MAP_KEYS'
+            version=recorder_version(metadata['toolVersion'])
+            metadata['attachmentReadiness']='reviewed-bpftrace-printf-drained-after-all-attachments'
+            map_key='BPFTRACE_MAP_KEYS_MAX' if version<(0,20,0) else 'BPFTRACE_MAX_MAP_KEYS'
             env[map_key]='65536'
             # -k diagnoses failed map updates/output helpers. -kk also labels
             # expected hash-map absence as a failed lookup on bpftrace 0.17.
@@ -183,6 +218,7 @@ def broker(directory,root_pid,namespace_inode):
                 if 'READY\n' in (directory/'events.raw').read_text():break
                 time.sleep(0.02)
             else:raise RuntimeError('kernel_recorder_ready_timeout')
+            held=hold_programs(process.pid,len(object_specs))
             (directory/'ready.json').write_text(json.dumps({'ready':True,'rootPid':root_pid,'namespaceInode':namespace_inode})+'\n')
             deadline=time.monotonic()+600
             while not (directory/'stop').exists():
@@ -197,15 +233,22 @@ def broker(directory,root_pid,namespace_inode):
                 states=samples((directory/'events.raw').read_text())
                 if states and states[-1]!=previous:
                     previous=states[-1];values=previous
-                    if values[1]>0 and values[1]==values[2] and values[3]==values[4]:balanced+=1
+                    if values[1]>0 and values[1]==values[2] and values[3]==values[4] and values[5]==values[6] and values[7]==values[8]:balanced+=1
                     else:balanced=0
                     if balanced>=2:break
                 if process.poll() is not None:raise RuntimeError('kernel_recorder_terminated_before_drain')
                 time.sleep(0.05)
-            else:raise RuntimeError('kernel_tasks_or_requests_not_drained')
+            else:
+                evidence['drainState']={'bornTasks':previous[1],'deadTasks':previous[2],
+                    'startedRequests':previous[3],'completedRequests':previous[4],
+                    'bornUdpObjects':previous[5],'freedUdpObjects':previous[6],
+                    'destructorEntries':previous[7],'destructorReturns':previous[8]} if previous else None
+                raise RuntimeError('kernel_tasks_requests_or_udp_objects_not_drained')
             process.send_signal(signal.SIGINT);process.wait(timeout=30)
         evidence=parse((directory/'events.raw').read_text(),(directory/'recorder.stderr').read_text(),process.returncode,namespace_inode)
         evidence.update(metadata)
+        evidence['udpProbeLoss']={'complete':True,'mode':'btf-fentry-fexit','hooks':object_specs,
+                                  'programs':program_statistics(held)}
         if (evidence.get('root') or {}).get('pid')!=root_pid:
             evidence.update(status='failed',complete=False,pidNamespaceVerified=False,reason='root_namespace_pid_mismatch')
     except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
@@ -218,6 +261,7 @@ def broker(directory,root_pid,namespace_inode):
             process.send_signal(signal.SIGINT)
             try:process.wait(timeout=10)
             except subprocess.TimeoutExpired:process.kill();process.wait()
+        for descriptor in held:os.close(descriptor)
         if mounted:
             try:subprocess.run(['umount',str(tracefs)],check=True,capture_output=True)
             except subprocess.SubprocessError:evidence.update(status='failed',complete=False,reason='tracefs_cleanup_failed')

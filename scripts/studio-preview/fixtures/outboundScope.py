@@ -432,17 +432,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     from udpLifecycle import analyze as analyze_udp
     intervals=[(pid,start,terminal_at[pid]) for pid,start in terminal_stops.items()
                if pid not in invalid_terminal_stops and terminal_at.get(pid,0)>start] if kernel_capture is not None else []
-    exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid, intervals)
+    udp_metadata={}
+    exempt, udp_writes, udp_issues = analyze_udp(udp_records, ring_evidence, tgid, intervals, udp_metadata)
     for issue in udp_issues:
         state(issue['pid'])
     event_keys = {(pid, event['_sequence']): event for pid, item in states.items() for event in item['events']}
-    for pid, sequence, call, connects in udp_writes:
-        if (pid, sequence) not in event_keys and connects:
-            origin = event_keys.get(connects[-1])
-            if origin:
-                states[pid]['events'].append({**origin, 'pid': pid, 'process': states[pid]['process'],
-                    'syscall': call, '_sequence': sequence, 'failed': True})
     network_evidence = None
+    object_evidence = None
+    legacy_exempt = exempt
+    exempt = set()
     if kernel_capture is not None:
         from uring.network import reconcile as reconcile_network
         eligible = {pid: count for pid, count in register_holes.items()
@@ -458,8 +456,45 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         network_evidence = reconcile_network(kernel_capture, udp_records, eligible, set(states), ring_evidence,
                                              {pid: tgid(pid) for pid in states},parents,
                                              {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
-                                             {(pid,event['_sequence']) for pid,item in states.items() for event in item['events']},
+                                             set(event_keys) | {(pid,seq) for pid,seq,call,connects in udp_writes if connects},
                                              metadata_allowed=metadata_allowed)
+        from uring.socketObjects import reconcile as reconcile_objects
+        connect_keys={key for key,event in event_keys.items() if event['syscall']=='connect'}
+        required_udp=udp_metadata['connectKeys'] | {(pid,seq) for pid,line,seq,*_ in udp_records
+            if re.match(r'^connect\(\d+<UDP(?:v6)?:',line) and (pid,seq) in connect_keys}
+        object_evidence=reconcile_objects(kernel_capture,network_evidence,set(states),
+                                          included if selected else set(states),connect_keys,required_udp)
+        if object_evidence['verified']:
+            # Complete object proof replaces only UDP descriptor inference.
+            # Generic FD/io_uring, syscall decode and network checks remain.
+            udp_issues=[]; udp_writes=[]
+            from uring.network import CALLS
+            seen_writes=set()
+            for write in object_evidence['writes']:
+                key=(write['pid'],write['sequence'])
+                if write['sequence'] is not None and write['call'] in range(2,7) and key not in seen_writes:
+                    seen_writes.add(key)
+                    udp_writes.append((*key,CALLS[write['call']-1],write['connects']))
+                elif write['sequence'] is None and write['layer']=='protocol' and any(
+                        ring['creatorTgid']==tgid(write['pid']) for ring in ring_evidence['rings']):
+                    issue={'pid':write['pid'],'reason':'udp_io_uring_write_fd_unproven'}
+                    if issue not in udp_issues:udp_issues.append(issue)
+            eligible={pid:count for pid,count in register_holes.items()
+                      if pid not in invalid_terminal_stops and terminal_at.get(pid,0)>terminal_stops[pid]}
+            blocked_metadata={pid for pid,issues in ring_evidence['issuesByPid'].items() if issues}
+            metadata_allowed={key for key,call in result_holes.items() if call=='close' and key[0] not in blocked_metadata}
+            if classification_issues:eligible={};metadata_allowed=set()
+            network_evidence=reconcile_network(kernel_capture,udp_records,eligible,set(states),ring_evidence,
+                {pid:tgid(pid) for pid in states},parents,
+                {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
+                set(event_keys)|{(pid,seq) for pid,seq,call,connects in udp_writes if connects},
+                metadata_allowed=metadata_allowed)
+            object_evidence=reconcile_objects(kernel_capture,network_evidence,set(states),
+                                              included if selected else set(states),connect_keys,required_udp)
+            exempt=object_evidence['exempt']
+        udp_issues.extend(object_evidence['issues'])
+        if not kernel_capture.get('udpObjects'):
+            udp_issues.extend({'pid':pid,'reason':'udp_socket_evidence_missing'} for pid in sorted({pid for pid,_ in legacy_exempt}))
         kernel_tcp={(operation['pid'],operation['sequence']) for operation in network_evidence['operationDiagnostics']
                     if set(operation['socketHooks']) & {'tcp_v4_connect','tcp_v6_connect'}}
         conflicts=exempt & kernel_tcp
@@ -476,6 +511,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 unparsed(evidence['pid'],'result',-1,result_holes[key])
         for evidence in network_evidence['metadataFields']:
             unparsed(evidence['pid'],'result',-1,'close')
+
+    elif legacy_exempt:
+        udp_issues.extend({'pid':pid,'reason':'udp_socket_evidence_missing'} for pid in sorted({pid for pid,_ in legacy_exempt}))
+    for pid, sequence, call, connects in udp_writes:
+        if (pid, sequence) not in event_keys and connects:
+            origin = event_keys.get(connects[-1])
+            if origin:
+                states[pid]['events'].append({**origin, 'pid': pid, 'process': states[pid]['process'],
+                    'syscall': call, '_sequence': sequence, 'failed': True})
 
     for pid, item in states.items():
         for event in item['events']:
@@ -500,7 +544,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
         processes = []
-        issues = classification_issues + [issue for issue in udp_issues if issue['pid'] in pids] + ([issue for pid in pids for issue in ring_evidence['issuesByPid'].get(pid,[])]
+        issues = classification_issues + [issue for issue in udp_issues if issue.get('pid') is None or issue['pid'] in pids] + ([issue for pid in pids for issue in ring_evidence['issuesByPid'].get(pid,[])]
             if ring_evidence is not None else [
                 {'reason': 'unsupported_io_uring', 'pid': pid, 'syscall': call}
                 for pid in sorted(pids) for call in states[pid]['io_uring']])
@@ -545,6 +589,14 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
                 'udpConnectOnly': sum(event['udpAssociationOnly'] for event in events),
                 'udpAssociations': [event for event in events if event['udpAssociationOnly']],
+                'udpSocketObjects': ({'verified':object_evidence['verified'],
+                    'objects':[obj for obj in object_evidence['objects'] if set(obj['actorPids']) & pids],
+                    'probes':kernel_capture.get('udpObjectProbes'),
+                    'signatureSha256':kernel_capture.get('udpObjectSignatureSha256'),
+                    'lossChecks':kernel_capture.get('udpProbeLoss'),
+                    'typedProbeDefinitions':kernel_capture.get('udpTypedProbeDefinitions'),
+                    'rcuOffset':kernel_capture.get('udpSocketRcuOffset')}
+                    if object_evidence is not None else {'verified':False}),
                 'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),
                 'classificationErrors': len(issues), 'classificationIssues': issues,
                 'kernelResolvedRecords': sum(evidence['records'] for evidence in resolutions),
@@ -568,13 +620,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     'socketFamilySource': 'socket',
                     'socketFamilyField': 'socket.sk.__sk_common.skc_family',
                     'workerSignatureSha256': kernel_capture.get('workerSignatureSha256'),
+                    'taskExitProbe':kernel_capture.get('taskExitProbe'),
+                    'attachmentReadiness':kernel_capture.get('attachmentReadiness'),
                     'socketProbes': kernel_capture.get('socketProbes', []),
                     'fileWriteProbes': kernel_capture.get('fileWriteProbes', [])}
                     if network_evidence is not None else {'recorded': False}),
                 'external': external, 'processes': processes,
                 'ioUring': ({'recorded':kernel_capture.get('complete',False),'opcodeCounts':ring_evidence['selectedOpcodeCounts'] if scope=='selected-process-trees' else ring_evidence['opcodeCounts'],
                              'policy':'node-v24.11.0-libuv-explicit-file-and-epoll',
-                             'capture':{k:kernel_capture.get(k) for k in ('complete','drained','lostEvents','eventCount','namespaceInode','pidNamespaceVerified','root','kernelCounts','recordErrors','recorderExitCode','tool','toolVersion','kernel','tracepoints','formatSha256','programSha256','pidNumbersOffset','reason','diagnostics')},
+                             'capture':{k:kernel_capture.get(k) for k in ('complete','drained','drainState','lostEvents','eventCount','namespaceInode','pidNamespaceVerified','root','kernelCounts','recordErrors','recorderExitCode','tool','toolVersion','kernel','tracepoints','formatSha256','programSha256','pidNumbersOffset','reason','diagnostics')},
                              'rings':[r for r in ring_evidence['rings'] if r['creatorPid'] in pids]}
                             if ring_evidence is not None else {'recorded':False})}
 

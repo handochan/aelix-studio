@@ -12,7 +12,7 @@ WRITE_OPCODES = {2, 5, 9, 23, 26, 47, 48, 50, 57, 58, 60}
 FD_MUTATING_OPCODES = {19}  # CLOSE may release a UDP descriptor too.
 
 
-def analyze(records, ring_evidence, tgid, unknown_intervals=()):
+def analyze(records, ring_evidence, tgid, unknown_intervals=(), metadata=None):
     tables = {}; sockets = []; issues = []; writes = []; acquisitions=[]; unknown_closes=[]
     ordered=sorted(records,key=lambda item:item[2])
     task_ends={record[0]:record[2] for record in ordered if record[1].startswith('+++')}
@@ -211,6 +211,7 @@ def analyze(records, ring_evidence, tgid, unknown_intervals=()):
                     for pid in sock['owners']: issue(pid, reason)
         if sock['written']: contaminated.update(sock['connects'])
         elif not sock.get('invalid'): exempt.update(sock['connects'])
+    if metadata is not None:metadata['connectKeys']={key for sock in sockets for key in sock['connects']}
     return exempt, [(pid, sequence, call, sock['connects']) for pid, sequence, call, sock in writes], issues
 
 
@@ -221,6 +222,8 @@ def control(mode):
     import subprocess
     import tempfile
     from pathlib import Path
+    from uring.socketObjects import CONTROL_MODES, control as object_control
+    if mode in CONTROL_MODES:return object_control(mode)
     if mode in ('uring-writev','uring-async-writev'):
         from uring.probe import CONTROL_C
         source = CONTROL_C.replace('SOCK_STREAM', 'SOCK_DGRAM').replace('"127.0.0.1"', '"203.0.113.1"')
@@ -269,15 +272,43 @@ def verify_controls(auditor, output):
     import sys
     output.mkdir(parents=True, exist_ok=True)
     results = []
-    for mode in ('connect-close','send','inherit-dup-send','uring-writev','uring-async-writev'):
+    from uring.socketObjects import CONTROL_MODES, RETENTION_MODES, LOOPBACK_MODES, retention_control
+    for mode in ('connect-close','send','inherit-dup-send','uring-writev','uring-async-writev',*CONTROL_MODES):
         report = output/(mode+'.json')
         command = ['sudo','-n','unshare','--net','--','/bin/sh','-c',
                    'ip link set lo up && exec "$@"','udp-control',
                    sys.executable,'-I','-B',str(auditor),'--report',str(report),'--',
                    sys.executable,'-I','-B',str(auditor),'--udp-control',mode]
-        result = subprocess.run(command)
+        result = retention_control(auditor,report,mode) if mode in RETENTION_MODES else subprocess.run(command)
         data = json.loads(report.read_text())
-        expected = 0 if mode=='connect-close' else 87 if mode.startswith('uring-') else 86
+        if mode in RETENTION_MODES:
+            capture=data['ioUring']['capture'];drain=capture.get('drainState') or {}
+            expected_cause=(capture.get('complete') and any(item['reason']=='udp_socket_birth_unproven'
+                            for item in data['classificationIssues'])) if mode=='object-preexisting' else (
+                not capture.get('complete') and capture.get('reason')=='kernel_tasks_requests_or_udp_objects_not_drained'
+                and drain.get('bornUdpObjects',0)>drain.get('freedUdpObjects',0)
+                and drain.get('bornTasks')==drain.get('deadTasks')
+                and drain.get('startedRequests')==drain.get('completedRequests'))
+            if not (result.returncode==87 and data.get('commandExitCode')==0 and data['udpConnectOnly']==0
+                    and data['externalAttempts']==1 and expected_cause
+                    and data['unparsedRecords']>0 and data['classificationErrors']>0):
+                raise RuntimeError('UDP retained/preexisting object control mismatch: '+mode)
+            results.append({'name':mode,'exitCode':result.returncode,**{key:data[key] for key in
+                            ('externalAttempts','unparsedRecords','classificationErrors','udpConnectOnly')}})
+            continue
+        if mode in LOOPBACK_MODES:
+            family=10 if mode=='loopback-ipv6-send' else 2
+            observed=[obj for obj in data['udpSocketObjects']['objects'] if obj['family']==family and obj['connects']]
+            layers={send['layer'] for obj in observed for send in obj['sends']}
+            if not (result.returncode==0 and data.get('commandExitCode')==0 and data['udpSocketObjects']['verified']
+                    and layers=={'protocol','ip-output'} and all(data[key]==0 for key in
+                        ('externalAttempts','unparsedRecords','classificationErrors','udpConnectOnly'))):
+                raise RuntimeError('UDP protocol/output layer control mismatch: '+mode)
+            results.append({'name':mode,'exitCode':result.returncode,**{key:data[key] for key in
+                            ('externalAttempts','unparsedRecords','classificationErrors','udpConnectOnly')}})
+            continue
+        unsent=mode in ('connect-close','fionclex-exec-exit')
+        expected = 0 if unsent else 87 if mode.startswith('uring-') else 86
         if not (result.returncode==expected and data.get('commandExitCode')==0
                 and data['ioUring']['recorded'] and data['ioUring']['capture']['drained']
                 and data['ioUring']['capture']['lostEvents']==0):
@@ -291,9 +322,9 @@ def verify_controls(auditor, output):
                 counts=data['ioUring']['capture']['kernelCounts']
                 if not (counts.get('worker',0)>0 and counts.get('worker_enter')==counts.get('worker_return')):
                     raise RuntimeError('Forced asynchronous write did not qualify IO worker tracking')
-        elif not (data['externalAttempts']==(0 if mode=='connect-close' else 2)
+        elif not (data['externalAttempts']==(0 if unsent else 2)
                   and data['unparsedRecords']==0 and data['classificationErrors']==0
-                  and data['udpConnectOnly']==(1 if mode=='connect-close' else 0)):
+                  and data['udpConnectOnly']==(1 if unsent else 0)):
             raise RuntimeError('UDP control classification mismatch: '+mode)
         results.append({'name':mode,'exitCode':result.returncode,**{key:data[key] for key in
                         ('externalAttempts','unparsedRecords','classificationErrors','udpConnectOnly')}})

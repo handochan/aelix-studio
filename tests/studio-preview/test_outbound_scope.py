@@ -610,9 +610,9 @@ int main(void) {
                 result = audit.audit([sys.executable,'-I','-B',str(driver),str(worker)], root/'scoped.json',
                                      scope_executables=(worker,), require_executables=(worker,), whole_report_path=root/'whole.json')
             scoped = json.loads((root/'scoped.json').read_text())
-            self.assertEqual(result,86)
+            self.assertEqual(result,87)
             self.assertEqual(scoped['externalAttempts'],2)
-            self.assertEqual(scoped['unparsedRecords'],0)
+            self.assertIn('udp_socket_cross_scope',{issue['reason'] for issue in scoped['classificationIssues']})
 
 
     def test_real_loopback_accepted_and_connected_sockets_remain_allowed(self):

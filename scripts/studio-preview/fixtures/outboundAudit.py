@@ -210,7 +210,8 @@ def main():
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
     parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
     parser.add_argument('--transport-controls', type=Path)
-    parser.add_argument('--udp-control', choices=['connect-close', 'send', 'inherit-dup-send', 'uring-writev', 'uring-async-writev'])
+    from uring.socketObjects import CONTROL_MODES
+    parser.add_argument('--udp-control', choices=['connect-close', 'send', 'inherit-dup-send', 'uring-writev', 'uring-async-writev', *CONTROL_MODES])
     parser.add_argument('--positive-control', action='store_true')
     parser.add_argument('--child-positive-control', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER)

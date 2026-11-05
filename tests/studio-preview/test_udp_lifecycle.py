@@ -252,10 +252,11 @@ class UdpLifecycleTests(unittest.TestCase):
             trace=Path(directory)/'trace';trace.write_text('\n'.join(lines)+'\n')
             return audit.analyze_processes([trace],require_lifecycle=True,kernel_capture=capture)[0]
 
-    def test_closed_unsent_association_is_recorded_without_address_exception(self):
+    def test_fd_only_closure_without_kernel_object_proof_never_authorizes_D(self):
         for address in ('2001:db8::1','2001:4860:4860::8888','::ffff:203.0.113.1'):
             report=self.parse([SOCKET,CONNECT.replace('2001:db8::1',address),CLOSE,END])
-            self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
+            self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
+            self.assertEqual(report['classificationIssues'],[{'pid':1,'reason':'udp_socket_evidence_missing'}])
 
     def test_every_write_family_promotes_association_even_on_failure(self):
         for call,args in [('write','""..., 1'),('writev','[...], 1'),('sendto','""..., 1, 0, NULL, 0'),
@@ -280,7 +281,7 @@ class UdpLifecycleTests(unittest.TestCase):
 
     def test_fd_reuse_does_not_make_a_later_file_write_a_udp_send(self):
         report=self.parse([SOCKET,CONNECT,CLOSE,'1<app> write(3</tmp/local>, ""..., 1) = 1',END])
-        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
 
     def test_ring_writev_with_unobservable_fd_blocks_udp_exemption(self):
         # Supply real policy-shaped records: capture reconciliation still checks
@@ -315,7 +316,7 @@ class UdpLifecycleTests(unittest.TestCase):
     def test_zero_protocol_alias_is_udp_but_ping_sockets_are_not(self):
         for protocol in ('0','IPPROTO_IP'):
             report=self.parse([SOCKET.replace('IPPROTO_UDP',protocol),CONNECT,CLOSE,END])
-            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(0,1))
+            self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
         report=self.parse([SOCKET.replace('IPPROTO_UDP','IPPROTO_ICMPV6'),CONNECT,CLOSE,END])
         self.assertEqual((report['externalAttempts'],report['udpConnectOnly']),(1,0))
 
@@ -328,7 +329,7 @@ class UdpLifecycleTests(unittest.TestCase):
     def test_surviving_thread_may_close_the_same_process_shared_table(self):
         report=self.parse([SOCKET,CONNECT,'1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD|SIGCHLD) = 2<thread>',
                            '2<thread> +++ exited with 0 +++',CLOSE,END])
-        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(0,0,1))
+        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['udpConnectOnly']),(1,1,0))
 
     def test_resumed_null_destination_whitespace_and_deleted_fd_annotation_are_complete(self):
         report=self.parse(['1<app> sendto(3<TCP:[127.0.0.1:1234->127.0.0.1:4321]>, ""..., 7, MSG_NOSIGNAL, NULL, 0 <unfinished ...>',

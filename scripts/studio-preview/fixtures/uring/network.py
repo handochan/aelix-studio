@@ -15,7 +15,7 @@ SOCKET_ARGUMENTS = {'kernel_connect':'socket','sock_write_iter':'kiocb',
                     '__ip4_datagram_connect':'sock','__ip6_datagram_connect':'sock'}
 SOCKET_HOOKS = tuple(SOCKET_ARGUMENTS)
 FILE_WRITE_HOOKS = ('vfs_write','vfs_writev','eventfd_write')
-HOOKS = (*SOCKET_HOOKS,*FILE_WRITE_HOOKS, 'create_io_thread')
+HOOKS = (*SOCKET_HOOKS,*FILE_WRITE_HOOKS, 'create_io_thread', 'do_task_dead')
 
 
 def symbol_evidence(path=None):
@@ -431,6 +431,9 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
     for key,sequence in matched_sequences.items():
         entry=calls[key];observed=hooks_by_invocation[key]
         diagnostics.append(dict(pid=key[0],sequence=sequence,fd=entry['value'],
+            kernelPid=entry['kernelPid'],kernelTgid=entry['kernelTgid'],tgid=entry['tgid'],
+            ordinal=key[1],call=entry['call'],entryTime=entry['time'],
+            returnTime=returns[key]['time'],
             socketHooks=sorted({SOCKET_HOOKS[event['value']-1] for event in observed if 1<=event['value']<=len(SOCKET_HOOKS)}),
             socketFamilies=sorted({event['result'] for event in observed}),
             fileModes=sorted({event['result'] for event in files[key]}),reconciled=not issues))
