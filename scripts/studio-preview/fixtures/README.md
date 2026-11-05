@@ -329,6 +329,12 @@ hide a send or prove a release. `receive_fd` (file arg0), `receive_fd_replace`
 (file arg1) and final socket-file release record additional users. FD imports must
 be socket-mode files and not O_PATH handles before private data is read.
 
+Every object send without a corresponding interpreted syscall is a classification
+error, for both protocol and IP-output layers, regardless of process kind or
+whether that object ever connected. Matching still requires the same task,
+ordinal, call and invocation interval. Existing io_uring protocol-write failures
+retain their diagnostic and exit code; unmatched IP output is never silently zero.
+
 D additionally requires zero sends over that entire generation, a final
 `__sk_destruct` entry AND return before collection ends, complete loss-free
 collection and verified namespace/task attribution. `sk_free` is not sufficient:

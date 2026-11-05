@@ -74,6 +74,56 @@ class SocketObjectTests(unittest.TestCase):
                     self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
                 else:self.assertGreater(report['classificationErrors'],0)
 
+    def send_reports(self, kind, hook, connected=False, matched=False):
+        capture,_=self.fixture()
+        capture['network']['tasks']=[task for task in capture['network']['tasks'] if task['pid']!=2]
+        lines=['1<app> execve("/owned/app", [...], 0x1) = 0',
+            '1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>']
+        address='{sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr)}'
+        if connected:
+            lines.append('1<app> connect(3<UDPv6:[123]>, '+address+', 28) = -1 ENETUNREACH')
+        else:
+            capture['network']['events']=[]
+            capture['udpObjects']['events']=[event for event in capture['udpObjects']['events'] if event['kind']!='C']
+        if matched:
+            lines.append('1<app> sendto(3<UDPv6:[123]>, ..., 1, 0, '+address+', 28) = 1')
+            for event_kind,time,value,result in [('P',31,3,0),('N',35,3,0),('H',40,7,10),('X',45,3,1)]:
+                capture['network']['events'].append(dict(kind=event_kind,time=time,pid=1,tgid=1,
+                    kernelPid=101,kernelTgid=101,call=2,ordinal=2,value=value,result=result))
+        capture['network']['eventCount']=len(capture['network']['events'])
+        capture['udpObjects']['events'].append({**self.event(kind,40),'hook':hook,'call':2,'ordinal':2})
+        capture['udpObjects']['eventCount']=len(capture['udpObjects']['events'])
+        lines+=['1<app> close(3<UDPv6:[123]>) = 0','1<app> +++ exited with 0 +++']
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
+            return audit.analyze_processes([path],('/owned/app',),('/owned/app',),True,capture)
+
+    def test_unconnected_unmatched_ip_output_is_a_classification_error(self):
+        for hook in (7,8,9,10):
+            with self.subTest(hook=hook):
+                for report in self.send_reports('L',hook):
+                    self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors'],report['udpConnectOnly']),(0,1,1,0))
+                    self.assertIn('udp_socket_send_strace_unmatched',{issue['reason'] for issue in report['classificationIssues']})
+
+    def test_unconnected_unmatched_protocol_send_is_a_classification_error(self):
+        for hook in (2,3):
+            with self.subTest(hook=hook):
+                for report in self.send_reports('S',hook):
+                    self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors'],report['udpConnectOnly']),(0,1,1,0))
+
+    def test_connected_unmatched_object_send_is_a_classification_error(self):
+        for kind,hook in [('S',2),('S',3),('L',7),('L',8),('L',9),('L',10)]:
+            with self.subTest(kind=kind,hook=hook):
+                for report in self.send_reports(kind,hook,connected=True):
+                    self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors'],report['udpConnectOnly']),(1,1,1,0))
+
+    def test_matching_object_sends_keep_normal_results(self):
+        for connected in (False,True):
+            for kind,hook in [('S',2),('S',3),('L',7),('L',8),('L',9),('L',10)]:
+                with self.subTest(connected=connected,kind=kind,hook=hook):
+                    for report in self.send_reports(kind,hook,connected=connected,matched=True):
+                        self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors'],report['udpConnectOnly']),(2 if connected else 1,0,0,0))
+
     def test_any_protocol_or_output_send_prevents_D_even_after_alias_import(self):
         for kind,hook in [('S',2),('S',3),('L',7),('L',8),('L',9),('L',10)]:
             capture,network=self.fixture();events=capture['udpObjects']['events']

@@ -478,10 +478,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 if write['sequence'] is not None and write['call'] in range(2,7) and key not in seen_writes:
                     seen_writes.add(key)
                     udp_writes.append((*key,CALLS[write['call']-1],write['connects']))
-                elif write['sequence'] is None and write['layer']=='protocol' and any(
-                        ring['creatorTgid']==tgid(write['pid']) for ring in ring_evidence['rings']):
-                    issue={'pid':write['pid'],'reason':'udp_io_uring_write_fd_unproven'}
-                    if issue not in udp_issues:udp_issues.append(issue)
             eligible={pid:count for pid,count in register_holes.items()
                       if pid not in invalid_terminal_stops and terminal_at.get(pid,0)>terminal_stops[pid]}
             blocked_metadata={pid for pid,issues in ring_evidence['issuesByPid'].items() if issues}
@@ -496,6 +492,15 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                                               included if selected else set(states),connect_keys,required_udp)
             exempt=object_evidence['exempt']
         udp_issues.extend(object_evidence['issues'])
+        for write in object_evidence['writes']:
+            if write['sequence'] is None:
+                # Every unmatched object send is fatal, including unconnected
+                # IP output and sends in otherwise invalid object evidence.
+                ring_protocol=(write['layer']=='protocol' and write['pid'] is not None and any(
+                    ring['creatorTgid']==tgid(write['pid']) for ring in ring_evidence['rings']))
+                issue={'pid':write['pid'],'reason':('udp_io_uring_write_fd_unproven' if ring_protocol
+                                                  else 'udp_socket_send_strace_unmatched')}
+                if issue not in udp_issues:udp_issues.append(issue)
         if not kernel_capture.get('udpObjects'):
             udp_issues.extend({'pid':pid,'reason':'udp_socket_evidence_missing'} for pid in sorted({pid for pid,_ in legacy_exempt}))
         kernel_tcp={(operation['pid'],operation['sequence']) for operation in network_evidence['operationDiagnostics']
