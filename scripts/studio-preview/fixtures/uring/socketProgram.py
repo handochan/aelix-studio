@@ -13,7 +13,7 @@ ARGUMENTS = {'sk_alloc': 'net', 'udp_init_sock': 'sock', 'udpv6_init_sock': 'soc
 
 CLEANUP = '''
   clear(@udp_alloc_pending); clear(@udp_allocation); clear(@udp_generation); clear(@udp_family);
-  clear(@udp_destruct_depth); clear(@udp_destruct_sk); clear(@udp_destruct_gen); clear(@udp_destruct_family);
+  clear(@udp_destruct_depth); clear(@udp_destruct_gen); clear(@udp_destruct_family);
   clear(@udp_socket_ready);
 '''
 
@@ -27,7 +27,7 @@ def definitions():
             'ip_send_skb':{'arg1':'skb'},'ip6_send_skb':{'arg0':'skb'}}
     specs={name+'_e':{'symbol':name,'return':False,'fields':fields.get(name,{})} for name in ARGUMENTS}
     specs.update(sk_alloc_r={'symbol':'sk_alloc','return':True,'fields':{}},
-                 __sk_destruct_r={'symbol':'__sk_destruct','return':True,'fields':{}},
+                 __sk_destruct_r={'symbol':'__sk_destruct','return':True,'fields':{'arg0':'head'}},
                  do_task_dead_e={'symbol':'do_task_dead','return':False,'fields':{}})
     return specs
 
@@ -139,43 +139,44 @@ NORMALIZE
 }
 '''.replace('HOOK', hook).replace('KIND', kind).replace('NUMBER', str(number)).replace(
             'SOCK', argument_source)
-    # Destruction can execute in an unrelated RCU task. It is an object event,
-    # not evidence that this task used the socket. Preserve both entry and
-    # return, including nested callbacks and idle tasks on different CPUs.
+    # fexit retains the original head pointer value without reading freed
+    # memory. Track frames only for a watched UDP address (including nested
+    # reuse while an older generation is pending), not unrelated TCP frees.
     source += r'''
 kprobe:__sk_destruct /@udp_socket_ready/ {
-  @udp_stack_enter=count();
   $who=(int64)tid; if (!tid) { $who=-1-(int64)cpu; }
-  $depth=@udp_destruct_depth[$who]+1; @udp_destruct_depth[$who]=$depth;
   $sk=(struct sock*)((uint64)arg0 - SOCK_RCU_OFFSET); $key=(uint64)$sk;
   if (@udp_allocation[$key]) {
     delete(@udp_allocation[$key]);
   }
-  if (@udp_generation[$key]) {
-    $generation=@udp_generation[$key]; $family=@udp_family[$key];
-    @udp_destruct_sk[$who,$depth]=$key; @udp_destruct_gen[$who,$depth]=$generation;
-    @udp_destruct_family[$who,$depth]=$family; @udp_destruct_enter=count();
-    @udp_object_count=count();
-    printf("O|Q|%llu|%llu|%llu|0|0|0|0|0|0|0|%d|0\n",nsecs,$key,$generation,$family);
-    delete(@udp_generation[$key]); delete(@udp_family[$key]);
+  if (@udp_generation[$key] || @udp_destruct_depth[$who,$key]) {
+    $depth=@udp_destruct_depth[$who,$key]+1; @udp_destruct_depth[$who,$key]=$depth;
+    @udp_stack_enter=count();
+    if (@udp_generation[$key]) {
+      $generation=@udp_generation[$key]; $family=@udp_family[$key];
+      @udp_destruct_gen[$who,$key,$depth]=$generation;
+      @udp_destruct_family[$who,$key,$depth]=$family; @udp_destruct_enter=count();
+      @udp_object_count=count();
+      printf("O|Q|%llu|%llu|%llu|0|0|0|0|0|0|0|%d|0\n",nsecs,$key,$generation,$family);
+      delete(@udp_generation[$key]); delete(@udp_family[$key]);
+    }
   }
 }
 kretprobe:__sk_destruct /@udp_socket_ready/ {
-  @udp_stack_return=count();
   $who=(int64)tid; if (!tid) { $who=-1-(int64)cpu; }
-  $depth=@udp_destruct_depth[$who];
-  if (!$depth) { @udp_object_error=count(); }
+  $key=(uint64)arg0 - SOCK_RCU_OFFSET;
+  $depth=@udp_destruct_depth[$who,$key];
   if ($depth) {
-    $key=@udp_destruct_sk[$who,$depth];
-    if ($key) {
+    @udp_stack_return=count();
+    if (@udp_destruct_gen[$who,$key,$depth]) {
       @udp_destruct_return=count(); @udp_freed=count(); @udp_object_count=count();
       printf("O|F|%llu|%llu|%llu|0|0|0|0|0|0|0|%d|0\n",nsecs,$key,
-        @udp_destruct_gen[$who,$depth],@udp_destruct_family[$who,$depth]);
-      delete(@udp_destruct_sk[$who,$depth]); delete(@udp_destruct_gen[$who,$depth]);
-      delete(@udp_destruct_family[$who,$depth]);
+        @udp_destruct_gen[$who,$key,$depth],@udp_destruct_family[$who,$key,$depth]);
+      delete(@udp_destruct_gen[$who,$key,$depth]);
+      delete(@udp_destruct_family[$who,$key,$depth]);
     }
-    if ($depth==1) { delete(@udp_destruct_depth[$who]); }
-    else { @udp_destruct_depth[$who]=$depth-1; }
+    if ($depth==1) { delete(@udp_destruct_depth[$who,$key]); }
+    else { @udp_destruct_depth[$who,$key]=$depth-1; }
   }
 }
 '''

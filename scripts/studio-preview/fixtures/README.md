@@ -336,8 +336,13 @@ TX references, workqueues and RCU can defer the actual free. The final callback 
 watched globally and need not run in a lineage task; its executor is not counted
 as a socket user. Entry saves the old generation per nested callback; return does
 not dereference freed memory or erase a newer allocation at the same address.
-All destructor stack entries/returns and UDP allocation/destruction counters must
-balance. The drain waits for tasks, requests and UDP object frees, rather than
+Watched-address destructor frames and UDP allocation/destruction counters must
+balance. The fexit original `head` pointer is used only as a scalar key, never
+dereferenced after free. A per-(task,address) stack includes a nested reuse even
+when the new object is not UDP, so that return cannot pop the older generation.
+Unrelated TCP destruction creates no watched frame and cannot be cut into a UDP
+collection error at detach. Missing watched entry/return still fails through
+object/counter checks and retained program recursion statistics. The drain waits for tasks, requests and UDP object frees, rather than
 stopping when strace returns. Opaque object IDs, connect ranges, sender/user PIDs
 and final destructor times are retained in `udpSocketObjects`; raw pointers are not.
 
@@ -383,7 +388,10 @@ could silently omit a return. Every owned BPF program FD is retained with
 still expose an explicit zero `recursion_misses`. Exactly 17 retained programs
 must have TRACING type 26, in addition to the preexisting network/tracepoint
 programs. Missing fields, program references, hooks or a nonzero miss fail D.
-The receipt is retained in `udpSocketObjects.lossChecks`.
+The receipt is retained in `udpSocketObjects.lossChecks`. A nonzero program
+counter remains fatal; `programLoss` retains all offending program IDs, types,
+generated names (when readable) and counts. Its `stage=after-detach` identifies
+the snapshot time, not the time at which a miss occurred. No miss is waived.
 This does not claim a kernel kprobe-profile miss count for the unchanged PMU
 network hooks; their program recursion counters and syscall reconciliation
 remain checked. Source: [BPF trampoline misses](https://github.com/torvalds/linux/blob/v7.0/kernel/bpf/trampoline.c#L1143-L1156),

@@ -628,7 +628,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 'external': external, 'processes': processes,
                 'ioUring': ({'recorded':kernel_capture.get('complete',False),'opcodeCounts':ring_evidence['selectedOpcodeCounts'] if scope=='selected-process-trees' else ring_evidence['opcodeCounts'],
                              'policy':'node-v24.11.0-libuv-explicit-file-and-epoll',
-                             'capture':{k:kernel_capture.get(k) for k in ('complete','drained','drainState','lostEvents','eventCount','namespaceInode','pidNamespaceVerified','root','kernelCounts','recordErrors','recorderExitCode','tool','toolVersion','kernel','tracepoints','formatSha256','programSha256','pidNumbersOffset','reason','diagnostics')},
+                             'capture':{k:kernel_capture.get(k) for k in ('complete','drained','drainState','programLoss','lostEvents','eventCount','namespaceInode','pidNamespaceVerified','root','kernelCounts','recordErrors','recorderExitCode','tool','toolVersion','kernel','tracepoints','formatSha256','programSha256','pidNumbersOffset','reason','diagnostics')},
                              'rings':[r for r in ring_evidence['rings'] if r['creatorPid'] in pids]}
                             if ring_evidence is not None else {'recorded':False})}
 

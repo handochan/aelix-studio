@@ -95,6 +95,12 @@ def pid_numbers_offset(path=Path('/sys/kernel/btf/vmlinux')):
     return btf_member_offset('pid', 'numbers', path)
 
 
+class ProgramLoss(RuntimeError):
+    def __init__(self, evidence):
+        super().__init__('kernel_bpf_program_recursion_lost')
+        self.evidence=evidence
+
+
 def program_fdinfo(raw):
     """recursion_misses is independent of optional run-time BPF statistics."""
     result={}
@@ -102,8 +108,8 @@ def program_fdinfo(raw):
         values=re.findall(r'^'+key+r':\s*(\d+)\s*$',raw,re.M)
         if len(values)!=1:raise RuntimeError('kernel_bpf_program_statistics_missing')
         result[key]=int(values[0])
-    if result['prog_id']<=0 or result['recursion_misses']:
-        raise RuntimeError('kernel_bpf_program_recursion_lost')
+    if result['prog_id']<=0:raise RuntimeError('kernel_bpf_program_identity_invalid')
+    if result['recursion_misses']:raise ProgramLoss(result)
     return result
 
 
@@ -134,8 +140,33 @@ def hold_programs(pid, minimum):
         raise
 
 
+def program_name(descriptor):
+    """Only the public fixed-size generated program name; no code or pointers."""
+    import ctypes
+    import platform
+    number={'x86_64':321,'aarch64':280}.get(platform.machine())
+    if number is None:raise RuntimeError('kernel_bpf_statistics_architecture_unsupported')
+    library=ctypes.CDLL(None,use_errno=True);library.syscall.restype=ctypes.c_long
+    info=ctypes.create_string_buffer(80)
+    attributes=ctypes.create_string_buffer(struct.pack('IIQ',descriptor,80,ctypes.addressof(info)))
+    if library.syscall(number,15,ctypes.byref(attributes),16)<0:
+        raise RuntimeError('kernel_bpf_program_name_unavailable')
+    name=info.raw[64:80].split(b'\0',1)[0].decode('ascii')
+    if not re.fullmatch(r'[A-Za-z0-9_.$]{1,15}',name):raise RuntimeError('kernel_bpf_program_name_invalid')
+    return name
+
+
 def program_statistics(descriptors):
-    return [program_fdinfo(Path('/proc/self/fdinfo',str(descriptor)).read_text()) for descriptor in descriptors]
+    values=[];losses=[]
+    for descriptor in descriptors:
+        try:values.append(program_fdinfo(Path('/proc/self/fdinfo',str(descriptor)).read_text()))
+        except ProgramLoss as error:
+            item=error.evidence
+            try:item['programName']=program_name(descriptor)
+            except (OSError,RuntimeError,ValueError):item['programNameUnavailable']=True
+            losses.append(item)
+    if losses:raise ProgramLoss({'stage':'after-detach','programs':losses})
+    return values
 
 
 CONTROL_C = r'''

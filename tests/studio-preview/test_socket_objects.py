@@ -4,13 +4,14 @@ from pathlib import Path
 import tempfile
 import unittest
 import struct
+from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[2]
 spec=importlib.util.spec_from_file_location('object_audit',ROOT/'scripts/studio-preview/fixtures/outboundAudit.py')
 audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 from uring.socketObjects import reconcile
 from uring.socketProgram import parse, requirements, definitions, trampoline_source
-from uring.probe import btf_member_offset, program_fdinfo
+from uring.probe import btf_member_offset, program_fdinfo, program_statistics, ProgramLoss
 
 
 class SocketObjectTests(unittest.TestCase):
@@ -177,6 +178,16 @@ class SocketObjectTests(unittest.TestCase):
             self.assertGreater(failed['classificationErrors'],0)
 
 class ObjectBtfLayoutTests(unittest.TestCase):
+    def test_lost_program_provenance_is_retained_and_still_fatal(self):
+        raw=['prog_id:\t12\nprog_type:\t26\nrecursion_misses:\t1\n',
+             'prog_id:\t13\nprog_type:\t2\nrecursion_misses:\t2\n']
+        with patch('pathlib.Path.read_text',side_effect=raw),patch('uring.probe.program_name',return_value='probe_generated'):
+            with self.assertRaises(ProgramLoss) as raised:program_statistics([20,21])
+        evidence=raised.exception.evidence
+        self.assertEqual(evidence,{'stage':'after-detach','programs':[
+            {'prog_id':12,'prog_type':26,'recursion_misses':1,'programName':'probe_generated'},
+            {'prog_id':13,'prog_type':2,'recursion_misses':2,'programName':'probe_generated'}]})
+
     def test_program_statistics_require_one_explicit_zero_recursion_count(self):
         raw='prog_id:\t12\nprog_type:\t26\nrecursion_misses:\t0\n'
         self.assertEqual(program_fdinfo(raw),{'prog_id':12,'prog_type':26,'recursion_misses':0})
@@ -185,10 +196,11 @@ class ObjectBtfLayoutTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):program_fdinfo(bad)
 
     def test_typed_arguments_have_no_unverified_register_fallback(self):
-        source='kprobe:udp_sendmsg { $sk=(struct sock*)arg0; }\nkretprobe:sk_alloc { $x=(uint64)retval; }'
+        source='kprobe:udp_sendmsg { $sk=(struct sock*)arg0; }\nkretprobe:sk_alloc { $x=(uint64)retval; }\nkretprobe:__sk_destruct { $pointer=(uint64)arg0; }'
         converted=trampoline_source(source,definitions())
         self.assertIn('kfunc:udp_sendmsg { $sk=(struct sock*)args->sk; }',converted)
         self.assertIn('kretfunc:sk_alloc',converted)
+        self.assertIn('kretfunc:__sk_destruct { $pointer=(uint64)args->head; }',converted)
         with self.assertRaisesRegex(RuntimeError,'typed_argument_missing'):
             trampoline_source('kprobe:udp_sendmsg { $x=arg1; }',definitions())
 

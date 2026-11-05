@@ -11,7 +11,7 @@ import sys
 import time
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
-from uring.probe import event_formats,event_fields,pid_numbers_offset,btf_member_offset,hold_programs,program_statistics
+from uring.probe import event_formats,event_fields,pid_numbers_offset,btf_member_offset,hold_programs,program_statistics,ProgramLoss
 from uring.program import program
 from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, FILE_WRITE_HOOKS, symbol_evidence
 from uring.entry import select as select_entry, btf_signature
@@ -253,6 +253,7 @@ def broker(directory,root_pid,namespace_inode):
             evidence.update(status='failed',complete=False,pidNamespaceVerified=False,reason='root_namespace_pid_mismatch')
     except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
         evidence.update(metadata,status='failed',complete=False,reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__)
+        if isinstance(error,ProgramLoss):evidence['programLoss']=error.evidence
         if (directory/'recorder.stderr').exists():
             evidence['diagnostics']=[re.sub(r'0x[0-9a-fA-F]+','<address>',line.replace(str(directory),'<capture>'))[:240]
                                      for line in (directory/'recorder.stderr').read_text().splitlines()][:24]
