@@ -460,8 +460,11 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                                              metadata_allowed=metadata_allowed)
         from uring.socketObjects import reconcile as reconcile_objects
         connect_keys={key for key,event in event_keys.items() if event['syscall']=='connect'}
+        proven_tcp={(operation['pid'],operation['sequence']) for operation in network_evidence['operationDiagnostics']
+                    if operation['reconciled'] and set(operation['socketHooks']) & {'tcp_v4_connect','tcp_v6_connect'}}
         required_udp=udp_metadata['connectKeys'] | {(pid,seq) for pid,line,seq,*_ in udp_records
             if re.match(r'^connect\(\d+<UDP(?:v6)?:',line) and (pid,seq) in connect_keys}
+        required_udp.difference_update(proven_tcp)
         object_evidence=reconcile_objects(kernel_capture,network_evidence,set(states),
                                           included if selected else set(states),connect_keys,required_udp)
         if object_evidence['verified']:
@@ -595,6 +598,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     'signatureSha256':kernel_capture.get('udpObjectSignatureSha256'),
                     'lossChecks':kernel_capture.get('udpProbeLoss'),
                     'typedProbeDefinitions':kernel_capture.get('udpTypedProbeDefinitions'),
+                    'rawTracepointSignatures':kernel_capture.get('rawTracepointSignatures'),
                     'rcuOffset':kernel_capture.get('udpSocketRcuOffset')}
                     if object_evidence is not None else {'verified':False}),
                 'unparsedRecords': sum(states[pid]['unparsed'] for pid in pids) + len(issues),

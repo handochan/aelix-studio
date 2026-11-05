@@ -354,6 +354,9 @@ within one generation is currently unsupported and fails conservatively.
 Complete object proof can replace only the UDP-specific FD-order, unknown-close,
 CLOEXEC and ring-target uncertainty rules. Every UDP connect predicted by that
 ledger or labelled UDP in strace must also have exactly one kernel-object match.
+A reconciled kernel TCP protocol hook overrides a contradictory FD-only UDP
+prediction: that key is never required as UDP and is never given D. It remains
+an ordinary TCP attempt. Missing object proof still retains conservative failure.
 Without this proof, the old conservative UDP failures remain and D is never
 awarded. TCP labels/protocol hooks always veto D. The existing ring FD ledger,
 explicit opcode allowlist, CONNECT rejection and independent syscall reconciliation
@@ -381,22 +384,51 @@ Linux source basis (checked 6.8 and7.0; running BTF and attachability required):
   lookup is unsafe after reaping, so cached identity is checked against current
   kernel TID/TGID. The pre-ptrace version support in `entry.py` is unchanged.
 
-The 17 new object/task attachments use public bpftrace `kfunc`/`kretfunc` (BTF
-fentry/fexit) with typed arguments. They have no kretprobe instance pool that
-could silently omit a return. Every owned BPF program FD is retained with
-`BPF_PROG_GET_FD_BY_ID` before stopping the recorder; after detach its fdinfo must
-still expose an explicit zero `recursion_misses`. Exactly 17 retained programs
-must have TRACING type 26, in addition to the preexisting network/tracepoint
-programs. Missing fields, program references, hooks or a nonzero miss fail D.
-The receipt is retained in `udpSocketObjects.lossChecks`. A nonzero program
-counter remains fatal; `programLoss` retains all offending program IDs, types,
-generated names (when readable) and counts. Its `stage=after-detach` identifies
-the snapshot time, not the time at which a miss occurred. No miss is waived.
-This does not claim a kernel kprobe-profile miss count for the unchanged PMU
-network hooks; their program recursion counters and syscall reconciliation
-remain checked. Source: [BPF trampoline misses](https://github.com/torvalds/linux/blob/v7.0/kernel/bpf/trampoline.c#L1143-L1156),
+All active network/task/ring recording now uses public BTF fentry/fexit or raw
+tracepoints. There are **34 TRACING programs** (17 object/task plus 17 network/
+pre-entry/worker hooks), **9 RAW_TRACEPOINT programs** and the existing single
+interval sampler. Classic TP/kprobe programs are not allowed in the active
+recorder receipt. BEGIN/END are setup/teardown triggers outside that active set.
+
+This removes the CPU-global `bpf_prog_active` guard shared by classic TP/kprobe
+programs: different nested probes can otherwise suppress one another before
+PID filtering. The observed failures named `sys_enter`, `sys_exit`, VFS/eventfd
+and the syscall-entry probe while all UDP typed programs had zero misses.
+Raw TP and trampoline programs use their own recursion contexts. Every nonzero
+program miss remains fatal; nothing is subtracted or waived. The interval
+sampler remains a perf-event program and is also strictly checked.
+
+Every owned BPF program FD is retained with `BPF_PROG_GET_FD_BY_ID` before stopping
+the recorder; after detach its fdinfo must expose an explicit zero
+`recursion_misses`. The source declaration graph and retained program types must
+match 34/9/1 exactly. Missing fields/references, an unexpected classic provider or
+nonzero miss fails D. `udpSocketObjects.lossChecks` retains the coverage receipt.
+`programLoss` preserves every offending ID, type, generated name when readable,
+and count. `stage=after-detach` is the snapshot time, not when the miss occurred.
+
+Raw arguments are separately checked using each running kernel BTF
+`btf_trace_<event>` TYPEDEF→PTR→FUNC_PROTO. Exactly one validated hidden ptr:void
+data argument is removed, then only known 6.8/7.0 raw prototypes are accepted.
+The `/format` payload is still checked and hashed but is not treated as raw ABI.
+`sys_enter` supplies regs+NR; `sys_exit` supplies regs+return, with NR recovered
+using the kernel's native syscall_get_nr fields (x64 orig_ax, ARM syscallno).
+First FD uses x64 di/ARM orig_x0. These are live kernel tracepoint arguments,
+independent of strace's register read. The pre-ptrace observation is a typed
+fentry at the same verified function, with x64 notify exit_code/message guard.
+The existing native ABI checks and pre-ptrace kernel-version boundary remain.
+
+io_uring create uses raw FD arg0/ctx arg1/flags arg4. Submission reads the live request;
+failed opcode comes from SQE arg0, never an assumed request opcode. Completion
+copies only ctx arg0/req arg1 scalar values and never reads a dead request. Both
+known completion prototypes are validated; unknown argument shapes fail.
+
+Source: [classic shared guard](https://github.com/torvalds/linux/blob/v6.8/kernel/trace/bpf_trace.c#L111-L152),
+[raw per-program recursion](https://github.com/torvalds/linux/blob/v7.0/kernel/trace/bpf_trace.c#L2073-L2095),
+[trampoline misses](https://github.com/torvalds/linux/blob/v7.0/kernel/bpf/trampoline.c#L1143-L1156),
 [fdinfo counter](https://github.com/torvalds/linux/blob/v6.8/kernel/bpf/syscall.c#L2230-L2284),
-[bpftrace typed probes](https://bpftrace.org/docs/0.21).
+[raw BTF declarations](https://github.com/torvalds/linux/blob/v7.0/include/trace/bpf_probe.h),
+[io_uring prototypes](https://github.com/torvalds/linux/blob/v7.0/include/trace/events/io_uring.h),
+[bpftrace raw/typed probes](https://bpftrace.org/docs/0.21).
 
 Missing symbols, inline-only functions, BTF/signature/layout mismatch, failed map
 updates, unmatched callback returns and event loss fail collection. The BTF member
@@ -405,12 +437,11 @@ on size and offset; offsets are never guessed. `sk_prot_free` is inlined on the
 measured local kernel, so the final destructor return is the required boundary.
 No destination-name/address exception, CPU restriction or ignored failure is used.
 
-The readiness barrier is reviewed for bpftrace 0.17.0 and 0.20.2 only; other versions
-fail. BEGIN runs before attachment, but its printf is not consumed until both
+The raw backend requires the reviewed bpftrace 0.20.2; other versions fail.
+Version 0.17.0 does not implement this raw provider and is not a fallback. BEGIN runs before attachment, but its printf is not consumed until both
 attachment loops succeed and poll_output starts. Thus observing READY in the
-broker is an attachment-complete barrier for these versions. See
-[bpftrace0.20.2 run](https://github.com/bpftrace/bpftrace/blob/v0.20.2/src/bpftrace.cpp#L1237-L1375)
-and [0.17.0](https://github.com/bpftrace/bpftrace/blob/v0.17.0/src/bpftrace.cpp).
+broker is an attachment-complete barrier for this version. See
+[bpftrace 0.20.2 run](https://github.com/bpftrace/bpftrace/blob/v0.20.2/src/bpftrace.cpp#L1237-L1375)
 
 `--transport-controls` keeps the original UDP results 0/86/86/87/87 and adds real
 FIONCLEX+exec exit/send (0/86), SCM_RIGHTS send (86) and pidfd_getfd send (86). IPv4/IPv6 loopback sends must receive the test datagram,

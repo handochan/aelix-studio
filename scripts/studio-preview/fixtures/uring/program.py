@@ -4,6 +4,7 @@ from uring.socketProgram import program as socket_program, CLEANUP
 
 
 def program(root_pid, namespace_inode, numbers_offset, submit, pre_entry=None, socket_rcu_offset=None, object_specs=None):
+    pre_entry=pre_entry or {'symbol':'syscall_trace_enter'}
     normalize='''
   $t=(struct task_struct*)curtask;
   $level=$t->thread_pid->level;
@@ -146,8 +147,14 @@ OBJECT_CLEANUP
     if object_specs is None:raise RuntimeError('kernel_udp_typed_probes_missing')
     dead=object_specs['do_task_dead_e']
     source=source.replace('kprobe:do_task_dead','kfunc:'+dead['symbol'])
+    from uring.network import typed_definitions
+    source=trampoline_source(source,typed_definitions(pre_entry))
     source += network_program(normalize,pre_entry)
     source += trampoline_source(socket_program(normalize, socket_rcu_offset),object_specs)
     source = source.replace('OBJECT_CLEANUP', CLEANUP)
-    return source.replace('NORMALIZE',normalize).replace('OFFSET',str(numbers_offset)).replace(
+    source=source.replace('NORMALIZE',normalize).replace('OFFSET',str(numbers_offset)).replace(
         'NAMESPACE',str(namespace_inode)).replace('ROOT_PID',str(root_pid)).replace('SUBMIT /',submit+' /')
+    from uring.rawTrace import convert,check_coverage
+    source=convert(source,submit)
+    check_coverage(source)
+    return source

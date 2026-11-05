@@ -16,13 +16,14 @@ from uring.program import program
 from uring.network import requirements as network_requirements, parse as parse_network, HOOKS, SOCKET_HOOKS, SOCKET_ARGUMENTS, FILE_WRITE_HOOKS, symbol_evidence
 from uring.entry import select as select_entry, btf_signature
 from uring.socketProgram import requirements as object_requirements, parse as parse_object, definitions as object_definitions
+from uring.rawTrace import requirements as raw_requirements,coverage
 
 
 def recorder_version(raw):
     """READY printf is drained after all attachments in these reviewed sources."""
     match=re.search(r'\bv(\d+)\.(\d+)\.(\d+)\b',raw)
     value=tuple(map(int,match.groups())) if match else None
-    if value not in ((0,17,0),(0,20,2)):
+    if value!=(0,20,2):
         raise RuntimeError('kernel_recorder_readiness_version_unsupported')
     return value
 
@@ -164,6 +165,7 @@ def broker(directory,root_pid,namespace_inode):
         available={line.split()[0] for line in (tracefs/'available_filter_functions').read_text().splitlines() if line.strip()}
         pre_entry=select_entry(available)
         object_signatures=object_requirements(available)
+        raw_signatures=raw_requirements(submit)
         metadata={'kernel':os.uname().release,'preEntryProbe':pre_entry}
         signature=json.dumps(btf_signature(pre_entry['symbol']),sort_keys=True)
         worker_signature=json.dumps(btf_signature('create_io_thread'),sort_keys=True)
@@ -194,6 +196,7 @@ def broker(directory,root_pid,namespace_inode):
                   'udpObjectProbes':list(object_signatures),
                   'udpSocketRcuOffset':socket_rcu_offset,
                   'udpTypedProbeDefinitions':object_specs,
+                  'rawTracepointSignatures':raw_signatures,'programCoverage':coverage(),
                   'udpObjectSignatureSha256':{name:hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
                                               for name,value in object_signatures.items()},
                   'preEntrySignatureSha256':hashlib.sha256(signature.encode()).hexdigest(),
@@ -218,7 +221,7 @@ def broker(directory,root_pid,namespace_inode):
                 if 'READY\n' in (directory/'events.raw').read_text():break
                 time.sleep(0.02)
             else:raise RuntimeError('kernel_recorder_ready_timeout')
-            held=hold_programs(process.pid,len(object_specs))
+            held=hold_programs(process.pid,sum(coverage().values()))
             (directory/'ready.json').write_text(json.dumps({'ready':True,'rootPid':root_pid,'namespaceInode':namespace_inode})+'\n')
             deadline=time.monotonic()+600
             while not (directory/'stop').exists():
@@ -247,7 +250,8 @@ def broker(directory,root_pid,namespace_inode):
             process.send_signal(signal.SIGINT);process.wait(timeout=30)
         evidence=parse((directory/'events.raw').read_text(),(directory/'recorder.stderr').read_text(),process.returncode,namespace_inode)
         evidence.update(metadata)
-        evidence['udpProbeLoss']={'complete':True,'mode':'btf-fentry-fexit','hooks':object_specs,
+        evidence['udpProbeLoss']={'complete':True,'mode':'raw-tracepoint-and-btf-fentry-fexit','hooks':object_specs,
+                                  'coverage':coverage(),
                                   'programs':program_statistics(held)}
         if (evidence.get('root') or {}).get('pid')!=root_pid:
             evidence.update(status='failed',complete=False,pidNamespaceVerified=False,reason='root_namespace_pid_mismatch')

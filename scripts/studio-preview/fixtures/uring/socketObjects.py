@@ -19,13 +19,16 @@ def reconcile(capture, network, states, selected, connect_keys, required_udp=())
         if pid in states: item['pid'] = pid
         if item not in issues: issues.append(item)
     from uring.socketProgram import definitions
+    from uring.rawTrace import coverage
     loss=capture.get('udpProbeLoss') or {};hooks=loss.get('hooks') or {};programs=loss.get('programs') or []
-    loss_valid=(loss.get('complete') is True and loss.get('mode')=='btf-fentry-fexit' and hooks==definitions() and
-                len(programs)>=len(hooks) and
+    expected=coverage()
+    loss_valid=(loss.get('complete') is True and loss.get('mode')=='raw-tracepoint-and-btf-fentry-fexit' and hooks==definitions() and
+                loss.get('coverage')==expected and len(programs)==sum(expected.values()) and
                 all(isinstance(item,dict) and isinstance(item.get('prog_id'),int) and item['prog_id']>0 and
-                    item.get('prog_type') in (2,5,7,26) and item.get('recursion_misses')==0 for item in programs) and
+                    item.get('prog_type') in (7,17,26) and item.get('recursion_misses')==0 for item in programs) and
                 len({item['prog_id'] for item in programs})==len(programs) and
-                sum(item['prog_type']==26 for item in programs)==len(hooks))
+                all(sum(item['prog_type']==kind for item in programs)==expected[label]
+                    for kind,label in [(26,'tracing'),(17,'raw'),(7,'interval')]))
     if (not loss_valid or not capture.get('complete') or capture.get('lostEvents') != 0 or
             not capture.get('pidNamespaceVerified') or channel.get('schema') != 1 or
             not isinstance(capture.get('namespaceInode'),int) or capture['namespaceInode']<=0 or

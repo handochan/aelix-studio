@@ -66,7 +66,7 @@ def registers(entry):
         'THREAD_BYTES',str(entry['threadBytes'])).replace('PADDING_BYTES',str(entry['paddingBytes']))
 
 
-def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_parameter=None):
+def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_parameter=None, tracepoint=False):
     """Validate actual BTF parameter types, independent of fentry/list formatting."""
     raw=path.read_bytes()
     if not 24<=len(raw)<=64*1024*1024: raise RuntimeError('kernel_signature_btf_invalid')
@@ -84,7 +84,7 @@ def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_paramet
         return strings[offset:stop].decode('ascii')
     fixed={0:0,1:4,2:0,3:12,7:0,8:0,9:0,10:0,11:0,12:0,14:4,16:0,17:4,18:0}
     variable={4:12,5:12,6:8,13:8,15:12,19:12}
-    types={};functions=[];identifier=1
+    types={};functions=[];trace_types=[];identifier=1
     while start<end:
         if start+12>end: raise RuntimeError('kernel_signature_btf_truncated')
         label,info,value=struct.unpack_from(endian+'III',raw,start)
@@ -100,8 +100,9 @@ def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_paramet
         if kind==13:item['args']=[struct.unpack_from(endian+'II',raw,start+12+i*8)[1] for i in range(count)]
         types[identifier]=item
         if kind==12 and item['name']==symbol:functions.append(value)
+        if kind==8 and item['name']=='btf_trace_'+symbol:trace_types.append(value)
         start+=12+extra;identifier+=1
-    if len(functions)!=1: raise RuntimeError('kernel_probe_btf_function_missing')
+    if not tracepoint and len(functions)!=1: raise RuntimeError('kernel_probe_btf_function_missing')
     def resolve(identifier,seen=None):
         seen=set() if seen is None else seen
         if identifier==0:return 'void'
@@ -113,6 +114,22 @@ def btf_signature(symbol, path=Path('/sys/kernel/btf/vmlinux'), *, first_paramet
         if item['kind']==1:return ('s' if item['signed'] else 'u')+str(item['value']*8) if item['naturalInteger'] else 'unsupported'
         if item['kind']==13:return 'function'
         return 'unsupported'
+    if tracepoint:
+        shapes=[]
+        for identifier in trace_types:
+            seen=set()
+            while identifier in types and types[identifier]['kind'] in (2,8,9,10,11,18):
+                if identifier in seen:raise RuntimeError('kernel_raw_tracepoint_btf_cycle')
+                seen.add(identifier);identifier=types[identifier]['value']
+            prototype=types.get(identifier,{})
+            if prototype.get('kind')!=13:raise RuntimeError('kernel_raw_tracepoint_btf_prototype_invalid')
+            parameters=[resolve(value) for value in prototype['args']]
+            if not parameters or parameters[0]!='ptr:void' or resolve(prototype['value'])!='void':
+                raise RuntimeError('kernel_raw_tracepoint_btf_data_parameter_invalid')
+            shapes.append({'parameters':parameters[1:],'return':'void'})
+        if not shapes or any(shape!=shapes[0] for shape in shapes):
+            raise RuntimeError('kernel_raw_tracepoint_btf_missing_or_ambiguous')
+        return shapes[0]
     prototype=types.get(functions[0],{})
     if prototype.get('kind')!=13: raise RuntimeError('kernel_signature_btf_prototype_invalid')
     shape={'parameters':[resolve(value) for value in prototype['args']], 'return':resolve(prototype['value'])}

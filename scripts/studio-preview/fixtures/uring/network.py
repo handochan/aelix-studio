@@ -18,6 +18,20 @@ FILE_WRITE_HOOKS = ('vfs_write','vfs_writev','eventfd_write')
 HOOKS = (*SOCKET_HOOKS,*FILE_WRITE_HOOKS, 'create_io_thread', 'do_task_dead')
 
 
+def typed_definitions(pre_entry):
+    names={name:('iocb' if kind=='kiocb' else 'sock' if kind=='socket' else 'sk')
+           for name,kind in SOCKET_ARGUMENTS.items()}
+    names.update({name:'file' for name in FILE_WRITE_HOOKS})
+    result={name+'_e':{'symbol':name,'return':False,'fields':{'arg0':argument}}
+            for name,argument in names.items()}
+    result.update(create_io_thread_e={'symbol':'create_io_thread','return':False,'fields':{}},
+                  create_io_thread_r={'symbol':'create_io_thread','return':True,'fields':{}})
+    symbol=pre_entry['symbol']
+    result[symbol+'_e']={'symbol':symbol,'return':False,'fields':
+        {'arg0':'regs'} if symbol=='syscall_trace_enter' else {'arg0':'exit_code','arg1':'message'}}
+    return result
+
+
 def symbol_evidence(path=None):
     """Keep public alias names, never raw kernel addresses, in provenance."""
     from pathlib import Path
@@ -163,7 +177,9 @@ NORMALIZE
   printf("V|%llu|%d|%d|%d|%d|%d|%llu|%d|%u|%llu\\n",nsecs,pid,tid,$nspid,$nstgid,@net_call[tid],@net_seq[tid],NUMBER,$file->f_inode->i_mode & 0xf000,(uint64)$file);
 }
 '''.replace('HOOK',hook).replace('NUMBER',str(number))
-    return source.replace('NORMALIZE', normalize).replace('/@tracked[tid]', '/tid != @audit_root_tid && @tracked[tid]')
+    from uring.socketProgram import trampoline_source
+    source=source.replace('NORMALIZE', normalize).replace('/@tracked[tid]', '/tid != @audit_root_tid && @tracked[tid]')
+    return trampoline_source(source,typed_definitions(pre_entry))
 
 
 def parse(fields):

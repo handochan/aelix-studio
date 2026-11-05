@@ -148,9 +148,9 @@ class KernelCaptureCompletenessTests(unittest.TestCase):
     RAW += 'OBJECTS|1\n'
     RAW += '@udp_task_exit_enter: 1\n@udp_task_exit_return: 1\n'
     def test_recorder_readiness_requires_a_reviewed_attachment_order(self):
-        for version in ('0.17.0','0.20.2'):
+        for version in ('0.20.2',):
             self.assertEqual(capture_module.recorder_version('bpftrace v'+version),tuple(map(int,version.split('.'))))
-        for version in ('0.21.0','0.17.1','unknown'):
+        for version in ('0.21.0','0.17.0','0.17.1','unknown'):
             with self.assertRaisesRegex(RuntimeError,'readiness_version_unsupported'):
                 capture_module.recorder_version('bpftrace v'+version)
     def test_complete_capture_requires_markers_counters_and_no_diagnostic(self):

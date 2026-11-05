@@ -12,6 +12,7 @@ audit=importlib.util.module_from_spec(spec);spec.loader.exec_module(audit)
 from uring.socketObjects import reconcile
 from uring.socketProgram import parse, requirements, definitions, trampoline_source
 from uring.probe import btf_member_offset, program_fdinfo, program_statistics, ProgramLoss
+from uring.rawTrace import coverage
 
 
 class SocketObjectTests(unittest.TestCase):
@@ -34,10 +35,11 @@ class SocketObjectTests(unittest.TestCase):
                      eventCount=0,events=[],root={'kernelPid':1000,'time':1},
                      network=dict(complete=True,eventCount=len(network_events),events=network_events,tasks=tasks),
                      udpObjects=dict(schema=1,complete=True,eventCount=len(events),events=events))
+        kinds=[kind for kind,label in [(26,'tracing'),(17,'raw'),(7,'interval')] for _ in range(coverage()[label])]
         capture['udpProbeLoss']=dict(complete=True,
-            mode='btf-fentry-fexit',hooks=definitions(),
-            programs=[{'prog_id':index+1,'prog_type':26,'recursion_misses':0}
-                      for index in range(len(definitions()))])
+            mode='raw-tracepoint-and-btf-fentry-fexit',hooks=definitions(),coverage=coverage(),
+            programs=[{'prog_id':index+1,'prog_type':kind,'recursion_misses':0}
+                      for index,kind in enumerate(kinds)])
         network=dict(issues=[],operationDiagnostics=[dict(pid=1,tgid=1,kernelPid=101,kernelTgid=101,
             call=1,fd=3,ordinal=1,sequence=3,entryTime=20,returnTime=30)])
         return capture,network
@@ -176,6 +178,32 @@ class SocketObjectTests(unittest.TestCase):
             failed=audit.analyze_processes([path],require_lifecycle=True,kernel_capture=capture)[0]
             self.assertEqual(failed['udpConnectOnly'],0)
             self.assertGreater(failed['classificationErrors'],0)
+
+    def test_proven_tcp_is_never_a_udp_requirement_or_a_udp_exemption(self):
+        for address,external in [('::1',0),('2001:db8::2',1)]:
+            capture,_=self.fixture();tasks=capture['network']['tasks']
+            tasks[1].update(tgid=1,kernelTgid=101,start=31,end=95,parentKernelPid=101)
+            events=capture['network']['events']
+            for kind,time,value,result in [('P',35,5,0),('N',40,5,0),('H',45,5,10),('X',50,5,-111)]:
+                events.append(dict(kind=kind,time=time,pid=2,tgid=1,kernelPid=102,kernelTgid=101,
+                    call=1,ordinal=1,value=value,result=result))
+            capture['network']['eventCount']=len(events)
+            lines=['1<app> execve("/owned/app", [...], 0x1) = 0',
+                '1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>',
+                '1<app> connect(3<UDPv6:[123]>, {sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "2001:db8::1", &sin6_addr)}, 28) = -1 ENETUNREACH',
+                '1<app> socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP) = 5<TCPv6:[456]>',
+                '1<app> clone(child_stack=NULL, flags=CLONE_FILES|CLONE_THREAD) = 2',
+                '1<app> dup(3<UDPv6:[123]> <unfinished ...>',
+                f'2<thread> connect(5<TCPv6:[456]>, {{sa_family=AF_INET6, sin6_port=htons(443), inet_pton(AF_INET6, "{address}", &sin6_addr)}}, 28) = -1 ECONNREFUSED',
+                '2<thread> close(5<TCPv6:[456]>) = 0',
+                '1<app> <... dup resumed>) = 5<UDPv6:[123]>',
+                '1<app> close(3<UDPv6:[123]>) = 0','1<app> close(5<UDPv6:[123]>) = 0',
+                '2<thread> +++ exited with 0 +++','1<app> +++ exited with 0 +++']
+            with tempfile.TemporaryDirectory() as directory:
+                path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
+                report=audit.analyze_processes([path],require_lifecycle=True,kernel_capture=capture)[0]
+                self.assertEqual((report['externalAttempts'],report['unparsedRecords'],report['classificationErrors'],report['udpConnectOnly']),(external,0,0,1))
+                self.assertTrue(all(event['syscall']=='connect' and not event['udpAssociationOnly'] for event in report['external']))
 
 class ObjectBtfLayoutTests(unittest.TestCase):
     def test_lost_program_provenance_is_retained_and_still_fatal(self):
