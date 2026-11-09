@@ -241,3 +241,7 @@ temp/
 
 # Disposable qualification environments, immutable downloads and local receipts.
 /.local/
+
+# Python preparation and regression-test bytecode.
+__pycache__/
+*.pyc

@@ -5,6 +5,9 @@
  */
 
 import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
 import {
   existsSync,
   mkdirSync,
@@ -20,6 +23,90 @@ import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '../../..');
+
+function runWindowsBuild(locked: 'initial' | 'retry' | undefined, packagingFailure = false) {
+  const root = mkdtempSync(join(tmpdir(), 'studio-build-owned-'));
+  const output = join(root, 'out/win-unpacked');
+  const commands: string[] = [];
+  const messages: string[] = [];
+  const state = {
+    platform: 'win32',
+    arch: 'x64',
+    argv: ['node', 'builder', 'x64', '--win', '--skip-vite'],
+    env: { CI: 'false' },
+    exitCode: 0,
+  };
+  let packagingCalls = 0;
+  const write = (relative: string, content: string) => {
+    const file = join(root, relative);
+    mkdirSync(resolve(file, '..'), { recursive: true });
+    writeFileSync(file, content);
+  };
+  try {
+    write('package.json', JSON.stringify({ main: './out/main/index.js', version: '2.2.2' }));
+    write('out/main/index.js', 'main');
+    write('out/preload/index.js', 'preload');
+    write('out/renderer/assets/index.js', 'renderer');
+    write(
+      'out/renderer/index.html',
+      '<html><div id="root"></div><script type="module" src="./assets/index.js"></script></html>'
+    );
+    mkdirSync(output, { recursive: true });
+    const realRequire = createRequire(import.meta.url);
+    const mockRequire = Object.assign(
+      (name: string) => {
+        if (name === 'fs')
+          return {
+            ...fs,
+            rmSync: (file: string, options: Parameters<typeof rmSync>[1]) => {
+              if (file === output && (locked === 'initial' || (locked === 'retry' && packagingCalls > 0)))
+                throw new Error('EPERM: owned fixture output is locked');
+              return rmSync(file, options);
+            },
+          };
+        if (name === 'child_process')
+          return {
+            execSync: (command: string) => {
+              commands.push(command);
+              if (command.includes('bunx electron-builder')) {
+                packagingCalls++;
+                if (packagingFailure && packagingCalls === 1) {
+                  write('out/win-unpacked/AionUi.exe', 'owned fixture');
+                  throw new Error('fixture rcedit failure');
+                }
+              }
+              return Buffer.from('');
+            },
+          };
+        if (name.endsWith('/prepare-aioncore.js')) return { prepareAioncore: () => ({}) };
+        if (name === './resolveAioncoreVersion.js') return { resolveAioncoreVersion: () => 'fixture' };
+        return realRequire(name);
+      },
+      {
+        resolve: () => {
+          throw new Error('isolated fixture has no builder templates');
+        },
+      }
+    );
+    runInNewContext(
+      `(function () {\n${readFileSync(resolve(repoRoot, 'scripts/build-with-builder.js'), 'utf8').replace(/^#![^\n]*\n/, '')}\n})()`,
+      {
+        require: mockRequire,
+        __dirname: join(root, 'scripts'),
+        process: state,
+        Buffer,
+        console: {
+          log: (...parts: unknown[]) => messages.push(parts.join(' ')),
+          warn: () => {},
+          error: (...parts: unknown[]) => messages.push(parts.join(' ')),
+        },
+      }
+    );
+    return { exitCode: state.exitCode, commands, messages: messages.join('\n'), packagingCalls };
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
 
 function readInstallerErrorDefinitions(): Array<{ defineName: string; code: string }> {
   const source = readFileSync(resolve(repoRoot, 'resources/windows/installer-errors-sentry.nsh'), 'utf8');
@@ -49,6 +136,27 @@ function resolveAppBuilderInstallUtil(): string {
 }
 
 describe('build-with-builder', () => {
+  it('fails before packaging when its Windows output is locked without terminating any app', () => {
+    const result = runWindowsBuild('initial');
+    expect(result).toMatchObject({ exitCode: 1, packagingCalls: 0 });
+    expect(result.messages).toContain('Windows output is locked');
+    expect(result.commands.some((command) => /taskkill|tasklist/i.test(command))).toBe(false);
+  });
+
+  it('fails a locked retry cleanup without killing running AionUi or Electron instances', () => {
+    const result = runWindowsBuild('retry', true);
+    expect(result).toMatchObject({ exitCode: 1, packagingCalls: 1 });
+    expect(result.messages).toContain('Cannot remove Windows output');
+    expect(result.commands.some((command) => /taskkill|tasklist/i.test(command))).toBe(false);
+  });
+
+  it('retains the local executable-edit retry when the owned output can be removed', () => {
+    const result = runWindowsBuild(undefined, true);
+    expect(result).toMatchObject({ exitCode: 0, packagingCalls: 2 });
+    expect(result.commands.at(-1)).toContain('--config.win.signAndEditExecutable=false');
+    expect(result.commands.some((command) => /taskkill|tasklist/i.test(command))).toBe(false);
+  });
+
   it('rejects skip-vite when renderer output is only a source html shell', () => {
     const outDir = resolve(repoRoot, 'out');
     const backupOutDir = resolve(repoRoot, `.tmp-out-backup-${process.pid}-${Date.now()}`);
