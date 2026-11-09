@@ -4,6 +4,8 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 
+const CLEANUP_PROCESS_NAMES = ['AionUi.exe', 'AionUi', 'electron.exe', 'electron'];
+
 function parseArgs(argv) {
   const flags = new Set(argv.filter((x) => x.startsWith('--')));
   const values = argv.filter((x) => !x.startsWith('--'));
@@ -58,9 +60,19 @@ function resolvePackagedApp(projectRoot) {
 
 async function main() {
   const { flags, values } = parseArgs(process.argv.slice(2));
+  if (flags.has('--help')) {
+    console.log(`Usage: node scripts/packaged-launch.mjs [--clean] [--no-clean] [--dry-run] [--help]
+
+Default: launch without terminating running processes.
+  --clean     Terminate AionUi/Electron processes by name before launch (opt-in).
+  --no-clean  Compatibility flag for the default no-cleanup behavior; overrides --clean.
+  --dry-run   Show the launch and requested cleanup without terminating or launching processes.
+  --help      Show this help.`);
+    return;
+  }
   const projectRoot = process.cwd();
   const dryRun = flags.has('--dry-run');
-  const shouldClean = !flags.has('--no-clean');
+  const shouldClean = flags.has('--clean') && !flags.has('--no-clean');
   const passthroughArgs = values;
 
   const packaged = resolvePackagedApp(projectRoot);
@@ -70,10 +82,11 @@ async function main() {
   }
 
   if (shouldClean) {
-    await killProcessByName('AionUi.exe');
-    await killProcessByName('AionUi');
-    await killProcessByName('electron.exe');
-    await killProcessByName('electron');
+    if (dryRun) {
+      console.log(`[packaged-launch] would terminate by name: ${CLEANUP_PROCESS_NAMES.join(', ')}`);
+    } else {
+      for (const name of CLEANUP_PROCESS_NAMES) await killProcessByName(name);
+    }
   }
 
   const env = {

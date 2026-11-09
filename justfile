@@ -403,12 +403,15 @@ cli-ext:
 dev-ext-doctor:
     node scripts/dev-bootstrap.mjs doctor
 
-# Launch packaged (unpacked) app with example extensions for one-click debugging
 # Requires out/*-unpacked artifacts
+# Explicit cleanup: node scripts/packaged-launch.mjs --clean (preview: --dry-run --clean).
+# Legacy --no-clean remains accepted and keeps running processes.
+# Launch packaged app with example extensions; no process cleanup by default
 packaged-ext:
     node scripts/packaged-launch.mjs
 
-# Build package first, then launch with example extensions
+# Close an instance locking out/ before building.
+# Build package first, then launch with extensions; no process cleanup by default
 packaged-ext-build: build-package
     node scripts/packaged-launch.mjs
 
