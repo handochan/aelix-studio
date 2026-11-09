@@ -29,6 +29,7 @@ function runWindowsBuild(locked: 'initial' | 'retry' | undefined, packagingFailu
   const output = join(root, 'out/win-unpacked');
   const commands: string[] = [];
   const messages: string[] = [];
+  const errors: string[] = [];
   const state = {
     platform: 'win32',
     arch: 'x64',
@@ -98,11 +99,20 @@ function runWindowsBuild(locked: 'initial' | 'retry' | undefined, packagingFailu
         console: {
           log: (...parts: unknown[]) => messages.push(parts.join(' ')),
           warn: () => {},
-          error: (...parts: unknown[]) => messages.push(parts.join(' ')),
+          error: (...parts: unknown[]) => {
+            messages.push(parts.join(' '));
+            errors.push(parts.join(' '));
+          },
         },
       }
     );
-    return { exitCode: state.exitCode, commands, messages: messages.join('\n'), packagingCalls };
+    return {
+      exitCode: state.exitCode,
+      commands,
+      messages: messages.join('\n'),
+      errors: errors.join('\n'),
+      packagingCalls,
+    };
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -139,7 +149,7 @@ describe('build-with-builder', () => {
   it('fails before packaging when its Windows output is locked without terminating any app', () => {
     const result = runWindowsBuild('initial');
     expect(result).toMatchObject({ exitCode: 1, packagingCalls: 0 });
-    expect(result.messages).toContain('Windows output is locked');
+    expect(result.errors).toMatch(/Windows output is locked: .*retry: EPERM: owned fixture output is locked/);
     expect(result.commands.some((command) => /taskkill|tasklist/i.test(command))).toBe(false);
   });
 

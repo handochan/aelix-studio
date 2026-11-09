@@ -431,7 +431,7 @@ function dmgExists(outDir) {
 }
 
 function tryRemoveDir(targetDir) {
-  if (!fs.existsSync(targetDir)) return true;
+  if (!fs.existsSync(targetDir)) return { removed: true };
   try {
     fs.rmSync(targetDir, {
       recursive: true,
@@ -439,10 +439,10 @@ function tryRemoveDir(targetDir) {
       maxRetries: 5,
       retryDelay: 300,
     });
-    return true;
+    return { removed: true };
   } catch (error) {
     console.log(`❌ Failed to remove ${targetDir}: ${error.message}`);
-    return false;
+    return { removed: false, message: error.message };
   }
 }
 
@@ -821,8 +821,11 @@ try {
 
   if (process.platform === 'win32' && builderArgs.includes('--win')) {
     const winUnpackedDir = path.join(outDir, 'win-unpacked');
-    if (!tryRemoveDir(winUnpackedDir)) {
-      throw new Error(`Windows output is locked: ${winUnpackedDir}. Close the process using this output and retry.`);
+    const removal = tryRemoveDir(winUnpackedDir);
+    if (!removal.removed) {
+      throw new Error(
+        `Windows output is locked: ${winUnpackedDir}. Close the process using this output and retry: ${removal.message}`
+      );
     }
   }
 
