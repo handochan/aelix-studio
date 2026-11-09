@@ -5,3 +5,14 @@ dist-server
 .github
 data
 *.log
+.local
+.env
+.env.*
+resources/bundled-aelix
+resources/bundled-aioncore
+resources/studio-preview
+resources/hub
+**/__pycache__
+**/.pytest_cache
+**/.cache
+**/*.pyc

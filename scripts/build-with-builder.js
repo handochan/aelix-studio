@@ -431,7 +431,7 @@ function dmgExists(outDir) {
 }
 
 function tryRemoveDir(targetDir) {
-  if (!fs.existsSync(targetDir)) return true;
+  if (!fs.existsSync(targetDir)) return { removed: true };
   try {
     fs.rmSync(targetDir, {
       recursive: true,
@@ -439,31 +439,10 @@ function tryRemoveDir(targetDir) {
       maxRetries: 5,
       retryDelay: 300,
     });
-    return true;
+    return { removed: true };
   } catch (error) {
     console.log(`❌ Failed to remove ${targetDir}: ${error.message}`);
-    return false;
-  }
-}
-
-function isProcessRunningWindows(imageName) {
-  if (process.platform !== 'win32') return false;
-  try {
-    const result = execSync(`tasklist /FI "IMAGENAME eq ${imageName}"`, {
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-    return result.toString().toLowerCase().includes(imageName.toLowerCase());
-  } catch {
-    return false;
-  }
-}
-
-function killWindowsProcesses(imageNames) {
-  if (process.platform !== 'win32') return;
-  for (const name of imageNames) {
-    try {
-      execSync(`taskkill /F /IM ${name}`, { stdio: 'ignore' });
-    } catch {}
+    return { removed: false, message: error.message };
   }
 }
 
@@ -585,15 +564,18 @@ function cleanupWindowsPackOutput() {
   for (const entry of fs.readdirSync(outDir, { withFileTypes: true })) {
     const fullPath = path.join(outDir, entry.name);
 
-    if (entry.isDirectory() && winUnpackedDirRe.test(entry.name)) {
-      fs.rmSync(fullPath, { recursive: true, force: true });
-      removed.push(entry.name);
-      continue;
-    }
-
-    if (entry.isFile() && winArtifactFileRe.test(entry.name)) {
-      fs.rmSync(fullPath, { force: true });
-      removed.push(entry.name);
+    if (
+      (entry.isDirectory() && winUnpackedDirRe.test(entry.name)) ||
+      (entry.isFile() && winArtifactFileRe.test(entry.name))
+    ) {
+      try {
+        fs.rmSync(fullPath, { recursive: entry.isDirectory(), force: true });
+        removed.push(entry.name);
+      } catch (error) {
+        throw new Error(
+          `Cannot remove Windows output ${fullPath}. Close the process using it and retry: ${error.message}`
+        );
+      }
     }
   }
 
@@ -839,18 +821,11 @@ try {
 
   if (process.platform === 'win32' && builderArgs.includes('--win')) {
     const winUnpackedDir = path.join(outDir, 'win-unpacked');
-    let cleaned = tryRemoveDir(winUnpackedDir);
-    if (!cleaned) {
-      const aionRunning = isProcessRunningWindows('AionUi.exe');
-      const electronRunning = isProcessRunningWindows('electron.exe');
-      if (aionRunning || electronRunning) {
-        console.log('⚠️  Detected running AionUi/Electron process. Attempting to close...');
-        killWindowsProcesses(['AionUi.exe', 'electron.exe']);
-        cleaned = tryRemoveDir(winUnpackedDir);
-        if (!cleaned) {
-          console.log('⚠️  Directory still locked. Please close any running AionUi/Electron processes and retry.');
-        }
-      }
+    const removal = tryRemoveDir(winUnpackedDir);
+    if (!removal.removed) {
+      throw new Error(
+        `Windows output is locked: ${winUnpackedDir}. Close the process using this output and retry: ${removal.message}`
+      );
     }
   }
 
@@ -886,7 +861,6 @@ try {
     }
     console.log('   Retrying local build with win.signAndEditExecutable=false...');
     console.log('   This fallback is intended for transient rcedit / file-lock failures on developer machines.');
-    killWindowsProcesses(['AionUi.exe', 'electron.exe']);
     cleanupWindowsPackOutput();
 
     try {

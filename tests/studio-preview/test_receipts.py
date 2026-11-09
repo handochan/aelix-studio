@@ -12,7 +12,7 @@ import struct
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from test_preparation import ROOT, prepare
 
@@ -168,6 +168,140 @@ class FailedAuditReceiptTests(unittest.TestCase):
                 acceptance.write_failure_receipt(output)
                 self.assertEqual(json.loads(output.read_text())['status'],'failed')
                 self.assertNotIn('auditedSessions',json.loads(output.read_text()))
+
+
+class InstallerWaitTests(unittest.TestCase):
+    class Process:
+        pid = 12345
+
+        def __init__(self, finish=65, code=0):
+            self.elapsed = 0
+            self.finish = finish
+            self.code = code
+            self.returncode = None
+
+        def poll(self):
+            if self.finish is not None and self.elapsed >= self.finish:
+                self.returncode = self.code
+            return self.returncode
+
+        def wait(self, timeout):
+            self.elapsed += min(timeout, max(0, self.finish - self.elapsed)) if self.finish is not None else timeout
+            if self.poll() is None:
+                raise subprocess.TimeoutExpired('owned fixture', timeout)
+            return self.returncode
+
+        def kill(self):
+            self.returncode = -9
+
+    def supervise(self, root, process, check=True, sample_delay=0):
+        def sample(*args):
+            process.elapsed += min(sample_delay, args[-1])
+            return dict(status='collected', files=int(process.elapsed), bytes=int(process.elapsed) * 10)
+
+        def stop(argv, **_kwargs):
+            self.assertEqual(argv, ['taskkill', '/PID', '12345', '/T', '/F'])
+            process.returncode = -9
+            return subprocess.CompletedProcess(argv, 0)
+
+        with patch.object(acceptance.time, 'monotonic', side_effect=lambda: process.elapsed), \
+                patch.object(acceptance.subprocess, 'Popen', return_value=process) as launch, \
+                patch.object(acceptance, 'installer_progress', side_effect=sample), \
+                patch.object(acceptance.subprocess, 'run', side_effect=stop), \
+                patch.object(acceptance, 'WINDOWS_INSTALL_TIMEOUT', 60 if process.finish is None else 600):
+            result = acceptance.windows_installer(root / 'installer 한글.exe', root / 'Installed App 한글',
+                                                 root / 'installer-progress.json', 'fixture', check=check)
+        self.assertEqual(launch.call_args.kwargs, {'shell': False})
+        self.assertTrue(launch.call_args.args[0].endswith('/D=' + str(root / 'Installed App 한글')))
+        return result
+
+    def test_progress_and_elapsed_receipt_survive_success(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            result = self.supervise(root, self.Process())
+            self.assertEqual([row['files'] for row in result['progress']], [0, 30, 60])
+            self.assertEqual((result['status'], result['durationSeconds'], result['timeoutSeconds']), ('passed', 65, 600))
+            self.assertEqual(json.loads((root / 'installer-progress.json').read_text())['attempts'], [result])
+
+    def test_nonzero_exit_fails_and_retains_receipt(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.supervise(root, self.Process(finish=1, code=7))
+            result, = json.loads((root / 'installer-progress.json').read_text())['attempts']
+            self.assertEqual((result['status'], result['exitCode']), ('failed', 7))
+
+    def test_expected_copy_failure_is_reported_without_becoming_a_pass(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            result = self.supervise(Path(temporary), self.Process(finish=1, code=1603), check=False)
+            self.assertEqual((result['status'], result['exitCode']), ('failed', 1603))
+
+    def test_continuing_progress_never_extends_deadline_and_only_owned_tree_is_stopped(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(subprocess.TimeoutExpired) as raised:
+                self.supervise(root, self.Process(finish=None))
+            result, = json.loads((root / 'installer-progress.json').read_text())['attempts']
+            self.assertEqual((raised.exception.timeout, result['status'], result['durationSeconds']), (60, 'timed_out', 60))
+            self.assertEqual(result['cleanup'], dict(treeStopSucceeded=True, exitCode=-9))
+            self.assertEqual([row['files'] for row in result['progress']], [0, 30])
+
+    def test_start_failure_replaces_running_status(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / 'installer-progress.json'
+            with patch.object(acceptance.subprocess, 'Popen', side_effect=OSError('fixture')), self.assertRaises(OSError):
+                acceptance.windows_installer(Path('candidate.exe'), Path(temporary), receipt, 'start-failure')
+            self.assertEqual(json.loads(receipt.read_text())['attempts'][0]['status'], 'failed')
+
+    def test_probe_time_is_inside_the_fixed_deadline(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            with self.assertRaises(subprocess.TimeoutExpired):
+                self.supervise(root, self.Process(finish=None), sample_delay=5)
+            result, = json.loads((root / 'installer-progress.json').read_text())['attempts']
+            self.assertEqual(result['durationSeconds'], 60)
+            self.assertEqual([row['elapsedSeconds'] for row in result['progress']], [5, 40])
+
+    def test_receipt_write_failure_still_stops_the_owned_tree_and_preserves_original_error(self):
+        process = self.Process(finish=None)
+        with tempfile.TemporaryDirectory() as temporary, \
+                patch.object(acceptance.subprocess, 'Popen', return_value=process), \
+                patch.object(acceptance, 'installer_progress', return_value=dict(status='unavailable')), \
+                patch.object(acceptance, 'stop_installer', return_value={}) as stop, \
+                patch.object(Path, 'write_text', side_effect=[1, OSError('original write failure'), OSError('secondary'), OSError('secondary')]), \
+                self.assertRaisesRegex(OSError, 'original write failure'):
+            acceptance.windows_installer(Path('candidate.exe'), Path(temporary), Path(temporary) / 'receipt.json', 'disk-full')
+        stop.assert_called_once_with(process)
+
+    def test_success_observed_after_a_probe_exhausts_the_deadline_is_not_accepted(self):
+        process = self.Process(finish=1)
+
+        def delayed_probe(*_args):
+            process.elapsed = 3
+            return dict(status='probe_timeout')
+
+        with tempfile.TemporaryDirectory() as temporary:
+            receipt = Path(temporary) / 'receipt.json'
+            with patch.object(acceptance.subprocess, 'Popen', return_value=process), \
+                    patch.object(acceptance.time, 'monotonic', side_effect=lambda: process.elapsed), \
+                    patch.object(acceptance, 'WINDOWS_INSTALL_TIMEOUT', 3), \
+                    patch.object(acceptance, 'installer_progress', side_effect=delayed_probe), \
+                    self.assertRaises(subprocess.TimeoutExpired):
+                acceptance.windows_installer(Path('candidate.exe'), Path(temporary), receipt, 'late-exit')
+            self.assertEqual(json.loads(receipt.read_text())['attempts'][0]['status'], 'timed_out')
+
+    def test_probe_retains_only_valid_numeric_counters(self):
+        values = dict(files=2, bytes=10, cpuSeconds=0.5, readBytes=4, writeBytes=8)
+        with patch.object(acceptance.subprocess, 'run', return_value=Mock(stdout=json.dumps(dict(values, secret='private')))):
+            self.assertEqual(acceptance.installer_progress(Mock(pid=1), Path('fixture'), 2), dict(values, status='collected'))
+        for response in ('[]', '{}', 'not-json', json.dumps(dict(values, files=-1)), json.dumps(dict(values, bytes=float('nan')))):
+            with self.subTest(response=response), patch.object(acceptance.subprocess, 'run', return_value=Mock(stdout=response)):
+                self.assertEqual(acceptance.installer_progress(Mock(pid=1), Path('fixture'), 2), dict(status='unavailable'))
+
+    def test_diagnostic_timeout_is_recorded_without_changing_the_install_result(self):
+        with patch.object(acceptance.subprocess, 'run', side_effect=subprocess.TimeoutExpired('probe', 2)) as run:
+            self.assertEqual(acceptance.installer_progress(Mock(pid=1), Path('fixture'), 2), dict(status='probe_timeout'))
+        self.assertEqual(run.call_args.kwargs['timeout'], 2)
 
 
 if __name__ == '__main__':

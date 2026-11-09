@@ -2,6 +2,7 @@
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import re
@@ -9,6 +10,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import textwrap
 import zipfile
 
@@ -19,6 +21,132 @@ sys.path.insert(0, str(Path(__file__).parents[1] / 'host-release'))
 from identity import host_identity, macho_code_identity
 sys.path.insert(0, str(Path(__file__).parent))
 from auditedSessions import AuditedSessions
+
+# Current recipe: NSIS extraction plus a second extraction/robocopy repair.
+# Both installs in same-tree CI 42005842920 passed their individual 300s limits.
+# Allow 2x that qualified bound (600s), including probes, never extended by progress.
+WINDOWS_INSTALL_TIMEOUT = 600
+INSTALL_PROGRESS_INTERVAL = 30
+INSTALL_PROBE_TIMEOUT = 5
+
+INSTALL_PROGRESS_PROBE = r"""
+$ErrorActionPreference = 'Stop'
+$p = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $env:STUDIO_INSTALL_PID)
+$files = @(if (Test-Path -LiteralPath $env:STUDIO_INSTALL_DIR) {
+  Get-ChildItem -LiteralPath $env:STUDIO_INSTALL_DIR -Recurse -File -Force -ErrorAction Stop
+})
+$size = ($files | Measure-Object -Property Length -Sum).Sum
+[pscustomobject]@{
+  files = $files.Count; bytes = [double]$size
+  cpuSeconds = ([double]$p.KernelModeTime + [double]$p.UserModeTime) / 10000000
+  readBytes = [double]$p.ReadTransferCount; writeBytes = [double]$p.WriteTransferCount
+} | ConvertTo-Json -Compress
+"""
+
+
+def installer_progress(process, destination, timeout):
+    """Collect bounded numeric diagnostics, without file names or command lines."""
+    try:
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', INSTALL_PROGRESS_PROBE],
+                                env=dict(os.environ, STUDIO_INSTALL_PID=str(process.pid), STUDIO_INSTALL_DIR=str(long_path(destination))),
+                                capture_output=True, text=True, encoding='utf-8', check=True, timeout=timeout)
+        values = json.loads(result.stdout)
+        sample = {key: values[key] for key in ('files', 'bytes', 'cpuSeconds', 'readBytes', 'writeBytes')}
+        if any(type(value) not in (int, float) or not math.isfinite(value) or value < 0 for value in sample.values()):
+            raise ValueError('Invalid installer counters')
+        return dict(sample, status='collected')
+    except subprocess.TimeoutExpired:
+        return dict(status='probe_timeout')
+    except (OSError, subprocess.CalledProcessError, ValueError, KeyError, TypeError):
+        return dict(status='unavailable')
+
+
+def stop_installer(process):
+    """Stop only the owned installer tree; bound cleanup separately from installation."""
+    try:
+        result = subprocess.run(['taskkill', '/PID', str(process.pid), '/T', '/F'],
+                                capture_output=True, timeout=15, check=False)
+        tree_stopped = result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        tree_stopped = False
+    if process.poll() is None:
+        process.kill()
+    process.wait(timeout=5)
+    return dict(treeStopSucceeded=tree_stopped, exitCode=process.returncode)
+
+
+def windows_installer(artifact, destination, receipt_path, phase, check=True):
+    """Supervise the existing NSIS command and retain progress on every exit path."""
+    # /D must remain the final unquoted tail, passed directly to CreateProcess.
+    command = subprocess.list2cmdline([str(artifact), '/S']) + ' /D=' + str(destination)
+    receipt = json.loads(receipt_path.read_text(encoding='utf-8')) if receipt_path.exists() else dict(attempts=[])
+    attempt = dict(phase=phase, status='running', timeoutSeconds=WINDOWS_INSTALL_TIMEOUT,
+                   durationSeconds=0, exitCode=None, progress=[])
+    receipt['attempts'].append(attempt)
+    receipt_path.parent.mkdir(parents=True, exist_ok=True)
+
+    def save():
+        receipt_path.write_text(json.dumps(receipt, indent=2) + '\n', encoding='utf-8')
+
+    process = None
+    failure = None
+    started = time.monotonic()
+    deadline = started + WINDOWS_INSTALL_TIMEOUT
+    next_probe = started
+    save()
+    try:
+        process = subprocess.Popen(command, shell=False)
+        while True:
+            now = time.monotonic()
+            remaining = deadline - now
+            if remaining <= 0:
+                attempt['status'] = 'timed_out'
+                raise subprocess.TimeoutExpired(command, WINDOWS_INSTALL_TIMEOUT)
+            if process.poll() is not None:
+                break
+            if now >= next_probe:
+                sample = installer_progress(process, destination, min(INSTALL_PROBE_TIMEOUT, remaining))
+                sample['elapsedSeconds'] = round(time.monotonic() - started, 3)
+                attempt['progress'].append(sample)
+                save()
+                print('Windows installer progress:', json.dumps(dict(phase=phase, **sample)), flush=True)
+                next_probe = time.monotonic() + INSTALL_PROGRESS_INTERVAL
+                continue
+            try:
+                process.wait(timeout=min(1, remaining, next_probe - now))
+            except subprocess.TimeoutExpired:
+                pass
+        attempt.update(status='passed' if process.returncode == 0 else 'failed', exitCode=process.returncode)
+        if check and process.returncode:
+            raise subprocess.CalledProcessError(process.returncode, command)
+        return attempt
+    except BaseException as error:
+        failure = error
+        if attempt['status'] == 'running':
+            attempt['status'] = 'failed'
+        raise
+    finally:
+        attempt['durationSeconds'] = round(time.monotonic() - started, 3)
+        # A full disk must not leave the installer tree running or mask the
+        # triggering failure. Persist evidence first, but always perform cleanup.
+        try:
+            try:
+                save()
+            except OSError:
+                if failure is None:
+                    raise
+        finally:
+            if process is not None and process.poll() is None:
+                try:
+                    attempt['cleanup'] = stop_installer(process)
+                except (OSError, subprocess.TimeoutExpired):
+                    attempt['cleanup'] = dict(treeStopSucceeded=False)
+                try:
+                    save()
+                except OSError:
+                    if failure is None:
+                        raise
+        print('Windows installer result:', json.dumps({key: value for key, value in attempt.items() if key != 'progress'}), flush=True)
 
 
 # Qualification-only diagnostics never include raw resource bytes or extra filenames.
@@ -120,9 +248,8 @@ def qualify_windows_copy_failure(artifact, directory, report_path):
     report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
     try:
         try:
-            result = subprocess.run('"' + str(artifact) + '" /S /D=' + str(app),
-                                    check=False, timeout=300, shell=False)
-            report['observedExitCode'] = result.returncode
+            result = windows_installer(artifact, app, report_path.with_name('installer-progress.json'), 'copy-failure-probe', check=False)
+            report['observedExitCode'] = result['exitCode']
         finally:
             kernel.CloseHandle(handle)
             if list(app.glob('*ninstall*.exe')):
@@ -130,7 +257,7 @@ def qualify_windows_copy_failure(artifact, directory, report_path):
             elif app.exists():
                 shutil.rmtree(long_path(app))
         report['ownedFailedAppRemoved'] = not app.exists()
-        if result.returncode != 1603 or not report['ownedFailedAppRemoved']:
+        if result['exitCode'] != 1603 or not report['ownedFailedAppRemoved']:
             raise ValueError('Owned locked-file installer did not fail closed and clean up')
         # A second normal installation runs at this exact artifact/location.
         assert_windows_install_unused()
@@ -142,7 +269,7 @@ def qualify_windows_copy_failure(artifact, directory, report_path):
         report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 
 
-def installed(artifact, directory):
+def installed(artifact, directory, installer_receipt=None):
     """Return executable/payload/app/format after installing only the owned candidate."""
     if sys.platform == 'darwin':
         mount = directory / 'mount'
@@ -159,9 +286,7 @@ def installed(artifact, directory):
     if sys.platform == 'win32':
         assert_windows_install_unused()
         app = directory / 'AionUi'
-        # NSIS /D is the final, unquoted tail. CreateProcess receives this command
-        # directly (no cmd/shell), preserving spaces and Unicode without expansion.
-        subprocess.run('"' + str(artifact) + '" /S /D=' + str(app), check=True, timeout=300, shell=False)
+        windows_installer(artifact, app, installer_receipt or directory / 'installer-progress.json', 'clean-install')
         return app / 'AionUi.exe', long_path(app / 'resources/studio-preview'), app, 'nsis', None
     package = subprocess.check_output(['dpkg-deb', '--field', str(artifact), 'Package'], text=True).strip()
     if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]*', package):
@@ -201,6 +326,9 @@ def main(args):
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'status': 'running'}) + '\n', encoding='utf-8')
+    installer_receipt = output.with_name('installer-progress.json')
+    if sys.platform == 'win32':
+        installer_receipt.write_text(json.dumps({'attempts': []}) + '\n', encoding='utf-8')
     if sys.platform == 'linux' and os.geteuid() == 0:
         raise ValueError('Run the GUI qualifier as an unprivileged user')
     artifact = args.artifact or args.dmg
@@ -222,7 +350,7 @@ def main(args):
         copy_failure_report = output.with_name('installer-copy-failure.json')
         if sys.platform == 'win32':
             qualify_windows_copy_failure(artifact, directory, copy_failure_report)
-        executable, payload, app, kind, package = installed(artifact, directory)
+        executable, payload, app, kind, package = installed(artifact, directory, installer_receipt)
         try:
             if not executable.is_file():
                 raise ValueError('Installer did not produce its expected executable')
@@ -382,6 +510,7 @@ def main(args):
                           installedUi=json.loads((ROOT / '.local/studio-provider/host.json').read_text(encoding='utf-8')),
                           installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
                           installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
+                          windowsInstaller=(json.loads(installer_receipt.read_text(encoding='utf-8')) if sys.platform == 'win32' else None),
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if sys.platform == 'linux':
                 report.update(outboundScope='host-and-installed-native-process-trees',
