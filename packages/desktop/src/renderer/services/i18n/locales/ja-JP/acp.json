@@ -28,5 +28,24 @@
   "config": {
     "reasoning_effort": "推論の深さ",
     "default": "デフォルト"
+  },
+  "subagents": {
+    "title": "サブエージェント",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "エージェント",
+    "unavailable": "—",
+    "tool": "ツール: {{value}}",
+    "elapsed": "経過: {{value}}秒",
+    "elapsedHint": "ランタイムが最後に報告した経過時間",
+    "tokens": "トークン: {{value}}",
+    "cost": "コスト: {{value}}",
+    "states": {
+      "starting": "起動中",
+      "running": "実行中",
+      "done": "完了",
+      "error": "失敗",
+      "stopped": "停止",
+      "unknown": "不明"
+    }
   }
 }

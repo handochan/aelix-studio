@@ -10,6 +10,8 @@ import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/co
 import { normalizeToolMessages, hasRunningToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
+import SubagentProgressPanel from '../acp/SubagentProgress';
+import { parseSubagentProgress } from '../acp/SubagentProgress/parser';
 import './MessageToolGroupSummary.css';
 
 const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
@@ -28,9 +30,15 @@ const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
   }
 };
 
-const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
+const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }> = ({ item, subagents }) => {
   const { t } = useTranslation();
-  const [expanded, setExpanded] = useState(false);
+  const interrupted =
+    parseSubagentProgress(subagents)?.children.some((child) => child.state === 'stopped' || child.state === 'error') ??
+    false;
+  const [expanded, setExpanded] = useState(interrupted);
+  useEffect(() => {
+    if (interrupted) setExpanded(true);
+  }, [interrupted]);
   const [fullItem, setFullItem] = useState<NormalizedToolCall | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -50,7 +58,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
     [messageApi, t]
   );
 
-  const loadFullItem = async () => {
+  const loadFullItem = useCallback(async () => {
     if (!item.truncated || fullItem || loadingFull || !item.conversationId || !item.messageId) return;
     setLoadingFull(true);
     setLoadError(false);
@@ -61,12 +69,17 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
       });
       const next = normalizeToolMessages([message as ToolMessage]).find((candidate) => candidate.key === item.key);
       if (next) setFullItem(next);
+      else setLoadError(true);
     } catch {
       setLoadError(true);
     } finally {
       setLoadingFull(false);
     }
-  };
+  }, [item, fullItem, loadingFull]);
+
+  useEffect(() => {
+    if (expanded && item.truncated && !loadError) void loadFullItem();
+  }, [expanded, item.truncated, loadError, loadFullItem]);
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded;
@@ -75,7 +88,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
   };
 
   return (
-    <div className='flex flex-col'>
+    <div className='flex flex-col' data-tool-call-id={item.key}>
       {messageContext}
       <div className='flex flex-row color-#86909C gap-12px items-center'>
         <Badge status={statusToBadge(item.status)} className={item.status === 'running' ? 'badge-breathing' : ''} />
@@ -98,6 +111,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
           </span>
         )}
       </div>
+      <SubagentProgressPanel value={subagents} />
       {expanded && hasDetail && (
         <div className='tool-detail-panel m-l-20px m-t-4px'>
           {loadingFull && <div className='tool-detail-label'>Loading...</div>}
@@ -142,11 +156,23 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall }> = ({ item }) => {
 
 const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messages }) => {
   const hasRunning = hasRunningToolMessages(messages);
-  const [showMore, setShowMore] = useState(hasRunning);
+  const subagentsByCall = useMemo(
+    () =>
+      new Map<string, unknown>(
+        messages.flatMap((message) =>
+          message.type === 'acp_tool_call' && message.content?.update
+            ? [[message.content.update.tool_call_id, message.content._meta?.['aelix/subagents']] as const]
+            : []
+        )
+      ),
+    [messages]
+  );
+  const hasSubagents = [...subagentsByCall.values()].some((value) => parseSubagentProgress(value) !== null);
+  const [showMore, setShowMore] = useState(hasRunning || hasSubagents);
 
   useEffect(() => {
-    if (hasRunning) setShowMore(true);
-  }, [hasRunning]);
+    if (hasRunning || hasSubagents) setShowMore(true);
+  }, [hasRunning, hasSubagents]);
 
   const tools = useMemo(() => normalizeToolMessages(messages), [messages]);
 
@@ -164,7 +190,7 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messag
       {showMore && (
         <div className='tool-group-summary__body'>
           {tools.map((item) => (
-            <ToolItemDetail key={item.key} item={item} />
+            <ToolItemDetail key={item.key} item={item} subagents={subagentsByCall.get(item.key)} />
           ))}
         </div>
       )}

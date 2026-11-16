@@ -1,0 +1,108 @@
+{
+  "status": "partial-acceptance-blocked-on-cancelled-tool-result",
+  "date": "2026-11-17",
+  "hostTag": "host-v0.2.2-aelix.4",
+  "nativeCommit": "e19ab55e17e871a40356fc9802f3f6669ca727de",
+  "acpCommit": "16d6555b08825d1d63c3b082de2b10a1152562c0",
+  "provider": "synthetic loopback",
+  "realProvider": false,
+  "installer": false,
+  "checksPassed": [
+    "two_children_live_state_and_current_tool",
+    "completed_children_usage_and_cost",
+    "ui_cancel_stops_children",
+    "chat_requested_stopped_child_resume_in_new_call",
+    "native_child_failure_visible",
+    "reload_restores_metadata",
+    "post_delegation_strict_inventory_unchanged"
+  ],
+  "fullAcceptanceExitCode": 1,
+  "missingAcceptance": "Immediate stopped-child work is absent from the parent tool result",
+  "cancelledTool": {
+    "status": "in_progress",
+    "content": [
+      {
+        "type": "content",
+        "content": {
+          "type": "text",
+          "text": "[1/2] agent reviewer [stopped] \u00b7 5s\n[2/2] agent reviewer [stopped] \u00b7 5s"
+        }
+      }
+    ],
+    "children": [
+      {
+        "id": "sub-1735009c714d",
+        "profile": "reviewer",
+        "state": "stopped",
+        "currentTool": null,
+        "model": "one",
+        "provider": "fixture",
+        "event": "subagent_end",
+        "elapsedMs": 5392,
+        "tokens": 20,
+        "cost": 0
+      },
+      {
+        "id": "sub-feca9007670d",
+        "profile": "reviewer",
+        "state": "stopped",
+        "currentTool": null,
+        "model": "one",
+        "provider": "fixture",
+        "event": "subagent_end",
+        "elapsedMs": 5385,
+        "tokens": 20,
+        "cost": 0
+      }
+    ]
+  },
+  "resume": {
+    "action": "resume",
+    "stoppedNativeSessionId": "02ffc1d0-8ab5-48a2-98a4-35e31eb9ce56",
+    "children": [
+      {
+        "id": "sub-a7a85dc4a647",
+        "profile": "reviewer",
+        "state": "done",
+        "currentTool": null,
+        "model": "one",
+        "provider": "fixture",
+        "event": "subagent_end",
+        "elapsedMs": 2330,
+        "tokens": 20,
+        "cost": 0
+      }
+    ],
+    "renderedUnderNewParentCall": true,
+    "linkedToPreviousRow": false
+  },
+  "runtimeImmutability": {
+    "incomingBytecodeSetting": "0",
+    "launcherOverride": "1",
+    "afterCompletionCancellationResumeAndFailure": "strict inventory passed",
+    "manifestSha256": "a1810a352898f86cb57fbcfb221e1a202a1363a09f1c542cd23f1ae76fcfb087"
+  },
+  "knownLimitation": "Progress IDs change on resume; metadata v1 has no child Session UUID or resume link. Same-row continuity is not required.",
+  "independentReview": "Two UI should-fix findings repaired and regression-tested; native/ACP cancellation-result gap independently confirmed.",
+  "notAccepted": [
+    "immediate stopped-child partial-result display",
+    "partial-result restoration after reopen",
+    "real provider",
+    "new-head five-target CI until completion"
+  ],
+  "localValidation": {
+    "vitestFilesPassed": 537,
+    "vitestTestsPassed": 5178,
+    "vitestTestsSkipped": 7,
+    "pythonTests": 219,
+    "pythonSkipped": 9,
+    "newModuleLineCoveragePercent": 100,
+    "newModuleBranchCoveragePercent": 97.72,
+    "typescript": "passed",
+    "lint": "passed with existing warnings",
+    "i18n": "passed",
+    "electronBuild": "passed"
+  },
+  "acceptanceProbe": "scripts/studio-preview/host-release/subagentSmoke.mjs",
+  "probeIncludesCompletedWorkBeforeCancellation": true
+}

@@ -28,5 +28,24 @@
   "config": {
     "reasoning_effort": "推理深度",
     "default": "默认"
+  },
+  "subagents": {
+    "title": "子代理",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "代理",
+    "unavailable": "—",
+    "tool": "工具：{{value}}",
+    "elapsed": "耗时：{{value}} 秒",
+    "elapsedHint": "运行时最后报告的耗时",
+    "tokens": "令牌：{{value}}",
+    "cost": "费用：{{value}}",
+    "states": {
+      "starting": "启动中",
+      "running": "运行中",
+      "done": "已完成",
+      "error": "失败",
+      "stopped": "已停止",
+      "unknown": "未知"
+    }
   }
 }

@@ -1,4 +1,11 @@
-# Studio #31 contract fixtures and preflight checkpoints
+# Studio #31 contract fixtures and validation
+
+Current scope after the coordinator correction: a resumed run renders under its
+new `agent` call. No cross-call row linking, result-text inference, contract
+change or pin change is required. The independent progress panel and inherited
+bytecode protection are implemented. Actual acceptance remains blocked only on
+immediate stopped-child work results, which the current native/ACP wire does
+not publish. Historical checkpoints below are retained as dated evidence.
 
 `frames.json` freezes `_meta["aelix/subagents"]` version 1 before renderer work.
 The canonical source is ACP
@@ -143,7 +150,7 @@ host and Electron probes with a synthetic loopback model:
   child ID changes from `sub-572cb34b2228` to `sub-1c30c67a5a2b` under a new
   parent call. This is not stopped-child resume or cancellation acceptance.
 
-### S2 continuity contract blocker
+### Historical S2 continuity stop (same-row requirement withdrawn)
 
 Pinned native `aelix_agents/runtime.py` allocates a new `spawn_id` with
 `_new_id()` for every run, including resume. Its receipt has a `resumes` link,
@@ -177,3 +184,82 @@ reopening/restoration, stopped-child resume, and same-row continuity remain
 unimplemented or unverified. No real-provider call, local five-target install
 or whole-app outbound audit was performed. This checkpoint does not complete
 Issue #31.
+
+## Renderer implementation and current acceptance
+
+`SubagentProgress` is an independent renderer module with one input:
+`message.content._meta["aelix/subagents"]`. It does not import the conversation
+store, IPC or native APIs. The actual message list renders generic ACP tools
+through `MessageToolGroupSummary`, so the panel is attached below each
+normalized tool header there. Metadata is selected by that parent tool-call ID;
+new resume calls retain their own new rows. No state was added to an Aion or
+global store. Interrupted results open automatically, including full-message
+loading for compact history. Existing tool input/output remains the parent
+call's result display.
+
+The parser handles absent/invalid data, unknown fields and versions, duplicate
+IDs, invalid metrics and the 32-child bound. Unknown versions render the
+ordinary tool view. Text is bounded and rendered as text, zero metrics are
+preserved, token counts are formatted as exact integers, and labels use all
+configured locales. Elapsed time is the latest reported runtime snapshot.
+
+Both Studio runtime entrypoints force `PYTHONDONTWRITEBYTECODE=1`; the Python
+entrypoint also sets `sys.dont_write_bytecode`. The existing installed smoke
+challenges this with an incoming value of `0`, delegates to two real native
+children, and compares the entire payload inventory. A descendant-interpreter
+unit test guards the direct Python entrypoint. Local actual Electron/native
+execution now leaves strict bundle inventory unchanged, including after
+cancellation and resume. Native and ACP source/wheels/pins are unmodified.
+
+Run the source-app acceptance probe after building Electron and the payload:
+
+```sh
+node scripts/studio-preview/host-release/subagentSmoke.mjs \
+  --runtime <payload> --prepared <prepared-runtime> --output <report-directory>
+```
+
+The probe deliberately keeps its full-acceptance assertion failing while the
+upstream partial-result gap below remains. It records all independent checks
+before that assertion, plus actual wire frames and screenshots. This is not a
+passing full S1 acceptance test.
+
+### Current blocker: cancelled work is not emitted as a tool result
+
+Actual aelix.4 host + bundled native + Electron, synthetic loopback model:
+
+- Two running children, current `bash` tool, reported usage and completion render.
+- UI Stop makes both child states `stopped`; the turn becomes idle.
+- On the next chat request, the model receives native's queued cancellation
+  report and calls `agent action=resume` for a stopped child. The new call's new
+  child row reaches `done`. No UI row linking or UI result-string parser exists.
+- Native child failure renders `error`; page reload restores the persisted
+  stopped/error/resumed metadata.
+- After the app closes, the full runtime inventory is identical and the strict
+  packaging verifier passes.
+
+But the cancelled parent call retains only two `[stopped]` progress lines,
+without its children's work. Pinned native's `CancelledError` path queues that
+report with `api.send_message(..., trigger_turn=False)` for the **next model
+turn**, then propagates cancellation without returning a `ToolResult`. The
+richer TUI linger display is separate. No `tool_execution_end` containing the
+cancelled work reaches ACP, so a full-message fetch cannot recover it. Its
+pending queue is memory-only, not a persisted UI result.
+
+An independent read-only source/wire review confirmed this gap. Emitting a
+standard cancelled-tool result needs native/ACP ownership and pin approval,
+which are excluded. No automatic follow-up model call or direct child-JSONL
+read was added. Immediate partial-result display and its history restoration
+therefore remain unaccepted; Issue #31 is not complete.
+
+`uiAcceptance.json` records the observed acceptance split. Same-row continuity
+is only a known limitation: resume creates a new progress ID and metadata v1
+has no child Session UUID or resume link. It is no longer a blocker or a
+requirement for this PR. S3 and new resume controls remain excluded.
+
+Current local checks: full Vitest 537 files / 5,178 tests passed (7 skipped),
+preview Python 219 tests (9 skipped), TypeScript/lint/format/i18n/build passed.
+The new renderer module has 100% line and 97.72% branch coverage in focused
+coverage validation. The actual Electron acceptance probe records seven passed
+checks and exits 1 for the missing immediate cancelled-work result. Its fixture
+includes completed assistant work before cancellation, rather than requiring
+only an unfinished streaming delta to survive.

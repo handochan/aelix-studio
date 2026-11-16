@@ -28,5 +28,24 @@
   "config": {
     "reasoning_effort": "추론 깊이",
     "default": "기본값"
+  },
+  "subagents": {
+    "title": "서브에이전트",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "에이전트",
+    "unavailable": "—",
+    "tool": "도구: {{value}}",
+    "elapsed": "경과: {{value}}초",
+    "elapsedHint": "runtime이 마지막으로 보고한 경과 시간",
+    "tokens": "토큰: {{value}}",
+    "cost": "비용: {{value}}",
+    "states": {
+      "starting": "시작 중",
+      "running": "실행 중",
+      "done": "완료",
+      "error": "실패",
+      "stopped": "중지됨",
+      "unknown": "알 수 없음"
+    }
   }
 }

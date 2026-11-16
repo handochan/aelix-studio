@@ -28,5 +28,24 @@
   "config": {
     "reasoning_effort": "Denkaufwand",
     "default": "Standard"
+  },
+  "subagents": {
+    "title": "Unteragenten",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Agent",
+    "unavailable": "—",
+    "tool": "Werkzeug: {{value}}",
+    "elapsed": "Dauer: {{value}} s",
+    "elapsedHint": "Zuletzt von der Laufzeit gemeldete Dauer",
+    "tokens": "Tokens: {{value}}",
+    "cost": "Kosten: {{value}}",
+    "states": {
+      "starting": "Startet",
+      "running": "Läuft",
+      "done": "Abgeschlossen",
+      "error": "Fehlgeschlagen",
+      "stopped": "Gestoppt",
+      "unknown": "Unbekannt"
+    }
   }
 }
