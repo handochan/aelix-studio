@@ -13,6 +13,8 @@ pygments>=2.18
 markdown-it-py>=3.0
 # Native agent tool imports rich.cells outside the tui extra (aelix-ai #797).
 rich>=13.7,<15
+# Native agent panel imports wcwidth outside the tui extra (aelix-ai #797).
+wcwidth>=0.3.0
 packaging>=23
 mcp>=1.27,<2
 Pillow>=11.0,<12.0

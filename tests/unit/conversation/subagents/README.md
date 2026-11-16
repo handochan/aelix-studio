@@ -15,9 +15,11 @@ The canonical source is ACP
   update envelope and completed child state. The frozen snapshots are contract
   examples, not captured provider output or evidence of UI acceptance.
 
-Each frame's children array is a complete snapshot. Resume retains the child ID
-but changes the parent call ID. The earlier parent's last snapshot remains in
-history. Cross-call display continuity is still unimplemented and unverified.
+Each frame's children array is a complete snapshot. The tracker-only resume
+example supplies the same child ID to a new parent call. It does not establish
+that native emits the same ID on resume. Actual pinned-native observations
+below show new progress IDs, so this example must not be used as evidence of
+cross-call row continuity.
 
 ## Preflight blocker (2026-11-16)
 
@@ -115,3 +117,63 @@ metadata delivery to the renderer, cancellation/partial results, reload and
 resume continuity remain unverified. Decide the additional dependency scope
 before rebuilding and repeating import → actual host → renderer validation.
 CI workflows, host/ACP/native code and all pins remain unchanged.
+
+## Wcwidth addition and native metadata preflight (2026-11-17)
+
+The user extended approval to the native `tui` extra and requested adding
+`wcwidth>=0.3.0` now. The lock adds only `wcwidth==0.9.4`; every previous
+requirement, version, marker and hash is unchanged. Both required bundled
+imports (`aelix_agents.tool` and `aelix_agents.panel`) pass. `prompt-toolkit`
+was not needed by these imports and was not added. Rich and Wcwidth LICENSE
+files are included in the generated payload inventory. Native/ACP wheel
+hashes, host and pins are unchanged. Preparation reused the same verified
+standalone CPython as described above.
+
+`nativePreflight.json` and `nativeFrames.json` record actual released aelix.4
+host and Electron probes with a synthetic loopback model:
+
+- The model is advertised `agent`, two children complete, and their progress
+  metadata persists in **`message.content._meta`**, outside `content.update`.
+- An actual Electron send reaches the same native path. React inspection of
+  the existing `MessageToolGroupSummary` messages prop finds this metadata.
+  The current message list routes calls through that summary, so a direct
+  `MessageAcpToolCall` connection and a new progress panel are still unimplemented.
+- A synthetic model calls native `agent action=resume` for a **completed**
+  child's Session UUID. Native continues that same session, but its metadata
+  child ID changes from `sub-572cb34b2228` to `sub-1c30c67a5a2b` under a new
+  parent call. This is not stopped-child resume or cancellation acceptance.
+
+### S2 continuity contract blocker
+
+Pinned native `aelix_agents/runtime.py` allocates a new `spawn_id` with
+`_new_id()` for every run, including resume. Its receipt has a `resumes` link,
+but the progress wire and pinned ACP snapshot do not expose it. Metadata v1
+has neither the child Session UUID nor `resumes`/`previousId`/another linking
+key. The outer `content.session_id` is the parent ACP session and cannot
+identify the child. Both original children share profile/model/provider, so
+matching those values or list order is ambiguous.
+
+The user's UI input is one `_meta` value, and S2 requires continuing the same
+child row. Result-text `Session:` parsing or `raw_input.id` would leave that
+input contract. An independent read-only review confirmed this gap in the
+actual frames and pinned source. Preserving the same-row requirement needs a
+metadata continuity contract and associated native/ACP pin approval. Those
+changes are excluded, so implementation stopped at this boundary; no renderer
+source, global store, S3 or new resume control was added.
+
+### Inventory boundary
+
+A fresh generated payload passes the existing strict identity/recipe/full
+inventory verifier. During the initial live probes, native child processes
+created 2,230 bytecode cache files in the executed payload; no existing
+inventory entry changed. The strict post-delegation inventory check therefore
+fails on the extra caches. The executed payload is preserved and this limit is
+recorded separately from the fresh-payload verification. No runtime or native
+code was patched to suppress it; post-delegation bundle immutability remains
+unqualified.
+
+The parser/component panel, live progress display, cancellation/partial results,
+reopening/restoration, stopped-child resume, and same-row continuity remain
+unimplemented or unverified. No real-provider call, local five-target install
+or whole-app outbound audit was performed. This checkpoint does not complete
+Issue #31.

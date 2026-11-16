@@ -8,7 +8,8 @@
       "tests/test_subagents.py",
       "tests/test_native_runtime.py"
     ],
-    "method": "The documented frame is copied from studio-integration.md. Other frames use pinned SubagentTracker with progress() from pinned tests; stopped/error/two-child frames extend the documented state enum. Not a provider capture."
+    "method": "The documented frame is copied from studio-integration.md. Other frames use pinned SubagentTracker with progress() from pinned tests; stopped/error/two-child frames extend the documented state enum. Not a provider capture.",
+    "limitation": "The tracker resume sample supplies the same child ID. Actual pinned native resume emits a new progress ID without a continuity key; see nativeFrames.json and nativePreflight.json."
   },
   "frames": [
     {
