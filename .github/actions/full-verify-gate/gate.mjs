@@ -43,8 +43,10 @@ export const SKIP_PATHS = [
  * inside the skip set but always run.
  *
  * `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives the first two kinds from the source
- * (the import closure of the non-renderer code and the paths the build configuration names) and
- * fails until a new one is listed here or in `ACCEPTED_MAIN_BUNDLE_DATA`.
+ * (the import closure of the non-renderer code and of the build configuration, and the paths the
+ * build configuration names) and fails until a new one is listed here or in
+ * `ACCEPTED_MAIN_BUNDLE_DATA`. It catches what ordinary development adds; it does not defeat
+ * deliberate circumvention or see non-literal dynamic imports and paths computed at runtime.
  */
 export const FORCED_PATHS = [
   {
@@ -84,7 +86,7 @@ export const ACCEPTED_MAIN_BUNDLE_DATA = [
   {
     pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/*.json',
     reason:
-      'translation text only (settings.json is forced above); the always-on I18n Check and typecheck validate it on every pull request and the daily run on main covers the rest',
+      'translation text only (settings.json is forced above); the always-on I18n Check parses it on every pull request that changes it, and the daily run on main covers the rest',
   },
 ];
 

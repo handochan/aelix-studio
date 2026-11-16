@@ -1,11 +1,19 @@
 /**
  * The full-verification gate skips pull requests that only change renderer code. That is safe only
  * while every renderer file that is more than a screen is listed as forced. These tests derive such
- * files from the source instead of trusting the list: the import closure of the non-renderer code,
- * and the renderer paths that the build configuration and the verification harness name.
+ * files from the source instead of trusting the list: the import closure of the non-renderer code
+ * and of the build configuration, and the renderer paths that the build configuration and the
+ * verification harness name.
+ *
+ * What this does not guarantee: it catches a dependency that ordinary development adds (a new
+ * import, a new copy target, a new literal path in a config or harness script). It does not try to
+ * defeat deliberate circumvention, and it cannot see a dynamic import whose argument is not a
+ * literal or a path computed at runtime. The daily run on main and release-candidate verification
+ * cover what it cannot see. The suite is skipped on Windows; the ubuntu and macOS unit-test jobs
+ * run it.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve, sep } from 'node:path';
 import { build, stop } from 'esbuild';
 import yaml from 'js-yaml';
@@ -33,6 +41,8 @@ vi.mock('vite-plugin-static-copy', () => ({
 
 const projectRoot = resolve(__dirname, '../../..');
 const RENDERER = 'packages/desktop/src/renderer';
+// Build configuration that is executed, not bundled. What it imports is traced like source code.
+const BUILD_CONFIG_ENTRIES = ['packages/desktop/electron.vite.config.ts'];
 const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
 const NOT_BUNDLED = /\.(?:test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/;
 const TEXT_FILE = /\.(?:[cm]?[jt]sx?|json|ya?ml|py|sh|ps1|nsh)$/;
@@ -99,11 +109,13 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
     aliases = { ...config.preload.resolve?.alias, ...config.main.resolve?.alias };
 
     // Every non-renderer module the main, preload and builtin-MCP bundles can be built from is a
-    // root, so the result does not depend on knowing the entry points.
+    // root, so the result does not depend on knowing the entry points. The build configuration is
+    // a root as well, which also covers what it imports, such as uno.config.ts.
     roots = [
       ...filesUnder('packages/desktop/src').filter((file) => !file.startsWith(`${RENDERER}/`)),
       ...filesUnder('packages/web-host/src'),
       ...filesUnder('packages/shared-scripts/src'),
+      ...BUILD_CONFIG_ENTRIES,
     ].filter((file) => SOURCE_FILE.test(file) && !NOT_BUNDLED.test(file));
 
     const result = await build({
@@ -121,6 +133,8 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
       platform: 'node',
       format: 'esm',
       packages: 'external',
+      // Report each file at the path it was imported by, not at the target of a symlink.
+      preserveSymlinks: true,
       logLevel: 'silent',
       // Directory aliases of the build. An alias that points at one file is checked separately.
       alias: Object.fromEntries(Object.entries(aliases).filter(([, target]) => kindOf(target) === 'directory')),
@@ -152,7 +166,7 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
       );
 
       expect(entries).toContain('packages/desktop/src/index.ts');
-      expect(roots).toEqual(expect.arrayContaining(entries));
+      expect(roots).toEqual(expect.arrayContaining([...entries, ...BUILD_CONFIG_ENTRIES]));
     });
 
     // Guards against an empty closure that would make the next test pass without checking anything.
@@ -176,6 +190,14 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
       expect(leaked).toEqual([]);
     });
 
+    // The closure is resolved with one alias table, which is only right while the sections agree.
+    it('uses the same target for an alias in the main and preload builds', () => {
+      const main = config.main.resolve?.alias ?? {};
+      const preload = config.preload.resolve?.alias ?? {};
+
+      expect(Object.keys(preload).filter((key) => key in main && main[key] !== preload[key])).toEqual([]);
+    });
+
     it('is forced or accepted as data, file by file', () => {
       const unclassified = closure.filter((file) => !isForced(file) && !acceptedMainBundleData(file));
 
@@ -189,6 +211,15 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
 
       expect(accepted.filter((file) => SOURCE_FILE.test(file))).toEqual([]);
       expect(accepted.length).toBeGreaterThan(0);
+    });
+
+    // A symlink at a data path could point at module code, so accepted data must be the file itself.
+    it('accepts regular files only, not symlinks', () => {
+      const accepted = [...new Set([...closure, ...rendererFiles])].filter(
+        (file) => !isForced(file) && acceptedMainBundleData(file)
+      );
+
+      expect(accepted.filter((file) => !lstatSync(resolve(projectRoot, file)).isFile())).toEqual([]);
     });
 
     it.each(ACCEPTED_MAIN_BUNDLE_DATA)('still needs the accepted entry $pattern', ({ pattern }) => {

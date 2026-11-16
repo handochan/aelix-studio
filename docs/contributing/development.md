@@ -263,7 +263,11 @@ Full verification is the expensive tier: the five-target Provider Preview instal
 - unit tests (`tests/unit/**`);
 - docs (`docs/**` and root-level Markdown).
 
-The skip set is `SKIP_PATHS` in `.github/actions/full-verify-gate/gate.mjs`, and the renderer exceptions are `FORCED_PATHS` beside it. Translation JSON other than `settings.json` stays skippable although the main-process bundle includes it; it is listed as accepted data in `ACCEPTED_MAIN_BUNDLE_DATA`. `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives what the non-renderer code imports from the renderer tree and which renderer paths the build configuration names, and fails until a new one is forced or accepted. Anything else runs, including a new directory and a pull request whose changed files cannot be listed. Full verification also runs:
+The skip set is `SKIP_PATHS` in `.github/actions/full-verify-gate/gate.mjs`, and the renderer exceptions are `FORCED_PATHS` beside it. Translation JSON other than `settings.json` stays skippable although the main-process bundle includes it; it is listed as accepted data in `ACCEPTED_MAIN_BUNDLE_DATA`. `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives what the non-renderer code and the build configuration import from the renderer tree and which renderer paths the build configuration names, and fails until a new one is forced or accepted.
+
+What that test does not guarantee: it catches a dependency that ordinary development adds, such as a new import from non-renderer code or the build configuration, a new copy target, or a new literal path in a config or harness script. It does not try to defeat deliberate circumvention, and it cannot see a dynamic import whose argument is not a literal or a path computed at runtime. The daily run on `main` and release-candidate verification cover what it cannot see. The test is skipped on Windows; the ubuntu and macOS unit-test jobs run it.
+
+Anything outside the skip set runs, including a new directory and a pull request whose changed files cannot be listed. Full verification also runs:
 
 - when the pull request carries the `full-verify` label (adding the label starts a run);
 - when the workflow is started manually (`workflow_dispatch`);
