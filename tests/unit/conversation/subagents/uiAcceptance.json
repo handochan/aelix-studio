@@ -31,44 +31,46 @@
     ],
     "children": [
       {
-        "id": "sub-1735009c714d",
+        "id": "sub-9cf66d2c180d",
         "profile": "reviewer",
         "state": "stopped",
         "currentTool": null,
         "model": "one",
         "provider": "fixture",
         "event": "subagent_end",
-        "elapsedMs": 5392,
+        "elapsedMs": 5382,
         "tokens": 20,
         "cost": 0
       },
       {
-        "id": "sub-feca9007670d",
+        "id": "sub-5362aec9186b",
         "profile": "reviewer",
         "state": "stopped",
         "currentTool": null,
         "model": "one",
         "provider": "fixture",
         "event": "subagent_end",
-        "elapsedMs": 5385,
+        "elapsedMs": 5372,
         "tokens": 20,
         "cost": 0
       }
-    ]
+    ],
+    "parentBusyIndicatorVisible": false,
+    "statusOverrideIsPresentationOnly": true
   },
   "resume": {
     "action": "resume",
-    "stoppedNativeSessionId": "02ffc1d0-8ab5-48a2-98a4-35e31eb9ce56",
+    "stoppedNativeSessionId": "df644c7c-59ea-4b8c-ad84-6c989a9a1e88",
     "children": [
       {
-        "id": "sub-a7a85dc4a647",
+        "id": "sub-b90315e53fd6",
         "profile": "reviewer",
         "state": "done",
         "currentTool": null,
         "model": "one",
         "provider": "fixture",
         "event": "subagent_end",
-        "elapsedMs": 2330,
+        "elapsedMs": 2022,
         "tokens": 20,
         "cost": 0
       }
@@ -83,7 +85,7 @@
     "manifestSha256": "a1810a352898f86cb57fbcfb221e1a202a1363a09f1c542cd23f1ae76fcfb087"
   },
   "knownLimitation": "Progress IDs change on resume; metadata v1 has no child Session UUID or resume link. Same-row continuity is not required.",
-  "independentReview": "Two UI should-fix findings repaired and regression-tested; native/ACP cancellation-result gap independently confirmed.",
+  "independentReview": "Three presentation findings repaired and regression-tested; native/ACP cancellation-result gap independently confirmed.",
   "notAccepted": [
     "immediate stopped-child partial-result display",
     "partial-result restoration after reopen",
@@ -92,7 +94,7 @@
   ],
   "localValidation": {
     "vitestFilesPassed": 537,
-    "vitestTestsPassed": 5178,
+    "vitestTestsPassed": 5180,
     "vitestTestsSkipped": 7,
     "pythonTests": 219,
     "pythonSkipped": 9,

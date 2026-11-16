@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import { getAcpImageFileName } from '@/common/chat/acpToolCallOutput';
 import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/common/chat/normalizeToolCall';
-import { normalizeToolMessages, hasRunningToolMessages } from '@/common/chat/normalizeToolCall';
+import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
 import SubagentProgressPanel from '../acp/SubagentProgress';
@@ -155,7 +155,6 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }
 };
 
 const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messages }) => {
-  const hasRunning = hasRunningToolMessages(messages);
   const subagentsByCall = useMemo(
     () =>
       new Map<string, unknown>(
@@ -168,13 +167,26 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messag
     [messages]
   );
   const hasSubagents = [...subagentsByCall.values()].some((value) => parseSubagentProgress(value) !== null);
+  const tools = useMemo(
+    () =>
+      normalizeToolMessages(messages).map((item) => {
+        const progress = parseSubagentProgress(subagentsByCall.get(item.key));
+        // Native cancellation may end the children without a final parent tool frame.
+        const stopped =
+          progress?.children.some((child) => child.state === 'stopped') &&
+          progress.children.every(
+            (child) => child.state === 'done' || child.state === 'error' || child.state === 'stopped'
+          );
+        return item.status === 'running' && stopped ? { ...item, status: 'canceled' as const } : item;
+      }),
+    [messages, subagentsByCall]
+  );
+  const hasRunning = tools.some((item) => item.status === 'running');
   const [showMore, setShowMore] = useState(hasRunning || hasSubagents);
 
   useEffect(() => {
     if (hasRunning || hasSubagents) setShowMore(true);
   }, [hasRunning, hasSubagents]);
-
-  const tools = useMemo(() => normalizeToolMessages(messages), [messages]);
 
   return (
     <div className='tool-group-summary'>

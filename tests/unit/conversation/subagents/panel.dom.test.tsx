@@ -106,6 +106,25 @@ describe('subagent progress display', () => {
     expect(await screen.findByText('FULL_INTERRUPTED_RESULT')).toBeInTheDocument();
   });
 
+  it('stops parent busy indicators when all children ended and a child stopped', () => {
+    const saved = message(value('stopped'));
+    saved.content.update.status = 'in_progress';
+    const { container } = render(<MessageToolGroupSummary messages={[saved]} />);
+    expect(container.querySelector('.tool-group-summary__header .arco-spin')).toBeNull();
+    expect(container.querySelector('.arco-badge-status-processing')).toBeNull();
+  });
+
+  it('keeps the parent busy while a sibling is still running', () => {
+    const snapshot = value('stopped');
+    const saved = message({
+      ...snapshot,
+      children: snapshot.children.map((child, index) => (index === 0 ? { ...child, state: 'running' } : child)),
+    });
+    saved.content.update.status = 'in_progress';
+    const { container } = render(<MessageToolGroupSummary messages={[saved]} />);
+    expect(container.querySelector('.tool-group-summary__header .arco-spin')).not.toBeNull();
+  });
+
   it('renders a resumed run under its new parent call without linking progress IDs', () => {
     const calls = native.frames.filter((frame) => frame.scenario === 'completedChildResumed');
     const old = calls[0].content._meta['aelix/subagents'];

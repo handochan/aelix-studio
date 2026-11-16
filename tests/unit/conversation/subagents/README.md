@@ -256,10 +256,17 @@ is only a known limitation: resume creates a new progress ID and metadata v1
 has no child Session UUID or resume link. It is no longer a blocker or a
 requirement for this PR. S3 and new resume controls remain excluded.
 
-Current local checks: full Vitest 537 files / 5,178 tests passed (7 skipped),
+Current local checks: full Vitest 537 files / 5,180 tests passed (7 skipped),
 preview Python 219 tests (9 skipped), TypeScript/lint/format/i18n/build passed.
 The new renderer module has 100% line and 97.72% branch coverage in focused
 coverage validation. The actual Electron acceptance probe records seven passed
 checks and exits 1 for the missing immediate cancelled-work result. Its fixture
 includes completed assistant work before cancellation, rather than requiring
 only an unfinished streaming delta to survive.
+
+A final presentation regression also guards the parent spinner: if every child
+is terminal and at least one stopped, an otherwise `running` parent is rendered
+as `canceled`. A still-running sibling and unsupported metadata keep the original
+running display. This is a local view projection; persisted messages and wire
+statuses are unchanged. The actual cancellation probe checks that the parent
+processing badge disappears.

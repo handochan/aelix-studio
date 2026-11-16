@@ -261,6 +261,7 @@ try {
   await page.locator('.sendbox-stop-button').click();
   await idle();
   await expect(card('STUDIO31_CANCEL').locator('[data-subagent-state="stopped"]')).toHaveCount(2, { timeout: 30000 });
+  await expect(card('STUDIO31_CANCEL').locator('.arco-badge-status-processing')).toHaveCount(0);
   report.partialResultVisible = (await card('STUDIO31_CANCEL').textContent()).includes('PARTIAL_CHILD_CANCEL');
   const stopped = await capture('STUDIO31_CANCEL');
   checks.push('ui_cancel_stops_children');
