@@ -100,6 +100,9 @@
 - **`blocked` 표시 점검(11-16):** Studio #6·#10·#11·#32는 본문에 적힌 선행이 모두 끝나 있었다. #31은 본문의 host #4
   가운데 이 카드가 쓰는 `_meta` 저장(범위 2·3)이 병합돼 있었다. 그런데 착수해 보니 번들 runtime이 native `agent`
   도구를 등록하지 못했다([readiness.md](readiness.md)). 선행 Issue가 닫힌 것과 실제 번들에서 도는 것은 따로 확인한다.
+- **Studio #31의 번들 의존성(11-16 사용자 결정):** native `agent` 도구(`aelix_agents/tool.py`)가 `rich.cells`를
+  import하는데 `rich`는 `tui` extra에만 있다. 두 가지를 다 한다. Studio 번들에 `rich`를 추가한다. 범위는 `rich`와
+  그것이 새로 끌어오는 패키지까지이고 다른 의존성 버전은 올리지 않는다. aelix-ai에는 버그로 등록한다(aelix-ai #797).
 
 ## 결정을 섞지 말 것
 
