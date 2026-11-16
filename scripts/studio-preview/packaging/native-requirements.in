@@ -11,6 +11,8 @@ pydantic>=2.7,<3
 filelock>=3.12,<5
 pygments>=2.18
 markdown-it-py>=3.0
+# Native agent tool imports rich.cells outside the tui extra (aelix-ai #797).
+rich>=13.7,<15
 packaging>=23
 mcp>=1.27,<2
 Pillow>=11.0,<12.0

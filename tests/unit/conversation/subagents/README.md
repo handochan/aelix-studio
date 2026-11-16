@@ -1,4 +1,4 @@
-# Studio #31 contract fixtures and blocked preflight
+# Studio #31 contract fixtures and preflight checkpoints
 
 `frames.json` freezes `_meta["aelix/subagents"]` version 1 before renderer work.
 The canonical source is ACP
@@ -55,12 +55,10 @@ The runtime was not patched and no package was injected. This is a packaged
 dependency blocker before progress generation; it is **not evidence that host
 metadata persistence or forwarding failed**.
 
-The user explicitly excluded manifest/lockfile/native changes and required
-stopping if they became necessary. Renderer implementation therefore did not
-start. Resolve the dependency ownership/scope first, then repeat native import
-and actual host preflight before implementing the panel. S1, S2, cancellation,
-reload, live metadata delivery and real-model acceptance remain unverified.
-No host/ACP/native/pin/manifest/lockfile or CI changes are included here.
+At this initial checkpoint the user excluded manifest/lockfile/native changes
+and required stopping if they became necessary. Renderer implementation did
+not start. The user subsequently authorized the narrow `rich` addition below;
+the original `preflight.json` remains a historical record.
 
 ## Checkpoint validation
 
@@ -75,3 +73,45 @@ No host/ACP/native/pin/manifest/lockfile or CI changes are included here.
 - No parser or component tests were added because their implementation is
   blocked. No renderer UI flow, real-model call, installation matrix or whole-app
   outbound audit was run. This checkpoint does not complete Issue #31.
+
+## Rich addition and additional import blocker (2026-11-17)
+
+The user authorized `rich>=13.7,<15`, its new transitive dependencies, and the
+resulting bundle inventories/licenses, with no unrelated version changes.
+This is the Studio workaround for
+[aelix-ai #797](https://github.com/handochan/aelix-ai/issues/797).
+
+The universal hash lock adds only `rich==14.3.4`. Its dependencies
+`markdown-it-py==4.2.0` and `pygments==2.21.0` were already present. Every prior
+requirement, version, target marker and hash remains identical, including the
+Windows requirements. No native/ACP wheel, host or pin was changed.
+
+`richPreflight.json` records a newly generated darwin-arm64 bundle. The local
+`uv 0.11.19` cannot download the pinned CPython 3.12.15, so preparation reused the
+prior inventory-verified standalone interpreter and created fresh native and
+adapter environments. The committed preparation and bundle recipes were not
+modified. The existing identity/recipe/full-inventory verifier passed, and the
+rebuilt native and ACP wheel hashes are unchanged. Rich's MIT license is
+preserved at `native-site/rich-14.3.4.dist-info/licenses/LICENSE` and covered by
+the new generated inventory; its digest is recorded in `richPreflight.json`.
+
+`import rich.cells` succeeds in the new bundle, but the user's required
+`import aelix_agents.tool` fails at `aelix_agents/panel.py:50`:
+
+```text
+ModuleNotFoundError: No module named 'wcwidth'
+```
+
+Confirmed additional missing package: **`wcwidth`**. Native metadata declares
+`wcwidth>=0.3.0` only under the `tui` extra. It is not a Rich dependency. An
+independent read-only review reproduced the failure and verified lock/license
+preservation. The user explicitly required stopping on another missing native
+import rather than adding it, so `wcwidth` was not installed or locked.
+This is the first subsequent import failure, not an exhaustive dependency audit.
+
+The actual-host preflight was not rerun after this import failure, and S1/S2
+implementation did not start. Agent advertisement, two-child execution,
+metadata delivery to the renderer, cancellation/partial results, reload and
+resume continuity remain unverified. Decide the additional dependency scope
+before rebuilding and repeating import → actual host → renderer validation.
+CI workflows, host/ACP/native code and all pins remain unchanged.
