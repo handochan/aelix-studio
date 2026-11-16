@@ -17,9 +17,10 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # Both audit jobs are full verification: they run only when the pull request changes
-  # install/runtime/outbound paths or carries the `full-verify` label, on a manual run, and on the
-  # daily scheduled run. The decision and the path list live in the gate action.
+  # Both audit jobs are full verification: they run for every pull request except one whose
+  # changed files are all in the skip set (renderer UI, unit tests, docs) and that has no
+  # `full-verify` label. They also run on a manual run and on the daily scheduled run. The decision
+  # and the skip set live in the gate action.
   full-verify-gate:
     name: Full verification decision
     runs-on: ubuntu-latest
@@ -197,6 +198,11 @@ jobs:
 
   # A scheduled run that does not pass is recorded in one tracking Issue (never one per failure).
   # This is the only job with issues: write, and it never runs for pull requests.
+  # Tracked: a needed job that failed, or one that ended cancelled while the run itself was not
+  # cancelled. GitHub documents that it cancels a job which exceeds `timeout-minutes`, so a timeout
+  # should land here; no job in this repository has timed out yet to confirm how it is reported.
+  # Not tracked: a run cancelled as a whole, by a person or by a newer run. That is a deliberate
+  # act, and `!cancelled()` then keeps this job out even if a job had already failed.
   scheduled-failure:
     name: Track scheduled failure
     if: ${{ !cancelled() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}

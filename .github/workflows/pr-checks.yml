@@ -17,7 +17,9 @@ on:
         required: false
         default: false
   pull_request:
-    # `labeled` lets the `full-verify` label start full verification (see full-verify-gate).
+    # `labeled` lets the `full-verify` label start full verification (see full-verify-gate). The
+    # label cannot reach a pull request that only changes the paths ignored below: this workflow
+    # does not start for it. Use workflow_dispatch with pr_number there.
     types: [opened, synchronize, edited, closed, ready_for_review, labeled]
     branches: [main, dev]
     paths-ignore:
@@ -46,9 +48,10 @@ env:
   AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
 
 jobs:
-  # Full verification (io-uring-trace-probe, provider-preview, build-test) runs only when the pull
-  # request changes install/runtime/outbound paths or carries the `full-verify` label, on a manual
-  # run, and on the daily scheduled run. The decision and the path list live in the gate action.
+  # Full verification (io-uring-trace-probe, provider-preview, build-test) runs for every pull
+  # request except one whose changed files are all in the skip set (renderer UI, unit tests, docs)
+  # and that has no `full-verify` label. It also runs on a manual run and on the daily scheduled
+  # run. The decision and the skip set live in the gate action.
   full-verify-gate:
     name: Full verification decision
     if: github.event_name != 'pull_request' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
@@ -79,7 +82,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit_sha || github.ref }}
+          # A scheduled run tests exactly the event commit, the one the tracking Issue names;
+          # `github.ref` would follow main if it moved while the run was queued.
+          ref: ${{ inputs.commit_sha || (github.event_name == 'schedule' && github.sha) || github.ref }}
       - name: Install tracepoint probe tools
         run: sudo apt-get update && sudo apt-get install -y bpftrace strace gcc make liburing-dev xz-utils
       - name: Prepare the shared pinned syscall tracer
@@ -125,7 +130,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit_sha || github.ref }}
+          ref: ${{ inputs.commit_sha || (github.event_name == 'schedule' && github.sha) || github.ref }}
           fetch-depth: 0
       - name: Resolve PR context
         uses: ./.github/actions/checkout-pr
@@ -515,7 +520,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.commit_sha || github.ref }}
+          ref: ${{ inputs.commit_sha || (github.event_name == 'schedule' && github.sha) || github.ref }}
 
       - name: Resolve PR or merged-source context
         uses: ./.github/actions/checkout-pr
@@ -764,6 +769,11 @@ jobs:
 
   # A scheduled run that does not pass is recorded in one tracking Issue (never one per failure).
   # This is the only job with issues: write, and it never runs for pull requests.
+  # Tracked: a needed job that failed, or one that ended cancelled while the run itself was not
+  # cancelled. GitHub documents that it cancels a job which exceeds `timeout-minutes`, so a timeout
+  # should land here; no job in this repository has timed out yet to confirm how it is reported.
+  # Not tracked: a run cancelled as a whole, by a person or by a newer run. That is a deliberate
+  # act, and `!cancelled()` then keeps this job out even if a job had already failed.
   scheduled-failure:
     name: Track scheduled failure
     if: ${{ !cancelled() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}

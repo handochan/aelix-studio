@@ -17,6 +17,7 @@ runs:
         RESULTS: ${{ inputs.results }}
         RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         WORKFLOW: ${{ github.workflow }}
+        # The event commit. Every product checkout of a scheduled run is pinned to it.
         HEAD_SHA: ${{ github.sha }}
       run: |
         set -euo pipefail

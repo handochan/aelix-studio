@@ -1,5 +1,5 @@
 name: 'Full verification gate'
-description: 'Decide whether the expensive full-verification jobs run: changed install/runtime/outbound paths, the full-verify label, a manual run or the scheduled run. Call after actions/checkout with fetch-depth 2. The path list lives in gate.mjs.'
+description: 'Decide whether the expensive full-verification jobs run. A pull request skips them only when every changed file is in the skip set in gate.mjs (renderer UI, unit tests, docs); the full-verify label, a manual run and the scheduled run always run them. Call after actions/checkout with fetch-depth 2 and the default ref.'
 inputs:
   jobs:
     description: 'Names of the jobs this gate controls, shown in the step summary'
