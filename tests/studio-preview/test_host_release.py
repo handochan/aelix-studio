@@ -23,6 +23,31 @@ class HostReleaseSmokeTests(unittest.TestCase):
 
 
 
+class BundledBytecodeTests(unittest.TestCase):
+    def test_direct_launcher_overrides_bytecode_opt_in_for_descendant_interpreters(self):
+        with tempfile.TemporaryDirectory(prefix='studio-bytecode-') as temporary:
+            root = Path(temporary)
+            site = root / 'native-site'
+            site.mkdir()
+            (site / 'delegated_probe.py').write_text('value = 1\n')
+            if os.name == 'nt':
+                for name in ('win32/lib', 'Pythonwin', 'pywin32_system32'):
+                    (site / name).mkdir(parents=True)
+                (site / 'pywin32_bootstrap.py').write_text('')
+            launcher = root / 'launch.py'
+            launcher.write_bytes((ROOT / 'scripts/studio-preview/packaging/launch.py').read_bytes())
+            code = ('import os,subprocess,sys; '
+                    'print(subprocess.check_output([sys.executable,"-c",'
+                    '"import delegated_probe,sys;print(sys.dont_write_bytecode)"],'
+                    f'env=dict(os.environ,PYTHONPATH={str(site)!r})).decode().strip())')
+            result = subprocess.run([sys.executable, '-I', '-S', '-B', str(launcher), 'helper', '-c', code],
+                                    env=dict(os.environ, PYTHONDONTWRITEBYTECODE='0', PYTHONPYCACHEPREFIX=''),
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'True')
+            self.assertEqual(list(site.rglob('*.pyc')), [])
+
+
 class InstalledPythonAliasTests(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('host_recovery_alias', PATH)

@@ -3,6 +3,10 @@ from pathlib import Path
 import os
 import sys
 
+# Child interpreters do not inherit -B. Keep every descendant out of the bundle.
+os.environ['PYTHONDONTWRITEBYTECODE'] = '1'
+sys.dont_write_bytecode = True
+
 root = Path(__file__).resolve().parent
 if sys.platform == 'win32' and not str(root).startswith('\\\\?\\'):
     root = Path('\\\\?\\UNC\\' + str(root)[2:] if str(root).startswith('\\\\') else '\\\\?\\' + str(root))
