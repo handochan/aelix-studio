@@ -253,6 +253,19 @@ prek run
 prek run --from-ref origin/main --to-ref HEAD
 ```
 
+## CI Verification Tiers
+
+Every non-draft pull request runs the always-on checks: Code Quality, Unit Tests, Coverage and I18n.
+
+Full verification is the expensive tier: the five-target Provider Preview installers, Build Test, the io_uring probe and the installed-app outbound audit. It runs only when one of these holds:
+
+- the pull request changes an install, runtime or outbound path (`FULL_VERIFY_PATHS` in `.github/actions/full-verify-gate/gate.mjs`);
+- the pull request carries the `full-verify` label (adding the label starts a run);
+- the workflow is started manually (`workflow_dispatch`);
+- the daily scheduled run on `main`, whose failures are collected in one tracking Issue.
+
+When a pull request skips full verification, the `Full verification decision` job says so in its summary and the jobs show as skipped. Skipped is not passed: a release candidate must be fully verified.
+
 ## Build System
 
 AionUi uses **electron-vite** for fast bundling:

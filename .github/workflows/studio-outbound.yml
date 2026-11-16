@@ -2,19 +2,44 @@ name: Studio outbound gate
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+    # `labeled` lets the `full-verify` label start the audit (see full-verify-gate).
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
   workflow_dispatch:
+  schedule:
+    # Daily audit of main; 18:47 UTC is 03:47 KST.
+    - cron: '47 18 * * *'
 
 permissions:
   contents: read
 
 concurrency:
-  group: studio-outbound-${{ github.event.pull_request.number || github.ref }}
+  group: studio-outbound-${{ github.event.pull_request.number || (github.event_name == 'schedule' && 'schedule') || github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Both audit jobs are full verification: they run only when the pull request changes
+  # install/runtime/outbound paths or carries the `full-verify` label, on a manual run, and on the
+  # daily scheduled run. The decision and the path list live in the gate action.
+  full-verify-gate:
+    name: Full verification decision
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.gate.outputs.run }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+          sparse-checkout: .github/actions
+      - id: gate
+        uses: ./.github/actions/full-verify-gate
+        with:
+          jobs: App outbound, Windows local diagnostics
+
   installed-app-outbound:
     name: App outbound (${{ matrix.target }})
+    needs: full-verify-gate
+    if: needs.full-verify-gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     strategy:
@@ -147,6 +172,8 @@ jobs:
 
   local-installer-report:
     name: Windows local diagnostics
+    needs: full-verify-gate
+    if: needs.full-verify-gate.outputs.run == 'true'
     runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
@@ -167,3 +194,26 @@ jobs:
           if ($metadata.code -ne 'TEST' -or -not $metadata.logIncluded) { throw 'Missing diagnostics' }
           if ((Get-Content (Join-Path $output 'installer.log') -Raw) -notmatch 'SYNTHETIC_LOCAL_DIAGNOSTICS') { throw 'Missing local log' }
           Remove-Item -LiteralPath $status.path
+
+  # A scheduled run that does not pass is recorded in one tracking Issue (never one per failure).
+  # This is the only job with issues: write, and it never runs for pull requests.
+  scheduled-failure:
+    name: Track scheduled failure
+    if: ${{ !cancelled() && github.event_name == 'schedule' && (contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')) }}
+    needs: [full-verify-gate, installed-app-outbound, local-installer-report]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: full-verify-scheduled-failure
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          sparse-checkout: .github/actions
+      - uses: ./.github/actions/track-scheduled-failure
+        with:
+          github_token: ${{ github.token }}
+          results: ${{ toJSON(needs) }}

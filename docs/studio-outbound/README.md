@@ -65,7 +65,10 @@ are required, never filtered from functional results.
 
 ## Validation boundary
 
-`studio-outbound.yml` runs on draft PRs. It builds/installs both Linux targets and
+`studio-outbound.yml` is full verification. It runs for PRs (drafts included) that
+change install/runtime/outbound paths or carry the `full-verify` label, for manual
+runs and daily on main; other PRs skip it and the run summary says so. The path list
+is `.github/actions/full-verify-gate/gate.mjs`. It builds/installs both Linux targets and
 requires whole-tree external/unparsed/classification 0/0/0 during synthetic
 sessions, permission changes, restart and separate 35-second startup observation.
 It seeds the exact persisted user setting to disable automatic update checks,

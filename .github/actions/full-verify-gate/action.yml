@@ -1,0 +1,45 @@
+name: 'Full verification gate'
+description: 'Decide whether the expensive full-verification jobs run: changed install/runtime/outbound paths, the full-verify label, a manual run or the scheduled run. Call after actions/checkout with fetch-depth 2. The path list lives in gate.mjs.'
+inputs:
+  jobs:
+    description: 'Names of the jobs this gate controls, shown in the step summary'
+    required: false
+    default: 'full-verification jobs'
+outputs:
+  run:
+    description: "'true' when full verification runs, 'false' when it is skipped"
+    value: ${{ steps.decide.outputs.run }}
+  reason:
+    description: 'One-line explanation of the decision'
+    value: ${{ steps.decide.outputs.reason }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Decide whether full verification runs
+      id: decide
+      shell: bash
+      env:
+        GATE_EVENT_NAME: ${{ github.event_name }}
+        GATE_LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        GATE_JOBS: ${{ inputs.jobs }}
+      run: |
+        set -euo pipefail
+        export GATE_CHANGED_FILES="$RUNNER_TEMP/full-verify-changed-files"
+        rm -f "$GATE_CHANGED_FILES"
+        if [ "$GATE_EVENT_NAME" = pull_request ]; then
+          # A pull request is checked out as GitHub's test merge commit: parent 1 is the base
+          # branch and parent 2 the head, so this diff is exactly what the pull request changes.
+          # --no-renames lists both sides of a move; -z keeps unusual file names intact.
+          if git rev-parse --quiet --verify 'HEAD^2' > /dev/null &&
+            git diff --name-only --no-renames -z 'HEAD^1' HEAD > "$GATE_CHANGED_FILES.partial"; then
+            mv "$GATE_CHANGED_FILES.partial" "$GATE_CHANGED_FILES"
+          else
+            echo '::warning title=Full verification gate::Could not list the changed files, so full verification runs to stay safe.'
+          fi
+        fi
+        node "$GITHUB_ACTION_PATH/main.mjs"
+        # Dependent jobs are skipped on anything but 'true', so a missing decision must fail here.
+        if ! grep -Eq '^run=(true|false)$' "$GITHUB_OUTPUT"; then
+          echo '::error title=Full verification gate::The gate produced no decision.'
+          exit 1
+        fi

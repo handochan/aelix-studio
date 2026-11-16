@@ -12,7 +12,10 @@ Releases request and verifies blocked networking produces no error dialog.
 It still runs after a session audit failure, provided installation succeeded. Installation is a preceding, separate `dpkg` step;
 network-free installer execution is not established by this runtime audit.
 
-The gate runs on draft PRs too. An external attempt exits 86. Missing or
+The gate is full verification: it runs for PRs (drafts too) that change
+install/runtime/outbound paths or carry the `full-verify` label, for manual runs and
+daily on main. Other PRs skip it; `.github/actions/full-verify-gate/gate.mjs` holds the
+path list. An external attempt exits 86. Missing or
 unparsed evidence, unsupported platforms and proxy configuration exit 87. Failed
 connections, DNS on loopback, IPv4-mapped IPv6 and interrupted calls remain in
 scope. A descendant-process TCP/UDP positive control must detect exactly two
