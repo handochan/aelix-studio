@@ -3,7 +3,7 @@
  * while every renderer file that is more than a screen is listed as forced. These tests derive such
  * files from the source instead of trusting the list: the import closure of the non-renderer code
  * and of the build configuration, and the renderer paths that the build configuration and the
- * verification harness name.
+ * verification harness name, whichever path alias spells them.
  *
  * What this does not guarantee: it catches a dependency that ordinary development adds (a new
  * import, a new copy target, a new literal path in a config or harness script). It does not try to
@@ -28,7 +28,8 @@ type BuildSection = {
   resolve?: { alias?: Record<string, string> };
   build?: { rollupOptions?: { input?: Record<string, string> } };
 };
-type BuildConfig = { main: BuildSection; preload: BuildSection };
+type BuildConfig = { main: BuildSection; preload: BuildSection; renderer?: BuildSection };
+type Reference = { file: string; reference: string };
 
 // Record what the build copies verbatim instead of loading the real plugin.
 const captured = vi.hoisted(() => ({ staticCopy: [] as StaticCopyOptions[] }));
@@ -84,6 +85,55 @@ const stringsIn = (value: unknown): string[] => {
   if (typeof value === 'string') return [value];
   return value && typeof value === 'object' ? Object.values(value).flatMap(stringsIn) : [];
 };
+
+// Path aliases of tsconfig.json. Harness scripts run through tsx resolve imports with them.
+const tsconfigPaths = (
+  JSON.parse(readFileSync(resolve(projectRoot, 'tsconfig.json'), 'utf8')) as {
+    compilerOptions: { paths: Record<string, string[]> };
+  }
+).compilerOptions.paths;
+const withoutWildcard = (path: string): string => path.replace(/\/\*$/, '');
+
+/** What every path alias points at, from tsconfig.json and from each section of the build. */
+const aliasTargets = (buildConfig: BuildConfig): [string, string][] => [
+  ...Object.entries(tsconfigPaths).flatMap(([key, targets]) =>
+    targets.map((target): [string, string] => [
+      withoutWildcard(key),
+      fromRoot(resolve(projectRoot, withoutWildcard(target))),
+    ])
+  ),
+  ...[buildConfig.main, buildConfig.preload, buildConfig.renderer].flatMap((section) =>
+    Object.entries(section?.resolve?.alias ?? {}).map(([key, target]): [string, string] => [key, fromRoot(target)])
+  ),
+];
+
+/**
+ * Every way a path into the renderer tree can be spelled, mapped to the repository path it stands
+ * for: the directory itself, and each alias that points at it, inside it, or at a parent of it
+ * (`@renderer/x` and `@/renderer/x` today). Derived, so the next alias is recognised as well.
+ */
+function rendererSpellings(targets: [string, string][]): Map<string, string> {
+  const spellings = new Map([[RENDERER, RENDERER]]);
+  for (const [key, target] of targets) {
+    if (target === RENDERER || target.startsWith(`${RENDERER}/`)) spellings.set(key, target);
+    else if (RENDERER.startsWith(`${target}/`)) spellings.set(`${key}/${RENDERER.slice(target.length + 1)}`, RENDERER);
+  }
+  return spellings;
+}
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** Renderer paths written in a text, with every alias spelling expanded to a repository path. */
+function rendererReferences(text: string, spellings: Map<string, string>): string[] {
+  const longestFirst = [...spellings.keys()].toSorted((a, b) => b.length - a.length);
+  // A spelling, not followed by more of a name, then the rest of the path.
+  const pattern = new RegExp('(?:' + longestFirst.map(escapeRegExp).join('|') + ')(?![\\w-])(?:/[\\w@.*{},/-]*)?', 'g');
+  const expand = (path: string): string => {
+    const spelling = longestFirst.find((candidate) => path.startsWith(candidate)) ?? RENDERER;
+    return (spellings.get(spelling) + path.slice(spelling.length)).replace(/[/.,]+$/, '');
+  };
+  return [...new Set((text.match(pattern) ?? []).map(expand))];
+}
 
 // What the bundles are built from does not depend on the host, so POSIX hosts check it; the
 // always-on Unit Tests job runs on ubuntu and macOS as well as Windows.
@@ -176,17 +226,12 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
     });
 
     it('resolves every project alias instead of leaving it external', () => {
-      const tsconfig = JSON.parse(readFileSync(resolve(projectRoot, 'tsconfig.json'), 'utf8')) as {
-        compilerOptions: { paths: Record<string, string[]> };
-      };
       const keys = Object.keys(aliases);
       const leaked = externalImports.filter((path) =>
         keys.some((key) => kindOf(aliases[key]) !== 'file' && (path === key || path.startsWith(`${key}/`)))
       );
 
-      expect(keys).toEqual(
-        expect.arrayContaining(Object.keys(tsconfig.compilerOptions.paths).map((key) => key.replace(/\/\*$/, '')))
-      );
+      expect(keys).toEqual(expect.arrayContaining(Object.keys(tsconfigPaths).map(withoutWildcard)));
       expect(leaked).toEqual([]);
     });
 
@@ -274,21 +319,57 @@ describeOnPosix('renderer dependencies of the non-renderer code and the build', 
       ...filesUnder('tests/outbound-audit'),
     ].filter((file) => TEXT_FILE.test(file) && !file.includes('/__pycache__/') && !file.includes('/node_modules/'));
 
-    /** Renderer paths written literally in a file, with the `@renderer` alias expanded. */
-    const referencesIn = (file: string): string[] => {
-      const text = readFileSync(resolve(projectRoot, file), 'utf8');
-      const found = text.match(/(?:packages\/desktop\/src\/renderer|@renderer)(?:\/[\w@.*{},/-]*)?/g) ?? [];
-      return [...new Set(found.map((path) => path.replace(/^@renderer/, RENDERER).replace(/[/.,]+$/, '')))];
-    };
-
-    const references = scanned.flatMap((file) => referencesIn(file).map((reference) => ({ file, reference })));
     const isReviewed = (file: string, reference: string): boolean =>
       REVIEWED_REFERENCES.some((entry) => entry.file === file && entry.reference === reference);
-    // The renderer root itself is the renderer build and its alias, not a single dependency.
-    const toCheck = references.filter(
-      ({ file, reference }) =>
-        reference !== RENDERER && !(file in NOT_RUN_BY_FULL_VERIFICATION) && !isReviewed(file, reference)
-    );
+    let spellings = new Map<string, string>();
+    let references: Reference[] = [];
+    let toCheck: Reference[] = [];
+
+    beforeAll(() => {
+      spellings = rendererSpellings(aliasTargets(config));
+      references = scanned.flatMap((file) =>
+        rendererReferences(readFileSync(resolve(projectRoot, file), 'utf8'), spellings).map((reference) => ({
+          file,
+          reference,
+        }))
+      );
+      // The renderer root itself is the renderer build and its alias, not a single dependency.
+      toCheck = references.filter(
+        ({ file, reference }) =>
+          reference !== RENDERER && !(file in NOT_RUN_BY_FULL_VERIFICATION) && !isReviewed(file, reference)
+      );
+    });
+
+    it('recognises a renderer path under every alias that reaches the renderer tree', () => {
+      expect([...spellings.keys()]).toEqual(expect.arrayContaining([RENDERER, '@renderer', '@/renderer']));
+    });
+
+    // The reviewer's case was the second line: a harness script importing through the `@/*` alias.
+    it.each([
+      "import url from '../../packages/desktop/src/renderer/utils/url';",
+      "import reviewUrl from '@/renderer/utils/url';",
+      "const { parseHttpUrl } = await import('@renderer/utils/url');",
+    ])('finds the renderer path in: %s', (line) => {
+      expect(rendererReferences(line, spellings)).toEqual([`${RENDERER}/utils/url`]);
+    });
+
+    it('finds no renderer path in an import of other code', () => {
+      const text = "import a from '@/process/utils/url'; import b from '@/rendererless/x'; import c from '@common/x';";
+
+      expect(rendererReferences(text, spellings)).toEqual([]);
+    });
+
+    it('derives the spelling of an alias that does not exist yet', () => {
+      const next = rendererSpellings([
+        ['~', 'packages'],
+        ['@screens', `${RENDERER}/pages`],
+        ['@host', 'packages/web-host/src'],
+      ]);
+
+      expect(rendererReferences("from '~/desktop/src/renderer/a'; from '@screens/guid'; from '@host/b'", next)).toEqual(
+        [`${RENDERER}/a`, `${RENDERER}/pages/guid`]
+      );
+    });
 
     it('scans the build configuration and the harness scripts', () => {
       expect(scanned).toEqual(
