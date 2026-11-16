@@ -18,7 +18,10 @@ gh project item-list 9 --owner handochan --format json --limit 100
   목표·범위/제외·완료 조건·검증·선행 작업을 정리한다.
 - 실제 작업·PR·claim을 확인하고 Issue별 branch/worktree를 사용한다. 공통 계약을 먼저
   직렬로 정하고, 이후 독립 구현은 최대 두 개씩 진행한다.
-- 구현과 다른 세션이 기본 한 번 리뷰한다. 시작·리뷰 제출·막힘·중단/완료 때만 갱신하고,
+- 구현 슬롯은 사용자에게 보이는 Beta 기능 카드에 먼저 쓴다. 현재 순서는
+  [착수 안내](../studio-release-train/readiness.md)의 "기능 우선 착수 순서"를 따른다.
+- 구현과 다른 세션이 기본 한 번 리뷰한다. blocking과 should-fix는 고치고, nit는 기본적으로
+  Issue에 기록만 한다. 시작·리뷰 제출·막힘·중단/완료 때만 갱신하고,
   인계에 현재 SHA/PR, 검증과 미실행, 다음 행동, 막힘을 남긴다.
 - 같은 Issue가 기존 보드에도 있으면 Project별 Status를 별도로 맞춘다. 연결 기능과
   출시 완료는 실제 native/설치 앱 결과까지 확인한다.

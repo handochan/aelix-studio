@@ -1,8 +1,33 @@
 # Studio 개발 착수 안내
 
+## 기능 우선 착수 순서 (2026-11-16)
+
+이 절이 현재 착수 기준이다. [decisions.md](decisions.md)의 D14–D20에 따라 아래 "Beta 우선 착수 순서"의
+3단계 순서를 대신한다. 0–2단계는 끝났다(host #1·#2·#3·#6·#7, ACP #20, Studio #28·#29 Done).
+선행 상태는 2026-11-16에 각 Issue와 pin으로 확인했다. 근거는
+[Studio #42](https://github.com/handochan/aelix-studio/issues/42)에 있다.
+
+| 순서         | 카드                                                                                                                                                                                                                           | 선행 상태                                                                                                                                                                                                       | 비고                                                                |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| 진행 중      | [host #23](https://github.com/handochan/aelix-studio-host/issues/23) rustix 공지 → [host #21](https://github.com/handochan/aelix-studio-host/issues/21) → [host #20](https://github.com/handochan/aelix-studio-host/issues/20) | 기존 사용자 판정대로 마무리한다                                                                                                                                                                                 | lockfile 때문에 직렬이다. 끝나면 이 슬롯도 기능 카드에 쓴다         |
+| 1            | [Studio #31 서브에이전트 패널](https://github.com/handochan/aelix-studio/issues/31) (S1·S2)                                                                                                                                    | 충족. ACP #20 Done, `_meta` 저장은 host `aelix.3`부터, native #604·#610·#132는 pin `e19ab55`에 포함                                                                                                             | 첫 기능 카드. D20 경계를 처음 적용한다                              |
+| 2            | [Studio #43 CI 검증 등급](https://github.com/handochan/aelix-studio/issues/43) → [Studio #32 확장 설치·관리](https://github.com/handochan/aelix-studio/issues/32)                                                              | 충족. #32는 #28 Done                                                                                                                                                                                            | #32는 D04 ADR spike부터. R8 전에는 `aelix extension … --yes`를 쓴다 |
+| 3            | [Studio #24 실행 중 제어](https://github.com/handochan/aelix-studio/issues/24) ∥ [Studio #10 Analytics 미리보기](https://github.com/handochan/aelix-studio/issues/10)                                                          | #10 충족. #24는 #28 Done이고 [aelix-ai #623](https://github.com/handochan/aelix-ai/issues/623) 판정 대기                                                                                                        | #623은 계약 고정이다. 판정이 나면 #24를 Ready로 옮긴다              |
+| 4            | [Studio #11 Team](https://github.com/handochan/aelix-studio/issues/11) ∥ [Studio #26 WebUI 접속 보호](https://github.com/handochan/aelix-studio/issues/26)                                                                     | 충족                                                                                                                                                                                                            |                                                                     |
+| 5            | [Studio #6 세션 이력·분기](https://github.com/handochan/aelix-studio/issues/6) ∥ [Studio #14 정체성](https://github.com/handochan/aelix-studio/issues/14)                                                                      | 충족. #14는 host #2 Done                                                                                                                                                                                        |                                                                     |
+| 대기         | [Studio #30 세션 보유자·동기화](https://github.com/handochan/aelix-studio/issues/30)                                                                                                                                           | [aelix-ai #655](https://github.com/handochan/aelix-ai/issues/655)(R9) → [ACP #22](https://github.com/handochan/aelix-acp/issues/22) → [host #4](https://github.com/handochan/aelix-studio-host/issues/4) 범위 1 | R9 판정이 나면 D16 방식으로 네 저장소를 한 묶음으로 진행한다        |
+| 대기         | [Studio #7 프로필·리소스 켜기/끄기](https://github.com/handochan/aelix-studio/issues/7)                                                                                                                                        | aelix-ai B6(#511 등), [aelix-ai #624](https://github.com/handochan/aelix-ai/issues/624)                                                                                                                         |                                                                     |
+| Beta 전 묶음 | [host #30 공지 검사 분리](https://github.com/handochan/aelix-studio-host/issues/30), [host #29](https://github.com/handochan/aelix-studio-host/issues/29), host #23의 RUSTSEC-2026-0459, 그 사이 나온 공지                     | host #30의 `release.yml` 변경은 PR #28 병합 뒤                                                                                                                                                                  | host #30의 `ci.yml` 변경은 먼저 할 수 있다                          |
+| 마지막       | [Studio #15](https://github.com/handochan/aelix-studio/issues/15) 나머지 → [Studio #8](https://github.com/handochan/aelix-studio/issues/8) → [Studio #9](https://github.com/handochan/aelix-studio/issues/9)                   | 위 기능 결과, 최종 beta.3·Analytics wheel                                                                                                                                                                       | 공동 출시                                                           |
+
+- 새 구현의 동시 진행은 계속 최대 두 개다. ∥ 표시는 함께 진행할 수 있는 쌍이다.
+- 서브에이전트 S3(자식 기록·승인·자식별 제어)는 첫 Beta 요구에 남아 있다. aelix-ai #612와 R4 판정 뒤 카드로 만든다.
+- aelix-ai 오너 판정 대기: #623, #624, #655(R9), #612(R4), 세션 잠금 보유자 정보(R7), 확장 관리 API(R8).
+  #30과 #7만 이 판정을 기다린다. 나머지 기능 카드는 지금 pin으로 진행한다.
+
 ## Beta 우선 착수 순서 (2026-10-30)
 
-D13에 따라 Studio의 첫 공개 릴리스는 공동 Beta다. 이 절이 현재 착수 기준이다. 아래 "Preview 준비 기록"부터
+D13에 따라 Studio의 첫 공개 릴리스는 공동 Beta다. 3단계의 순서는 2026-11-16부터 위 절이 대신한다. 아래 "Preview 준비 기록"부터
 "준비 시작 시점의 source와 기존 작업"까지는 2026-10-25 기록이고, 마지막 "실행자의 시작·정지 체크포인트"는
 계속 적용한다. 판단은 [decisions.md](decisions.md)의 D03·D12·D13과 사용자 결정 기록을 따른다.
 
