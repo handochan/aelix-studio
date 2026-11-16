@@ -1,0 +1,267 @@
+{
+  "source": {
+    "repository": "handochan/aelix-acp",
+    "commit": "16d6555b08825d1d63c3b082de2b10a1152562c0",
+    "files": [
+      "docs/studio-integration.md",
+      "src/aelix_acp/runtime/subagents.py",
+      "tests/test_subagents.py",
+      "tests/test_native_runtime.py"
+    ],
+    "method": "The documented frame is copied from studio-integration.md. Other frames use pinned SubagentTracker with progress() from pinned tests; stopped/error/two-child frames extend the documented state enum. Not a provider capture."
+  },
+  "frames": [
+    {
+      "name": "documented",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call_1",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-…",
+                "profile": "reviewer",
+                "state": "running",
+                "currentTool": "read",
+                "elapsedMs": 2300,
+                "tokens": 0,
+                "cost": 0.0,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_tool"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "starting",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-1",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-1",
+                "profile": "reviewer",
+                "state": "starting",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_start",
+                "elapsedMs": 10,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "running",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-1",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-1",
+                "profile": "reviewer",
+                "state": "running",
+                "currentTool": "read",
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_tool",
+                "elapsedMs": 2300,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "twoChildren",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-1",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-1",
+                "profile": "reviewer",
+                "state": "running",
+                "currentTool": "read",
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_tool",
+                "elapsedMs": 2300,
+                "tokens": 5,
+                "cost": 0.0
+              },
+              {
+                "id": "sub-2",
+                "profile": "reviewer",
+                "state": "starting",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_start",
+                "elapsedMs": 10,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "completed",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-1",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-1",
+                "profile": "reviewer",
+                "state": "done",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 3000,
+                "tokens": 5,
+                "cost": 0.0
+              },
+              {
+                "id": "sub-2",
+                "profile": "reviewer",
+                "state": "starting",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_start",
+                "elapsedMs": 10,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "stopped",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-1",
+        "status": "completed",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-1",
+                "profile": "reviewer",
+                "state": "done",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 3000,
+                "tokens": 5,
+                "cost": 0.0
+              },
+              {
+                "id": "sub-2",
+                "profile": "reviewer",
+                "state": "stopped",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 3100,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "resumed",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-resume",
+        "status": "in_progress",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-2",
+                "profile": "reviewer",
+                "state": "running",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_start",
+                "elapsedMs": 10,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "failed",
+      "update": {
+        "sessionUpdate": "tool_call_update",
+        "toolCallId": "call-resume",
+        "status": "failed",
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-2",
+                "profile": "reviewer",
+                "state": "error",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 4000,
+                "tokens": 5,
+                "cost": 0.0
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}
