@@ -259,11 +259,11 @@ Every non-draft pull request runs the always-on checks: Code Quality, Unit Tests
 
 Full verification is the expensive tier: the five-target Provider Preview installers, Build Test, the io_uring probe and the installed-app outbound audit. It runs for every pull request except one whose changed files are all in the skip set:
 
-- renderer UI code (`packages/desktop/src/renderer/**`), apart from the few files the verification harness reads or drives by content;
+- renderer UI code (`packages/desktop/src/renderer/**`), apart from the files in that tree that are more than screens: modules the main process imports, assets the build packages separately, and files the verification harness reads or drives by content;
 - unit tests (`tests/unit/**`);
 - docs (`docs/**` and root-level Markdown).
 
-The skip set is `SKIP_PATHS` in `.github/actions/full-verify-gate/gate.mjs`, and the renderer exceptions are `FORCED_PATHS` beside it. Anything else runs, including a new directory and a pull request whose changed files cannot be listed. Full verification also runs:
+The skip set is `SKIP_PATHS` in `.github/actions/full-verify-gate/gate.mjs`, and the renderer exceptions are `FORCED_PATHS` beside it. Translation JSON other than `settings.json` stays skippable although the main-process bundle includes it; it is listed as accepted data in `ACCEPTED_MAIN_BUNDLE_DATA`. `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives what the non-renderer code imports from the renderer tree and which renderer paths the build configuration names, and fails until a new one is forced or accepted. Anything else runs, including a new directory and a pull request whose changed files cannot be listed. Full verification also runs:
 
 - when the pull request carries the `full-verify` label (adding the label starts a run);
 - when the workflow is started manually (`workflow_dispatch`);

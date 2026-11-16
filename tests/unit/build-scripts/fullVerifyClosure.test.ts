@@ -1,0 +1,321 @@
+/**
+ * The full-verification gate skips pull requests that only change renderer code. That is safe only
+ * while every renderer file that is more than a screen is listed as forced. These tests derive such
+ * files from the source instead of trusting the list: the import closure of the non-renderer code,
+ * and the renderer paths that the build configuration and the verification harness name.
+ */
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
+import { join, relative, resolve, sep } from 'node:path';
+import { build, stop } from 'esbuild';
+import yaml from 'js-yaml';
+import {
+  ACCEPTED_MAIN_BUNDLE_DATA,
+  acceptedMainBundleData,
+  classifyChangedFile,
+} from '../../../.github/actions/full-verify-gate/gate.mjs';
+
+type StaticCopyOptions = { targets: { src: string | string[] }[] };
+type BuildSection = {
+  resolve?: { alias?: Record<string, string> };
+  build?: { rollupOptions?: { input?: Record<string, string> } };
+};
+type BuildConfig = { main: BuildSection; preload: BuildSection };
+
+// Record what the build copies verbatim instead of loading the real plugin.
+const captured = vi.hoisted(() => ({ staticCopy: [] as StaticCopyOptions[] }));
+vi.mock('vite-plugin-static-copy', () => ({
+  viteStaticCopy: (options: StaticCopyOptions) => {
+    captured.staticCopy.push(options);
+    return { name: 'captured-static-copy' };
+  },
+}));
+
+const projectRoot = resolve(__dirname, '../../..');
+const RENDERER = 'packages/desktop/src/renderer';
+const SOURCE_FILE = /\.[cm]?[jt]sx?$/;
+const NOT_BUNDLED = /\.(?:test|spec)\.[cm]?[jt]sx?$|\.d\.ts$/;
+const TEXT_FILE = /\.(?:[cm]?[jt]sx?|json|ya?ml|py|sh|ps1|nsh)$/;
+
+const fromRoot = (file: string): string => relative(projectRoot, file).split(sep).join('/');
+
+/** Every file below a directory, as repository-relative paths with forward slashes. */
+function filesUnder(directory: string): string[] {
+  const absolute = resolve(projectRoot, directory);
+  return (readdirSync(absolute, { recursive: true }) as string[])
+    .map((name) => join(absolute, name))
+    .filter((file) => statSync(file).isFile())
+    .map(fromRoot);
+}
+
+const rendererFiles = filesUnder(RENDERER);
+
+/** What an alias of the build points at. The build keeps an alias for a directory that is gone. */
+const kindOf = (path: string): 'directory' | 'file' | 'missing' => {
+  const stats = statSync(path, { throwIfNoEntry: false });
+  if (!stats) return 'missing';
+  return stats.isDirectory() ? 'directory' : 'file';
+};
+
+/** A renderer file is forced when the gate refuses to skip it. */
+const isForced = (file: string): boolean => !classifyChangedFile(file).skippable;
+
+/**
+ * Renderer files a path reference stands for: everything that starts with the text before its
+ * first glob character. A directory therefore stands for all files below it.
+ */
+const referencedFiles = (reference: string): string[] => {
+  const prefix = reference.split(/[*?{[]/)[0];
+  return rendererFiles.filter((file) => file.startsWith(prefix));
+};
+
+/** Every string anywhere inside a parsed YAML or JSON value. */
+const stringsIn = (value: unknown): string[] => {
+  if (typeof value === 'string') return [value];
+  return value && typeof value === 'object' ? Object.values(value).flatMap(stringsIn) : [];
+};
+
+// What the bundles are built from does not depend on the host, so POSIX hosts check it; the
+// always-on Unit Tests job runs on ubuntu and macOS as well as Windows.
+const describeOnPosix = process.platform === 'win32' ? describe.skip : describe;
+
+describeOnPosix('renderer dependencies of the non-renderer code and the build', () => {
+  let config: BuildConfig;
+  let aliases: Record<string, string> = {};
+  let roots: string[] = [];
+  let closure: string[] = [];
+  let externalImports: string[] = [];
+
+  beforeAll(async () => {
+    const exported: unknown = (await import('../../../packages/desktop/electron.vite.config')).default;
+    config = (
+      typeof exported === 'function'
+        ? await (exported as (env: { mode: string; command: string }) => unknown)({
+            mode: 'production',
+            command: 'build',
+          })
+        : exported
+    ) as BuildConfig;
+    aliases = { ...config.preload.resolve?.alias, ...config.main.resolve?.alias };
+
+    // Every non-renderer module the main, preload and builtin-MCP bundles can be built from is a
+    // root, so the result does not depend on knowing the entry points.
+    roots = [
+      ...filesUnder('packages/desktop/src').filter((file) => !file.startsWith(`${RENDERER}/`)),
+      ...filesUnder('packages/web-host/src'),
+      ...filesUnder('packages/shared-scripts/src'),
+    ].filter((file) => SOURCE_FILE.test(file) && !NOT_BUNDLED.test(file));
+
+    const result = await build({
+      absWorkingDir: projectRoot,
+      stdin: {
+        contents: roots.map((file) => `import ${JSON.stringify(`./${file}`)};`).join('\n'),
+        resolveDir: projectRoot,
+        sourcefile: 'non-renderer-roots.ts',
+        loader: 'ts',
+      },
+      bundle: true,
+      write: false,
+      metafile: true,
+      outdir: 'full-verify-closure-is-never-written',
+      platform: 'node',
+      format: 'esm',
+      packages: 'external',
+      logLevel: 'silent',
+      // Directory aliases of the build. An alias that points at one file is checked separately.
+      alias: Object.fromEntries(Object.entries(aliases).filter(([, target]) => kindOf(target) === 'directory')),
+      loader: Object.fromEntries(
+        ['.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.wasm', '.node', '.html', '.md', '.txt'].map(
+          (extension) => [extension, 'file' as const]
+        )
+      ),
+    });
+    const inputs = result.metafile.inputs;
+    closure = Object.keys(inputs)
+      .filter((file) => file.startsWith(`${RENDERER}/`))
+      .toSorted();
+    externalImports = [
+      ...new Set(
+        Object.values(inputs).flatMap((input) => input.imports.filter((item) => item.external).map((item) => item.path))
+      ),
+    ];
+  });
+
+  afterAll(async () => {
+    await stop();
+  });
+
+  describe('renderer files in the main-process import closure', () => {
+    it('finds the closure from every build entry', () => {
+      const entries = [config.main, config.preload].flatMap((section) =>
+        Object.values(section.build?.rollupOptions?.input ?? {}).map(fromRoot)
+      );
+
+      expect(entries).toContain('packages/desktop/src/index.ts');
+      expect(roots).toEqual(expect.arrayContaining(entries));
+    });
+
+    // Guards against an empty closure that would make the next test pass without checking anything.
+    it('sees the locale modules that the main process imports', () => {
+      expect(closure).toContain(`${RENDERER}/services/i18n/locales/en-US/index.ts`);
+      expect(closure).toContain(`${RENDERER}/services/i18n/locales/en-US/update.json`);
+    });
+
+    it('resolves every project alias instead of leaving it external', () => {
+      const tsconfig = JSON.parse(readFileSync(resolve(projectRoot, 'tsconfig.json'), 'utf8')) as {
+        compilerOptions: { paths: Record<string, string[]> };
+      };
+      const keys = Object.keys(aliases);
+      const leaked = externalImports.filter((path) =>
+        keys.some((key) => kindOf(aliases[key]) !== 'file' && (path === key || path.startsWith(`${key}/`)))
+      );
+
+      expect(keys).toEqual(
+        expect.arrayContaining(Object.keys(tsconfig.compilerOptions.paths).map((key) => key.replace(/\/\*$/, '')))
+      );
+      expect(leaked).toEqual([]);
+    });
+
+    it('is forced or accepted as data, file by file', () => {
+      const unclassified = closure.filter((file) => !isForced(file) && !acceptedMainBundleData(file));
+
+      // A file listed here is imported by non-renderer code. Add it to FORCED_PATHS in
+      // .github/actions/full-verify-gate/gate.mjs, or to ACCEPTED_MAIN_BUNDLE_DATA if it is data.
+      expect(unclassified).toEqual([]);
+    });
+
+    it('accepts data files only, never module code', () => {
+      const accepted = closure.filter((file) => !isForced(file));
+
+      expect(accepted.filter((file) => SOURCE_FILE.test(file))).toEqual([]);
+      expect(accepted.length).toBeGreaterThan(0);
+    });
+
+    it.each(ACCEPTED_MAIN_BUNDLE_DATA)('still needs the accepted entry $pattern', ({ pattern }) => {
+      expect(closure.some((file) => acceptedMainBundleData(file) === pattern && !isForced(file))).toBe(true);
+    });
+
+    it('forces a renderer file that a build alias points at', () => {
+      const targets = Object.values(aliases)
+        .map(fromRoot)
+        .filter((target) => target.startsWith(`${RENDERER}/`) && kindOf(resolve(projectRoot, target)) === 'file');
+
+      expect(targets.filter((file) => !isForced(file))).toEqual([]);
+    });
+  });
+
+  describe('renderer paths named by the build configuration and the harness', () => {
+    // Whole files that mention renderer paths but are not run by the full-verification jobs.
+    const NOT_RUN_BY_FULL_VERIFICATION: Record<string, string> = {
+      'scripts/check-i18n.js': 'run by the always-on I18n Check',
+      'scripts/generate-i18n-types.js': 'developer tool that regenerates i18n-keys.d.ts',
+    };
+    // References that do not stand for every file below them, each reviewed by hand.
+    const REVIEWED_REFERENCES = [
+      {
+        file: 'packages/desktop/electron.vite.config.ts',
+        reference: `${RENDERER}/components/IconParkHOC`,
+        reason: 'import the icon plugin writes into renderer .tsx files; the plugin is in the renderer build only',
+      },
+      ...[
+        'scripts/studio-preview/providerHostSmoke.mjs',
+        'scripts/studio-preview/providerRealSmoke.mjs',
+        'scripts/outbound-audit/buildInstallerReportLocales.mjs',
+      ].map((file) => ({
+        file,
+        reference: `${RENDERER}/services/i18n/locales`,
+        reason: 'joined with <language>/settings.json, which is forced',
+      })),
+    ];
+
+    const scanned = [
+      'packages/desktop/electron.vite.config.ts',
+      ...readdirSync(resolve(projectRoot, 'packages/desktop'))
+        .filter((name) => name.startsWith('electron-builder'))
+        .map((name) => `packages/desktop/${name}`),
+      'package.json',
+      '.github/workflows/pr-checks.yml',
+      '.github/workflows/studio-outbound.yml',
+      ...filesUnder('.github/actions/checkout-pr'),
+      ...filesUnder('scripts'),
+      ...filesUnder('packages/shared-scripts'),
+      ...filesUnder('tests/studio-preview'),
+      ...filesUnder('tests/outbound-audit'),
+    ].filter((file) => TEXT_FILE.test(file) && !file.includes('/__pycache__/') && !file.includes('/node_modules/'));
+
+    /** Renderer paths written literally in a file, with the `@renderer` alias expanded. */
+    const referencesIn = (file: string): string[] => {
+      const text = readFileSync(resolve(projectRoot, file), 'utf8');
+      const found = text.match(/(?:packages\/desktop\/src\/renderer|@renderer)(?:\/[\w@.*{},/-]*)?/g) ?? [];
+      return [...new Set(found.map((path) => path.replace(/^@renderer/, RENDERER).replace(/[/.,]+$/, '')))];
+    };
+
+    const references = scanned.flatMap((file) => referencesIn(file).map((reference) => ({ file, reference })));
+    const isReviewed = (file: string, reference: string): boolean =>
+      REVIEWED_REFERENCES.some((entry) => entry.file === file && entry.reference === reference);
+    // The renderer root itself is the renderer build and its alias, not a single dependency.
+    const toCheck = references.filter(
+      ({ file, reference }) =>
+        reference !== RENDERER && !(file in NOT_RUN_BY_FULL_VERIFICATION) && !isReviewed(file, reference)
+    );
+
+    it('scans the build configuration and the harness scripts', () => {
+      expect(scanned).toEqual(
+        expect.arrayContaining([
+          'packages/desktop/electron-builder.yml',
+          'scripts/studio-preview/packaging/build.mjs',
+          'scripts/outbound-audit/bundles/monacoSmoke.mjs',
+        ])
+      );
+      expect(toCheck.map(({ reference }) => reference)).toContain(`${RENDERER}/assets/logos/*`);
+    });
+
+    it('forces every file a literal renderer path stands for', () => {
+      const unforced = toCheck.flatMap(({ file, reference }) =>
+        referencedFiles(reference)
+          .filter((target) => !isForced(target))
+          .map((target) => `${file} names ${reference}, which covers ${target}`)
+      );
+
+      // Add the path to FORCED_PATHS in .github/actions/full-verify-gate/gate.mjs, or review it above.
+      expect(unforced).toEqual([]);
+    });
+
+    it('names only renderer paths that exist', () => {
+      expect(toCheck.filter(({ reference }) => referencedFiles(reference).length === 0)).toEqual([]);
+    });
+
+    it('forces everything the build copies out of the renderer tree', () => {
+      // Targets may be written relative to the project root or built from an absolute path.
+      const sources = captured.staticCopy
+        .flatMap(({ targets }) => targets.flatMap(({ src }) => src))
+        .map((source) => fromRoot(resolve(projectRoot, source)))
+        .filter((source) => source.startsWith(`${RENDERER}/`));
+
+      expect(sources).toContain(`${RENDERER}/assets/logos/*`);
+      expect(sources.filter((source) => referencedFiles(source).length === 0)).toEqual([]);
+      expect(sources.flatMap(referencedFiles).filter((file) => !isForced(file))).toEqual([]);
+    });
+
+    it('names no renderer source path in the electron-builder configuration', () => {
+      const packaged = scanned
+        .filter((file) => file.startsWith('packages/desktop/electron-builder'))
+        .flatMap((file) => stringsIn(yaml.load(readFileSync(resolve(projectRoot, file), 'utf8'))))
+        .filter((value) => value.includes('src/renderer'));
+
+      expect(packaged.flatMap(referencedFiles).filter((file) => !isForced(file))).toEqual([]);
+      expect(packaged.filter((value) => referencedFiles(value).length === 0)).toEqual([]);
+    });
+
+    it('keeps no exception that the source no longer needs', () => {
+      const stale = [
+        ...Object.keys(NOT_RUN_BY_FULL_VERIFICATION).filter((file) => !references.some((found) => found.file === file)),
+        ...REVIEWED_REFERENCES.filter(
+          ({ file, reference }) => !references.some((found) => found.file === file && found.reference === reference)
+        ).map(({ file, reference }) => `${file}: ${reference}`),
+      ];
+
+      expect(stale).toEqual([]);
+    });
+  });
+});

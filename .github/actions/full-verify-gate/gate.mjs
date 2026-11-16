@@ -27,7 +27,7 @@ export const FULL_VERIFY_LABEL = 'full-verify';
 export const SKIP_PATHS = [
   {
     pattern: 'packages/desktop/src/renderer/**',
-    reason: 'renderer UI code; it reaches the installer only as bundled screens',
+    reason: 'renderer UI code; apart from the forced entries it reaches the installer only as bundled screens',
   },
   {
     pattern: 'tests/unit/**',
@@ -38,10 +38,25 @@ export const SKIP_PATHS = [
 ];
 
 /**
- * Renderer files the full-verification harness reads or drives by content. They sit inside the
- * skip set but always run.
+ * Renderer files that are more than screens: the main process imports them, the build packages
+ * them separately, or the full-verification harness reads or drives them by content. They sit
+ * inside the skip set but always run.
+ *
+ * `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives the first two kinds from the source
+ * (the import closure of the non-renderer code and the paths the build configuration names) and
+ * fails until a new one is listed here or in `ACCEPTED_MAIN_BUNDLE_DATA`.
  */
 export const FORCED_PATHS = [
+  {
+    pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/index.ts',
+    reason:
+      'module code the main process executes: packages/desktop/src/process/services/i18n/index.ts imports every locale index',
+  },
+  {
+    pattern: 'packages/desktop/src/renderer/assets/logos/**',
+    reason:
+      'copied to out/main/static/images by the viteStaticCopy target in packages/desktop/electron.vite.config.ts, packaged by electron-builder.yml (out/main/static)',
+  },
   {
     pattern: 'packages/desktop/src/renderer/pages/conversation/Preview/components/editors/OfflineMonacoEditor.tsx',
     reason: 'bundled by path by scripts/outbound-audit/bundles/monacoSmoke.mjs',
@@ -57,6 +72,19 @@ export const FORCED_PATHS = [
   {
     pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/settings.json',
     reason: 'strings scripts/studio-preview/providerHostSmoke.mjs reads to drive the Provider settings UI',
+  },
+];
+
+/**
+ * Renderer files that the main-process bundle includes but that stay skippable, accepted as data.
+ * Nothing here is consulted for the decision; the closure test uses it to tell an accepted file
+ * from an unclassified one.
+ */
+export const ACCEPTED_MAIN_BUNDLE_DATA = [
+  {
+    pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/*.json',
+    reason:
+      'translation text only (settings.json is forced above); the always-on I18n Check and typecheck validate it on every pull request and the daily run on main covers the rest',
   },
 ];
 
@@ -94,6 +122,7 @@ function compile(pattern) {
 const withExpressions = (entries) => entries.map((entry) => ({ ...entry, expression: compile(entry.pattern) }));
 const SKIP = withExpressions(SKIP_PATHS);
 const FORCED = withExpressions(FORCED_PATHS);
+const ACCEPTED_DATA = withExpressions(ACCEPTED_MAIN_BUNDLE_DATA);
 const PR_CHECKS_IGNORED = PR_CHECKS_IGNORED_PATHS.map(compile);
 
 const find = (entries, file) => entries.find(({ expression }) => expression.test(file));
@@ -111,6 +140,16 @@ export function classifyChangedFile(file) {
   const skip = find(SKIP, file);
   if (skip) return { skippable: true, pattern: skip.pattern, reason: skip.reason };
   return { skippable: false, reason: 'outside the skip set' };
+}
+
+/**
+ * Tell whether a renderer file in the main-process bundle is accepted as skippable data.
+ *
+ * @param {string} file Repository-relative path with forward slashes.
+ * @returns {string | undefined} The `ACCEPTED_MAIN_BUNDLE_DATA` pattern that covers it, if any.
+ */
+export function acceptedMainBundleData(file) {
+  return find(ACCEPTED_DATA, file)?.pattern;
 }
 
 /**

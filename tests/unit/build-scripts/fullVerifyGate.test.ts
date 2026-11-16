@@ -22,12 +22,18 @@ const PROVIDER_UI = 'packages/desktop/src/renderer/components/settings/SettingsM
 const LOCALES = 'packages/desktop/src/renderer/services/i18n/locales';
 // The reviewer's case: main-process runtime that lives in the shared tree.
 const COMMON_RUNTIME = 'packages/desktop/src/common/platform/ElectronPlatformServices.ts';
+// The re-review's cases: renderer-tree files that are more than screens.
+const LOCALE_ENTRY = `${LOCALES}/en-US/index.ts`;
+const PACKAGED_LOGO = 'packages/desktop/src/renderer/assets/logos/brand/app.png';
 
 describe('full verification skip set', () => {
   const skippable: [string, string][] = [
     ['packages/desktop/src/renderer/pages/guid/index.tsx', RENDERER],
     ['packages/desktop/src/renderer/components/settings/SettingsModal/index.tsx', RENDERER],
     [`${LOCALES}/en-US/acp.json`, RENDERER],
+    // Translation text stays skippable although the main bundle includes it (accepted data).
+    [`${LOCALES}/en-US/update.json`, RENDERER],
+    ['packages/desktop/src/renderer/assets/channel-logos/discord.svg', RENDERER],
     ['tests/unit/build-scripts/fullVerifyGate.test.ts', 'tests/unit/**'],
     ['docs/studio-outbound/README.md', 'docs/**'],
     ['docs/studio-outbound/ipv6Measurements.json', 'docs/**'],
@@ -45,8 +51,12 @@ describe('full verification skip set', () => {
     );
   });
 
-  // Renderer files the harness reads or drives by content always run.
+  // Renderer files that the main process imports, the build packages separately, or the harness
+  // reads or drives by content always run.
   const forced: [string, string][] = [
+    [LOCALE_ENTRY, `${LOCALES}/*/index.ts`],
+    [`${LOCALES}/ko-KR/index.ts`, `${LOCALES}/*/index.ts`],
+    [PACKAGED_LOGO, 'packages/desktop/src/renderer/assets/logos/**'],
     [`${EDITORS}/OfflineMonacoEditor.tsx`, `${EDITORS}/OfflineMonacoEditor.tsx`],
     [`${EDITORS}/localMonaco.ts`, `${EDITORS}/localMonaco.ts`],
     [`${PROVIDER_UI}/NativeProviders.tsx`, `${PROVIDER_UI}/**`],
@@ -135,6 +145,27 @@ describe('full verification decision', () => {
       changedFiles: [COMMON_RUNTIME],
       run: true,
       code: 'outside-skip-set',
+    },
+    {
+      name: 'locale entry module that the main process imports',
+      labels: [],
+      changedFiles: [LOCALE_ENTRY],
+      run: true,
+      code: 'outside-skip-set',
+    },
+    {
+      name: 'logo that the build packages separately',
+      labels: [],
+      changedFiles: [PACKAGED_LOGO],
+      run: true,
+      code: 'outside-skip-set',
+    },
+    {
+      name: 'translation text other than settings',
+      labels: [],
+      changedFiles: [`${LOCALES}/en-US/update.json`, `${LOCALES}/ko-KR/update.json`],
+      run: false,
+      code: 'skip-set',
     },
     {
       name: 'one file outside the skip set among renderer files',
@@ -468,10 +499,14 @@ describeShell('gate action script on real merge commits', () => {
     write('packages/desktop/src/renderer/a.tsx', 'a');
     write('packages/desktop/src/process/b.ts', 'b');
     write(COMMON_RUNTIME, 'c');
+    write(LOCALE_ENTRY, 'd');
+    write(PACKAGED_LOGO, 'e');
     git('add', '--all');
     git('commit', '--quiet', '-m', 'base');
     branch('renderer-only', () => write('packages/desktop/src/renderer/a.tsx', 'a2'));
     branch('common-runtime', () => write(COMMON_RUNTIME, 'c2'));
+    branch('locale-entry', () => write(LOCALE_ENTRY, 'd2'));
+    branch('packaged-logo', () => write(PACKAGED_LOGO, 'e2'));
     branch('moved-into-renderer', () =>
       git('mv', 'packages/desktop/src/process/b.ts', 'packages/desktop/src/renderer/b.ts')
     );
@@ -491,6 +526,18 @@ describeShell('gate action script on real merge commits', () => {
 
   it('runs when only shared main-process runtime changed', () => {
     testMerge('common-runtime');
+
+    expect(runGate().output).toMatch(/^run=true$/m);
+  });
+
+  it('runs when only a locale entry module that the main process imports changed', () => {
+    testMerge('locale-entry');
+
+    expect(runGate().output).toMatch(/^run=true$/m);
+  });
+
+  it('runs when only a logo that the build packages separately changed', () => {
+    testMerge('packaged-logo');
 
     expect(runGate().output).toMatch(/^run=true$/m);
   });
