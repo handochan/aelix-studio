@@ -106,6 +106,7 @@
   그것이 새로 끌어오는 패키지까지이고 다른 의존성 버전은 올리지 않는다. aelix-ai에는 버그로 등록한다(aelix-ai #797).
   11-17에 `wcwidth`도 빠져 있는 것이 드러나, 사용자가 추가 범위를 native `tui` extra(`prompt-toolkit`, `rich`, `wcwidth`)까지
   넓혔다. `wcwidth`는 바로 추가하고, `prompt-toolkit`은 번들에서 실제로 import가 실패할 때만 추가한다.
+  `tui` extra 밖의 패키지가 필요하면 추가하지 않고 멈춘 뒤 보고한다.
 
 ## 결정을 섞지 말 것
 
