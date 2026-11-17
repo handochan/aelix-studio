@@ -85,7 +85,8 @@ def unsupported_personalities(stderr):
     return len(re.findall(r'Proper structure decoding for this\s+personality is not supported', stderr, re.I))
 
 
-def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
+def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
+          recapture=True):
     """Recapture incomplete evidence once; never retry a functional/policy failure.
 
     Commands must own fresh state per invocation (the installer drivers use
@@ -121,7 +122,7 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
             for item in diagnostics)
         command_failed = report.get('commandStarted') and report.get('commandExitCode') != 0
         retry = report.get('outcome') == 'evidence_incomplete' and provisional and not policy_failure and not command_failed
-        if attempt == 2 or not retry:
+        if attempt == 2 or not recapture or not retry:
             break
         print('Audit evidence incomplete; recapturing once (first report: ' + snapshot.name + ')', file=sys.stderr)
     report['captureAttempts'] = attempts
@@ -260,6 +261,8 @@ def main():
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
     parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
+    parser.add_argument('--single-capture', action='store_true',
+                        help='Fail on the first incomplete capture (for non-replayable negative control fixtures)')
     parser.add_argument('--transport-controls', type=Path)
     from uring.socketObjects import CONTROL_MODES
     parser.add_argument('--udp-control', choices=['connect-close', 'send', 'inherit-dup-send', 'uring-writev', 'uring-async-writev', *CONTROL_MODES])
@@ -290,7 +293,8 @@ def main():
     for path in args.scope_executable:
         if not path.is_file(): parser.error('Scope executable must exist')
     return audit(command, args.report, scope_executables=args.scope_executable,
-                 require_executables=args.require_executable, whole_report_path=args.whole_report)
+                 require_executables=args.require_executable, whole_report_path=args.whole_report,
+                 recapture=not args.single_capture)
 
 
 if __name__ == '__main__':

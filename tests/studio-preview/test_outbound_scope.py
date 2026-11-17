@@ -47,14 +47,14 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 
 class RecaptureTests(unittest.TestCase):
-    def run_attempts(self, root, measurements):
+    def run_attempts(self, root, measurements, **options):
         def capture(_command, path, **_options):
             code, report = measurements.pop(0)
             path.write_text(json.dumps(report))
             return code
         path = root/'audit.json'
         with patch.object(audit, 'capture_once', side_effect=capture) as run:
-            code = audit.audit(['/owned/isolated-fixture'], path)
+            code = audit.audit(['/owned/isolated-fixture'], path, **options)
         return code, json.loads(path.read_text()), run.call_count
 
     def incomplete(self, **fields):
@@ -103,6 +103,11 @@ class RecaptureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             code, _, calls=self.run_attempts(Path(directory), [(87,dict(reason='proxy_environment'))])
             self.assertEqual((code,calls), (87,1))
+
+    def test_one_shot_negative_control_still_fails_on_first_incomplete_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report, calls=self.run_attempts(Path(directory), [(87,self.incomplete())],recapture=False)
+            self.assertEqual((code,calls,report['recaptures']), (87,1,0))
 
     def test_incomplete_capture_cannot_erase_known_tcp_or_udp_writes(self):
         for change in (dict(syscall='sendto'), dict(straceSocketKind='tcp'),

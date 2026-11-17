@@ -42,6 +42,15 @@ alongside an evidence hole also prevents replay; only unsent UDP-connect
 association counts with matching diagnostics can be provisional. No
 destination/parser policy is relaxed.
 
+The two retained/preexisting socket **negative controls** use `--single-capture`:
+their one-shot peer owns state outside the audited command, so replaying only
+that command cannot recreate the fixture. They still require the first capture
+to fail with exit 87 and the exact existing loss/retention evidence. This option
+never turns incomplete evidence into a pass; ordinary product audits still
+recapture once. The first #51 CI was cancelled after logs confirmed a second
+`object-preexisting` invocation waiting for a peer that had already served its
+one request. Real descriptor-exchange regression tests cover both controls.
+
 For #51's x64 failure (job 133707594478), retained evidence proves a complete
 kernel capture but not complete reconciliation: `unknown_record` on PID 15654
 and a missing final strace `write` on PID 15953 (ordinal/lastOrdinal 4684, no

@@ -15,6 +15,37 @@ from uring.probe import btf_member_offset, program_fdinfo, program_statistics, P
 from uring.rawTrace import coverage
 
 
+class RetentionControlTests(unittest.TestCase):
+    def test_one_shot_peer_requires_single_capture_and_finishes_its_exchange(self):
+        import array
+        import os
+        import socket
+        import subprocess
+        from uring.socketObjects import retention_control, RETENTION_MODES
+        if not hasattr(socket.socket,'sendmsg'):
+            self.skipTest('SCM_RIGHTS descriptor exchange requires Unix sendmsg')
+        for mode in RETENTION_MODES:
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as directory:
+                def run(command):
+                    self.assertIn('--single-capture',command)
+                    address=next(item.split('=',1)[1] for item in command if item.startswith('AELIX_AUDIT_OBJECT_CONTROL_SOCKET='))
+                    with socket.socket(socket.AF_UNIX,socket.SOCK_STREAM) as peer:
+                        peer.settimeout(2)
+                        peer.connect(address)
+                        if mode=='object-preexisting':
+                            _,ancillary,_,_=peer.recvmsg(1,socket.CMSG_SPACE(array.array('i').itemsize))
+                            descriptors=array.array('i');descriptors.frombytes(ancillary[0][2])
+                            for descriptor in descriptors:os.close(descriptor)
+                        else:
+                            with socket.socket(socket.AF_INET,socket.SOCK_DGRAM) as held:
+                                peer.sendmsg([b'x'],[(socket.SOL_SOCKET,socket.SCM_RIGHTS,array.array('i',[held.fileno()]))])
+                                self.assertEqual(peer.recv(1),b'x')
+                    return subprocess.CompletedProcess(command,87)
+                with patch('subprocess.run',side_effect=run):
+                    result=retention_control(Path('/owned/auditor'),Path(directory)/'report.json',mode)
+                self.assertEqual(result.returncode,87)
+
+
 class SocketObjectTests(unittest.TestCase):
     def event(self,kind,time,**changes):
         event=dict(kind=kind,time=time,socket=12345,generation=4,kernelPid=101,kernelTgid=101,

@@ -344,10 +344,13 @@ def retention_control(auditor,report,mode):
                 for fd in held:os.close(fd)
         thread=threading.Thread(target=exchange);thread.start()
         try:
+            # This one-shot peer owns state outside the audited command. Its
+            # expected incomplete evidence must fail on that first capture;
+            # replaying only the command would wait forever for a second peer.
             command=['sudo','-n','env','AELIX_AUDIT_OBJECT_CONTROL_SOCKET='+str(path),
                      'unshare','--net','--','/bin/sh','-c',
                      'ip link set lo up && exec "$@"','udp-object-control',
-                     sys.executable,'-I','-B',str(auditor),'--report',str(report),'--',
+                     sys.executable,'-I','-B',str(auditor),'--single-capture','--report',str(report),'--',
                      sys.executable,'-I','-B',str(auditor),'--udp-control',mode]
             result=subprocess.run(command)
         finally:
