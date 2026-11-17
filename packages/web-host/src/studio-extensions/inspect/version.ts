@@ -1,0 +1,131 @@
+/**
+ * Enough of PEP 440 to tell, before any installer runs, that a requirement cannot accept
+ * the version the bundle ships. The installer, run with the bundle's versions as
+ * constraints, stays the authority: this only answers "certainly excluded" and leaves
+ * every doubtful case (local versions, arbitrary equality, text it cannot parse) to it.
+ */
+
+export type Version = {
+  epoch: number;
+  release: number[];
+  pre: [number, number] | null;
+  post: number | null;
+  dev: number | null;
+  local: string | null;
+};
+
+const VERSION = new RegExp(
+  '^v?(?:(\\d+)!)?(\\d+(?:\\.\\d+)*)' +
+    '(?:[-_.]?(alpha|a|beta|b|preview|pre|c|rc)[-_.]?(\\d+)?)?' +
+    '(?:-(\\d+)|[-_.]?(post|rev|r)[-_.]?(\\d+)?)?' +
+    '(?:[-_.]?(dev)[-_.]?(\\d+)?)?' +
+    '(?:\\+([a-z0-9]+(?:[-_.][a-z0-9]+)*))?$',
+  'i'
+);
+
+const PRE_ORDER: Record<string, number> = { a: 0, alpha: 0, b: 1, beta: 1, c: 2, rc: 2, pre: 2, preview: 2 };
+
+/** Parse a PEP 440 version; undefined when the text is not one. */
+export function parseVersion(text: string): Version | undefined {
+  const match = VERSION.exec(text.trim());
+  if (!match) return undefined;
+  const [, epoch, release, preLabel, preNumber, postImplicit, postLabel, postNumber, devLabel, devNumber, local] =
+    match;
+  return {
+    epoch: epoch ? Number(epoch) : 0,
+    release: release.split('.').map(Number),
+    pre: preLabel ? [PRE_ORDER[preLabel.toLowerCase()], preNumber ? Number(preNumber) : 0] : null,
+    post: postImplicit ? Number(postImplicit) : postLabel ? (postNumber ? Number(postNumber) : 0) : null,
+    dev: devLabel ? (devNumber ? Number(devNumber) : 0) : null,
+    local: local ? local.toLowerCase() : null,
+  };
+}
+
+function compareReleases(left: number[], right: number[]): number {
+  for (let index = 0; index < Math.max(left.length, right.length); index += 1) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference;
+  }
+  return 0;
+}
+
+/** A dev release of the bare version sorts before every pre-release; a final sorts after them. */
+const preKey = (version: Version): [number, number] =>
+  version.pre ?? (version.post === null && version.dev !== null ? [-1, 0] : [3, 0]);
+
+/** Order two versions by their public part (the local label is not compared). */
+export function compareVersions(left: Version, right: Version): number {
+  if (left.epoch !== right.epoch) return left.epoch - right.epoch;
+  const release = compareReleases(left.release, right.release);
+  if (release !== 0) return release;
+  const [leftPre, rightPre] = [preKey(left), preKey(right)];
+  if (leftPre[0] !== rightPre[0]) return leftPre[0] - rightPre[0];
+  if (leftPre[1] !== rightPre[1]) return leftPre[1] - rightPre[1];
+  const post = (left.post ?? -1) - (right.post ?? -1);
+  if (post !== 0) return post;
+  return (left.dev ?? Infinity) === (right.dev ?? Infinity) ? 0 : (left.dev ?? Infinity) - (right.dev ?? Infinity);
+}
+
+const sameRelease = (left: Version, right: Version): boolean =>
+  left.epoch === right.epoch && compareReleases(left.release, right.release) === 0;
+const isPreRelease = (version: Version): boolean => version.pre !== null || version.dev !== null;
+
+/** True, false, or undefined when this module cannot decide. */
+function clauseAccepts(operator: string, operand: string, version: Version): boolean | undefined {
+  if (operator === '===') return undefined;
+  if (operand.endsWith('.*')) {
+    if (operator !== '==' && operator !== '!=') return undefined;
+    const prefix = /^v?(?:(\d+)!)?(\d+(?:\.\d+)*)$/i.exec(operand.slice(0, -2));
+    if (!prefix) return undefined;
+    const wanted = prefix[2].split('.').map(Number);
+    const matches =
+      (prefix[1] ? Number(prefix[1]) : 0) === version.epoch &&
+      wanted.every((segment, index) => (version.release[index] ?? 0) === segment);
+    return operator === '==' ? matches : !matches;
+  }
+  const bound = parseVersion(operand);
+  if (!bound || bound.local !== null) return undefined;
+  const order = compareVersions(version, bound);
+  switch (operator) {
+    case '==':
+      return order === 0;
+    case '!=':
+      return order !== 0;
+    case '>=':
+      return order >= 0;
+    case '<=':
+      return order <= 0;
+    case '<':
+      // Excludes pre-releases of the bound unless the bound is itself a pre-release.
+      return order < 0 && !(!isPreRelease(bound) && isPreRelease(version) && sameRelease(version, bound));
+    case '>':
+      // Excludes post-releases of the bound unless the bound is itself a post-release.
+      return order > 0 && !(bound.post === null && version.post !== null && sameRelease(version, bound));
+    case '~=': {
+      if (bound.release.length < 2) return undefined;
+      const prefix = bound.release.slice(0, -1);
+      return (
+        order >= 0 &&
+        version.epoch === bound.epoch &&
+        prefix.every((segment, index) => (version.release[index] ?? 0) === segment)
+      );
+    }
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * Whether a version specifier (comma-separated clauses, as in `Requires-Dist`) certainly
+ * excludes `installed`. Returns false whenever a clause or the version cannot be decided.
+ */
+export function specifierExcludes(specifier: string, installed: string): boolean {
+  const version = parseVersion(installed);
+  if (!version || version.local !== null) return false;
+  for (const clause of specifier.split(',')) {
+    const match = /^(~=|===|==|!=|<=|>=|<|>)\s*(?![<>=!~])(\S+)$/.exec(clause.trim());
+    if (!match) continue;
+    if (clauseAccepts(match[1], match[2], version) === false) return true;
+  }
+  return false;
+}
