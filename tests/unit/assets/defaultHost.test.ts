@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 
 const {
   policy,
@@ -12,6 +13,7 @@ const {
   verifyDefaultHostBundle,
 } = require('../../../packages/shared-scripts/src/default-host.js');
 const hash = (bytes: string | Buffer) => createHash('sha256').update(bytes).digest('hex');
+const quote = (value: string) => value.replace(/'/g, "''");
 let root: string, directory: string, receipt: Record<string, unknown>, manifest: Record<string, unknown>;
 const writeJson = (name: string, value: unknown) => fs.writeFileSync(path.join(directory, name), JSON.stringify(value));
 function refreshManifest() {
@@ -232,6 +234,45 @@ describe('release archive selection', () => {
     expect(() => prepareDefaultHost({ projectRoot: root, platform: process.platform, arch: process.arch })).toThrow(
       'release archive checksum differs'
     );
+  });
+});
+
+describe('Windows release archive extraction', () => {
+  const onWindows = process.platform === 'win32';
+  const powershell = (command: string) =>
+    execFileSync('powershell', ['-NoProfile', '-NonInteractive', '-Command', command]);
+  let modulePath: string | undefined;
+  beforeEach(() => {
+    modulePath = process.env.PSModulePath;
+  });
+  afterEach(() => {
+    if (modulePath === undefined) delete process.env.PSModulePath;
+    else process.env.PSModulePath = modulePath;
+  });
+
+  it.runIf(onWindows)('extracts under a module path inherited from PowerShell 7', () => {
+    const { extractWindowsArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const source = path.join(root, "archive owner's source");
+    const archive = path.join(root, "owner's release.zip");
+    const extracted = path.join(root, "owner's extracted");
+    fs.mkdirSync(path.join(source, 'nested'), { recursive: true });
+    fs.writeFileSync(path.join(source, 'nested/host.txt'), 'synthetic archive member');
+    fs.mkdirSync(extracted);
+    powershell(
+      "$ErrorActionPreference = 'Stop'; " +
+        "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem'); " +
+        `[System.IO.Compression.ZipFile]::CreateFromDirectory('${quote(source)}', '${quote(archive)}')`
+    );
+    // A pwsh parent puts PowerShell 7's modules ahead of Windows PowerShell's own.
+    process.env.PSModulePath = ['C:\\Program Files\\PowerShell\\7\\Modules', modulePath].filter(Boolean).join(';');
+    extractWindowsArchive(archive, extracted);
+    expect(fs.readFileSync(path.join(extracted, 'nested/host.txt'), 'utf8')).toBe('synthetic archive member');
+  });
+  it.runIf(onWindows)('fails at extraction instead of leaving an empty directory', () => {
+    const { extractWindowsArchive } = require('../../../scripts/studio-preview/host-release/prepare.cjs');
+    const extracted = path.join(root, 'extracted');
+    fs.mkdirSync(extracted);
+    expect(() => extractWindowsArchive(path.join(root, 'missing.zip'), extracted)).toThrow();
   });
 });
 
