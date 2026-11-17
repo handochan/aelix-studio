@@ -253,6 +253,32 @@ prek run
 prek run --from-ref origin/main --to-ref HEAD
 ```
 
+## CI Verification Tiers
+
+Every non-draft pull request runs the always-on checks: Code Quality, Unit Tests, Coverage and I18n.
+
+Full verification is the expensive tier: the five-target Provider Preview installers, Build Test, the io_uring probe and the installed-app outbound audit. It runs for every pull request except one whose changed files are all in the skip set:
+
+- renderer UI code (`packages/desktop/src/renderer/**`), apart from the files in that tree that are more than screens: modules the main process imports, assets the build packages separately, and files the verification harness reads or drives by content;
+- unit tests (`tests/unit/**`);
+- docs (`docs/**` and root-level Markdown).
+
+The skip set is `SKIP_PATHS` in `.github/actions/full-verify-gate/gate.mjs`, and the renderer exceptions are `FORCED_PATHS` beside it. Translation JSON other than `settings.json` stays skippable although the main-process bundle includes it; it is listed as accepted data in `ACCEPTED_MAIN_BUNDLE_DATA`. `tests/unit/build-scripts/fullVerifyClosure.test.ts` derives what the non-renderer code and the build configuration import from the renderer tree and which renderer paths the build configuration names, and fails until a new one is forced or accepted.
+
+What that test does not guarantee: it catches a dependency that ordinary development adds, such as a new import from non-renderer code or the build configuration, a new copy target, or a new literal path in a config or harness script. It does not try to defeat deliberate circumvention, and it cannot see a dynamic import whose argument is not a literal or a path computed at runtime. The daily run on `main` and release-candidate verification cover what it cannot see. The test is skipped on Windows; the ubuntu and macOS unit-test jobs run it.
+
+Anything outside the skip set runs, including a new directory and a pull request whose changed files cannot be listed. Full verification also runs:
+
+- when the pull request carries the `full-verify` label (adding the label starts a run);
+- when the workflow is started manually (`workflow_dispatch`);
+- daily on `main`.
+
+The label forces full verification in the workflows that start for the pull request. PR Checks does not start for a pull request that changes only Markdown, `docs/`, `.vscode/` or issue templates (its `paths-ignore`). For such a pull request the label runs the outbound audit only; for the Provider Preview installers, Build Test and the io_uring probe, start PR Checks manually with `pr_number`.
+
+When a pull request skips full verification, the `Full verification decision` job says so in its summary and the jobs show as skipped. Skipped is not passed: a release candidate must be fully verified.
+
+A scheduled run tests the commit that started it. When one of its jobs fails, or ends cancelled while the run itself is not cancelled, the run adds a comment to one tracking Issue, opening it when none is open. GitHub documents that it cancels a job which exceeds its time limit, so a timeout should count as the second case; no job here has timed out yet to confirm it. A scheduled run that is cancelled as a whole, by a person or by a newer run, is not recorded.
+
 ## Build System
 
 AionUi uses **electron-vite** for fast bundling:
