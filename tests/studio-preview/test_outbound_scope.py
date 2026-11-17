@@ -1,6 +1,7 @@
 """Scoped syscall audit: lineage, attribution, fail-closed parsing and real children."""
 import importlib.util
-from contextlib import nullcontext
+import io
+from contextlib import nullcontext, redirect_stdout
 import json
 import os
 from pathlib import Path
@@ -57,8 +58,9 @@ class RecaptureTests(unittest.TestCase):
             path.write_text(json.dumps(report))
             return code
         path = root/'audit.json'
-        with patch.object(audit, 'capture_once', side_effect=capture) as run:
+        with patch.object(audit, 'capture_once', side_effect=capture) as run, redirect_stdout(io.StringIO()) as output:
             code = audit.audit(['/owned/isolated-fixture'], path, **options)
+        self.audit_stdout = output.getvalue()
         return code, json.loads(path.read_text()), run.call_count
 
     def incomplete(self, **fields):
@@ -67,6 +69,115 @@ class RecaptureTests(unittest.TestCase):
                     externalOperationDiagnostics=[dict(syscall='connect',straceSocketKind='udp',
                         udpWriteAssociations=[]) for _ in range(29)],
                     commandStarted=True, commandExitCode=0, **fields)
+
+    KERNEL_RAW = ('READY\nROOT|1|100|100|10|1\nSTATE|5|1|1|0|0\n'
+                  'T|5|100|100|10|10|1|0|0|0\nOBJECTS|1\nDONE\n'
+                  '@root_count: 1\n@state_count: 1\n@born_count: 1\n@dead_count: 1\n'
+                  '@task_count: 1\n@udp_task_exit_enter: 1\n@udp_task_exit_return: 1\n')
+
+    def kernel_loss(self):
+        from uring.capture import parse
+        capture = parse(self.KERNEL_RAW, '', 0, 1)
+        self.assertTrue(capture['complete'])
+        # The real ip_local_out failure occurred after a complete, drained parse.
+        capture.update(complete=False, status='failed', reason='kernel_bpf_program_recursion_lost',
+            programLoss={'stage':'after-detach','programs':[{'prog_type':26,'programName':'ip_local_out','recursion_misses':1}]})
+        report = self.incomplete()
+        report.update(externalAttempts=0, externalOperationDiagnostics=[], unparsedRecords=3,
+            classificationIssues=[{'reason':reason} for reason in ('io_uring_kernel_capture_incomplete',
+                'udp_socket_capture_incomplete','kernel_network_capture_incomplete')],
+            processes=[{'pid':10,'unparsedRecords':0,'unparsedRecordKinds':{}}],
+            ioUring={'capture':capture}, observedRejectedOpcodes=[])
+        return report
+
+    def assert_no_recapture(self, report):
+        with tempfile.TemporaryDirectory() as directory:
+            code,_,count = self.run_attempts(Path(directory), [(87,report),
+                (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
+        self.assertEqual((code,count),(87,1))
+
+    def test_real_bpf_loss_without_record_holes_can_recapture_and_keeps_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code,report,count = self.run_attempts(Path(directory), [(87,self.kernel_loss()),
+                (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
+        self.assertEqual((code,count,report['recaptures']),(0,2,1))
+        # The producer still emits the real annotation; this test captures it.
+        self.assertIn('::warning title=Outbound audit recapture::', self.audit_stdout)
+
+    def test_observed_forbidden_opcode_blocks_kernel_loss_recapture(self):
+        report=self.kernel_loss();report['observedRejectedOpcodes']=[16]
+        self.assert_no_recapture(report)
+
+    def test_unparsed_accounting_must_match_process_and_report_totals(self):
+        for mismatch in ('process','report'):
+            with self.subTest(mismatch=mismatch):
+                report=self.incomplete()
+                report['ioUring']={'capture':{'complete':True,'recordErrors':[]}}
+                if mismatch=='process':
+                    report['processes']=[{'unparsedRecords':1,'unparsedRecordKinds':{'register_stub':2}}]
+                    report['unparsedRecords']=4
+                else:report['unparsedRecords']=3
+                self.assert_no_recapture(report)
+
+    def test_kernel_reason_namespace_and_diagnostics_must_allow_recapture(self):
+        for field,value in [('reason','unsupported_kernel_capture'),('pidNamespaceVerified',False),
+                            ('diagnostics',['unexpected recorder diagnostic'])]:
+            with self.subTest(field=field):
+                report=self.kernel_loss();report['ioUring']['capture'][field]=value
+                self.assert_no_recapture(report)
+
+    def test_any_kernel_error_counter_blocks_recapture(self):
+        for counter in ('namespace_error','unsupported_abi','pre_mismatch','network_return_id_error',
+                        'raw_state_overlap','pre_layout_error','socket_layout_error','worker_error',
+                        'udp_object_error','untracked_sqpoll','unmatched_completion'):
+            with self.subTest(counter=counter):
+                report=self.kernel_loss();report['ioUring']['capture']['kernelCounts'][counter]=1
+                self.assert_no_recapture(report)
+
+    def test_unlisted_or_malformed_kernel_record_errors_block_recapture(self):
+        for errors in ([{'reason':'unknown_record'}], ['invalid_record']):
+            with self.subTest(errors=errors):
+                report=self.kernel_loss();report['ioUring']['capture']['recordErrors']=errors
+                self.assert_no_recapture(report)
+
+    def test_incomplete_report_without_any_reason_is_not_recaptured(self):
+        report=self.incomplete()
+        report.update(externalAttempts=0,externalOperationDiagnostics=[],unparsedRecords=0,
+            classificationIssues=[],processes=[],ioUring={'capture':{'complete':True,'recordErrors':[]}})
+        self.assert_no_recapture(report)
+
+    def test_actual_perf_loss_parser_shape_is_not_recaptured(self):
+        from uring.capture import parse
+        report=self.kernel_loss()
+        report['ioUring']['capture']=parse(self.KERNEL_RAW,'Lost 1 events',0,1)
+        capture=report['ioUring']['capture']
+        self.assertEqual((capture['complete'],capture['lostEvents'],capture['pidNamespaceVerified']),
+                         (False,1,False))
+        self.assertEqual(capture['reason'],'io_uring_kernel_events_lost')
+        self.assert_no_recapture(report)
+
+    def test_incomplete_kernel_with_any_record_hole_fails_first_capture(self):
+        for hole in ('register_stub','unknown_record','kernel_network_strace_entry_missing'):
+            with self.subTest(hole=hole):
+                report=self.kernel_loss()
+                report['unparsedRecords']+=1
+                if hole=='register_stub':
+                    report['processes'][0].update(unparsedRecords=1,unparsedRecordKinds={'register_stub':1})
+                else:report['classificationIssues'].append({'reason':hole})
+                self.assert_no_recapture(report)
+
+    def test_complete_kernel_keeps_record_hole_recapture(self):
+        from uring.capture import parse
+        for hole in ('register_stub','unknown_record','kernel_network_strace_entry_missing'):
+            with self.subTest(hole=hole), tempfile.TemporaryDirectory() as directory:
+                report=self.kernel_loss();report['ioUring']['capture']=parse(self.KERNEL_RAW,'',0,1)
+                report.update(unparsedRecords=1,classificationIssues=[])
+                if hole=='register_stub':
+                    report['processes'][0].update(unparsedRecords=1,unparsedRecordKinds={'register_stub':1})
+                else:report['classificationIssues']=[{'reason':hole}]
+                code,_,count=self.run_attempts(Path(directory),[(87,report),
+                    (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
+                self.assertEqual((code,count),(0,2))
 
     def test_observed_or_undecodable_network_operations_never_replay(self):
         cases = [
@@ -692,6 +803,11 @@ class ScopedParserTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'linux', 'Linux process tracing required')
 class ScopedTraceTests(unittest.TestCase):
+    def setUp(self):
+        self.captured_stdout=io.StringIO()
+        output=redirect_stdout(self.captured_stdout)
+        output.__enter__();self.addCleanup(output.__exit__,None,None,None)
+
     def test_capture_timeout_stops_the_real_trace_and_detached_app_child(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);pidfile=root/'child-pid'
@@ -716,12 +832,14 @@ class ScopedTraceTests(unittest.TestCase):
         def lose_evidence(capture):
             evidence=original_stop(capture)
             stops.append(evidence.get('complete'))
-            evidence.update(complete=False,status='failed',lostEvents=1,reason='io_uring_kernel_events_lost')
+            evidence.update(complete=False,status='failed',reason='kernel_bpf_program_recursion_lost',
+                programLoss={'stage':'after-detach','programs':[{'programName':'ip_local_out','recursion_misses':1}]})
             return evidence
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'incomplete.json'
             with patch.object(audit.Capture, 'stop', lose_evidence):
                 code=audit.audit(['/bin/true'],path)
+            self.assertEqual(self.captured_stdout.getvalue().count('::warning title=Outbound audit recapture::'),1)
             report=json.loads(path.read_text())
             self.assertEqual(stops,[True,True], 'Injection requires two otherwise complete real captures')
             self.assertEqual((code,report['recaptures'],len(report['captureAttempts'])), (87,1,2))

@@ -94,7 +94,7 @@ def unsupported_personalities(stderr):
 # including any undecodable network destination/peer, remains a first-pass failure.
 RECAPTURE_ISSUES = frozenset({'unknown_record', 'kernel_network_strace_entry_missing',
     'io_uring_kernel_capture_incomplete', 'kernel_network_capture_incomplete', 'udp_socket_capture_incomplete'})
-RECAPTURE_KERNEL_LOSSES = frozenset({'kernel_bpf_program_recursion_lost', 'io_uring_kernel_events_lost'})
+RECAPTURE_KERNEL_LOSSES = frozenset({'kernel_bpf_program_recursion_lost'})
 RECAPTURE_RECORD_KINDS = frozenset({'register_stub'})
 CAPTURE_TIMEOUT = 480
 CAPTURE_CLEANUP = 75
@@ -116,6 +116,8 @@ def recapture_reasons_allowed(report):
     capture = report.get('ioUring', {}).get('capture', {})
     incomplete_kernel = any(i['reason'] in RECAPTURE_ISSUES - {'unknown_record', 'kernel_network_strace_entry_missing'} for i in issues)
     if incomplete_kernel or capture and not capture.get('complete'):
+        # Missing kernel proof cannot validate a simultaneous strace hole.
+        if any(kinds) or any(i['reason'] in ('unknown_record', 'kernel_network_strace_entry_missing') for i in issues): return False
         if capture.get('reason') not in RECAPTURE_KERNEL_LOSSES or not capture.get('pidNamespaceVerified'): return False
         if capture.get('diagnostics'): return False
         counters = capture.get('kernelCounts') or {}

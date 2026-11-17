@@ -39,9 +39,16 @@ a second incomplete capture fails. Only these explicit reasons permit replay:
 - classification: `unknown_record`, `kernel_network_strace_entry_missing`;
 - derivative capture markers: `io_uring_kernel_capture_incomplete`,
   `kernel_network_capture_incomplete`, `udp_socket_capture_incomplete`, only
-  with kernel reason `kernel_bpf_program_recursion_lost` or
-  `io_uring_kernel_events_lost`;
+  with kernel reason `kernel_bpf_program_recursion_lost`;
 - per-process record kind: `register_stub`.
+
+With an incomplete kernel capture, recording holes must be **zero**: no
+`register_stub`, `unknown_record` or missing strace entry may accompany the
+kernel loss. Only the derivative markers are eligible. A complete kernel capture
+retains the recording-hole recapture path. Perf event loss
+(`io_uring_kernel_events_lost`, `lostEvents > 0`) is not eligible: the real parser
+also marks PID namespace verification false, so it cannot establish the proof
+needed for recapture.
 
 Every issue and unparsed record must be covered by that list. Kernel namespace,
 diagnostics, error counters and already-observed forbidden opcodes cannot
