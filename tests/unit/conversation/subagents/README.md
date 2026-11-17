@@ -257,7 +257,7 @@ has no child Session UUID or resume link. It is no longer a blocker or a
 requirement for this PR. S3 and new resume controls remain excluded.
 
 Current local checks: full Vitest 537 files / 5,180 tests passed (7 skipped),
-preview Python 219 tests (9 skipped), TypeScript/lint/format/i18n/build passed.
+preview Python 223 tests (9 skipped), TypeScript/lint/format/i18n/build passed.
 The new renderer module has 100% line and 97.72% branch coverage in focused
 coverage validation. The actual Electron acceptance probe records seven passed
 checks and exits 1 for the missing immediate cancelled-work result. Its fixture
@@ -270,3 +270,22 @@ as `canceled`. A still-running sibling and unsupported metadata keep the origina
 running display. This is a local view projection; persisted messages and wire
 statuses are unchanged. The actual cancellation probe checks that the parent
 processing badge disappears.
+
+### Windows descendant bootstrap qualification
+
+CI on `7dc1ebe6c` exposed a separate packaged-child startup failure:
+`mcp.os.win32.utilities` could not import `pywintypes`. `pywin32==311` was
+already installed and locked. The original Windows entrypoint added its
+`win32`, `win32/lib`, `Pythonwin` paths only to the current interpreter; native
+children execute `python -m` and bypass that entrypoint. The Windows payload now includes a Studio-owned startup hook in the owned
+interpreter's base site-packages, outside native wheels. It adds process-local
+Windows paths and retains DLL-directory handles only for the exact bundled
+interpreter/prefix running `-m aelix_coding_agent`. It never changes environment
+paths. General Python commands, foreign interpreters and project venvs are
+untouched; this avoids globally exposing bundled packages or cp312 pywin32.
+The parent isolated entrypoint keeps its original manual bootstrap. No new
+package, wheel edit, pin or native change was made. Regression tests cover the
+positive/negative scopes, `.pth` loading and refusal to overwrite existing
+startup files.
+The final Windows CI must verify actual pywin32 imports and child completion;
+local macOS verification does not establish that platform result.

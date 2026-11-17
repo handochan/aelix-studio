@@ -82,7 +82,8 @@
     "incomingBytecodeSetting": "0",
     "launcherOverride": "1",
     "afterCompletionCancellationResumeAndFailure": "strict inventory passed",
-    "manifestSha256": "a1810a352898f86cb57fbcfb221e1a202a1363a09f1c542cd23f1ae76fcfb087"
+    "manifestSha256": "76eac7e173ebf9443d6fa46370e2b49191bd9642d2abeaeb444b92cb5ff25da7",
+    "windowsBootstrap": "Studio-owned startup is scoped to the bundled interpreter/prefix and -m aelix_coding_agent, without changing environment paths; Windows CI qualification is separate."
   },
   "knownLimitation": "Progress IDs change on resume; metadata v1 has no child Session UUID or resume link. Same-row continuity is not required.",
   "independentReview": "Three presentation findings repaired and regression-tested; native/ACP cancellation-result gap independently confirmed.",
@@ -96,7 +97,7 @@
     "vitestFilesPassed": 537,
     "vitestTestsPassed": 5180,
     "vitestTestsSkipped": 7,
-    "pythonTests": 219,
+    "pythonTests": 223,
     "pythonSkipped": 9,
     "newModuleLineCoveragePercent": 100,
     "newModuleBranchCoveragePercent": 97.72,

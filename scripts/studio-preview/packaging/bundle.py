@@ -19,6 +19,46 @@ spec = importlib.util.spec_from_file_location('preview_prepare', Path(__file__).
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
 
+WINDOWS_CHILD_BOOTSTRAP = '''# SPDX-License-Identifier: Apache-2.0
+"""Studio-owned startup for the bundled native child; never changes environment paths."""
+import os
+import sys
+from pathlib import Path
+
+_DLL_HANDLES = []
+
+def _configure_native_child():
+    if sys.platform != 'win32' or getattr(sys, 'orig_argv', [])[1:3] != ['-m', 'aelix_coding_agent']:
+        return False
+    bundle = Path(__file__).resolve().parents[3]
+    python = bundle / 'python'
+    try:
+        if not os.path.samefile(sys.executable, python / 'python.exe') or not os.path.samefile(sys.prefix, python):
+            return False
+    except (OSError, ValueError):
+        return False
+    site = bundle / 'native-site'
+    sys.path[:0] = [str(site / name) for name in ('win32', 'win32/lib', 'Pythonwin')]
+    _DLL_HANDLES.append(os.add_dll_directory(str(site / 'pywin32_system32')))
+    import pywin32_bootstrap
+    return True
+
+_configure_native_child()
+'''
+
+
+def write_windows_child_bootstrap(bundle):
+    """Add scoped Studio startup files outside the unmodified native wheels."""
+    site = bundle / 'python/Lib/site-packages'
+    site.mkdir(parents=True, exist_ok=True)
+    files = {'_aelix_studio_native_bootstrap.py': WINDOWS_CHILD_BOOTSTRAP,
+             'aelix_studio_native.pth': 'import _aelix_studio_native_bootstrap\n'}
+    if any((site / name).exists() for name in files):
+        raise ValueError('Refusing to replace an existing Python startup file')
+    for name, content in files.items():
+        (site / name).write_text(content, encoding='utf-8')
+    return [str((site / name).relative_to(bundle)) for name in files]
+
 
 def digest(file):
     return hashlib.sha256(file.read_bytes()).hexdigest()
@@ -97,6 +137,7 @@ def main(args):
             copy_tree(site, bundle / (kind + '-site'))
         shutil.copy2(Path(__file__).with_name('launch.py'), bundle / 'launch.py')
         shutil.copy2(runtime / 'launch.cjs', bundle / 'launch.cjs')
+        studio_startup = write_windows_child_bootstrap(bundle) if sys.platform == 'win32' else []
         wrappers = (('native/bin/python', 'helper'), ('native/bin/aelix', 'native'), ('adapter/bin/aelix-acp', 'acp')) if sys.platform != 'win32' else ()
         for relative, mode in wrappers:
             file = bundle / relative
@@ -110,6 +151,7 @@ def main(args):
                         preparedReceiptSha256=digest(runtime / 'receipt.json'),
                         recipeSha256={file.name: digest(file) for file in (Path(__file__), Path(__file__).with_name('launch.py'), Path(__file__).with_name('build.mjs'), Path(__file__).with_name('runtime.py'), Path(__file__).with_name('build-requirements.txt'))},
                         dependencyLockSha256=receipt['dependencyLockSha256'], platformBootstrapAudit=bootstrap_audits,
+                        studioStartupFiles=studio_startup,
                         pythonProvenance='uv-managed python-build-standalone copied from qualified CPython base; no venv',
                         entrypoints=['python/python.exe' if sys.platform == 'win32' else 'python/bin/python3', 'launch.py', 'launch.cjs'])
         manifest['recipeSha256']['launch.cjs'] = digest(runtime / 'launch.cjs')

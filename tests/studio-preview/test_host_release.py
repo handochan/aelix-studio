@@ -7,6 +7,8 @@ import subprocess
 from pathlib import Path
 import tempfile
 import unittest
+from unittest.mock import patch
+from types import SimpleNamespace, ModuleType
 
 ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / 'scripts/studio-preview/host-release/smoke.py'
@@ -46,6 +48,68 @@ class BundledBytecodeTests(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertEqual(result.stdout.strip(), 'True')
             self.assertEqual(list(site.rglob('*.pyc')), [])
+
+
+class WindowsChildBootstrapTests(unittest.TestCase):
+    def fixture(self, root):
+        spec = importlib.util.spec_from_file_location('studio_bundle', ROOT / 'scripts/studio-preview/packaging/bundle.py')
+        builder = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(builder)
+        files = builder.write_windows_child_bootstrap(root)
+        executable = root / 'python/python.exe'
+        executable.write_bytes(b'owned executable identity fixture')
+        spec = importlib.util.spec_from_file_location('studio_bootstrap_probe', root / files[0])
+        module = importlib.util.module_from_spec(spec)
+        # Keep the host test interpreter out of the automatic Windows startup gate.
+        with patch.object(sys, 'orig_argv', [sys.executable, '-c', 'probe'], create=True):
+            spec.loader.exec_module(module)
+        fake = SimpleNamespace(platform='win32', orig_argv=[str(executable), '-m', 'aelix_coding_agent'],
+                               executable=str(executable), prefix=str(root / 'python'), path=['original'])
+        return builder, module, fake
+
+    def test_owned_native_child_gets_process_local_windows_paths_without_environment_changes(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, module, fake = self.fixture(root)
+            environment = dict(os.environ)
+            handle = object()
+            with patch.object(module, 'sys', fake), patch.object(module.os, 'add_dll_directory', return_value=handle, create=True), patch.dict(sys.modules, {'pywin32_bootstrap': ModuleType('pywin32_bootstrap')}):
+                self.assertTrue(module._configure_native_child())
+            self.assertEqual(fake.path[:3], [str(root / 'native-site' / name) for name in ('win32', 'win32/lib', 'Pythonwin')])
+            self.assertEqual(module._DLL_HANDLES, [handle])
+            self.assertEqual(dict(os.environ), environment)
+
+    def test_project_modules_other_interpreters_and_venvs_are_untouched(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            _, module, fake = self.fixture(root)
+            venv = root / 'project-venv'
+            venv.mkdir()
+            cases = [dict(orig_argv=[fake.executable, '-m', 'project_module']),
+                     dict(executable=sys.executable), dict(prefix=str(venv))]
+            for changes in cases:
+                candidate = SimpleNamespace(**{**vars(fake), **changes, 'path': ['original']})
+                with patch.object(module, 'sys', candidate):
+                    self.assertFalse(module._configure_native_child())
+                self.assertEqual(candidate.path, ['original'])
+
+    def test_existing_startup_files_are_never_overwritten(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            builder, _, _ = self.fixture(root)
+            with self.assertRaisesRegex(ValueError, 'existing Python startup'):
+                builder.write_windows_child_bootstrap(root)
+
+    def test_generated_pth_loads_the_owned_hook_without_bootstrapping_a_general_python_command(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            self.fixture(root)
+            code = (f'import site,sys;site.addsitedir({str(root / "python/Lib/site-packages")!r});'
+                    'print("_aelix_studio_native_bootstrap" in sys.modules)')
+            result = subprocess.run([sys.executable, '-I', '-S', '-B', '-c', code],
+                                    capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(result.stdout.strip(), 'True')
 
 
 class InstalledPythonAliasTests(unittest.TestCase):
