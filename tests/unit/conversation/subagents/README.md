@@ -41,12 +41,21 @@ scenario selector if it changes. Keep provenance/pins in the `source` field;
 UUIDs and timing values are capture-specific. This regenerates semantic cases,
 not byte-identical identifiers.
 
-Signal-boundary fixtures intentionally retain reported running states while a
-new conversation turn is active: current ACP rows do not provide a host turn
-ID, and `backend_turn_id` is a provider fork anchor. Reconciling those calls
-requires an explicit per-call turn-ended signal or matching host turn IDs.
-No new store/subscription is used. A stopped child followed by a new child is
-unreachable in the pinned native and remains outside these fixtures until S3.
-Before the first subagent metadata frame, the item is an ordinary tool and is
-not projected, even with a known idle conversation. Identifying that case needs
-an explicit per-call subagent/lifecycle signal rather than a title guess.
+Signal-boundary tests preserve every live frame, including the first one, even
+with a hydrated idle runtime view. Team, scheduled and other-client sends do not
+update that view's turn-start state. `MessageList` therefore does not calculate
+or pass a conversation `known`/`turn` signal to this module. Only an explicitly
+terminal parent marks unreported active children as ended; a complete child
+snapshot containing a stopped child still clears the unfinished parent's busy
+indicator. Filtered child lists never justify a parent projection.
+
+On reopen, stopped/terminal snapshots restore without busy indicators. A saved
+in-progress parent with active children (or only done/error children) retains its
+spinner: it is indistinguishable from live work in a renderer that did not start
+the turn. Local stop without a terminal call/child update has the same limit.
+Resolving it needs an explicit per-call ended signal or matching host turn IDs;
+current rows lack those IDs, and `backend_turn_id` is a provider fork anchor.
+No store change or new subscription is used. A stopped child followed by a new
+child is unreachable in the pinned native and remains outside these fixtures
+until S3. Before the first metadata frame, the item remains an ordinary tool;
+identifying it needs a per-call subagent/lifecycle signal rather than a title guess.

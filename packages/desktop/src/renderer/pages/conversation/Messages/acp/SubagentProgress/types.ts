@@ -13,7 +13,6 @@ export type SubagentChild = {
 export type SubagentProgress = { version: 1; children: SubagentChild[]; hasDiscardedChildren: boolean };
 
 export type SubagentParentStatus = 'pending' | 'running' | 'completed' | 'error' | 'canceled';
-export type SubagentTurnSignal = { known: boolean; isProcessing: boolean };
 export type SubagentPresentation = {
   progress: SubagentProgress;
   parentStatus: SubagentParentStatus;

@@ -10,11 +10,7 @@ import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/co
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
-import SubagentProgressPanel, {
-  presentSubagentTool,
-  type SubagentPresentation,
-  type SubagentTurnSignal,
-} from '../acp/SubagentProgress';
+import SubagentProgressPanel, { presentSubagentTool, type SubagentPresentation } from '../acp/SubagentProgress';
 import './MessageToolGroupSummary.css';
 
 const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
@@ -158,10 +154,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: SubagentP
   );
 };
 
-const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[]; turn?: SubagentTurnSignal }> = ({
-  messages,
-  turn,
-}) => {
+const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messages }) => {
   const extensionsByCall = useMemo(
     () =>
       new Map<string, unknown>(
@@ -178,10 +171,10 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[]; turn?: Subage
     () =>
       normalized.map((item) => {
         const extension = extensionsByCall.get(item.key);
-        const subagents = extension ? presentSubagentTool(extension, item.status, turn) : null;
+        const subagents = extension ? presentSubagentTool(extension, item.status) : null;
         return { item: subagents ? { ...item, status: subagents.parentStatus } : item, subagents };
       }),
-    [normalized, extensionsByCall, turn]
+    [normalized, extensionsByCall]
   );
   const tools = presented.map(({ item }) => item);
   const hasSubagents = presented.some(({ subagents }) => subagents !== null);

@@ -27,7 +27,7 @@ vi.mock('@arco-design/web-react', async () => ({
 
 const value = (name: string) => fixture.frames.find((frame) => frame.name === name)!.update._meta['aelix/subagents'];
 const panel = (snapshot: unknown) => (
-  <SubagentProgressPanel progress={presentSubagentTool({ 'aelix/subagents': snapshot }, 'completed')!.progress} />
+  <SubagentProgressPanel progress={presentSubagentTool({ 'aelix/subagents': snapshot }, 'running')!.progress} />
 );
 const message = (snapshot: unknown, id = 'call-one', result = ''): IMessageAcpToolCall => ({
   id,
@@ -170,12 +170,10 @@ describe('subagent progress display', () => {
     spy.mockRestore();
   });
 
-  it('uses the existing ended-turn prop for stale child rows and done/error parents', () => {
+  it('ends stale child rows only when the parent call explicitly ended', () => {
     const running = message({ version: 1, children: [{ id: 'late', state: 'running' }] });
-    running.content.update.status = 'in_progress';
-    const { container } = render(
-      <MessageToolGroupSummary messages={[running]} turn={{ known: true, isProcessing: false }} />
-    );
+    running.content.update.status = 'failed';
+    const { container } = render(<MessageToolGroupSummary messages={[running]} />);
     expect(screen.getByText('acp.subagents.states.ended')).toBeInTheDocument();
     expect(container.querySelector('.arco-badge-status-processing')).toBeNull();
   });

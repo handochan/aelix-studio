@@ -3,7 +3,7 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SubagentProgress, SubagentState } from './types';
 export { presentSubagentTool } from './presentation';
-export type { SubagentPresentation, SubagentTurnSignal } from './types';
+export type { SubagentPresentation } from './types';
 
 const STATUS = {
   starting: 'processing',
