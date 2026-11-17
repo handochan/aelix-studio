@@ -11,7 +11,7 @@
 | D01 | beta.2 기준                        | 공개 beta.2 wheel 무수정. Studio/ACP/별도 확장/helper에서 연결. 실제 wheel의 import/CLI/schema compatibility 확인                                                                                                                                                                          | Preview용 core backport와 강제 CLI upgrade는 제외. 남는 제약은 beta2-public-surface.md에 명시. main을 b2로 포장하지 않음                                                                                                                                                 | 2026-10-25 사용자 기준 확정                                |
 | D02 | Preview/첫 Beta의 UI·기능 커버리지 | 첫 Beta까지 기존 Aion context 표시·설정창·selector·분기/가져오기/복제·sidebar·preview/browser에 native 기능 연결을 최대한 우선. clear 재구현 제외                                                                                                                                          | 명령 36개는 참고 inventory이며 전수 신규 구현 gate가 아님. 새 표면은 기존 UI로 충족할 수 없는 필수 작업의 최소 범위. UI 재사용과 native 기능 미연결은 구분                                                                                                               | 첫 Beta까지 UI 재사용 우선은 사용자 기준 확정              |
 | D03 | 기존 CLI 연결                      | native 설정·인증·원본 세션 재사용. user 선택과 runtime/schema 호환성 확인, 같은 파일은 협조하는 writer 한 명만                                                                                                                                                                             | export/import 사본 중심은 단순하지만 같은 세션이 아님. legacy beta.2는 viewer/copy branch 또는 호환 CLI upgrade                                                                                                                                                          | 최소선 확정(2026-10-29–30, 아래 기록), 나머지 제안         |
-| D04 | 확장 설치 위치                     | 사용자 managed runtime generation. bundled source/ABI/lock에 연결, 검증 후 전환·rollback                                                                                                                                                                                                   | 검증된 overlay도 후보. signed bundle 수정/시스템 CLI 임의 업데이트는 제외                                                                                                                                                                                                | 설치·관리 UI 첫 Beta 필수(10-29 확정). 위치는 spike 후 ADR |
+| D04 | 확장 설치 위치                     | 사용자 managed runtime generation. bundled source/ABI/lock에 연결, 검증 후 전환·rollback. 설계는 [D04 ADR](../studio-extensions/README.md)                                                                                                                                                 | 검증된 overlay도 후보. signed bundle 수정/시스템 CLI 임의 업데이트는 제외                                                                                                                                                                                                | 설치·관리 UI 첫 Beta 필수(10-29 확정). 방식은 11-17 채택   |
 | D05 | 초기 관리 통로                     | 두 경로: 세션 제어는 기존 Aion host→ACP, 전역 관리는 Studio 소유 stdio native helper. 세션 감독자는 기존 host 한 곳                                                                                                                                                                        | helper는 LLM bootstrap 의존을 없애지만 프로세스/호환 심볼 관리 비용이 있음. 커스텀 live command/dialog·metadata forwarding은 별도 host probe 후 bounded host 변경(D12) 여부 판단. helper로 live worker를 우회 제어하지 않음                                              | 권장 설계, host spike 필요                                 |
 | D06 | Team과 native 위임                 | 첫 Beta까지 Aion Team UX와 Aelix child run을 명확히 구분. 공통 run identity/가시성을 먼저 만들기                                                                                                                                                                                           | 처음부터 Aion orchestrator 전체 교체는 출시 범위를 크게 늘림. Team 생성만 하고 실제 도구 미연결은 gate 실패                                                                                                                                                              | 서브에이전트 기능 첫 Beta 필수(10-29 확정), Team 요구 유지 |
 | D07 | upstream 추적                      | main 감지/평가와 stable/선별 commit adoption을 분리. 모듈 소유권 map·별도 upgrade branch·실제 regression                                                                                                                                                                                   | 매 main 자동 merge/사용자 자동 업데이트는 제품 정책/세션 schema 충돌 위험. 장기 upstream 고정도 보안/호환 수정 누락                                                                                                                                                      | 제안                                                       |
@@ -116,6 +116,29 @@
   포함한다. #800이 beta.3에 들어오면 첫 Beta에 넣고, 아니면 다음 릴리스로 넘긴다. Studio #31은 지금 구현(상태 표시와
   이어서 시키기)으로 리뷰와 병합 준비를 진행한다.
   - 조정 세션 기록(사용자 결정 아님): 표시 작업은 Studio #49로 뗐다. #31의 나머지 범위는 #31 본문을 따른다.
+- **확장 설치 방식(G07·D04, 11-17 사용자 결정):** Studio #32의 spike와 독립 리뷰 뒤에 사용자가
+  [D04 ADR](../studio-extensions/README.md)의 질문 가운데 일곱 가지를 골랐다.
+  - 설치 방식: 채택. 설치 helper 구현을 시작한다. 화면에는 아직 내지 않는다. OS별 확인은 그 다음 단계에서 하고,
+    화면 공개 전에는 ACP 변경(대화창 설치 차단)이 필요하다. 함께 보여 준 제약은 다음과 같다. Studio에 든 라이브러리와
+    버전이 충돌하는 확장과 시작 시 자동 실행 파일이 있는 패키지는 설치를 거부한다. 사용자의 pip 설정은 따르지 않는다
+    (사내 미러는 Studio 설정에 따로 적는다). 파일 반입은 wheel만 받는다.
+  - 대화에서 사용: 지금 ACP로 낸다. 설치하면 다음 새 대화부터 확장의 명령과 도구를 쓴다. 확장 구조에 따라 선언한
+    MCP 서버·테마·hook이 빠질 수 있고 그런 확장은 화면에 표시한다. 구조가 맞지 않아 로드에 실패하는 일부 확장은
+    설치가 거부된다.
+  - 온라인 설치: 내되 설정으로 끌 수 있게 한다. 사용자가 설치를 누를 때만 접속하고, 설치 전에 접속 범위를 알린다.
+    접속 없이 써야 하는 환경에서는 설정으로 온라인 설치를 끄고 파일 반입만 쓴다.
+  - Studio 업데이트 뒤 설치한 확장을 새 버전에 맞출 수 없을 때: 확장 없이 시작하고 안내한다. 대화는 되고 확장 기능은
+    빠진다. "다시 설치 필요"를 표시한다. 맞는 것만 남기기와 사전 안내는 뒤에 더한다.
+  - 이름·git으로 설치한 확장의 설치 파일 사본: 보관하지 않는다. 파일로 반입한 확장은 항상 보관한다. 이름·git으로
+    설치한 확장은 Studio 업데이트 뒤 index에 다시 접속해야 다시 만들어진다. 접속 없이 쓰는 환경에서는 파일 반입을 쓴다.
+  - 되돌리기: 직전 한 단계.
+  - R8(확장 관리 API): 요구하지 않고 버그만 등록한다. 첫 Beta는 지금 CLI로 낸다. 버그 두 건은 aelix-ai에 등록한다.
+  - 아직 묻지 않아 미정인 것: 켜고 끄는 단위, 대화창 `/extension install`의 처리, 이름 설치의 기본 index(이상 화면 공개
+    전), 터미널 CLI에도 설치하기, 터미널 CLI의 기존 확장 다루기(이상 미뤄도 됨).
+  - 조정 세션 기록(사용자 결정 아님): 질문 번호는 ADR 8.2의 A1·A2·A3·A4·A11·A12·A10이고 미정은 A5–A9다. 실행은
+    macOS에서만 했다. Windows·Linux·서명된 설치 앱 확인은 helper 구현 뒤의 단계다. 위 "aelix-ai 계약" 항목의 남은
+    판정 가운데 R8이 이 결정에 해당한다. 버그 두 건은 `--offline` 경로 설치가 빠진 의존성을 공개 index에서 받는 것과
+    `extension remove`만 pip의 종료 코드를 그대로 돌려주는 것이다.
 
 ## 결정을 섞지 말 것
 
