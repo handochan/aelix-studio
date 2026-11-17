@@ -16,7 +16,10 @@ gh project item-list 9 --owner handochan --format json --limit 100
 
 - Follow the user's explicit task scope. For queued product work, take only an assigned Ready Issue after dependencies are satisfied; convert drafts before implementation.
 - One Issue, one owner, one branch/worktree. Preserve other agents' dirty work. Initial independent implementation concurrency is at most two; serialize shared contracts, manifests, lockfiles, and host composition changes.
-- Use one independent review from another session, then recheck affected validation. Claude/Codex may alternate implementation and review.
+- Put Beta feature Issues that can start now into the implementation slots first. Re-check that an Issue's stated dependencies are still open before leaving it `blocked`; a closed dependency does not prove the feature runs in the bundled runtime.
+- For a cross-repository feature, fix the contract as example JSON first, integrate on branch SHAs during development, and cut host releases only at integration. Send Aelix-specific features over paths the host passes through without interpreting, and global management through the helper.
+- Build new Aelix screens as self-contained modules behind a narrow data interface, not inside the Aion conversation store.
+- Use one independent review from another session, then recheck affected validation. Fix blocking and should-fix findings; record nits on the Issue instead of holding the merge. Claude/Codex may alternate implementation and review.
 - Update Issue/Project at start, review submission, blockage, and stop/completion. Handoff records current SHA/PR/worktree, verification, next action, and blockers.
 - Use `needs-decision` for product/compatibility/release choices and `blocked` for unmet dependencies. Done requires actual acceptance and relevant merge/verification evidence; one backend PR does not complete a cross-repository feature.
 - Preview keeps public beta.2 native wheels unmodified. Through the first Beta, reuse existing Aion UI surfaces; connect native state rather than replicate every slash command. New `/clear` implementation is excluded.

@@ -37,6 +37,25 @@ function downloadVerifiedArchive(
   }
 }
 
+/**
+ * Extract a verified ZIP into an existing empty directory with .NET directly.
+ * Windows PowerShell inherits PowerShell 7's module path from a pwsh parent and
+ * then loads an Archive module it cannot run, so the command uses no cmdlet.
+ */
+function extractWindowsArchive(archive, extracted) {
+  const quote = (value) => value.replace(/'/g, "''");
+  execFileSync('powershell', [
+    '-NoProfile',
+    '-NonInteractive',
+    '-Command',
+    [
+      "$ErrorActionPreference = 'Stop'",
+      "[void][System.Reflection.Assembly]::LoadWithPartialName('System.IO.Compression.FileSystem')",
+      `[System.IO.Compression.ZipFile]::ExtractToDirectory('${quote(archive)}', '${quote(extracted)}')`,
+    ].join('; '),
+  ]);
+}
+
 function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResources }) {
   const target = `${platform}-${arch}`;
   const spec = policy.targets[target];
@@ -55,15 +74,8 @@ function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResourc
   const extracted = path.join(cache, 'extracted');
   fs.rmSync(extracted, { recursive: true, force: true });
   fs.mkdirSync(extracted);
-  if (platform === 'win32') {
-    const quote = (value) => value.replace(/'/g, "''");
-    execFileSync('powershell', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      `Expand-Archive -LiteralPath '${quote(archive)}' -DestinationPath '${quote(extracted)}'`,
-    ]);
-  } else execFileSync('tar', ['-xzf', archive, '-C', extracted]);
+  if (platform === 'win32') extractWindowsArchive(archive, extracted);
+  else execFileSync('tar', ['-xzf', archive, '-C', extracted]);
   // The checksum authenticates every archive member before extraction or execution.
   if (digest(path.join(extracted, spec.binary)) !== spec.binarySha256)
     throw new Error('Default host release binary checksum differs');
@@ -96,7 +108,7 @@ function prepareDefaultHost({ projectRoot, platform, arch, prepareManagedResourc
   verifyDefaultHostBundle(directory, target);
   return { prepared: true, dir: directory, sourceType: manifest.sourceType };
 }
-module.exports = { prepareDefaultHost, downloadVerifiedArchive };
+module.exports = { prepareDefaultHost, downloadVerifiedArchive, extractWindowsArchive };
 
 if (require.main === module)
   require('../../../packages/shared-scripts/src/prepare-aioncore.js').prepareAioncore({
