@@ -246,6 +246,27 @@ describe('reading a wheel without running anything in it', () => {
       /same place/,
     ],
     [
+      'a member name the installer would decode as code page 437',
+      async () => {
+        const data = Buffer.from(buildWheel({ name: 'legacy', tail: [['legacy/é.py', '']] }).data);
+        // Clear the UTF-8 flag of the last member in the central directory.
+        const entry = data.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+        data.writeUInt16LE(0, entry + 8);
+        return raw('legacy-0.1.0-py3-none-any.whl', data);
+      },
+      /not marked as UTF-8/,
+    ],
+    [
+      'a member name that is not UTF-8',
+      async () => {
+        const data = Buffer.from(buildWheel({ name: 'broken', tail: [['broken/xx.py', '']] }).data);
+        const entry = data.lastIndexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
+        data.writeUInt8(0xff, entry + 46 + 'broken/'.length);
+        return raw('broken-0.1.0-py3-none-any.whl', data);
+      },
+      /not UTF-8/,
+    ],
+    [
       'metadata of another distribution installed through the data directory',
       async () =>
         raw(

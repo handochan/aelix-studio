@@ -234,10 +234,15 @@ describe('changing what is installed', () => {
       await mkdir(path.join(outside, 'keep'), { recursive: true });
       await rm(helper.context.layout.generations, { recursive: true });
       await symlink(outside, helper.context.layout.generations, 'junction');
-      expect((await failure(install({ name: 'demo-one' }))).code).toBe('UNSAFE_ROOT');
-      expect((await failure(rollback(helper.context))).code).toBe('UNSAFE_ROOT');
-      expect((await failure(describeInstalled(helper.context))).code).toBe('UNSAFE_ROOT');
+      const caught = (work: Promise<unknown>): Promise<unknown> => work.catch((error: unknown) => error);
+      const outcomes = [
+        await caught(install({ name: 'demo-one' })),
+        await caught(rollback(helper.context)),
+        await caught(describeInstalled(helper.context)),
+      ];
+      // What the link points at first: recovery used to take `keep` for an unfinished candidate.
       expect(await readdir(outside)).toEqual(['keep']);
+      expect(outcomes.map((outcome) => (outcome as ExtensionFailure).code)).toEqual(Array(3).fill('UNSAFE_ROOT'));
     });
 
     it('reports no change when the installer exits 0 without installing anything', async () => {

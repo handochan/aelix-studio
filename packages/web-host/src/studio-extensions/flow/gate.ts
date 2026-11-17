@@ -37,26 +37,30 @@ const owned = (snapshot: SiteSnapshot, distribution: string): string[] =>
 export type Resolution = { distribution: string } | { ambiguous: string[] };
 
 /**
- * The distribution a name refers to in a snapshot, or the entry names it could mean when it
- * fits more than one; undefined when nothing fits.
+ * The distribution a name refers to in a snapshot, or the names it could mean when it fits
+ * more than one distribution; undefined when nothing fits.
  *
  * An exact extension entry name wins. Otherwise names are compared the way native compares
- * them (case and `_`/`-` fold, a dot does not): first entry names, then the names of
- * distributions that provide an extension. A name that fits entries of two distributions is
- * ambiguous; native would take whichever it lists first.
+ * them (case and `_`/`-` fold, a dot does not) with the entry names and with the names of
+ * distributions that provide an extension. A name that fits more than one distribution that
+ * way is ambiguous: native would take whichever it happens to list first.
  */
 export function resolveDistribution(snapshot: SiteSnapshot, name: string): Resolution | undefined {
   const exact = snapshot.extensions.get(name);
   if (exact) return { distribution: exact.distribution };
   const wanted = nativeName(name);
-  const alike = [...snapshot.extensions].filter(([entry]) => nativeName(entry) === wanted);
-  const owners = new Set(alike.map(([, extension]) => extension.distribution));
-  if (owners.size > 1) return { ambiguous: alike.map(([entry]) => entry) };
-  if (owners.size === 1) return { distribution: alike[0][1].distribution };
-  const provider = [...snapshot.distributions.values()].find(
-    (distribution) => nativeName(distribution.declaredName) === wanted && owned(snapshot, distribution.name).length > 0
-  );
-  return provider && { distribution: provider.name };
+  const fits: [string, string][] = [
+    ...[...snapshot.extensions]
+      .filter(([entry]) => nativeName(entry) === wanted)
+      .map(([entry, extension]): [string, string] => [entry, extension.distribution]),
+    ...[...snapshot.distributions.values()]
+      .filter((distribution) => nativeName(distribution.declaredName) === wanted)
+      .filter((distribution) => owned(snapshot, distribution.name).length > 0)
+      .map((distribution): [string, string] => [distribution.declaredName, distribution.name]),
+  ];
+  const owners = new Set(fits.map(([, distribution]) => distribution));
+  if (owners.size > 1) return { ambiguous: fits.map(([fit]) => fit) };
+  return owners.size === 1 ? { distribution: fits[0][1] } : undefined;
 }
 
 /**

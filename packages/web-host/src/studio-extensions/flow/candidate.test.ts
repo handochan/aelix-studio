@@ -287,10 +287,15 @@ describe('building and scanning a candidate generation', () => {
     const listed = path.relative(parent.paths.site, entry).split(path.sep).join('/');
     await writeFile(path.join(parent.paths.site, 'demo-0.1.0.dist-info', 'RECORD'), `${listed},,\n`, { flag: 'a' });
     const interpreter = await readFile(helper.context.bundle.python, 'utf8');
-    expect((await failure(createCandidate(helper.context, CHILD, await finished(parent)))).code).toBe(
-      'GENERATION_MODIFIED'
+    const outcome = createCandidate(helper.context, CHILD, await finished(parent));
+    const error = await outcome.then(
+      () => undefined,
+      (caught: unknown) => caught
     );
+    // The bundled interpreter first: copying onto the link used to overwrite it.
     expect(await readFile(helper.context.bundle.python, 'utf8')).toBe(interpreter);
+    expect(error).toBeInstanceOf(ExtensionFailure);
+    expect((error as ExtensionFailure).code).toBe('GENERATION_MODIFIED');
   });
 
   // Review finding 2: what counts is the metadata that ended up installed.

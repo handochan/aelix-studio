@@ -11,7 +11,7 @@
  */
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, rm, truncate, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,6 +24,10 @@ import {
   type ExtensionReply,
   type ExtensionRollback,
 } from '../../packages/web-host/src/studio-extensions/index';
+import { baseEnvironment } from '../../packages/web-host/src/studio-extensions/flow/environment';
+import { spawnChild } from '../../packages/web-host/src/studio-extensions/process';
+import { locateLayout, resolveBundle } from '../../packages/web-host/src/studio-extensions/store/layout';
+import { acquireMutationLock } from '../../packages/web-host/src/studio-extensions/store/lock';
 import { writeWheel, type WheelSpec } from '../../packages/web-host/tests/fixtures/extensionWheels';
 
 const BUNDLE = process.env.AELIX_STUDIO_EXTENSION_BUNDLE;
@@ -479,8 +483,95 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     }
     expect(await list(isolated)).toMatchObject({ current: null, extensions: [] });
 
+    // What counts is the metadata that ended up installed: a generation whose METADATA gained a
+    // direct reference after the check is refused before the installer runs in it again.
+    const base = await install(await wheel({ name: 'fixture-metabase' }, 'alias-base'), undefined, isolated);
+    expect(base.phase).toBe('switched');
+    const manifest = JSON.parse(await readFile(path.join(bundle, 'manifest.json'), 'utf8')) as { python: string };
+    const generationsOf = path.join(sandbox, 'path alias', 'aelix-runtime', 'generations');
+    const site = (generation: string): string =>
+      path.join(
+        generationsOf,
+        generation,
+        'venv',
+        'lib',
+        `python${manifest.python.split('.').slice(0, 2).join('.')}`,
+        'site-packages'
+      );
+    const metadata = path.join(site(base.generation ?? ''), 'fixture_metabase-0.1.0.dist-info', 'METADATA');
+    await writeFile(
+      metadata,
+      `${await readFile(metadata, 'utf8')}Requires-Dist: fixture-hidden @ ${pathToFileURL(hidden).href}\n`
+    );
+    const next = await install(await wheel({ name: 'fixture-metanext' }, 'alias-base'), undefined, isolated);
+    // Refused by the scan of what the candidate inherited, before the installer ever ran in it.
+    expect(next).toMatchObject({ phase: 'failed', code: 'DIRECT_REFERENCE' });
+    expect(next.output).toBeUndefined();
+    for (const generation of await readdir(generationsOf))
+      expect((await readdir(site(generation))).filter((entry) => entry.startsWith('fixture_hidden'))).toEqual([]);
+    expect(await list(isolated)).toMatchObject({ current: base.generation });
+    expect(await bundleDifferences(bundle)).toEqual([]);
     await isolated.dispose();
   }, 240_000);
+
+  // Review findings 3 and 7, at the level of the real lock holder: it is the only writer of
+  // shared state, removes only entries of directories that are really the helper's own, and
+  // writes nothing once it is gone.
+  it('has the lock holder remove only entries of directories that are its own, and nothing once released', async () => {
+    const runtime = await resolveBundle(bundle);
+    if (!runtime) throw new Error('the bundle copy did not resolve');
+    const valuable = path.join(sandbox, 'lock holder', 'valuable');
+    await mkdir(path.join(valuable, 'keep'), { recursive: true });
+    const layout = await locateLayout(path.join(sandbox, 'lock holder', 'aelix-runtime'));
+    await mkdir(layout.leases, { recursive: true });
+    await mkdir(layout.artifacts, { recursive: true });
+    await symlink(valuable, layout.generations);
+    await mkdir(path.join(layout.artifacts, 'stale'));
+    await writeFile(path.join(layout.root, 'current.json.0001.tmp'), '{}\n');
+    const lock = await acquireMutationLock({
+      bundle: runtime,
+      layout,
+      spawn: spawnChild,
+      env: baseEnvironment(environment, process.platform),
+      waitMs: 5000,
+    });
+    const code = (work: Promise<unknown>): Promise<unknown> =>
+      work.then(
+        () => 'done',
+        (error: unknown) => (error as { code?: unknown }).code
+      );
+    try {
+      expect(await code(lock.remove('generations/keep'))).toBe('UNSAFE_ROOT');
+      for (const relative of ['..', 'generations/../..', 'other/keep', 'artifacts/a/b', '/etc', 'artifacts/..'])
+        expect([relative, await code(lock.remove(relative))]).toEqual([relative, 'UNSAFE_ROOT']);
+      expect(await code(lock.replace('current.json.0001.tmp', 'lock'))).toBe('UNSAFE_ROOT');
+      expect(await readdir(valuable)).toEqual(['keep']);
+      // A link among the entries of the root is removed as a link; what it points at stays.
+      expect(await code(lock.remove('generations'))).toBe('done');
+      expect(await readdir(valuable)).toEqual(['keep']);
+      expect(await code(lock.remove('artifacts/stale'))).toBe('done');
+      expect(await readdir(layout.artifacts)).toEqual([]);
+      expect(await code(lock.replace('current.json.0001.tmp', 'current.json'))).toBe('done');
+      expect(await readFile(layout.pointer, 'utf8')).toBe('{}\n');
+    } finally {
+      await lock.release();
+    }
+    await mkdir(path.join(layout.artifacts, 'after'));
+    expect(await code(lock.remove('artifacts/after'))).toBe('CONFLICT');
+    expect(await readdir(layout.artifacts)).toEqual(['after']);
+    // The lock file itself must not be a link: the holder would lock whatever it points at.
+    const linked = await locateLayout(path.join(sandbox, 'lock holder', 'linked-lock'));
+    await mkdir(linked.root, { recursive: true });
+    await symlink(path.join(valuable, 'keep', 'lock'), linked.lock);
+    expect(
+      await code(
+        acquireMutationLock({ bundle: runtime, layout: linked, spawn: spawnChild, env: {}, waitMs: 1000 }).then(
+          (held) => held.release()
+        )
+      )
+    ).toBe('UNSAFE_ROOT');
+    expect(await readdir(path.join(valuable, 'keep'))).toEqual([]);
+  }, 60_000);
 
   it('wrote nothing outside its root and left the bundle as it was', async () => {
     for (const name of ['target', 'site']) expect(await readdir(path.join(outside, name))).toEqual([]);

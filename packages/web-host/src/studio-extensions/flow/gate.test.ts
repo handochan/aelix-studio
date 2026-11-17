@@ -85,6 +85,16 @@ describe('finding the distribution a name refers to', () => {
     expect(resolveDistribution(alike, 'Sample-One')).toEqual({ ambiguous: ['sample-one', 'sample_one'] });
   });
 
+  it('calls a name ambiguous when it reads like an entry of one distribution and the name of another', () => {
+    const crossed = site(
+      ['first', '1.0', { 'Second-Pack': 'first:setup' }],
+      ['second-pack', '1.0', { two: 'two:setup' }]
+    );
+    // native would take the entry of `first`; whoever typed it may have meant the distribution.
+    expect(resolveDistribution(crossed, 'second_pack')).toEqual({ ambiguous: ['Second-Pack', 'second-pack'] });
+    expect(resolveDistribution(crossed, 'Second-Pack')).toEqual({ distribution: 'first' });
+  });
+
   it('hands native an entry name only this distribution has', () => {
     expect(nativeHandle(snapshot, 'beta-ext')).toBe('beta');
     expect(nativeHandle(alike, 'dot-pack')).toBe('sample.one');

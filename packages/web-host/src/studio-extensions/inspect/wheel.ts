@@ -28,6 +28,25 @@ const ARCHIVE_LIMIT = 0xffffffff;
 /** Largest total of the declared member sizes: what the installer would write to disk. */
 const INSTALLED_LIMIT = 4 * 1024 ** 3;
 
+/** General purpose flag: the member name is UTF-8. */
+const UTF8_NAME = 0x0800;
+const UTF8 = new TextDecoder('utf-8', { fatal: true });
+
+/**
+ * A member name as the installer reads it. Python's `zipfile` decodes a name as UTF-8 only
+ * when the archive flags it so, and as code page 437 otherwise; a name decoded any other way
+ * here would be another path than the one installed.
+ */
+function memberName(raw: Buffer, flags: number): string {
+  if ((flags & UTF8_NAME) === 0 && raw.some((byte) => byte >= 0x80))
+    throw new WheelError('the archive holds a member name that is not marked as UTF-8');
+  try {
+    return UTF8.decode(raw);
+  } catch {
+    throw new WheelError('the archive holds a member name that is not UTF-8');
+  }
+}
+
 async function readAt(handle: FileHandle, position: number, length: number): Promise<Buffer> {
   const buffer = Buffer.alloc(length);
   const { bytesRead } = await handle.read(buffer, 0, length, position);
@@ -68,8 +87,10 @@ async function readDirectory(handle: FileHandle): Promise<Member[]> {
     const nameLength = directory.readUInt16LE(cursor + 28);
     const extraLength = directory.readUInt16LE(cursor + 30);
     const commentLength = directory.readUInt16LE(cursor + 32);
+    if (cursor + 46 + nameLength + extraLength + commentLength > directory.length)
+      throw new WheelError('the archive directory is damaged');
     const member = {
-      name: directory.toString('utf8', cursor + 46, cursor + 46 + nameLength),
+      name: memberName(directory.subarray(cursor + 46, cursor + 46 + nameLength), directory.readUInt16LE(cursor + 8)),
       method: directory.readUInt16LE(cursor + 10),
       compressedSize: directory.readUInt32LE(cursor + 20),
       size: directory.readUInt32LE(cursor + 24),
