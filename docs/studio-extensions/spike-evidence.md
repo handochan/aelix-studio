@@ -1,8 +1,8 @@
 # D04 spike 실험 기록
 
-[D04 ADR 초안](README.md)의 근거다. 2026-11-17의 실행 기록이고, 계속 갱신하는 문서가 아니다. 1–6절은 1차
-실험, 7절은 첫 독립 리뷰 뒤의 2차 실험, 8절은 둘째 리뷰 뒤의 3차 실험이다. 1차의 세대 관리 절차(3절)와
-2차 절차(7.6)에는 리뷰가 찾은 결함이 있었고, 다음 절에서 고쳐 다시 실행했다.
+[D04 ADR](README.md)의 근거다. 2026-11-17의 실행 기록이고, 계속 갱신하는 문서가 아니다. 1–6절은 1차
+실험, 7절은 첫 독립 리뷰 뒤의 2차 실험, 8절은 둘째 리뷰 뒤의 3차 실험, 9절은 셋째 리뷰 뒤에 더한 실행이다.
+1차의 세대 관리 절차(3절)와 2차 절차(7.6)에는 리뷰가 찾은 결함이 있었고, 다음 절에서 고쳐 다시 실행했다.
 
 ## 환경과 재료
 
@@ -333,3 +333,48 @@ pack마다 링크 하나를 둔 디렉터리(`packs/aelix_starter -> <세대>/�
 | `remove aelix-starter`                                                                              | `gate passed: request ["aelix-starter-ext", null], expected extensions ["studio32-depext"]`, 검증 통과                                                                                                        | g3                 |
 | `remove studio32-depext`(마지막 확장)                                                               | `expected extensions []`, `loaded with -e: []`, 검증 통과. 세대에 `tabulate`만 남는다                                                                                                                         | g4                 |
 | `studio32_setupconnect` 반입, 서버를 띄움                                                           | 대조 통과, 로드 검증 중 서버 기록 `/setup-was-here`. 고친 뒤에도 요청은 나간다                                                                                                                                | 폐기(404로 실패)   |
+
+## 9. 셋째 리뷰 뒤에 더한 실행
+
+### 9.1 3차 절차로 다시 실행한 것
+
+8.3의 스크립트(요청 대조와 필수 기대 집합이 든 것)를 그대로 썼다. 새 root에서 시작했고 내부 index는
+loopback이다. 7.6의 14·15·17·18번과 9·10번에 해당하는 실행이다.
+
+| 네트워크   | 실행                                                                              | 관찰                                                                                                                                         | 결과 |
+| ---------- | --------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- | ---- |
+| loopback만 | 이름으로 설치: `aelix-starter-ext` (`--index-url http://127.0.0.1:18732/simple/`) | `Looking in indexes: …`, native 종료 0, `gate passed: request ["aelix-starter-ext", null], expected extensions ["aelix-starter"]`, 검증 통과 | g1   |
+| loopback만 | index에 0.2.0을 올린 뒤 `update aelix-starter-ext`                                | `Successfully installed aelix-starter-ext-0.2.0`, 대조 통과, `verify passed: {"aelix-starter-ext": "0.2.0"}`                                 | g2   |
+| 열림       | `remove aelix-starter`(마지막 확장)                                               | `expected extensions []`, `loaded with -e: []`, 검증 통과                                                                                    | g3   |
+| 열림       | `install git+file://<starter git 저장소>`                                         | `Resolved … to commit 71afc5d2…`, `gate passed: request [null, null], expected extensions ["aelix-starter"]`, 검증 통과                      | g4   |
+| —          | 다른 경로·다른 lock 해시의 번들 사본으로 옮기기                                   | `g4 is bound to … (lock eddf8567); now … (lock dddddddd)`, `prepared candidate g5 from g4: 10 recorded files copied`, 검증 통과              | g5   |
+| —          | 위 상태에서 되돌리기                                                              | `g4 is bound to another bundle; adopting its content into a new candidate`, 검증 통과, `SWITCHED current -> g6 (previous g5, revision 6)`    | g6   |
+
+- 번들 사본은 끝난 뒤에도 7,668개 파일, 추가·누락·변경 0이었다.
+- 3차 절차로 다시 실행하지 않은 것: 네트워크를 전부 막은 반입(7.6의 1번), 기록을 다시 설치하는 재구축(7.6의
+  11·12번), 동시 실행·복구·lease(7.6의 6–8번). 이들은 2차 절차의 결과다.
+
+### 9.2 native 버그 두 건의 재현
+
+ADR 7.2의 두 건을 pin과 aelix-ai `origin/main`에서 실행했다.
+
+- pin `e19ab55e17e871a40356fc9802f3f6669ca727de`: 번들에 든 wheel을 새 venv의 interpreter로 실행했다
+  (`<venv>/bin/python -I -B -X utf8 <번들>/launch.py native …`).
+- `origin/main` `d369ab797924e8263d2649de2173a8b1c51db57c`(2026-11-17): `git archive`로 꺼낸 소스의
+  `packages/*/src`를 import 경로 앞에 두고 실행했다. third-party 패키지는 같은 번들의 것이다. main에서 만든
+  wheel로 실행한 것은 아니다. `extension_install.py`는 pin과 주석 한 줄만 다르다.
+- 두 경우 모두 사용자 pip 설정이 없는 `HOME`, pip 26.2.2, Python 3.12.15, 네트워크 열림.
+
+| 실행                                                                                 | pin                                                                                                   | main 소스 |
+| ------------------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- | --------- |
+| `--offline extension install <studio32_depext wheel> --yes` (venv에 `tabulate` 없음) | `Downloading tabulate-0.10.0-py3-none-any.whl (39 kB)`, `Successfully installed …`, 종료 0            | 같음      |
+| `--offline extension install studio32-conflictext --yes` (이름, index 없음)          | `Error: offline mode — a pypi install needs --index-url …`, 종료 2                                    | 같음      |
+| 첫 줄과 같은 명령에 `PIP_NO_INDEX=1`                                                 | `No matching distribution found for tabulate<1,>=0.9`, `pip install failed (exit 1).`, 종료 1         | 같음      |
+| `PIP_TIMEOUT=abc <venv>/bin/python -P -m pip uninstall -y nothing-here` (pip을 직접) | `An error occurred during configuration: option timeout: invalid floating-point value: 'abc'`, 종료 3 | —         |
+| `PIP_TIMEOUT=abc`로 `extension install <aelix_starter_ext 0.2.0 wheel> --yes`        | `pip install failed (exit 3).`, 종료 1                                                                | 같음      |
+| `PIP_TIMEOUT=abc`로 `extension update aelix-starter-ext --yes`                       | `pip install failed (exit 3).`, 종료 1                                                                | 같음      |
+| `PIP_TIMEOUT=abc`로 `extension remove aelix-starter --yes`                           | `pip uninstall failed (exit 3).`, **종료 3**                                                          | 같음      |
+
+소스 위치(pin과 main에서 줄 번호가 같다): offline 검사는 `extension_install.py` 2262행의
+`if _is_offline(offline) and kind == "pypi" and not index_url:`이고, `remove`의 반환은 4936–4939행의
+`return code`, `install`의 반환은 2453–2459행의 `return _INSTALLER_FAILED`다.
