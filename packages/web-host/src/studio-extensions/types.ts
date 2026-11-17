@@ -19,11 +19,19 @@ export type ExtensionCommand =
 export type ExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
 
 /**
- * `ready`: loaded in new conversations. `manifest_unbound`: loaded, but what its manifest
- * declares (MCP servers, themes, hooks) is inert; the screen marks such an extension.
+ * `load_verified`: the extension was imported and its `setup()` ran when native was started
+ * the way a conversation starts it. This is all the helper has checked. Whether what its
+ * manifest declares (MCP servers, themes, hooks) is active in a conversation is not known
+ * yet: a conversation loads an extension by module reference, which attaches no manifest,
+ * and the form that does (decision B5, with its second load check) comes with the launcher.
+ * Until then nothing is reported as fully ready.
+ *
+ * `manifest_unbound`: it loads, and native reports that its manifest does not bind, so what
+ * it declares is certainly inert; the screen marks such an extension.
+ *
  * `reinstall_needed`: the generation belongs to another bundle and is not used.
  */
-export type ExtensionStatus = 'ready' | 'manifest_unbound' | 'reinstall_needed';
+export type ExtensionStatus = 'load_verified' | 'manifest_unbound' | 'reinstall_needed';
 
 export type ExtensionEntry = {
   name: string;
@@ -71,6 +79,12 @@ export type ExtensionFailureCode =
   | 'INSTALLER_NOT_RUN'
   /** Something Studio wrote into the generation was replaced. */
   | 'GENERATION_MODIFIED'
+  /** The helper's state directory is not its own: a link, or somewhere else than its path says. */
+  | 'UNSAFE_ROOT'
+  /** The name fits more than one installed extension the way native compares names. */
+  | 'AMBIGUOUS_NAME'
+  /** Changes are not offered on this platform yet; see `ExtensionService`. */
+  | 'UNSUPPORTED_PLATFORM'
   /** The result differs from what was asked for. */
   | 'REQUEST_MISMATCH'
   | 'LOAD_ERROR'

@@ -1,8 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, truncate, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ensureLayout, layoutOf, type BundleBinding, type Layout } from './layout';
+import { directWriter } from '../../../tests/fixtures/extensionRuntime';
+import { ensureLayout, locateLayout, type BundleBinding, type Layout } from './layout';
+import type { StateWriter } from './lock';
+import { ExtensionFailure } from '../types';
 import {
   newGenerationRecord,
   newPointer,
@@ -103,9 +106,11 @@ describe('pointer and generation records read from disk', () => {
 
 describe('the pointer in effect', () => {
   let layout: Layout;
+  let writer: StateWriter;
   beforeEach(async () => {
-    layout = layoutOf(await mkdtemp(path.join(os.tmpdir(), 'studio-pointer-')));
+    layout = await locateLayout(await mkdtemp(path.join(os.tmpdir(), 'studio-pointer-')));
     await ensureLayout(layout);
+    writer = directWriter(layout.root);
   });
   afterEach(() => rm(layout.root, { recursive: true, force: true }));
   const complete = async (generation: string, parent: string | null = null): Promise<void> => {
@@ -119,7 +124,7 @@ describe('the pointer in effect', () => {
 
   it('is the current pointer when its generation is complete', async () => {
     await complete(G1);
-    await switchPointer(layout, newPointer(G1, null, 1, BINDING), null);
+    await switchPointer(layout, newPointer(G1, null, 1, BINDING), null, writer);
     const state = await readPointer(layout);
     expect(state).toMatchObject({ pointer: { generation: G1, revision: 1 }, recovered: false });
     expect(state.record?.generation).toBe(G1);
@@ -129,9 +134,9 @@ describe('the pointer in effect', () => {
     await complete(G1);
     await complete(G2, G1);
     const first = newPointer(G1, null, 1, BINDING);
-    await switchPointer(layout, first, null);
+    await switchPointer(layout, first, null, writer);
     await expect(readFile(layout.previousPointer, 'utf8')).rejects.toThrow();
-    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first);
+    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first, writer);
     expect(parsePointer(await readFile(layout.previousPointer, 'utf8'))).toEqual(first);
     expect((await readPointer(layout)).pointer?.generation).toBe(G2);
   });
@@ -140,8 +145,8 @@ describe('the pointer in effect', () => {
     await complete(G1);
     await complete(G2, G1);
     const first = newPointer(G1, null, 1, BINDING);
-    await switchPointer(layout, first, null);
-    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first);
+    await switchPointer(layout, first, null, writer);
+    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first, writer);
     await truncate(layout.pointer, 25);
     expect(await readPointer(layout)).toMatchObject({ pointer: first, recovered: true });
   });
@@ -149,9 +154,9 @@ describe('the pointer in effect', () => {
   it('falls back to the copy when the current pointer names an unfinished generation', async () => {
     await complete(G1);
     const first = newPointer(G1, null, 1, BINDING);
-    await switchPointer(layout, first, null);
+    await switchPointer(layout, first, null, writer);
     await mkdir(path.join(layout.generations, G2));
-    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first);
+    await switchPointer(layout, newPointer(G2, G1, 2, BINDING), first, writer);
     expect(await readPointer(layout)).toMatchObject({ pointer: first, recovered: true });
   });
 
@@ -159,6 +164,27 @@ describe('the pointer in effect', () => {
     await writeFile(layout.pointer, 'garbage');
     await writeFile(layout.previousPointer, JSON.stringify(newPointer(G3, null, 3, BINDING)));
     expect(await readPointer(layout)).toEqual({ pointer: null, record: null, recovered: false });
+  });
+
+  it('leaves the pointer where it is when the lock holder cannot rename', async () => {
+    await complete(G1);
+    await complete(G2, G1);
+    const first = newPointer(G1, null, 1, BINDING);
+    await switchPointer(layout, first, null, writer);
+    const lost: StateWriter = {
+      replace: () => Promise.reject(new ExtensionFailure('CONFLICT', ['the lock was lost'])),
+      remove: () => Promise.resolve(),
+    };
+    await expect(switchPointer(layout, newPointer(G2, G1, 2, BINDING), first, lost)).rejects.toMatchObject({
+      code: 'CONFLICT',
+    });
+    expect((await readPointer(layout)).pointer).toEqual(first);
+  });
+
+  it('does not read a generation through a link of its name', async () => {
+    await complete(G1);
+    await symlink(path.join(layout.generations, G1), path.join(layout.generations, G2), 'junction');
+    expect(await readGenerationRecord(layout, G2)).toBeUndefined();
   });
 
   it('does not take a record that belongs to another generation directory', async () => {

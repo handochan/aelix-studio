@@ -3,7 +3,7 @@ import { parseRequirement } from '../inspect/requirement.js';
 import { INSTALLER } from '../inspect/site.js';
 import { specifierExcludes } from '../inspect/version.js';
 import { isEntryName, isObjectReference } from '../inspect/metadata.js';
-import { readWheel, WheelError, type WheelFacts } from '../inspect/wheel.js';
+import { isInterpreterName, readWheel, WheelError, type WheelFacts } from '../inspect/wheel.js';
 import type { BundleFacts } from '../store/layout.js';
 import type { ImportRefusalCode } from '../types.js';
 
@@ -29,7 +29,8 @@ export type ImportCheck = {
  * For the requested wheel, which is certain to be installed:
  * - it provides at least one `aelix.extensions` entry point;
  * - it ships no file that runs when an interpreter starts (`.pth`, `sitecustomize`, `usercustomize`);
- * - neither its distribution name nor a top-level name belongs to the bundle or the installer;
+ * - neither its distribution name nor a top-level name belongs to the bundle or the installer,
+ *   and it installs no script under a name of the interpreter or the installer;
  * - no unconditional requirement excludes the version of a library the bundle ships.
  *
  * The same rules are enforced again after the installer ran, on what was actually installed
@@ -75,6 +76,9 @@ export async function checkImport(target: string, files: string[], bundle: Bundl
   for (const name of wheel.topLevel)
     if (name === INSTALLER || bundle.topLevel.has(name))
       report('BUNDLE_OVERLAP', target, `top-level module ${name} is shipped with Studio`);
+  for (const script of wheel.scripts)
+    if (isInterpreterName(script))
+      report('BUNDLE_OVERLAP', target, `script ${script} would replace the interpreter or installer of Studio`);
   for (const text of wheel.requires) {
     const requirement = parseRequirement(text);
     if (!requirement || requirement.url !== undefined || requirement.marker !== undefined) continue;

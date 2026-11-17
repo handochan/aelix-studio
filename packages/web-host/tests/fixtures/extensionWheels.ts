@@ -72,6 +72,8 @@ export type WheelSpec = {
   extension?: boolean;
   /** Set false to leave the manifest (`aelix-plugin.toml`) out of an extension. */
   manifest?: boolean;
+  /** Name of the `aelix.extensions` entry point; the distribution name by default. */
+  entry?: string;
   /** Python statements at module level, before `setup`. */
   prelude?: string;
   /** Python statements inside `setup(aelix)`, before the command is registered. */
@@ -80,6 +82,8 @@ export type WheelSpec = {
   scripts?: string[];
   /** Further members, by archive path. */
   files?: Record<string, string>;
+  /** Members appended after `RECORD`, in this order: what a hand-made archive can smuggle in. */
+  tail?: [name: string, content: string][];
   /** Replaces the generated `METADATA`. */
   metadata?: string;
   /** Replaces the generated file name. */
@@ -145,7 +149,7 @@ export function buildWheel(spec: WheelSpec): { filename: string; data: Buffer } 
   );
   const points =
     (spec.scripts?.length ? `[console_scripts]\n${spec.scripts.join('\n')}\n` : '') +
-    (extension ? `[aelix.extensions]\n${spec.name} = ${module}:setup\n` : '');
+    (extension ? `[aelix.extensions]\n${spec.entry ?? spec.name} = ${module}:setup\n` : '');
   if (points) files.set(`${info}/entry_points.txt`, points);
   const record = [...files].map(([name, content]) => {
     const digest = createHash('sha256').update(content).digest('base64url');
@@ -154,7 +158,7 @@ export function buildWheel(spec: WheelSpec): { filename: string; data: Buffer } 
   files.set(`${info}/RECORD`, [...record, `${info}/RECORD,,`].join('\n') + '\n');
   return {
     filename: spec.filename ?? `${distribution}-${version}-py3-none-any.whl`,
-    data: zip([...files], spec.deflate),
+    data: zip([...files, ...(spec.tail ?? [])], spec.deflate),
   };
 }
 

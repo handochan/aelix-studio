@@ -19,7 +19,7 @@ describe('reading a site-packages directory', () => {
   it('lists distributions with their RECORD hash and files, and their extension entries', async () => {
     const record = 'demo/__init__.py,sha256=x,1\n../../../bin/demo,sha256=y,2\n';
     await distribution('demo-1.0.dist-info', {
-      METADATA: 'Name: Demo\nVersion: 1.0\n',
+      METADATA: 'Name: Demo\nVersion: 1.0\nRequires-Dist: lib>=1\n',
       RECORD: record,
       'entry_points.txt': '[aelix.extensions]\ndemo-ext = demo:setup\n',
     });
@@ -28,7 +28,9 @@ describe('reading a site-packages directory', () => {
     expect(snapshot.problems).toEqual([]);
     expect(snapshot.distributions.get('demo')).toEqual({
       name: 'demo',
+      declaredName: 'Demo',
       version: '1.0',
+      requires: ['lib>=1'],
       recordSha256: createHash('sha256').update(record).digest('hex'),
       info: 'demo-1.0.dist-info',
       files: ['demo/__init__.py', '../../../bin/demo'],

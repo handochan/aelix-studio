@@ -10,7 +10,11 @@ export const INSTALLER = 'pip';
 export type InstalledDistribution = {
   /** Canonical distribution name. */
   name: string;
+  /** `Name` as its metadata writes it; native compares this spelling. */
+  declaredName: string;
   version: string;
+  /** `Requires-Dist` values of the installed metadata, as written. */
+  requires: string[];
   /** sha256 of the `RECORD` file: changes whenever the installer rewrites the distribution. */
   recordSha256: string;
   /** Directory name of the `.dist-info`. */
@@ -90,7 +94,9 @@ function addDistribution(snapshot: SiteSnapshot, info: string, files: Distributi
   if (!files.record) snapshot.problems.push(`${info} has no RECORD`);
   snapshot.distributions.set(identity.name, {
     name: identity.name,
+    declaredName: identity.declaredName,
     version: identity.version,
+    requires: identity.requires,
     recordSha256: files.record ? sha256(files.record) : '',
     info,
     files: files.record ? parseRecordPaths(files.record.toString('utf8')) : [],

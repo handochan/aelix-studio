@@ -1,5 +1,17 @@
-import { copyFile, cp, lstat, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import {
+  constants,
+  copyFile,
+  cp,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  readlink,
+  realpath,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
+import { parseRequirement } from '../inspect/requirement.js';
 import { contentDistributions, INSTALLER, readSite, type SiteSnapshot } from '../inspect/site.js';
 import { runToExit, type Spawn } from '../process.js';
 import { hashFile } from '../store/artifacts.js';
@@ -23,8 +35,12 @@ export type FlowContext = {
 export type Skeleton = {
   /** Content of `pyvenv.cfg`. */
   configuration: string;
-  /** What the management interpreter path is: the file it links to, or its hash where it is a copy. */
-  interpreter: string;
+  /**
+   * Every entry `python -m venv` put next to the interpreter, by name: the interpreter under
+   * each of its names, the installer's launchers, the activation scripts. On POSIX the
+   * interpreter names are links that end at the bundled interpreter.
+   */
+  entries: Record<string, string>;
   /** `RECORD` hash of the installer distribution. */
   installer: string;
 };
@@ -33,20 +49,34 @@ export type Skeleton = {
 export type Candidate = { id: string; paths: GenerationPaths; skeleton: Skeleton };
 
 export type ScanProblem = {
-  code: Extract<ExtensionFailureCode, 'STARTUP_CODE' | 'BUNDLE_OVERLAP' | 'GENERATION_MODIFIED'>;
+  code: Extract<
+    ExtensionFailureCode,
+    'STARTUP_CODE' | 'BUNDLE_OVERLAP' | 'GENERATION_MODIFIED' | 'DIRECT_REFERENCE' | 'INVALID_WHEEL'
+  >;
   message: string;
 };
 
-async function interpreterIdentity(paths: GenerationPaths, platform: NodeJS.Platform): Promise<string> {
-  // POSIX venvs link to the bundled interpreter; Windows venvs hold a copy of a launcher.
-  return platform === 'win32' ? `sha256:${await hashFile(paths.python)}` : `link:${await realpath(paths.python)}`;
+/** What an entry next to the interpreter is, without following a link: its target, or its content hash. */
+async function entryIdentity(file: string): Promise<string> {
+  try {
+    const stats = await lstat(file);
+    if (stats.isSymbolicLink()) return `link:${await readlink(file)}`;
+    return stats.isFile() ? `file:${await hashFile(file)}` : 'other';
+  } catch {
+    return 'missing';
+  }
 }
 
-async function readSkeleton(context: FlowContext, paths: GenerationPaths): Promise<Skeleton> {
+async function readSkeleton(paths: GenerationPaths, names?: string[]): Promise<Skeleton> {
   const site = await readSite(paths.site);
+  const entries: Record<string, string> = {};
+  for (const name of names ?? (await readdir(paths.scripts)).toSorted()) {
+    // oxlint-disable-next-line no-await-in-loop -- a dozen small entries, read in order
+    entries[name] = await entryIdentity(path.join(paths.scripts, name));
+  }
   return {
     configuration: await readFile(paths.configuration, 'utf8'),
-    interpreter: await interpreterIdentity(paths, context.platform),
+    entries,
     installer: site.distributions.get(INSTALLER)?.recordSha256 ?? '',
   };
 }
@@ -96,6 +126,11 @@ const inside = (directory: string, file: string): boolean => {
  * Copy what the parent generation installed into the candidate (ADR 5.4 step 3): every
  * file its `RECORD` files list, which includes console scripts and data files outside
  * `site-packages`. The installer itself is not copied; the candidate has its own.
+ *
+ * A copy only ever creates a new file. The candidate's interpreter names are links that end
+ * at the bundled interpreter, so writing "onto" one of them would write into the bundle;
+ * a recorded file that meets an entry of the new environment, or that would leave either
+ * generation through a link, ends the change instead.
  */
 async function carryOver(
   parent: GenerationPaths,
@@ -105,13 +140,24 @@ async function carryOver(
   const snapshot = await readSite(parent.site);
   if (snapshot.problems.length > 0)
     throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation is damaged', ...snapshot.problems]);
+  const refuse = (distribution: string, reason: string): never => {
+    throw new ExtensionFailure('GENERATION_MODIFIED', [`${distribution} ${reason}`]);
+  };
+  const [parentRoot, candidateRoot] = await Promise.all([realpath(parent.venv), realpath(candidate.venv)]);
+  const within = async (root: string, directory: string): Promise<boolean> => {
+    const real = await realpath(directory);
+    return real === root || inside(root, real);
+  };
+  const copied = new Set<string>();
   for (const distribution of contentDistributions(snapshot)) {
     for (const listed of distribution.files) {
       if (listed.endsWith('.pyc')) continue;
       const source = path.resolve(parent.site, listed);
       const destination = path.resolve(candidate.site, listed);
       if (!inside(parent.venv, source) || !inside(candidate.venv, destination))
-        throw new ExtensionFailure('GENERATION_MODIFIED', [`${distribution.name} lists a file outside its generation`]);
+        refuse(distribution.name, 'lists a file outside its generation');
+      // Two distributions may list the same file (a shared package); it is copied once.
+      if (copied.has(destination)) continue;
       // oxlint-disable-next-line no-await-in-loop -- files are copied one at a time, in RECORD order
       const regular = await lstat(source).then(
         (stats) => stats.isFile(),
@@ -121,7 +167,18 @@ async function carryOver(
       // oxlint-disable-next-line no-await-in-loop
       await mkdir(path.dirname(destination), { recursive: true });
       // oxlint-disable-next-line no-await-in-loop
-      await copyFile(source, destination);
+      const contained =
+        (await within(parentRoot, path.dirname(source))) && (await within(candidateRoot, path.dirname(destination)));
+      if (!contained) refuse(distribution.name, 'lists a file that leaves its generation through a link');
+      try {
+        // Exclusive: fails on anything that is already there, link or file, and never writes through it.
+        // oxlint-disable-next-line no-await-in-loop
+        await copyFile(source, destination, constants.COPYFILE_EXCL);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+        refuse(distribution.name, `lists ${path.basename(destination)}, which belongs to the new environment`);
+      }
+      copied.add(destination);
       if (platform === 'win32' || path.dirname(destination) !== candidate.scripts) continue;
       // oxlint-disable-next-line no-await-in-loop
       const rewritten = rewriteScriptHeader(await readFile(destination), parent.python, candidate.python);
@@ -129,12 +186,22 @@ async function carryOver(
       if (rewritten) await writeFile(destination, rewritten);
     }
   }
-  await cp(parent.agent, candidate.agent, { recursive: true, force: true });
+  // Links in the agent directory are left behind: native would write through them.
+  await cp(parent.agent, candidate.agent, {
+    recursive: true,
+    filter: async (source) => {
+      const stats = await lstat(source);
+      return stats.isDirectory() || stats.isFile();
+    },
+  });
 }
 
 /**
  * Build a candidate generation (ADR 5.4 step 3): a fresh venv on the bundled interpreter,
  * then the parent generation's installed files and native records.
+ *
+ * The directory is new: a directory of that name must not exist. When this fails, what was
+ * built so far is left for the caller to remove through the lock holder.
  *
  * @throws ExtensionFailure `RUNTIME_UNAVAILABLE` when the venv cannot be made,
  * `GENERATION_MODIFIED` when the parent cannot be copied faithfully, `CANCELLED`, `TIMEOUT`.
@@ -145,21 +212,7 @@ export async function createCandidate(
   parent: GenerationRecord | null
 ): Promise<Candidate> {
   const paths = generationPaths(context.layout, id, context.bundle.binding.pythonMinor, context.platform);
-  // Not recursive: a directory of this name must not exist yet, so nothing is ever built into an old one.
   await mkdir(paths.directory);
-  try {
-    return { id, paths, skeleton: await buildCandidate(context, paths, parent) };
-  } catch (error) {
-    await rm(paths.directory, { recursive: true, force: true, maxRetries: 3 });
-    throw error;
-  }
-}
-
-async function buildCandidate(
-  context: FlowContext,
-  paths: GenerationPaths,
-  parent: GenerationRecord | null
-): Promise<Skeleton> {
   const result = await runToExit(
     context.spawn,
     {
@@ -178,14 +231,17 @@ async function buildCandidate(
       ['the bundled interpreter could not create an environment'],
       result.output
     );
-  const skeleton = await readSkeleton(context, paths);
-  const lines = skeleton.configuration.split(/\r?\n/);
+  // Anything that cannot be read here means venv did not leave an environment behind.
+  const skeleton = await readSkeleton(paths).catch((): undefined => undefined);
+  const lines = skeleton?.configuration.split(/\r?\n/) ?? [];
+  const linked = async (): Promise<boolean> =>
+    context.platform === 'win32' || (await realpath(paths.python)) === (await realpath(context.bundle.python));
   const owned =
     lines.includes(`home = ${path.dirname(context.bundle.python)}`) &&
     lines.includes('include-system-site-packages = false') &&
-    skeleton.installer !== '' &&
-    (context.platform === 'win32' || skeleton.interpreter === `link:${await realpath(context.bundle.python)}`);
-  if (!owned)
+    skeleton?.installer !== '' &&
+    (await linked().catch(() => false));
+  if (!skeleton || !owned)
     throw new ExtensionFailure('RUNTIME_UNAVAILABLE', ['the new environment is not on the bundled interpreter']);
   await mkdir(paths.agent, { recursive: true });
   if (parent) {
@@ -197,12 +253,7 @@ async function buildCandidate(
     );
     await carryOver(parentPaths, paths, context.platform);
   }
-  return skeleton;
-}
-
-/** Remove a candidate that will not become a generation. */
-export async function discardCandidate(candidate: Candidate): Promise<void> {
-  await rm(candidate.paths.directory, { recursive: true, force: true, maxRetries: 3 });
+  return { id, paths, skeleton };
 }
 
 /**
@@ -210,12 +261,14 @@ export async function discardCandidate(candidate: Candidate): Promise<void> {
  * generation's interpreter is started, because that interpreter runs with `site` enabled.
  *
  * - No file that runs when the interpreter starts: `.pth`, `sitecustomize`, `usercustomize`.
- * - What Studio wrote is unchanged: `pyvenv.cfg`, the interpreter the helper starts, the installer.
+ * - What Studio wrote is unchanged: `pyvenv.cfg`, every entry venv put next to the
+ *   interpreter (the interpreter under all its names included), the installer.
  * - No distribution and no top-level name the bundle ships. The bundle wins only if a
  *   generation never holds its names; path order alone does not guarantee it.
+ * - No installed distribution declares a direct reference. This is read from the metadata
+ *   that ended up on disk, which is what the installer consults on every later install.
  */
 export async function scanGeneration(
-  context: FlowContext,
   candidate: Candidate,
   bundle: BundleFacts
 ): Promise<{ snapshot: SiteSnapshot; problems: ScanProblem[] }> {
@@ -226,9 +279,10 @@ export async function scanGeneration(
     problems.push({ code, message });
   };
   for (const entry of snapshot.startup) report('STARTUP_CODE', `${entry} runs when the interpreter starts`);
-  const current = await readSkeleton(context, paths).catch((): undefined => undefined);
+  const current = await readSkeleton(paths, Object.keys(skeleton.entries)).catch((): undefined => undefined);
   if (current?.configuration !== skeleton.configuration) report('GENERATION_MODIFIED', 'pyvenv.cfg was replaced');
-  if (current?.interpreter !== skeleton.interpreter) report('GENERATION_MODIFIED', 'the interpreter was replaced');
+  for (const [name, identity] of Object.entries(skeleton.entries))
+    if (current?.entries[name] !== identity) report('GENERATION_MODIFIED', `${name} of the environment was replaced`);
   if (current?.installer !== skeleton.installer) report('GENERATION_MODIFIED', 'the installer was replaced');
   for (const problem of snapshot.problems) report('GENERATION_MODIFIED', problem);
   for (const distribution of contentDistributions(snapshot)) {
@@ -243,6 +297,11 @@ export async function scanGeneration(
       return top === INSTALLER || (top.startsWith(`${INSTALLER}-`) && top.endsWith('.dist-info'));
     });
     if (claimsInstaller) report('GENERATION_MODIFIED', `${distribution.name} installs files of the installer`);
+    for (const text of distribution.requires) {
+      const requirement = parseRequirement(text);
+      if (!requirement) report('INVALID_WHEEL', `${distribution.name} declares a requirement that cannot be read`);
+      else if (requirement.url !== undefined) report('DIRECT_REFERENCE', `${distribution.name} requires ${text}`);
+    }
   }
   for (const name of snapshot.topLevel)
     if (name !== INSTALLER && bundle.topLevel.has(name))

@@ -6,13 +6,32 @@
  * helper's own logic runs unchanged and no Python is needed. The integration test runs the
  * same flows against a real bundle.
  */
-import { copyFile, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import {
+  copyFile,
+  lstat,
+  mkdir,
+  readdir,
+  readFile,
+  realpath,
+  rename,
+  rm,
+  symlink,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 import type { FlowContext } from '../../src/studio-extensions/flow/candidate';
 import { baseEnvironment } from '../../src/studio-extensions/flow/environment';
-import { canonicalName, parseExtensionEntries, parseRecordPaths } from '../../src/studio-extensions/inspect/metadata';
+import {
+  canonicalName,
+  nativeName,
+  parseExtensionEntries,
+  parseRecordPaths,
+} from '../../src/studio-extensions/inspect/metadata';
 import type { Child, ChildExit, Spawn, SpawnSpec } from '../../src/studio-extensions/process';
-import { ensureLayout, layoutOf, resolveBundle } from '../../src/studio-extensions/store/layout';
+import { ensureLayout, locateLayout, resolveBundle } from '../../src/studio-extensions/store/layout';
+import type { StateWriter } from '../../src/studio-extensions/store/lock';
+import { ExtensionFailure } from '../../src/studio-extensions/types';
 
 /** A child whose behaviour a test scripts. */
 export class ScriptedChild implements Child {
@@ -91,6 +110,39 @@ export function scriptedSpawn(script: (spec: SpawnSpec, child: ScriptedChild) =>
     return child;
   };
   return Object.assign(spawn, { calls, children });
+}
+
+/**
+ * What the lock holder does to shared state, done here with Node: rename a temporary file
+ * over a pointer file, and remove one entry of the root or of a dedicated directory, but
+ * only when that directory is a real directory where its path says it is.
+ */
+export function directWriter(root: string): StateWriter {
+  const refused = (): ExtensionFailure => new ExtensionFailure('UNSAFE_ROOT', ['refused by the lock holder']);
+  const plain = (name: string): boolean =>
+    !['', '.', '..'].includes(name) && !['/', '\\', '\u0000'].some((mark) => name.includes(mark));
+  const own = async (directory: string): Promise<boolean> => {
+    const stats = await lstat(directory).catch(() => undefined);
+    return !stats || (stats.isDirectory() && (await realpath(directory)) === directory);
+  };
+  return {
+    replace: async (from, to) => {
+      const pointer = to === 'current.json' || to === 'current.previous.json';
+      if (!pointer || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
+      await rename(path.join(root, from), path.join(root, to));
+    },
+    remove: async (relative) => {
+      const parts = relative.split('/');
+      const dedicated = ['generations', 'artifacts', 'leases'].includes(parts[0]);
+      if (!parts.every(plain) || !(parts.length === 1 || (parts.length === 2 && dedicated))) throw refused();
+      const parent = path.join(root, ...parts.slice(0, -1));
+      if (!(await own(parent))) throw refused();
+      const target = path.join(parent, parts.at(-1) ?? '');
+      const stats = await lstat(target).catch(() => undefined);
+      if (stats?.isDirectory()) await rm(target, { recursive: true, force: true });
+      else if (stats) await unlink(target);
+    },
+  };
 }
 
 export type FakeBundleOptions = {
@@ -185,6 +237,8 @@ export async function installWheel(venv: Venv, wheel: string): Promise<void> {
   const record: string[] = [];
   const place = async (file: string, content: Buffer | string): Promise<void> => {
     await mkdir(path.dirname(file), { recursive: true });
+    // pip unlinks what is there before it writes, so it replaces a link instead of following it.
+    await rm(file, { force: true });
     await writeFile(file, content);
     // RECORD paths are relative to site-packages and use `/`, also for files outside it.
     record.push(`${path.relative(venv.site, file).split(path.sep).join('/')},,`);
@@ -196,6 +250,7 @@ export async function installWheel(venv: Venv, wheel: string): Promise<void> {
     else if (parts[1] === 'purelib' || parts[1] === 'platlib')
       await place(path.join(venv.site, ...parts.slice(2)), content);
     else if (parts[1] === 'data') await place(path.join(venv.root, ...parts.slice(2)), content);
+    else if (parts[1] === 'scripts') await place(path.join(venv.scripts, ...parts.slice(2)), content);
   }
   const points = members.find(([name]) => name === `${info}/entry_points.txt`)?.[1].toString() ?? '';
   const scripts = /\[console_scripts\]\n((?:[^[\n].*\n)*)/.exec(points)?.[1] ?? '';
@@ -253,7 +308,28 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
     if (inline.includes('try_lock')) {
       const mode = args[args.indexOf('-c') + 2];
       if (mode === 'hold') {
+        // The holder carries out the requests it is sent, one after the other, and answers each.
+        const writer = directWriter(path.dirname(args[args.indexOf('-c') + 3]));
+        let last: Promise<void> = Promise.resolve();
         child.onEnd = () => child.exit(0);
+        child.onInput = (text) => {
+          for (const line of text.split('\n').filter(Boolean)) {
+            const request = JSON.parse(line) as { op: string; from: string; to: string; path: string };
+            last = last
+              .then(() =>
+                request.op === 'replace' ? writer.replace(request.from, request.to) : writer.remove(request.path)
+              )
+              .then(
+                () => child.print('{"ok": true}\n'),
+                (error: unknown) =>
+                  child.print(
+                    error instanceof ExtensionFailure
+                      ? '{"ok": false, "refused": true}\n'
+                      : '{"ok": false, "error": "OSError"}\n'
+                  )
+              );
+          }
+        };
         if (options.lock) options.lock(child);
         else child.print('held\n');
         return;
@@ -277,8 +353,16 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
         await writeFile(path.join(venv.site, 'pip', '__init__.py'), '');
         await writeFile(path.join(venv.site, 'pip-26.0.dist-info', 'METADATA'), 'Name: pip\nVersion: 26.0\n');
         await writeFile(path.join(venv.site, 'pip-26.0.dist-info', 'RECORD'), 'pip/__init__.py,,\n');
-        if (platform === 'win32') await copyFile(bundlePython, python);
-        else await symlink(bundlePython, python);
+        // The entries `python -m venv` creates next to the interpreter.
+        if (platform === 'win32') {
+          await copyFile(bundlePython, python);
+          await copyFile(bundlePython, path.join(venv.scripts, 'pythonw.exe'));
+        } else {
+          await symlink(bundlePython, path.join(venv.scripts, 'python3'));
+          await symlink('python3', python);
+          await symlink('python3', path.join(venv.scripts, 'python3.12'));
+        }
+        await writeFile(path.join(venv.scripts, platform === 'win32' ? 'pip.exe' : 'pip'), 'pip launcher');
         await writeFile(
           path.join(root, 'pyvenv.cfg'),
           `home = ${path.dirname(bundlePython)}\ninclude-system-site-packages = false\nversion = 3.12.15\n`
@@ -322,7 +406,16 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
         return options.install ? options.install(venv, native[2], spec) : (await installWheel(venv, native[2]), 0);
       if (native[1] === 'remove') {
         if (options.remove) return options.remove(venv, native[2]);
-        const info = await distributionInfo(venv, (_entry, entries) => entries.has(native[2]));
+        // native compares names loosely (case, `_` as `-`) and takes the first entry that matches.
+        const wanted = nativeName(native[2]);
+        const info =
+          (await distributionInfo(venv, (_entry, entries) =>
+            [...entries.keys()].some((entry) => nativeName(entry) === wanted)
+          )) ??
+          (await distributionInfo(
+            venv,
+            (entry, entries) => entries.size > 0 && nativeName(entry.split('-')[0]) === wanted
+          ));
         if (!info) return 2;
         await removeDistribution(venv, info);
         return 0;
@@ -355,7 +448,7 @@ export async function createFakeHelper(scratch: string, options: FakeBundleOptio
   if (!bundle) throw new Error('the fake bundle did not resolve');
   const runtime: FakeRuntimeOptions = { bundle: bundle.root };
   const spawn = fakeRuntime(runtime);
-  const layout = layoutOf(path.join(scratch, 'Application Support', 'aelix-runtime'));
+  const layout = await locateLayout(path.join(scratch, 'Application Support', 'aelix-runtime'));
   await ensureLayout(layout);
   return {
     context: {

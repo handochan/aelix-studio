@@ -11,9 +11,10 @@
  */
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readdir, readFile, readlink, rm, truncate, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, rm, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
@@ -133,7 +134,8 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
   });
 
   afterAll(async () => {
-    service?.dispose();
+    // Wait for a change a failed test may have left running before its files are removed.
+    await service?.dispose();
     if (sandbox && !process.env.AELIX_STUDIO_EXTENSION_KEEP) await rm(sandbox, { recursive: true, force: true });
   });
 
@@ -160,7 +162,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
         distribution: 'fixture-good',
         version: '0.1.0',
         reference: 'fixture_good:setup',
-        status: 'ready',
+        status: 'load_verified',
         origin: expect.objectContaining({ kind: 'file', wheel: 'fixture_good-0.1.0-py3-none-any.whl' }),
       }),
     ]);
@@ -230,7 +232,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     expect(legacy).toMatchObject({ phase: 'switched', action: 'install' });
     const listing = await list();
     expect(listing.extensions.map((extension) => [extension.name, extension.status])).toEqual([
-      ['fixture-good', 'ready'],
+      ['fixture-good', 'load_verified'],
       ['fixture-legacy', 'manifest_unbound'],
     ]);
     const directories = await generations();
@@ -324,6 +326,10 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
       { env: { PYTHONDONTWRITEBYTECODE: '1' } }
     );
     await new Promise((resolve) => holder.stdout.once('data', resolve));
+    // Review finding 5: a second lease on the same generation that cannot even be opened.
+    const unreadable = path.join(root, 'leases', `${leased}.unreadable`);
+    await writeFile(unreadable, '');
+    await chmod(unreadable, 0o000);
     try {
       expect((await install(await wheel({ name: 'fixture-third' }))).phase).toBe('switched');
       expect((await install(await wheel({ name: 'fixture-fourth' }))).phase).toBe('switched');
@@ -334,12 +340,17 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
       holder.stdin.end();
       await new Promise((resolve) => holder.once('close', resolve));
     }
-    const removal = await finish(await service.request(OWNER, { action: 'remove', name: 'fixture-fourth' }));
+    // The launcher is gone, but whether the other lease is held cannot be told: the generation stays.
+    const kept = await finish(await service.request(OWNER, { action: 'remove', name: 'fixture-fourth' }));
+    expect(kept.phase).toBe('switched');
+    expect(await generations()).toContain(leased);
+    await chmod(unreadable, 0o600);
+    const removal = await finish(await service.request(OWNER, { action: 'remove', name: 'fixture-third' }));
     expect(removal.phase).toBe('switched');
     const listing = await list();
     expect((await generations()).toSorted()).toEqual([listing.previous, listing.current].toSorted());
     expect(await readdir(path.join(root, 'leases'))).toEqual([]);
-  }, 240_000);
+  }, 300_000);
 
   it('serializes two helper processes worth of changes through the lock', async () => {
     const other = new ExtensionService({ runtime: bundle, root, env: environment });
@@ -390,6 +401,86 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     expect(await finish({ ok: true, data: state })).toMatchObject({ phase: 'cancelled', code: 'CANCELLED' });
     await expectUntouched(before, directories);
   }, 180_000);
+
+  // Review finding 1: a script named like one of the interpreter links of a venv. The next
+  // candidate was built by copying that file onto the link, which ends at the bundled interpreter.
+  it('never lets a wheel replace an interpreter name, and never writes through the links of a new environment', async () => {
+    const manifest = JSON.parse(await readFile(path.join(bundle, 'manifest.json'), 'utf8')) as { python: string };
+    const interpreter = `python${manifest.python.split('.').slice(0, 2).join('.')}`;
+    const isolated = new ExtensionService({
+      runtime: bundle,
+      root: path.join(sandbox, 'interpreter names', 'aelix-runtime'),
+      env: environment,
+    });
+    const script = (name: string): Record<string, string> => ({
+      [`${name}-0.1.0.data/scripts/${interpreter}`]: '#!/bin/sh\necho hijacked\n',
+    });
+    const requested = await install(
+      await wheel({ name: 'fixture-interp', files: script('fixture_interp') }, 'interp'),
+      undefined,
+      isolated
+    );
+    expect(requested).toMatchObject({ phase: 'failed', code: 'BUNDLE_OVERLAP' });
+    // As a dependency the script is only seen after the installer wrote it.
+    await wheel({ name: 'fixture-interplib', extension: false, files: script('fixture_interplib') }, 'interp');
+    const dependent = await install(
+      await wheel({ name: 'fixture-interpuser', requires: ['fixture-interplib'] }, 'interp'),
+      path.join(wheels, 'interp'),
+      isolated
+    );
+    expect(dependent).toMatchObject({ phase: 'failed', code: 'GENERATION_MODIFIED' });
+    expect(await bundleDifferences(bundle)).toEqual([]);
+
+    // A generation that already holds such a file, as one written before this was checked.
+    const base = await install(await wheel({ name: 'fixture-base' }), undefined, isolated);
+    expect(base.phase).toBe('switched');
+    const venv = path.join(sandbox, 'interpreter names', 'aelix-runtime', 'generations', base.generation ?? '', 'venv');
+    await rm(path.join(venv, 'bin', interpreter));
+    await writeFile(path.join(venv, 'bin', interpreter), 'not an interpreter');
+    const site = path.join(venv, 'lib', interpreter, 'site-packages');
+    await writeFile(path.join(site, 'fixture_base-0.1.0.dist-info', 'RECORD'), `../../../bin/${interpreter},,\n`, {
+      flag: 'a',
+    });
+    const next = await install(await wheel({ name: 'fixture-next' }), undefined, isolated);
+    expect(next).toMatchObject({ phase: 'failed', code: 'GENERATION_MODIFIED' });
+    expect(await bundleDifferences(bundle)).toEqual([]);
+    await isolated.dispose();
+  }, 240_000);
+
+  // Review finding 2: the installer normalizes member names, so `./x.dist-info/METADATA` overwrites
+  // the METADATA that was checked, and a later install follows the direct reference it declares.
+  it('refuses a wheel that hides a second METADATA behind another spelling of its path', async () => {
+    const isolated = new ExtensionService({
+      runtime: bundle,
+      root: path.join(sandbox, 'path alias', 'aelix-runtime'),
+      env: environment,
+    });
+    const hidden = await writeWheel(path.join(sandbox, 'elsewhere'), { name: 'fixture-hidden', extension: false });
+    const alias = (name: string): [string, string][] => [
+      [
+        `./${name}-0.1.0.dist-info/METADATA`,
+        `Metadata-Version: 2.1\nName: ${name.replace('_', '-')}\nVersion: 0.1.0\nRequires-Dist: fixture-hidden @ ${pathToFileURL(hidden).href}\n`,
+      ],
+    ];
+    const requested = await install(
+      await wheel({ name: 'fixture-alias', tail: alias('fixture_alias') }, 'alias'),
+      undefined,
+      isolated
+    );
+    expect(requested).toMatchObject({ phase: 'failed', code: 'INVALID_WHEEL' });
+    await wheel({ name: 'fixture-aliaslib', extension: false, tail: alias('fixture_aliaslib') }, 'alias');
+    for (const name of ['fixture-aliasuser', 'fixture-aliasuser2']) {
+      const dependent = await install(
+        await wheel({ name, requires: ['fixture-aliaslib'] }, 'alias'),
+        path.join(wheels, 'alias'),
+        isolated
+      );
+      expect([name, dependent.phase, dependent.code]).toEqual([name, 'failed', 'INVALID_WHEEL']);
+    }
+    expect(await list(isolated)).toMatchObject({ current: null, extensions: [] });
+
+    await isolated.dispose();
+  }, 240_000);
 
   it('wrote nothing outside its root and left the bundle as it was', async () => {
     for (const name of ['target', 'site']) expect(await readdir(path.join(outside, name))).toEqual([]);

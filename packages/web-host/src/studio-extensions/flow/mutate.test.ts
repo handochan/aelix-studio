@@ -1,9 +1,15 @@
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFakeHelper, installWheel, type FakeHelper } from '../../../tests/fixtures/extensionRuntime';
+import {
+  createFakeHelper,
+  directWriter,
+  installWheel,
+  scriptedSpawn,
+  type FakeHelper,
+} from '../../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
 import { generationPaths, resolveBundle } from '../store/layout';
 import { newPointer, readGenerationRecord, readPointer, switchPointer } from '../store/pointer';
@@ -43,6 +49,10 @@ describe('changing what is installed', () => {
   const current = async () => (await readPointer(helper.context.layout)).pointer;
   const extensionNames = async (): Promise<string[]> =>
     (await describeInstalled(helper.context)).extensions.map((extension) => extension.name);
+  /** What another process holding the lock would do to the state directory. */
+  const elsewhere = () => directWriter(helper.context.layout.root);
+  /** The lock holder of the change that is running. */
+  const holder = () => helper.spawn.children[helper.spawn.calls.findLastIndex((call) => call.args.includes('hold'))];
   /** A failed change must leave no candidate behind and the pointer where it was. */
   const expectUntouched = async (pointer: Awaited<ReturnType<typeof current>>, directories: string[]) => {
     expect(await current()).toEqual(pointer);
@@ -164,6 +174,72 @@ describe('changing what is installed', () => {
       expect((await failure(install({ name: 'demo-one' }))).code).toBe('BUNDLE_OVERLAP');
     });
 
+    // Review finding 1.
+    it('refuses a change in which the installer replaced an entry of the environment, and leaves the bundle alone', async () => {
+      const name = process.platform === 'win32' ? 'pythonw.exe' : 'python3.12';
+      const interpreter = await readFile(helper.context.bundle.python, 'utf8');
+      const library = await writeWheel(path.join(scratch, 'interp'), {
+        name: 'demo-interplib',
+        extension: false,
+        files: { [`demo_interplib-0.1.0.data/scripts/${name}`]: '#!/bin/sh\necho hijacked\n' },
+      });
+      helper.runtime.install = async (venv, wheel) => {
+        await installWheel(venv, wheel);
+        await installWheel(venv, library);
+        return 0;
+      };
+      const request = await source({ name: 'demo-one', requires: ['demo-interplib'] }, 'interp');
+      const error = await failure(
+        mutate(
+          helper.context,
+          { action: 'install', source: { ...request, folder: path.join(scratch, 'interp') } },
+          hooks
+        )
+      );
+      expect(error.code).toBe('GENERATION_MODIFIED');
+      expect(await readFile(helper.context.bundle.python, 'utf8')).toBe(interpreter);
+      await expectUntouched(null, []);
+    });
+
+    it('refuses the requested wheel before any installer when it ships a script named like the interpreter', async () => {
+      const error = await failure(
+        install({ name: 'demo-interp', files: { 'demo_interp-0.1.0.data/scripts/python3.12': '#!/bin/sh\n' } })
+      );
+      expect(error.code).toBe('BUNDLE_OVERLAP');
+      expect(helper.spawn.calls.some((call) => call.args.includes('venv'))).toBe(false);
+    });
+
+    // Review finding 2.
+    it('refuses a candidate in which an installed distribution declares a direct reference', async () => {
+      helper.runtime.install = async (venv, wheel) => {
+        await installWheel(venv, wheel);
+        await writeFile(
+          path.join(venv.site, 'demo_one-0.1.0.dist-info', 'METADATA'),
+          'Metadata-Version: 2.1\nName: demo-one\nVersion: 0.1.0\nRequires-Dist: hidden @ file:///elsewhere/hidden.whl\n'
+        );
+        return 0;
+      };
+      const error = await failure(install({ name: 'demo-one' }));
+      expect([error.code, error.detail]).toEqual([
+        'DIRECT_REFERENCE',
+        ['demo-one requires hidden @ file:///elsewhere/hidden.whl'],
+      ]);
+      expect(helper.nativeRuns()).toHaveLength(1);
+      await expectUntouched(null, []);
+    });
+
+    // Review finding 3.
+    it('refuses to work in a state directory whose generations directory leads somewhere else', async () => {
+      const outside = path.join(scratch, 'valuable');
+      await mkdir(path.join(outside, 'keep'), { recursive: true });
+      await rm(helper.context.layout.generations, { recursive: true });
+      await symlink(outside, helper.context.layout.generations, 'junction');
+      expect((await failure(install({ name: 'demo-one' }))).code).toBe('UNSAFE_ROOT');
+      expect((await failure(rollback(helper.context))).code).toBe('UNSAFE_ROOT');
+      expect((await failure(describeInstalled(helper.context))).code).toBe('UNSAFE_ROOT');
+      expect(await readdir(outside)).toEqual(['keep']);
+    });
+
     it('reports no change when the installer exits 0 without installing anything', async () => {
       await install({ name: 'demo-one' });
       const [pointer, directories] = [await current(), await generations()];
@@ -257,7 +333,7 @@ describe('changing what is installed', () => {
         expect(outcome).toEqual({ generation: 'g00000002-0002', revision: 2 });
         expect(await statuses()).toEqual([
           ['demo-legacy', 'manifest_unbound'],
-          ['demo-one', 'ready'],
+          ['demo-one', 'load_verified'],
         ]);
       });
 
@@ -267,7 +343,7 @@ describe('changing what is installed', () => {
         await install({ name: 'demo-legacy', manifest: false });
         expect(await statuses()).toEqual([
           ['demo-legacy', 'manifest_unbound'],
-          ['demo-one', 'ready'],
+          ['demo-one', 'load_verified'],
         ]);
       });
 
@@ -316,18 +392,71 @@ describe('changing what is installed', () => {
       const base = await current();
       if (!base) throw new Error('no pointer');
       const moved = newPointer(base.generation, null, 7, base.binding);
-      helper.runtime.beforeLoad = () => switchPointer(helper.context.layout, moved, base);
+      helper.runtime.beforeLoad = () => switchPointer(helper.context.layout, moved, base, elsewhere());
       expect((await failure(install({ name: 'demo-two' }))).code).toBe('CONFLICT');
       await expectUntouched(moved, [base.generation]);
     });
 
-    it('does not switch when the lock was lost on the way', async () => {
-      helper.runtime.beforeLoad = () => {
-        const holder = helper.spawn.children[helper.spawn.calls.findIndex((call) => call.args.includes('hold'))];
-        holder.exit(null, 'SIGKILL');
+    // Review finding 7: shared state is written by the lock holder, so nothing of it changes
+    // once the holder is gone, and what was running under the lock is stopped at once.
+    it('does not switch when the lock was lost on the way, and removes nothing without it', async () => {
+      await install({ name: 'demo-one' });
+      const pointer = await current();
+      helper.runtime.beforeLoad = () => holder().exit(null, 'SIGKILL');
+      expect((await failure(install({ name: 'demo-two' }))).code).toBe('CONFLICT');
+      expect(await current()).toEqual(pointer);
+      // The candidate cannot be removed without the lock; the next change, under its own lock, removes it.
+      expect(await generations()).toEqual(['g00000001-0001', 'g00000002-0002']);
+      helper.runtime.beforeLoad = undefined;
+      await install({ name: 'demo-three' });
+      expect(await generations()).toEqual(['g00000001-0001', 'g00000002-0003']);
+    });
+
+    it('stops the installer the moment the lock is lost', async () => {
+      helper.runtime.install = () => {
+        holder().exit(null, 'SIGKILL');
+        return new Promise<number>(() => {});
       };
       expect((await failure(install({ name: 'demo-one' }))).code).toBe('CONFLICT');
-      await expectUntouched(null, []);
+      const installer = helper.spawn.children[helper.spawn.calls.findIndex((call) => call.args.includes('install'))];
+      expect(installer.signals).toEqual(['SIGTERM']);
+      expect(await current()).toBeNull();
+    });
+
+    it('does not move the pointer when the lock holder is gone at the moment of the switch', async () => {
+      await install({ name: 'demo-one' });
+      const pointer = await current();
+      const real = helper.context.spawn;
+      // The holder of this change dies on the first request to rename a pointer file.
+      helper.context.spawn = (spec) => {
+        const child = real(spec);
+        if (!spec.args.includes('hold')) return child;
+        return {
+          ...child,
+          onStdout: (listener) => child.onStdout(listener),
+          onStderr: (listener) => child.onStderr(listener),
+          end: () => child.end(),
+          kill: (signal) => child.kill(signal),
+          exited: child.exited,
+          write: (text) => (text.includes('"replace"') ? holder().exit(null, 'SIGKILL') : child.write(text)),
+        };
+      };
+      expect((await failure(install({ name: 'demo-two' }))).code).toBe('CONFLICT');
+      expect(await current()).toEqual(pointer);
+      expect(JSON.parse(await readFile(helper.context.layout.pointer, 'utf8'))).toMatchObject({ revision: 1 });
+    });
+
+    it('removes what was built when the candidate cannot be created', async () => {
+      await install({ name: 'demo-one' });
+      const [pointer, directories] = [await current(), await generations()];
+      const real = helper.context.spawn;
+      // venv writes part of an environment, then fails.
+      const failing = scriptedSpawn((spec, child) => {
+        void mkdir(path.join(spec.args.at(-1) ?? '', 'bin'), { recursive: true }).then(() => child.exit(1));
+      });
+      helper.context.spawn = (spec) => (spec.args.includes('venv') ? failing(spec) : real(spec));
+      expect((await failure(install({ name: 'demo-two' }))).code).toBe('RUNTIME_UNAVAILABLE');
+      await expectUntouched(pointer, directories);
     });
 
     it('stops and discards the candidate when cancelled during the installer', async () => {
@@ -447,6 +576,50 @@ describe('changing what is installed', () => {
       });
     });
 
+    // Review finding 4: native does not read a dot as a hyphen, so these are two extensions.
+    it('removes the extension that was named, not one whose name only looks alike', async () => {
+      await install({ name: 'alpha-pack', entry: 'sample.one' });
+      await install({ name: 'beta-pack', entry: 'sample-one' });
+      await remove('sample-one');
+      expect(await extensionNames()).toEqual(['sample.one']);
+      expect(helper.nativeRuns().findLast((run) => run.includes('remove'))).toEqual([
+        'extension',
+        'remove',
+        'sample-one',
+        '--yes',
+      ]);
+    });
+
+    it('refuses a name that fits more than one extension the way native compares names', async () => {
+      await install({ name: 'alpha-pack', entry: 'sample_one' });
+      await install({ name: 'beta-pack', entry: 'sample-one' });
+      const [pointer, directories] = [await current(), await generations()];
+      expect((await failure(remove('Sample-One'))).code).toBe('AMBIGUOUS_NAME');
+      await expectUntouched(pointer, directories);
+    });
+
+    it('hands native a name it cannot confuse when the exact name is not one', async () => {
+      await install({ name: 'alpha-pack', entry: 'sample_one' });
+      await install({ name: 'beta-pack', entry: 'sample-one' });
+      await remove('sample-one');
+      expect(await extensionNames()).toEqual(['sample_one']);
+      expect(helper.nativeRuns().findLast((run) => run.includes('remove'))).toEqual([
+        'extension',
+        'remove',
+        'beta-pack',
+        '--yes',
+      ]);
+    });
+
+    // Review finding 11: `extension remove` hands through pip's exit code, so 2 is not "did not run".
+    it.each([1, 2, 3])('reports exit code %i of a removal as a plain failure', async (exit) => {
+      await install({ name: 'demo-one' });
+      const [pointer, directories] = [await current(), await generations()];
+      helper.runtime.remove = () => Promise.resolve(exit);
+      expect((await failure(remove('demo-one'))).code).toBe('INSTALLER_FAILED');
+      await expectUntouched(pointer, directories);
+    });
+
     it('leaves a generation without extensions when the last one is removed', async () => {
       await install({ name: 'demo-one' });
       await remove('demo-one');
@@ -532,7 +705,8 @@ describe('changing what is installed', () => {
         void switchPointer(
           helper.context.layout,
           newPointer('g00000002-0002', 'g00000003-0003', 4, base.binding),
-          base
+          base,
+          elsewhere()
         ).then(() => {
           child.onEnd = () => child.exit(0);
           child.print('held\n');

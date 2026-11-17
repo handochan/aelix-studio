@@ -1,5 +1,4 @@
 import { pathToFileURL } from 'node:url';
-import { isEntryName } from '../inspect/metadata.js';
 import { contentDistributions, readSite, type SiteSnapshot } from '../inspect/site.js';
 import type { WheelFacts } from '../inspect/wheel.js';
 import { runToExit, type RunResult } from '../process.js';
@@ -11,6 +10,7 @@ import {
   generationPaths,
   readBundleFacts,
   sameBinding,
+  verifyLayout,
   writeConstraints,
   type BundleFacts,
 } from '../store/layout.js';
@@ -35,10 +35,11 @@ import {
   type ExtensionRollback,
   type ExtensionSource,
 } from '../types.js';
-import { createCandidate, discardCandidate, scanGeneration, type Candidate, type FlowContext } from './candidate.js';
+import { createCandidate, scanGeneration, type Candidate, type FlowContext } from './candidate.js';
 import { managementEnvironment } from './environment.js';
 import {
   compareRequest,
+  nativeHandle,
   resolveDistribution,
   runLoadCheck,
   type ChangeRequest,
@@ -74,6 +75,9 @@ const EMPTY_SITE: SiteSnapshot = {
  * `manifest_unbound`, not refused: only a pack that fails to load is refused (decision A2).
  */
 const INSTALLED_NOT_BOUND = 3;
+
+/** How long a reason taken from native's own words may be. */
+const REASON_LIMIT = 500;
 
 /** Turn the end of a helper child into a failure, or return when it exited with an accepted code. */
 function requireSuccess(
@@ -116,6 +120,9 @@ function runManagement(
  * Ask `aelix extension verify` which manifests bind (ADR 5.5). The answer is recorded for
  * the list; an unbound manifest does not fail the change. One run covers every extension;
  * only when some manifest does not bind is each extension asked about separately.
+ *
+ * This is native's verdict for the installed entry point. It says nothing about whether a
+ * conversation, which loads the extension by module reference, attaches the manifest.
  */
 async function manifestBindings(
   context: FlowContext,
@@ -150,22 +157,32 @@ type Preparation = { change: ChangeRequest; native: string[]; importSet?: Import
 /** Work out what the request means against the current generation, and store an import. */
 async function prepare(
   context: FlowContext,
+  lock: MutationLock,
   request: MutationRequest,
   before: SiteSnapshot,
   bundle: BundleFacts
 ): Promise<Preparation> {
-  const owner = request.action === 'install' ? undefined : resolveDistribution(before, request.name);
-  // native resolves an entry name before a distribution name, so an entry name is unambiguous.
-  const entry = [...before.extensions].find(([, extension]) => extension.distribution === owner)?.[0];
-  if (request.action !== 'install' && (!owner || entry === undefined || !isEntryName(entry)))
-    throw new ExtensionFailure('NOT_INSTALLED', [`no installed extension provides ${request.name}`]);
-  if (request.action === 'remove')
+  const name = request.action === 'install' ? undefined : request.name;
+  const resolution = name === undefined ? undefined : resolveDistribution(before, name);
+  if (resolution && 'ambiguous' in resolution)
+    throw new ExtensionFailure('AMBIGUOUS_NAME', [
+      `${String(name)} fits more than one extension: ${resolution.ambiguous.join(', ')}`,
+    ]);
+  const owner = resolution && 'distribution' in resolution ? resolution.distribution : undefined;
+  if (name !== undefined && owner === undefined)
+    throw new ExtensionFailure('NOT_INSTALLED', [`no installed extension provides ${name}`]);
+  if (request.action === 'remove') {
+    // native compares names loosely and takes the first that fits, so it gets a name only this one has.
+    const handle = nativeHandle(before, owner ?? '');
+    if (handle === undefined)
+      throw new ExtensionFailure('AMBIGUOUS_NAME', [`native cannot tell ${request.name} from another extension`]);
     return {
       change: { action: 'remove', distribution: owner ?? '' },
-      native: ['extension', 'remove', entry ?? '', '--yes'],
+      native: ['extension', 'remove', handle, '--yes'],
       wheels: [],
     };
-  const staged = await stageImport(context.layout, request.source);
+  }
+  const staged = await stageImport(context.layout, request.source, lock);
   try {
     const check = await checkImport(staged.target, staged.files, bundle);
     if (check.problems.length > 0 || !check.target)
@@ -177,7 +194,7 @@ async function prepare(
       throw new ExtensionFailure('REQUEST_MISMATCH', [
         `${check.target.filename} is ${check.target.name}; ${request.name} is provided by ${String(owner)}`,
       ]);
-    const importSet = await promoteImport(context.layout, staged);
+    const importSet = await promoteImport(context.layout, staged, lock);
     return {
       change: { action: request.action, distribution: check.target.name, version: check.target.version },
       // A file import always runs offline: no index, wheels from the stored set only (ADR 5.9).
@@ -186,7 +203,7 @@ async function prepare(
       wheels: check.wheels,
     };
   } catch (error) {
-    await discardStage(staged);
+    await discardStage(context.layout, staged, lock).catch(() => {});
     throw error;
   }
 }
@@ -240,7 +257,11 @@ function describeCandidate(
   });
 }
 
-/** Take the lock, undo interrupted work, read the pointer: the start of every change (ADR 5.6). */
+/**
+ * Take the lock, undo interrupted work, read the pointer: the start of every change (ADR 5.6).
+ * The state directory is checked first: the helper removes things from it, so it has to be
+ * the helper's own.
+ */
 async function begin(context: FlowContext): Promise<{ lock: MutationLock; base: PointerState }> {
   await ensureLayout(context.layout);
   const lock = await acquireMutationLock({
@@ -252,7 +273,7 @@ async function begin(context: FlowContext): Promise<{ lock: MutationLock; base: 
     signal: context.signal,
   });
   try {
-    await recover(context.layout);
+    await recover(context.layout, lock);
     return { lock, base: await readPointer(context.layout) };
   } catch (error) {
     await lock.release();
@@ -260,13 +281,29 @@ async function begin(context: FlowContext): Promise<{ lock: MutationLock; base: 
   }
 }
 
+/** The context for work under a lock: everything it starts is stopped the moment the lock is lost. */
+function underLock(context: FlowContext, lock: MutationLock): FlowContext {
+  return { ...context, signal: context.signal ? AbortSignal.any([context.signal, lock.loss]) : lock.loss };
+}
+
 /** Clean-up under the lock. A failure here never changes the outcome of the change. */
-async function tidy(context: FlowContext): Promise<void> {
+async function tidy(context: FlowContext, lock: MutationLock): Promise<void> {
   try {
-    await collect({ bundle: context.bundle, layout: context.layout, spawn: context.spawn, env: context.base });
+    await collect({
+      bundle: context.bundle,
+      layout: context.layout,
+      spawn: context.spawn,
+      env: context.base,
+      writer: lock,
+    });
   } catch {
     // Left for the next change to clean up.
   }
+}
+
+/** What ended a change under a lock: the loss of the lock outranks whatever it caused. */
+function outcome(error: unknown, lock: MutationLock): unknown {
+  return lock.lost() ? new ExtensionFailure('CONFLICT', ['the lock was lost while the change was in progress']) : error;
 }
 
 /**
@@ -278,6 +315,10 @@ async function tidy(context: FlowContext): Promise<void> {
  * An install whose manifest does not bind goes through the same checks and is recorded as
  * such; every other non-zero exit of the installer ends the change.
  *
+ * Shared state (the pointer files, and everything that is removed) is written by the lock
+ * holder, so none of it changes after the lock is gone; losing the lock stops what is
+ * running and ends the change with `CONFLICT`.
+ *
  * @throws ExtensionFailure with the reason; see `ExtensionFailureCode`.
  */
 export async function mutate(
@@ -287,109 +328,114 @@ export async function mutate(
 ): Promise<MutationOutcome> {
   hooks.progress('checking');
   const { lock, base } = await begin(context);
+  const guarded = underLock(context, lock);
+  let unfinished: string | undefined;
   try {
-    const { bundle, layout, platform } = context;
+    const { bundle, layout, platform } = guarded;
     if (base.record && !sameBinding(base.record.binding, bundle.binding))
       throw new ExtensionFailure('BUNDLE_CHANGED', ['the installed extensions belong to another Studio runtime']);
     const facts = await readBundleFacts(bundle);
     const before = base.record
       ? await readSite(generationPaths(layout, base.record.generation, base.record.binding.pythonMinor, platform).site)
       : EMPTY_SITE;
-    const preparation = await prepare(context, request, before, facts);
+    const preparation = await prepare(guarded, lock, request, before, facts);
 
     hooks.progress('preparing');
     const constraintsUrl = await writeConstraints(layout, bundle, facts);
     const revision = base.pointer?.revision ?? 0;
-    const candidate = await createCandidate(context, generationId(revision + 1, hooks.suffix()), base.record);
-    try {
-      const refuse = (problems: { code: ExtensionFailureCode; message: string }[], output?: string): void => {
-        if (problems.length > 0)
-          throw new ExtensionFailure(
-            problems[0].code,
-            problems.map((problem) => problem.message),
-            output
-          );
-      };
-      refuse((await scanGeneration(context, candidate, facts)).problems);
+    unfinished = generationId(revision + 1, hooks.suffix());
+    const candidate = await createCandidate(guarded, unfinished, base.record);
+    const refuse = (problems: { code: ExtensionFailureCode; message: string }[], output?: string): void => {
+      if (problems.length > 0)
+        throw new ExtensionFailure(
+          problems[0].code,
+          problems.map((problem) => problem.message),
+          output
+        );
+    };
+    refuse((await scanGeneration(candidate, facts)).problems);
 
-      hooks.progress('installing');
-      const management = { agentDirectory: candidate.paths.agent, nativeSite: bundle.nativeSite, constraintsUrl };
-      const installer = await runManagement(
-        context,
-        candidate,
-        managementEnvironment(context.base, platform, {
-          ...management,
-          ...(preparation.importSet ? { offlineLinksUrl: pathToFileURL(preparation.importSet.directory).href } : {}),
-        }),
-        preparation.native,
-        context.timeouts.installerMs
-      );
-      // `extension remove` hands pip's own exit code through, so 3 means "not bound" only for an install.
-      requireSuccess(
-        installer,
-        { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN' },
-        'the installer',
-        request.action === 'remove' ? [0] : [0, INSTALLED_NOT_BOUND]
-      );
-      // The candidate's interpreter is not started again unless this second scan passes.
-      const scan = await scanGeneration(context, candidate, facts);
-      refuse(scan.problems, installer.output);
+    hooks.progress('installing');
+    const management = { agentDirectory: candidate.paths.agent, nativeSite: bundle.nativeSite, constraintsUrl };
+    const installer = await runManagement(
+      guarded,
+      candidate,
+      managementEnvironment(guarded.base, platform, {
+        ...management,
+        ...(preparation.importSet ? { offlineLinksUrl: pathToFileURL(preparation.importSet.directory).href } : {}),
+      }),
+      preparation.native,
+      guarded.timeouts.installerMs
+    );
+    // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
+    // native's "did not run" and "not bound", so every non-zero code is a plain failure.
+    if (request.action === 'remove') requireSuccess(installer, { 1: 'INSTALLER_FAILED' }, 'the installer');
+    else
+      requireSuccess(installer, { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN' }, 'the installer', [
+        0,
+        INSTALLED_NOT_BOUND,
+      ]);
+    // The candidate's interpreter is not started again unless this second scan passes.
+    const scan = await scanGeneration(candidate, facts);
+    refuse(scan.problems, installer.output);
 
-      hooks.progress('verifying');
-      const gate = compareRequest(preparation.change, before, scan.snapshot);
-      if (!gate.changed)
-        throw new ExtensionFailure('NO_CHANGE', ['nothing was installed or removed'], installer.output);
-      if (gate.problems.length > 0) throw new ExtensionFailure('REQUEST_MISMATCH', gate.problems, installer.output);
-      const bound = await manifestBindings(
-        context,
-        candidate,
-        managementEnvironment(context.base, platform, management),
-        gate.expected
-      );
-      // The installer's verdict stands even when `extension verify` does not repeat it.
-      if (installer.code === INSTALLED_NOT_BOUND && [...bound.values()].every(Boolean))
-        for (const [name, extension] of scan.snapshot.extensions)
-          if (extension.distribution === preparation.change.distribution) bound.set(name, false);
-      const load = await runLoadCheck(context, candidate, gate.expected);
-      if (load.cancelled) throw new ExtensionFailure('CANCELLED');
-      if (load.timedOut) throw new ExtensionFailure('TIMEOUT', ['the load check took too long']);
-      if (!load.answered) throw new ExtensionFailure('VERIFICATION_FAILED', load.problems);
-      if (load.problems.length > 0) throw new ExtensionFailure('LOAD_ERROR', load.problems);
+    hooks.progress('verifying');
+    const gate = compareRequest(preparation.change, before, scan.snapshot);
+    if (!gate.changed) throw new ExtensionFailure('NO_CHANGE', ['nothing was installed or removed'], installer.output);
+    if (gate.problems.length > 0) throw new ExtensionFailure('REQUEST_MISMATCH', gate.problems, installer.output);
+    const bound = await manifestBindings(
+      guarded,
+      candidate,
+      managementEnvironment(guarded.base, platform, management),
+      gate.expected
+    );
+    // The installer's verdict stands even when `extension verify` does not repeat it.
+    if (installer.code === INSTALLED_NOT_BOUND && [...bound.values()].every(Boolean))
+      for (const [name, extension] of scan.snapshot.extensions)
+        if (extension.distribution === preparation.change.distribution) bound.set(name, false);
+    const load = await runLoadCheck(guarded, candidate, gate.expected);
+    if (load.cancelled) throw new ExtensionFailure('CANCELLED');
+    if (load.timedOut) throw new ExtensionFailure('TIMEOUT', ['the load check took too long']);
+    const reasons = load.problems.map((problem) => problem.slice(0, REASON_LIMIT));
+    if (!load.answered) throw new ExtensionFailure('VERIFICATION_FAILED', reasons);
+    if (reasons.length > 0) throw new ExtensionFailure('LOAD_ERROR', reasons);
 
-      const record = describeCandidate(
-        context,
-        candidate,
-        base.record,
-        request,
-        preparation,
-        scan.snapshot,
-        bound,
-        hooks.now()
-      );
-      await writeGenerationRecord(layout, record);
-      // The lock is the first guard, the revision the second (ADR 5.6).
-      const latest = await readPointer(layout);
-      if (
-        lock.lost() ||
-        (latest.pointer?.revision ?? 0) !== revision ||
-        latest.pointer?.generation !== base.pointer?.generation
-      )
-        throw new ExtensionFailure('CONFLICT', ['the current generation changed while this one was prepared']);
-      if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
-      await switchPointer(
-        layout,
-        newPointer(candidate.id, base.pointer?.generation ?? null, revision + 1, bundle.binding),
-        base.pointer
-      );
-    } catch (error) {
-      await discardCandidate(candidate);
-      throw error;
-    }
+    const record = describeCandidate(
+      guarded,
+      candidate,
+      base.record,
+      request,
+      preparation,
+      scan.snapshot,
+      bound,
+      hooks.now()
+    );
+    await writeGenerationRecord(layout, record);
+    // The lock is the first guard, the revision the second (ADR 5.6).
+    const latest = await readPointer(layout);
+    if (
+      lock.lost() ||
+      (latest.pointer?.revision ?? 0) !== revision ||
+      latest.pointer?.generation !== base.pointer?.generation
+    )
+      throw new ExtensionFailure('CONFLICT', ['the current generation changed while this one was prepared']);
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+    await switchPointer(
+      layout,
+      newPointer(candidate.id, base.pointer?.generation ?? null, revision + 1, bundle.binding),
+      base.pointer,
+      lock
+    );
+    unfinished = undefined;
     return { generation: candidate.id, revision: revision + 1 };
+  } catch (error) {
+    // Without the lock nothing is removed; the next change under a lock removes what is left.
+    if (unfinished !== undefined) await lock.remove(`generations/${unfinished}`).catch(() => {});
+    throw outcome(error, lock);
   } finally {
     // Clean-up runs after a failure too: a refused import must not leave its wheels in the
     // store. The caller reports the outcome only after this, so "switched" also means "idle again".
-    if (!lock.lost()) await tidy(context);
+    if (!lock.lost()) await tidy(context, lock);
     await lock.release();
   }
 }
@@ -409,11 +455,12 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
       throw new ExtensionFailure('NOTHING_TO_ROLL_BACK', ['there is no previous generation']);
     if (!sameBinding(target.binding, context.bundle.binding))
       throw new ExtensionFailure('BUNDLE_CHANGED', ['the previous generation belongs to another Studio runtime']);
-    if (lock.lost()) throw new ExtensionFailure('CONFLICT', ['the lock was lost']);
     const next = newPointer(target.generation, base.pointer.generation, base.pointer.revision + 1, target.binding);
-    await switchPointer(context.layout, next, base.pointer);
-    await tidy(context);
+    await switchPointer(context.layout, next, base.pointer, lock);
+    await tidy(context, lock);
     return { current: next.generation, previous: next.previous, revision: next.revision };
+  } catch (error) {
+    throw outcome(error, lock);
   } finally {
     await lock.release();
   }
@@ -422,8 +469,14 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
 /**
  * What is installed, read from files only (ADR 5.10): no process is started and nothing
  * is contacted. Safe to call while a change is running; it shows the state before it.
+ *
+ * `load_verified` means what the helper checked and no more: the extension was imported and
+ * its `setup()` ran when native was started the way a conversation starts it. Whether the
+ * things its manifest declares are active in a conversation depends on how the launcher
+ * passes the extension, which is decided and verified together with the launcher.
  */
 export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>): Promise<ExtensionListing> {
+  await verifyLayout(context.layout);
   const { pointer, record } = await readPointer(context.layout);
   if (!pointer || !record)
     return {
@@ -452,7 +505,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
         status: !usable
           ? ('reinstall_needed' as const)
           : extension.manifestBound
-            ? ('ready' as const)
+            ? ('load_verified' as const)
             : ('manifest_unbound' as const),
       }))
       .toSorted((left, right) => (left.name < right.name ? -1 : 1)),

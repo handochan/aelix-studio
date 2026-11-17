@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -13,7 +13,7 @@ import type { Child, SpawnSpec } from '../process';
 import { readBundleFacts, type BundleFacts } from '../store/layout';
 import { newGenerationRecord, writeGenerationRecord, type GenerationRecord } from '../store/pointer';
 import { ExtensionFailure } from '../types';
-import { createCandidate, discardCandidate, rewriteScriptHeader, scanGeneration, type Candidate } from './candidate';
+import { createCandidate, rewriteScriptHeader, scanGeneration, type Candidate } from './candidate';
 
 const [PARENT, CHILD] = ['g00000001-aaaa', 'g00000002-bbbb'];
 
@@ -76,9 +76,7 @@ describe('building and scanning a candidate generation', () => {
     return record;
   };
   const problems = async (candidate: Candidate): Promise<string[]> =>
-    (await scanGeneration(helper.context, candidate, facts)).problems.map(
-      (problem) => `${problem.code}: ${problem.message}`
-    );
+    (await scanGeneration(candidate, facts)).problems.map((problem) => `${problem.code}: ${problem.message}`);
 
   it('creates the environment with the bundled interpreter and the allow-listed environment', async () => {
     const candidate = await createCandidate(helper.context, PARENT, null);
@@ -101,7 +99,6 @@ describe('building and scanning a candidate generation', () => {
     };
     const error = await failure(createCandidate(broken, PARENT, null));
     expect([error.code, error.output]).toEqual(['RUNTIME_UNAVAILABLE', 'Error: no space left on device']);
-    expect(await readdir(helper.context.layout.generations)).toEqual([]);
   });
 
   it('does not accept an environment that is not on the bundled interpreter', async () => {
@@ -124,6 +121,11 @@ describe('building and scanning a candidate generation', () => {
       },
     };
     expect((await failure(createCandidate(foreign, PARENT, null))).code).toBe('RUNTIME_UNAVAILABLE');
+  });
+
+  it('does not accept an environment venv reported as made but did not make', async () => {
+    const empty = { ...helper.context, spawn: scriptedSpawn((_spec, child) => child.exit(0)) };
+    expect((await failure(createCandidate(empty, PARENT, null))).code).toBe('RUNTIME_UNAVAILABLE');
   });
 
   it('reports cancellation instead of building on', async () => {
@@ -173,8 +175,36 @@ describe('building and scanning a candidate generation', () => {
     expect((await failure(createCandidate(helper.context, CHILD, await finished(parent)))).code).toBe(
       'GENERATION_MODIFIED'
     );
-    // What was half built is removed; only the parent remains.
-    expect(await readdir(helper.context.layout.generations)).toEqual([PARENT]);
+    expect(await readFile(path.join(scratch, 'outside.txt'), 'utf8')).toBe('outside');
+  });
+
+  it('refuses to build on a parent whose recorded file leaves the generation through a linked directory', async () => {
+    const parent = await createCandidate(helper.context, PARENT, null);
+    await install(parent, { name: 'demo' });
+    const outside = path.join(scratch, 'outside');
+    await mkdir(outside);
+    await writeFile(path.join(outside, 'secret.txt'), 'outside');
+    await symlink(outside, path.join(parent.paths.site, 'demo', 'linked'), 'junction');
+    await writeFile(path.join(parent.paths.site, 'demo-0.1.0.dist-info', 'RECORD'), 'demo/linked/secret.txt,,\n', {
+      flag: 'a',
+    });
+    const error = await failure(createCandidate(helper.context, CHILD, await finished(parent)));
+    expect([error.code, error.detail]).toEqual([
+      'GENERATION_MODIFIED',
+      ['demo lists a file that leaves its generation through a link'],
+    ]);
+  });
+
+  it('copies a file two distributions list only once, and leaves links in the agent directory behind', async () => {
+    const parent = await createCandidate(helper.context, PARENT, null);
+    await install(parent, { name: 'demo-one', extension: false, files: { 'shared/__init__.py': 'shared' } });
+    await install(parent, { name: 'demo-two', extension: false, files: { 'shared/__init__.py': 'shared' } });
+    await writeFile(path.join(parent.paths.agent, 'settings.json'), '{}');
+    await writeFile(path.join(scratch, 'elsewhere.json'), 'elsewhere');
+    await symlink(path.join(scratch, 'elsewhere.json'), path.join(parent.paths.agent, 'auth.json'));
+    const child = await createCandidate(helper.context, CHILD, await finished(parent));
+    expect(await readFile(path.join(child.paths.site, 'shared', '__init__.py'), 'utf8')).toBe('shared');
+    expect(await readdir(child.paths.agent)).toEqual(['settings.json']);
   });
 
   it('refuses to build on a parent whose metadata is damaged', async () => {
@@ -205,7 +235,7 @@ describe('building and scanning a candidate generation', () => {
         await unlink(c.paths.python);
         await writeFile(c.paths.python, '#!/bin/sh\n', { mode: 0o755 });
       },
-      /^GENERATION_MODIFIED: the interpreter/,
+      /^GENERATION_MODIFIED: python(\.exe)? of the environment/,
     ],
     [
       'a changed installer',
@@ -233,15 +263,52 @@ describe('building and scanning a candidate generation', () => {
     ]);
   });
 
+  // Review finding 1. `python -m venv` puts more than one interpreter name next to each other;
+  // on POSIX they are links that end at the bundled interpreter.
+  const OTHER_INTERPRETER = process.platform === 'win32' ? 'pythonw.exe' : 'python3.12';
+
+  it('finds a replaced entry of the environment that is not the interpreter the helper starts', async () => {
+    const candidate = await createCandidate(helper.context, PARENT, null);
+    const entry = path.join(candidate.paths.scripts, OTHER_INTERPRETER);
+    await rm(entry);
+    await writeFile(entry, '#!/bin/sh\necho hijacked\n');
+    expect(await problems(candidate)).toEqual([
+      expect.stringMatching(/^GENERATION_MODIFIED: .*(python3\.12|pythonw\.exe)/),
+    ]);
+  });
+
+  it('never writes through an entry of the new environment when it carries files over', async () => {
+    const parent = await createCandidate(helper.context, PARENT, null);
+    await install(parent, { name: 'demo' });
+    // A generation as one written before those entries were protected could look.
+    const entry = path.join(parent.paths.scripts, OTHER_INTERPRETER);
+    await rm(entry);
+    await writeFile(entry, 'not an interpreter');
+    const listed = path.relative(parent.paths.site, entry).split(path.sep).join('/');
+    await writeFile(path.join(parent.paths.site, 'demo-0.1.0.dist-info', 'RECORD'), `${listed},,\n`, { flag: 'a' });
+    const interpreter = await readFile(helper.context.bundle.python, 'utf8');
+    expect((await failure(createCandidate(helper.context, CHILD, await finished(parent)))).code).toBe(
+      'GENERATION_MODIFIED'
+    );
+    expect(await readFile(helper.context.bundle.python, 'utf8')).toBe(interpreter);
+  });
+
+  // Review finding 2: what counts is the metadata that ended up installed.
+  it('finds a direct reference in the metadata of an installed distribution', async () => {
+    const candidate = await createCandidate(helper.context, PARENT, null);
+    await install(candidate, { name: 'demo', extension: false });
+    await writeFile(
+      path.join(candidate.paths.site, 'demo-0.1.0.dist-info', 'METADATA'),
+      'Metadata-Version: 2.1\nName: demo\nVersion: 0.1.0\nRequires-Dist: hidden@git+ssh://example.invalid/hidden.git\n'
+    );
+    expect(await problems(candidate)).toEqual([
+      'DIRECT_REFERENCE: demo requires hidden@git+ssh://example.invalid/hidden.git',
+    ]);
+  });
+
   it('never builds into a generation directory that already exists', async () => {
     const candidate = await createCandidate(helper.context, PARENT, null);
     await expect(createCandidate(helper.context, PARENT, null)).rejects.toThrow(/EEXIST/);
     expect(await problems(candidate)).toEqual([]);
-  });
-
-  it('removes a discarded candidate completely', async () => {
-    const candidate = await createCandidate(helper.context, PARENT, null);
-    await discardCandidate(candidate);
-    expect(await readdir(helper.context.layout.generations)).toEqual([]);
   });
 });

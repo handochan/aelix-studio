@@ -3,9 +3,11 @@ import {
   canonicalName,
   isEntryName,
   isObjectReference,
+  nativeName,
   parseExtensionEntries,
   parseHeaders,
   parseRecordPaths,
+  parseScriptNames,
   readIdentity,
 } from './metadata';
 
@@ -48,6 +50,7 @@ describe('METADATA headers', () => {
   it('reads name, version and requirements, and nothing when a field is missing', () => {
     expect(readIdentity('Name: Demo_Pack\nVersion: 1.2\nRequires-Dist: x>=1\n')).toEqual({
       name: 'demo-pack',
+      declaredName: 'Demo_Pack',
       version: '1.2',
       requires: ['x>=1'],
     });
@@ -79,6 +82,17 @@ describe('extension entry points', () => {
 
   it('returns nothing for a file without the group', () => {
     expect(parseExtensionEntries('[console_scripts]\ntool = demo:main\n').size).toBe(0);
+  });
+
+  it('lists the scripts the installer would write for console and gui entry points', () => {
+    const text = '[console_scripts]\ntool = demo:main\npython3.12 = demo:main\n[gui_scripts]\nwindow = demo:gui\n';
+    expect(parseScriptNames(text)).toEqual(['tool', 'python3.12', 'window']);
+    expect(parseScriptNames('[aelix.extensions]\ndemo = demo:setup\n')).toEqual([]);
+  });
+
+  it('compares names the way native does: case and underscores fold, a dot does not', () => {
+    expect(['Sample_One', ' sample-one ', 'SAMPLE-ONE'].map(nativeName)).toEqual(Array(3).fill('sample-one'));
+    expect(nativeName('sample.one')).toBe('sample.one');
   });
 
   it('accepts module and module:attribute references and nothing that could be read as an option', () => {

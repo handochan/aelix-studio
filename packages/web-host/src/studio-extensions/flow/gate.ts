@@ -1,5 +1,10 @@
-import { canonicalName, isEntryName, isObjectReference } from '../inspect/metadata.js';
-import { contentDistributions, type InstalledDistribution, type SiteSnapshot } from '../inspect/site.js';
+import { isEntryName, isObjectReference, nativeName } from '../inspect/metadata.js';
+import {
+  contentDistributions,
+  type InstalledDistribution,
+  type InstalledExtension,
+  type SiteSnapshot,
+} from '../inspect/site.js';
 import { runToExit } from '../process.js';
 import type { Candidate, FlowContext } from './candidate.js';
 import { loadEnvironment } from './environment.js';
@@ -29,17 +34,45 @@ const same = (left: InstalledDistribution | undefined, right: InstalledDistribut
 const owned = (snapshot: SiteSnapshot, distribution: string): string[] =>
   [...snapshot.extensions].filter(([, extension]) => extension.distribution === distribution).map(([name]) => name);
 
+export type Resolution = { distribution: string } | { ambiguous: string[] };
+
 /**
- * The distribution a name refers to in a snapshot: an extension entry name first, then a
- * distribution name, the order native uses for `extension remove`.
+ * The distribution a name refers to in a snapshot, or the entry names it could mean when it
+ * fits more than one; undefined when nothing fits.
+ *
+ * An exact extension entry name wins. Otherwise names are compared the way native compares
+ * them (case and `_`/`-` fold, a dot does not): first entry names, then the names of
+ * distributions that provide an extension. A name that fits entries of two distributions is
+ * ambiguous; native would take whichever it lists first.
  */
-export function resolveDistribution(snapshot: SiteSnapshot, name: string): string | undefined {
-  const wanted = canonicalName(name);
-  for (const [entry, extension] of snapshot.extensions)
-    if (canonicalName(entry) === wanted) return extension.distribution;
-  const distribution = snapshot.distributions.get(wanted);
-  const owns = [...snapshot.extensions.values()].some((extension) => extension.distribution === wanted);
-  return distribution && owns ? wanted : undefined;
+export function resolveDistribution(snapshot: SiteSnapshot, name: string): Resolution | undefined {
+  const exact = snapshot.extensions.get(name);
+  if (exact) return { distribution: exact.distribution };
+  const wanted = nativeName(name);
+  const alike = [...snapshot.extensions].filter(([entry]) => nativeName(entry) === wanted);
+  const owners = new Set(alike.map(([, extension]) => extension.distribution));
+  if (owners.size > 1) return { ambiguous: alike.map(([entry]) => entry) };
+  if (owners.size === 1) return { distribution: alike[0][1].distribution };
+  const provider = [...snapshot.distributions.values()].find(
+    (distribution) => nativeName(distribution.declaredName) === wanted && owned(snapshot, distribution.name).length > 0
+  );
+  return provider && { distribution: provider.name };
+}
+
+/**
+ * A name to hand to native (`extension remove <name>`) that it resolves to `distribution`
+ * whatever order it lists extensions in. native takes the first entry name that fits, then
+ * the first distribution name. Returns undefined when every name of the distribution could
+ * also mean another one.
+ */
+export function nativeHandle(snapshot: SiteSnapshot, distribution: string): string | undefined {
+  const entries = [...snapshot.extensions];
+  const fits = (name: string): [string, InstalledExtension][] =>
+    entries.filter(([entry]) => nativeName(entry) === nativeName(name));
+  for (const name of owned(snapshot, distribution))
+    if (isEntryName(name) && fits(name).every(([, extension]) => extension.distribution === distribution)) return name;
+  const declared = snapshot.distributions.get(distribution)?.declaredName;
+  return declared !== undefined && isEntryName(declared) && fits(declared).length === 0 ? declared : undefined;
 }
 
 /**

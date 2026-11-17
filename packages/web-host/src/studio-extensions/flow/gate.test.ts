@@ -5,21 +5,42 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFakeHelper, scriptedSpawn, type FakeHelper } from '../../../tests/fixtures/extensionRuntime';
 import type { SiteSnapshot } from '../inspect/site';
 import { createCandidate } from './candidate';
-import { checkLoaded, compareRequest, resolveDistribution, runLoadCheck } from './gate';
+import { checkLoaded, compareRequest, nativeHandle, resolveDistribution, runLoadCheck } from './gate';
 
 type Installed = [name: string, version: string, extensions?: Record<string, string>, record?: string];
 
 /** A snapshot holding the given distributions; `record` stands for the RECORD hash. */
 const site = (...installed: Installed[]): SiteSnapshot => {
   const snapshot: SiteSnapshot = {
-    distributions: new Map([['pip', { name: 'pip', version: '26.0', recordSha256: 'pip', info: 'pip', files: [] }]]),
+    distributions: new Map([
+      [
+        'pip',
+        {
+          name: 'pip',
+          declaredName: 'pip',
+          version: '26.0',
+          requires: [],
+          recordSha256: 'pip',
+          info: 'pip',
+          files: [],
+        },
+      ],
+    ]),
     extensions: new Map(),
     topLevel: new Set(),
     startup: [],
     problems: [],
   };
   for (const [name, version, extensions = {}, record = `${name}-${version}`] of installed) {
-    snapshot.distributions.set(name, { name, version, recordSha256: record, info: `${name}.dist-info`, files: [] });
+    snapshot.distributions.set(name, {
+      name,
+      declaredName: name,
+      version,
+      requires: [],
+      recordSha256: record,
+      info: `${name}.dist-info`,
+      files: [],
+    });
     for (const [entry, reference] of Object.entries(extensions))
       snapshot.extensions.set(entry, { reference, distribution: name });
   }
@@ -31,16 +52,62 @@ const LIB: Installed = ['lib', '2.0'];
 
 describe('finding the distribution a name refers to', () => {
   const snapshot = site(ALPHA, BETA, LIB);
+  // Review finding 4: three extensions whose names differ only in the separator.
+  const alike = site(
+    ['dot-pack', '1.0', { 'sample.one': 'dot:setup' }],
+    ['hyphen-pack', '1.0', { 'sample-one': 'hyphen:setup' }],
+    ['underscore-pack', '1.0', { sample_one: 'underscore:setup' }]
+  );
 
-  it('prefers an extension entry name and falls back to a distribution name', () => {
-    expect(resolveDistribution(snapshot, 'Beta_Two')).toBe('beta-ext');
-    expect(resolveDistribution(snapshot, 'Alpha.Ext')).toBe('alpha-ext');
+  it('takes an exact entry name, then a name native would read as the same, then a distribution name', () => {
+    expect(resolveDistribution(snapshot, 'beta-two')).toEqual({ distribution: 'beta-ext' });
+    expect(resolveDistribution(snapshot, 'Beta_Two')).toEqual({ distribution: 'beta-ext' });
+    expect(resolveDistribution(snapshot, 'Alpha_Ext')).toEqual({ distribution: 'alpha-ext' });
   });
 
   it('finds nothing for a library, the installer or an unknown name', () => {
     expect(['lib', 'pip', 'absent'].map((name) => resolveDistribution(snapshot, name))).toEqual(
       Array(3).fill(undefined)
     );
+  });
+
+  it('does not read a dot as a hyphen: native does not either', () => {
+    expect(resolveDistribution(alike, 'sample.one')).toEqual({ distribution: 'dot-pack' });
+    expect(resolveDistribution(site(ALPHA), 'alpha.ext')).toBeUndefined();
+  });
+
+  it('prefers the exact name over one that only looks alike', () => {
+    expect(resolveDistribution(alike, 'sample-one')).toEqual({ distribution: 'hyphen-pack' });
+    expect(resolveDistribution(alike, 'sample_one')).toEqual({ distribution: 'underscore-pack' });
+  });
+
+  it('calls a name ambiguous when native would read it as more than one extension', () => {
+    expect(resolveDistribution(alike, 'Sample-One')).toEqual({ ambiguous: ['sample-one', 'sample_one'] });
+  });
+
+  it('hands native an entry name only this distribution has', () => {
+    expect(nativeHandle(snapshot, 'beta-ext')).toBe('beta');
+    expect(nativeHandle(alike, 'dot-pack')).toBe('sample.one');
+  });
+
+  it('hands native the distribution name when every entry name could mean another extension', () => {
+    expect(nativeHandle(alike, 'hyphen-pack')).toBe('hyphen-pack');
+  });
+
+  it('has no name to hand over when the distribution name is also an entry of another extension', () => {
+    const tangled = site(
+      ['first', '1.0', { shared_name: 'first:setup' }],
+      ['second', '1.0', { 'shared-name': 'second:setup', other: 'second:other' }],
+      ['third', '1.0', { Other: 'third:setup', first: 'third:first' }]
+    );
+    // `first`: its entry reads like one of `second`, and its own name is an entry of `third`.
+    expect(nativeHandle(tangled, 'first')).toBeUndefined();
+    expect(nativeHandle(tangled, 'second')).toBe('second');
+    expect(nativeHandle(tangled, 'third')).toBe('first');
+  });
+
+  it('skips an entry name native would read as an option', () => {
+    expect(nativeHandle(site(['odd-pack', '1.0', { '--yes': 'odd:setup' }]), 'odd-pack')).toBe('odd-pack');
   });
 });
 

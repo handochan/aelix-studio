@@ -1,8 +1,9 @@
-import { readFile } from 'node:fs/promises';
+import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isObjectReference } from '../inspect/metadata.js';
 import type { ExtensionOrigin } from '../types.js';
-import { isGenerationId, writeAtomic, type BundleBinding, type Layout } from './layout.js';
+import { isGenerationId, writeAtomic, writeTemporary, type BundleBinding, type Layout } from './layout.js';
+import type { StateWriter } from './lock.js';
 
 const POINTER_SCHEMA = 'aelix.studio.extensions.current/1';
 const GENERATION_SCHEMA = 'aelix.studio.extensions.generation/1';
@@ -143,6 +144,8 @@ const recordFile = (layout: Layout, generation: string): string =>
 export async function readGenerationRecord(layout: Layout, generation: string): Promise<GenerationRecord | undefined> {
   if (!isGenerationId(generation)) return undefined;
   try {
+    // A generation is a directory of its own; a link of that name is not read through.
+    if (!(await lstat(path.join(layout.generations, generation))).isDirectory()) return undefined;
     const record = parseGenerationRecord(await readFile(recordFile(layout, generation), 'utf8'));
     return record?.generation === generation ? record : undefined;
   } catch {
@@ -192,8 +195,22 @@ export async function readPointer(layout: Layout): Promise<PointerState> {
  * Make `next` the pointer in effect. `base` is the pointer that was in effect when the
  * caller took the lock; it is kept as the copy to fall back on. The copy is written
  * first, so an interruption between the two writes leaves `base` in effect either way.
+ *
+ * The new content is flushed to temporary files here; the renames that put it in effect are
+ * done by the lock holder, so the pointer cannot move once the lock is gone.
+ *
+ * @throws ExtensionFailure `CONFLICT` when the lock was lost.
  */
-export async function switchPointer(layout: Layout, next: Pointer, base: Pointer | null): Promise<void> {
-  if (base) await writeAtomic(layout.previousPointer, JSON.stringify(base, null, 2) + '\n');
-  await writeAtomic(layout.pointer, JSON.stringify(next, null, 2) + '\n');
+export async function switchPointer(
+  layout: Layout,
+  next: Pointer,
+  base: Pointer | null,
+  writer: StateWriter
+): Promise<void> {
+  const put = async (file: string, pointer: Pointer): Promise<void> => {
+    const temporary = await writeTemporary(file, JSON.stringify(pointer, null, 2) + '\n');
+    await writer.replace(path.basename(temporary), path.basename(file));
+  };
+  if (base) await put(layout.previousPointer, base);
+  await put(layout.pointer, next);
 }

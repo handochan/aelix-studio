@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -10,9 +10,12 @@ import {
   generationPaths,
   isGenerationId,
   layoutOf,
+  locateLayout,
   readBundleFacts,
   resolveBundle,
   sameBinding,
+  stateRelative,
+  verifyLayout,
   writeAtomic,
   writeConstraints,
 } from './layout';
@@ -29,6 +32,66 @@ describe('helper layout', () => {
     expect(Object.values(layout).every((file) => file.startsWith(layout.root))).toBe(true);
     await ensureLayout(layout);
     expect((await readdir(layout.root)).toSorted()).toEqual(['artifacts', 'generations', 'leases']);
+  });
+
+  it('resolves the state directory through links, also before it exists', async () => {
+    const real = path.join(scratch, 'real data');
+    await mkdir(real);
+    await symlink(real, path.join(scratch, 'linked data'), 'junction');
+    expect((await locateLayout(path.join(scratch, 'linked data', 'aelix-runtime'))).root).toBe(
+      path.join(real, 'aelix-runtime')
+    );
+    await mkdir(path.join(real, 'aelix-runtime'));
+    expect((await locateLayout(path.join(scratch, 'linked data', 'aelix-runtime'))).root).toBe(
+      path.join(real, 'aelix-runtime')
+    );
+  });
+
+  it.each(['generations', 'artifacts', 'leases'] as const)(
+    'refuses a state directory whose %s directory is a link to somewhere else',
+    async (name) => {
+      const layout = layoutOf(path.join(scratch, 'root'));
+      const outside = path.join(scratch, 'outside');
+      await mkdir(layout.root);
+      await mkdir(outside);
+      await symlink(outside, layout[name], 'junction');
+      await expect(ensureLayout(layout)).rejects.toMatchObject({ code: 'UNSAFE_ROOT' });
+      await expect(verifyLayout(layout)).rejects.toMatchObject({ code: 'UNSAFE_ROOT' });
+      expect(await readdir(outside)).toEqual([]);
+    }
+  );
+
+  it('refuses a state directory that is reached through a link, and one whose directory is a file', async () => {
+    const real = path.join(scratch, 'real');
+    await mkdir(real);
+    await symlink(real, path.join(scratch, 'link'), 'junction');
+    await expect(ensureLayout(layoutOf(path.join(scratch, 'link')))).rejects.toMatchObject({ code: 'UNSAFE_ROOT' });
+    const layout = layoutOf(path.join(scratch, 'root'));
+    await mkdir(layout.root);
+    await writeFile(layout.leases, 'not a directory');
+    await expect(ensureLayout(layout)).rejects.toMatchObject({ code: 'UNSAFE_ROOT' });
+  });
+
+  it('has nothing to object to before anything was created', async () => {
+    await expect(verifyLayout(layoutOf(path.join(scratch, 'absent')))).resolves.toBeUndefined();
+  });
+
+  it('names only what sits directly in the root or in a dedicated directory', () => {
+    const layout = layoutOf(path.join(scratch, 'root'));
+    const relative = (...parts: string[]): string | undefined =>
+      stateRelative(layout, path.join(layout.root, ...parts));
+    expect([relative('current.json'), relative('generations', 'g1'), relative('leases', 'g1.4711')]).toEqual([
+      'current.json',
+      'generations/g1',
+      'leases/g1.4711',
+    ]);
+    expect([
+      relative(),
+      relative('generations', 'g1', 'venv'),
+      relative('elsewhere', 'g1'),
+      relative('..', 'outside'),
+      stateRelative(layout, path.join(scratch, 'other')),
+    ]).toEqual(Array(5).fill(undefined));
   });
 
   it('lays a generation out the way venv does on each platform', () => {

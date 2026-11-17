@@ -50,7 +50,14 @@ export function parseHeaders(text: string): Map<string, string[]> {
   return headers;
 }
 
-export type DistributionIdentity = { name: string; version: string; requires: string[] };
+export type DistributionIdentity = {
+  /** Canonical name (PEP 503). */
+  name: string;
+  /** `Name` as written in the metadata. */
+  declaredName: string;
+  version: string;
+  requires: string[];
+};
 
 /** Name, version and declared requirements of a distribution; undefined when a field is missing. */
 export function readIdentity(metadata: string): DistributionIdentity | undefined {
@@ -58,10 +65,33 @@ export function readIdentity(metadata: string): DistributionIdentity | undefined
   const name = headers.get('name')?.[0];
   const version = headers.get('version')?.[0];
   if (!name || !version) return undefined;
-  return { name: canonicalName(name), version, requires: headers.get('requires-dist') ?? [] };
+  return { name: canonicalName(name), declaredName: name, version, requires: headers.get('requires-dist') ?? [] };
 }
 
 const REFERENCE = /^[\p{L}\p{N}_.]+(?::[\p{L}\p{N}_.]+)?$/u;
+
+/**
+ * Every group of an `entry_points.txt`: group name to its entries (entry name to value, as written).
+ */
+export function parseEntryPoints(text: string): Map<string, Map<string, string>> {
+  const groups = new Map<string, Map<string, string>>();
+  let group: Map<string, string> | undefined;
+  for (const raw of text.split(/\r\n|\r|\n/)) {
+    const line = raw.trim();
+    if (line === '' || line[0] === '#' || line[0] === ';') continue;
+    if (line[0] === '[' && line.endsWith(']')) {
+      const name = line.slice(1, -1).trim();
+      group = groups.get(name) ?? new Map<string, string>();
+      groups.set(name, group);
+      continue;
+    }
+    const split = line.indexOf('=');
+    if (!group || split <= 0) continue;
+    const name = line.slice(0, split).trim();
+    if (name) group.set(name, line.slice(split + 1).trim());
+  }
+  return groups;
+}
 
 /**
  * The `aelix.extensions` entries of an `entry_points.txt`: entry name to object reference.
@@ -71,25 +101,24 @@ const REFERENCE = /^[\p{L}\p{N}_.]+(?::[\p{L}\p{N}_.]+)?$/u;
  */
 export function parseExtensionEntries(text: string): Map<string, string> {
   const entries = new Map<string, string>();
-  let inGroup = false;
-  for (const raw of text.split(/\r\n|\r|\n/)) {
-    const line = raw.trim();
-    if (line === '' || line[0] === '#' || line[0] === ';') continue;
-    if (line[0] === '[' && line.endsWith(']')) {
-      inGroup = line.slice(1, -1).trim() === EXTENSION_GROUP;
-      continue;
-    }
-    if (!inGroup) continue;
-    const split = line.indexOf('=');
-    if (split <= 0) continue;
-    const name = line.slice(0, split).trim();
-    const value = line
-      .slice(split + 1)
-      .replace(/\[[^\]]*\]\s*$/, '')
-      .replace(/\s+/g, '');
-    if (name) entries.set(name, value);
-  }
+  for (const [name, value] of parseEntryPoints(text).get(EXTENSION_GROUP) ?? [])
+    entries.set(name, value.replace(/\[[^\]]*\]\s*$/, '').replace(/\s+/g, ''));
   return entries;
+}
+
+/** The names of the scripts an `entry_points.txt` makes the installer write. */
+export function parseScriptNames(text: string): string[] {
+  const groups = parseEntryPoints(text);
+  return [...(groups.get('console_scripts')?.keys() ?? []), ...(groups.get('gui_scripts')?.keys() ?? [])];
+}
+
+/**
+ * A name the way native compares extension and distribution names (`_canon` in
+ * `extension_install.py`): surrounding space dropped, lower case, `_` read as `-`. A dot
+ * stays a dot, so `sample.one` and `sample-one` are different extensions.
+ */
+export function nativeName(name: string): string {
+  return name.trim().toLowerCase().replaceAll('_', '-');
 }
 
 /** Whether a reference can be passed to native as `-e <reference>`. */

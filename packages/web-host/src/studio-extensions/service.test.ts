@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,8 @@ import { writeWheel, type WheelSpec } from '../../tests/fixtures/extensionWheels
 import { ExtensionService } from './service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply } from './types';
 
-describe('the extension helper service', () => {
+// Changes are refused on Windows (see the last block); what follows runs where they are offered.
+describe.skipIf(process.platform === 'win32')('the extension helper service', () => {
   let scratch = '';
   let root = '';
   let runtime: FakeRuntimeOptions;
@@ -21,7 +22,7 @@ describe('the extension helper service', () => {
     service = new ExtensionService({ runtime: runtime.bundle, root, spawn, env: { PATH: '/usr/bin' } });
   });
   afterEach(async () => {
-    service.dispose();
+    await service.dispose();
     await rm(scratch, { recursive: true, force: true });
   });
 
@@ -161,20 +162,59 @@ describe('the extension helper service', () => {
     });
   });
 
-  it('reports an unexpected error as INTERNAL and accepts the next change', async () => {
+  // Review finding 12: the text of an unexpected error can hold absolute paths.
+  it('reports an unexpected error as INTERNAL with nothing of its text, logs it, and accepts the next change', async () => {
+    const logged: unknown[] = [];
     const broken = new ExtensionService({
       runtime: runtime.bundle,
       root,
       env: {},
+      log: (_message, error) => logged.push(error),
       spawn: () => {
-        throw new Error('cannot start processes');
+        throw new Error(`ENOTDIR: not a directory, open '${path.join(root, 'generations')}'`);
       },
     });
     const failed = operation(await broken.request('window:1', await installRequest({ name: 'demo-two' })));
-    await new Promise((resolve) => setTimeout(resolve, 20));
-    const state = operation(await broken.request('window:1', { action: 'poll', operationId: failed.operationId }));
-    expect(state).toMatchObject({ phase: 'failed', code: 'INTERNAL', detail: ['cannot start processes'] });
+    // Polled, not disposed: disposing cancels the change before it meets the error.
+    let state = failed;
+    for (let round = 0; round < 500 && !['switched', 'failed', 'cancelled'].includes(state.phase); round += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      state = operation(await broken.request('window:1', { action: 'poll', operationId: failed.operationId }));
+    }
+    expect(state).toEqual({ operationId: failed.operationId, action: 'install', phase: 'failed', code: 'INTERNAL' });
+    expect(logged.map((error) => (error as Error).message)).toEqual([
+      `ENOTDIR: not a directory, open '${path.join(root, 'generations')}'`,
+    ]);
     expect((await broken.request('window:1', await installRequest({ name: 'demo-two' }))).ok).toBe(true);
+    await broken.dispose();
+  });
+
+  it('answers an unexpected error of a direct request the same way', async () => {
+    const logged: unknown[] = [];
+    const broken = new ExtensionService({
+      runtime: runtime.bundle,
+      root,
+      env: {},
+      log: (_message, error) => logged.push(error),
+      spawn: () => {
+        throw new Error(`EACCES: permission denied, open '${root}'`);
+      },
+    });
+    expect(await broken.request('window:1', { action: 'rollback' })).toEqual({ ok: false, code: 'INTERNAL' });
+    expect(logged).toHaveLength(1);
+  });
+
+  // Review finding 3, seen from a caller.
+  it('refuses to list or change a state directory that is not its own', async () => {
+    const outside = path.join(scratch, 'valuable');
+    await mkdir(path.join(outside, 'keep'), { recursive: true });
+    await mkdir(root, { recursive: true });
+    await symlink(outside, path.join(root, 'generations'), 'junction');
+    expect(await service.request('window:1', { action: 'list' })).toMatchObject({ ok: false, code: 'UNSAFE_ROOT' });
+    expect(await service.request('window:1', { action: 'rollback' })).toMatchObject({ ok: false, code: 'UNSAFE_ROOT' });
+    const done = await settle(await service.request('window:1', await installRequest({ name: 'demo-one' })));
+    expect(done).toMatchObject({ phase: 'failed', code: 'UNSAFE_ROOT' });
+    expect(await readdir(outside)).toEqual(['keep']);
   });
 
   it('cancels a running change, removes its candidate and stays as it was', async () => {
@@ -214,8 +254,11 @@ describe('the extension helper service', () => {
     const started = operation(await service.request('window:1', await installRequest({ name: 'demo-one' })));
     while (!spawn.calls.some((call) => call.args.includes('install')))
       await new Promise((resolve) => setTimeout(resolve, 5));
-    service.dispose();
-    expect((await settle({ ok: true, data: started })).phase).toBe('cancelled');
+    await service.dispose();
+    // Disposing waits for the change to end: its final state is there without polling for it.
+    const state = operation(await service.request('window:1', { action: 'poll', operationId: started.operationId }));
+    expect(state.phase).toBe('cancelled');
+    expect(await readdir(path.join(root, 'generations'))).toEqual([]);
   });
 
   it('rolls back directly and answers with the generation that is current now', async () => {
@@ -260,5 +303,53 @@ describe('the extension helper service', () => {
       expect(call.env.AELIX_SETTINGS_PATH).toBeUndefined();
       expect([undefined, runtime.bundle + path.sep + 'native-site']).toContain(call.env.PYTHONPATH);
     }
+  });
+});
+
+// Review findings 8 and 9: stopping pip and rewriting console scripts are not right on
+// Windows, and nothing of the helper has run there. Until that is done (stage 1a'), changes
+// are refused instead of being offered as if they worked.
+describe('the extension helper service on Windows', () => {
+  let scratch = '';
+  let spawn: ReturnType<typeof fakeRuntime>;
+  let service: ExtensionService;
+  beforeEach(async () => {
+    scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-service-win-')));
+    const bundle = await createFakeBundle(path.join(scratch, 'bundle'), { platform: 'win32', arch: 'x64' });
+    spawn = fakeRuntime({ bundle, platform: 'win32' });
+    service = new ExtensionService({
+      runtime: bundle,
+      root: path.join(scratch, 'aelix-runtime'),
+      spawn,
+      env: {},
+      platform: 'win32',
+      arch: 'x64',
+    });
+  });
+  afterEach(() => rm(scratch, { recursive: true, force: true }));
+
+  it.each<[string, unknown]>([
+    ['install', { action: 'install', source: { kind: 'file', path: path.resolve('demo-0.1.0-py3-none-any.whl') } }],
+    [
+      'update',
+      { action: 'update', name: 'demo', source: { kind: 'file', path: path.resolve('demo-0.2.0-py3-none-any.whl') } },
+    ],
+    ['remove', { action: 'remove', name: 'demo' }],
+    ['rollback', { action: 'rollback' }],
+  ])('refuses %s with a code of its own and starts nothing', async (_action, command) => {
+    expect(await service.request('window:1', command)).toEqual({ ok: false, code: 'UNSUPPORTED_PLATFORM' });
+    expect(spawn.calls).toEqual([]);
+    await expect(readdir(path.join(scratch, 'aelix-runtime'))).rejects.toThrow();
+  });
+
+  it('still lists, which only reads files', async () => {
+    expect(await service.request('window:1', { action: 'list' })).toMatchObject({
+      ok: true,
+      data: { current: null, extensions: [] },
+    });
+  });
+
+  it('still answers a request it would not take anywhere with the reason for that', async () => {
+    expect(await service.request('window:1', { action: 'remove' })).toEqual({ ok: false, code: 'INVALID_INPUT' });
   });
 });

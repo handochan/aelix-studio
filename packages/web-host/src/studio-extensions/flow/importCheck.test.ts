@@ -103,6 +103,23 @@ describe('checking an import set before any installer runs', () => {
     ]);
   });
 
+  it('refuses the set when any wheel of it hides a second METADATA behind another spelling of its path', async () => {
+    const result = await check(
+      { name: 'demo', requires: ['demo-lib'] },
+      {
+        name: 'demo-lib',
+        extension: false,
+        tail: [
+          [
+            './demo_lib-0.1.0.dist-info/METADATA',
+            'Name: demo-lib\nVersion: 0.1.0\nRequires-Dist: x @ http://127.0.0.1/x.whl\n',
+          ],
+        ],
+      }
+    );
+    expect(result.problems.map((problem) => problem.code)).toEqual(['INVALID_WHEEL']);
+  });
+
   it('refuses the set when a wheel of it cannot be read', async () => {
     const target = await writeWheel(directory, { name: 'demo' });
     const broken = path.join(directory, 'broken-1.0-py3-none-any.whl');

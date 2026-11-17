@@ -3,7 +3,7 @@ import { scriptedSpawn, type ScriptedChild } from '../../../tests/fixtures/exten
 import { ExtensionFailure } from '../types';
 import type { Bundle } from './layout';
 import { layoutOf } from './layout';
-import { acquireMutationLock, probeLeases } from './lock';
+import { acquireMutationLock, probeLeases, removeFromState } from './lock';
 
 const bundle = { python: '/bundle/python/bin/python3' } as Bundle;
 const layout = layoutOf('/data/aelix-runtime');
@@ -16,9 +16,19 @@ const request = (spawn: ReturnType<typeof scriptedSpawn>, signal?: AbortSignal) 
   signal,
 });
 const code = (failure: unknown): string | undefined => (failure instanceof ExtensionFailure ? failure.code : undefined);
-/** A holder that answers `held` and ends when its input closes, like the real one. */
-const holder = (child: ScriptedChild): void => {
+const caught = (work: Promise<unknown>): Promise<unknown> => work.catch((error: unknown) => error);
+/**
+ * A holder that answers `held`, answers every request with `answer` and ends when its
+ * input closes, like the real one.
+ */
+const holder = (
+  child: ScriptedChild,
+  answer: (request: Record<string, string>) => string = () => '{"ok": true}'
+): void => {
   child.onEnd = () => child.exit(0);
+  child.onInput = (text) => {
+    for (const line of text.split('\n').filter(Boolean)) child.print(answer(JSON.parse(line)) + '\n');
+  };
   child.print('held\n');
 };
 
@@ -38,18 +48,18 @@ describe('the mutation lock', () => {
     const spawn = scriptedSpawn((_spec, child) => holder(child));
     const lock = await acquireMutationLock(request(spawn));
     expect(spawn.children[0].ended).toBe(false);
-    expect(lock.lost()).toBe(false);
+    expect([lock.lost(), lock.loss.aborted]).toEqual([false, false]);
     await lock.release();
     expect(spawn.children[0].ended).toBe(true);
-    expect(lock.lost()).toBe(false);
+    expect([lock.lost(), lock.loss.aborted]).toEqual([false, false]);
   });
 
-  it('reports the lock as lost when the holder ends on its own', async () => {
+  it('reports the lock as lost, and says so at once, when the holder ends on its own', async () => {
     const spawn = scriptedSpawn((_spec, child) => holder(child));
     const lock = await acquireMutationLock(request(spawn));
+    const noticed = new Promise((resolve) => lock.loss.addEventListener('abort', resolve));
     spawn.children[0].exit(null, 'SIGKILL');
-    await spawn.children[0].exited;
-    await Promise.resolve();
+    await noticed;
     expect(lock.lost()).toBe(true);
   });
 
@@ -58,21 +68,26 @@ describe('the mutation lock', () => {
       child.print('busy\n');
       child.exit(3);
     });
-    expect(code(await acquireMutationLock(request(spawn)).catch((error: unknown) => error))).toBe('BUSY');
+    expect(code(await caught(acquireMutationLock(request(spawn))))).toBe('BUSY');
+  });
+
+  it('refuses a lock file that is a link', async () => {
+    const spawn = scriptedSpawn((_spec, child) => {
+      child.print('unsafe\n');
+      child.exit(4);
+    });
+    expect(code(await caught(acquireMutationLock(request(spawn))))).toBe('UNSAFE_ROOT');
   });
 
   it('reports the runtime as unavailable when the holder ends without an answer', async () => {
     const spawn = scriptedSpawn((_spec, child) => child.exit(1));
-    expect(code(await acquireMutationLock(request(spawn)).catch((error: unknown) => error))).toBe(
-      'RUNTIME_UNAVAILABLE'
-    );
+    expect(code(await caught(acquireMutationLock(request(spawn))))).toBe('RUNTIME_UNAVAILABLE');
   });
 
   it('stops waiting when the caller cancels', async () => {
     const controller = new AbortController();
     const spawn = scriptedSpawn(() => controller.abort());
-    const failure = await acquireMutationLock(request(spawn, controller.signal)).catch((error: unknown) => error);
-    expect(code(failure)).toBe('CANCELLED');
+    expect(code(await caught(acquireMutationLock(request(spawn, controller.signal))))).toBe('CANCELLED');
     expect(spawn.children[0].signals).toEqual(['SIGTERM']);
   });
 
@@ -80,10 +95,72 @@ describe('the mutation lock', () => {
     const controller = new AbortController();
     controller.abort();
     const spawn = scriptedSpawn(() => {});
-    expect(code(await acquireMutationLock(request(spawn, controller.signal)).catch((error: unknown) => error))).toBe(
-      'CANCELLED'
-    );
+    expect(code(await caught(acquireMutationLock(request(spawn, controller.signal))))).toBe('CANCELLED');
     expect(spawn.calls).toEqual([]);
+  });
+});
+
+describe('changing shared state through the lock holder', () => {
+  it('asks the holder to rename and to remove, one request at a time, in order', async () => {
+    const spawn = scriptedSpawn((_spec, child) => holder(child));
+    const lock = await acquireMutationLock(request(spawn));
+    await Promise.all([
+      lock.replace('current.json.1a2b.tmp', 'current.json'),
+      lock.remove('generations/g00000001-aaaa'),
+      removeFromState(layout, lock, layout.lock + '.tmp'),
+    ]);
+    expect(spawn.children[0].written.map((line) => JSON.parse(line))).toEqual([
+      { op: 'replace', from: 'current.json.1a2b.tmp', to: 'current.json' },
+      { op: 'remove', path: 'generations/g00000001-aaaa' },
+      { op: 'remove', path: 'lock.tmp' },
+    ]);
+    await lock.release();
+  });
+
+  it('never asks the holder to remove something that is not directly in the state directory', async () => {
+    const spawn = scriptedSpawn((_spec, child) => holder(child));
+    const lock = await acquireMutationLock(request(spawn));
+    for (const target of ['/data/elsewhere', '/data/aelix-runtime/generations/g1/venv', '/data/aelix-runtime/other/x'])
+      expect(code(await caught(Promise.resolve().then(() => removeFromState(layout, lock, target))))).toBe(
+        'UNSAFE_ROOT'
+      );
+    expect(spawn.children[0].written).toEqual([]);
+    await lock.release();
+  });
+
+  it('reports a path the holder refuses as an unsafe state directory', async () => {
+    const spawn = scriptedSpawn((_spec, child) => holder(child, () => '{"ok": false, "refused": true}'));
+    const lock = await acquireMutationLock(request(spawn));
+    expect(code(await caught(lock.remove('generations/g00000001-aaaa')))).toBe('UNSAFE_ROOT');
+    await lock.release();
+  });
+
+  it('reports a failure of the holder without passing on what it printed', async () => {
+    const spawn = scriptedSpawn((_spec, child) => holder(child, () => '{"ok": false, "error": "PermissionError"}'));
+    const lock = await acquireMutationLock(request(spawn));
+    const failure = await caught(lock.remove('generations/g00000001-aaaa'));
+    expect(failure).toBeInstanceOf(Error);
+    expect(code(failure)).toBeUndefined();
+    await lock.release();
+  });
+
+  it('changes nothing once the holder is gone, whether it ended before or during the request', async () => {
+    const spawn = scriptedSpawn((_spec, child) => {
+      child.onInput = () => child.exit(null, 'SIGKILL');
+      child.print('held\n');
+    });
+    const lock = await acquireMutationLock(request(spawn));
+    expect(code(await caught(lock.replace('current.json.1a2b.tmp', 'current.json')))).toBe('CONFLICT');
+    expect(code(await caught(lock.remove('generations/g00000001-aaaa')))).toBe('CONFLICT');
+    expect(spawn.children[0].written).toHaveLength(1);
+  });
+
+  it('changes nothing after it was released', async () => {
+    const spawn = scriptedSpawn((_spec, child) => holder(child));
+    const lock = await acquireMutationLock(request(spawn));
+    await lock.release();
+    expect(code(await caught(lock.remove('generations/g00000001-aaaa')))).toBe('CONFLICT');
+    expect(spawn.children[0].written).toEqual([]);
   });
 });
 

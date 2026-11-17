@@ -1,8 +1,9 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, realpath, rename, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { readSite } from '../inspect/site.js';
+import { ExtensionFailure } from '../types.js';
 
 /**
  * Where everything lives (D04 ADR 5.1). The helper writes only under `root`, a directory
@@ -49,27 +50,112 @@ export function layoutOf(root: string): Layout {
   };
 }
 
-/** Create the directories of the layout. */
+/** The directories only the helper puts things into, and removes things from. */
+export const DEDICATED_DIRECTORIES = ['generations', 'artifacts', 'leases'] as const;
+
+const missing = (error: unknown): boolean => (error as NodeJS.ErrnoException).code === 'ENOENT';
+
+/**
+ * The layout of a state directory, with its location resolved through links, so every path
+ * the helper builds is the real one. Nothing is created: for a directory that does not
+ * exist yet, the nearest existing ancestor is resolved.
+ */
+export async function locateLayout(root: string): Promise<Layout> {
+  const absent: string[] = [];
+  let existing = path.resolve(root);
+  for (;;) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- walks up one directory at a time
+      return layoutOf(path.join(await realpath(existing), ...absent));
+    } catch (error) {
+      const parent = path.dirname(existing);
+      if (!missing(error) || parent === existing) throw error;
+      absent.unshift(path.basename(existing));
+      existing = parent;
+    }
+  }
+}
+
+/**
+ * Make sure the state directory is the helper's own. The helper removes things from its
+ * dedicated directories; if one of them were a link, that would remove what the link
+ * points at. So the root must be where its path says it is, and each dedicated directory
+ * must be a real directory in it. A directory that does not exist yet passes.
+ *
+ * @throws ExtensionFailure `UNSAFE_ROOT`
+ */
+export async function verifyLayout(layout: Layout): Promise<void> {
+  const check = async (directory: string, what: string): Promise<void> => {
+    const stats = await lstat(directory).catch((error: unknown): undefined => {
+      if (!missing(error)) throw error;
+      return undefined;
+    });
+    if (!stats) return;
+    if (stats.isSymbolicLink() || !stats.isDirectory() || (await realpath(directory)) !== directory)
+      throw new ExtensionFailure('UNSAFE_ROOT', [`${what} is not a directory of the helper's own`]);
+  };
+  await check(layout.root, 'the state directory');
+  await Promise.all(DEDICATED_DIRECTORIES.map((name) => check(layout[name], name)));
+}
+
+/**
+ * Create the directories of the layout and verify them.
+ *
+ * @throws ExtensionFailure `UNSAFE_ROOT`
+ */
 export async function ensureLayout(layout: Layout): Promise<void> {
+  await mkdir(layout.root, { recursive: true });
   await Promise.all(
-    [layout.generations, layout.artifacts, layout.leases].map((directory) => mkdir(directory, { recursive: true }))
+    DEDICATED_DIRECTORIES.map((name) =>
+      mkdir(layout[name]).catch((error: unknown) => {
+        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+      })
+    )
   );
+  await verifyLayout(layout);
+}
+
+/**
+ * The path of something directly in the root or in one of the dedicated directories,
+ * relative to the root with `/`: the only places the helper renames or removes anything.
+ * Undefined for any other path.
+ */
+export function stateRelative(layout: Layout, target: string): string | undefined {
+  const parts = path.relative(layout.root, target).split(path.sep);
+  const plain = parts.every((part) => part !== '' && part !== '.' && part !== '..' && !part.includes('/'));
+  const dedicated = (DEDICATED_DIRECTORIES as readonly string[]).includes(parts[0]);
+  if (!plain || path.isAbsolute(parts[0]) || !(parts.length === 1 || (parts.length === 2 && dedicated)))
+    return undefined;
+  return parts.join('/');
+}
+
+/**
+ * Write `content` into a new temporary file beside `file` and flush it to disk. Returns
+ * the path of the temporary file; renaming it over `file` is the caller's step.
+ */
+export async function writeTemporary(file: string, content: string): Promise<string> {
+  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+  // `wx`: the name is new, so an existing file or link of that name is never written through.
+  const handle = await open(temporary, 'wx', 0o600);
+  try {
+    await handle.writeFile(content, 'utf8');
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+  return temporary;
 }
 
 /**
  * Replace a file with new content so that a reader sees the old file or the new one,
  * never a part: write a temporary file beside it, flush it to disk, then rename.
+ *
+ * For files only this process's change cares about. The pointer files are shared and are
+ * renamed by the lock holder instead (`switchPointer`).
  */
 export async function writeAtomic(file: string, content: string): Promise<void> {
-  const temporary = `${file}.${randomBytes(4).toString('hex')}.tmp`;
+  const temporary = await writeTemporary(file, content);
   try {
-    const handle = await open(temporary, 'w', 0o600);
-    try {
-      await handle.writeFile(content, 'utf8');
-      await handle.sync();
-    } finally {
-      await handle.close();
-    }
     await rename(temporary, file);
   } catch (error) {
     await rm(temporary, { force: true });

@@ -4,7 +4,7 @@ import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
 import { describe, mutate, rollback, type MutationRequest } from './flow/mutate.js';
 import { spawnChild, type Spawn } from './process.js';
-import { layoutOf, resolveBundle } from './store/layout.js';
+import { locateLayout, resolveBundle } from './store/layout.js';
 import {
   ExtensionFailure,
   type ExtensionCommand,
@@ -25,9 +25,11 @@ export type ExtensionServiceOptions = {
   arch?: string;
   spawn?: Spawn;
   timeouts?: Partial<FlowContext['timeouts']>;
+  /** Where the full text of an unexpected error goes. It is never part of a reply. */
+  log?: (message: string, error: unknown) => void;
 };
 
-type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController };
+type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
 
 const TIMEOUTS: FlowContext['timeouts'] = {
   lockMs: 30_000,
@@ -67,6 +69,16 @@ const isName = (value: unknown): value is string =>
  *
  * One change runs at a time. `install`, `update` and `remove` return an operation to
  * `poll`; `list` and `rollback` answer directly.
+ *
+ * On Windows every change is refused with `UNSUPPORTED_PLATFORM`; only `list` answers. The
+ * helper has not run on Windows, and these are known not to be right there yet. They are the
+ * work of the per-platform verification stage (1a'):
+ * - cancelling a change stops native but not pip, its child, and the pipe handles pip
+ *   inherited can keep the cancelled change and its lock waiting;
+ * - console scripts are `.exe` launchers with the interpreter path of the generation they
+ *   were installed in built in, so one carried over still points at the old generation;
+ * - the lock (`msvcrt.locking`), the venv layout and the name of the null device as pip
+ *   compares it are written from documentation and have never been exercised.
  */
 export class ExtensionService {
   private operation?: Tracked;
@@ -74,19 +86,28 @@ export class ExtensionService {
 
   constructor(private readonly options: ExtensionServiceOptions) {}
 
+  private get platform(): NodeJS.Platform {
+    return this.options.platform ?? process.platform;
+  }
+
   private async context(signal?: AbortSignal): Promise<FlowContext | undefined> {
-    const platform = this.options.platform ?? process.platform;
-    const bundle = await resolveBundle(this.options.runtime, platform, this.options.arch ?? process.arch);
+    const bundle = await resolveBundle(this.options.runtime, this.platform, this.options.arch ?? process.arch);
     if (!bundle) return undefined;
     return {
       bundle,
-      layout: layoutOf(path.resolve(this.options.root)),
-      platform,
+      layout: await locateLayout(this.options.root),
+      platform: this.platform,
       spawn: this.options.spawn ?? spawnChild,
-      base: baseEnvironment(this.options.env ?? process.env, platform),
+      base: baseEnvironment(this.options.env ?? process.env, this.platform),
       timeouts: { ...TIMEOUTS, ...this.options.timeouts },
       signal,
     };
+  }
+
+  /** An unexpected error: its text may hold paths, so it goes to the log and the reply carries the code only. */
+  private unexpected(error: unknown): ExtensionReply {
+    (this.options.log ?? console.error)('[studio-extensions] unexpected error', error);
+    return fail('INTERNAL');
   }
 
   /**
@@ -106,6 +127,7 @@ export class ExtensionService {
       }
       const change = command.action === 'rollback' ? undefined : parseChange(command);
       if (command.action !== 'rollback' && !change) return fail('INVALID_INPUT');
+      if (this.platform === 'win32') return fail('UNSUPPORTED_PLATFORM');
       if (this.changing) return fail('BUSY');
       this.changing = true;
       if (!change) {
@@ -117,21 +139,24 @@ export class ExtensionService {
         }
       }
       const abort = new AbortController();
-      const context = await this.context(abort.signal).catch((): undefined => undefined);
-      if (!context) {
-        this.changing = false;
-        return fail('RUNTIME_UNAVAILABLE');
+      let context: FlowContext | undefined;
+      try {
+        context = await this.context(abort.signal);
+      } finally {
+        if (!context) this.changing = false;
       }
+      if (!context) return fail('RUNTIME_UNAVAILABLE');
       const tracked: Tracked = {
         owner,
         state: { operationId: randomUUID(), action: change.action, phase: 'checking' },
         abort,
+        done: Promise.resolve(),
       };
       this.operation = tracked;
-      void this.run(tracked, change, context);
+      tracked.done = this.run(tracked, change, context);
       return { ok: true, data: { ...tracked.state } };
     } catch (error) {
-      return error instanceof ExtensionFailure ? fail(error.code, error.detail) : fail('INTERNAL');
+      return error instanceof ExtensionFailure ? fail(error.code, error.detail) : this.unexpected(error);
     }
   }
 
@@ -166,7 +191,10 @@ export class ExtensionService {
       tracked.state = { ...tracked.state, phase: 'switched', generation: outcome.generation };
     } catch (error) {
       if (error instanceof ExtensionFailure) finish(error.code, error.detail, error.output);
-      else finish('INTERNAL', [error instanceof Error ? error.message : 'unexpected error']);
+      else {
+        this.unexpected(error);
+        finish('INTERNAL', []);
+      }
     } finally {
       this.changing = false;
     }
@@ -178,9 +206,13 @@ export class ExtensionService {
     if (tracked && (prefix ? tracked.owner.startsWith(owner) : tracked.owner === owner)) tracked.abort.abort();
   }
 
-  /** Stop a running change. Its candidate is removed; the current generation is untouched. */
-  dispose(): void {
+  /**
+   * Stop a running change. Its candidate is removed; the current generation is untouched.
+   * The promise resolves once the change has ended and nothing of it is running any more.
+   */
+  async dispose(): Promise<void> {
     this.operation?.abort.abort();
+    await this.operation?.done;
   }
 }
 

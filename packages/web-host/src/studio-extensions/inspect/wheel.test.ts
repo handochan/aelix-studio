@@ -1,9 +1,9 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdtemp, rm, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWheel, writeWheel, zip } from '../../../tests/fixtures/extensionWheels';
-import { isStartupEntry, readWheel, topLevelName, WheelError } from './wheel';
+import { isInterpreterName, isStartupEntry, readWheel, topLevelName, WheelError } from './wheel';
 
 describe('reading a wheel without running anything in it', () => {
   let directory = '';
@@ -31,6 +31,7 @@ describe('reading a wheel without running anything in it', () => {
       requires: ['demo-lib>=1', 'other @ http://127.0.0.1/x.whl'],
       topLevel: ['demo_pack', 'helper'],
       startupFiles: [],
+      scripts: [],
     });
     expect([...(await readWheel(file)).extensions]).toEqual([['Demo.Pack', 'Demo_Pack:setup']]);
   });
@@ -58,6 +59,29 @@ describe('reading a wheel without running anything in it', () => {
       'demo_startup.pth',
     ]);
     expect(facts.topLevel).toEqual(['demo_startup', 'sitecustomize', 'usercustomize']);
+    expect(facts.scripts).toEqual(['tool']);
+  });
+
+  it('lists every script the installer would write next to the interpreter', async () => {
+    const file = await writeWheel(directory, {
+      name: 'demo-scripts',
+      scripts: ['demo-tool = demo_scripts:main'],
+      files: {
+        'demo_scripts-0.1.0.data/scripts/python3.12': '#!/bin/sh\n',
+        'demo_scripts-0.1.0.data/data/bin/pip': '#!/bin/sh\n',
+        'demo_scripts-0.1.0.data/data/share/doc.txt': 'not a script',
+      },
+    });
+    expect((await readWheel(file)).scripts).toEqual(['demo-tool', 'pip', 'python3.12']);
+  });
+
+  it('knows the names venv gives the interpreter and the installer', () => {
+    expect(
+      ['python', 'python3', 'python3.12', 'Python.exe', 'pythonw.exe', 'pip', 'pip3.12'].map(isInterpreterName)
+    ).toEqual(Array(7).fill(true));
+    expect(['python-tool', 'pipx', 'mypython', 'python3.12-config'].map(isInterpreterName)).toEqual(
+      Array(4).fill(false)
+    );
   });
 
   it('names top-level entries by what Python would import, in lower case', () => {
@@ -123,7 +147,7 @@ describe('reading a wheel without running anything in it', () => {
             ['dup-1.0.dist-info/entry_points.txt', '[aelix.extensions]\ndup = dup:setup\n'],
           ])
         ),
-      /same name/,
+      /same place/,
     ],
     [
       'a truncated archive',
@@ -140,6 +164,99 @@ describe('reading a wheel without running anything in it', () => {
       /zip64/,
     ],
     ['a missing file', async () => path.join(directory, 'absent-1.0-py3-none-any.whl'), /cannot be opened/],
+    [
+      'an archive that claims a directory larger than this reader holds in memory',
+      async () => {
+        // 40 MiB of nothing, then an end record that calls all of it the directory.
+        const claimed = 40 * 1024 * 1024;
+        const end = Buffer.alloc(22);
+        end.writeUInt32LE(0x06054b50, 0);
+        end.writeUInt16LE(1, 10);
+        end.writeUInt32LE(claimed, 12);
+        const file = await raw('huge-0.1.0-py3-none-any.whl', '');
+        await truncate(file, claimed);
+        await appendFile(file, end);
+        return file;
+      },
+      /directory is too large/,
+    ],
+    [
+      'an archive that would unpack to more than the helper installs',
+      async () => {
+        const data = Buffer.from(buildWheel({ name: 'bomb' }).data);
+        const directory = data.readUInt32LE(data.length - 22 + 16);
+        let cursor = directory;
+        for (let entry = 0; entry < 2; entry += 1) {
+          data.writeUInt32LE(0xf0000000, cursor + 24);
+          cursor +=
+            46 + data.readUInt16LE(cursor + 28) + data.readUInt16LE(cursor + 30) + data.readUInt16LE(cursor + 32);
+        }
+        return raw('bomb-0.1.0-py3-none-any.whl', data);
+      },
+      /unpack to more/,
+    ],
+    // Review finding 2: the installer normalizes member names, so a second spelling of a path
+    // overwrites the file this reader looked at.
+    [
+      'a second METADATA under another spelling of its path',
+      async () =>
+        raw(
+          'alias-0.1.0-py3-none-any.whl',
+          buildWheel({
+            name: 'alias',
+            tail: [
+              [
+                './alias-0.1.0.dist-info/METADATA',
+                'Name: alias\nVersion: 0.1.0\nRequires-Dist: x @ http://127.0.0.1/x.whl\n',
+              ],
+            ],
+          }).data
+        ),
+      /unusual path/,
+    ],
+    ...[
+      'pkg//mod.py',
+      'pkg/./mod.py',
+      'pkg/../other.py',
+      '/absolute.py',
+      'pkg\\mod.py',
+      'C:/mod.py',
+      'odd-0.1.0.data/unknown/file',
+    ].map((member): [string, () => Promise<string>, RegExp] => [
+      `a member named ${member}`,
+      async () => raw('odd-0.1.0-py3-none-any.whl', buildWheel({ name: 'odd', tail: [[member, '']] }).data),
+      /unusual path/,
+    ]),
+    [
+      'a file that also arrives through the data directory',
+      async () =>
+        raw(
+          'twin-0.1.0-py3-none-any.whl',
+          buildWheel({ name: 'twin', files: { 'twin-0.1.0.data/purelib/twin/__init__.py': 'other' } }).data
+        ),
+      /same place/,
+    ],
+    [
+      'two members that differ only in case',
+      async () =>
+        raw(
+          'cased-0.1.0-py3-none-any.whl',
+          buildWheel({ name: 'cased', files: { 'cased/Mod.py': '', 'cased/mod.py': '' } }).data
+        ),
+      /same place/,
+    ],
+    [
+      'metadata of another distribution installed through the data directory',
+      async () =>
+        raw(
+          'meta-0.1.0-py3-none-any.whl',
+          buildWheel({
+            name: 'meta',
+            files: { 'meta-0.1.0.data/purelib/other-1.0.dist-info/METADATA': 'Name: other\n' },
+          }).data
+        ),
+      /data directory/,
+    ],
   ])('refuses %s', async (_what, make, reason) => {
     const failure = await readWheel(await make()).catch((error: unknown) => error);
     expect(failure).toBeInstanceOf(WheelError);
