@@ -3,7 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
+import {
+  closeElectron as baseCloseElectron,
+  launchWithIdentity,
+  recordLaunchFailure,
+  sandboxProcesses,
+} from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -30,7 +35,156 @@ function recordLifecycle(observation) {
   fs.writeFileSync(file, JSON.stringify({ ...previous, checksPassed: [...checks], mainLaunches }, null, 2) + '\n');
   fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
 }
+// Investigation only: observe persisted preference and request origin without cancelling requests.
+const investigation = [];
+let investigationLaunch = 0;
+const investigationFile = path.join(output, 'egress-investigation.json');
+function configState() {
+  try {
+    const raw = fs.readFileSync(path.join(sandbox, 'studio/config/aionui-config.txt'));
+    let parsed;
+    try {
+      parsed = JSON.parse(decodeURIComponent(Buffer.from(raw.toString(), 'base64').toString()));
+    } catch {
+      /* record undecodable */
+    }
+    return {
+      bytes: raw.length,
+      valid: Boolean(parsed),
+      autoCheck: parsed && Object.hasOwn(parsed, 'update.autoCheck') ? parsed['update.autoCheck'] : 'missing',
+      keyCount: parsed ? Object.keys(parsed).length : 0,
+    };
+  } catch (error) {
+    return { bytes: null, errorCode: error.code };
+  }
+}
+function diagnostic(event, data = {}) {
+  investigation.push({ event, launch: investigationLaunch, at: new Date().toISOString(), ...data });
+  fs.writeFileSync(investigationFile, JSON.stringify(investigation, null, 2) + '\n');
+}
+function observeRequests({ app, net, webContents }) {
+  globalThis.__egressInvestigation = { requests: [], calls: [] };
+  const known = (url) => {
+    try {
+      const value = new URL(url);
+      if (!['http:', 'https:'].includes(value.protocol) || ['localhost', '127.0.0.1', '[::1]'].includes(value.hostname))
+        return null;
+      return {
+        hostname: value.hostname,
+        route:
+          value.hostname === 'github.com' && value.pathname.endsWith('/releases.atom')
+            ? 'github-release-feed'
+            : 'other',
+      };
+    } catch {
+      return null;
+    }
+  };
+  const seen = new WeakSet();
+  const monitor = (created) => {
+    if (seen.has(created)) return;
+    seen.add(created);
+    created.webRequest.onBeforeRequest((details, callback) => {
+      const request = known(details.url);
+      if (request) globalThis.__egressInvestigation.requests.push({ ...request, at: Date.now() });
+      callback({});
+    });
+  };
+  app.on('session-created', monitor);
+  app.on('web-contents-created', (_event, contents) => monitor(contents.session));
+  for (const contents of webContents.getAllWebContents()) monitor(contents.session);
+  try {
+    net.request = new Proxy(net.request, {
+      apply(target, thisArg, args) {
+        const options = args[0];
+        const request = known(
+          typeof options === 'string'
+            ? options
+            : options.url ||
+                `${options.protocol || 'https:'}//${options.hostname || options.host}${options.path || '/'}`
+        );
+        if (request)
+          globalThis.__egressInvestigation.calls.push({
+            ...request,
+            stack: new Error().stack
+              .split('\n')
+              .filter((line) => /electron-updater|autoUpdater|updateFeed/.test(line))
+              .map((line) =>
+                line
+                  .replace(/\([^)]*\/node_modules\//g, '(node_modules/')
+                  .replace(/\([^)]*\/out\/main\//g, '(out/main/')
+              ),
+          });
+        return Reflect.apply(target, thisArg, args);
+      },
+    });
+    globalThis.__egressInvestigation.proxy = true;
+  } catch {
+    globalThis.__egressInvestigation.proxy = false;
+  }
+}
+async function cachedPreference() {
+  return page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const id = 'investigation-' + Date.now(),
+          name = 'agent.config.storage.get';
+        let off;
+        const timer = setTimeout(() => {
+          off?.();
+          resolve('unavailable');
+        }, 1000);
+        off = window.electronAPI.on(({ value }) => {
+          const frame = JSON.parse(value);
+          if (frame.name === 'subscribe.callback-' + name + id) {
+            clearTimeout(timer);
+            off();
+            resolve(Object.hasOwn(frame, 'data') ? frame.data : 'missing');
+          }
+        });
+        window.electronAPI.emit('subscribe-' + name, { id, data: 'update.autoCheck' });
+      })
+  );
+}
+function logMarkers(directory) {
+  const result = [];
+  const visit = (dir, depth) => {
+    if (depth > 9) return;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const file = path.join(dir, entry.name);
+      if (entry.isDirectory()) visit(file, depth + 1);
+      else if (entry.isFile() && entry.name.endsWith('.log')) {
+        for (const line of fs.readFileSync(file, 'utf8').split('\n')) {
+          for (const [needle, event] of [
+            ['Checking for update', 'checking-for-update'],
+            ['Update feed set to Studio', 'studio-feed-configured'],
+            ['Auto-update startup check unavailable', 'startup-update-unavailable'],
+            ['Failed to persist', 'persist-error'],
+          ]) {
+            if (line.includes(needle))
+              result.push({ event, timestamp: line.match(/\d{4}-\d{2}-\d{2}[^ ]*/)?.[0] || null });
+          }
+        }
+      }
+    }
+  };
+  try {
+    visit(directory, 0);
+  } catch {
+    /* best effort local logs */
+  }
+  return result;
+}
+async function closeElectron(current) {
+  if (!current) return;
+  const configBefore = configState();
+  const requests = await current.evaluate(() => globalThis.__egressInvestigation).catch(() => null);
+  await baseCloseElectron(current);
+  diagnostic('after-os-exit', { configBefore, configAfter: configState(), requests, logMarkers: logMarkers(sandbox) });
+}
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
+  investigationLaunch++;
+  diagnostic('before-launch', { config: configState() });
   const result = await launchWithIdentity(
     () =>
       electron.launch({
@@ -47,6 +201,7 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   );
   app = result.app;
   const { identity } = result;
+  await app.evaluate(observeRequests);
   appPids.push(identity.pid);
   launchResources = identity.resourcesPath;
   if (executablePath) assert.equal(identity.backendOverride, undefined);
@@ -56,6 +211,7 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   // Backend readiness precedes the authenticated startup router. Wait for its
   // Guid surface before navigating so an initial redirect cannot replace us.
   await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+  diagnostic('ready', { config: configState(), cachedAutoCheck: await cachedPreference() });
   if (conversation) {
     await page.locator(`[id="c-${conversation}"]`).click();
     await expect
