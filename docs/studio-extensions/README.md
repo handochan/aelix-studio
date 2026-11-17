@@ -252,7 +252,8 @@ interpreter를 다시 띄우지 않고 지운다. `sitecustomize.py`를 싣는 w
    interpreter 경로를 후보의 것으로 고친다. `agent/`를 복사한다.
 4. 정적 검사(5.3)를 한다.
 5. 후보에서 native CLI를 관리 형태로 실행한다: `--offline`(반입일 때) `extension install|update|remove <대상> --yes`.
-6. 종료 코드가 0이 아니면 후보를 지운다.
+6. 종료 코드가 0이나 3이 아니면 후보를 지운다. 3(설치됐지만 manifest가 묶이지 않음)은 그 확장의 상태를
+   "manifest 미결합"으로 기록하고 다음 단계로 넘긴다(8.2의 A2, 5.11의 `list` 상태).
 7. 정적 검사를 다시 한다. 실패하면 후보를 지운다.
 8. 요청과 결과를 대조하고 로드를 검증한다(5.5). 하나라도 실패하면 후보를 지운다.
 9. `generation.json`을 쓰고, revision이 2번에서 읽은 값과 같은지 확인한 뒤 `current.json`을 임시 파일에
