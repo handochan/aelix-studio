@@ -6,6 +6,7 @@ import { NativeAuthService } from '../../packages/web-host/src/studio-auth/servi
 import { NATIVE_AUTH_HELPER } from '../../packages/web-host/src/studio-auth/helperSource.ts';
 import { resolveNativeRuntime } from '../../packages/web-host/src/studio-auth/runtime.ts';
 import { createHash } from 'node:crypto';
+import { boundedWait } from './host-release/verification.mjs';
 
 const runtime = process.env.AELIX_STUDIO_RUNTIME;
 const sandbox = process.env.PROVIDER_SANDBOX;
@@ -17,13 +18,15 @@ const resolvedRuntime = resolveNativeRuntime(runtime);
 assert.ok(resolvedRuntime, 'Selected native runtime unavailable');
 const checks = [];
 const record = (name) => checks.push(name);
+const children = new Set();
+const request = (command) => boundedWait(service.request('probe', command), `helper-${command.action}`);
 async function catalog() {
-  const reply = await service.request('probe', { action: 'catalog' });
+  const reply = await request({ action: 'catalog' });
   assert.ok(reply.ok && 'providers' in reply.data, 'Native catalog failed');
   return reply.data;
 }
 async function mutate(command) {
-  return service.request('probe', { ...command, exclusive: true, revision: (await catalog()).revision });
+  return request({ ...command, exclusive: true, revision: (await catalog()).revision });
 }
 
 const prefix = `
@@ -61,6 +64,8 @@ function oauth(revision, polling = false, callback = false) {
     },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
+  children.add(child);
+  child.once('close', () => children.delete(child));
   child.stderr.resume();
   const frames = [];
   const waiters = [];
@@ -77,15 +82,22 @@ function oauth(revision, polling = false, callback = false) {
   });
   child.stdin.write(JSON.stringify({ action: 'login', provider: 'synthetic-oauth', exclusive: true, revision }) + '\n');
   const exit = new Promise((resolve) => child.once('close', resolve));
+  // Harness hang guard, introduced in 382c819db; not an OAuth product SLA.
+  // Match the service's 20s ordinary-request deadline. Slow darwin-x64 runners
+  // spent ~4.8s importing each helper before any callback could be produced.
+  let frameNumber = 0;
   const next = () =>
-    Promise.race([
+    boundedWait(
       frames.length ? Promise.resolve(frames.shift()) : new Promise((resolve) => waiters.push(resolve)),
-      new Promise((_, reject) => {
-        const timer = setTimeout(() => reject(new Error('Bounded callback wait elapsed')), 5000);
-        timer.unref();
-      }),
-    ]);
-  return { child, next, exit };
+      `oauth-${polling ? 'poll' : callback ? 'callback' : 'prompt'}-frame-${++frameNumber}`
+    );
+  return {
+    child,
+    next,
+    get exit() {
+      return boundedWait(exit, 'oauth-process-exit');
+    },
+  };
 }
 
 try {
@@ -100,7 +112,7 @@ try {
   const previous = await catalog();
   assert.ok((await mutate({ action: 'setKey', provider: 'anthropic', key: 'synthetic-b' })).ok);
   assert.deepEqual(
-    await service.request('probe', {
+    await request({
       action: 'setKey',
       provider: 'openai',
       key: 'synthetic-c',
@@ -254,7 +266,7 @@ win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32s
   record('oauth_external_edit_before_commit_refused');
   const saved = fs.readFileSync(path.join(root, 'auth.json'));
   fs.writeFileSync(path.join(root, 'auth.json'), '{corrupt');
-  assert.deepEqual(await service.request('probe', { action: 'catalog' }), { ok: false, code: 'INVALID_CONFIG' });
+  assert.deepEqual(await request({ action: 'catalog' }), { ok: false, code: 'INVALID_CONFIG' });
   assert.equal(fs.readFileSync(path.join(root, 'auth.json'), 'utf8'), '{corrupt');
   fs.writeFileSync(path.join(root, 'auth.json'), saved);
   record('malformed_cli_credentials_refused_without_reset');
@@ -279,5 +291,6 @@ win32security.SetNamedSecurityInfo(str(file),win32security.SE_FILE_OBJECT,win32s
   );
   console.log(`Native Provider helper: ${checks.length} checks passed (synthetic OAuth)`);
 } finally {
+  for (const child of children) child.kill();
   service.dispose();
 }

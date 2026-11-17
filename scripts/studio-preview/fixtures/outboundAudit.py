@@ -86,6 +86,51 @@ def unsupported_personalities(stderr):
 
 
 def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
+    """Recapture incomplete evidence once; never retry a functional/policy failure.
+
+    Commands must own fresh state per invocation (the installer drivers use
+    TemporaryDirectory). Both measurements survive, including provisional counts.
+    """
+    attempts = []
+    for attempt in (1, 2):
+        code = capture_once(command, report_path, scope_executables=scope_executables,
+                            require_executables=require_executables, whole_report_path=whole_report_path)
+        report = json.loads(report_path.read_text())
+        snapshot = report_path.with_name(report_path.stem + f'.capture-{attempt}' + report_path.suffix)
+        snapshot.write_text(json.dumps(report, indent=2) + '\n')
+        attempts.append(dict(attempt=attempt, report=snapshot.name, exitCode=code,
+                             outcome=report.get('outcome', report.get('reason')),
+                             externalAttempts=report.get('externalAttempts'),
+                             unparsedRecords=report.get('unparsedRecords')))
+        if whole_report_path is not None and whole_report_path.exists():
+            whole_report_path.with_name(whole_report_path.stem + f'.capture-{attempt}' + whole_report_path.suffix).write_bytes(whole_report_path.read_bytes())
+        # A captured forbidden operation is policy evidence, even when another
+        # part of the capture is incomplete. It must not disappear in a replay.
+        policy_failure = any(issue['reason'] in ('io_uring_opcode_not_allowed', 'udp_io_uring_write_fd_unproven',
+                             'udp_socket_send_strace_unmatched', 'udp_kernel_tcp_connect_conflict')
+                             for issue in report.get('classificationIssues', []))
+        diagnostics = report.get('externalOperationDiagnostics', [])
+        # Only unresolved, unsent UDP associations can be provisional counts.
+        # A real TCP connect/send/write observed alongside a capture hole must
+        # never be erased by a quieter second execution. Missing diagnostics
+        # are also conservative failure evidence, not permission to replay.
+        provisional = len(diagnostics) == report.get('externalAttempts', 0) and all(
+            item.get('syscall') == 'connect' and item.get('straceSocketKind') == 'udp' and
+            not item.get('udpWriteAssociations') and not
+            (set((item.get('kernel') or {}).get('socketHooks', [])) & {'tcp_v4_connect', 'tcp_v6_connect'})
+            for item in diagnostics)
+        command_failed = report.get('commandStarted') and report.get('commandExitCode') != 0
+        retry = report.get('outcome') == 'evidence_incomplete' and provisional and not policy_failure and not command_failed
+        if attempt == 2 or not retry:
+            break
+        print('Audit evidence incomplete; recapturing once (first report: ' + snapshot.name + ')', file=sys.stderr)
+    report['captureAttempts'] = attempts
+    report['recaptures'] = len(attempts) - 1
+    report_path.write_text(json.dumps(report, indent=2) + '\n')
+    return code
+
+
+def capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -125,10 +170,12 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         stderr_stream=stderr_path.open('wb')
         process=subprocess.Popen([sys.executable,'-I','-B',str(Path(__file__).with_name('uring')/'capture.py'),
                                   '--exec-stop',str(marker),'--',*trace_command],start_new_session=True,stderr=stderr_stream)
+        command_started = False
         try:
             capture.start(process.pid)
             if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
             os.kill(process.pid,signal.SIGCONT)
+            command_started = True
             process.wait()
             evidence=capture.stop()
         except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
@@ -178,10 +225,14 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
         whole_report_path.parent.mkdir(parents=True, exist_ok=True)
         whole_report_path.write_text(json.dumps(whole, indent=2) + '\n')
     report['commandExitCode'] = process.returncode
+    report['commandStarted'] = command_started
     complete = bool(report['traceFiles']) and report['processCount'] > 0 and report['unparsedRecords'] == 0
     code = INCOMPLETE if not complete else DENIED if report['externalAttempts'] else process.returncode
     report['enforcement'] = 'blocking'
     report['status'] = 'passed' if code == 0 else 'failed'
+    report['evidenceComplete'] = complete
+    report['outcome'] = ('evidence_incomplete' if not complete else 'external_attempts' if report['externalAttempts']
+                         else 'command_failed' if process.returncode else 'passed')
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(json.dumps(report, indent=2) + '\n')
     print(json.dumps({key: report[key] for key in ('status', 'externalAttempts', 'unparsedRecords', 'commandExitCode')}))

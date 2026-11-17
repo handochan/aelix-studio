@@ -27,6 +27,31 @@ No Studio permission-restore patch or backend override is used. The old forwardi
 harness and migration 044 are removed; see `docs/studio-preview/README.md` for the
 internal test database reset and phase-two acceptance scope.
 
+The #51 launch failure's root cause remains **unconfirmed**. PR #45 observed the
+third Linux main process exit with code 0 and no signal, before identity
+evaluation; this is evidence of a clean early exit, not proof that the previous
+instance caused it. E2E mode bypasses the single-instance lock. Playwright 1.58.2
+normally waits for process close, but its client ignores a target-closed error.
+`verification.mjs` explicitly waits for the old OS process to exit. Only a
+restart's destroyed-context identity query followed by a naturally observed
+exit 0/no signal can launch a replacement once. `startup-lifecycle.jsonl` retains
+each attempt. First launch, crashes, signals, live processes, and failures after
+identity evaluation remain failures. All UI/effect assertions run unchanged.
+This mitigation can mask a product self-quit during early restart; a passing
+replacement does not establish the cause of the first exit. It does not retry
+the fail-start fault or any permission/recovery assertion. Its diagnostics use
+separate files from PR #45's `main-launch-*` logs.
+
+Provider helper smoke's old 5s callback guard came from fixture commit
+`382c819db`, not a product response requirement. Product service limits remain
+20s for ordinary requests and 180s for login. Fixture callbacks now use 20s:
+the observed slow darwin-x64 runner needed ~4.8s just for each cold helper start,
+and PR #45's additional imports reduce that margin further. The outer helper
+suite hang guard is 300s instead of 120s (~31 starts × 4.8s ≈ 149s). Every
+request/frame/process-exit wait logs elapsed time and its bound; timers clear on
+settlement. Assertions and product deadlines are unchanged, and hung helpers
+still fail and are stopped by the owned fixture cleanup.
+
 The stdout markers, log/data/DB names, bootstrap secret and `AIONUI_*` interfaces
 remain unchanged. Only the executable and release-archive identity have changed.
 

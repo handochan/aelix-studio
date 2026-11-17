@@ -30,6 +30,29 @@ is only the existing host-scoped diagnostic output; the separate app gate always
 enforces the whole tree. Linux requires strace, bpftrace/BTF/tracepoints and sudo.
 Capture failures/lost events remain fatal, with no syscall-only fallback.
 
+Reports distinguish `outcome: evidence_incomplete` (exit 87) from
+`external_attempts` (exit 86) and `command_failed`. Incomplete capture or
+reconciliation is recaptured **once**, using the driver's fresh isolated state.
+Both `*.capture-1.json` and `*.capture-2.json` survive, and `captureAttempts` links
+them. Counts in an incomplete attempt remain provisional and are never rewritten
+as zero. A second incomplete attempt fails. A complete external-attempt result,
+a known forbidden io_uring operation, a configuration refusal or a failed command
+that actually started is not retried. A definite TCP connect or UDP send/write
+alongside an evidence hole also prevents replay; only unsent UDP-connect
+association counts with matching diagnostics can be provisional. No
+destination/parser policy is relaxed.
+
+For #51's x64 failure (job 133707594478), retained evidence proves a complete
+kernel capture but not complete reconciliation: `unknown_record` on PID 15654
+and a missing final strace `write` on PID 15953 (ordinal/lastOrdinal 4684, no
+kernel return/socket hook). Raw traces were deleted by design. Whether that was
+missing strace output or an unsupported parser shape **cannot be determined**
+from that artifact. Unknown records now retain only a fixed shape, length and
+sequence for diagnosis; they still fail closed. The arm64 `__sk_destruct`
+`recursion_misses: 1` is a confirmed capture loss, including when observed after
+detach. That check remains fatal for each capture; recapture mitigates the
+intermittent collection failure rather than treating lost evidence as complete.
+
 TCP connects and every UDP write/send attempt (including failed attempts through
 inherited/duplicated/imported FDs) are denied outside loopback. `udpConnectOnly` (D)
 requires a unique kernel socket-generation connect matching strace, zero protocol

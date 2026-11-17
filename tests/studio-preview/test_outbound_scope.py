@@ -46,6 +46,81 @@ class CaptureStartupFailureTests(unittest.TestCase):
                 self.assertIn({'reason':'kernel_tracepoint_unavailable'},evidence['recordErrors'])
 
 
+class RecaptureTests(unittest.TestCase):
+    def run_attempts(self, root, measurements):
+        def capture(_command, path, **_options):
+            code, report = measurements.pop(0)
+            path.write_text(json.dumps(report))
+            return code
+        path = root/'audit.json'
+        with patch.object(audit, 'capture_once', side_effect=capture) as run:
+            code = audit.audit(['/owned/isolated-fixture'], path)
+        return code, json.loads(path.read_text()), run.call_count
+
+    def incomplete(self, **fields):
+        return dict(outcome='evidence_incomplete', externalAttempts=29, unparsedRecords=2,
+                    externalOperationDiagnostics=[dict(syscall='connect',straceSocketKind='udp',
+                        udpWriteAssociations=[]) for _ in range(29)],
+                    commandStarted=True, commandExitCode=0, **fields)
+
+    def test_two_incomplete_measurements_fail_after_exactly_one_recapture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            code, report, calls=self.run_attempts(root, [(87,self.incomplete()), (87,self.incomplete())])
+            self.assertEqual((code,calls,report['recaptures']), (87,2,1))
+            self.assertEqual(report['externalAttempts'],29)
+            self.assertEqual(len(list(root.glob('audit.capture-*.json'))),2)
+
+    def test_complete_recapture_retains_first_incomplete_counts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            code, report, calls=self.run_attempts(root, [(87,self.incomplete()),
+                (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
+            self.assertEqual((code,calls), (0,2))
+            self.assertEqual(report['captureAttempts'][0]['externalAttempts'],29)
+            self.assertEqual(json.loads((root/'audit.capture-1.json').read_text())['unparsedRecords'],2)
+
+    def test_complete_external_attempt_is_not_retried_or_erased(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report, calls=self.run_attempts(Path(directory), [(86,
+                dict(outcome='external_attempts',externalAttempts=2,unparsedRecords=0))])
+            self.assertEqual((code,calls,report['externalAttempts']), (86,1,2))
+
+    def test_external_attempt_in_second_capture_still_fails(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, report, calls=self.run_attempts(Path(directory), [(87,self.incomplete()),
+                (86,dict(outcome='external_attempts',externalAttempts=2,unparsedRecords=0))])
+            self.assertEqual((code,calls,report['recaptures']), (86,2,1))
+
+    def test_functional_failure_and_known_forbidden_operation_cannot_be_hidden(self):
+        for change in (dict(commandExitCode=1), dict(classificationIssues=[{'reason':'io_uring_opcode_not_allowed'}])):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                measurement=self.incomplete();measurement.update(change)
+                code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
+                self.assertEqual((code,calls), (87,1))
+
+    def test_configuration_refusal_is_not_recaptured(self):
+        with tempfile.TemporaryDirectory() as directory:
+            code, _, calls=self.run_attempts(Path(directory), [(87,dict(reason='proxy_environment'))])
+            self.assertEqual((code,calls), (87,1))
+
+    def test_incomplete_capture_cannot_erase_known_tcp_or_udp_writes(self):
+        for change in (dict(syscall='sendto'), dict(straceSocketKind='tcp'),
+                       dict(udpWriteAssociations=[{'syscall':'write'}]),
+                       dict(kernel={'socketHooks':['tcp_v6_connect']})):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
+                measurement=self.incomplete()
+                measurement['externalOperationDiagnostics'][0].update(change)
+                code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
+                self.assertEqual((code,calls), (87,1))
+
+    def test_incomplete_capture_without_destination_diagnostics_is_not_retried(self):
+        with tempfile.TemporaryDirectory() as directory:
+            measurement=self.incomplete();measurement['externalOperationDiagnostics']=[]
+            code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
+            self.assertEqual((code,calls), (87,1))
+
+
 class ScopedParserTests(unittest.TestCase):
     def test_external_diagnostics_keep_protocol_and_write_provenance_without_raw_content(self):
         records=['1<app> socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP) = 3<UDPv6:[123]>',
@@ -458,6 +533,31 @@ class ScopedParserTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'linux', 'Linux process tracing required')
 class ScopedTraceTests(unittest.TestCase):
+    def test_forced_incomplete_real_capture_recaptures_once_then_fails(self):
+        original_stop=audit.Capture.stop
+        stops=[]
+        def lose_evidence(capture):
+            evidence=original_stop(capture)
+            stops.append(evidence.get('complete'))
+            evidence.update(complete=False,status='failed',reason='test_injected_capture_loss')
+            return evidence
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'incomplete.json'
+            with patch.object(audit.Capture, 'stop', lose_evidence):
+                code=audit.audit(['/bin/true'],path)
+            report=json.loads(path.read_text())
+            self.assertEqual(stops,[True,True], 'Injection requires two otherwise complete real captures')
+            self.assertEqual((code,report['recaptures'],len(report['captureAttempts'])), (87,1,2))
+
+    def test_real_external_control_is_still_denied_without_recapture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'control.json'
+            with patch.object(audit, 'capture_once', wraps=audit.capture_once) as run:
+                code=audit.audit([sys.executable,'-I','-B',str(SCRIPT),'--positive-control'],path)
+            report=json.loads(path.read_text())
+            self.assertEqual((code,report['externalAttempts'],report['unparsedRecords']), (86,2,0))
+            self.assertEqual(run.call_count,1)
+
     @classmethod
     def setUpClass(cls):
         if not shutil.which('strace') or not shutil.which('cc'):
