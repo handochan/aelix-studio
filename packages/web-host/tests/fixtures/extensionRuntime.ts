@@ -8,8 +8,11 @@
  */
 import { copyFile, mkdir, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import type { FlowContext } from '../../src/studio-extensions/flow/candidate';
+import { baseEnvironment } from '../../src/studio-extensions/flow/environment';
 import { canonicalName, parseExtensionEntries, parseRecordPaths } from '../../src/studio-extensions/inspect/metadata';
 import type { Child, ChildExit, Spawn, SpawnSpec } from '../../src/studio-extensions/process';
+import { ensureLayout, layoutOf, resolveBundle } from '../../src/studio-extensions/store/layout';
 
 /** A child whose behaviour a test scripts. */
 export class ScriptedChild implements Child {
@@ -331,4 +334,43 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
       return 2;
     });
   });
+}
+
+export type FakeHelper = {
+  context: FlowContext;
+  spawn: ReturnType<typeof scriptedSpawn>;
+  /** Behaviour of the fake runtime; change it between steps. */
+  runtime: FakeRuntimeOptions;
+  /** Native argument lists of the management runs, without the launcher prefix. */
+  nativeRuns(): string[][];
+};
+
+/**
+ * A flow context on a fake bundle under `scratch`, for the platform the tests run on. The
+ * state root has a space in its path, like "Application Support".
+ */
+export async function createFakeHelper(scratch: string, options: FakeBundleOptions = {}): Promise<FakeHelper> {
+  const platform = process.platform;
+  const bundle = await resolveBundle(await createFakeBundle(path.join(scratch, 'bundle'), options));
+  if (!bundle) throw new Error('the fake bundle did not resolve');
+  const runtime: FakeRuntimeOptions = { bundle: bundle.root };
+  const spawn = fakeRuntime(runtime);
+  const layout = layoutOf(path.join(scratch, 'Application Support', 'aelix-runtime'));
+  await ensureLayout(layout);
+  return {
+    context: {
+      bundle,
+      layout,
+      platform,
+      spawn,
+      base: baseEnvironment({ PATH: '/usr/bin', HOME: path.join(scratch, 'home'), PIP_TARGET: '/elsewhere' }, platform),
+      timeouts: { lockMs: 1000, environmentMs: 5000, installerMs: 5000, verifyMs: 5000 },
+    },
+    spawn,
+    runtime,
+    nativeRuns: () =>
+      spawn.calls
+        .filter((call) => call.command !== bundle.python && call.args.includes('native'))
+        .map((call) => call.args.slice(call.args.indexOf('native') + 1)),
+  };
 }
