@@ -11,6 +11,15 @@ export type {
   NativeAuthOperation,
   NativeAuthSelection,
 } from './studio-auth/types.js';
+export { ExtensionService, STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY } from './studio-extensions/index.js';
+export type {
+  ExtensionCommand,
+  ExtensionListing,
+  ExtensionOperation,
+  ExtensionReply,
+  ExtensionRollback,
+  ExtensionServiceOptions,
+} from './studio-extensions/index.js';
 
 // Backend launcher exports (M4)
 export {
