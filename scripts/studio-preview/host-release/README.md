@@ -1,5 +1,9 @@
 # Immutable Studio host release
 
+Managed runtime entrypoints force `PYTHONDONTWRITEBYTECODE=1` to protect the installed bundle.
+Agent shell tools and the user-project `python`/`pytest` commands they launch inherit this setting too: implicit `.pyc` caches are not written, so cold imports may be slower.
+This performance tradeoff is intentional; the Windows module-path bootstrap remains scoped separately to the owned native interpreter.
+
 `default.json` pins `host-v0.2.2-aelix.4`, its source commit/tree, five archive
 SHA-256 values and release provenance. `provenance.json` is the byte-preserved
 published release asset. The release also publishes `aelix-studio-host-checksums.txt`;

@@ -20,39 +20,82 @@ if (executablePath) {
 let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
+let launchSequence = 0;
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
-  app = await electron.launch({
-    ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
-    cwd: executablePath ? sandbox : process.cwd(),
-    env: appEnv,
-    timeout: 60000,
-  });
-  // Capture both assertions in the same early main-context evaluation.
-  const identity = await app.evaluate(() => ({
-    pid: process.pid,
-    backendOverride: process.env.AIONUI_BACKEND_BIN,
-    resourcesPath: process.resourcesPath,
-  }));
-  appPids.push(identity.pid);
-  launchResources = identity.resourcesPath;
-  if (executablePath) assert.equal(identity.backendOverride, undefined);
-  page = await app.firstWindow();
-  await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
-  port = await page.evaluate(() => window.__backendPort);
-  // Backend readiness precedes the authenticated startup router. Wait for its
-  // Guid surface before navigating so an initial redirect cannot replace us.
-  await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
-  if (conversation) {
-    await page.locator(`[id="c-${conversation}"]`).click();
-    await expect
-      .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
-      .toBe(`#/conversation/${conversation}`);
-    await expect(page.getByTestId('message-list-content')).toBeVisible({ timeout: 30000 });
-    await expect(page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${marker}$`) })).toBeVisible({
-      timeout: 30000,
+  const attempt = ++launchSequence;
+  const stdoutPath = path.join(output, `main-launch-${attempt}.stdout.log`);
+  const stderrPath = path.join(output, `main-launch-${attempt}.stderr.log`);
+  fs.writeFileSync(stdoutPath, '');
+  fs.writeFileSync(stderrPath, '');
+  let main;
+  const observed = { attempt, stdout: '', stderr: '', exitCode: null, signal: null, error: null };
+  const persistFailure = () =>
+    fs.writeFileSync(
+      path.join(output, 'renderer-result.json'),
+      JSON.stringify({ checksPassed: [...checks], mainLaunchFailure: observed }, null, 2) + '\n'
+    );
+  try {
+    app = await electron.launch({
+      ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
+      cwd: executablePath ? sandbox : process.cwd(),
+      env: appEnv,
+      timeout: 60000,
     });
+    main = app.process();
+    main.stdout?.on('data', (chunk) => {
+      observed.stdout += chunk.toString();
+      fs.appendFileSync(stdoutPath, chunk);
+    });
+    main.stderr?.on('data', (chunk) => {
+      observed.stderr += chunk.toString();
+      fs.appendFileSync(stderrPath, chunk);
+    });
+    main.on('exit', (code, signal) => {
+      observed.exitCode = code;
+      observed.signal = signal;
+      fs.writeFileSync(path.join(output, `main-launch-${attempt}.exit.json`), JSON.stringify({ code, signal }) + '\n');
+      if (observed.error) persistFailure();
+    });
+    main.on('close', (code, signal) => {
+      observed.exitCode = code;
+      observed.signal = signal;
+      if (observed.error) persistFailure();
+    });
+    // Capture both assertions in the same early main-context evaluation.
+    const identity = await app.evaluate(() => ({
+      pid: process.pid,
+      backendOverride: process.env.AIONUI_BACKEND_BIN,
+      resourcesPath: process.resourcesPath,
+    }));
+    appPids.push(identity.pid);
+    launchResources = identity.resourcesPath;
+    if (executablePath) assert.equal(identity.backendOverride, undefined);
+    page = await app.firstWindow();
+    await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
+    port = await page.evaluate(() => window.__backendPort);
+    // Backend readiness precedes the authenticated startup router. Wait for its
+    // Guid surface before navigating so an initial redirect cannot replace us.
+    await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+    if (conversation) {
+      await page.locator(`[id="c-${conversation}"]`).click();
+      await expect
+        .poll(() => page.evaluate(() => window.location.hash), { timeout: 30000 })
+        .toBe(`#/conversation/${conversation}`);
+      await expect(page.getByTestId('message-list-content')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${marker}$`) })).toBeVisible(
+        {
+          timeout: 30000,
+        }
+      );
+    }
+    selector = page.getByTestId('mode-selector');
+  } catch (error) {
+    observed.error = String(error);
+    observed.exitCode = main?.exitCode ?? observed.exitCode;
+    observed.signal = main?.signalCode ?? observed.signal;
+    persistFailure();
+    throw error;
   }
-  selector = page.getByTestId('mode-selector');
 }
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, async () => {

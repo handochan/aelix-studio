@@ -14,6 +14,45 @@ ROOT = Path(__file__).resolve().parents[2]
 PATH = ROOT / 'scripts/studio-preview/host-release/smoke.py'
 
 class HostReleaseSmokeTests(unittest.TestCase):
+    def test_launch_failure_retains_main_output_and_exit_in_the_uploaded_checkpoint(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            script = r'''
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+const [sourceFile, output] = process.argv.slice(1);
+const source = fs.readFileSync(sourceFile, 'utf8');
+const launch = source.slice(source.indexOf('async function launch('), source.indexOf('\nfor (const signal'));
+const main = new EventEmitter();
+main.stdout = new PassThrough(); main.stderr = new PassThrough();
+const fake = {
+  process: () => main,
+  evaluate: async () => {
+    main.stdout.write('owned main stdout\n'); main.stderr.write('owned main stderr\n');
+    main.exitCode = 17; main.signalCode = null; main.emit('exit', 17, null);
+    throw Error('main context failure');
+  },
+};
+const context = { fs, path, output, launchSequence: 0, checks: ['before-launch'],
+  electron: { launch: async () => fake }, executablePath: 'owned-app', sandbox: output,
+  process, appEnv: {}, appPids: [] };
+vm.createContext(context);
+vm.runInContext(launch, context);
+try { await context.launch(); } catch {}
+main.stderr.write('tail after exit\n'); main.emit('close', 17, null);
+const result = JSON.parse(fs.readFileSync(path.join(output, 'renderer-result.json')));
+process.stdout.write(JSON.stringify(result.mainLaunchFailure));
+'''
+            result = subprocess.run(['node', '--input-type=module', '-e', script,
+                                     str(PATH.with_suffix('.mjs')), temporary], capture_output=True, text=True, timeout=15)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            failure = json.loads(result.stdout)
+            self.assertEqual((failure['stdout'], failure['stderr'], failure['exitCode']),
+                             ('owned main stdout\n', 'owned main stderr\ntail after exit\n', 17))
+            self.assertIn('main context failure', failure['error'])
+
     def test_gui_keeps_display_transport_without_importing_provider_secrets_or_user_roots(self):
         spec = importlib.util.spec_from_file_location('host_recovery_smoke', PATH)
         smoke = importlib.util.module_from_spec(spec)
