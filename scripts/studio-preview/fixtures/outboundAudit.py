@@ -101,6 +101,8 @@ CAPTURE_CLEANUP = 75
 SUPERVISOR_CLEANUP = 15
 FORCE_CLEANUP = 5
 
+OWNED_SIGNAL = "import os, sys\nfrom pathlib import Path\ntry:\n    fields = (Path('/proc') / sys.argv[1] / 'stat').read_text().rsplit(')', 1)[1].split()\n    if fields[19] == sys.argv[2]:\n        os.kill(int(sys.argv[1]), int(sys.argv[3]))\nexcept (FileNotFoundError, ProcessLookupError):\n    pass\n"
+
 
 def recapture_reasons_allowed(report):
     if report.get('observedRejectedOpcodes'): return False
@@ -179,11 +181,7 @@ def stop_owned_tree(root, *, include_root=False, grace=None, root_birth=None):
             except ProcessLookupError: pass
             except PermissionError:
                 # Only a revalidated owned sudo/BPF descendant can reach here.
-                code = ('import os,sys;from pathlib import Path;'
-                        'p=Path("/proc")/sys.argv[1]/"stat";'
-                        'v=p.read_text().rsplit(")",1)[1].split() if p.exists() else [];'
-                        'os.kill(int(sys.argv[1]),int(sys.argv[3])) if v and v[19]==sys.argv[2] else None')
-                subprocess.run(['sudo', '-n', sys.executable, '-I', '-B', '-c', code,
+                subprocess.run(['sudo', '-n', sys.executable, '-I', '-B', '-c', OWNED_SIGNAL,
                                 str(pid), known[pid], str(int(selected))],
                                check=True, capture_output=True, timeout=5)
         # Keep the subreaper/root alive and rescan after KILL too: a process
@@ -249,7 +247,7 @@ def capture_deadline(seconds):
     old_alarm = signal.signal(signal.SIGALRM, timeout)
     old_term = signal.signal(signal.SIGTERM, cancel)
     old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
-    try: yield
+    try: yield time.monotonic() + seconds
     finally:
         signal.setitimer(signal.ITIMER_REAL, *old_timer)
         signal.signal(signal.SIGALRM, old_alarm)
@@ -306,6 +304,34 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
 
 def capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
                  capture_timeout=CAPTURE_TIMEOUT):
+    # Report parsing and hashing are part of the same original capture budget.
+    try:
+        with capture_deadline(capture_timeout) as deadline:
+            return _capture_once(command, report_path, scope_executables=scope_executables,
+                                 require_executables=require_executables, whole_report_path=whole_report_path,
+                                 capture_timeout=capture_timeout, activity_deadline=deadline)
+    except RuntimeError as error:
+        if str(error) not in ('capture_timeout', 'capture_cancelled'): raise
+        # No analysis budget remains. Unknown counts are not a zero receipt.
+        report = dict(schema='aelix-studio-host.outbound-audit/1', status='failed',
+            outcome=str(error), reason=str(error), evidenceComplete=False,
+            scope='selected-process-trees' if scope_executables else 'all', enforcement='blocking',
+            traceFiles=0, processCount=0, rootPids=[], processes=[], external=[], externalAttempts=None,
+            unparsedRecords=1, classificationErrors=1, classificationIssues=[{'reason':str(error)}],
+            commandStarted=None, commandExitCode=None, captureTimeoutSeconds=capture_timeout,
+            ioUring=dict(recorded=False, opcodeCounts={},capture=dict(complete=False,reason=str(error))))
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report, indent=2)+'\n')
+        if whole_report_path is not None:
+            whole_report_path.parent.mkdir(parents=True, exist_ok=True)
+            whole_report_path.write_text(json.dumps(dict(report,scope='all',enforcement='report-only',status='reported'),indent=2)+'\n')
+        print('Capture failed within its original bound: '+str(error), file=sys.stderr)
+        return INCOMPLETE
+
+
+def _capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
+                  capture_timeout=CAPTURE_TIMEOUT, activity_deadline=None):
+    activity_deadline = activity_deadline or time.monotonic() + capture_timeout
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -347,26 +373,28 @@ def capture_once(command, report_path, *, scope_executables=(), require_executab
                                   '--exec-stop',str(marker),'--',*trace_command],start_new_session=True,stderr=stderr_stream)
         root_birth = (process_table().get(process.pid) or (None, None))[1]
         command_started = False
-        with capture_deadline(capture_timeout):
-            try:
-                capture.start(process.pid)
-                if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
-                os.kill(process.pid,signal.SIGCONT)
-                command_started = True
-                process.wait()
-                evidence=capture.stop()
-            except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
-                signal.setitimer(signal.ITIMER_REAL, 0)
-                if process.poll() is None:
-                    stop_owned_tree(process.pid, include_root=True, root_birth=root_birth)
-                process.wait(timeout=5)
-                try:evidence=capture.stop()
-                except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
-                reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__
-                if evidence.get('reason') and evidence['reason']!=reason:
-                    evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
-                evidence.update(status='failed',complete=False,reason=reason)
-                evidence.setdefault('recordErrors',[]).append({'reason':reason})
+        try:
+            capture.start(process.pid)
+            if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
+            os.kill(process.pid,signal.SIGCONT)
+            command_started = True
+            process.wait()
+            evidence=capture.stop()
+        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
+            remaining = max(0, activity_deadline - time.monotonic())
+            signal.setitimer(signal.ITIMER_REAL, 0)
+            if process.poll() is None:
+                stop_owned_tree(process.pid, include_root=True, root_birth=root_birth)
+            process.wait(timeout=5)
+            try:evidence=capture.stop()
+            except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
+            reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__
+            if evidence.get('reason') and evidence['reason']!=reason:
+                evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
+            evidence.update(status='failed',complete=False,reason=reason)
+            evidence.setdefault('recordErrors',[]).append({'reason':reason})
+            if not remaining: raise RuntimeError('capture_timeout')
+            signal.setitimer(signal.ITIMER_REAL, remaining)
         stderr_stream.close()
         stderr=stderr_path.read_bytes()
         # Restore command diagnostics, but never retain them in JSON/artifacts.

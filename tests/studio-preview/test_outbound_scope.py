@@ -159,6 +159,28 @@ class RecaptureTests(unittest.TestCase):
 
 @unittest.skipUnless(hasattr(audit.signal,'setitimer'),'POSIX capture deadline required')
 class CaptureDeadlineTests(unittest.TestCase):
+    def test_capture_bound_includes_report_processing_not_only_collection(self):
+        import time
+        with tempfile.TemporaryDirectory() as directory, patch.object(audit,'_capture_once',side_effect=lambda *a,**k: time.sleep(1)):
+            path=Path(directory)/'report.json'
+            self.assertEqual(audit.capture_once(['/owned/command'],path,capture_timeout=0.02),87)
+            self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
+
+    def test_failed_collection_analysis_keeps_its_remaining_budget(self):
+        import time
+        capture=Mock();capture.start.side_effect=RuntimeError('kernel_tracepoint_unavailable')
+        capture.stop.return_value={'status':'failed','complete':False,'reason':'kernel_tracepoint_unavailable'}
+        process=Mock(pid=123,returncode=0);process.poll.return_value=0
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{},clear=True), \
+             patch.object(audit.sys,'platform','linux'), patch.object(audit,'resolve_strace',return_value='/bin/true'), \
+             patch.object(audit,'npm_config_paths',return_value=[]), patch.object(audit,'npm_proxy_configured',return_value=False), \
+             patch.object(audit,'Capture',return_value=capture), patch.object(audit.subprocess,'Popen',return_value=process), \
+             patch.object(audit,'analyze_processes',side_effect=lambda *a,**k: time.sleep(1)):
+            path=Path(directory)/'timeout.json'
+            self.assertEqual(audit.capture_once(['/owned/command'],path,capture_timeout=0.03),87)
+            self.assertIsNone(json.loads(path.read_text())['externalAttempts'])
+            self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
+
     def test_capture_deadline_fails_without_extending_the_bound_for_replay(self):
         import time
         with self.assertRaisesRegex(RuntimeError,'capture_timeout'):
@@ -170,6 +192,17 @@ class CleanupIdentityTests(unittest.TestCase):
         # The algorithm uses mocked /proc and kill; retain that coverage on Windows.
         signals=patch.object(audit.signal,'SIGKILL',9,create=True)
         signals.start();self.addCleanup(signals.stop)
+
+    def test_privileged_signal_tolerates_a_process_exiting_before_revalidation(self):
+        with patch.object(sys,'argv',['signal','123','old','9']), patch.object(audit.Path,'read_text',side_effect=FileNotFoundError), patch.object(audit.os,'kill') as kill:
+            exec(audit.OWNED_SIGNAL,{})
+        kill.assert_not_called()
+
+    def test_privileged_signal_rejects_a_reused_pid(self):
+        raw='123 (owned) '+' '.join(['S','1']+['0']*17+['new'])
+        with patch.object(sys,'argv',['signal','123','old','9']), patch.object(audit.Path,'read_text',return_value=raw), patch.object(audit.os,'kill') as kill:
+            exec(audit.OWNED_SIGNAL,{})
+        kill.assert_not_called()
 
     def test_reused_root_is_not_owned(self):
         table={100:(1,'new','S'),201:(100,'child','S')}

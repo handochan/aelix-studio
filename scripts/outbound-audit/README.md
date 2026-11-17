@@ -52,8 +52,11 @@ forbidden opcodes, configuration refusal and command failure also prevent
 replay. No parser, destination or socket-object policy is relaxed.
 
 `AuditedSessions` passes each session's existing bound (480s for Provider and
-permission) as `--capture-timeout`; attachment, command and drain all share it.
-Expiry is failure, never a retry reason. Cleanup has a separate 75s reserve.
+permission) as `--capture-timeout`; attachment, command, drain, report parsing and hashing all share it.
+Expiry is failure, never a retry reason. If analysis cannot finish, a minimal
+failed report records `externalAttempts: null`, not zero, and acceptance does
+not defer that unknown result. Cleanup has a separate 75s reserve; after cleanup
+the unused activity budget is restored for remaining analysis.
 The outer budget covers two such captures plus 30s report overhead; the
 supervisor's own shutdown reserve is separate. Linux supervisors adopt detached
 children, retain PID birth identities, terminate descendants before the root,

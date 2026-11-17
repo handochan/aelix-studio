@@ -100,6 +100,14 @@ class SessionReceiptTests(unittest.TestCase):
             self.assertEqual(ledger['auditedSessions'][0]['status'], 'failed')
             self.assertEqual(ledger['auditedSessions'][0]['externalAttempts'], 1)
 
+    def test_unknown_timeout_counts_cannot_defer_failure_even_after_command_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            audit,run=self.run_report(Path(directory),attempts=None,unparsed=1,classification=1,exit_code=87)
+            with patch.object(module,'run_supervised',run), self.assertRaisesRegex(RuntimeError,'provider'):
+                audit.run('provider',['/owned/command'],env={},timeout=480,defer_failure=True)
+            self.assertIsNone(audit.sessions[0]['externalAttempts'])
+            self.assertEqual(audit.sessions[0]['status'],'failed')
+
     def test_unparsed_or_classification_failure_is_never_a_zero_receipt(self):
         for fields in [dict(unparsed=1),dict(classification=1),dict(exit_code=87)]:
             with self.subTest(fields=fields), tempfile.TemporaryDirectory() as directory:

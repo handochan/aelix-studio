@@ -116,7 +116,7 @@ class AuditedSessions:
             record['expectedRejectedOpcode']=expected_ring_opcode
         if valid: record['status'] = 'passed'
         self.save()
-        if not valid and not (defer_failure and scoped.get('commandExitCode') == 0):
+        if not valid and not (defer_failure and scoped.get('commandExitCode') == 0 and scoped.get('externalAttempts') is not None):
             raise RuntimeError('Scoped outbound session failed: ' + name)
         return result
 
