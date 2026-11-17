@@ -4,9 +4,13 @@ import {
   boundedWait,
   closeElectron,
   launchWithIdentity,
+  recordLaunchFailure,
 } from '../../../scripts/studio-preview/host-release/verification.mjs';
 
-afterEach(() => vi.useRealTimers());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 function application(error?: Error, exitCode: number | null = 0, signalCode: string | null = null) {
   const main = Object.assign(new EventEmitter(), { pid: 123, exitCode, signalCode });
@@ -46,8 +50,13 @@ describe('fixture callback deadlines', () => {
   });
 });
 
-describe('Electron restart evidence', () => {
+describe('Electron launch evidence without retry', () => {
   const destroyed = new Error('Execution context was destroyed');
+  const options = (record = vi.fn()) => ({
+    launchNumber: 3,
+    record,
+    remainingProcesses: { status: 'observed', processes: [] },
+  });
   it('waits for the old OS process even when app.close has already resolved', async () => {
     const { main, app } = application(undefined, null);
     let completed = false;
@@ -62,33 +71,68 @@ describe('Electron restart evidence', () => {
     expect(completed).toBe(true);
   });
 
-  it('retains a clean pre-identity restart failure and evaluates the replacement', async () => {
-    const failed = application(destroyed);
-    const replacement = application();
-    const launch = vi.fn().mockResolvedValueOnce(failed.app).mockResolvedValueOnce(replacement.app);
-    const record = vi.fn();
-    const result = await launchWithIdentity(launch, { restarting: true, record });
-    expect(result.app).toBe(replacement.app);
-    expect(record.mock.calls[0][0]).toMatchObject({ exitCode: 0, retry: true, status: 'failed' });
-    expect(launch).toHaveBeenCalledTimes(2);
-  });
-
   it.each([
-    ['first startup', false, 0, null, destroyed],
-    ['crash', true, 1, null, destroyed],
-    ['signal', true, null, 'SIGTERM', destroyed],
-    ['assertion', true, 0, null, new Error('identity assertion failed')],
-  ])('does not retry %s', async (_label, restarting, code, signal, error) => {
-    const { app } = application(error as Error, code as number | null, signal as string | null);
+    ['clean natural exit', 0, null],
+    ['crash', 1, null],
+    ['signal', null, 'SIGTERM'],
+  ])('fails a restart on %s without launching a replacement', async (_label, code, signal) => {
+    const { app } = application(destroyed, code as number | null, signal as string | null);
     const launch = vi.fn().mockResolvedValue(app);
-    await expect(launchWithIdentity(launch, { restarting, record: vi.fn() })).rejects.toThrow(error as Error);
+    const record = vi.fn();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    await expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed);
     expect(launch).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('Studio launch #3 FAILED: naturalExit=true'));
+    expect(record.mock.calls.find(([row]) => row.status === 'failed')?.[0]).toMatchObject({
+      launch: 3,
+      exitCode: code,
+      signal,
+      naturalExit: true,
+      closeRequestedAt: null,
+      exitObservedAt: expect.any(String),
+    });
   });
 
-  it('fails after the second clean early exit', async () => {
-    const { app } = application(destroyed);
-    const launch = vi.fn().mockResolvedValue(app);
-    await expect(launchWithIdentity(launch, { restarting: true, record: vi.fn() })).rejects.toThrow(destroyed);
-    expect(launch).toHaveBeenCalledTimes(2);
+  it('retains a pre-handle launch failure for the uploaded result', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const record = vi.fn();
+    await expect(
+      launchWithIdentity(async () => {
+        throw new Error('launch failed');
+      }, options(record))
+    ).rejects.toThrow('launch failed');
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ launch: 3, status: 'failed', error: 'Error: launch failed' });
+  });
+
+  it('records main output and spontaneous exit after identity before smoke closes', async () => {
+    const { app, main } = application(undefined, null);
+    const stdout = new EventEmitter();
+    const observedMain = Object.assign(main, { stdout });
+    const record = vi.fn();
+    await launchWithIdentity(async () => app, options(record));
+    stdout.emit('data', Buffer.from('initialization failed'));
+    observedMain.exitCode = 0;
+    observedMain.emit('exit', 0, null);
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    recordLaunchFailure(app, destroyed);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      stdout: 'initialization failed',
+      naturalExit: true,
+      closeRequestedAt: null,
+    });
+    await closeElectron(app);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ naturalExit: true, closeRequestedAt: expect.any(String) });
+  });
+
+  it('distinguishes shutdown requested by smoke from a natural exit', async () => {
+    const { app, main } = application(undefined, null);
+    const record = vi.fn();
+    await launchWithIdentity(async () => app, options(record));
+    app.close.mockImplementation(async () => {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+    });
+    await closeElectron(app);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ naturalExit: false, closeRequestedAt: expect.any(String) });
   });
 });

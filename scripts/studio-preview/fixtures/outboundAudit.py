@@ -8,6 +8,8 @@ Optional executable roots select descendant trees; the default remains whole-com
 Exit 86 means detected outbound attempts; 87 means incomplete/unparseable evidence.
 """
 import argparse
+import contextlib
+import ctypes
 import hashlib
 import json
 import os
@@ -18,10 +20,12 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from outboundScope import analyze_processes
 from uring.capture import Capture
+from uring.policy import ALLOWED_OPCODES
 
 DENIED = 86
 INCOMPLETE = 87
@@ -85,8 +89,175 @@ def unsupported_personalities(stderr):
     return len(re.findall(r'Proper structure decoding for this\s+personality is not supported', stderr, re.I))
 
 
+
+# Only known recording gaps may replay an isolated command. An unlisted reason,
+# including any undecodable network destination/peer, remains a first-pass failure.
+RECAPTURE_ISSUES = frozenset({'unknown_record', 'kernel_network_strace_entry_missing',
+    'io_uring_kernel_capture_incomplete', 'kernel_network_capture_incomplete', 'udp_socket_capture_incomplete'})
+RECAPTURE_KERNEL_LOSSES = frozenset({'kernel_bpf_program_recursion_lost', 'io_uring_kernel_events_lost'})
+RECAPTURE_RECORD_KINDS = frozenset({'register_stub'})
+CAPTURE_TIMEOUT = 480
+CAPTURE_CLEANUP = 75
+SUPERVISOR_CLEANUP = 15
+FORCE_CLEANUP = 5
+
+
+def recapture_reasons_allowed(report):
+    if report.get('observedRejectedOpcodes'): return False
+    issues = report.get('classificationIssues', [])
+    if any(item.get('reason') not in RECAPTURE_ISSUES for item in issues): return False
+    kinds = [p.get('unparsedRecordKinds', {}) for p in report.get('processes', [])]
+    if any(key not in RECAPTURE_RECORD_KINDS for counts in kinds for key in counts): return False
+    if any(p.get('unparsedRecords', 0) != sum(p.get('unparsedRecordKinds', {}).values())
+           for p in report.get('processes', [])): return False
+    if report.get('unparsedRecords') != len(issues) + sum(sum(counts.values()) for counts in kinds): return False
+    capture = report.get('ioUring', {}).get('capture', {})
+    incomplete_kernel = any(i['reason'] in RECAPTURE_ISSUES - {'unknown_record', 'kernel_network_strace_entry_missing'} for i in issues)
+    if incomplete_kernel or capture and not capture.get('complete'):
+        if capture.get('reason') not in RECAPTURE_KERNEL_LOSSES or not capture.get('pidNamespaceVerified'): return False
+        if capture.get('diagnostics'): return False
+        counters = capture.get('kernelCounts') or {}
+        if any(counters.get(key, 0) for key in ('namespace_error', 'unsupported_abi', 'pre_mismatch',
+               'network_return_id_error', 'raw_state_overlap', 'pre_layout_error', 'socket_layout_error',
+               'worker_error', 'udp_object_error', 'untracked_sqpoll', 'unmatched_completion')): return False
+    if any(not isinstance(item, dict) or item.get('reason') not in RECAPTURE_KERNEL_LOSSES
+           for item in capture.get('recordErrors', [])): return False
+    return bool(issues or any(kinds))
+
+
+def process_table():
+    """Linux PID/parent/start-tick identities, without argv or environment."""
+    result = {}
+    for path in Path('/proc').glob('[0-9]*/stat'):
+        try:
+            fields = path.read_text().rsplit(')', 1)[1].split()
+            result[int(path.parent.name)] = (int(fields[1]), fields[19], fields[0])
+        except (OSError, ValueError, IndexError): continue
+    return result
+
+
+def stop_owned_tree(root, *, include_root=False, grace=None, root_birth=None):
+    """Terminate only live descendants with revalidated PID birth identities."""
+    if root_birth is None and root == os.getpid():
+        root_birth = process_table()[root][1]
+    if root_birth is None: raise RuntimeError('owned_root_identity_missing')
+    known = {}
+    empty_rounds = root_only_rounds = 0
+    deadline = time.monotonic() + (SUPERVISOR_CLEANUP if grace is None else grace)
+    hard_deadline = deadline + FORCE_CLEANUP
+    while True:
+        table = process_table()
+        current_root = table.get(root)
+        owned = {root} if current_root and current_root[1] == root_birth else set()
+        while True:
+            added = {pid for pid, (parent, _, _) in table.items() if parent in owned} - owned
+            if not added: break
+            owned.update(added)
+        if not include_root: owned.discard(root)
+        for pid in owned:
+            if pid in table: known.setdefault(pid, table[pid][1])
+        live = {pid for pid, birth in known.items() if pid in table and table[pid][1] == birth and table[pid][2] != 'Z'}
+        if not live:
+            empty_rounds += 1
+            if empty_rounds >= 2: return
+            time.sleep(0.05)
+            continue
+        empty_rounds = 0
+        descendants = live - {root}
+        root_only_rounds = root_only_rounds + 1 if not descendants else 0
+        force = time.monotonic() >= deadline
+        for pid in sorted(live, reverse=True):
+            # Preserve the subreaper until descendants are absent in two fresh
+            # snapshots. A force round must never kill root alongside children.
+            if pid == root and (descendants or root_only_rounds < 2): continue
+            current = process_table().get(pid)
+            if not current or current[1] != known[pid]: continue
+            selected = signal.SIGKILL if force else signal.SIGTERM
+            try:
+                os.kill(pid, selected)
+                if not force: os.kill(pid, signal.SIGCONT)
+            except ProcessLookupError: pass
+            except PermissionError:
+                # Only a revalidated owned sudo/BPF descendant can reach here.
+                code = ('import os,sys;from pathlib import Path;'
+                        'p=Path("/proc")/sys.argv[1]/"stat";'
+                        'v=p.read_text().rsplit(")",1)[1].split() if p.exists() else [];'
+                        'os.kill(int(sys.argv[1]),int(sys.argv[3])) if v and v[19]==sys.argv[2] else None')
+                subprocess.run(['sudo', '-n', sys.executable, '-I', '-B', '-c', code,
+                                str(pid), known[pid], str(int(selected))],
+                               check=True, capture_output=True, timeout=5)
+        # Keep the subreaper/root alive and rescan after KILL too: a process
+        # can fork during shutdown and leave a newly adopted descendant.
+        if force and time.monotonic() >= hard_deadline:
+            raise RuntimeError('owned_process_tree_cleanup_incomplete')
+        time.sleep(0.05)
+
+
+def supervise(command, timeout):
+    """Subreap detached tracer/app descendants before returning to acceptance."""
+    if sys.platform != 'linux': raise RuntimeError('Linux supervision required')
+    if ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+        raise RuntimeError('audit_subreaper_unavailable')
+    interrupted = []
+    def cancel(signum, _frame): interrupted.append(signum)
+    for signum in (signal.SIGTERM, signal.SIGINT): signal.signal(signum, cancel)
+    child = subprocess.Popen(command)
+    deadline = time.monotonic() + timeout
+    timed_out = False
+    try:
+        while child.poll() is None:
+            if interrupted or time.monotonic() >= deadline:
+                timed_out = True
+                child.terminate()
+                try: child.wait(timeout=CAPTURE_CLEANUP)
+                except subprocess.TimeoutExpired: pass
+                break
+            time.sleep(0.02)
+    finally:
+        stop_owned_tree(os.getpid())
+        child.wait(timeout=5)
+        # Reap adopted zombies after all live descendants have been stopped.
+        while True:
+            try:
+                if os.waitpid(-1, os.WNOHANG)[0] == 0: break
+            except ChildProcessError: break
+    return 124 if timed_out else child.returncode
+
+
+def run_supervised(command, *, timeout, **options):
+    """Keep the subreaper alive until timeout cleanup has covered detached trees."""
+    if options.pop('capture_output', False):
+        options.update(stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    supervised = [sys.executable, '-I', '-B', str(Path(__file__).resolve()),
+                  '--supervise', str(timeout), '--', *map(str, command)]
+    process = subprocess.Popen(supervised, start_new_session=True, **options)
+    root_birth = (process_table().get(process.pid) or (None, None))[1]
+    try:
+        stdout, stderr = process.communicate(timeout=timeout + CAPTURE_CLEANUP + SUPERVISOR_CLEANUP + FORCE_CLEANUP + 10)
+    except BaseException:
+        # Do not kill the subreaper before enumerating its adopted descendants.
+        stop_owned_tree(process.pid, include_root=True, root_birth=root_birth)
+        process.communicate(timeout=5)
+        raise
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
+
+
+@contextlib.contextmanager
+def capture_deadline(seconds):
+    def timeout(_signum, _frame): raise RuntimeError('capture_timeout')
+    def cancel(_signum, _frame): raise RuntimeError('capture_cancelled')
+    old_alarm = signal.signal(signal.SIGALRM, timeout)
+    old_term = signal.signal(signal.SIGTERM, cancel)
+    old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
+    try: yield
+    finally:
+        signal.setitimer(signal.ITIMER_REAL, *old_timer)
+        signal.signal(signal.SIGALRM, old_alarm)
+        signal.signal(signal.SIGTERM, old_term)
+
+
 def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
-          recapture=True):
+          recapture=True, capture_timeout=CAPTURE_TIMEOUT):
     """Recapture incomplete evidence once; never retry a functional/policy failure.
 
     Commands must own fresh state per invocation (the installer drivers use
@@ -94,8 +265,12 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
     """
     attempts = []
     for attempt in (1, 2):
+        if attempt == 2:
+            report.update(recaptures=1, captureAttempts=[*attempts, {'attempt': 2, 'status': 'running'}])
+            report_path.write_text(json.dumps(report, indent=2) + '\n')
         code = capture_once(command, report_path, scope_executables=scope_executables,
-                            require_executables=require_executables, whole_report_path=whole_report_path)
+                            require_executables=require_executables, whole_report_path=whole_report_path,
+                            capture_timeout=capture_timeout)
         report = json.loads(report_path.read_text())
         snapshot = report_path.with_name(report_path.stem + f'.capture-{attempt}' + report_path.suffix)
         snapshot.write_text(json.dumps(report, indent=2) + '\n')
@@ -105,11 +280,6 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
                              unparsedRecords=report.get('unparsedRecords')))
         if whole_report_path is not None and whole_report_path.exists():
             whole_report_path.with_name(whole_report_path.stem + f'.capture-{attempt}' + whole_report_path.suffix).write_bytes(whole_report_path.read_bytes())
-        # A captured forbidden operation is policy evidence, even when another
-        # part of the capture is incomplete. It must not disappear in a replay.
-        policy_failure = any(issue['reason'] in ('io_uring_opcode_not_allowed', 'udp_io_uring_write_fd_unproven',
-                             'udp_socket_send_strace_unmatched', 'udp_kernel_tcp_connect_conflict')
-                             for issue in report.get('classificationIssues', []))
         diagnostics = report.get('externalOperationDiagnostics', [])
         # Only unresolved, unsent UDP associations can be provisional counts.
         # A real TCP connect/send/write observed alongside a capture hole must
@@ -121,17 +291,21 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
             (set((item.get('kernel') or {}).get('socketHooks', [])) & {'tcp_v4_connect', 'tcp_v6_connect'})
             for item in diagnostics)
         command_failed = report.get('commandStarted') and report.get('commandExitCode') != 0
-        retry = report.get('outcome') == 'evidence_incomplete' and provisional and not policy_failure and not command_failed
+        retry = report.get('outcome') == 'evidence_incomplete' and provisional and recapture_reasons_allowed(report) and not command_failed
+        report['captureAttempts'] = list(attempts)
+        report['recaptures'] = len(attempts) - 1
+        report_path.write_text(json.dumps(report, indent=2) + '\n')
         if attempt == 2 or not recapture or not retry:
             break
-        print('Audit evidence incomplete; recapturing once (first report: ' + snapshot.name + ')', file=sys.stderr)
+        print('::warning title=Outbound audit recapture::Incomplete evidence; recapturing once; first report '+snapshot.name, flush=True)
     report['captureAttempts'] = attempts
     report['recaptures'] = len(attempts) - 1
     report_path.write_text(json.dumps(report, indent=2) + '\n')
     return code
 
 
-def capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None):
+def capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
+                 capture_timeout=CAPTURE_TIMEOUT):
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
         report_path.parent.mkdir(parents=True, exist_ok=True)
@@ -171,23 +345,28 @@ def capture_once(command, report_path, *, scope_executables=(), require_executab
         stderr_stream=stderr_path.open('wb')
         process=subprocess.Popen([sys.executable,'-I','-B',str(Path(__file__).with_name('uring')/'capture.py'),
                                   '--exec-stop',str(marker),'--',*trace_command],start_new_session=True,stderr=stderr_stream)
+        root_birth = (process_table().get(process.pid) or (None, None))[1]
         command_started = False
-        try:
-            capture.start(process.pid)
-            if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
-            os.kill(process.pid,signal.SIGCONT)
-            command_started = True
-            process.wait()
-            evidence=capture.stop()
-        except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
-            if process.poll() is None:process.kill();process.wait()
-            try:evidence=capture.stop()
-            except (OSError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
-            reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__
-            if evidence.get('reason') and evidence['reason']!=reason:
-                evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
-            evidence.update(status='failed',complete=False,reason=reason)
-            evidence.setdefault('recordErrors',[]).append({'reason':reason})
+        with capture_deadline(capture_timeout):
+            try:
+                capture.start(process.pid)
+                if not marker.exists():raise RuntimeError('audit_root_stop_marker_missing')
+                os.kill(process.pid,signal.SIGCONT)
+                command_started = True
+                process.wait()
+                evidence=capture.stop()
+            except (OSError,RuntimeError,ValueError,subprocess.SubprocessError) as error:
+                signal.setitimer(signal.ITIMER_REAL, 0)
+                if process.poll() is None:
+                    stop_owned_tree(process.pid, include_root=True, root_birth=root_birth)
+                process.wait(timeout=5)
+                try:evidence=capture.stop()
+                except (OSError,RuntimeError,ValueError,subprocess.SubprocessError):evidence={'status':'failed','complete':False,'lostEvents':0,'pidNamespaceVerified':False,'events':[],'eventCount':0}
+                reason=str(error) if isinstance(error,RuntimeError) else type(error).__name__
+                if evidence.get('reason') and evidence['reason']!=reason:
+                    evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
+                evidence.update(status='failed',complete=False,reason=reason)
+                evidence.setdefault('recordErrors',[]).append({'reason':reason})
         stderr_stream.close()
         stderr=stderr_path.read_bytes()
         # Restore command diagnostics, but never retain them in JSON/artifacts.
@@ -226,7 +405,10 @@ def capture_once(command, report_path, *, scope_executables=(), require_executab
         whole_report_path.parent.mkdir(parents=True, exist_ok=True)
         whole_report_path.write_text(json.dumps(whole, indent=2) + '\n')
     report['commandExitCode'] = process.returncode
+    report['observedRejectedOpcodes'] = sorted({event['opcode'] for event in evidence.get('events', [])
+        if event.get('kind') in ('submit', 'failed') and event.get('opcode') not in ALLOWED_OPCODES})
     report['commandStarted'] = command_started
+    report['captureTimeoutSeconds'] = capture_timeout
     complete = bool(report['traceFiles']) and report['processCount'] > 0 and report['unparsedRecords'] == 0
     code = INCOMPLETE if not complete else DENIED if report['externalAttempts'] else process.returncode
     report['enforcement'] = 'blocking'
@@ -258,6 +440,8 @@ def positive_control():
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path)
+    parser.add_argument('--capture-timeout', type=float, default=CAPTURE_TIMEOUT)
+    parser.add_argument('--supervise', type=float)
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
     parser.add_argument('--whole-report', type=Path, help='Separate report-only whole-command measurement when scoped')
@@ -270,6 +454,10 @@ def main():
     parser.add_argument('--child-positive-control', action='store_true')
     parser.add_argument('command', nargs=argparse.REMAINDER)
     args = parser.parse_args()
+    if args.supervise is not None:
+        command = args.command[1:] if args.command[:1] == ['--'] else args.command
+        return supervise(command, args.supervise)
+    if args.capture_timeout <= 0: parser.error('--capture-timeout must be positive')
     if args.transport_controls:
         from udpLifecycle import verify_controls
         return verify_controls(Path(__file__).resolve(), args.transport_controls.resolve())
@@ -292,9 +480,14 @@ def main():
         parser.error('--require-executable must also be selected by --scope-executable')
     for path in args.scope_executable:
         if not path.is_file(): parser.error('Scope executable must exist')
-    return audit(command, args.report, scope_executables=args.scope_executable,
-                 require_executables=args.require_executable, whole_report_path=args.whole_report,
-                 recapture=not args.single_capture)
+    if sys.platform == 'linux' and ctypes.CDLL(None, use_errno=True).prctl(36, 1, 0, 0, 0) != 0:
+        raise RuntimeError('audit_subreaper_unavailable')
+    try:
+        return audit(command, args.report, scope_executables=args.scope_executable,
+                     require_executables=args.require_executable, whole_report_path=args.whole_report,
+                     recapture=not args.single_capture, capture_timeout=args.capture_timeout)
+    finally:
+        if sys.platform == 'linux': stop_owned_tree(os.getpid())
 
 
 if __name__ == '__main__':

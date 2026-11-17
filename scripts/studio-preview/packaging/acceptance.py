@@ -496,6 +496,7 @@ def main(args):
             report = dict(status='failed' if audits.failed else 'passed', failedAudits=audits.failed, target=target,
                           permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output),
                           auditedSessions=audits.sessions, outboundControls=audits.controls,
+                          **audits.recapture_summary(),
                           artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),

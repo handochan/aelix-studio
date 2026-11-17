@@ -1,5 +1,6 @@
 """Scoped syscall audit: lineage, attribution, fail-closed parsing and real children."""
 import importlib.util
+from contextlib import nullcontext
 import json
 import os
 from pathlib import Path
@@ -38,6 +39,7 @@ class CaptureStartupFailureTests(unittest.TestCase):
                      patch.object(audit,'npm_config_paths',return_value=[]), \
                      patch.object(audit,'npm_proxy_configured',return_value=False), \
                      patch.object(audit,'Capture',return_value=capture), \
+                     patch.object(audit,'capture_deadline',return_value=nullcontext()), \
                      patch.object(audit.subprocess,'Popen',return_value=process):
                     code=audit.audit(['/owned/command'],report)
                 evidence=json.loads(report.read_text())['ioUring']['capture']
@@ -59,9 +61,36 @@ class RecaptureTests(unittest.TestCase):
 
     def incomplete(self, **fields):
         return dict(outcome='evidence_incomplete', externalAttempts=29, unparsedRecords=2,
+                    classificationIssues=[{'reason':'unknown_record'}, {'reason':'kernel_network_strace_entry_missing'}],
                     externalOperationDiagnostics=[dict(syscall='connect',straceSocketKind='udp',
                         udpWriteAssociations=[]) for _ in range(29)],
                     commandStarted=True, commandExitCode=0, **fields)
+
+    def test_observed_or_undecodable_network_operations_never_replay(self):
+        cases = [
+            'accept4(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("203.0.113.1")}, [16], 0) = 4',
+            'sendto(3, "", 0, 0, 0x1234, 16) = -1 EFAULT (Bad address)',
+            'connect(3, {sa_family=AF_XDP}, 16) = -1 EAFNOSUPPORT (Address family not supported)',
+            'write(3<socket:[1234]>, "", 0) = 0',
+            'sendto(3<TCP:[127.0.0.1:1234->broken]>, "", 0, 0, NULL, 0) = 0',
+        ]
+        for call in cases:
+            with self.subTest(call=call), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory); trace=root/'trace'
+                trace.write_text('1<app> '+call+'\n1<app> +++ exited with 0 +++\n')
+                measured=audit.analyze_processes([trace],require_lifecycle=True)[0]
+                self.assertGreater(measured['unparsedRecords'],0)
+                measured.update(outcome='evidence_incomplete',commandStarted=True,commandExitCode=0)
+                code,_,count=self.run_attempts(root,[(87,measured)])
+                self.assertEqual((code,count),(87,1))
+
+    def test_mixed_allowed_gap_and_unlisted_issue_cannot_replay(self):
+        with tempfile.TemporaryDirectory() as directory:
+            measured=self.incomplete()
+            measured['classificationIssues'].append({'reason':'unsupported_external_accept'})
+            measured['unparsedRecords']+=1
+            code,_,count=self.run_attempts(Path(directory),[(87,measured)])
+            self.assertEqual((code,count),(87,1))
 
     def test_two_incomplete_measurements_fail_after_exactly_one_recapture(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -124,6 +153,91 @@ class RecaptureTests(unittest.TestCase):
             measurement=self.incomplete();measurement['externalOperationDiagnostics']=[]
             code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
             self.assertEqual((code,calls), (87,1))
+
+
+@unittest.skipUnless(hasattr(audit.signal,'setitimer'),'POSIX capture deadline required')
+class CaptureDeadlineTests(unittest.TestCase):
+    def test_capture_deadline_fails_without_extending_the_bound_for_replay(self):
+        import time
+        with self.assertRaisesRegex(RuntimeError,'capture_timeout'):
+            with audit.capture_deadline(0.02): time.sleep(1)
+
+
+class CleanupIdentityTests(unittest.TestCase):
+    def test_reused_root_is_not_owned(self):
+        table={100:(1,'new','S'),201:(100,'child','S')}
+        with patch.object(audit,'process_table',return_value=table), patch.object(audit.os,'kill') as kill:
+            audit.stop_owned_tree(100,include_root=True,root_birth='old',grace=0)
+        kill.assert_not_called()
+
+    def test_outer_fallback_keeps_subreaper_until_adopted_children_are_gone(self):
+        table={100:(1,'root','S'),200:(100,'old','S')}
+        signalled=[]
+        def kill(pid,_signal):
+            signalled.append(pid)
+            table.pop(pid)
+            if pid==200:table[201]=(100,'adopted','S')
+        with patch.object(audit,'process_table',side_effect=lambda:dict(table)), patch.object(audit.os,'kill',side_effect=kill):
+            audit.stop_owned_tree(100,include_root=True,root_birth='root',grace=0)
+        self.assertEqual(signalled,[200,201,100])
+
+    def test_force_cleanup_rescans_newly_adopted_children(self):
+        table={100:(1,'root','S'),200:(100,'old','S')}
+        signalled=[]
+        def kill(pid,_signal):
+            signalled.append(pid)
+            table.pop(pid)
+            if pid==200:table[201]=(100,'adopted','S')
+        with patch.object(audit,'process_table',side_effect=lambda:dict(table)), patch.object(audit.os,'kill',side_effect=kill):
+            audit.stop_owned_tree(100,root_birth='root',grace=0)
+        self.assertEqual(signalled,[200,201])
+
+
+@unittest.skipUnless(sys.platform=='linux','Linux subreaper required')
+class SupervisionTests(unittest.TestCase):
+    def test_timeout_stops_a_detached_descendant_before_returning(self):
+        import time
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);pidfile=root/'pid.json'
+            child=root/'child.py'
+            child.write_text('import os,signal,time,json,sys\n'
+                'signal.signal(signal.SIGTERM,signal.SIG_IGN)\n'
+                'open(sys.argv[1],"w").write(json.dumps({"pid":os.getpid()}))\n'
+                'while True:time.sleep(1)\n')
+            parent=root/'parent.py'
+            parent.write_text('import subprocess,sys,time\n'
+                'subprocess.Popen([sys.executable,sys.argv[1],sys.argv[2]],start_new_session=True)\n'
+                'while True:time.sleep(1)\n')
+            code=('import runpy,sys; m=runpy.run_path(sys.argv[1]); g=m["supervise"].__globals__;'
+                  'g["SUPERVISOR_CLEANUP"]=0.1;g["CAPTURE_CLEANUP"]=0.1;'
+                  'raise SystemExit(m["supervise"](sys.argv[2:],0.5))')
+            result=subprocess.run([sys.executable,'-I','-B','-c',code,str(SCRIPT),sys.executable,
+                                   str(parent),str(child),str(pidfile)],capture_output=True,timeout=10)
+            self.assertEqual(result.returncode,124,result.stderr)
+            pid=json.loads(pidfile.read_text())['pid']
+            self.assertNotIn(pid,audit.process_table())
+
+    def test_caller_timeout_keeps_subreaper_alive_until_detached_tree_is_cleaned(self):
+        # Exercise the outer fallback independently of the supervisor's own clock.
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);pidfile=root/'pid'
+            command=[sys.executable,'-I','-B','-c',
+                'import os,time,sys;open(sys.argv[1],"w").write(str(os.getpid()));time.sleep(100)',str(pidfile)]
+            original=audit.subprocess.Popen
+            def launch(argv,**options):
+                process=original(argv,**options)
+                communicate=process.communicate
+                first=[True]
+                def limited(**kwargs):
+                    if first and first.pop():
+                        return communicate(timeout=0.5)
+                    return communicate(**kwargs)
+                process.communicate=limited
+                return process
+            with patch.object(audit.subprocess,'Popen',launch), self.assertRaises(subprocess.TimeoutExpired):
+                audit.run_supervised(command,timeout=100)
+            pid=int(pidfile.read_text())
+            self.assertNotIn(pid,audit.process_table())
 
 
 class ScopedParserTests(unittest.TestCase):
@@ -538,13 +652,31 @@ class ScopedParserTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform == 'linux', 'Linux process tracing required')
 class ScopedTraceTests(unittest.TestCase):
+    def test_capture_timeout_stops_the_real_trace_and_detached_app_child(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);pidfile=root/'child-pid'
+            child='import os,signal,time,sys;signal.signal(signal.SIGTERM,signal.SIG_IGN);open(sys.argv[1],"w").write(str(os.getpid()));time.sleep(100)'
+            driver='import subprocess,sys,time;subprocess.Popen([sys.executable,"-I","-B","-c",sys.argv[1],sys.argv[2]],start_new_session=True);time.sleep(100)'
+            original_start=audit.Capture.start
+            def start(capture,pid):
+                original_start(capture,pid)
+                audit.signal.setitimer(audit.signal.ITIMER_REAL,1)
+            path=root/'timeout.json'
+            with patch.object(audit.Capture,'start',start), patch.object(audit,'SUPERVISOR_CLEANUP',0.2):
+                code=audit.audit([sys.executable,'-I','-B','-c',driver,child,str(pidfile)],path,capture_timeout=30)
+            report=json.loads(path.read_text())
+            self.assertEqual((code,report['recaptures']), (87,0))
+            self.assertEqual(report['ioUring']['capture']['reason'],'capture_timeout')
+            pid=int(pidfile.read_text())
+            self.assertTrue(pid not in audit.process_table() or audit.process_table()[pid][2]=='Z')
+
     def test_forced_incomplete_real_capture_recaptures_once_then_fails(self):
         original_stop=audit.Capture.stop
         stops=[]
         def lose_evidence(capture):
             evidence=original_stop(capture)
             stops.append(evidence.get('complete'))
-            evidence.update(complete=False,status='failed',reason='test_injected_capture_loss')
+            evidence.update(complete=False,status='failed',lostEvents=1,reason='io_uring_kernel_events_lost')
             return evidence
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'incomplete.json'

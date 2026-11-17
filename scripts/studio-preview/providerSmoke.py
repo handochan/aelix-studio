@@ -18,6 +18,11 @@ from prepare import verify_prepared
 
 ROOT = Path(__file__).resolve().parents[2]
 
+def phase_timeout(deadline, limit):
+    """Bound each phase by both its unchanged limit and the shared deadline."""
+    return min(limit, max(0, deadline - time.monotonic()))
+
+
 
 class ProviderFixture:
     def __init__(self):
@@ -134,12 +139,15 @@ async def main(args):
             str(Path(__file__).with_name('providerHelperSmoke.mjs')), cwd=ROOT, env=env,
             **({'start_new_session': True} if os.name != 'nt' else {}))
         try:
+            # Share 450s inside the unchanged 480s per-capture bound; reserve
+            # 30s for attach/drain and the driver setup/receipt work.
+            qualification_deadline = time.monotonic() + 450
             helper_started = time.monotonic()
             try:
                 # ~31 cold helper launches at the observed ~4.8s each already
                 # exceed 120s. Keep a finite suite hang guard, separate from
                 # each callback's 20s guard and all unchanged assertions.
-                async with asyncio.timeout(300):
+                async with asyncio.timeout(phase_timeout(qualification_deadline, 300)):
                     if await process.wait():
                         raise RuntimeError('Native helper qualification failed')
             finally:
@@ -147,7 +155,10 @@ async def main(args):
                                   'elapsedSeconds': round(time.monotonic() - helper_started, 3)}), flush=True)
             process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
                 cwd=ROOT, env=env, **({'start_new_session': True} if os.name != 'nt' else {}))
-            async with asyncio.timeout(240):
+            host_timeout = phase_timeout(qualification_deadline, 240)
+            print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
+                              'sharedTimeoutSeconds': 450}), flush=True)
+            async with asyncio.timeout(host_timeout):
                 if await process.wait():
                     raise RuntimeError('Studio Provider UI qualification failed')
             if fixture.accepted < 1 or fixture.rejected < 1:

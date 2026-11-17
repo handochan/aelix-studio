@@ -9,6 +9,9 @@ import subprocess
 import sys
 import tempfile
 
+sys.path.insert(0, str(Path(__file__).parents[1] / 'fixtures'))
+from outboundAudit import run_supervised, CAPTURE_CLEANUP
+
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -28,6 +31,11 @@ class AuditedSessions:
             'schema': 'aelix.scoped-audited-sessions/1', 'auditedSessions': self.sessions,
             'positiveControls': self.controls, 'recipeSha256': digest(Path(__file__))}, indent=2) + '\n')
 
+    def capture_history(self, record, scoped, report):
+        record.update(recaptures=scoped.get('recaptures', 0), captureAttempts=scoped.get('captureAttempts', []))
+        if record['recaptures']:
+            print('::warning title=Recaptured outbound session::'+record['name']+' required '+str(record['recaptures'])+' recapture; see '+report.name, flush=True)
+
     def run(self, name, command, *, env, timeout, required=(), expected_external=None,
             roots=None, namespace=False, defer_failure=False, expected_ring_opcode=None, **options):
         if not self.enabled:
@@ -37,7 +45,8 @@ class AuditedSessions:
         stem = '' if name == 'permission' else '-' + name
         report = self.directory / ('outbound' + stem + '.json')
         whole_path = self.directory / ('outbound-app' + stem + '.json')
-        audited = [sys.executable, '-I', '-B', str(self.auditor)]
+        audited = [sys.executable, '-I', '-B', str(self.auditor), '--capture-timeout', str(timeout)]
+        total_timeout = 2 * (timeout + CAPTURE_CLEANUP) + 30
         for root in (roots if roots is not None else (self.core, self.native)):
             audited += ['--scope-executable', str(root)]
         for root in required: audited += ['--require-executable', str(root)]
@@ -51,19 +60,23 @@ class AuditedSessions:
                        'ip link set lo up && exec "$@"', 'host-control', *audited]
         expected_code = 87 if expected_ring_opcode is not None else 0 if expected_external is None else 86
         record = {'name': name, 'status': 'running', 'expectedAuditExitCode': expected_code,
-                  'report': report.name, 'wholeAppReport': whole_path.name}
+                  'report': report.name, 'wholeAppReport': whole_path.name,
+                  'captureTimeoutSeconds': timeout, 'totalTimeoutSeconds': total_timeout}
         collection = self.sessions if expected_external is None and expected_ring_opcode is None else self.controls
         collection.append(record); self.save()
         try:
-            result = subprocess.run(audited, cwd=self.root, env=env, timeout=timeout, **options)
+            result = run_supervised(audited, cwd=self.root, env=env, timeout=total_timeout, **options)
             record.update(status='failed', auditExitCode=result.returncode)
             scoped, whole = json.loads(report.read_text()), json.loads(whole_path.read_text())
         except (subprocess.SubprocessError, OSError, ValueError) as error:
             record.update(status='failed', exceptionKind=type(error).__name__)
+            try: self.capture_history(record, json.loads(report.read_text()), report)
+            except (OSError, ValueError): pass
             self.save()
             raise
         for field in ('externalAttempts', 'unparsedRecords', 'classificationErrors', 'processCount'):
             record[field] = scoped[field]
+        self.capture_history(record, scoped, report)
         record.update(reportSha256=digest(report), wholeAppReportSha256=digest(whole_path),
                       commandExitCode=scoped.get('commandExitCode'),
                       udpConnectOnly=scoped.get('udpConnectOnly',0),
@@ -106,6 +119,10 @@ class AuditedSessions:
         if not valid and not (defer_failure and scoped.get('commandExitCode') == 0):
             raise RuntimeError('Scoped outbound session failed: ' + name)
         return result
+
+    def recapture_summary(self):
+        return {'outboundRecaptures': sum(item.get('recaptures', 0) for item in self.sessions),
+                'recapturedAudits': [item['name'] for item in self.sessions if item.get('recaptures', 0)]}
 
     @property
     def failed(self):

@@ -31,16 +31,41 @@ enforces the whole tree. Linux requires strace, bpftrace/BTF/tracepoints and sud
 Capture failures/lost events remain fatal, with no syscall-only fallback.
 
 Reports distinguish `outcome: evidence_incomplete` (exit 87) from
-`external_attempts` (exit 86) and `command_failed`. Incomplete capture or
-reconciliation is recaptured **once**, using the driver's fresh isolated state.
-Both `*.capture-1.json` and `*.capture-2.json` survive, and `captureAttempts` links
-them. Counts in an incomplete attempt remain provisional and are never rewritten
-as zero. A second incomplete attempt fails. A complete external-attempt result,
-a known forbidden io_uring operation, a configuration refusal or a failed command
-that actually started is not retried. A definite TCP connect or UDP send/write
-alongside an evidence hole also prevents replay; only unsent UDP-connect
-association counts with matching diagnostics can be provisional. No
-destination/parser policy is relaxed.
+`external_attempts` (exit 86) and `command_failed`. Incomplete evidence may be
+recaptured **once**, using the driver's fresh isolated state. Both reports and
+first provisional counts survive in `*.capture-N.json` and `captureAttempts`;
+a second incomplete capture fails. Only these explicit reasons permit replay:
+
+- classification: `unknown_record`, `kernel_network_strace_entry_missing`;
+- derivative capture markers: `io_uring_kernel_capture_incomplete`,
+  `kernel_network_capture_incomplete`, `udp_socket_capture_incomplete`, only
+  with kernel reason `kernel_bpf_program_recursion_lost` or
+  `io_uring_kernel_events_lost`;
+- per-process record kind: `register_stub`.
+
+Every issue and unparsed record must be covered by that list. Kernel namespace,
+diagnostics, error counters and already-observed forbidden opcodes cannot
+supply an unlisted failure alongside the loss. An external `accept4`, unreadable
+`sendto` destination, unknown `connect` family, undecodable socket `write` peer,
+or malformed TCP send peer fails the first capture. Known TCP/send/write,
+forbidden opcodes, configuration refusal and command failure also prevent
+replay. No parser, destination or socket-object policy is relaxed.
+
+`AuditedSessions` passes each session's existing bound (480s for Provider and
+permission) as `--capture-timeout`; attachment, command and drain all share it.
+Expiry is failure, never a retry reason. Cleanup has a separate 75s reserve.
+The outer budget covers two such captures plus 30s report overhead; the
+supervisor's own shutdown reserve is separate. Linux supervisors adopt detached
+children, retain PID birth identities, terminate descendants before the root,
+and keep rescanning after forced termination. They fail if the owned tree cannot
+be cleared within its bounded grace. A standalone CLI audit also adopts and
+cleans its descendants. Provider helper/host phases share 450s inside that 480s
+capture budget, retaining their respective 300/240s maxima.
+
+A recapture emits a GitHub warning annotation. `outbound-sessions.json` retains
+`recaptures`, `captureAttempts` and per-capture/outer budgets on each session;
+acceptance exposes `outboundRecaptures` and `recapturedAudits`. Passing after a
+recapture is therefore visible rather than indistinguishable from one capture.
 
 The two retained/preexisting socket **negative controls** use `--single-capture`:
 their one-shot peer owns state outside the audited command, so replaying only

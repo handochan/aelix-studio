@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { closeElectron, launchWithIdentity } from './verification.mjs';
+import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -21,6 +21,15 @@ if (executablePath) {
 let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
+const mainLaunches = [];
+fs.writeFileSync(path.join(output, 'renderer-result.json'), JSON.stringify({ checksPassed: [], mainLaunches }));
+function recordLifecycle(observation) {
+  mainLaunches[observation.launch - 1] = observation;
+  const file = path.join(output, 'renderer-result.json');
+  const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...previous, checksPassed: [...checks], mainLaunches }, null, 2) + '\n');
+  fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
+}
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   const result = await launchWithIdentity(
     () =>
@@ -31,9 +40,9 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
         timeout: 60000,
       }),
     {
-      restarting: appPids.length > 0,
-      record: (observation) =>
-        fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n'),
+      launchNumber: mainLaunches.length + 1,
+      remainingProcesses: sandboxProcesses(sandbox),
+      record: recordLifecycle,
     }
   );
   app = result.app;
@@ -348,6 +357,7 @@ try {
         driverNodeVersion: process.version,
         electronVersions: await app.evaluate(() => process.versions),
         appPids,
+        mainLaunches,
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,
@@ -357,6 +367,7 @@ try {
     ) + '\n'
   );
 } catch (error) {
+  recordLaunchFailure(app, error);
   if (conversationRoute)
     fs.writeFileSync(
       path.join(output, 'failure-wire.local'),
