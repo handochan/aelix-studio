@@ -224,6 +224,26 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     }
   }, 300_000);
 
+  it('installs a pack without a manifest as manifest_unbound and refuses one that does not load', async () => {
+    // native exits with 3 for such a pack: installed, but its manifest will not bind.
+    const legacy = await install(await wheel({ name: 'fixture-legacy', manifest: false }));
+    expect(legacy).toMatchObject({ phase: 'switched', action: 'install' });
+    const listing = await list();
+    expect(listing.extensions.map((extension) => [extension.name, extension.status])).toEqual([
+      ['fixture-good', 'ready'],
+      ['fixture-legacy', 'manifest_unbound'],
+    ]);
+    const directories = await generations();
+    const broken = await install(
+      await wheel({ name: 'fixture-legacy-broken', manifest: false, setup: 'raise RuntimeError("setup fails")' })
+    );
+    expect(broken).toMatchObject({ phase: 'failed', code: 'LOAD_ERROR' });
+    await expectUntouched(listing, directories);
+    const removed = await finish(await service.request(OWNER, { action: 'remove', name: 'fixture-legacy' }));
+    expect(removed.phase).toBe('switched');
+    expect(names(await list())).toEqual(['fixture-good']);
+  }, 180_000);
+
   it('installs dependencies from the same folder and keeps scripts and data files across generations', async () => {
     await wheel({ name: 'fixture-lib', extension: false }, 'tool');
     const tool = await wheel(

@@ -131,7 +131,6 @@ describe('changing what is installed', () => {
     it.each([
       [1, 'INSTALLER_FAILED'],
       [2, 'INSTALLER_NOT_RUN'],
-      [3, 'MANIFEST_UNBOUND'],
       [70, 'INSTALLER_FAILED'],
     ])('discards the candidate when native exits with %i and reports %s with its output', async (exit, code) => {
       await install({ name: 'demo-one' });
@@ -237,6 +236,79 @@ describe('changing what is installed', () => {
         ['extension', 'verify', 'demo-one'],
         ['extension', 'verify', 'demo-two'],
       ]);
+    });
+
+    describe('a pack whose manifest does not bind', () => {
+      /** native installs such a pack and exits with 3. */
+      const installerSaysNotBound = (): void => {
+        helper.runtime.install = async (venv, wheel) => {
+          await installWheel(venv, wheel);
+          return 3;
+        };
+      };
+      const statuses = async (): Promise<[string, string][]> =>
+        (await describeInstalled(helper.context)).extensions.map((extension) => [extension.name, extension.status]);
+
+      it('is installed and listed as manifest_unbound next to a ready one', async () => {
+        await install({ name: 'demo-one' });
+        installerSaysNotBound();
+        helper.runtime.unbound = ['demo-legacy'];
+        const outcome = await install({ name: 'demo-legacy', manifest: false });
+        expect(outcome).toEqual({ generation: 'g00000002-0002', revision: 2 });
+        expect(await statuses()).toEqual([
+          ['demo-legacy', 'manifest_unbound'],
+          ['demo-one', 'ready'],
+        ]);
+      });
+
+      it('is listed as manifest_unbound on the word of the installer, even when verify does not repeat it', async () => {
+        await install({ name: 'demo-one' });
+        installerSaysNotBound();
+        await install({ name: 'demo-legacy', manifest: false });
+        expect(await statuses()).toEqual([
+          ['demo-legacy', 'manifest_unbound'],
+          ['demo-one', 'ready'],
+        ]);
+      });
+
+      it('is refused like any other pack when it does not load', async () => {
+        await install({ name: 'demo-one' });
+        const [pointer, directories] = [await current(), await generations()];
+        installerSaysNotBound();
+        helper.runtime.unbound = ['demo-legacy'];
+        helper.runtime.loadErrors = { 'demo_legacy:setup': 'setup() of demo-legacy fails' };
+        const error = await failure(install({ name: 'demo-legacy', manifest: false }));
+        expect([error.code, error.detail]).toEqual([
+          'LOAD_ERROR',
+          ['load error demo_legacy:setup: setup() of demo-legacy fails'],
+        ]);
+        await expectUntouched(pointer, directories);
+      });
+
+      it('is scanned like any other pack before its candidate is started again', async () => {
+        helper.runtime.install = async (venv, wheel) => {
+          await installWheel(venv, wheel);
+          await writeFile(path.join(venv.site, 'demo.pth'), 'import os\n');
+          return 3;
+        };
+        expect((await failure(install({ name: 'demo-legacy', manifest: false }))).code).toBe('STARTUP_CODE');
+        expect(helper.nativeRuns()).toHaveLength(1);
+        await expectUntouched(null, []);
+      });
+
+      it('is still compared with the request: exit code 3 without the pack is not an install', async () => {
+        helper.runtime.install = () => Promise.resolve(3);
+        expect((await failure(install({ name: 'demo-legacy', manifest: false }))).code).toBe('NO_CHANGE');
+      });
+
+      it('is not what exit code 3 means for a removal, where native hands through the code of pip', async () => {
+        await install({ name: 'demo-one' });
+        const [pointer, directories] = [await current(), await generations()];
+        helper.runtime.remove = () => Promise.resolve(3);
+        const error = await failure(mutate(helper.context, { action: 'remove', name: 'demo-one' }, hooks));
+        expect(error.code).toBe('INSTALLER_FAILED');
+        await expectUntouched(pointer, directories);
+      });
     });
 
     it('does not switch when the pointer moved while the candidate was prepared', async () => {

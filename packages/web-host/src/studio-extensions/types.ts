@@ -19,7 +19,8 @@ export type ExtensionCommand =
 export type ExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
 
 /**
- * `ready`: loaded in new conversations. `manifest_unbound`: loaded, declared contributions inert.
+ * `ready`: loaded in new conversations. `manifest_unbound`: loaded, but what its manifest
+ * declares (MCP servers, themes, hooks) is inert; the screen marks such an extension.
  * `reinstall_needed`: the generation belongs to another bundle and is not used.
  */
 export type ExtensionStatus = 'ready' | 'manifest_unbound' | 'reinstall_needed';
@@ -68,8 +69,6 @@ export type ExtensionFailureCode =
   | 'INSTALLER_FAILED'
   /** The installer never ran (native exit 2). */
   | 'INSTALLER_NOT_RUN'
-  /** Installed, but the manifest of the pack does not bind (native exit 3). */
-  | 'MANIFEST_UNBOUND'
   /** Something Studio wrote into the generation was replaced. */
   | 'GENERATION_MODIFIED'
   /** The result differs from what was asked for. */

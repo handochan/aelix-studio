@@ -68,11 +68,23 @@ const EMPTY_SITE: SiteSnapshot = {
   problems: [],
 };
 
-/** Turn the end of a helper child into a failure, or return when it exited with `0`. */
-function requireSuccess(result: RunResult, codes: Record<number, ExtensionFailureCode>, what: string): void {
+/**
+ * native's exit code for "installed, but a manifest of the pack will not bind". Such a pack
+ * still loads; what its manifest declares stays inert. It is installed and listed as
+ * `manifest_unbound`, not refused: only a pack that fails to load is refused (decision A2).
+ */
+const INSTALLED_NOT_BOUND = 3;
+
+/** Turn the end of a helper child into a failure, or return when it exited with an accepted code. */
+function requireSuccess(
+  result: RunResult,
+  codes: Record<number, ExtensionFailureCode>,
+  what: string,
+  accepted: number[] = [0]
+): void {
   if (result.cancelled) throw new ExtensionFailure('CANCELLED');
   if (result.timedOut) throw new ExtensionFailure('TIMEOUT', [`${what} took too long`], result.output);
-  if (result.code === 0) return;
+  if (result.code !== null && accepted.includes(result.code)) return;
   const code = (result.failedToStart ? codes[2] : result.code !== null && codes[result.code]) || codes[1];
   throw new ExtensionFailure(code, [`${what} ended with exit code ${String(result.code)}`], result.output);
 }
@@ -263,6 +275,9 @@ async function tidy(context: FlowContext): Promise<void> {
  * of request and result and the load check all passed. On any failure the candidate is
  * removed and the current generation is untouched.
  *
+ * An install whose manifest does not bind goes through the same checks and is recorded as
+ * such; every other non-zero exit of the installer ends the change.
+ *
  * @throws ExtensionFailure with the reason; see `ExtensionFailureCode`.
  */
 export async function mutate(
@@ -309,10 +324,12 @@ export async function mutate(
         preparation.native,
         context.timeouts.installerMs
       );
+      // `extension remove` hands pip's own exit code through, so 3 means "not bound" only for an install.
       requireSuccess(
         installer,
-        { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN', 3: 'MANIFEST_UNBOUND' },
-        'the installer'
+        { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN' },
+        'the installer',
+        request.action === 'remove' ? [0] : [0, INSTALLED_NOT_BOUND]
       );
       // The candidate's interpreter is not started again unless this second scan passes.
       const scan = await scanGeneration(context, candidate, facts);
@@ -329,6 +346,10 @@ export async function mutate(
         managementEnvironment(context.base, platform, management),
         gate.expected
       );
+      // The installer's verdict stands even when `extension verify` does not repeat it.
+      if (installer.code === INSTALLED_NOT_BOUND && [...bound.values()].every(Boolean))
+        for (const [name, extension] of scan.snapshot.extensions)
+          if (extension.distribution === preparation.change.distribution) bound.set(name, false);
       const load = await runLoadCheck(context, candidate, gate.expected);
       if (load.cancelled) throw new ExtensionFailure('CANCELLED');
       if (load.timedOut) throw new ExtensionFailure('TIMEOUT', ['the load check took too long']);

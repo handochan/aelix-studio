@@ -70,6 +70,8 @@ export type WheelSpec = {
   requires?: string[];
   /** Adds an `aelix.extensions` entry point, a `setup()` and a manifest that binds. Default true. */
   extension?: boolean;
+  /** Set false to leave the manifest (`aelix-plugin.toml`) out of an extension. */
+  manifest?: boolean;
   /** Python statements at module level, before `setup`. */
   prelude?: string;
   /** Python statements inside `setup(aelix)`, before the command is registered. */
@@ -128,7 +130,8 @@ export function buildWheel(spec: WheelSpec): { filename: string; data: Buffer } 
       '',
     ].join('\n')
   );
-  if (extension) files.set(`${module}/aelix-plugin.toml`, manifest(spec.name, version, module));
+  if (extension && spec.manifest !== false)
+    files.set(`${module}/aelix-plugin.toml`, manifest(spec.name, version, module));
   for (const [name, content] of Object.entries(spec.files ?? {})) files.set(name, content);
   files.set(
     `${info}/METADATA`,
