@@ -1,13 +1,26 @@
 # D04 spike 실험 기록
 
-[D04 ADR 초안](README.md)의 근거다. 2026-11-17에 한 번 실행한 기록이고, 계속 갱신하는 문서가 아니다.
+[D04 ADR 초안](README.md)의 근거다. 2026-11-17의 실행 기록이고, 계속 갱신하는 문서가 아니다. 1–6절은 1차
+실험, 7절은 독립 리뷰 뒤의 2차 실험이다. 1차의 세대 관리 절차(3절)에는 리뷰가 찾은 결함이 있었고 7절에서
+고친 절차로 다시 실행했다.
 
 ## 환경과 재료
 
 - macOS (Darwin 25.6.0, arm64). Windows와 Linux에서는 실행하지 않았다.
-- 번들: Studio #31 작업에서 준비한 번들형 runtime의 사본. `manifest.json` 기준 Python 3.12.15,
-  native `e19ab55e17e871a40356fc9802f3f6669ca727de`(0.1.0b2), ACP `16d6555b08825d1d63c3b082de2b10a1152562c0`
-  (0.2.0a1), lock `eddf8567…`. 번들 Python에 pip 26.2.2와 `EXTERNALLY-MANAGED` 표시가 있다.
+- 번들: Studio #31 worktree에서 준비한 번들형 runtime(`runtime-s1`)의 사본이다. **main에서 만든 번들이
+  아니다.** `manifest.json`의 recipe 해시는 branch `codex/studio-31-subagents`의 commit `7510beb38`
+  (PR #45, 병합 전)의 파일과 같다. Python 3.12.15, native `e19ab55e17e871a40356fc9802f3f6669ca727de`(0.1.0b2),
+  ACP `16d6555b08825d1d63c3b082de2b10a1152562c0`(0.2.0a1). 번들 Python에 pip 26.2.2와 `EXTERNALLY-MANAGED`
+  표시가 있다. 번들에 들어가는 것 가운데 main `0665d6004`의 packaging 소스와 다른 것은 셋이다.
+  - `launch.py`: `os.environ['PYTHONDONTWRITEBYTECODE'] = '1'`과 `sys.dont_write_bytecode = True` 네 줄이 더
+    있다(sha256 `f02e60ac…`, main은 `803a4cd4…`).
+  - `launch.cjs`: 어댑터를 띄울 때 `env: { ...process.env, PYTHONDONTWRITEBYTECODE: '1' }` 한 줄이 더 있다
+    (`b68d2f85…`, main은 `72478dc1…`).
+  - `native-requirements.lock`: `rich==14.3.4`와 `wcwidth==0.9.4`가 더 있다(`eddf8567…`, main은 `53f67132…`).
+  - `bundle.py`, `runtime.py`, `build.mjs`, `build-requirements.txt`는 main과 같다.
+- 이 문서의 "번들 무변경"은 그 사본의 `checksums.json`과 같다는 뜻이다. 일부러 뺀 실행(1절 마지막 줄,
+  7.5)을 빼면 실험 스크립트가 `PYTHONDONTWRITEBYTECODE=1`을 환경에 직접 줬다. 그래서 1–6절의 결과는
+  launcher의 그 줄에 기대지 않는다. main의 launcher로 바꾼 실행은 7.5에 있다.
 - 번들 무변경 확인: 실험 묶음이 끝날 때마다 사본의 모든 파일을 그 번들의 `checksums.json`과 대조했다.
   결과는 매번 7,668개 파일, 추가·누락·변경 0이었다. 번들을 일부러 바꾼 실험은 따로 만든 사본에서 했다.
 - 실험용 확장(모두 순수 Python wheel, 빌드는 `uv build --wheel --no-config`):
@@ -22,8 +35,8 @@
   `(allow network-outbound (remote ip "localhost:18732"))`만 더했다. 차단 상태에서 `curl https://pypi.org`가
   실패하는 것을 먼저 확인했다.
 - 내부 index: wheel로 만든 PEP 503 디렉터리를 `python -m http.server --bind 127.0.0.1 18732`로 띄웠다.
-- 세대 관리 절차(3절)는 약 350줄의 시험용 Python 스크립트로 돌렸다. 저장소에 넣지 않았다. 스크립트가 하는
-  일은 ADR 5.3–5.6에 적힌 순서 그대로다.
+- 세대 관리 절차는 시험용 Python 스크립트로 돌렸다(1차 약 350줄, 2차 약 600줄). 저장소에 넣지 않았다.
+  2차 스크립트가 하는 일은 ADR 5.3–5.9에 적힌 순서 그대로다.
 
 아래 명령에서 `<번들>`은 번들 사본, `<세대>`는 세대 디렉터리, `<W>`는 실험용 wheel 디렉터리다.
 `세대 실행`은 `<세대>/venv/bin/python -I -B -X utf8 <번들>/launch.py native`를 줄인 말이다.
@@ -53,6 +66,10 @@
 | `세대 실행 --offline extension install <W>/studio32_depext-0.1.0-py3-none-any.whl --yes` (네트워크 열림, pip 환경 변수 없음) | `Collecting tabulate<1,>=0.9 … Downloading tabulate-0.10.0-py3-none-any.whl` 종료 0. **`--offline`인데 PyPI에서 받았다**                                                                                                                                                                |
 
 ## 3. 세대 관리 절차
+
+1차 절차다. 리뷰 뒤에 바뀐 점: 후보 복제가 `site-packages`만 복사했다(7.6에서 `RECORD` 기준으로 바꿈),
+검증이 `status --json`에 기댔다(7.1), 13–14번의 번들 교체 처리가 현재 세대의 링크를 먼저 고쳤다(7.6).
+아래 관찰 자체는 그대로 유효하다.
 
 각 줄은 "후보 세대 만들기 → native CLI 실행 → 검증 → 전환 또는 폐기"를 한 번 돈 것이다. 기본 환경은
 `PYTHONPATH=<번들>/native-site`, `PIP_CONSTRAINT=<번들 배포판 목록>`, `PYTHONDONTWRITEBYTECODE=1`,
@@ -125,3 +142,147 @@
 | `<번들>/native/bin/aelix extension source list`                                                                              | `[catalog] https://handochan.github.io/aelix-marketplace/catalog.json (built-in default — present)`, `[path] <wheel> (installed as aelix-starter-ext)`                                                                                      |
 | agent dir을 공유하는 빈 세대에서 `extension update --yes` (이름 없음)                                                        | `Upgrade extension from path: <wheel>`, `Successfully installed aelix-starter-ext-0.1.0`. 그 세대의 `extension list`에 `aelix-starter`가 생겼다                                                                                             |
 | 그 세대에서 `extension install <depext wheel> --yes` 뒤 두 번째 환경에서 `extension source list` / `list`                    | 기록 목록에 `studio32_depext` 줄이 생겼다. `extension list`는 `aelix-starter`뿐이다                                                                                                                                                         |
+
+## 7. 2차 실험 (독립 리뷰 반영)
+
+리뷰의 지적 아홉 건을 각각 다시 실행해 확인한 뒤, 고친 절차를 실행했다. 추가로 만든 실험용 wheel:
+
+- `studio32-lazyok` / `studio32-lazybroken` / `studio32-setupfail`: manifest의 활성화 조건이 `on_command`뿐이다.
+  차례로 정상, import할 때 없는 모듈을 찾음, `setup()`이 예외를 냄.
+- `studio32-sitecust`(`sitecustomize.py`를 싣는다), `studio32-pthext`(`.pth`를 싣는다), `studio32-shadow`
+  (`packaging/__init__.py`를 싣는다), `studio32-scriptext`(console script `studio32-aux`와 `site-packages` 밖의
+  data 파일 `share/studio32/info.txt`를 싣는다).
+- `studio32-directext`: `Requires-Dist: studio32-directlib @ http://127.0.0.1:18741/…whl`.
+
+`대화 형태`는 `<번들>/python/bin/python3 -I -S -B -X utf8 <시험용 launcher> <번들> native …`를 줄인 말이다.
+시험용 launcher는 환경 변수로 받은 세대 `site-packages`를 `sys.path` 끝에 더한 뒤 번들의 `launch.py`를
+실행한다. 번들의 launcher는 고치지 않았다.
+
+### 7.1 지연 활성화와 검증 방법
+
+세 pack을 한 세대에 설치했다. 설치 종료 코드는 셋 다 0이었다.
+
+| 실행                                                                                                   | 관찰                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `세대 실행 extension verify`                                                                           | `verify: all 3 endpoint(s) BOUND.` 종료 0                                                                                                                                                                                                                                             |
+| `세대 실행 --offline status --json`                                                                    | `discovered_extensions`에 셋 다 있고 `extension_errors: []`                                                                                                                                                                                                                           |
+| `세대 실행 --offline --mode rpc --no-session`(entry point 경로)에서 `resources/list`, 이어서 명령 실행 | 시작 때 `extensionErrors: []`. `/studio32-lazybroken-cmd` → `activating plugin 'studio32-lazybroken' failed: No module named 'studio32_module_that_does_not_exist'`. `/studio32-setupfail-cmd` → `activating plugin 'studio32-setupfail' failed: setup() of studio32-setupfail fails` |
+| 같은 명령에 `--no-extensions -e studio32_lazybroken:setup` (ACP가 쓰는 경로)                           | `extensions: []`, `extensionErrors: [{"source": "studio32_lazybroken:setup", "message": "No module named 'studio32_module_that_does_not_exist'"}]`                                                                                                                                    |
+| 같은 명령에 `--no-extensions -e studio32_setupfail:setup`                                              | `extensionErrors: [{"source": "studio32_setupfail:setup", "message": "setup() of studio32-setupfail fails"}]`                                                                                                                                                                         |
+| 같은 명령에 `--no-extensions -e studio32_lazyok:setup`                                                 | `extensions: ["studio32_lazyok:setup"]`, `extensionErrors: []`, `commands: ["studio32-lazyok-cmd"]`                                                                                                                                                                                   |
+| 세대 interpreter에서 `importlib.metadata`로 `aelix.extensions` entry point를 하나씩 `load()`           | `studio32-lazybroken IMPORT FAILED: ModuleNotFoundError`, `studio32-lazyok import ok`, `studio32-setupfail import ok`                                                                                                                                                                 |
+
+### 7.2 시작 코드
+
+세대에 `packaging 23.2`를 설치했다(번들은 26.3). 같은 probe를 두 형태로 실행했다.
+
+| 세대의 상태                                        | venv interpreter, `-I -B` (`site` 켜짐)                        | 번들 interpreter, `-I -S -B`, 세대를 launcher가 추가        |
+| -------------------------------------------------- | -------------------------------------------------------------- | ----------------------------------------------------------- |
+| 시작 파일 없음                                     | `packaging 26.3 from BUNDLE`                                   | `packaging 26.3 from BUNDLE`                                |
+| `sitecustomize.py`(`import packaging`), `.pth` 0개 | `packaging 23.2 from GENERATION`, `sitecustomize loaded: True` | `packaging 26.3 from BUNDLE`, `sitecustomize loaded: False` |
+| `.pth` 한 줄(`import os; os.environ[…] = "yes"`)   | `pth code ran: yes`                                            | `pth code ran: no`                                          |
+
+세 경우 모두 `sys.path[0]`은 `native-site`였다.
+
+### 7.3 pip과 접속
+
+요청을 기록하는 HTTP 서버를 `127.0.0.1:18741`에 띄웠다. 네트워크는 열어 둔 상태다.
+
+| 실행                                                                                                                                                  | 관찰                                                                                                                                                                         |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `세대 실행 --offline extension install studio32_directext-….whl --yes`, `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=file://<폴더>`, `PIP_CONFIG_FILE=/dev/null` | `Collecting studio32-directlib @ http://127.0.0.1:18741/…`, `Downloading …`, 종료 0. 서버 기록: `/studio32_directlib-0.1.0-py3-none-any.whl`                                 |
+| 사용자 pip 설정 `[global] find-links = http://127.0.0.1:18741/`, 의존성이 빠진 wheel, `PIP_NO_INDEX=1`                                                | `Looking in links: http://127.0.0.1:18741/`, 서버 기록: `/`. `PIP_CONFIG_FILE=/dev/null`을 주면 서버 기록 없음                                                               |
+| 사용자 pip 설정 `[install] target = <다른 디렉터리>`                                                                                                  | `Successfully installed aelix-starter-ext-0.1.0`, `Installed, but this build has no binding verdict for it …` 종료 **0**. 세대에는 아무것도 없고 다른 디렉터리에 파일이 있다 |
+| 직접 URL wheel에 죽은 proxy(`HTTP_PROXY`·`HTTPS_PROXY`·`ALL_PROXY=http://127.0.0.1:9`)                                                                | `error: proxy-connection-failed`, 종료 1, 서버 기록 없음. 같은 proxy로 정상 묶음은 `Successfully installed studio32-depext-0.1.0 tabulate-0.10.0`                            |
+| sdist(`aelix_starter_ext-0.1.0.tar.gz`), `PIP_NO_INDEX=1`, `PIP_ONLY_BINARY=:all:`                                                                    | `Installing build dependencies: started` … `No matching distribution found for hatchling`, 종료 1. `PIP_ONLY_BINARY`를 빼도 같다                                             |
+| 정적 검사(파일만 읽는 스크립트)                                                                                                                       | 직접 URL wheel: `REFUSED … direct-reference dependency: studio32-directlib @ http://…`. sdist: `REFUSED … not a wheel`. 정상 묶음: `checked 2 wheel(s): acceptable`          |
+
+Python 소켓 호출 추적. native 부모에는 launcher 앞에서, pip 자식에는 `PYTHONPATH`로 audit hook을 넣어
+`socket.*` 이벤트를 기록했다(소켓 객체 생성, `gethostname`, `getservbyname`은 뺐다). venv 만들기는 추적하지
+않았다.
+
+| 실행                                                             | 기록된 소켓 호출                                                                                                                                                        |
+| ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 정상 묶음 설치 (native 부모 + pip 자식)                          | `socket.bind(('::1', 0))` 두 번. 위치는 `<native-site>/urllib3/util/connection.py:127`과 `<세대>/pip/_vendor/urllib3/util/connection.py:127`(`_has_ipv6`). 그 밖에 없음 |
+| `extension verify`                                               | 같은 bind 한 번. 그 밖에 없음                                                                                                                                           |
+| 로드 검사(대화 형태, `--no-extensions -e studio32_depext:setup`) | 같은 bind 한 번. 그 밖에 없음                                                                                                                                           |
+| 직접 URL wheel 설치 (정적 검사와 죽은 proxy 없이)                | 위 bind에 더해 `socket.getaddrinfo('127.0.0.1', 18741, …)`와 `socket.connect(('127.0.0.1', 18741))`                                                                     |
+
+sandbox(`deny network*`)가 system log에 남기는 거부 기록도 봤다. curl의 연결 시도와 pip의 직접 URL 연결
+시도(`python3.12 deny(1) network-outbound remote:*:18741`)는 기록됐다. 그러나 `urllib3`의 bind 시도는 어떤
+실행에서는 기록되고(`network-bind local:*:0`) 어떤 실행에서는 기록되지 않았다. 횟수의 증거로 쓰지 않는다.
+
+### 7.4 ACP와 대화 형태
+
+`HYB`는 `--aelix <번들>/python/bin/python3 --aelix-arg=-I --aelix-arg=-S --aelix-arg=-B --aelix-arg=-Xutf8 --aelix-arg=<시험용 launcher> --aelix-arg=<번들> --aelix-arg=native`다.
+세대에는 `aelix-starter-ext 0.1.0`, `studio32-depext 0.1.0`, `tabulate 0.10.0`이 있다. 어댑터와 `launch.cjs`는
+번들 그대로다.
+
+| 실행                                                                                                                              | prompt                                                                                        | 관찰                                                                                                                                                                                                     |
+| --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `node <번들>/launch.cjs HYB --extension aelix_starter:setup --extension studio32_depext:setup`                                    | `/hello`, `/studio32-table`                                                                   | `hello from the aelix starter extension`. `tabulate  0.10.0` 표(세대에만 있는 의존성)                                                                                                                    |
+| `node <번들>/launch.cjs HYB --extension aelix_starter:setup`                                                                      | `/extension list`, `/extension install <0.2.0 wheel>`, `/extension remove aelix-starter`      | 목록: `aelix-starter … — REFUSED (untrusted sys.path provenance); not loaded`. install·remove 둘 다 승인 뒤 `{"code": -33002, "message": "Aelix extension manager failed"}`. 세대의 `dist-info`는 그대로 |
+| 같은 실행, `PATH`에 `uv` 포함                                                                                                     | install, remove                                                                               | 위와 같다                                                                                                                                                                                                |
+| 어댑터가 실행한 명령을 직접 실행(`대화 형태 extension install <wheel> --yes`)                                                     | —                                                                                             | `→ <번들>/python/bin/python3 -P -m pip install …`, `error: externally-managed-environment`, `pip install failed (exit 1).` `remove`도 같은 오류. 추가한 디렉터리에 pip이 없으면 종료 2                   |
+| `node <번들>/launch.cjs <세대 venv interpreter 인자> --extension aelix_starter:setup --extension-manager <번들>/native/bin/aelix` | `/extension list`, install, remove                                                            | 목록: `No extensions installed`. install·remove는 `-33002`. 세대는 그대로                                                                                                                                |
+| `node <번들>/launch.cjs HYB --extension aelix_starter:setup`                                                                      | `/extension disable aelix_starter:setup`, `/hello`                                            | `{"code": -32004, "message": "This extension is part of the adapter's launch configuration; change that configuration instead", "data": {"kind": "extension_owned_by_launch", …}}`. `/hello`는 계속 동작 |
+| `node <번들>/launch.cjs HYB` (`--extension` 없음)                                                                                 | `/hello`, `/extension enable aelix_starter:setup`, `/hello`, `/extension disable …`, `/hello` | Unknown → 승인 뒤 `"loaded": true` → `hello from …` → 승인 뒤 `"enabledExtensions": []` → Unknown                                                                                                        |
+
+pack마다 링크 하나를 둔 디렉터리(`packs/aelix_starter -> <세대>/…/site-packages/aelix_starter` 등 셋).
+
+| 실행                                                                     | 관찰                                                                                                                                                                                                                                                                             |
+| ------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `대화 형태 --offline --mode rpc --no-session --no-extensions -e <packs>` | `extensions: ["aelix-starter", "studio32-lazybroken", "studio32-lazyok"]`(plugin id), `extensionErrors: []`, `aelix-starter`의 source는 `<packs>/aelix_starter`. `/hello`와 `/studio32-lazyok-cmd`는 동작, `/studio32-lazybroken-cmd`는 첫 사용에서 `activating plugin … failed` |
+| 같은 세 pack을 `-e <모듈 참조>` 셋으로                                   | `extensions: ["aelix_starter:setup", "studio32_lazyok:setup"]`, `extensionErrors`에 `studio32_lazybroken:setup`                                                                                                                                                                  |
+| `node <번들>/launch.cjs HYB --extension <packs>`                         | `/hello`, `/studio32-lazyok-cmd` 동작. `/extension disable <packs>`는 `extension_owned_by_launch`                                                                                                                                                                                |
+
+확장이 `sys.executable`로 자식 interpreter를 띄우는 경우.
+
+| 부모                                           | 자식의 `import tabulate`                          |
+| ---------------------------------------------- | ------------------------------------------------- |
+| venv interpreter (`site` 켜짐)                 | `child sees tabulate 0.10.0`                      |
+| 대화 형태                                      | `ModuleNotFoundError: No module named 'tabulate'` |
+| 지금 번들(세대 없음), 자식의 `import pydantic` | `ModuleNotFoundError: No module named 'pydantic'` |
+
+### 7.5 main의 launcher로
+
+번들 사본의 `launch.py`와 `launch.cjs`를 main `0665d6004`의 파일로 바꾼 뒤 실행했다.
+
+| launcher                                       | Studio가 `PYTHONDONTWRITEBYTECODE=1`을 주는가 | `extension install` 한 번 뒤 번들에 추가된 파일          |
+| ---------------------------------------------- | --------------------------------------------- | -------------------------------------------------------- |
+| main                                           | 아니오                                        | **163개** (`python/lib/python3.12/__pycache__/*.pyc` 등) |
+| main                                           | 예                                            | 0개. `extension list`에 설치한 확장이 나온다             |
+| #31 (`7510beb38`)                              | 아니오                                        | 0개                                                      |
+| main, ACP 세션(`/hello`), 변수는 어댑터 환경에 | 예                                            | 0개. `hello from the aelix starter extension`            |
+
+### 7.6 고친 절차
+
+2차 스크립트의 순서: 반입 묶음 정적 검사와 보관소 복사 → 잠금 → 미완성 후보 정리 → 후보(새 venv +
+부모 `RECORD` 기준 복사) → 정적 검사 → native CLI → 정적 검사 → `extension verify`와 로드 검사 → revision
+확인 → 전환. 설치는 모두 파일 반입(`--offline`)으로 했다.
+
+| #   | 네트워크  | 실행                                                                    | 관찰                                                                                                                                                                                                                                                                                                            | 결과           |
+| --- | --------- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------- |
+| 1   | 전부 차단 | `studio32_depext` + 같은 폴더의 `tabulate`                              | `import set …: 2 wheel(s) checked and copied to the artifact store`, 설치 0, `static scan passed`, `loaded with -e: ["studio32_depext:setup"]`                                                                                                                                                                  | g1로 전환      |
+| 2   | 열림      | `studio32_directext`(직접 URL 의존성)                                   | `REFUSED before any installer ran: … direct-reference dependency …` 종료 7. 후보를 만들지 않았다                                                                                                                                                                                                                | g1 유지        |
+| 3   | 열림      | `studio32_lazybroken`, `studio32_setupfail`, `studio32_lazyok`          | 앞의 둘: native 종료 0, `verify FAILED: load error …`. 셋째: 통과                                                                                                                                                                                                                                               | 폐기, 폐기, g2 |
+| 4   | 열림      | `studio32_sitecust`, `studio32_pthext`, `studio32_shadow`               | 셋 다 native 종료 0. `verify FAILED: scan: startup module sitecustomize.py …` / `scan: startup file studio32_pthext.pth …` / `scan: top-level module packaging is also shipped by the bundle`. "starting the candidate for verification" 줄이 없다                                                              | 셋 다 폐기     |
+| 5   | 열림      | `studio32_scriptext` 설치 뒤 `aelix_starter_ext` 설치                   | 새 세대에 `bin/studio32-aux`와 `share/studio32/info.txt`가 있다. 첫 줄 `#!<새 세대>/venv/bin/python`. 실행 결과 `studio32-scriptext console script ran`. 1차 스크립트로 같은 순서를 돌리면 둘 다 `No such file or directory`였다(import는 성공)                                                                 | g3, g4         |
+| 6   | 열림      | 두 프로세스가 1초 간격으로 서로 다른 wheel을 설치                       | 둘째: `waited 8.0s for the mutation lock`, `prepared candidate g6 from g5`. 두 확장 모두 로드. revision 5 → 6                                                                                                                                                                                                   | g5, g6         |
+| 7   | —         | `generation.json` 없는 `g99` 디렉터리를 만들고 `current.json`을 잘라 냄 | `pointer unusable; recovered from current.prev -> g5`(직전 포인터). 포인터를 되살린 뒤 다음 설치에서 `recovery: removed uncommitted candidate g99`                                                                                                                                                              | —              |
+| 8   | 열림      | 한 프로세스가 현재 세대에 lease를 잡은 동안 설치·제거 뒤 정리           | `gc: removed g1` … `gc: kept g7 (in use by a running launcher)`. lease 프로세스가 끝난 뒤 `gc: removed g7`                                                                                                                                                                                                      | —              |
+| 9   | 열림      | 번들을 새 경로에 놓고 옛 번들을 지움                                    | launcher 판단: 쓸 수 있는 세대 없음, 번들만으로 `No extensions installed`. 옮기기: `prepared candidate g10 from g9: 75 recorded files copied`, 검증 통과. 옛 g9의 `bin/python3`과 `pyvenv.cfg`는 지워진 번들을 가리킨 채 그대로                                                                                 | g10            |
+| 10  | 열림      | 위 상태에서 되돌리기                                                    | `g9 is bound to another bundle; adopting its content into a new candidate`, 검증 통과                                                                                                                                                                                                                           | g11            |
+| 11  | 전부 차단 | 번들 사본에 `tabulate`를 넣고 lock 해시를 바꾼 "새 번들"로 옮기기       | `adopted content does not fit the new bundle: scan: distribution tabulate 0.10.0 is also shipped by the bundle`. 빈 후보에 기록 7건을 보관소 wheel로 다시 설치, 검증 통과. 새 세대에 `tabulate`가 없다                                                                                                          | g12            |
+| 12  | 전부 차단 | 반대로 `tabulate`가 없는 번들로 옮기기                                  | `adopted content does not fit the new bundle: load error studio32_depext:setup: No module named 'tabulate'`. 다시 설치(보관소의 `tabulate` wheel 사용), 검증 통과                                                                                                                                               | g14            |
+| 13  | —         | 전체가 끝난 뒤 worker의 agent dir(`$HOME/.aelix/agent`)                 | native가 만든 `auth.json` 하나가 있었다. 로드 검사를 대화와 같은 agent dir로 실행했기 때문이다. 로드 검사에 후보의 `agent/`를 주도록 고쳐 다시 설치하니 `$HOME/.aelix`가 만들어지지 않았고 `auth.json`은 세대의 `agent/`에 생겼다. 설치 기록은 처음부터 세대의 `agent/`에만 있었다. 세대 5개 63MB, 보관소 148KB | —              |
+
+파일 반입이 아닌 출처도 고친 절차로 한 번씩 실행했다(새 root, 내부 index는 loopback).
+
+| #   | 네트워크   | 실행                                                                                                 | 관찰                                                                                                                  | 결과   |
+| --- | ---------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- | ------ |
+| 14  | loopback만 | 이름으로 설치: `studio32-depext`, `aelix-starter-ext` (`--index-url http://127.0.0.1:18732/simple/`) | `Looking in indexes: …`, 설치 0, `loaded with -e: ["aelix_starter:setup", "studio32_depext:setup"]`                   | g1, g2 |
+| 15  | loopback만 | index에 0.2.0을 올린 뒤 `update aelix-starter-ext`                                                   | `Successfully installed aelix-starter-ext-0.2.0`, 검증 통과                                                           | g3     |
+| 16  | loopback만 | index에 0.3.0(import 안 됨)을 올린 뒤 `update aelix-starter-ext`                                     | native 종료 0, `verify FAILED: load error aelix_starter:setup: No module named 'studio32_module_that_does_not_exist'` | 폐기   |
+| 17  | 열림       | `remove aelix-starter`, 이어서 `install git+file://<starter git 저장소>`                             | 제거 뒤 검증 통과. git: `Resolved … to commit 71afc5d2…`, `Building wheel …`, 검증 통과                               | g4, g5 |
+| 18  | —          | 되돌리기                                                                                             | `ROLLED BACK current -> g4 (was g5)`. 대화 형태의 `resources/list`에 `studio32_depext:setup`만 있다                   | g4     |
