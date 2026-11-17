@@ -40,6 +40,8 @@ class CaptureStartupFailureTests(unittest.TestCase):
                      patch.object(audit,'npm_proxy_configured',return_value=False), \
                      patch.object(audit,'Capture',return_value=capture), \
                      patch.object(audit,'capture_deadline',return_value=nullcontext()), \
+                     patch.object(audit.signal,'setitimer',create=True), \
+                     patch.object(audit.signal,'ITIMER_REAL',0,create=True), \
                      patch.object(audit.subprocess,'Popen',return_value=process):
                     code=audit.audit(['/owned/command'],report)
                 evidence=json.loads(report.read_text())['ioUring']['capture']
@@ -164,6 +166,11 @@ class CaptureDeadlineTests(unittest.TestCase):
 
 
 class CleanupIdentityTests(unittest.TestCase):
+    def setUp(self):
+        # The algorithm uses mocked /proc and kill; retain that coverage on Windows.
+        signals=patch.object(audit.signal,'SIGKILL',9,create=True)
+        signals.start();self.addCleanup(signals.stop)
+
     def test_reused_root_is_not_owned(self):
         table={100:(1,'new','S'),201:(100,'child','S')}
         with patch.object(audit,'process_table',return_value=table), patch.object(audit.os,'kill') as kill:
