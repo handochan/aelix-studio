@@ -1,0 +1,111 @@
+import { mkdir, mkdtemp, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { fakeRuntime, scriptedSpawn } from '../../../tests/fixtures/extensionRuntime';
+import { collect, recover } from './cleanup';
+import { ensureLayout, layoutOf, type Bundle, type BundleBinding, type Layout } from './layout';
+import { newGenerationRecord, newPointer, switchPointer, writeGenerationRecord } from './pointer';
+
+const BINDING: BundleBinding = {
+  bundle: '/bundle',
+  target: 'darwin-arm64',
+  pythonMinor: '3.12',
+  dependencyLockSha256: 'lock',
+  nativeCommit: 'commit',
+};
+const [G1, G2, G3, G4] = ['g00000001-aaaa', 'g00000002-bbbb', 'g00000003-cccc', 'g00000004-dddd'];
+const [SET_A, SET_B, SET_C] = ['a'.repeat(16), 'b'.repeat(16), 'c'.repeat(16)];
+const bundle = { root: '/bundle', python: '/bundle/python/bin/python3' } as Bundle;
+
+describe('recovery and clean-up', () => {
+  let layout: Layout;
+  beforeEach(async () => {
+    layout = layoutOf(await mkdtemp(path.join(os.tmpdir(), 'studio-cleanup-')));
+    await ensureLayout(layout);
+  });
+  afterEach(() => rm(layout.root, { recursive: true, force: true }));
+  const names = async (directory: string): Promise<string[]> => (await readdir(directory)).toSorted();
+  const generation = async (id: string, artifact?: string): Promise<void> => {
+    await mkdir(path.join(layout.generations, id, 'venv'), { recursive: true });
+    await writeGenerationRecord(
+      layout,
+      newGenerationRecord({
+        generation: id,
+        parent: null,
+        createdAt: '2026-11-17T00:00:00.000Z',
+        binding: BINDING,
+        operation: { action: 'install', target: 'demo' },
+        distributions: artifact
+          ? { demo: { version: '1', recordSha256: 'h', origin: { kind: 'file', artifact, wheel: 'w', sha256: 's' } } }
+          : {},
+        extensions: {},
+      })
+    );
+  };
+  const request = (heldLeases: string[] = []) => ({
+    bundle,
+    layout,
+    spawn: fakeRuntime({ bundle: bundle.root, heldLeases }),
+    env: {},
+  });
+
+  it('removes candidates that never finished and what interrupted writes left behind', async () => {
+    await generation(G1);
+    await mkdir(path.join(layout.generations, G2, 'venv'), { recursive: true });
+    await mkdir(path.join(layout.generations, 'not-even-a-name'));
+    await writeFile(path.join(layout.root, 'current.json.1a2b3c4d.tmp'), '{');
+    await mkdir(path.join(layout.artifacts, '.staging-abcdef'));
+    await mkdir(path.join(layout.artifacts, SET_A));
+    expect((await recover(layout)).toSorted()).toEqual([G2, 'not-even-a-name'].toSorted());
+    expect(await names(layout.generations)).toEqual([G1]);
+    expect(await names(layout.root)).toEqual(['artifacts', 'generations', 'leases']);
+    expect(await names(layout.artifacts)).toEqual([SET_A]);
+  });
+
+  it('does nothing on a root that has no directories yet', async () => {
+    const empty = layoutOf(path.join(layout.root, 'absent'));
+    expect(await recover(empty)).toEqual([]);
+  });
+
+  it('keeps the current and the previous generation and removes older ones with their wheels', async () => {
+    await Promise.all([generation(G1, SET_A), generation(G2, SET_B), generation(G3, SET_C)]);
+    await Promise.all([SET_A, SET_B, SET_C].map((set) => mkdir(path.join(layout.artifacts, set))));
+    await switchPointer(layout, newPointer(G3, G2, 3, BINDING), null);
+    const report = await collect(request());
+    expect(report).toEqual({ removed: [G1], leased: [], removedArtifacts: [SET_A], skipped: false });
+    expect(await names(layout.generations)).toEqual([G2, G3]);
+    expect(await names(layout.artifacts)).toEqual([SET_B, SET_C]);
+  });
+
+  it('keeps a generation a running launcher holds, with its wheels, and drops leases nobody holds', async () => {
+    await Promise.all([generation(G1, SET_A), generation(G2), generation(G3), generation(G4)]);
+    await mkdir(path.join(layout.artifacts, SET_A));
+    await writeFile(path.join(layout.leases, `${G1}.4711`), '');
+    await writeFile(path.join(layout.leases, `${G2}.4712`), '');
+    await switchPointer(layout, newPointer(G4, G3, 4, BINDING), null);
+    const report = await collect(request([`${G1}.4711`]));
+    expect(report).toMatchObject({ removed: [G2], leased: [G1], removedArtifacts: [] });
+    expect(await names(layout.generations)).toEqual([G1, G3, G4]);
+    expect(await names(layout.leases)).toEqual([`${G1}.4711`]);
+  });
+
+  it('removes nothing when it cannot tell which generations are in use', async () => {
+    await Promise.all([generation(G1), generation(G2), generation(G3)]);
+    await writeFile(path.join(layout.leases, `${G1}.4711`), '');
+    await switchPointer(layout, newPointer(G3, G2, 3, BINDING), null);
+    const failing = scriptedSpawn((_spec, child) => child.exit(1));
+    expect(await collect({ bundle, layout, spawn: failing, env: {} })).toMatchObject({ removed: [], skipped: true });
+    expect(await names(layout.generations)).toEqual([G1, G2, G3]);
+    expect(await names(layout.leases)).toEqual([`${G1}.4711`]);
+  });
+
+  it('keeps every generation when there is no usable pointer, and only drops wheels none of them uses', async () => {
+    await Promise.all([generation(G1, SET_A), generation(G2)]);
+    await Promise.all([SET_A, SET_B].map((set) => mkdir(path.join(layout.artifacts, set))));
+    await writeFile(layout.pointer, 'garbage');
+    expect(await collect(request())).toEqual({ removed: [], leased: [], removedArtifacts: [SET_B], skipped: false });
+    expect(await names(layout.generations)).toEqual([G1, G2]);
+    expect(await names(layout.artifacts)).toEqual([SET_A]);
+  });
+});
