@@ -9,9 +9,14 @@
 - Backlog → Ready → In progress → In review → Done. Release는 Preview/Beta/Later, Agent는 Codex/Claude다.
 - 사용자는 Backlog에 제목 한 줄의 draft 아이디어를 추가할 수 있다. 실행 전 agent가 기존 작업과 중복을 확인하고 실제 변경 repo의 Issue로 전환해 범위·완료 조건·검증·선행을 보완한다.
 - 사용자 또는 한 조정 세션이 Ready 순서와 Agent를 정한다. 초기 공통 계약은 직렬로 정하고 이후 독립 구현만 최대 두 개씩 진행한다.
+- 지금 시작할 수 있는 Beta 기능 카드를 구현 슬롯에 먼저 넣는다(D15). host 보안 공지는 Beta 직전에 한 번에 고친다(D18).
 - 하나의 Issue·실행자·branch/worktree를 사용한다. 같은 manifest/lockfile/공통 계약/host composition은 직렬로 변경한다.
-- 다른 세션의 독립 리뷰 한 번과 영향받는 재검증을 한다. 착수·리뷰 제출·막힘·중단/완료 때만 상태를 갱신한다.
-- `needs-decision`은 제품 범위·호환성·출시 선택, `blocked`는 실제 선행 조건이다. 일상적인 구현 선택은 agent가 처리한다.
+- 여러 저장소가 바뀌는 기능은 계약을 예시 JSON으로 먼저 고정하고, 개발 중에는 branch SHA로 묶어 확인한다. host release는 통합 시점에만 낸다(D16).
+- Aelix 전용 기능은 host가 해석하지 않고 넘기는 경로로 보낸다. 전역 관리는 helper를 쓴다(D17).
+- 새 Aelix 화면은 Aion 대화 저장소에 직접 묶지 않고 독립 모듈로 만든다(D20).
+- 다른 세션의 독립 리뷰 한 번과 영향받는 재검증을 한다. blocking과 should-fix는 고치고, nit는 Issue에 기록만 한다(D19). 착수·리뷰 제출·막힘·중단/완료 때만 상태를 갱신한다.
+- 5개 target 설치 검증과 kernel 수준 외부 접속 감사는 renderer 화면·단위 테스트·문서만 바꾼 PR에서 건너뛴다. `full-verify` label, 수동 실행, main 일일 실행에서는 돈다(D19의 11-17 결정, 구현은 Studio #43). host의 새 보안 공지는 주간 점검에서 본다(D18).
+- `needs-decision`은 제품 범위·호환성·출시 선택, `blocked`는 실제 선행 조건이다. 일상적인 구현 선택은 agent가 처리한다. Ready 순서를 정할 때마다 `blocked`의 선행이 실제로 남아 있는지 확인한다. 선행 Issue가 닫힌 것과 실제 번들에서 도는 것은 따로 확인한다.
 - 연결/출시 Issue는 모든 완료 조건과 final artifact 수용이 끝나야 Done이다. 하나의 backend PR이나 CI green으로 전체 기능을 닫지 않는다.
 - 기존 core Project 1·Analytics Project 7은 유지한다. 같은 Issue가 여러 보드에 있으면 checkpoint에서 각각의 Status를 확인한다.
 
