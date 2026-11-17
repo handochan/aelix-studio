@@ -1,45 +1,43 @@
 {
   "source": {
-    "method": "Actual host aelix.4, copied bundled runtime and synthetic loopback model; persisted HTTP tool messages. Resume targets a completed child, not a stopped child.",
+    "method": "Actual host aelix.4, bundled runtime and synthetic loopback model; persisted HTTP tool messages. A stopped child is resumed in a new call.",
     "hostCommit": "c516fa946ef48adc0119dbf37367e02216b22e70",
     "acpCommit": "16d6555b08825d1d63c3b082de2b10a1152562c0",
     "nativeCommit": "e19ab55e17e871a40356fc9802f3f6669ca727de"
   },
   "frames": [
     {
-      "scenario": "twoChildrenCompleted",
+      "scenario": "stoppedChildResumed",
       "content": {
-        "session_id": "5d43448e-dd46-46e7-b052-1c29fe8720cd",
+        "session_id": "bacb6cde-5014-4566-8954-15a0bc646e7e",
         "update": {
           "session_update": "tool_call_update",
-          "tool_call_id": "call-agent-1",
-          "status": "completed",
+          "tool_call_id": "agent-2",
+          "status": "in_progress",
           "title": "agent",
           "kind": "execute",
           "raw_input": {
             "profile": "reviewer",
             "mode": "parallel",
-            "tasks": ["CHILD_ONE respond briefly", "CHILD_TWO respond briefly"]
+            "tasks": ["CHILD_CANCEL_A", "CHILD_CANCEL_B"]
           },
           "raw_output": {
             "content": [
               {
-                "text": "agent reviewer \u00b7 parallel \u00b7 2 tasks \u00b7 2 ok \u00b7 0 failed\n\n[1/2 ok] CHILD_OK\nSession: c1d9f1fb-d214-4d3a-b311-07d9b34847eb\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 2.8s]\n\n[2/2 ok] CHILD_OK\nSession: f3b8e017-538d-4def-8d6b-774af5b0141f\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 2.8s]\n\n[total] 2 tasks \u00b7 2 ok \u00b7 0 failed \u00b7 34 in / 6 out \u00b7 2.8s wall",
+                "text": "[1/2] agent reviewer [stopped] · 5s\n[2/2] agent reviewer [stopped] · 5s",
                 "text_signature": "",
                 "type": "text"
               }
             ],
             "is_error": false,
-            "terminate": false,
-            "details": "--- [1/2] reviewer ---\nCHILD_OK\n\n--- [2/2] reviewer ---\nCHILD_OK",
-            "status": "completed"
+            "terminate": false
           },
           "content": [
             {
               "type": "content",
               "content": {
                 "type": "text",
-                "text": "agent reviewer \u00b7 parallel \u00b7 2 tasks \u00b7 2 ok \u00b7 0 failed\n\n[1/2 ok] CHILD_OK\nSession: c1d9f1fb-d214-4d3a-b311-07d9b34847eb\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 2.8s]\n\n[2/2 ok] CHILD_OK\nSession: f3b8e017-538d-4def-8d6b-774af5b0141f\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 2.8s]\n\n[total] 2 tasks \u00b7 2 ok \u00b7 0 failed \u00b7 34 in / 6 out \u00b7 2.8s wall"
+                "text": "[1/2] agent reviewer [stopped] · 5s\n[2/2] agent reviewer [stopped] · 5s"
               }
             }
           ]
@@ -49,26 +47,26 @@
             "version": 1,
             "children": [
               {
-                "id": "sub-20c3d8cfaac4",
+                "id": "sub-33051484406c",
                 "profile": "reviewer",
-                "state": "done",
+                "state": "stopped",
                 "currentTool": null,
                 "model": "one",
                 "provider": "fixture",
                 "event": "subagent_end",
-                "elapsedMs": 2769,
+                "elapsedMs": 5391,
                 "tokens": 20,
                 "cost": 0
               },
               {
-                "id": "sub-d20f0a4d12b8",
+                "id": "sub-928564e5272e",
                 "profile": "reviewer",
-                "state": "done",
+                "state": "stopped",
                 "currentTool": null,
                 "model": "one",
                 "provider": "fixture",
                 "event": "subagent_end",
-                "elapsedMs": 2760,
+                "elapsedMs": 5384,
                 "tokens": 20,
                 "cost": 0
               }
@@ -78,103 +76,32 @@
       }
     },
     {
-      "scenario": "completedChildResumed",
+      "scenario": "stoppedChildResumed",
       "content": {
-        "session_id": "5fbc0df4-11e7-4668-97e2-b4d123f36e1b",
+        "session_id": "bacb6cde-5014-4566-8954-15a0bc646e7e",
         "update": {
           "session_update": "tool_call_update",
-          "tool_call_id": "call-agent-1",
-          "status": "completed",
-          "title": "agent",
-          "kind": "execute",
-          "raw_input": {
-            "profile": "reviewer",
-            "mode": "parallel",
-            "tasks": ["CHILD_ONE respond briefly", "CHILD_TWO respond briefly"]
-          },
-          "raw_output": {
-            "content": [
-              {
-                "text": "agent reviewer \u00b7 parallel \u00b7 2 tasks \u00b7 2 ok \u00b7 0 failed\n\n[1/2 ok] CHILD_OK\nSession: d8a9b08b-1095-4ce5-9ca1-aff51c477335\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.5s]\n\n[2/2 ok] CHILD_OK\nSession: 91a60f1e-cea1-4988-b86f-e0f85dc4df31\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.4s]\n\n[total] 2 tasks \u00b7 2 ok \u00b7 0 failed \u00b7 34 in / 6 out \u00b7 1.5s wall",
-                "text_signature": "",
-                "type": "text"
-              }
-            ],
-            "is_error": false,
-            "terminate": false,
-            "details": "--- [1/2] reviewer ---\nCHILD_OK\n\n--- [2/2] reviewer ---\nCHILD_OK",
-            "status": "completed"
-          },
-          "content": [
-            {
-              "type": "content",
-              "content": {
-                "type": "text",
-                "text": "agent reviewer \u00b7 parallel \u00b7 2 tasks \u00b7 2 ok \u00b7 0 failed\n\n[1/2 ok] CHILD_OK\nSession: d8a9b08b-1095-4ce5-9ca1-aff51c477335\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.5s]\n\n[2/2 ok] CHILD_OK\nSession: 91a60f1e-cea1-4988-b86f-e0f85dc4df31\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.4s]\n\n[total] 2 tasks \u00b7 2 ok \u00b7 0 failed \u00b7 34 in / 6 out \u00b7 1.5s wall"
-              }
-            }
-          ]
-        },
-        "_meta": {
-          "aelix/subagents": {
-            "version": 1,
-            "children": [
-              {
-                "id": "sub-572cb34b2228",
-                "profile": "reviewer",
-                "state": "done",
-                "currentTool": null,
-                "model": "one",
-                "provider": "fixture",
-                "event": "subagent_end",
-                "elapsedMs": 1468,
-                "tokens": 20,
-                "cost": 0
-              },
-              {
-                "id": "sub-e75c7f910d38",
-                "profile": "reviewer",
-                "state": "done",
-                "currentTool": null,
-                "model": "one",
-                "provider": "fixture",
-                "event": "subagent_end",
-                "elapsedMs": 1407,
-                "tokens": 20,
-                "cost": 0
-              }
-            ]
-          }
-        }
-      }
-    },
-    {
-      "scenario": "completedChildResumed",
-      "content": {
-        "session_id": "5fbc0df4-11e7-4668-97e2-b4d123f36e1b",
-        "update": {
-          "session_update": "tool_call_update",
-          "tool_call_id": "call-agent-resume",
+          "tool_call_id": "agent-3",
           "status": "completed",
           "title": "agent",
           "kind": "execute",
           "raw_input": {
             "action": "resume",
-            "id": "d8a9b08b-1095-4ce5-9ca1-aff51c477335",
             "profile": "reviewer",
-            "task": "Continue the child and respond briefly"
+            "id": "f0eb54f5-a432-4d72-8639-0cd3dc27c646",
+            "task": "CHILD_RESUME finish the interrupted work"
           },
           "raw_output": {
             "content": [
               {
-                "text": "CHILD_OK\n\nSession: d8a9b08b-1095-4ce5-9ca1-aff51c477335\n\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.2s]",
+                "text": "RESUMED_CHILD_WORK\n\nSession: f0eb54f5-a432-4d72-8639-0cd3dc27c646\n\n[agent reviewer · one · ok · yolo · 1 turns · 17 in / 3 out · 2.4s]",
                 "text_signature": "",
                 "type": "text"
               }
             ],
             "is_error": false,
             "terminate": false,
-            "details": "CHILD_OK",
+            "details": "RESUMED_CHILD_WORK",
             "status": "completed"
           },
           "content": [
@@ -182,7 +109,7 @@
               "type": "content",
               "content": {
                 "type": "text",
-                "text": "CHILD_OK\n\nSession: d8a9b08b-1095-4ce5-9ca1-aff51c477335\n\n[agent reviewer \u00b7 one \u00b7 ok \u00b7 yolo \u00b7 1 turns \u00b7 17 in / 3 out \u00b7 1.2s]"
+                "text": "RESUMED_CHILD_WORK\n\nSession: f0eb54f5-a432-4d72-8639-0cd3dc27c646\n\n[agent reviewer · one · ok · yolo · 1 turns · 17 in / 3 out · 2.4s]"
               }
             }
           ]
@@ -192,14 +119,14 @@
             "version": 1,
             "children": [
               {
-                "id": "sub-1c30c67a5a2b",
+                "id": "sub-e68c3ee5292f",
                 "profile": "reviewer",
                 "state": "done",
                 "currentTool": null,
                 "model": "one",
                 "provider": "fixture",
                 "event": "subagent_end",
-                "elapsedMs": 1241,
+                "elapsedMs": 2438,
                 "tokens": 20,
                 "cost": 0
               }

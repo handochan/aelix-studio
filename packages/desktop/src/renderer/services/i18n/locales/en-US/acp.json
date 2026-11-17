@@ -45,7 +45,9 @@
       "done": "Completed",
       "error": "Failed",
       "stopped": "Stopped",
-      "unknown": "Unknown"
-    }
+      "unknown": "Unknown",
+      "ended": "Turn ended; final status not reported"
+    },
+    "elapsedReported": "Last reported elapsed: {{value}} s"
   }
 }

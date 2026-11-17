@@ -45,7 +45,9 @@
       "done": "Abgeschlossen",
       "error": "Fehlgeschlagen",
       "stopped": "Gestoppt",
-      "unknown": "Unbekannt"
-    }
+      "unknown": "Unbekannt",
+      "ended": "Runde beendet; Endstatus nicht gemeldet"
+    },
+    "elapsedReported": "Zuletzt gemeldete Dauer: {{value}} s"
   }
 }

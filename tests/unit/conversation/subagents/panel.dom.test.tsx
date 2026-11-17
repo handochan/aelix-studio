@@ -3,10 +3,13 @@ import { render, screen, within, fireEvent } from '@testing-library/react';
 import { ipcBridge } from '@/common';
 import { describe, expect, it, vi } from 'vitest';
 import type { IMessageAcpToolCall } from '@/common/chat/chatLib';
-import SubagentProgressPanel from '@/renderer/pages/conversation/Messages/acp/SubagentProgress';
+import SubagentProgressPanel, {
+  presentSubagentTool,
+} from '@/renderer/pages/conversation/Messages/acp/SubagentProgress';
 import MessageToolGroupSummary from '@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
 import fixture from './frames.json';
 import native from './nativeFrames.json';
+import * as parser from '@/renderer/pages/conversation/Messages/acp/SubagentProgress/parser';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -23,6 +26,9 @@ vi.mock('@arco-design/web-react', async () => ({
 }));
 
 const value = (name: string) => fixture.frames.find((frame) => frame.name === name)!.update._meta['aelix/subagents'];
+const panel = (snapshot: unknown) => (
+  <SubagentProgressPanel progress={presentSubagentTool({ 'aelix/subagents': snapshot }, 'completed')!.progress} />
+);
 const message = (snapshot: unknown, id = 'call-one', result = ''): IMessageAcpToolCall => ({
   id,
   type: 'acp_tool_call',
@@ -44,25 +50,25 @@ const message = (snapshot: unknown, id = 'call-one', result = ''): IMessageAcpTo
 
 describe('subagent progress display', () => {
   it.each(['starting', 'running', 'done', 'error', 'stopped', 'unknown'])('shows a readable %s state', (state) => {
-    render(<SubagentProgressPanel value={{ version: 1, children: [{ ...value('running').children[0], state }] }} />);
+    render(panel({ version: 1, children: [{ ...value('running').children[0], state }] }));
     expect(screen.getByText(`acp.subagents.states.${state}`)).toBeInTheDocument();
   });
 
   it('shows the tool, reported elapsed time and zero usage without hiding zero', () => {
-    render(<SubagentProgressPanel value={value('documented')} />);
+    render(panel(value('documented')));
     expect(screen.getByText('acp.subagents.tool: read')).toBeInTheDocument();
-    expect(screen.getByText('acp.subagents.elapsed: 2.3')).toBeInTheDocument();
+    expect(screen.getByText('acp.subagents.elapsedReported: 2.3')).toBeInTheDocument();
     expect(screen.getByText('acp.subagents.tokens: 0')).toBeInTheDocument();
     expect(screen.getByText('acp.subagents.cost: 0')).toBeInTheDocument();
   });
 
   it('shows unavailable counters when fields are absent', () => {
-    render(<SubagentProgressPanel value={{ version: 1, children: [{ id: 'partial' }] }} />);
+    render(panel({ version: 1, children: [{ id: 'partial' }] }));
     expect(screen.getByText('acp.subagents.tokens: acp.subagents.unavailable')).toBeInTheDocument();
   });
 
   it('preserves the exact integer token count', () => {
-    render(<SubagentProgressPanel value={{ version: 1, children: [{ id: 'large', tokens: 1234567 }] }} />);
+    render(panel({ version: 1, children: [{ id: 'large', tokens: 1234567 }] }));
     expect(screen.getByText('acp.subagents.tokens: 1,234,567')).toBeInTheDocument();
   });
 
@@ -126,7 +132,7 @@ describe('subagent progress display', () => {
   });
 
   it('renders a resumed run under its new parent call without linking progress IDs', () => {
-    const calls = native.frames.filter((frame) => frame.scenario === 'completedChildResumed');
+    const calls = native.frames.filter((frame) => frame.scenario === 'stoppedChildResumed');
     const old = calls[0].content._meta['aelix/subagents'];
     const resumed = calls[1].content._meta['aelix/subagents'];
     render(<MessageToolGroupSummary messages={[message(old, 'old'), message(resumed, 'resumed')]} />);
@@ -134,5 +140,68 @@ describe('subagent progress display', () => {
     expect(within(lists[0]).getAllByRole('listitem')).toHaveLength(2);
     expect(within(lists[1]).getAllByRole('listitem')).toHaveLength(1);
     expect(within(lists[1]).getByRole('listitem')).toHaveAttribute('data-subagent-id', resumed.children[0].id);
+  });
+
+  it('preserves a user-collapsed subagent group when the delegation finishes', () => {
+    const running = message(value('running'));
+    running.content.update.status = 'in_progress';
+    const { rerender } = render(<MessageToolGroupSummary messages={[running]} />);
+    fireEvent.click(screen.getByText(/View Steps/));
+    const complete = value('completed');
+    rerender(
+      <MessageToolGroupSummary
+        messages={[message({ ...complete, children: complete.children.map((child) => ({ ...child, state: 'done' })) })]}
+      />
+    );
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  });
+
+  it('parses each extension item once and never parses an ordinary tool', () => {
+    const spy = vi.spyOn(parser, 'parseSubagentProgress');
+    const { unmount } = render(<MessageToolGroupSummary messages={[message(value('documented'))]} />);
+    expect(spy).toHaveBeenCalledTimes(1);
+    unmount();
+    spy.mockClear();
+    const ordinary = message(undefined);
+    delete ordinary.content._meta;
+    render(<MessageToolGroupSummary messages={[ordinary]} />);
+    fireEvent.click(screen.getByText(/View Steps/));
+    expect(spy).not.toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('uses the existing ended-turn prop for stale child rows and done/error parents', () => {
+    const running = message({ version: 1, children: [{ id: 'late', state: 'running' }] });
+    running.content.update.status = 'in_progress';
+    const { container } = render(
+      <MessageToolGroupSummary messages={[running]} turn={{ known: true, isProcessing: false }} />
+    );
+    expect(screen.getByText('acp.subagents.states.ended')).toBeInTheDocument();
+    expect(container.querySelector('.arco-badge-status-processing')).toBeNull();
+  });
+
+  it('retains ordinary compact-tool expansion and exactly one full-message lookup', async () => {
+    const ordinary = message(undefined, 'ordinary', 'preview');
+    delete ordinary.content._meta;
+    ordinary.content.update.title = 'ordinary-tool';
+    const compact = { ...ordinary, content: { ...ordinary.content, _compact: { truncated: true } } };
+    vi.mocked(ipcBridge.database.getConversationMessage.invoke)
+      .mockClear()
+      .mockResolvedValueOnce({
+        ...ordinary,
+        content: {
+          ...ordinary.content,
+          update: {
+            ...ordinary.content.update,
+            content: [{ type: 'content', content: { type: 'text', text: 'ORDINARY_FULL' } }],
+          },
+        },
+      });
+    render(<MessageToolGroupSummary messages={[compact]} />);
+    expect(ipcBridge.database.getConversationMessage.invoke).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText(/View Steps/));
+    fireEvent.click(screen.getByText('ordinary-tool'));
+    expect(await screen.findByText('ORDINARY_FULL')).toBeInTheDocument();
+    expect(ipcBridge.database.getConversationMessage.invoke).toHaveBeenCalledTimes(1);
   });
 });

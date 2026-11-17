@@ -45,7 +45,9 @@
       "done": "已完成",
       "error": "失敗",
       "stopped": "已停止",
-      "unknown": "未知"
-    }
+      "unknown": "未知",
+      "ended": "回合已結束，未回報最終狀態"
+    },
+    "elapsedReported": "上次回報耗時：{{value}} 秒"
   }
 }

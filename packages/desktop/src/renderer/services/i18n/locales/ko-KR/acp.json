@@ -45,7 +45,9 @@
       "done": "완료",
       "error": "실패",
       "stopped": "중지됨",
-      "unknown": "알 수 없음"
-    }
+      "unknown": "알 수 없음",
+      "ended": "턴 종료 · 최종 상태 미보고"
+    },
+    "elapsedReported": "마지막 보고 경과: {{value}}초"
   }
 }

@@ -45,7 +45,9 @@
       "done": "Completado",
       "error": "Fallido",
       "stopped": "Detenido",
-      "unknown": "Desconocido"
-    }
+      "unknown": "Desconocido",
+      "ended": "Turno finalizado; estado final sin informar"
+    },
+    "elapsedReported": "Último tiempo informado: {{value}} s"
   }
 }

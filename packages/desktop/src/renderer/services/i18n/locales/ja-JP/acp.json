@@ -45,7 +45,9 @@
       "done": "完了",
       "error": "失敗",
       "stopped": "停止",
-      "unknown": "不明"
-    }
+      "unknown": "不明",
+      "ended": "ターン終了・最終状態は未報告"
+    },
+    "elapsedReported": "最終報告の経過: {{value}}秒"
   }
 }

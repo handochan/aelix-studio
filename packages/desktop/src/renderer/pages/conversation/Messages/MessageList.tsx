@@ -343,7 +343,15 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
   // While the agent is still streaming, the in-progress turn's last text keeps
   // moving down, so we defer its copy/timestamp row until the turn finishes to
   // avoid the row flashing in and the layout reflowing mid-stream.
-  const { isProcessing } = useConversationRuntimeView(conversationContext?.conversation_id ?? '');
+  const {
+    isProcessing,
+    hydrated,
+    view: runtimeView,
+  } = useConversationRuntimeView(conversationContext?.conversation_id ?? '');
+  const toolTurn = useMemo(
+    () => ({ known: hydrated === true && runtimeView?.hasBackendRuntime === true, isProcessing }),
+    [hydrated, runtimeView?.hasBackendRuntime, isProcessing]
+  );
   const { t } = useTranslation();
   const location = useLocation();
   const locationState = (location.state || {}) as ConversationLocationState;
@@ -704,7 +712,9 @@ const MessageList: React.FC<{ className?: string; emptySlot?: React.ReactNode }>
           style={highlighted ? highlightStyle : undefined}
         >
           {item.type === 'file_summary' && <MessageFileChanges diffsChanges={item.diffs} />}
-          {item.type === 'tool_summary' && <MessageToolGroupSummary messages={item.messages}></MessageToolGroupSummary>}
+          {item.type === 'tool_summary' && (
+            <MessageToolGroupSummary messages={item.messages} turn={toolTurn}></MessageToolGroupSummary>
+          )}
         </div>
       );
     }

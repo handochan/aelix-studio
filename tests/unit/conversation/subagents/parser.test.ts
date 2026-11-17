@@ -5,6 +5,11 @@ import fixture from './frames.json';
 const value = (name: string) => fixture.frames.find((frame) => frame.name === name)!.update._meta['aelix/subagents'];
 
 describe('subagent metadata contract', () => {
+  it.each(fixture.frames)('accepts the reference snapshot $name', (frame) => {
+    expect(parseSubagentProgress(frame.update._meta['aelix/subagents'])?.children.map((child) => child.state)).toEqual(
+      frame.update._meta['aelix/subagents'].children.map((child) => child.state)
+    );
+  });
   it('reads the documented progress frame without requiring other tool-call fields', () => {
     expect(parseSubagentProgress(value('documented'))?.children[0]).toMatchObject({
       profile: 'reviewer',

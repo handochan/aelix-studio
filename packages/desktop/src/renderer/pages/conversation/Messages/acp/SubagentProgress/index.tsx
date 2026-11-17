@@ -1,8 +1,9 @@
 import { Badge } from '@arco-design/web-react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { parseSubagentProgress } from './parser';
-import type { SubagentState } from './types';
+import type { SubagentProgress, SubagentState } from './types';
+export { presentSubagentTool } from './presentation';
+export type { SubagentPresentation, SubagentTurnSignal } from './types';
 
 const STATUS = {
   starting: 'processing',
@@ -11,6 +12,7 @@ const STATUS = {
   error: 'error',
   stopped: 'default',
   unknown: 'warning',
+  ended: 'default',
 } as const;
 const STATE_KEYS = {
   starting: 'acp.subagents.states.starting',
@@ -19,13 +21,12 @@ const STATE_KEYS = {
   error: 'acp.subagents.states.error',
   stopped: 'acp.subagents.states.stopped',
   unknown: 'acp.subagents.states.unknown',
+  ended: 'acp.subagents.states.ended',
 } as const satisfies Record<SubagentState, string>;
 
 /** Render one parent call's latest snapshot. Resume is a new call, with its own rows. */
-const SubagentProgressPanel: React.FC<{ value: unknown }> = ({ value }) => {
+const SubagentProgressPanel: React.FC<{ progress: SubagentProgress }> = ({ progress }) => {
   const { t, i18n } = useTranslation();
-  const progress = parseSubagentProgress(value);
-  if (!progress) return null;
   const number = new Intl.NumberFormat(i18n?.language, { maximumSignificantDigits: 6 });
   const tokens = new Intl.NumberFormat(i18n?.language, { maximumFractionDigits: 0 });
   const seconds = new Intl.NumberFormat(i18n?.language, { maximumFractionDigits: 1 });
@@ -52,16 +53,21 @@ const SubagentProgressPanel: React.FC<{ value: unknown }> = ({ value }) => {
           <div className='flex flex-wrap gap-x-16px gap-y-4px mt-4px'>
             <span>{t('acp.subagents.tool', { value: child.currentTool ?? unavailable })}</span>
             <span title={t('acp.subagents.elapsedHint')}>
-              {t('acp.subagents.elapsed', {
-                value: child.elapsedMs === undefined ? unavailable : seconds.format(child.elapsedMs / 1000),
-              })}
+              {t(
+                child.state === 'starting' || child.state === 'running' || child.state === 'ended'
+                  ? 'acp.subagents.elapsedReported'
+                  : 'acp.subagents.elapsed',
+                {
+                  value: child.elapsedMs === undefined ? unavailable : seconds.format(child.elapsedMs / 1000),
+                }
+              )}
             </span>
-            <span>
+            <span data-subagent-metric='tokens'>
               {t('acp.subagents.tokens', {
                 value: child.tokens === undefined ? unavailable : tokens.format(child.tokens),
               })}
             </span>
-            <span>
+            <span data-subagent-metric='cost'>
               {t('acp.subagents.cost', { value: child.cost === undefined ? unavailable : number.format(child.cost) })}
             </span>
           </div>

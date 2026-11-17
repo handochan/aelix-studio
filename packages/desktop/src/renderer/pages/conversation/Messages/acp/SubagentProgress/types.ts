@@ -1,4 +1,4 @@
-export type SubagentState = 'starting' | 'running' | 'done' | 'error' | 'stopped' | 'unknown';
+export type SubagentState = 'starting' | 'running' | 'done' | 'error' | 'stopped' | 'unknown' | 'ended';
 
 export type SubagentChild = {
   id: string;
@@ -10,4 +10,12 @@ export type SubagentChild = {
   cost?: number;
 };
 
-export type SubagentProgress = { version: 1; children: SubagentChild[] };
+export type SubagentProgress = { version: 1; children: SubagentChild[]; hasDiscardedChildren: boolean };
+
+export type SubagentParentStatus = 'pending' | 'running' | 'completed' | 'error' | 'canceled';
+export type SubagentTurnSignal = { known: boolean; isProcessing: boolean };
+export type SubagentPresentation = {
+  progress: SubagentProgress;
+  parentStatus: SubagentParentStatus;
+  interrupted: boolean;
+};

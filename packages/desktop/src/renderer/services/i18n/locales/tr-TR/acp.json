@@ -45,7 +45,9 @@
       "done": "Tamamlandı",
       "error": "Başarısız",
       "stopped": "Durduruldu",
-      "unknown": "Bilinmiyor"
-    }
+      "unknown": "Bilinmiyor",
+      "ended": "Tur sona erdi; son durum bildirilmedi"
+    },
+    "elapsedReported": "Son bildirilen süre: {{value}} sn"
   }
 }

@@ -45,7 +45,9 @@
       "done": "Terminé",
       "error": "Échec",
       "stopped": "Arrêté",
-      "unknown": "Inconnu"
-    }
+      "unknown": "Inconnu",
+      "ended": "Tour terminé ; état final non signalé"
+    },
+    "elapsedReported": "Dernière durée signalée : {{value}} s"
   }
 }

@@ -20,11 +20,18 @@ const count = (value: unknown): number | undefined =>
 export const parseSubagentProgress = (value: unknown): SubagentProgress | null => {
   if (!isRecord(value) || value.version !== 1 || !Array.isArray(value.children)) return null;
   const children: SubagentProgress['children'] = [];
+  let hasDiscardedChildren = value.children.length > MAX_CHILDREN;
   const ids = new Set<string>();
   for (const entry of value.children.slice(0, MAX_CHILDREN)) {
-    if (!isRecord(entry)) continue;
+    if (!isRecord(entry)) {
+      hasDiscardedChildren = true;
+      continue;
+    }
     const id = text(entry.id);
-    if (!id || ids.has(id)) continue;
+    if (!id || ids.has(id)) {
+      hasDiscardedChildren = true;
+      continue;
+    }
     ids.add(id);
     const tokens = count(entry.tokens);
     children.push({
@@ -37,5 +44,5 @@ export const parseSubagentProgress = (value: unknown): SubagentProgress | null =
       cost: count(entry.cost),
     });
   }
-  return children.length ? { version: 1, children } : null;
+  return children.length ? { version: 1, children, hasDiscardedChildren } : null;
 };

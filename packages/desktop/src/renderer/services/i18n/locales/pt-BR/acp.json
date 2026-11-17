@@ -45,7 +45,9 @@
       "done": "Concluído",
       "error": "Falhou",
       "stopped": "Interrompido",
-      "unknown": "Desconhecido"
-    }
+      "unknown": "Desconhecido",
+      "ended": "Turno encerrado; estado final não informado"
+    },
+    "elapsedReported": "Último tempo informado: {{value}} s"
   }
 }

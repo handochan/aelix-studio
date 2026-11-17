@@ -2,7 +2,7 @@ import type { BadgeProps } from '@arco-design/web-react';
 import { Badge, Button, Message, Spin, Tooltip } from '@arco-design/web-react';
 import { IconDown, IconRight } from '@arco-design/web-react/icon';
 import { Checklist, Download, Right } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import { getAcpImageFileName } from '@/common/chat/acpToolCallOutput';
@@ -10,8 +10,11 @@ import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/co
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
-import SubagentProgressPanel from '../acp/SubagentProgress';
-import { parseSubagentProgress } from '../acp/SubagentProgress/parser';
+import SubagentProgressPanel, {
+  presentSubagentTool,
+  type SubagentPresentation,
+  type SubagentTurnSignal,
+} from '../acp/SubagentProgress';
 import './MessageToolGroupSummary.css';
 
 const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
@@ -30,11 +33,12 @@ const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
   }
 };
 
-const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }> = ({ item, subagents }) => {
+const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: SubagentPresentation | null }> = ({
+  item,
+  subagents,
+}) => {
   const { t } = useTranslation();
-  const interrupted =
-    parseSubagentProgress(subagents)?.children.some((child) => child.state === 'stopped' || child.state === 'error') ??
-    false;
+  const interrupted = subagents?.interrupted ?? false;
   const [expanded, setExpanded] = useState(interrupted);
   useEffect(() => {
     if (interrupted) setExpanded(true);
@@ -69,17 +73,17 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }
       });
       const next = normalizeToolMessages([message as ToolMessage]).find((candidate) => candidate.key === item.key);
       if (next) setFullItem(next);
-      else setLoadError(true);
+      else if (interrupted) setLoadError(true);
     } catch {
       setLoadError(true);
     } finally {
       setLoadingFull(false);
     }
-  }, [item, fullItem, loadingFull]);
+  }, [item, fullItem, loadingFull, interrupted]);
 
   useEffect(() => {
-    if (expanded && item.truncated && !loadError) void loadFullItem();
-  }, [expanded, item.truncated, loadError, loadFullItem]);
+    if (interrupted && expanded && item.truncated && !loadError) void loadFullItem();
+  }, [interrupted, expanded, item.truncated, loadError, loadFullItem]);
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded;
@@ -88,7 +92,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }
   };
 
   return (
-    <div className='flex flex-col' data-tool-call-id={item.key}>
+    <div className='flex flex-col' data-tool-call-id={subagents ? item.key : undefined}>
       {messageContext}
       <div className='flex flex-row color-#86909C gap-12px items-center'>
         <Badge status={statusToBadge(item.status)} className={item.status === 'running' ? 'badge-breathing' : ''} />
@@ -111,7 +115,7 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }
           </span>
         )}
       </div>
-      <SubagentProgressPanel value={subagents} />
+      {subagents && <SubagentProgressPanel progress={subagents.progress} />}
       {expanded && hasDetail && (
         <div className='tool-detail-panel m-l-20px m-t-4px'>
           {loadingFull && <div className='tool-detail-label'>Loading...</div>}
@@ -154,43 +158,50 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: unknown }
   );
 };
 
-const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messages }) => {
-  const subagentsByCall = useMemo(
+const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[]; turn?: SubagentTurnSignal }> = ({
+  messages,
+  turn,
+}) => {
+  const extensionsByCall = useMemo(
     () =>
       new Map<string, unknown>(
         messages.flatMap((message) =>
-          message.type === 'acp_tool_call' && message.content?.update
-            ? [[message.content.update.tool_call_id, message.content._meta?.['aelix/subagents']] as const]
+          message.type === 'acp_tool_call' && message.content?.update && message.content._meta !== undefined
+            ? [[message.content.update.tool_call_id, message.content._meta] as const]
             : []
         )
       ),
     [messages]
   );
-  const hasSubagents = [...subagentsByCall.values()].some((value) => parseSubagentProgress(value) !== null);
-  const tools = useMemo(
+  const normalized = useMemo(() => normalizeToolMessages(messages), [messages]);
+  const presented = useMemo(
     () =>
-      normalizeToolMessages(messages).map((item) => {
-        const progress = parseSubagentProgress(subagentsByCall.get(item.key));
-        // Native cancellation may end the children without a final parent tool frame.
-        const stopped =
-          progress?.children.some((child) => child.state === 'stopped') &&
-          progress.children.every(
-            (child) => child.state === 'done' || child.state === 'error' || child.state === 'stopped'
-          );
-        return item.status === 'running' && stopped ? { ...item, status: 'canceled' as const } : item;
+      normalized.map((item) => {
+        const extension = extensionsByCall.get(item.key);
+        const subagents = extension ? presentSubagentTool(extension, item.status, turn) : null;
+        return { item: subagents ? { ...item, status: subagents.parentStatus } : item, subagents };
       }),
-    [messages, subagentsByCall]
+    [normalized, extensionsByCall, turn]
   );
+  const tools = presented.map(({ item }) => item);
+  const hasSubagents = presented.some(({ subagents }) => subagents !== null);
   const hasRunning = tools.some((item) => item.status === 'running');
   const [showMore, setShowMore] = useState(hasRunning || hasSubagents);
+  const userToggled = useRef(false);
 
   useEffect(() => {
-    if (hasRunning || hasSubagents) setShowMore(true);
+    if ((hasRunning || hasSubagents) && (!hasSubagents || !userToggled.current)) setShowMore(true);
   }, [hasRunning, hasSubagents]);
 
   return (
     <div className='tool-group-summary'>
-      <div className='tool-group-summary__header' onClick={() => setShowMore(!showMore)}>
+      <div
+        className='tool-group-summary__header'
+        onClick={() => {
+          userToggled.current = true;
+          setShowMore(!showMore);
+        }}
+      >
         <span className='tool-group-summary__icon'>
           {hasRunning ? <Spin size={12} /> : <Checklist theme='outline' size='14' />}
         </span>
@@ -201,8 +212,8 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messag
       </div>
       {showMore && (
         <div className='tool-group-summary__body'>
-          {tools.map((item) => (
-            <ToolItemDetail key={item.key} item={item} subagents={subagentsByCall.get(item.key)} />
+          {presented.map(({ item, subagents }) => (
+            <ToolItemDetail key={item.key} item={item} subagents={subagents} />
           ))}
         </div>
       )}
