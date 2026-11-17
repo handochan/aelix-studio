@@ -69,6 +69,8 @@ A recapture emits a GitHub warning annotation. `outbound-sessions.json` retains
 `recaptures`, `captureAttempts` and per-capture/outer budgets on each session;
 acceptance exposes `outboundRecaptures` and `recapturedAudits`. Passing after a
 recapture is therefore visible rather than indistinguishable from one capture.
+Interrupted acceptance/cleanup also preserves the current run's recapture
+history in its failed receipt.
 
 The two retained/preexisting socket **negative controls** use `--single-capture`:
 their one-shot peer owns state outside the audited command, so replaying only
