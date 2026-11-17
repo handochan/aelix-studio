@@ -129,11 +129,12 @@ def setup(api):
                    RECOVERY_ADAPTER=str(adapter_python), RECOVERY_ADAPTER_ARGS=json.dumps(command),
                    RECOVERY_OBSERVER_ARGS=json.dumps([str(python), *prefix]),
                    RECOVERY_APP_EXECUTABLE=os.environ['PROVIDER_APP_EXECUTABLE'],
-                   DEBUG='pw:browser', AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
+                   AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
                    AIONUI_DISABLE_DEVTOOLS='1', AIONUI_CDP_PORT='0',
                    AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
         env = gui_environment(env)
+        env.pop('DEBUG', None)  # Investigation ablation: no driver/app DEBUG.
         process = None
         try:
             process = await asyncio.create_subprocess_exec('node', str(HERE / 'smoke.mjs'), cwd=ROOT, env=env,

@@ -3,12 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import {
-  closeElectron as baseCloseElectron,
-  launchWithIdentity,
-  recordLaunchFailure,
-  sandboxProcesses,
-} from './verification.mjs';
+import { launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -179,8 +174,16 @@ async function closeElectron(current) {
   if (!current) return;
   const configBefore = configState();
   const requests = await current.evaluate(() => globalThis.__egressInvestigation).catch(() => null);
-  await baseCloseElectron(current);
-  diagnostic('after-os-exit', { configBefore, configAfter: configState(), requests, logMarkers: logMarkers(sandbox) });
+  await current.close();
+  diagnostic('after-close', {
+    explicitOsWait: false,
+    debugEnabled: Boolean(process.env.DEBUG),
+    mainExitCode: current.process().exitCode,
+    configBefore,
+    configAfter: configState(),
+    requests,
+    logMarkers: logMarkers(sandbox),
+  });
 }
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   investigationLaunch++;
