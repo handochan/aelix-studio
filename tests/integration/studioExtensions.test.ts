@@ -514,6 +514,44 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     await isolated.dispose();
   }, 240_000);
 
+  // Second review: on a file system that ignores case, pip leaves one file that two
+  // distributions record in different cases. Carrying it over must not block every later change.
+  it('keeps changing a generation in which two distributions record one file in different cases', async (context) => {
+    const probe = path.join(sandbox, 'case probe');
+    await writeFile(probe, '');
+    const ignoresCase = await readFile(path.join(sandbox, 'CASE PROBE')).then(
+      () => true,
+      () => false
+    );
+    if (!ignoresCase) context.skip();
+    const isolated = new ExtensionService({
+      runtime: bundle,
+      root: path.join(sandbox, 'case', 'aelix-runtime'),
+      env: environment,
+    });
+    const upper = await install(
+      await wheel({ name: 'fixture-upper', files: { 'casepkg/Mod.py': 'X = 1\n' } }, 'case'),
+      undefined,
+      isolated
+    );
+    const lower = await install(
+      await wheel({ name: 'fixture-lower', files: { 'casepkg/mod.py': 'X = 2\n' } }, 'case'),
+      undefined,
+      isolated
+    );
+    const next = await install(await wheel({ name: 'fixture-casenext' }, 'case'), undefined, isolated);
+    const removed = await finish(await isolated.request(OWNER, { action: 'remove', name: 'fixture-lower' }), isolated);
+    expect([upper.phase, lower.phase, next.phase, removed.phase]).toEqual([
+      'switched',
+      'switched',
+      'switched',
+      'switched',
+    ]);
+    expect(names(await list(isolated))).toEqual(['fixture-casenext', 'fixture-upper']);
+    expect(await bundleDifferences(bundle)).toEqual([]);
+    await isolated.dispose();
+  }, 300_000);
+
   // Review findings 3 and 7, at the level of the real lock holder: it is the only writer of
   // shared state, removes only entries of directories that are really the helper's own, and
   // writes nothing once it is gone.

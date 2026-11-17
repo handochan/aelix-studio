@@ -117,6 +117,16 @@ export function rewriteScriptHeader(content: Buffer, from: string, to: string): 
   ]);
 }
 
+/** Device and inode of a regular file, without following a link; undefined for anything else. */
+async function fileIdentity(file: string): Promise<string | undefined> {
+  try {
+    const stats = await lstat(file, { bigint: true });
+    return stats.isFile() ? `${stats.dev}:${stats.ino}` : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 const inside = (directory: string, file: string): boolean => {
   const relative = path.relative(directory, file);
   return relative !== '' && !relative.startsWith('..') && !path.isAbsolute(relative);
@@ -131,6 +141,11 @@ const inside = (directory: string, file: string): boolean => {
  * at the bundled interpreter, so writing "onto" one of them would write into the bundle;
  * a recorded file that meets an entry of the new environment, or that would leave either
  * generation through a link, ends the change instead.
+ *
+ * Where the file system ignores case or Unicode normalization, two distributions can list
+ * one file under two spellings. The second spelling then meets the very file this
+ * carry-over made from the same source; that file is already in place and is skipped. Only
+ * such a file is: an entry venv made, or anything else, still ends the change.
  */
 async function carryOver(
   parent: GenerationPaths,
@@ -149,6 +164,8 @@ async function carryOver(
     return real === root || inside(root, real);
   };
   const copied = new Set<string>();
+  /** File made by this carry-over (device and inode) to the file it was copied from. */
+  const made = new Map<string, string>();
   for (const distribution of contentDistributions(snapshot)) {
     for (const listed of distribution.files) {
       if (listed.endsWith('.pyc')) continue;
@@ -159,11 +176,8 @@ async function carryOver(
       // Two distributions may list the same file (a shared package); it is copied once.
       if (copied.has(destination)) continue;
       // oxlint-disable-next-line no-await-in-loop -- files are copied one at a time, in RECORD order
-      const regular = await lstat(source).then(
-        (stats) => stats.isFile(),
-        () => false
-      );
-      if (!regular) continue;
+      const origin = await fileIdentity(source);
+      if (origin === undefined) continue;
       // oxlint-disable-next-line no-await-in-loop
       await mkdir(path.dirname(destination), { recursive: true });
       // oxlint-disable-next-line no-await-in-loop
@@ -176,8 +190,17 @@ async function carryOver(
         await copyFile(source, destination, constants.COPYFILE_EXCL);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-        refuse(distribution.name, `lists ${path.basename(destination)}, which belongs to the new environment`);
+        // oxlint-disable-next-line no-await-in-loop
+        const existing = await fileIdentity(destination);
+        if (existing !== undefined && made.get(existing) === origin) continue;
+        refuse(
+          distribution.name,
+          `lists ${path.basename(destination)}, which the new environment already has and this change did not copy`
+        );
       }
+      // oxlint-disable-next-line no-await-in-loop
+      const identity = await fileIdentity(destination);
+      if (identity !== undefined) made.set(identity, origin);
       copied.add(destination);
       if (platform === 'win32' || path.dirname(destination) !== candidate.scripts) continue;
       // oxlint-disable-next-line no-await-in-loop

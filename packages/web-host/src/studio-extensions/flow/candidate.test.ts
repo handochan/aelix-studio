@@ -1,3 +1,4 @@
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,6 +17,18 @@ import { ExtensionFailure } from '../types';
 import { createCandidate, rewriteScriptHeader, scanGeneration, type Candidate } from './candidate';
 
 const [PARENT, CHILD] = ['g00000001-aaaa', 'g00000002-bbbb'];
+
+/** Whether the temporary directory ignores case in names, as macOS and Windows do by default. */
+function ignoresCase(): boolean {
+  const directory = mkdtempSync(path.join(os.tmpdir(), 'studio-case-'));
+  try {
+    writeFileSync(path.join(directory, 'probe'), '');
+    return existsSync(path.join(directory, 'PROBE'));
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+const IGNORES_CASE = ignoresCase();
 
 describe('console script headers', () => {
   const [from, to] = ['/data/Application Support/g1/venv/bin/python', '/data/Application Support/g2/venv/bin/python'];
@@ -206,6 +219,55 @@ describe('building and scanning a candidate generation', () => {
     expect(await readFile(path.join(child.paths.site, 'shared', '__init__.py'), 'utf8')).toBe('shared');
     expect(await readdir(child.paths.agent)).toEqual(['settings.json']);
   });
+
+  // Second review: where the file system ignores case (macOS and Windows by default), two
+  // distributions can list one file under two spellings. The second spelling then meets the
+  // file this carry-over just made, which is not an entry of the new environment.
+  it.runIf(IGNORES_CASE)('carries over one file that two distributions list in different cases', async () => {
+    const parent = await createCandidate(helper.context, PARENT, null);
+    await install(parent, { name: 'demo-upper', extension: false, files: { 'casepkg/Mod.py': 'X = 1\n' } });
+    await install(parent, { name: 'demo-lower', extension: false, files: { 'casepkg/mod.py': 'X = 2\n' } });
+    const child = await createCandidate(helper.context, CHILD, await finished(parent));
+    expect(await readdir(path.join(child.paths.site, 'casepkg'))).toEqual(['mod.py']);
+    expect(await readFile(path.join(child.paths.site, 'casepkg', 'Mod.py'), 'utf8')).toBe('X = 2\n');
+    expect(await problems(child)).toEqual([]);
+  });
+
+  it.skipIf(IGNORES_CASE)('carries over both files when the file system tells the two cases apart', async () => {
+    const parent = await createCandidate(helper.context, PARENT, null);
+    await install(parent, { name: 'demo-upper', extension: false, files: { 'casepkg/Mod.py': 'X = 1\n' } });
+    await install(parent, { name: 'demo-lower', extension: false, files: { 'casepkg/mod.py': 'X = 2\n' } });
+    const child = await createCandidate(helper.context, CHILD, await finished(parent));
+    expect((await readdir(path.join(child.paths.site, 'casepkg'))).toSorted()).toEqual(['Mod.py', 'mod.py']);
+  });
+
+  it.runIf(IGNORES_CASE)(
+    'still never writes through an entry of the new environment spelled in another case',
+    async () => {
+      const parent = await createCandidate(helper.context, PARENT, null);
+      await install(parent, { name: 'demo' });
+      const entry = path.join(parent.paths.scripts, OTHER_INTERPRETER);
+      await rm(entry);
+      await writeFile(entry, 'not an interpreter');
+      const listed = path
+        .relative(parent.paths.site, path.join(parent.paths.scripts, OTHER_INTERPRETER.toUpperCase()))
+        .split(path.sep)
+        .join('/');
+      await writeFile(path.join(parent.paths.site, 'demo-0.1.0.dist-info', 'RECORD'), `${listed},,\n`, { flag: 'a' });
+      const interpreter = await readFile(helper.context.bundle.python, 'utf8');
+      const error = await createCandidate(helper.context, CHILD, await finished(parent)).then(
+        () => undefined,
+        (caught: unknown) => caught
+      );
+      expect(await readFile(helper.context.bundle.python, 'utf8')).toBe(interpreter);
+      expect([(error as ExtensionFailure).code, (error as ExtensionFailure).detail]).toEqual([
+        'GENERATION_MODIFIED',
+        [
+          `demo lists ${OTHER_INTERPRETER.toUpperCase()}, which the new environment already has and this change did not copy`,
+        ],
+      ]);
+    }
+  );
 
   it('refuses to build on a parent whose metadata is damaged', async () => {
     const parent = await createCandidate(helper.context, PARENT, null);
