@@ -1,8 +1,8 @@
 # D04 spike 실험 기록
 
 [D04 ADR 초안](README.md)의 근거다. 2026-11-17의 실행 기록이고, 계속 갱신하는 문서가 아니다. 1–6절은 1차
-실험, 7절은 독립 리뷰 뒤의 2차 실험이다. 1차의 세대 관리 절차(3절)에는 리뷰가 찾은 결함이 있었고 7절에서
-고친 절차로 다시 실행했다.
+실험, 7절은 첫 독립 리뷰 뒤의 2차 실험, 8절은 둘째 리뷰 뒤의 3차 실험이다. 1차의 세대 관리 절차(3절)와
+2차 절차(7.6)에는 리뷰가 찾은 결함이 있었고, 다음 절에서 고쳐 다시 실행했다.
 
 ## 환경과 재료
 
@@ -35,8 +35,9 @@
   `(allow network-outbound (remote ip "localhost:18732"))`만 더했다. 차단 상태에서 `curl https://pypi.org`가
   실패하는 것을 먼저 확인했다.
 - 내부 index: wheel로 만든 PEP 503 디렉터리를 `python -m http.server --bind 127.0.0.1 18732`로 띄웠다.
-- 세대 관리 절차는 시험용 Python 스크립트로 돌렸다(1차 약 350줄, 2차 약 600줄). 저장소에 넣지 않았다.
-  2차 스크립트가 하는 일은 ADR 5.3–5.9에 적힌 순서 그대로다.
+- 세대 관리 절차는 시험용 Python 스크립트로 돌렸다(1차 약 350줄, 2차 약 600줄, 3차 약 700줄). 저장소에
+  넣지 않았다. 3차 스크립트가 하는 일은 ADR 5.3–5.9에 적힌 순서와 같다. 다만 되돌리기와 lease의 잠금
+  순서는 ADR 5.6의 설계와 다르다(잠금 밖에서 포인터를 읽는다).
 
 아래 명령에서 `<번들>`은 번들 사본, `<세대>`는 세대 디렉터리, `<W>`는 실험용 wheel 디렉터리다.
 `세대 실행`은 `<세대>/venv/bin/python -I -B -X utf8 <번들>/launch.py native`를 줄인 말이다.
@@ -222,7 +223,7 @@ sandbox(`deny network*`)가 system log에 남기는 거부 기록도 봤다. cur
 | --------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `node <번들>/launch.cjs HYB --extension aelix_starter:setup --extension studio32_depext:setup`                                    | `/hello`, `/studio32-table`                                                                   | `hello from the aelix starter extension`. `tabulate  0.10.0` 표(세대에만 있는 의존성)                                                                                                                    |
 | `node <번들>/launch.cjs HYB --extension aelix_starter:setup`                                                                      | `/extension list`, `/extension install <0.2.0 wheel>`, `/extension remove aelix-starter`      | 목록: `aelix-starter … — REFUSED (untrusted sys.path provenance); not loaded`. install·remove 둘 다 승인 뒤 `{"code": -33002, "message": "Aelix extension manager failed"}`. 세대의 `dist-info`는 그대로 |
-| 같은 실행, `PATH`에 `uv` 포함                                                                                                     | install, remove                                                                               | 위와 같다                                                                                                                                                                                                |
+| 같은 실행, `PATH`에 `uv` 포함                                                                                                     | install, remove                                                                               | 위와 같다. 세대에 pip이 있어 pip 경로를 탔다. uv로 넘어가는 경우의 확인이 아니다                                                                                                                         |
 | 어댑터가 실행한 명령을 직접 실행(`대화 형태 extension install <wheel> --yes`)                                                     | —                                                                                             | `→ <번들>/python/bin/python3 -P -m pip install …`, `error: externally-managed-environment`, `pip install failed (exit 1).` `remove`도 같은 오류. 추가한 디렉터리에 pip이 없으면 종료 2                   |
 | `node <번들>/launch.cjs <세대 venv interpreter 인자> --extension aelix_starter:setup --extension-manager <번들>/native/bin/aelix` | `/extension list`, install, remove                                                            | 목록: `No extensions installed`. install·remove는 `-33002`. 세대는 그대로                                                                                                                                |
 | `node <번들>/launch.cjs HYB --extension aelix_starter:setup`                                                                      | `/extension disable aelix_starter:setup`, `/hello`                                            | `{"code": -32004, "message": "This extension is part of the adapter's launch configuration; change that configuration instead", "data": {"kind": "extension_owned_by_launch", …}}`. `/hello`는 계속 동작 |
@@ -286,3 +287,49 @@ pack마다 링크 하나를 둔 디렉터리(`packs/aelix_starter -> <세대>/�
 | 16  | loopback만 | index에 0.3.0(import 안 됨)을 올린 뒤 `update aelix-starter-ext`                                     | native 종료 0, `verify FAILED: load error aelix_starter:setup: No module named 'studio32_module_that_does_not_exist'` | 폐기   |
 | 17  | 열림       | `remove aelix-starter`, 이어서 `install git+file://<starter git 저장소>`                             | 제거 뒤 검증 통과. git: `Resolved … to commit 71afc5d2…`, `Building wheel …`, 검증 통과                               | g4, g5 |
 | 18  | —          | 되돌리기                                                                                             | `ROLLED BACK current -> g4 (was g5)`. 대화 형태의 `resources/list`에 `studio32_depext:setup`만 있다                   | g4     |
+
+## 8. 3차 실험 (둘째 리뷰 반영)
+
+추가로 만든 wheel: `studio32-noendpoint`(`aelix.extensions` entry point 없음), `studio32-compactref`
+(`Requires-Dist: studio32_dep@git+ssh://example.invalid/studio32-dep.git`, 공백 없음), `studio32-setupconnect`
+(`setup()`이 `http://127.0.0.1:18741/setup-was-here`를 요청), `studio32-chatwrite`.
+
+### 8.1 대화창 설치와 pip 환경 변수
+
+번들 사본을 하나 더 만들어 그 Python으로 세대를 만들었다(`aelix-starter-ext 0.1.0`). 실행은 7.4의 `HYB`와
+같고 `--extension aelix_starter:setup`을 줬다. prompt는 `/extension install <wheel>`이고 승인 요청에 허용으로
+답했다.
+
+| 어댑터의 환경                     | 관찰                                                                                                                                                                                |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| pip 변수 없음                     | `-33002 Aelix extension manager failed`. 세대와 번들 사본 그대로                                                                                                                    |
+| `PIP_TARGET=<세대 site-packages>` | 응답은 `-33002`였지만 세대에 `studio32_chatwrite-0.1.0.dist-info`가 생겼다. 번들 사본은 그대로                                                                                      |
+| `PIP_BREAK_SYSTEM_PACKAGES=1`     | `"exitCode": 0`, `Successfully installed studio32-noendpoint-0.1.0`. **번들 사본에 파일 8개가 추가됐다**(`python/lib/python3.12/site-packages/studio32_noendpoint…`). 세대는 그대로 |
+
+### 8.2 2차 절차에 남아 있던 빈틈
+
+2차 스크립트(7.6의 절차)를 그대로 실행했다.
+
+| 실행                                                                            | 관찰                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `studio32_noendpoint` 반입                                                      | native 종료 0, `verify passed: {"studio32-noendpoint": "0.1.0"} \| loaded with -e: []`, `SWITCHED current -> g1`                                                                        |
+| `studio32_compactref` 반입                                                      | 정적 검사를 통과했다(`1 wheel(s) checked and copied`). pip: `Failed to build 'studio32_dep' when git clone --filter=blob:none --quiet ssh://example.invalid/studio32-dep.git …`, 종료 1 |
+| `studio32_setupconnect` 반입, 요청을 기록하는 서버를 `127.0.0.1:18741`에 띄움   | 로드 검증 중 서버 기록: `/setup-was-here`. (서버가 404를 돌려줘 `setup()`이 실패했고 후보는 폐기됐다)                                                                                   |
+| helper 환경에 `AELIX_SETTINGS_PATH=<밖의 파일>`을 두고 `aelix_starter_ext` 반입 | 종료 0, 전환됨. 밖의 파일에 `{"extensionSources": [{"spec": "<보관소>/…/aelix_starter_ext-0.1.0…"}]}`가 쓰였다. 후보의 `agent/`에는 `settings.json`이 없다                              |
+
+### 8.3 고친 뒤
+
+스크립트를 세 군데 고쳤다. 띄우는 프로세스의 환경을 허용 목록으로 만든다. 정적 검사가 `METADATA` 헤더를
+읽고 `Requires-Dist`를 직접 참조 형태(`이름 [extras] @ …`, 공백은 없어도 됨)로 해석한다. 설치 전후의
+배포판과 확장 entry point를 비교하는 대조를 넣고 기대 확장 집합을 필수로 했다.
+
+| 실행                                                                                                | 관찰                                                                                                                                                                                                          | 결과               |
+| --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------ |
+| `studio32_noendpoint` 반입                                                                          | native 종료 0, `gate FAILED: the requested package provides no aelix.extensions entry point`                                                                                                                  | 폐기               |
+| `studio32_compactref` 반입                                                                          | `REFUSED before any installer ran: … direct-reference dependency studio32_dep@git+ssh://example.invalid/studio32-dep.git` 종료 7                                                                              | 후보를 만들지 않음 |
+| helper 환경에 `AELIX_SETTINGS_PATH`와 `AELIX_AUTH_PATH`를 밖의 파일로 두고 `aelix_starter_ext` 반입 | `gate passed: request ["aelix-starter-ext", "0.1.0"], expected extensions ["aelix-starter"]`, 검증 통과. 밖의 디렉터리는 비어 있고 세대의 `agent/`에 `auth.json`·`extension_pins.json`·`settings.json`이 있다 | g1                 |
+| `studio32_depext` 반입(같은 폴더에 `tabulate`)                                                      | `expected extensions ["aelix-starter", "studio32-depext"]`, 검증 통과                                                                                                                                         | g2                 |
+| `update aelix-starter-ext`(새 버전 없음)                                                            | native 종료 0, `DISCARDED candidate g3: nothing changed` 종료 9                                                                                                                                               | 전환하지 않음      |
+| `remove aelix-starter`                                                                              | `gate passed: request ["aelix-starter-ext", null], expected extensions ["studio32-depext"]`, 검증 통과                                                                                                        | g3                 |
+| `remove studio32-depext`(마지막 확장)                                                               | `expected extensions []`, `loaded with -e: []`, 검증 통과. 세대에 `tabulate`만 남는다                                                                                                                         | g4                 |
+| `studio32_setupconnect` 반입, 서버를 띄움                                                           | 대조 통과, 로드 검증 중 서버 기록 `/setup-was-here`. 고친 뒤에도 요청은 나간다                                                                                                                                | 폐기(404로 실패)   |
