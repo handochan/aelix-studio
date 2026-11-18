@@ -21,9 +21,15 @@ def _studio_generation(bundle, state):
     switch), lock a lease on that generation for the life of this process, release the lock.
     A change holds the lock for as long as it installs; after a short wait the lease is taken
     without it and kept only if the generation is still one clean-up keeps (current or
-    previous). Clean-up runs under the lock and never removes a generation whose lease is
-    held. Anything unusable means the bundle alone, exactly as before extensions existed.
-    Windows is not offered generations yet (Studio #32, stage 1a').
+    previous). That holds because clean-up runs under the lock after the change's switch, and
+    a generation that left current/previous never comes back (D04 ADR 5.6).
+
+    A lease is locked before it gets its name in ``leases/``: it is created as a pending file
+    there, locked, then renamed. Clean-up removes only lease files it found unlocked, so a
+    lease under its generation's name is never one it took for stale; if clean-up removed the
+    pending file first, the rename fails and the lease is taken again. Anything unusable means
+    the bundle alone, exactly as before extensions existed. Windows is not offered generations
+    yet (Studio #32, stage 1a').
     """
     if os.name == 'nt' or not state or not os.path.isabs(state):
         return None
@@ -94,34 +100,56 @@ def _studio_generation(bundle, state):
                 return current, previous, found
         return None
 
+    def acquire(handle, wait):
+        deadline = time.monotonic() + wait
+        while True:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                return True
+            except OSError as error:
+                if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES) or time.monotonic() >= deadline:
+                    return False
+                time.sleep(0.05)
+
     def lock(path, wait):
         try:
             handle = os.open(path, os.O_RDWR | os.O_CREAT | nofollow, 0o600)
         except OSError:
             return None
-        deadline = time.monotonic() + wait
-        while True:
-            try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                return handle
-            except OSError as error:
-                if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES) or time.monotonic() >= deadline:
-                    os.close(handle)
-                    return None
-                time.sleep(0.05)
+        if acquire(handle, wait):
+            return handle
+        os.close(handle)
+        return None
 
-    def lease(root, generation):
-        leases = root / 'leases'
-        if not own(leases):
-            return None
-        file = leases / f'{generation}.{os.getpid()}-{secrets.token_hex(4)}'
-        handle = os.open(file, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
-        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        return file, handle
+    def lease(leases, generation):
+        token = f'{os.getpid()}-{secrets.token_hex(4)}'
+        # A name clean-up maps to no generation; it is renamed only once it is locked.
+        pending = leases / f'.pending.{token}'
+        handle = os.open(pending, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
+        try:
+            # The lease probe holds a lease it tests for an instant; wait that out.
+            if acquire(handle, 1.0):
+                final = leases / f'{generation}.{token}'
+                os.rename(pending, final)
+                if os.stat(final, follow_symlinks=False).st_ino == os.fstat(handle).st_ino:
+                    return final, handle
+                os.unlink(final)
+        except OSError:
+            pass
+        try:
+            os.unlink(pending)
+        except OSError:
+            pass
+        os.close(handle)
+        return None
 
     def release(held):
+        # Out of the directory first, then unlocked: clean-up never sees it unlocked under its name.
+        try:
+            os.unlink(held[0])
+        except OSError:
+            pass
         os.close(held[1])
-        os.unlink(held[0])
 
     def arguments_of(root, generation, found):
         directory = root / 'generations' / generation
@@ -135,7 +163,7 @@ def _studio_generation(bundle, state):
     if binding['pythonMinor'] == '':
         return None
     root = Path(os.path.realpath(state))
-    if not own(root) or not own(root / 'generations'):
+    if not own(root) or not own(root / 'generations') or not own(root / 'leases'):
         return None
     if not (root / 'current.json').exists() and not (root / 'current.previous.json').exists():
         return None
@@ -143,9 +171,11 @@ def _studio_generation(bundle, state):
     try:
         for _attempt in range(3):
             chosen = pointer_in_effect(root)
-            held = chosen and lease(root, chosen[0])
-            if not held:
+            if not chosen:
                 return None
+            held = lease(root / 'leases', chosen[0])
+            if not held:
+                continue
             again = pointer_in_effect(root)
             if again and chosen[0] in (again[0], again[1]):
                 break
@@ -159,8 +189,19 @@ def _studio_generation(bundle, state):
     if result is None:
         release(held)
     else:
-        _LEASES.append(held[1])
+        _LEASES.append(held)
     return result
+
+
+def _release_leases():
+    """Give back the leases of this process when it ends normally; clean-up removes any left behind."""
+    for file, handle in _LEASES:
+        try:
+            os.unlink(file)
+        except OSError:
+            pass
+        os.close(handle)
+    _LEASES.clear()
 
 
 root = Path(__file__).resolve().parent
@@ -207,6 +248,9 @@ elif mode == 'acp':
                   '--aelix-arg=-Xutf8', '--aelix-arg=' + str(root / 'launch.py'), *native]
         for extension in [] if generation is None else generation[1]:
             prefix += ['--extension', extension]
+        if _LEASES:
+            import atexit
+            atexit.register(_release_leases)
     sys.argv = ['aelix-acp', *prefix, *arguments]
     from aelix_acp.server import main
     main()

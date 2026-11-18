@@ -350,8 +350,85 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
                 fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
         finally:
             process.communicate(input='\n', timeout=30)
-        with open(lease, 'rb') as handle:
-            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        # An adapter that ends normally takes its lease away instead of leaving it for clean-up.
+        self.assertEqual(list((self.state / 'leases').iterdir()), [])
+
+    def in_process(self, flock):
+        """Run the launcher's generation choice in this process, with ``fcntl.flock`` replaced."""
+        import fcntl
+        import types
+        source = (self.bundle / 'launch.py').read_text()
+        namespace = {'os': os, 'sys': sys, 'Path': Path, '_LEASES': []}
+        exec(compile(source[source.index('def _studio_generation'):source.index('\nroot = Path(__file__)')],
+                     'launch.py', 'exec'), namespace)
+        fake = types.ModuleType('fcntl')
+        for name in dir(fcntl):
+            setattr(fake, name, getattr(fcntl, name))
+        fake.flock = flock
+        with patch.dict(sys.modules, {'fcntl': fake}):
+            result = namespace['_studio_generation'](self.bundle, str(self.state))
+        return result, namespace['_LEASES']
+
+    def clean_up_leases(self, flock):
+        """What the helper's clean-up does to leases: remove every lease file nobody holds locked."""
+        import fcntl
+        for lease in (self.state / 'leases').iterdir():
+            with open(lease, 'rb') as handle:
+                try:
+                    flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    continue
+            lease.unlink()
+
+    def test_a_lease_clean_up_finds_unlocked_never_carries_the_name_of_a_generation(self):
+        import fcntl
+        lock = self.state / 'lock'
+        real = fcntl.flock
+        calls = []
+
+        def flock(handle, operation):
+            # Between creating the lease file and locking it, a change's clean-up runs (review of
+            # the launcher piece, should-fix 1). The mutation lock is left alone.
+            if os.fstat(handle).st_ino != os.stat(lock).st_ino and not calls:
+                calls.append('clean-up')
+                self.clean_up_leases(real)
+            return real(handle, operation)
+
+        result, leases = self.in_process(flock)
+        try:
+            self.assertEqual(calls, ['clean-up'])
+            self.assertIsNotNone(result)
+            # The generation it chose has a lease under its name that clean-up finds locked, so
+            # the next clean-up keeps it, and with it the generation the conversation uses.
+            names = [file.name for file in (self.state / 'leases').iterdir()]
+            self.assertEqual(len(names), 1, names)
+            self.assertTrue(names[0].startswith(self.GENERATION + '.'), names)
+            self.clean_up_leases(real)
+            self.assertEqual([file.name for file in (self.state / 'leases').iterdir()], names)
+        finally:
+            for held in leases:
+                os.close(held[1] if isinstance(held, tuple) else held)
+
+    def test_waits_out_the_instant_the_lease_probe_holds_a_new_lease(self):
+        import errno
+        import fcntl
+        lock = self.state / 'lock'
+        refused = []
+
+        def flock(handle, operation):
+            if os.fstat(handle).st_ino != os.stat(lock).st_ino and len(refused) < 2:
+                refused.append(handle)
+                raise OSError(errno.EWOULDBLOCK, 'held by the probe')
+            return fcntl.flock(handle, operation)
+
+        result, leases = self.in_process(flock)
+        try:
+            self.assertIsNotNone(result)
+            self.assertEqual(len(leases), 1)
+            self.assertEqual(len(refused), 2)
+        finally:
+            for held in leases:
+                os.close(held[1] if isinstance(held, tuple) else held)
 
     def test_waits_only_briefly_for_a_change_that_holds_the_lock_and_still_adds_the_generation(self):
         import fcntl
@@ -360,7 +437,6 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
             reply, _ = self.started()
         packs = str(self.state / 'generations' / self.GENERATION / 'packs')
         self.assertEqual(reply['argv'], self.extended(self.GENERATION, [packs, 'legacy_pack.entry:setup']))
-        self.assertEqual(len(list((self.state / 'leases').iterdir())), 1)
 
     def test_falls_back_to_the_pointer_before_the_last_switch(self):
         cases = {
