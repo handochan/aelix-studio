@@ -86,10 +86,16 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
   return {
     port: staticHandle.port,
     backendPort: backendHandle.port,
-    url: staticHandle.url,
     localUrl: staticHandle.localUrl,
-    networkUrl: staticHandle.networkUrl,
-    lanIP: staticHandle.lanIP,
+    get url() {
+      return staticHandle.url;
+    },
+    get networkUrl() {
+      return staticHandle.networkUrl;
+    },
+    get lanIP() {
+      return staticHandle.lanIP;
+    },
     async stop() {
       await staticHandle.stop();
       await backendHandle.stop();

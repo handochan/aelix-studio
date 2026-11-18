@@ -36,13 +36,22 @@ await handle.stop();
 
 The listener defaults to IPv4 loopback. Its HTTP and WebSocket endpoints accept
 the listener's port on `127.0.0.1` or `localhost`. When remote access is enabled,
-they also accept the machine's IPv4 addresses at startup. WebSocket upgrades and
-state-changing HTTP requests require an Origin matching the request's Host.
+they also accept the machine's current IPv4 addresses without restarting after
+a Wi-Fi or VPN change. Reopen the desktop WebUI settings to read the current
+network URL. The standalone CLI prints the address present at startup. After a
+network change, use the machine's current IPv4 address with the same port.
+WebSocket upgrades and state-changing HTTP requests require an Origin matching
+the request's Host.
 Normal page and asset loads can omit the Origin header.
 
 A reverse proxy can use the existing `AELIX_STUDIO_ORIGIN` setting to declare
 its browser-facing origin. Preserve the browser-facing Host when forwarding
 requests, including WebSocket upgrades.
+
+The listener removes forwarded client IP headers before sending login requests
+to the backend. Behind a reverse proxy, devices share the backend's login rate
+limit. Failed attempts from one device can cause HTTP 429 for password or QR
+login requests from another device.
 
 ## Status
 
