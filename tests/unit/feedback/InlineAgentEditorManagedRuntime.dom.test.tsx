@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ConfigProvider } from '@arco-design/web-react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,11 +23,14 @@ vi.mock('@/renderer/components/chat/EmojiPicker', () => ({
 }));
 
 vi.mock('@uiw/react-codemirror', () => ({
-  default: () => <div data-testid='codemirror-stub' />,
+  default: ({ value, onChange }: { value: string; onChange: (value: string) => void }) => (
+    <textarea aria-label='Advanced JSON' value={value} onChange={(event) => onChange(event.target.value)} />
+  ),
 }));
 
 const testCustomAgentMock = vi.fn();
 vi.mock('@/common/adapter/ipcBridge', () => ({
+  assistants: { list: { invoke: vi.fn().mockResolvedValue([]) } },
   acpConversation: {
     testCustomAgent: { invoke: (...args: unknown[]) => testCustomAgentMock(...args) },
   },
@@ -35,10 +38,10 @@ vi.mock('@/common/adapter/ipcBridge', () => ({
 
 import InlineAgentEditor from '@/renderer/pages/settings/AgentSettings/InlineAgentEditor';
 
-const renderEditor = () =>
+const renderEditor = (onSave = vi.fn()) =>
   render(
     <ConfigProvider>
-      <InlineAgentEditor onSave={vi.fn()} onCancel={vi.fn()} />
+      <InlineAgentEditor onSave={onSave} onCancel={vi.fn()} />
     </ConfigProvider>
   );
 
@@ -92,5 +95,26 @@ describe('InlineAgentEditor managed runtime feedback', () => {
       expect(screen.getByText('settings.testConnectionFailAcp')).toBeInTheDocument();
     });
     expect(screen.getByText(/CLI exited before ACP initialize completed/i)).toBeInTheDocument();
+  });
+
+  it.each([
+    { setting: true, policy: { supports_side_question: true, supports_team: true } },
+    { setting: false, policy: { supports_side_question: true, supports_team: false } },
+    { setting: 'true', policy: { supports_side_question: true } },
+  ])('saves only boolean Team settings from Advanced JSON ($setting)', async ({ setting, policy }) => {
+    const save = vi.fn();
+    const user = userEvent.setup();
+    renderEditor(save);
+
+    const [name, command] = screen.getAllByRole('textbox');
+    await user.type(name, 'Aelix');
+    await user.type(command, 'aelix-acp');
+    await user.click(screen.getByText('settings.advancedMode'));
+    fireEvent.change(screen.getByRole('textbox', { name: 'Advanced JSON' }), {
+      target: { value: JSON.stringify({ behavior_policy: { supports_side_question: true, supports_team: setting } }) },
+    });
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ advanced: { behavior_policy: policy } }));
   });
 });

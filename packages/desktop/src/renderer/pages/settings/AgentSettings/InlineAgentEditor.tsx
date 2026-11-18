@@ -264,7 +264,7 @@ const InlineAgentEditor: React.FC<InlineAgentEditorProps> = ({ agent, onSave, on
     const skeleton: CustomAgentAdvancedOverrides = {
       yolo_id: advancedVal.yolo_id ?? '',
       native_skills_dirs: advancedVal.native_skills_dirs ?? [],
-      behavior_policy: advancedVal.behavior_policy ?? { supports_side_question: false },
+      behavior_policy: { supports_side_question: false, supports_team: false, ...advancedVal.behavior_policy },
       description: advancedVal.description ?? '',
     };
     return JSON.stringify(skeleton, null, 2);
@@ -320,6 +320,9 @@ const InlineAgentEditor: React.FC<InlineAgentEditorProps> = ({ agent, onSave, on
           const bp = p.behavior_policy as Record<string, unknown>;
           if (typeof bp.supports_side_question === 'boolean') {
             next.behavior_policy = { supports_side_question: bp.supports_side_question };
+          }
+          if (typeof bp.supports_team === 'boolean') {
+            next.behavior_policy = { ...next.behavior_policy, supports_team: bp.supports_team };
           }
         }
         if (typeof p.description === 'string' && p.description.trim()) next.description = p.description;

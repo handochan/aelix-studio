@@ -15,7 +15,7 @@ import type { TConversationRuntimeSummary } from '@/common/config/storage';
 export interface CustomAgentAdvancedOverrides {
   yolo_id?: string;
   native_skills_dirs?: string[];
-  behavior_policy?: { supports_side_question?: boolean };
+  behavior_policy?: { supports_side_question?: boolean; supports_team?: boolean };
   description?: string;
 }
 

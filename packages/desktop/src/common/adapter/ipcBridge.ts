@@ -36,6 +36,7 @@ import type {
   UpdateAssistantRequest,
 } from '../types/agent/assistantTypes';
 import type {
+  CustomAgentAdvancedOverrides,
   EnsureConversationRuntimeResponse,
   GetConfigOptionsResponse,
   SetConfigOptionRequest,
@@ -1148,12 +1149,7 @@ export const acpConversation = {
       icon?: string;
       args?: string[];
       env?: Array<{ name: string; value: string; description?: string }>;
-      advanced?: {
-        yolo_id?: string;
-        native_skills_dirs?: string[];
-        behavior_policy?: { supports_side_question?: boolean };
-        description?: string;
-      };
+      advanced?: CustomAgentAdvancedOverrides;
     }
   >('/api/agents/custom'),
   updateCustomAgent: httpPut<
@@ -1165,12 +1161,7 @@ export const acpConversation = {
       icon?: string;
       args?: string[];
       env?: Array<{ name: string; value: string; description?: string }>;
-      advanced?: {
-        yolo_id?: string;
-        native_skills_dirs?: string[];
-        behavior_policy?: { supports_side_question?: boolean };
-        description?: string;
-      };
+      advanced?: CustomAgentAdvancedOverrides;
     }
   >(
     (p) => `/api/agents/custom/${p.id}`,
