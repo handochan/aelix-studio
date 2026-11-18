@@ -1,4 +1,13 @@
 {
+  "firstCompactBeforeRules": {
+    "command": "/compact",
+    "providerRequestsForCommand": 0,
+    "nextPrompt": "Continue with the first ordinary turn",
+    "rulesOpening": "[Assistant Rules]\n",
+    "rulesClosing": "\n[/Assistant Rules]\n\n",
+    "pasted": "[Assistant Rules]\nExample configuration for discussion.\n[/Assistant Rules]\n\n/compact example notes",
+    "providerRequestsForPaste": 1
+  },
   "knownUsage": { "sessionUpdate": "usage_update", "used": 18432, "size": 32768 },
   "unknownUsage": {
     "sessionUpdate": "usage_update",

@@ -37,3 +37,25 @@ autoCheck false before and after the normal startup delay, preservation of the
 The app's normal quit path cancels an open recovery notice. Existing installed
 outbound capture includes the probe; its `recoveryProfile` result is uploaded in
 `renderer-result.json`. This adds one startup, not the repeated race loop, to CI.
+
+## Aelix first-turn compaction
+
+Build `aelix-studio-host` from the clean host feature-branch checkout with
+`cargo build --locked -p aionui-app --bin aelix-studio-host`. Run the probe
+from Studio with a clean ACP branch checkout and the prepared native runtime
+for the Studio pin.
+
+```sh
+python3 tests/manual/aelixCompactBeforeRules.py \
+  --host /path/to/host-checkout/target/debug/aelix-studio-host \
+  --host-source /path/to/host-checkout \
+  --runtime /path/to/prepared-studio-runtime \
+  --acp-source /path/to/acp-checkout
+```
+
+The fixture starts the source-built host, ACP and native with disposable state
+and a loopback provider. It checks that the first leading `/compact` enters
+compaction, the next ordinary prompt receives the pending rules exactly once,
+and a pasted rules block followed by a `/compact` example reaches the provider
+as ordinary text. The receipt reports both branch SHAs, the host binary digest
+and the native pin.
