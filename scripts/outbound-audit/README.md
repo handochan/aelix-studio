@@ -174,8 +174,10 @@ strace gap syntax before raw data deletion. See the
 [shared task-evidence schema](../studio-preview/fixtures/README.md#task-evidence-issue-59-a-first-pr).
 Unavailable data stays distinguishable from zero; PID reuse, missing userspace
 records and unmatched kernel identities remain visible even in incomplete
-captures. Each `*.capture-N.json` retains its own evidence; a successful recapture
-does not replace the first report's task history.
+captures. Each `*.capture-N.json` retains its own diagnostic status and any saved
+evidence. The audit saves the verdict before collecting and attaching evidence
+under separate time limits. `taskEvidenceStatus` shows whether attachment
+succeeded.
 
 This first PR is recording only. Existing resolutions, global unknown-record
 blocking, external/unknown-destination/opcode/functional failures and the narrow

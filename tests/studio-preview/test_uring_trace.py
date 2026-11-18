@@ -634,11 +634,13 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         capture['network']['complete']=False
         capture['programLoss']={'programs':[{'programName':'PRIVATE','recursion_misses':2}]}
         self.add(capture,self.event('H',value=1,result=2))
-        result=network.summarize_tasks(capture,{'issues':[{'reason':'kernel_network_capture_incomplete'}]})
+        checked=network.reconcile(capture,[],{}, {10}, None)
+        result=network.summarize_tasks(capture,checked)
         self.assertFalse(result['source']['complete'])
         self.assertEqual(result['source']['reportedProgramMissTotal'],2)
         self.assertEqual(self.task(result)['assignedRecordCounts']['H'],1)
-        self.assertEqual(result['source']['globalNetworkIssueCount'],1)
+        self.assertIsNone(result['source']['globalNetworkIssueCount'])
+        self.assertIn('kernel_network_capture_incomplete', [issue['reason'] for issue in checked['issues']])
         self.assertNotIn('PRIVATE',json.dumps(result))
 
     def test_structural_unmatched_channels_are_visible_without_becoming_new_errors(self):
@@ -670,6 +672,13 @@ class KernelTaskEvidenceTests(unittest.TestCase):
                 self.assertEqual(result['unattributedNetworkRecords'],1)
                 self.assertEqual(result['unattributedNetwork'][0]['recordCounts']['P'],1)
 
+    def test_network_events_at_both_lifetime_boundaries_are_assigned(self):
+        capture=self.fixture()
+        self.add(capture,self.event(time=2),self.event('X',time=100))
+        result=network.summarize_tasks(capture)
+        self.assertEqual(self.task(result)['assignedRecordCounts'],dict(P=1,N=0,X=1,H=0,V=0,other=0))
+        self.assertEqual(result['unattributedNetworkRecords'],0)
+
     def test_reused_identifiers_retain_each_lifetime_and_ambiguous_events(self):
         capture=self.fixture();second=copy.deepcopy(capture['network']['tasks'][1])
         second.update(start=50,end=150);capture['network']['tasks'].append(second)
@@ -691,11 +700,38 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         self.assertEqual((row['namespaceTgid'],row['kernelTgid'],row['parentNamespaceTid']),(10,110,10))
         self.assertTrue(row['ioWorker']);self.assertEqual(row['workerBirthRecords'],1)
 
+    def test_worker_birth_matches_only_its_own_lifetime(self):
+        capture=self.fixture()
+        first=dict(pid=11,tgid=10,kernelPid=111,kernelTgid=110,parentKernelPid=110,
+            start=4,end=50,lastOrdinal=0,kernelThread=False,ioWorker=True)
+        capture['network']['tasks'].extend([first,first | dict(start=51,end=99)])
+        birth=dict(kernelPid=111,parentKernelPid=110,start=4,time=5,flags=0x4010)
+        capture['network']['workers']=[birth,birth | {'time':52},birth | {'parentKernelPid':99}]
+        result=network.summarize_tasks(capture)
+        self.assertEqual([row['workerBirthRecords'] for row in result['tasks'] if row['kernelTid']==111],[1,0])
+        self.assertEqual(result['unattributedWorkerBirthRecords'],2)
+        capture['network']['tasks'].append(first.copy())
+        result=network.summarize_tasks(capture)
+        self.assertEqual([row['workerBirthRecords'] for row in result['tasks'] if row['kernelTid']==111],[0,0,0])
+        self.assertEqual(result['unattributedWorkerBirthRecords'],3)
+
+    def test_sequence_matches_and_verified_operations_are_separate_counts(self):
+        capture=self.fixture()
+        self.add(capture,self.event(call=1),self.event('N',call=1,time=4),self.event('X',call=1,time=5,result=-1))
+        records=[(10,'connect(3, {sa_family=AF_INET}, 16) = -1 ENETUNREACH',1,1)]
+        for states, expected in [({10,98},(1,0,False)),({10},(1,1,True))]:
+            with self.subTest(states=states):
+                checked=network.reconcile(capture,records,{},states,None)
+                result=network.summarize_tasks(capture,checked)
+                info=self.task(result)['existingNetworkCorroboration']
+                self.assertEqual((info['matchedOperations'],info['reconciledOperations'],result['source']['networkReconciled']),expected)
+
     def test_ring_and_shared_object_results_are_pid_aggregates_without_raw_references(self):
         capture=self.fixture()
-        rings={'globalIssues':[{'reason':'PRIVATE'}],'issuesByPid':{10:[{'reason':'PRIVATE'}]},
+        rings={'comparisonPerformed':True,'globalIssues':[{'reason':'PRIVATE'}],'issuesByPid':{10:[{'reason':'PRIVATE'}]},
             'rings':[dict(ctx='PRIVATE',creatorPid=10,submissions=[{'pid':11,'attributedPid':10}])]}
-        objects={'verified':False,'objects':[dict(id='PRIVATE',actorPids=[10,11],valid=False,sends=[{'payload':'PRIVATE'}])]}
+        objects={'comparisonPerformed':True,'verified':False,
+                 'objects':[dict(id='PRIVATE',actorPids=[10,11],valid=False,sends=[{'payload':'PRIVATE'}])]}
         before=copy.deepcopy((capture,rings,objects))
         result=network.summarize_tasks(capture,ring_evidence=rings,object_evidence=objects);row=self.task(result)
         self.assertEqual(row['ringCounts'],{'creations':1,'submissions':1})
@@ -723,9 +759,9 @@ class KernelTaskEvidenceTests(unittest.TestCase):
             (root/'recorder.stderr').write_text('SECRET_SENTINEL')
             snapshot=diagnostic_task_snapshot(root,7)
         failed=dict(status='failed',complete=False,pidNamespaceVerified=False,lostEvents=0,
-                    reason='kernel_recorder_terminated_early',taskRecordingSnapshot=snapshot)
+                    reason='kernel_recorder_terminated_early')
         original=copy.deepcopy(failed)
-        result=network.summarize_tasks(failed)
+        result=network.summarize_tasks(failed,snapshot=snapshot)
         self.assertTrue(result['source']['diagnosticSnapshotUsed'])
         self.assertFalse(result['source']['complete']);self.assertFalse(result['source']['networkComplete'])
         self.assertFalse(result['source']['pidNamespaceVerified'])

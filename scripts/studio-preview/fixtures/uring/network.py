@@ -193,7 +193,7 @@ def parse(fields):
                 file=int(fields[10]) if fields[0]=='V' else None)
 
 
-def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_evidence=None):
+def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_evidence=None, *, snapshot=None):
     """Preserve diagnostic task ranges and counts; never authorize a resolution.
 
     Only numeric identities/times, booleans and fixed labels are exported. Raw
@@ -246,13 +246,12 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
         return result
 
     capture=capture if isinstance(capture,dict) else {}
-    snapshot=capture.get('taskRecordingSnapshot') if isinstance(capture.get('taskRecordingSnapshot'),dict) else {}
+    snapshot=snapshot or {}
     diagnostic=not isinstance(capture.get('network'),dict) and isinstance(snapshot.get('network'),dict)
     channel=(snapshot['network'] if diagnostic else
              capture.get('network') if isinstance(capture.get('network'),dict) else {})
     events=channel.get('events');available=isinstance(events,list)
     raw_tasks=items(channel.get('tasks'));tasks=[];by_kernel=defaultdict(list);by_pid=Counter()
-    worker_births=Counter(pid(e.get('kernelPid')) for e in items(channel.get('workers')) if isinstance(e,dict))
     for index,raw in enumerate(raw_tasks,1):
         raw=raw if isinstance(raw,dict) else {}
         row=dict(taskIndex=index,namespaceTid=pid(raw.get('pid')),namespaceTgid=pid(raw.get('tgid')),
@@ -275,8 +274,22 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
                  row['rangeStart'] is not None and p['rangeStart']<=row['rangeStart']<=p['rangeEnd']]
         row['parentNamespaceTid']=parents[0]['namespaceTid'] if len(parents)==1 else None
         row['parentIdentityMatches']=len(parents)
-        row['workerBirthRecords']=(worker_births[row['kernelTid']] if row['kernelTid'] is not None and
-                                   isinstance(channel.get('workers'),list) else None)
+
+    workers=channel.get('workers')
+    worker_births=Counter();unattributed_workers=0
+    for raw in items(workers):
+        event=raw if isinstance(raw,dict) else {}
+        tid=pid(event.get('kernelPid'));parent=pid(event.get('parentKernelPid'))
+        start=number(event.get('start'));stamp=number(event.get('time'));flags=number(event.get('flags'))
+        matches=[row for row in by_kernel.get(tid,[]) if row['identityValuesValid'] and row['rangeValid'] and
+                 row['ioWorker'] is True and parent is not None and row['parentKernelTid']==parent and
+                 row['rangeStart']==start and stamp is not None and row['rangeStart']<=stamp<=row['rangeEnd'] and
+                 flags is not None and 0<=flags<=0xffffffff and flags&0x4010==0x4010]
+        if len(matches)==1:worker_births[matches[0]['taskIndex']]+=1
+        else:unattributed_workers+=1
+    for row in tasks:
+        row['workerBirthRecords']=(worker_births[row['taskIndex']] if isinstance(workers,list) and
+                                  row['identityValuesValid'] and row['rangeValid'] else None)
 
     buckets=defaultdict(list);unattributed={}
     for raw in items(events):
@@ -299,8 +312,9 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
             group['firstEventAt']=stamp if group['firstEventAt'] is None else min(group['firstEventAt'],stamp)
             group['lastEventAt']=stamp if group['lastEventAt'] is None else max(group['lastEventAt'],stamp)
 
-    rings=ring_evidence if isinstance(ring_evidence,dict) else None
-    objects=object_evidence if isinstance(object_evidence,dict) else None
+    network_checked=(network_evidence or {}).get('comparisonPerformed') is True
+    rings=ring_evidence if (ring_evidence or {}).get('comparisonPerformed') is True else None
+    objects=object_evidence if (object_evidence or {}).get('comparisonPerformed') is True else None
     ring_counts=defaultdict(Counter);object_counts=defaultdict(Counter)
     for ring in items((rings or {}).get('rings')):
         creator=pid(ring.get('creatorPid'))
@@ -319,6 +333,8 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
                    for name,field in [('matchedOperations','operationDiagnostics'),
                        ('nonNetworkWrites','nonNetworkWrites'),('notExecutedInvocations','notExecuted'),
                        ('resolvedResultFields','resultFields')]}
+    corroboration['reconciledOperations']=Counter(item['pid'] for item in
+        items((network_evidence or {}).get('operationDiagnostics')) if item.get('reconciled') is True)
     for issue in network_issues:
         for actor in {pid(issue.get('pid')),pid(issue.get('unattributedPid'))}-{None}:issue_counts[actor]+=1
     object_issues=items((objects or {}).get('issues'))
@@ -329,9 +345,9 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
         assignable=available and row['identityValuesValid'] and row['rangeValid']
         row['assignedRecordCounts']=counts(observed) if assignable else None
         row['structuralUnmatched']=unmatched(observed) if assignable else None
-        row['networkIssueCount']=issue_counts[tid] if tid is not None and network_evidence is not None else None
+        row['networkIssueCount']=issue_counts[tid] if tid is not None and network_checked else None
         row['existingNetworkCorroboration']=({name:values[tid] for name,values in corroboration.items()}
-                                            if tid is not None and network_evidence is not None else None)
+                                            if tid is not None and network_checked else None)
         row['ringCounts']=dict.fromkeys(('creations','submissions'),0) | dict(ring_counts[tid]) if rings is not None and tid is not None else None
         row['ringIssueCount']=len((rings or {}).get('issuesByPid',{}).get(tid,[])) if rings is not None and tid is not None else None
         row['objectCounts']=dict.fromkeys(('generations','validGenerations','unfreedGenerations','sharedObjectSendRecords'),0) | dict(object_counts[tid]) if objects is not None and tid is not None else None
@@ -348,6 +364,7 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
                 sum(value is None for value in misses),sum(misses) if None not in misses else None)
     retained,nonzero,unknown,miss_total=miss_counts(programs)
     reported_count,reported_nonzero,reported_unknown,reported_total=miss_counts(reported)
+    loss_source=snapshot if diagnostic else capture if isinstance(capture.get('network'),dict) else {}
     return dict(schema='aelix.outbound-task-evidence/1',purpose='diagnostic-only-no-new-resolution',
         kernelTimeUnit='monotonic-nanoseconds',rangeMeaning='tracked-start-through-final-do_task_dead',
         referenceScope='namespace-tid-aggregate',
@@ -355,7 +372,7 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
             diagnosticSnapshotUsed=diagnostic,
             drained=flag(capture.get('drained')),pidNamespaceVerified=flag(capture.get('pidNamespaceVerified')),
             namespaceInode=number(capture.get('namespaceInode',snapshot.get('namespaceInode') if diagnostic else None)),
-            lostEvents=number(capture.get('lostEvents')),recordingRootKernelTid=pid(root.get('kernelPid')),
+            lostEvents=number(loss_source.get('lostEvents')),recordingRootKernelTid=pid(root.get('kernelPid')),
             recorderExitCode=number(capture.get('recorderExitCode')),ready=flag(checks.get('ready')),
             done=flag(checks.get('done')),stderrEmpty=flag(checks.get('stderrEmpty')),
             attachmentBarrierMatched=(capture.get('attachmentReadiness')=='reviewed-bpftrace-printf-drained-after-all-attachments'
@@ -365,16 +382,18 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
             reportedLossPrograms=reported_count,reportedProgramsWithMisses=reported_nonzero,
             reportedProgramsWithUnknownMisses=reported_unknown,reportedProgramMissTotal=reported_total,
             recorderDiagnosticCount=len(capture['diagnostics']) if isinstance(capture.get('diagnostics'),list) else None,
-            recordErrorCount=len(capture['recordErrors']) if isinstance(capture.get('recordErrors'),list) else None,
+            recordErrorCount=(number(snapshot.get('recordErrorCount')) if diagnostic else
+                              len(capture['recordErrors']) if isinstance(capture.get('recordErrors'),list) else None),
             kernelTasksAvailable=isinstance(channel.get('tasks'),list),
             networkEventsAvailable=available,networkComplete=flag(channel.get('complete')),
             kernelNetworkCount=number(snapshot.get('kernelNetworkCount') if diagnostic
                                       else (capture.get('kernelCounts') or {}).get('network')),
             decodedNetworkRecords=number(channel.get('eventCount')),
             observedNetworkRecords=len(events) if available else None,
-            networkIssueCount=len(network_issues) if network_evidence is not None else None,
+            networkReconciled=not network_issues if network_checked else None,
+            networkIssueCount=len(network_issues) if network_checked else None,
             globalNetworkIssueCount=(sum('pid' not in issue and 'unattributedPid' not in issue for issue in network_issues)
-                                     if network_evidence is not None else None),
+                                     if network_checked else None),
             ringGlobalIssueCount=len(items((rings or {}).get('globalIssues'))) if rings is not None else None,
             objectProofVerified=flag((objects or {}).get('verified')),
             objectIssueCount=len(object_issues) if objects is not None else None,
@@ -382,7 +401,8 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
         tasks=tasks,networkRecordCounts=counts(items(events)) if available else None,
         assignedNetworkRecords=sum(len(value) for value in buckets.values()) if available else None,
         unattributedNetworkRecords=sum(sum(value['recordCounts'].values()) for value in unattributed.values()) if available else None,
-        unattributedNetwork=list(unattributed.values()))
+        unattributedNetwork=list(unattributed.values()),
+        unattributedWorkerBirthRecords=unattributed_workers if isinstance(workers,list) else None)
 
 
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None, metadata_allowed=()):
@@ -399,7 +419,7 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             not capture.get('pidNamespaceVerified') or not isinstance(network, dict) or
             not network.get('complete')):
         error('kernel_network_capture_incomplete')
-        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], operationDiagnostics=[], eventCount=0)
+        return dict(comparisonPerformed=False, issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], operationDiagnostics=[], eventCount=0)
     for task in network.get('tasks', []):
         pid = task['pid']
         if task['start'] <= 0 or task['start'] > task['end']:
@@ -651,6 +671,6 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             socketHooks=sorted({SOCKET_HOOKS[event['value']-1] for event in observed if 1<=event['value']<=len(SOCKET_HOOKS)}),
             socketFamilies=sorted({event['result'] for event in observed}),
             fileModes=sorted({event['result'] for event in files[key]}),reconciled=not issues))
-    return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
+    return dict(comparisonPerformed=True, issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
                 nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],
                 metadataFields=metadata,operationDiagnostics=diagnostics,eventCount=len(events))

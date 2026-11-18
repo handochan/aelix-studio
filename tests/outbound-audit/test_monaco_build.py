@@ -9,7 +9,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import contextmanager, redirect_stdout
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,9 +66,10 @@ class CaptureFailureTests(unittest.TestCase):
         measurement = dict(status='failed', outcome='evidence_incomplete', commandStarted=True, commandExitCode=1,
                            externalAttempts=0, unparsedRecords=1, classificationIssues=[{'reason':'unknown_record'}],
                            processes=[], externalOperationDiagnostics=[])
+        @contextmanager
         def fail(_command, path, **_options):
             path.write_text(json.dumps(measurement))
-            return 87
+            yield 87, None
         with tempfile.TemporaryDirectory() as directory, patch.object(audit, 'capture_once', side_effect=fail) as run, redirect_stdout(io.StringIO()):
             report = Path(directory) / 'audit.json'
             code = audit.audit(['node', str(FIXTURE), 'managed'], report)

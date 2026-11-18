@@ -25,7 +25,7 @@ def reconcile(capture, calls, all_pids, selected_pids):
     if (capture.get('status')!='captured' or not capture.get('complete')
             or capture.get('lostEvents')!=0 or not capture.get('pidNamespaceVerified')):
         global_error('io_uring_kernel_capture_incomplete')
-        return {'globalIssues':global_issues,'issuesByPid':{},'rings':[],'opcodeCounts':{},'selectedOpcodeCounts':{}}
+        return {'comparisonPerformed':False,'globalIssues':global_issues,'issuesByPid':{},'rings':[],'opcodeCounts':{},'selectedOpcodeCounts':{}}
     setups=defaultdict(deque)
     for call in calls:
         if call['call']=='io_uring_setup' and isinstance(call.get('result'),int) and call['result']>=0:
@@ -152,5 +152,5 @@ def reconcile(capture, calls, all_pids, selected_pids):
     for ring in records:
         if ring.get('straceSubmitted',0)>len(ring['submissions']):
             global_error('io_uring_kernel_submissions_missing',ring['creatorPid'])
-    return {'globalIssues':global_issues,'issuesByPid':dict(by_pid),'rings':records,
+    return {'comparisonPerformed':True,'globalIssues':global_issues,'issuesByPid':dict(by_pid),'rings':records,
             'opcodeCounts':dict(totals),'selectedOpcodeCounts':dict(selected_totals)}

@@ -279,7 +279,7 @@ def diagnostic_task_snapshot(directory, namespace_inode):
 
     Failed attachment/drain/stop can leave readable task records without an
     authoritative network channel. Keep only private numeric task/network data
-    for the report summarizer; never copy parse status, diagnostics or errors.
+    for the report summarizer, along with observed loss and error counts.
     """
     directory = Path(directory)
     try:
@@ -297,6 +297,8 @@ def diagnostic_task_snapshot(directory, namespace_inode):
         'captureChecks': {**parsed['captureChecks'], 'stderrEmpty': None if stderr is None else not stderr.strip()},
         'kernelNetworkCount': parsed['kernelCounts'].get('network'),
         'namespaceInode': parsed['namespaceInode'],
+        'lostEvents': parsed['lostEvents'],
+        'recordErrorCount': len(parsed['recordErrors']),
     }
 
 

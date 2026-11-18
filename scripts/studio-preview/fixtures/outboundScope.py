@@ -23,6 +23,12 @@ CALL = re.compile(r'^(\w+)\(')
 RESUMED = re.compile(r'^<\.\.\. (\w+) resumed>')
 ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 QUOTED = r'"(?:[^"\\]|\\.)*"'
+REGISTER_ENTRY = '???( <unfinished ...>'
+REGISTER_RESUME = '<... ??? resumed>) = ?'
+
+
+def is_register_terminal(line, with_kernel):
+    return line.startswith('+++ killed by ') or with_kernel and line.startswith('+++ exited with ')
 
 
 def decode_path(quoted):
@@ -54,7 +60,13 @@ def canonical(value):
 
 
 def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
-    """Scope by successful exec roots plus all forks/threads, never by address/name."""
+    """Return the scoped and whole-command measurements."""
+    scoped, whole, _ = measure_processes(paths, scope_executables, require_executables, require_lifecycle, kernel_capture)
+    return scoped, whole
+
+
+def measure_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
+    """Scope by executable and lineage; defer optional task evidence until after measurement."""
     selected = {canonical(path) for path in scope_executables}
     required = {canonical(path) for path in require_executables}
     states, parents, roots, matches = {}, {}, set(), set()
@@ -70,10 +82,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     terminal_at, terminal_shapes = {}, {}
     register_holes, hole_resumes = {}, set()
     result_holes = {}
-    trace_positions = {}
-    register_positions = defaultdict(list)
-    terminal_shape_counts = defaultdict(Counter)
-    pending_result_holes = set()
     invalid_terminal_stops = set()
 
     def state(pid, name=None):
@@ -302,25 +310,20 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 pid, name, line = legacy_pid, None, raw
                 if selected and line: classification_issue('missing_task_prefix', pid)
             state(pid, name)
-            position=trace_positions.setdefault(pid,{'firstSequence':sequence,'lastSequence':sequence,'records':0})
-            position['lastSequence']=sequence;position['records']+=1
             # Keep register stubs blocking until independent kernel proof.
             # With kernel evidence, signal notifications and normal termination
             # can delimit the same final hole. Known calls, ambiguous edges,
             # pending fork/exec and post-termination records remain fatal.
-            unreadable_resume = line == '<... ??? resumed>) = ?'
+            unreadable_resume = line == REGISTER_RESUME
             signal_record=line.startswith('--- SIG')
-            final_record=line.startswith('+++ killed by ') or kernel_capture is not None and line.startswith('+++ exited with ')
+            final_record=is_register_terminal(line, kernel_capture is not None)
             if pid in terminal_stops:
                 shape=('signal' if signal_record else 'resume' if unreadable_resume else
-                       'exit' if final_record else 'register-entry' if line=='???( <unfinished ...>' else 'other')
-                terminal_shape_counts[pid][shape]+=1
+                       'exit' if final_record else 'register-entry' if line==REGISTER_ENTRY else 'other')
                 if len(terminal_shapes[pid])<8:terminal_shapes[pid].append(shape)
                 if pid in terminal_at or not (final_record or unreadable_resume or kernel_capture is not None and signal_record):
                     invalid_terminal_stops.add(pid)
-            if line == '???( <unfinished ...>':
-                register_positions[pid].append({'sequence':sequence,'kind':'exact-register-entry'})
-                if pid not in terminal_stops:terminal_shape_counts[pid]['register-entry']+=1
+            if line == REGISTER_ENTRY:
                 if pid in pending or pid in terminal_stops:
                     invalid_terminal_stops.add(pid)
                 terminal_stops[pid] = sequence
@@ -328,7 +331,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                 terminal_shapes.setdefault(pid,['register-entry'])
                 continue
             if unreadable_resume:
-                register_positions[pid].append({'sequence':sequence,'kind':'exact-register-resume'})
                 if pid not in terminal_stops or pid in hole_resumes:
                     classification_issue('unknown_resumed_syscall', pid)
                 else:
@@ -354,7 +356,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             record(pid, line, started)
     for pid, (call, _line, _started) in pending.items():
         if kernel_capture is not None and call in NETWORK | {'close'}:
-            pending_result_holes.add((pid,_started))
             record(pid,_line,_started)
         else: unknown(pid, call,'pending_at_end')
     for pid, at in terminal_stops.items():
@@ -554,41 +555,6 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             if event['udpAssociationOnly']: event['external'] = False
 
     raw_records={(pid,seq):line for pid,line,seq,*_ in udp_records}
-    from uring.network import summarize_tasks
-    task_evidence=summarize_tasks(kernel_capture,network_evidence,ring_evidence,object_evidence)
-    kernel_task_indices=defaultdict(list)
-    for task in task_evidence['tasks']:
-        tid=task['namespaceTid']
-        if tid is not None:kernel_task_indices[tid].append(task['taskIndex'])
-        task['straceObserved']=tid in states
-        task['expectedStraceTgid']=tgid(tid) if tid in states or tid in parents else None
-        task['expectedStraceParentTid']=parents.get(tid)
-    grammar_gaps=defaultdict(list)
-    for pid,records in register_positions.items():
-        grammar_gaps[pid].append(dict(kind='register-sequence',records=len(records),positions=records,
-            terminalSequence=terminal_at.get(pid),terminalDelimited=(pid in terminal_stops and pid not in invalid_terminal_stops and
-                terminal_at.get(pid,0)>terminal_stops.get(pid,0)),
-            recordKinds=list(terminal_shapes.get(pid,[])),recordKindCounts=dict(terminal_shape_counts[pid]),
-            recordKindsTruncated=sum(terminal_shape_counts[pid].values())>len(terminal_shapes.get(pid,[]))))
-    close_argument=r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
-    for (pid,seq),call in result_holes.items():
-        shape='other-result-gap';fd=None
-        if call=='close':
-            line=raw_records.get((pid,seq),'')
-            complete=re.fullmatch(close_argument+r'\)\s+=\s+\?',line)
-            pending_complete=(re.fullmatch(close_argument,line) if (pid,seq) in pending_result_holes else None)
-            match=complete or pending_complete
-            if match and -0x80000000<=int(match[1])<=0x7fffffff:
-                fd=int(match[1]);shape='close-pending-complete-argument' if pending_complete else 'close-return-unavailable'
-        grammar_gaps[pid].append(dict(kind=shape,syscall=call,sequence=seq,records=1,fd=fd,
-            pendingAtCaptureEnd=(pid,seq) in pending_result_holes,terminalSequence=terminal_at.get(pid),
-            **({'returnValueKnown':False,'fdClosureInferred':False} if call=='close' else {})))
-    for issue in classification_issues:
-        if issue['reason']=='unknown_record':
-            grammar_gaps[issue['pid']].append(dict(kind='unclassified-record',records=1,
-                sequence=issue.get('sequence'),recordLength=issue.get('recordLength'),
-                recordShape=issue.get('recordShape') if issue.get('recordShape') in
-                    ('register_unavailable','resumed','other') else 'other'))
     operation_diagnostics={(item['pid'],item['sequence']):item for item in
                            (network_evidence or {}).get('operationDiagnostics',[])}
     def descriptor_diagnostic(key):
@@ -644,29 +610,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                               'ioUringSyscalls': item['io_uring'],
                               'unparsedRecords': item['unparsed'],
                               'unparsedRecordKinds':dict(sorted(item['unparsed_kinds'].items()))})
-        issue_indices=defaultdict(list);global_indices=[]
-        for index,issue in enumerate(issues):
-            if issue.get('pid') is None and issue.get('unattributedPid') is None:global_indices.append(index)
-            else:
-                for pid in {issue.get('pid'),issue.get('unattributedPid')}-{None}:issue_indices[pid].append(index)
-        strace_tasks=[]
-        resolved_registers=Counter();resolved_closes=Counter()
-        for entry in (network_evidence or {}).get('resolved',[]):resolved_registers[entry['pid']]+=entry['records']
-        for entry in (network_evidence or {}).get('metadataFields',[]):resolved_closes[entry['pid']]+=entry['records']
-        for pid in sorted(set(states)|set(parents)):
-            item=states.get(pid)
-            strace_tasks.append(dict(tid=pid,tgid=tgid(pid),parentTid=parents.get(pid),inReportScope=pid in pids,
-                observed=item is not None,positions=dict(trace_positions[pid]) if pid in trace_positions else None,
-                kernelTaskIndices=kernel_task_indices[pid],
-                forkEntrySequence=fork_at.get(pid),terminalSequence=terminal_at.get(pid),
-                finished=item['finished'] if item is not None else None,
-                gaps=grammar_gaps.get(pid,[]),classificationIssueIndices=issue_indices[pid],
-                unparsedRecordsAfterExistingPolicy=item['unparsed'] if item is not None else None,
-                unparsedRecordKindsAfterExistingPolicy=dict(item['unparsed_kinds']) if item is not None else None,
-                existingRegisterResolutions=resolved_registers[pid],existingCloseResolutions=resolved_closes[pid]))
         return {'schema': 'aelix-studio-host.outbound-audit/1', 'scope': scope,
-                'taskEvidence':{**task_evidence,'stracePositionUnit':'parsed-line-sequence',
-                    'globalClassificationIssueIndices':global_indices,'straceTasks':strace_tasks},
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
@@ -718,4 +662,110 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
 
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole
-    return scoped, whole
+
+    def summarize(snapshot=None):
+        # Re-read strace positions under the diagnostic budget. The verdict
+        # parser has no diagnostic bookkeeping in its per-record loop.
+        trace_positions={}
+        register_positions=defaultdict(list)
+        terminal_shape_counts=defaultdict(Counter)
+        seen_entries=set()
+        sequence=0
+        for index,path in enumerate(sorted(paths)):
+            legacy_pid=int(path.suffix[1:]) if path.suffix[1:].isdigit() else -(index+1)
+            for raw in path.read_text().splitlines():
+                sequence+=1
+                if not raw: continue
+                prefix=PREFIX.match(raw)
+                pid,line=(int(prefix[1]),prefix[3]) if prefix else (legacy_pid,raw)
+                position=trace_positions.get(pid)
+                if position is None:
+                    trace_positions[pid]=dict(firstSequence=sequence,lastSequence=sequence,records=1)
+                else:
+                    position['lastSequence']=sequence
+                    position['records']+=1
+
+                entry=line==REGISTER_ENTRY
+                resume=line==REGISTER_RESUME
+                if entry or resume:
+                    register_positions[pid].append(dict(sequence=sequence,
+                        kind='exact-register-entry' if entry else 'exact-register-resume'))
+                if entry:
+                    seen_entries.add(pid)
+                if pid in seen_entries:
+                    shape=('register-entry' if entry else 'resume' if resume else
+                           'signal' if line.startswith('--- SIG') else
+                           'exit' if is_register_terminal(line, kernel_capture is not None) else 'other')
+                    terminal_shape_counts[pid][shape]+=1
+
+        from uring.network import summarize_tasks
+        task_evidence=summarize_tasks(kernel_capture,network_evidence,ring_evidence,object_evidence,snapshot=snapshot)
+        kernel_task_indices=defaultdict(list)
+        for task in task_evidence['tasks']:
+            tid=task['namespaceTid']
+            if tid is not None:kernel_task_indices[tid].append(task['taskIndex'])
+            task['straceObserved']=tid in states
+            task['expectedStraceTgid']=tgid(tid) if tid in states or tid in parents else None
+            task['expectedStraceParentTid']=parents.get(tid)
+        grammar_gaps=defaultdict(list)
+        for pid,records in register_positions.items():
+            terminal_delimited = pid in terminal_stops and terminal_at.get(pid,0)>terminal_stops[pid]
+            # register_holes counts the entry and at most one allowed resume.
+            grammar_gaps[pid].append(dict(kind='register-sequence',records=len(records),positions=records,
+                terminalSequence=terminal_at.get(pid),terminalDelimited=terminal_delimited,
+                exactStubSyntax=(terminal_delimited and pid not in invalid_terminal_stops and len(records)==register_holes[pid]),
+                recordKinds=list(terminal_shapes.get(pid,[])),recordKindCounts=dict(terminal_shape_counts[pid]),
+                recordKindsTruncated=sum(terminal_shape_counts[pid].values())>len(terminal_shapes.get(pid,[]))))
+        close_argument=r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
+        for (pid,seq),call in result_holes.items():
+            shape='other-result-gap';fd=None
+            pending_at_end=pid in pending and pending[pid][2]==seq
+            if call=='close':
+                line=raw_records.get((pid,seq),'')
+                complete=re.fullmatch(close_argument+r'\)\s+=\s+\?',line)
+                pending_complete=(re.fullmatch(close_argument,line) if pending_at_end else None)
+                match=complete or pending_complete
+                if match and -0x80000000<=int(match[1])<=0x7fffffff:
+                    fd=int(match[1]);shape='close-pending-complete-argument' if pending_complete else 'close-return-unavailable'
+            grammar_gaps[pid].append(dict(kind=shape,syscall=call,sequence=seq,records=1,fd=fd,
+                pendingAtCaptureEnd=pending_at_end,terminalSequence=terminal_at.get(pid),
+                **({'returnValueKnown':False,'fdClosureInferred':False} if call=='close' else {})))
+        for issue in classification_issues:
+            if issue['reason']=='unknown_record':
+                grammar_gaps[issue['pid']].append(dict(kind='unclassified-record',records=1,
+                    sequence=issue.get('sequence'),recordLength=issue.get('recordLength'),
+                    recordShape=issue.get('recordShape') if issue.get('recordShape') in
+                        ('register_unavailable','resumed','other') else 'other'))
+
+        network_checked=(network_evidence or {}).get('comparisonPerformed') is True
+        resolved_registers=Counter();resolved_closes=Counter()
+        for entry in (network_evidence or {}).get('resolved',[]):resolved_registers[entry['pid']]+=entry['records']
+        for entry in (network_evidence or {}).get('metadataFields',[]):resolved_closes[entry['pid']]+=entry['records']
+
+        def for_report(measurement):
+            pids={process['pid'] for process in measurement['processes']}
+            issues=measurement['classificationIssues']
+            issue_indices=defaultdict(list);global_indices=[]
+            for index,issue in enumerate(issues):
+                if issue.get('pid') is None and issue.get('unattributedPid') is None:global_indices.append(index)
+                else:
+                    for pid in {issue.get('pid'),issue.get('unattributedPid')}-{None}:issue_indices[pid].append(index)
+            strace_tasks=[]
+            for pid in sorted(set(states)|set(parents)):
+                item=states.get(pid)
+                strace_tasks.append(dict(tid=pid,tgid=tgid(pid),parentTid=parents.get(pid),inReportScope=pid in pids,
+                    observed=item is not None,positions=dict(trace_positions[pid]) if pid in trace_positions else None,
+                    kernelTaskIndices=kernel_task_indices[pid],
+                    forkEntrySequence=fork_at.get(pid),terminalSequence=terminal_at.get(pid),
+                    finished=item['finished'] if item is not None else None,
+                    gaps=grammar_gaps.get(pid,[]),classificationIssueIndices=issue_indices[pid],
+                    unparsedRecordsAfterExistingPolicy=item['unparsed'] if item is not None else None,
+                    unparsedRecordKindsAfterExistingPolicy=dict(item['unparsed_kinds']) if item is not None else None,
+                    existingRegisterResolutions=resolved_registers[pid] if network_checked else None,
+                    existingCloseResolutions=resolved_closes[pid] if network_checked else None))
+            return {**task_evidence,'stracePositionUnit':'parsed-line-sequence',
+                    'globalClassificationIssueIndices':global_indices,'straceTasks':strace_tasks}
+        whole_evidence=for_report(whole)
+        return (whole_evidence if scoped is whole else for_report(scoped)), whole_evidence
+
+    return scoped, whole, summarize

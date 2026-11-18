@@ -10,7 +10,7 @@ import hashlib
 
 def reconcile(capture, network, states, selected, connect_keys, required_udp=()):
     channel = (capture or {}).get('udpObjects')
-    empty = dict(verified=False, exempt=set(), writes=[], issues=[], objects=[])
+    empty = dict(comparisonPerformed=False, verified=False, exempt=set(), writes=[], issues=[], objects=[])
     if not isinstance(channel, dict):
         return empty
     issues = []
@@ -156,7 +156,7 @@ def reconcile(capture, network, states, selected, connect_keys, required_udp=())
     # never authorize an exemption for a different socket in the same trace.
     verified = not orphan and not issues
     if not verified or (network or {}).get('issues'): exempt.clear()
-    return dict(verified=verified, exempt=exempt, writes=writes, issues=issues, objects=proofs)
+    return dict(comparisonPerformed=True, verified=verified, exempt=exempt, writes=writes, issues=issues, objects=proofs)
 
 
 RETENTION_MODES = ('object-preexisting', 'object-unreleased')

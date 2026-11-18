@@ -551,8 +551,8 @@ No destination-name/address exemption is used. See
 
 ## Task evidence (Issue #59 A, first PR)
 
-Each parsed report now retains `taskEvidence` before the private traces and
-kernel events are deleted. Its schema is `aelix.outbound-task-evidence/1` and its
+The audit attaches `taskEvidence` before deleting the private traces and kernel
+events. Its schema is `aelix.outbound-task-evidence/1` and its
 purpose is explicitly `diagnostic-only-no-new-resolution`. This first PR does
 not change any parser classification, resolution, UDP exemption, outcome or
 recapture decision. The exact-hole resolver and dependency-preserving validation
@@ -565,15 +565,18 @@ new diagnostic fields. Historical artifacts are not rejudged.
   retained-program and reported-loss counter summaries. Missing source fields
   are null, not an assertion of zero loss. The existing capture receipts remain
   authoritative for attachments, individual program misses and global errors.
-  A failed broker may leave only a diagnostic snapshot of the available recorder
-  output. `diagnosticSnapshotUsed` marks that path, which retains the failed
-  capture status and never upgrades the channel or PID namespace to complete.
+  A failed broker can leave a diagnostic snapshot of available recorder output.
+  `diagnosticSnapshotUsed` marks that path. The loss and parse error counts come
+  from the snapshot, and the original capture and PID namespace status remain
+  authoritative.
 - `tasks` retains **every** received kernel task lifetime with namespace
   TID/TGID, kernel TID/TGID, parent identity, tracked-start/final-`do_task_dead`
   range, last ordinal and worker-birth count. The recorder root's start is its
   tracking boundary, not its earlier OS birth. PID reuse and ambiguous parent
-  correspondence are explicit; records are not overwritten by PID. Recorder-root
-  and private tracer capability-probe tasks can legitimately have no strace row.
+  correspondence are explicit. A worker birth record must match one lifetime's
+  kernel TID, parent, start time and inclusive time range. The report counts births
+  without a unique match in `unattributedWorkerBirthRecords`. Recorder-root and
+  private tracer capability-probe tasks can legitimately have no strace row.
 - `assignedRecordCounts` gives P/N/X/H/V counts only for records uniquely matching
   that lifetime's full identity and interval. `unattributedNetwork` separately
   retains numeric identities, first/last event times and counts for missing,
@@ -584,21 +587,24 @@ new diagnostic fields. Historical artifacts are not rejudged.
   outside unique N/X bounds. These categories can overlap and are **not new
   errors**: a final pre-entry or a terminal VFS write can already have an existing
   proof. `existingNetworkCorroboration` and the existing top-level network proof
-  arrays retain that distinction. None of these counts are subtracted from an
-  error or used to authorize a discharge.
+  arrays retain that distinction. `matchedOperations` counts operations linked
+  by sequence. `reconciledOperations` counts the linked operations marked
+  `reconciled` by the existing network comparison.
 - Ring creation/submission/issue counts and UDP generation validity/free/send
   counts are namespace-TID aggregates of the existing reconciliation results.
   Shared-object sends are object-wide, not attributed task sends. These counts
   can overlap across actors and must not be added as independent object totals.
-  A reused namespace TID does not gain a generation-specific ring/object proof.
+  Network, ring and UDP comparison results are null when that comparison did
+  not run. A completed comparison can report zero activity or issues.
 - `straceTasks` retains observed/fork-only TIDs, expected TGID/parent, source-line
   position bounds, terminal position, corresponding kernel task indices, current
   unparsed kinds and existing close/register resolution counts. Its gap records
   distinguish exact lexical register markers, complete numeric close arguments,
   other result gaps and unclassified records. Register examples remain bounded
-  as before, with full kind counts and an explicit truncation indicator. Unknown
-  text retains only a fixed shape, length and sequence. These are syntax
-  observations, not a claim that an arbitrary unknown syscall is harmless.
+  as before, with full kind counts and an explicit truncation indicator.
+  `terminalDelimited` records the observed final boundary. `exactStubSyntax`
+  also requires the permitted sequence between entry and exit, including at
+  most one resume. Unknown text retains only a fixed shape, length and sequence.
 
 Kernel ranges are monotonic nanoseconds; strace positions are parsed-line
 sequences, a different coordinate system. Both whole-command and executable
@@ -606,6 +612,10 @@ selection reports retain the capture-wide task context; `inReportScope` identifi
 the strace tasks belonging to the particular report. Classification issue indices
 refer to that report's unchanged `classificationIssues` array. The new evidence
 never copies comm names, executable paths, argv, environment, payloads, raw FD
-annotations or kernel object/file pointers. It adds no probes or commands inside
-the capture and is computed once after existing reconciliation. Collection,
-analysis and serialization still share the existing deadline.
+annotations or kernel object/file pointers. The existing deadline covers capture,
+required analysis and verdict writes. After saving the verdict and attempt history,
+the audit allows up to 30 seconds to collect task evidence and up to 10 seconds
+to attach it per capture. Measured reports start with `taskEvidenceStatus=unavailable`.
+Each completed attachment atomically replaces the saved JSON and sets the status
+to `available`. If a diagnostic fails or exceeds its budget, the saved verdict
+and capture history remain readable.
