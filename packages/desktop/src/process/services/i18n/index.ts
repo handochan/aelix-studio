@@ -96,5 +96,15 @@ export async function changeLanguage(language: string): Promise<void> {
   await ensureAndSwitch(i18n, language, getLocaleModules);
 }
 
+/** Match renderer fallback rules without changing global language or persisted preferences. */
+export async function getRecoveryNoticeTranslator(savedLanguage: string | undefined, systemLocale: string) {
+  await i18nReady;
+  const language = normalizeLanguageCode(savedLanguage || systemLocale || DEFAULT_LANGUAGE);
+  if (!i18n.hasResourceBundle(language, 'translation')) {
+    i18n.addResourceBundle(language, 'translation', getLocaleModules(language), true, true);
+  }
+  return i18n.getFixedT(language);
+}
+
 export { normalizeLanguageCode };
 export default i18n;

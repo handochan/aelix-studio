@@ -36,7 +36,7 @@ import { resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
 import { wasLaunchedAtLogin } from '@process/bridge/applicationBridge';
 import { onLanguageChanged } from './process/bridge/systemSettingsBridge';
-import mainI18n, { i18nReady, setInitialLanguage } from '@process/services/i18n';
+import { getRecoveryNoticeTranslator, i18nReady, setInitialLanguage } from '@process/services/i18n';
 import { setupApplicationMenu } from './process/utils/appMenu';
 import { startWebHost } from '@aionui/web-host';
 import { initializeZoomFactor, setupZoomForWindow } from './process/utils/zoom';
@@ -543,16 +543,18 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   const recoveryWindow = mainWindow;
   recoveryWindow.webContents.once('did-finish-load', () => {
     void i18nReady
-      .then(() => {
+      .then(async () => {
+        const savedLanguage = await ProcessConfig.get('language');
+        const translate = await getRecoveryNoticeTranslator(savedLanguage, app.getLocale());
         if (recoveryWindow.isDestroyed() || isExplicitQuit) return;
         return ConfigRecovery.showNotice(async (signal) => {
           recoveryWindow.show();
           await dialog.showMessageBox(recoveryWindow, {
             type: 'warning',
-            title: mainI18n.t('common.configurationRecovery.title'),
-            message: mainI18n.t('common.configurationRecovery.message'),
-            detail: mainI18n.t('common.configurationRecovery.detail'),
-            buttons: [mainI18n.t('common.confirm')],
+            title: translate('common.configurationRecovery.title'),
+            message: translate('common.configurationRecovery.message'),
+            detail: translate('common.configurationRecovery.detail'),
+            buttons: [translate('common.confirm')],
             signal,
           });
         });
