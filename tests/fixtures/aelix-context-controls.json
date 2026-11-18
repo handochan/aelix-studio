@@ -1,0 +1,29 @@
+{
+  "knownUsage": { "sessionUpdate": "usage_update", "used": 18432, "size": 32768 },
+  "unknownUsage": {
+    "sessionUpdate": "usage_update",
+    "used": 18432,
+    "size": 32768,
+    "_meta": { "aelix/contextUnknown": true }
+  },
+  "manualCompactionStarted": {
+    "sessionUpdate": "tool_call",
+    "toolCallId": "aelix-compact-example",
+    "title": "/compact",
+    "kind": "other",
+    "status": "in_progress",
+    "_meta": { "aelix/compaction": { "reason": "manual", "state": "running" } }
+  },
+  "manualCompactionCompleted": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "aelix-compact-example",
+    "status": "completed",
+    "_meta": { "aelix/compaction": { "reason": "manual", "state": "completed", "tokensBefore": 18432 } }
+  },
+  "automaticCompactionFailed": {
+    "sessionUpdate": "tool_call_update",
+    "toolCallId": "aelix-compact-example",
+    "status": "failed",
+    "_meta": { "aelix/compaction": { "reason": "threshold", "state": "failed" } }
+  }
+}

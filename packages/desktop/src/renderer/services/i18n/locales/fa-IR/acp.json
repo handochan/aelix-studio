@@ -29,6 +29,16 @@
     "reasoning_effort": "تلاش استدلال",
     "default": "پیش‌فرض"
   },
+  "compaction": {
+    "manual": "فشرده‌سازی زمینه",
+    "automatic": "فشرده‌سازی خودکار زمینه",
+    "running": "در حال فشرده‌سازی…",
+    "runningManual": "در حال فشرده‌سازی… توقف در زمان فشرده‌سازی دستی ممکن نیست.",
+    "completed": "تکمیل شد",
+    "completedWithTokens": "تکمیل شد. تعداد توکن‌ها پیش از فشرده‌سازی: {{tokens}}",
+    "failed": "ناموفق",
+    "aborted": "لغو شد"
+  },
   "subagents": {
     "title": "عامل‌های فرعی",
     "child": "{{profile}} · {{index}}",

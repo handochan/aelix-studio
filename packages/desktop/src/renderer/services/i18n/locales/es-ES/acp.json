@@ -29,6 +29,16 @@
     "reasoning_effort": "Esfuerzo de razonamiento",
     "default": "Predeterminado"
   },
+  "compaction": {
+    "manual": "Compactación del contexto",
+    "automatic": "Compactación automática del contexto",
+    "running": "Compactando…",
+    "runningManual": "Compactando… No se puede detener la compactación manual.",
+    "completed": "Completada",
+    "completedWithTokens": "Completada. Tokens antes de la compactación: {{tokens}}",
+    "failed": "Fallida",
+    "aborted": "Cancelada"
+  },
   "subagents": {
     "title": "Subagentes",
     "child": "{{profile}} · {{index}}",

@@ -29,6 +29,16 @@
     "reasoning_effort": "Effort de raisonnement",
     "default": "Par défaut"
   },
+  "compaction": {
+    "manual": "Compactage du contexte",
+    "automatic": "Compactage automatique du contexte",
+    "running": "Compactage en cours…",
+    "runningManual": "Compactage en cours… Le compactage manuel ne peut pas être arrêté.",
+    "completed": "Terminé",
+    "completedWithTokens": "Terminé. Jetons avant le compactage : {{tokens}}",
+    "failed": "Échec",
+    "aborted": "Annulé"
+  },
   "subagents": {
     "title": "Sous-agents",
     "child": "{{profile}} · {{index}}",

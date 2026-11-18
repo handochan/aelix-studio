@@ -29,6 +29,16 @@
     "reasoning_effort": "추론 깊이",
     "default": "기본값"
   },
+  "compaction": {
+    "manual": "컨텍스트 압축",
+    "automatic": "자동 컨텍스트 압축",
+    "running": "압축 중…",
+    "runningManual": "압축 중… 수동 압축 중에는 중지할 수 없습니다.",
+    "completed": "완료",
+    "completedWithTokens": "완료. 압축 전 토큰 수 {{tokens}}",
+    "failed": "실패",
+    "aborted": "취소됨"
+  },
   "subagents": {
     "title": "서브에이전트",
     "child": "{{profile}} · {{index}}",

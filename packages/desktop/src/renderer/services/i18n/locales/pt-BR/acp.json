@@ -29,6 +29,16 @@
     "download_error": "Falha ao baixar",
     "generated_alt": "Imagem gerada"
   },
+  "compaction": {
+    "manual": "Compactação do contexto",
+    "automatic": "Compactação automática do contexto",
+    "running": "Compactando…",
+    "runningManual": "Compactando… Não é possível parar durante a compactação manual.",
+    "completed": "Concluída",
+    "completedWithTokens": "Concluída. Tokens antes da compactação: {{tokens}}",
+    "failed": "Falhou",
+    "aborted": "Cancelada"
+  },
   "subagents": {
     "title": "Subagentes",
     "child": "{{profile}} · {{index}}",

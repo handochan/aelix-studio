@@ -29,6 +29,16 @@
     "reasoning_effort": "Усилия на рассуждение",
     "default": "По умолчанию"
   },
+  "compaction": {
+    "manual": "Сжатие контекста",
+    "automatic": "Автоматическое сжатие контекста",
+    "running": "Сжатие…",
+    "runningManual": "Сжатие… Остановка недоступна во время ручного сжатия.",
+    "completed": "Завершено",
+    "completedWithTokens": "Завершено. Токенов до сжатия: {{tokens}}",
+    "failed": "Ошибка",
+    "aborted": "Отменено"
+  },
   "subagents": {
     "title": "Субагенты",
     "child": "{{profile}} · {{index}}",

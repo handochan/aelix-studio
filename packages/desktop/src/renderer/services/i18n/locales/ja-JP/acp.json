@@ -29,6 +29,16 @@
     "reasoning_effort": "推論の深さ",
     "default": "デフォルト"
   },
+  "compaction": {
+    "manual": "コンテキストの圧縮",
+    "automatic": "コンテキストの自動圧縮",
+    "running": "圧縮中…",
+    "runningManual": "圧縮中…手動圧縮中は停止できません。",
+    "completed": "完了",
+    "completedWithTokens": "完了。圧縮前のトークン数：{{tokens}}",
+    "failed": "失敗",
+    "aborted": "キャンセル済み"
+  },
   "subagents": {
     "title": "サブエージェント",
     "child": "{{profile}} · {{index}}",

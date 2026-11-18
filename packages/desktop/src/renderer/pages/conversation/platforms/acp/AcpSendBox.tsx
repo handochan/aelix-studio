@@ -123,6 +123,7 @@ const AcpSendBox: React.FC<{
     slashCommands,
     tokenUsage,
     context_limit,
+    manualCompactionRunning,
   } = messageState;
   const { t } = useTranslation();
   const teamPermission = useTeamPermission();
@@ -742,6 +743,7 @@ Please check your local CLI tool authentication status`,
   const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
+      if (manualCompactionRunning) return;
       if (supportsMidturnDelivery) {
         // Supporting agents can deliver directly into the running turn — no
         // need to stop/restart. Remove the item BEFORE executing (rather than
@@ -774,7 +776,7 @@ Please check your local CLI tool authentication status`,
       await effectiveHandleStop();
       prioritize(item.id);
     },
-    [effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
+    [effectiveHandleStop, enqueue, executeCommand, manualCompactionRunning, prioritize, remove, supportsMidturnDelivery]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 
@@ -799,7 +801,7 @@ Please check your local CLI tool authentication status`,
         statusText={teamRuntime?.statusText}
         externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
         startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
-        onStop={effectiveHandleStop}
+        onStop={manualCompactionRunning ? undefined : effectiveHandleStop}
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
@@ -833,7 +835,7 @@ Please check your local CLI tool authentication status`,
           backend: agent_name || backend,
           defaultValue: `Send message to {{backend}}...`,
         })}
-        onStop={effectiveHandleStop}
+        onStop={manualCompactionRunning ? undefined : effectiveHandleStop}
         className='z-10'
         onFilesAdded={handleFilesAdded}
         hasPendingAttachments={uploadFile.length > 0 || atPath.length > 0}

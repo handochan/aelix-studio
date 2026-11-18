@@ -29,6 +29,16 @@
     "reasoning_effort": "推理深度",
     "default": "默认"
   },
+  "compaction": {
+    "manual": "上下文压缩",
+    "automatic": "自动上下文压缩",
+    "running": "正在压缩…",
+    "runningManual": "正在压缩…手动压缩期间无法停止。",
+    "completed": "已完成",
+    "completedWithTokens": "已完成。压缩前的词元数：{{tokens}}",
+    "failed": "失败",
+    "aborted": "已取消"
+  },
   "subagents": {
     "title": "子代理",
     "child": "{{profile}} · {{index}}",

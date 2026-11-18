@@ -5,6 +5,7 @@ import { ipcBridge } from '@/common';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { ToolMessage } from '@/common/chat/normalizeToolCall';
 import MessageToolGroupSummary from '@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
+import contextControls from '../../fixtures/aelix-context-controls.json';
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -16,7 +17,36 @@ vi.mock('@/common', () => ({
   },
 }));
 
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    i18n: { resolvedLanguage: 'en-US' },
+    t: (key: string, values?: { tokens: string }) => (values ? `${key} ${values.tokens}` : key),
+  }),
+}));
+
 describe('MessageToolGroupSummary', () => {
+  it('renders the compaction result on the existing steps surface', () => {
+    const completion = contextControls.manualCompactionCompleted;
+    const message: ToolMessage = {
+      id: 'compact-message',
+      conversation_id: 'conversation-1',
+      type: 'acp_tool_call',
+      content: {
+        sessionId: 'session',
+        _meta: completion._meta,
+        update: {
+          sessionUpdate: 'tool_call_update',
+          tool_call_id: completion.toolCallId,
+          title: '/compact',
+          status: 'completed',
+          kind: 'execute',
+        },
+      },
+    };
+    render(<MessageToolGroupSummary messages={[message]} />);
+    expect(screen.getByRole('status')).toHaveTextContent('18,432');
+  });
+
   it('loads full tool content when expanding a compact history item', async () => {
     const invoke = vi.mocked(ipcBridge.database.getConversationMessage.invoke);
     invoke.mockResolvedValue({

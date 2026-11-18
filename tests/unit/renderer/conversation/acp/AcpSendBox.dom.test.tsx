@@ -325,6 +325,7 @@ vi.mock('@arco-design/web-react', () => ({
 }));
 
 const makeMessageState = (): UseAcpMessageReturn => ({
+  manualCompactionRunning: false,
   thought: { subject: '', description: '' },
   setThought: vi.fn(),
   running: true,
@@ -893,6 +894,20 @@ describe('AcpSendBox', () => {
       };
       return props.onSendNow;
     };
+
+    it('keeps a queued command from stopping a manual compaction', async () => {
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      render(
+        <AcpSendBox
+          conversation_id='conv-1'
+          backend='aelix'
+          messageState={{ ...makeMessageState(), manualCompactionRunning: true }}
+        />
+      );
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+    });
 
     it('delivers mid-turn for a supporting agent instead of stopping the turn', async () => {
       runtimeViewMock.supportsMidturnDelivery = true;
