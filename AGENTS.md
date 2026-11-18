@@ -15,7 +15,7 @@ gh project item-list 9 --owner handochan --format json --limit 100
 ```
 
 - Follow the user's explicit task scope. For queued product work, take only an assigned Ready Issue after dependencies are satisfied; convert drafts before implementation.
-- One Issue, one owner, one branch/worktree. Preserve other agents' dirty work. Initial independent implementation concurrency is at most two; serialize shared contracts, manifests, lockfiles, and host composition changes.
+- One Issue, one owner, one branch/worktree. Preserve other agents' dirty work. There is no cap on concurrent independent implementations. Before starting, check what other sessions are working on (In progress cards, open PRs, branches/worktrees) and do not take or overlap their work. Serialize shared contracts, manifests, lockfiles, and host composition changes.
 - Put Beta feature Issues that can start now into the implementation slots first. Re-check that an Issue's stated dependencies are still open before leaving it `blocked`; a closed dependency does not prove the feature runs in the bundled runtime.
 - For a cross-repository feature, fix the contract as example JSON first, integrate on branch SHAs during development, and cut host releases only at integration. Send Aelix-specific features over paths the host passes through without interpreting, and global management through the helper.
 - Build new Aelix screens as self-contained modules behind a narrow data interface, not inside the Aion conversation store.
