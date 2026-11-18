@@ -65,8 +65,14 @@ before CRSession discards CDP error codes or changes their message. It adds no
 connection, protocol command, DEBUG setting, retry or driver patch. The factory
 is restored after launch; the existing connections' observers retire at cleanup.
 Context IDs/default flags, request IDs, fixed method names and error codes are
-retained. Known CDP message templates are preserved; arbitrary text/suffixes and
-error data are redacted. Names, origins, URLs, evaluation contents, session IDs,
+retained. Fixed CDP/V8 inspector messages (including `Promise was collected`)
+are preserved only on exact equality, using the pinned Electron 37.10.3 /
+V8 13.8.258.32 source literals cited in the observer. Prefixes, suffixes and
+unrecognized messages remain fully redacted. Only message length, whitespace
+word count, Unicode decimal-digit presence and `/`/`:`/`=` presence are retained
+as shape information. Evaluation errors also retain the request's `awaitPromise`
+and `returnByValue` booleans (null when absent or not boolean), without copying
+other parameters. Error data, names, origins, URLs, evaluation contents, session IDs,
 paths and tokens are never copied into this new protocol evidence. The observer
 keeps 64 events, 8 errors and 16 preceding context events per error; the identity
 snapshot is frozen before later cleanup events. An unsupported adapter is

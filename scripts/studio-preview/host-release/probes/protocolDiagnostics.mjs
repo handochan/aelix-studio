@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 const require = createRequire(import.meta.url);
-const MESSAGES = [
+const MESSAGES = new Set([
   'Cannot find context with specified id',
   'Cannot find object with given id',
   'Could not find object with given id',
@@ -13,7 +13,19 @@ const MESSAGES = [
   'Invalid remote object id',
   'Session with given id not found.',
   'No target with given id found',
-];
+  // Verified in Electron 37.10.3's V8 13.8.258.32 inspector binary strings.
+  // These are fixed literals, not formatted messages carrying user values:
+  // https://github.com/v8/v8/blob/13.8.258.32/src/inspector/injected-script.cc
+  'Promise was collected',
+  'Tearing down inspector/session/context',
+  "Couldn't parse value object in call argument",
+  'Argument should belong to the same JavaScript world as target object',
+  'Uncaught',
+  // https://github.com/v8/v8/blob/13.8.258.32/third_party/inspector_protocol/crdtp/dispatch.cc#L61
+  'Internal error',
+  // https://github.com/v8/v8/blob/13.8.258.32/src/inspector/v8-debugger-agent-impl.cc#L424
+  'Script execution is prohibited',
+]);
 const METHODS = new Set([
   'Runtime.enable',
   'Runtime.evaluate',
@@ -26,12 +38,17 @@ const METHODS = new Set([
 /** Preserve known CDP diagnostics, never arbitrary remote text or error data. */
 export function safeProtocolError(error) {
   const raw = typeof error?.message === 'string' ? error.message : '';
-  const prefix = MESSAGES.find((message) => raw.startsWith(message));
+  const recognized = MESSAGES.has(raw);
   return {
     code: Number.isSafeInteger(error?.code) ? error.code : null,
-    message: prefix ? prefix + (raw === prefix ? '' : ' <redacted>') : '<redacted-unrecognized-message>',
-    messageRedacted: !prefix || raw !== prefix,
+    message: recognized ? raw : '<redacted-unrecognized-message>',
+    messageRedacted: !recognized,
     messageLength: raw.length,
+    messageWordCount: raw.match(/\S+/gu)?.length ?? 0,
+    messageHasNumber: /\p{Decimal_Number}/u.test(raw),
+    messageHasSlash: raw.includes('/'),
+    messageHasColon: raw.includes(':'),
+    messageHasEquals: raw.includes('='),
   };
 }
 
@@ -83,19 +100,29 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
       try {
         if (active && direction === 'send' && Number.isSafeInteger(message?.id)) {
           const key = `${message.sessionId ?? ''}:${message.id}`;
-          requests.set(key, METHODS.has(message.method) ? message.method : 'other');
+          const method = METHODS.has(message.method) ? message.method : 'other';
+          requests.set(key, {
+            method,
+            ...(method === 'Runtime.evaluate' || method === 'Runtime.callFunctionOn'
+              ? {
+                  awaitPromise: typeof message.params?.awaitPromise === 'boolean' ? message.params.awaitPromise : null,
+                  returnByValue:
+                    typeof message.params?.returnByValue === 'boolean' ? message.params.returnByValue : null,
+                }
+              : {}),
+          });
           if (requests.size > 256) requests.delete(requests.keys().next().value);
         } else if (active && direction === 'receive' && message) {
           if (Number.isSafeInteger(message.id)) {
             const key = `${message.sessionId ?? ''}:${message.id}`;
-            const method = requests.get(key) ?? 'unknown';
+            const request = requests.get(key) ?? { method: 'unknown' };
             requests.delete(key);
             if (message.error)
               emit({
                 kind: 'protocol-error',
                 connection,
                 requestId: message.id,
-                method,
+                ...request,
                 ...safeProtocolError(message.error),
               });
           } else if (message.method === 'Runtime.executionContextCreated') {
