@@ -193,6 +193,33 @@ test.describe('Preview — file type routing', () => {
   });
 });
 
+test('ordinary HTML and SVG open below folders named workspace and reports', async ({ page }) => {
+  test.setTimeout(120_000);
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-ordinary-preview-'));
+  const directory = path.join(parent, 'workspace', 'reports', 'quarterly', 'site');
+  fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(path.join(directory, 'index.html'), '<h1>Ordinary HTML</h1>');
+  fs.writeFileSync(
+    path.join(directory, 'logo.svg'),
+    '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"><title>Ordinary SVG</title></svg>'
+  );
+  let conversation: string | undefined;
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, directory);
+    const tree = page.locator('.workspace-tree').first();
+    const panel = page.locator(PREVIEW_PANEL);
+    await tree.getByText('index.html', { exact: true }).click();
+    await expect(panel.locator('webview')).toBeVisible();
+    await expect(panel.getByTestId('analytics-preview')).toHaveCount(0);
+    await tree.getByText('logo.svg', { exact: true }).click();
+    await expect(panel.getByRole('img', { name: 'logo.svg' })).toBeVisible();
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('Analytics Workspace preserves relative assets, navigation, and Report isolation', async ({
   page,
   electronApp,
@@ -265,6 +292,20 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
     fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
     fs.writeFileSync(path.join(workspace, name), contents);
   }
+  const journal = path.join(workspace, 'journal.jsonl');
+  const timeline =
+    Array.from({ length: 2100 }, (_, index) =>
+      JSON.stringify({
+        schema: 'analytics.event/2',
+        kind: 'note',
+        id: `e${index + 2}`,
+        seq: index + 2,
+        text: 'a'.repeat(8250),
+      })
+    ).join('\n') + '\n';
+  fs.appendFileSync(journal, timeline);
+  const journalSize = fs.statSync(journal).size;
+  expect(journalSize).toBeGreaterThan(16 * 1024 * 1024);
   let conversation: string | undefined;
   let externalRequests = 0;
   const otherOrigin = createServer((_request, response) => {
@@ -367,6 +408,17 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
       },
       { projectId, uri: pathToFileURL(path.join(workspace, revision)).href }
     );
+    fs.appendFileSync(journal, '{"schema":"future","kind":"other","id":"conflict","seq":1}\n');
+    const conflicted = await page.evaluate(
+      ({ projectId, peId }) =>
+        window.electronAPI!.analyticsPreview!.open({
+          projectId,
+          file: { kind: 'project', pe_id: peId, relative_path: 'index.html' },
+        }),
+      { projectId, peId }
+    );
+    expect(conflicted).toBeNull();
+    fs.truncateSync(journal, journalSize);
     const match = await page.evaluate(
       async ({ projectId, peId }) => {
         const bridge = window.electronAPI!.analyticsPreview!;

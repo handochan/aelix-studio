@@ -21,7 +21,7 @@ import {
   type AnalyticsPreviewRequest,
   type AnalyticsPreviewScope,
 } from '@/common/utils/analyticsPreview';
-import { previewFileType, readPreviewFile, resolvePreviewRoot } from './files';
+import { locateAnalyticsDocument, previewFileType, readPreviewFile } from './files';
 import {
   ANALYTICS_PARTITION,
   ANALYTICS_SCHEME,
@@ -176,27 +176,6 @@ async function attachedFolder(projectId: string, peId: string): Promise<string |
   if (entry?.runtime_status === 'available' && path.isAbsolute(entry.display_path)) return entry.display_path;
 }
 
-function locateDocument(filename: string) {
-  const volume = path.parse(filename).root;
-  const parts = path.relative(volume, filename).split(path.sep);
-  let workspace;
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i] !== 'artifacts' && parts[i] !== 'workspace') continue;
-    const suffix = parts.slice(i);
-    if (suffix[0] === 'artifacts' && suffix[1] === 'reports' && suffix[3] === '.staging') {
-      throw new Error('A prepared Report revision cannot be previewed');
-    }
-    const scope: AnalyticsPreviewScope | undefined = isReportViewPath(suffix)
-      ? { kind: 'workspace', project: [] }
-      : analyticsPreviewScope(suffix.join('/'));
-    if (scope?.project.length !== 0) continue;
-    const candidate = { directory: path.join(volume, ...parts.slice(0, i)), scope, parts: suffix };
-    if (scope.kind === 'report' || isReportViewPath(suffix)) return candidate;
-    workspace = candidate;
-  }
-  return workspace;
-}
-
 function canNavigate(grant: PreviewGrant, parts: string[]): boolean {
   if (!grant.permits(parts)) return false;
   const mime = previewFileType(grant.scope, parts);
@@ -222,19 +201,17 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
   const explorerRoot = await realpath(displayPath);
   const filename = path.join(explorerRoot, ...requested);
   const canonical = await realpath(filename);
-  const location = locateDocument(filename);
-  if (canonical !== filename && (location || locateDocument(canonical))) {
+  const location = await locateAnalyticsDocument(filename);
+  if (canonical !== filename && (location || (await locateAnalyticsDocument(canonical)))) {
     throw new Error('Analytics preview cannot follow links');
   }
   if (!location) {
     return;
   }
-  const { directory, scope, parts } = location;
+  const { root, scope, parts } = location;
   if (scope.kind === 'workspace' && isReportViewPath(parts) && !isGeneratedReportBody(parts)) {
     throw new Error('Open the original Report revision for this attachment');
   }
-  const root = await resolvePreviewRoot(directory, scope);
-  if (!root) return;
   if (!previewFileType(scope, parts)) throw new Error('Analytics preview file refused');
   if (scope.kind === 'workspace' && !/\.html?$/i.test(file.relative_path)) return;
   const permits = (target: string[]) => {

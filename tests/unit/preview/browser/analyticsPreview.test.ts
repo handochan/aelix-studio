@@ -5,11 +5,15 @@
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
-import { MAX_ANALYTICS_PREVIEW_BYTES, resolvePreviewRoot } from '@process/services/analyticsPreview/files';
+import {
+  locateAnalyticsDocument,
+  MAX_ANALYTICS_PREVIEW_BYTES,
+  scanPreviewJournal,
+} from '@process/services/analyticsPreview/files';
 import { previewUrl, servePreview, type PreviewGrant } from '@process/services/analyticsPreview/protocol';
 import { savedRevisionFiles } from '@process/services/analyticsPreview/revision';
 
@@ -22,6 +26,7 @@ let scratch: string;
 let rootDirectory: string;
 let grants: Map<string, PreviewGrant>;
 let authorize: () => Promise<boolean>;
+let completionLine: string;
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 
 async function write(parts: string[], data: string) {
@@ -53,11 +58,10 @@ beforeEach(async () => {
   await write(['analytics.json'], '{"schema":"analytics.project/2"}');
   const workspaceScope = analyticsPreviewScope([...workspace, 'index.html'].join('/'))!;
   const reportScope = analyticsPreviewScope([...revision, 'index.html'].join('/'))!;
-  const root = (await resolvePreviewRoot(rootDirectory, workspaceScope))!;
+  const root = (await locateAnalyticsDocument(path.join(rootDirectory, 'workspace/index.html')))!.root;
   const saved = manifest({ 'index.html': '<h1>Monthly</h1>', 'script.js': 'void 0', 'link/script.js': 'void 0' });
   await write([...revision.slice(0, -1), 'manifest.json'], saved);
-  await write(
-    ['journal.jsonl'],
+  completionLine =
     JSON.stringify({
       schema: 'analytics.event/2',
       kind: 'report_revision',
@@ -76,8 +80,8 @@ beforeEach(async () => {
           digest: { sha256: sha(saved) },
         },
       ],
-    }) + '\n'
-  );
+    }) + '\n';
+  await write(['journal.jsonl'], completionLine);
   authorize = async () => true;
   const authority = { permits: () => true, authorized: () => authorize() };
   grants = new Map([
@@ -131,6 +135,76 @@ describe('Analytics preview resource routing', () => {
     const replacement = manifest({ 'index.html': '<h1>Monthly</h1>', 'script.js': 'void 1', 'added.js': 'void 0' });
     await write([...revision.slice(0, -1), 'manifest.json'], replacement);
     expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it.each([
+    {
+      name: 'ID on another kind before the completion',
+      row: { schema: 'analytics.event/2', kind: 'note', id: 'e1', seq: 2 },
+      before: true,
+    },
+    {
+      name: 'sequence on an unsupported row after the completion',
+      row: { schema: 'analytics.event/9', kind: 'future', id: 'other', seq: 1 },
+      before: false,
+    },
+  ])('rejects a conflicting $name', async ({ row, before }) => {
+    const other = JSON.stringify(row) + '\n';
+    await write(['journal.jsonl'], before ? other + completionLine : completionLine + other);
+    expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it('rejects a truncated journal even when its completion was readable earlier', async () => {
+    await appendFile(path.join(rootDirectory, 'journal.jsonl'), '{"schema":"analytics.event/2","id":"e2"');
+    expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it('requires an integer completion sequence in the stored JSON', async () => {
+    await write(['journal.jsonl'], completionLine.replace('"seq":1', '"seq":1.0'));
+    expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it('does not count another record with a decimal sequence as an integer collision', async () => {
+    await appendFile(path.join(rootDirectory, 'journal.jsonl'), '{"schema":"future","id":"decimal","seq":1.0}\n');
+    expect((await savedRevisionFiles(grants.get(reportHost)!.root, revision))?.has('index.html')).toBe(true);
+  });
+
+  it('accepts a large accumulated journal and detects a conflicting row beyond the asset ceiling', async () => {
+    const tail =
+      Array.from({ length: 2100 }, (_, index) =>
+        JSON.stringify({
+          schema: 'analytics.event/2',
+          kind: 'note',
+          id: `e${index + 2}`,
+          seq: index + 2,
+          text: '가'.repeat(2750),
+        })
+      ).join('\n') + '\n';
+    expect(Buffer.byteLength(tail)).toBeGreaterThan(MAX_ANALYTICS_PREVIEW_BYTES);
+    const journal = await write(['journal.jsonl'], completionLine + tail);
+    const root = grants.get(reportHost)!.root;
+    const files = await savedRevisionFiles(root, revision);
+    expect(files?.has('index.html')).toBe(true);
+    await appendFile(journal, '{"schema":"future","id":"late","seq":1}\n');
+    expect(await savedRevisionFiles(root, revision)).toBeUndefined();
+  });
+
+  it('refuses a journal snapshot changed between scans', async () => {
+    const root = grants.get(reportHost)!.root;
+    const result = await scanPreviewJournal(root, async (lines) => {
+      for await (const line of lines()) expect(line).toBe(completionLine.trim());
+      await appendFile(path.join(rootDirectory, 'journal.jsonl'), '{"id":"e2","seq":2}\n');
+      for await (const line of lines()) expect(line).toBe(completionLine.trim());
+      return true;
+    });
+    expect(result).toBe(404);
+  });
+
+  it('bounds the number of admitted revision verifications', async () => {
+    const root = grants.get(reportHost)!.root;
+    const attempts = Array.from({ length: 35 }, () => savedRevisionFiles(root, revision));
+    expect(await attempts[34]).toBeUndefined();
+    expect((await Promise.all(attempts)).filter(Boolean)).toHaveLength(34);
   });
 
   it('keeps copies out of the Workspace origin and renders the derived body without scripts', async () => {
@@ -188,17 +262,23 @@ describe('Analytics preview resource routing', () => {
     expect((await pending).status).toBe(403);
   });
 
-  it('requires the project marker independently of the attached folder location', async () => {
-    const candidate = path.basename(rootDirectory) + '/workspace/index.html';
-    const scope = analyticsPreviewScope(candidate)!;
-    expect((await resolvePreviewRoot(scratch, scope))?.directory).toContain('분석 project');
+  it.each([
+    ['workspace', 'reports', 'quarterly', 'site', 'index.html'],
+    ['workspace', 'reports', 'quarterly', 'site', 'logo.svg'],
+    ['artifacts', 'reports', 'quarterly', '.staging', 'site', 'index.html'],
+  ])('leaves ordinary documents to the existing viewer under %j', async (...parts) => {
+    const filename = path.join(scratch, 'plain', ...parts);
+    await mkdir(path.dirname(filename), { recursive: true });
+    await writeFile(filename, 'fixture');
+    expect(await locateAnalyticsDocument(filename)).toBeUndefined();
+  });
+
+  it('requires the marker for an Analytics document even with an attached subfolder', async () => {
+    const filename = await write([...revision, 'index.html'], '<h1>Monthly</h1>');
+    expect((await locateAnalyticsDocument(filename))?.scope.kind).toBe('report');
     await rm(path.join(rootDirectory, 'analytics.json'));
-    expect(await resolvePreviewRoot(scratch, scope)).toBeUndefined();
-    const reportScope = analyticsPreviewScope([...revision, 'index.html'].join('/'))!;
-    await expect(resolvePreviewRoot(rootDirectory, reportScope)).rejects.toThrow(
-      'Analytics project marker is unavailable'
-    );
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
     await write(['analytics.json'], '{"schema":"ordinary.project/1"}');
-    await expect(resolvePreviewRoot(scratch, scope)).rejects.toThrow('Invalid Analytics project marker');
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Invalid Analytics project marker');
   });
 });
