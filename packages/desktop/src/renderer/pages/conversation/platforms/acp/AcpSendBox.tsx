@@ -199,20 +199,33 @@ const AcpSendBox: React.FC<{
     setCurrentMode(runtimeMode.currentValue);
   }, [runtimeMode?.currentValue]);
 
+  const propagateTeamMode = useCallback(
+    (mode: string) => teamPermission?.propagateMode(mode, runtimeMode?.id === 'permission_mode'),
+    [runtimeMode?.id, teamPermission]
+  );
+
   const handleSheetModeChange = useCallback(
     async (mode: string) => {
       if (!runtimeMode || mode === runtimeMode.currentValue) return;
       try {
-        await runtimeConfig.setConfigOption(runtimeMode.id, mode);
+        const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
+        if (
+          teamPermission &&
+          runtimeMode.id === 'permission_mode' &&
+          applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode
+        ) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+          return;
+        }
         setCurrentMode(mode);
-        if (isLeaderInTeam) teamPermission?.propagateMode?.(mode);
+        if (isLeaderInTeam) await propagateTeamMode(mode);
         Message.success(t('agentMode.switchSuccess'));
       } catch (error) {
         console.error('[AcpSendBox] Failed to switch mode via sheet:', error);
         Message.error(t(configErrorMessageKey(error)));
       }
     },
-    [isLeaderInTeam, runtimeConfig, runtimeMode, t, teamPermission]
+    [isLeaderInTeam, propagateTeamMode, runtimeConfig, runtimeMode, t, teamPermission]
   );
 
   const handleContentChange = useCallback(
@@ -860,7 +873,7 @@ Please check your local CLI tool authentication status`,
                 modeLabelFormatter={(mode) => t(`agentMode.${mode.value}`, { defaultValue: mode.label })}
                 compactLabelPrefix={t('agentMode.permission')}
                 hideCompactLabelPrefixOnMobile
-                onModeChanged={isLeaderInTeam ? teamPermission?.propagateMode : undefined}
+                onModeChanged={isLeaderInTeam ? propagateTeamMode : undefined}
                 beforeRuntimeSync={prepareRuntimeConfig}
                 beforeRuntimeSet={teamPermission?.warmupSession}
                 configOptionsPort={teamPermission?.configOptionsPort}

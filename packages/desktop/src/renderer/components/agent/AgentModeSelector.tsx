@@ -60,7 +60,7 @@ export interface AgentModeSelectorProps {
   /** Hide compact prefix on mobile */
   hideCompactLabelPrefixOnMobile?: boolean;
   /** Callback fired after a successful mode change (for team-mode propagation) */
-  onModeChanged?: (mode: string) => void;
+  onModeChanged?: (mode: string) => void | Promise<void>;
   /** Dynamic modes from capabilities (overrides static list when non-empty) */
   dynamicModes?: AgentModeOption[];
   /** Optional runtime preparation before reading active-session mode. */
@@ -208,7 +208,7 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
           return;
         }
         setCurrentMode(mode);
-        onModeChanged?.(mode);
+        await onModeChanged?.(mode);
         Message.success(t('agentMode.switchSuccess'));
       } catch (error) {
         console.error('[AgentModeSelector] Failed to switch mode:', error);

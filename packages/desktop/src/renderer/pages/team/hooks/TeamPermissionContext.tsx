@@ -12,7 +12,7 @@ type TeamPermissionContextValue = {
   /** All agent conversation IDs in this team (for centralized confirmation listening) */
   allConversationIds: string[];
   /** Propagate a permission mode change from the leader to all member agents */
-  propagateMode: (mode: string) => void;
+  propagateMode: (mode: string, requireConfirmation?: boolean) => void | Promise<void>;
   /** Trigger session warmup (idempotent, returns cached promise) */
   warmupSession: () => Promise<void>;
   /** Read/write runtime config options through the team-owned session */
@@ -39,9 +39,12 @@ export const TeamPermissionProvider: React.FC<{
   const warmupPromiseRef = useRef<Promise<void> | null>(null);
 
   const propagateMode = useCallback(
-    (mode: string) => {
+    (mode: string, requireConfirmation = false) => {
       // Persist session_mode on the team record so newly spawned agents inherit it
-      void ipcBridge.team.setSessionMode.invoke({ team_id, session_mode: mode }).catch(() => {
+      const change = ipcBridge.team.setSessionMode.invoke({ team_id, session_mode: mode });
+      if (requireConfirmation) return change;
+
+      void change.catch(() => {
         // Best-effort: if this fails, active agents still receive per-conversation config updates.
       });
     },

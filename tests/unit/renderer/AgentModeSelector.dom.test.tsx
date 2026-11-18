@@ -143,6 +143,63 @@ describe('AgentModeSelector', () => {
     expect(screen.getByText('权限 · 默认')).toBeInTheDocument();
   });
 
+  it('shows Ask in the desktop Team selector and only propagates Yolo after selection', async () => {
+    const port = { setConfigOption: vi.fn() };
+    const propagateMode = vi.fn();
+    const select = vi.fn().mockResolvedValue([{ id: 'permission_mode', current_value: 'yolo' }]);
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: {
+        id: 'permission_mode',
+        category: 'mode',
+        currentValue: 'default',
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      },
+      setConfigOption: select,
+    });
+
+    render(
+      <AgentModeSelector
+        backend='acp'
+        conversation_id='team-leader'
+        compact
+        initialMode='yolo'
+        configOptionsPort={port}
+        onModeChanged={propagateMode}
+      />
+    );
+
+    expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'default');
+    expect(select).not.toHaveBeenCalled();
+    expect(propagateMode).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-yolo'));
+
+    await waitFor(() => expect(propagateMode).toHaveBeenCalledWith('yolo'));
+    expect(select).toHaveBeenCalledOnce();
+    expect(select).toHaveBeenCalledWith('permission_mode', 'yolo');
+  });
+
+  it('surfaces a rejected Team propagation after applying the leader mode', async () => {
+    const { Message } = await import('@arco-design/web-react');
+    const onModeChanged = vi.fn().mockRejectedValue(new Error('teammate is busy'));
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: runtimeMode(),
+      setConfigOption: vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'bypassPermissions' }]),
+    });
+    render(<AgentModeSelector backend='acp' conversation_id='team-leader' compact onModeChanged={onModeChanged} />);
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-bypassPermissions'));
+
+    await waitFor(() => expect(Message.error).toHaveBeenCalledOnce());
+    expect(Message.success).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'bypassPermissions');
+  });
+
   // A switch the backend accepted but has not applied yet (codex always, claude/agy
   // mid-turn) must not move the pill onto the requested mode: the pill answers "what
   // permission is governing right now", and showing the target would tell the user a
