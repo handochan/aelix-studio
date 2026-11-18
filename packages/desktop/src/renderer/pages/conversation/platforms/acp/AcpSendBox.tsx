@@ -208,22 +208,25 @@ const AcpSendBox: React.FC<{
       if (reapply && !propagateTeamMode) return;
 
       try {
+        let deferred = false;
         if (!reapply) {
           const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-          if (teamPermission && applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode) {
-            Message.info(t('agentMode.switchPendingNextTurn'));
-            return;
-          }
-          setCurrentMode(mode);
+          deferred = applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode;
+          if (!deferred) setCurrentMode(mode);
         }
+        // A resolved deferred selection still authorizes the Team change.
         await propagateTeamMode?.(mode);
-        Message.success(t('agentMode.switchSuccess'));
+        if (deferred) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+        } else {
+          Message.success(t('agentMode.switchSuccess'));
+        }
       } catch (error) {
         console.error('[AcpSendBox] Failed to switch mode via sheet:', error);
         Message.error(t(configErrorMessageKey(error)));
       }
     },
-    [propagateTeamMode, runtimeConfig, runtimeMode, t, teamPermission]
+    [propagateTeamMode, runtimeConfig, runtimeMode, t]
   );
 
   const handleContentChange = useCallback(

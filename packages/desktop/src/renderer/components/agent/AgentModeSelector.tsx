@@ -200,17 +200,20 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
 
       setIsLoading(true);
       try {
+        let deferred = false;
         if (!reapply) {
           const applied = await setActiveMode();
-          // A deferred switch leaves the effective mode unchanged until the host reports it.
-          if (applied?.find((option) => option.id === runtimeMode?.id)?.current_value !== mode) {
-            Message.info(t('agentMode.switchPendingNextTurn'));
-            return;
-          }
-          setCurrentMode(mode);
+          deferred = applied?.find((option) => option.id === runtimeMode?.id)?.current_value !== mode;
+          if (!deferred) setCurrentMode(mode);
         }
+        // The leader's effective mode stays unchanged until the host reports
+        // it. An accepted selection can still be applied to other Team slots.
         await onModeChanged?.(mode);
-        Message.success(t('agentMode.switchSuccess'));
+        if (deferred) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+        } else {
+          Message.success(t('agentMode.switchSuccess'));
+        }
       } catch (error) {
         console.error('[AgentModeSelector] Failed to switch mode:', error);
         Message.error(t(configErrorMessageKey(error)));

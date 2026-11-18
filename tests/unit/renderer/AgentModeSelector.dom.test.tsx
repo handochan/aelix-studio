@@ -250,6 +250,7 @@ describe('AgentModeSelector', () => {
       Message: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn> };
     };
     // The backend answers with the mode still in force, not the one just requested.
+    const propagateMode = vi.fn().mockResolvedValue(undefined);
     const setConfigOption = vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'default' }]);
     useAcpConfigOptionsMock.mockImplementation(() => ({
       setStatus: { state: 'idle' },
@@ -269,12 +270,14 @@ describe('AgentModeSelector', () => {
         compact
         modeLabelFormatter={(mode) => (mode.value === 'default' ? '默认' : '全自动')}
         compactLabelPrefix='权限'
+        onModeChanged={propagateMode}
       />
     );
 
     fireEvent.click(screen.getByText('全自动'));
 
     await waitFor(() => expect(setConfigOption).toHaveBeenCalledWith('mode', 'bypassPermissions'));
+    expect(propagateMode).toHaveBeenCalledWith('bypassPermissions');
     await waitFor(() => expect(Message.info).toHaveBeenCalled());
     expect(Message.error).not.toHaveBeenCalled();
     expect(Message.success).not.toHaveBeenCalled();

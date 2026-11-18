@@ -492,16 +492,19 @@ const AionrsSendBox: React.FC<{
       if (reapply && !propagateMode) return;
 
       try {
+        let deferred = false;
         if (!reapply) {
           const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-          if (propagateMode && applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode) {
-            Message.info(t('agentMode.switchPendingNextTurn'));
-            return;
-          }
-          setCurrentMode(mode);
+          deferred = applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode;
+          if (!deferred) setCurrentMode(mode);
         }
+        // A resolved deferred selection still authorizes the Team change.
         await propagateMode?.(mode);
-        Message.success(t('agentMode.switchSuccess'));
+        if (deferred) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+        } else {
+          Message.success(t('agentMode.switchSuccess'));
+        }
       } catch (error) {
         console.error('[AionrsSendBox] Failed to switch mode via sheet:', error);
         Message.error(t(configErrorMessageKey(error)));

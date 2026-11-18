@@ -7,6 +7,10 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
+import { Message } from '@arco-design/web-react';
+import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import type { AcpConfigOptionDto } from '@/common/types/platform/acpTypes';
+import { TeamPermissionProvider } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AcpSendBox from '@/renderer/pages/conversation/platforms/acp/AcpSendBox';
 import type { UseAcpMessageReturn } from '@/renderer/pages/conversation/platforms/acp/useAcpMessage';
@@ -21,6 +25,10 @@ const {
   setSendBoxHandlerMock,
   useAcpConfigOptionsMock,
   useTeamPermissionMock,
+  teamGetConfigMock,
+  teamSetConfigMock,
+  teamSetModeMock,
+  responseListeners,
   isMobileMock,
   mobileActionSheetEntries,
   sendBoxPropsSpy,
@@ -43,6 +51,10 @@ const {
   setSendBoxHandlerMock: vi.fn(),
   useAcpConfigOptionsMock: vi.fn(),
   useTeamPermissionMock: vi.fn(),
+  teamGetConfigMock: vi.fn(),
+  teamSetConfigMock: vi.fn(),
+  teamSetModeMock: vi.fn(),
+  responseListeners: new Set<(message: IResponseMessage) => void>(),
   sendBoxPropsSpy: vi.fn(),
   isMobileMock: { current: false },
   mobileActionSheetEntries: {
@@ -76,7 +88,19 @@ const {
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    team: {
+      getConfigOptions: { invoke: teamGetConfigMock },
+      setConfigOption: { invoke: teamSetConfigMock },
+      setSessionMode: { invoke: teamSetModeMock },
+      ensureSession: { invoke: vi.fn().mockResolvedValue(undefined) },
+    },
     acpConversation: {
+      responseStream: {
+        on: (listener: (message: IResponseMessage) => void) => {
+          responseListeners.add(listener);
+          return () => responseListeners.delete(listener);
+        },
+      },
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
@@ -266,9 +290,16 @@ vi.mock('@/renderer/pages/conversation/Preview', () => ({
     setSendBoxHandler: setSendBoxHandlerMock,
   }),
 }));
-vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', () => ({
-  useTeamPermission: useTeamPermissionMock,
-}));
+vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/pages/team/hooks/TeamPermissionContext')>();
+  return {
+    ...actual,
+    useTeamPermission: () => {
+      const context = actual.useTeamPermission();
+      return useTeamPermissionMock() ?? context;
+    },
+  };
+});
 vi.mock('@/renderer/services/FileService', () => ({
   allSupportedExts: [],
 }));
@@ -293,6 +324,7 @@ vi.mock('@arco-design/web-react', () => ({
     success: vi.fn(),
     error: vi.fn(),
     warning: messageWarningMock,
+    info: vi.fn(),
   },
   Tag: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   Popover: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -611,6 +643,82 @@ describe('AcpSendBox', () => {
 
     expect(useAcpConfigOptionsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.queryByTestId('mock-thought-selector')).not.toBeInTheDocument();
+  });
+
+  it('propagates an accepted next-turn Ask to teammates and keeps the leader on its observed mode', async () => {
+    const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
+      '@/renderer/hooks/agent/useAcpConfigOptions'
+    );
+    useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
+    isMobileMock.current = true;
+    const leaderId = 'deferred-mixed-team-leader';
+    const modeOption = (current_value: string): AcpConfigOptionDto => ({
+      id: 'mode',
+      category: 'mode',
+      type: 'select',
+      current_value,
+      options: [
+        { value: 'default', label: 'Ask' },
+        { value: 'yolo', label: 'Yolo' },
+      ],
+    });
+
+    let teammateMode = 'yolo';
+    teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('yolo')] });
+    teamSetConfigMock
+      .mockReset()
+      .mockResolvedValueOnce({ confirmation: 'pending_next_turn', config_options: [modeOption('yolo')] })
+      .mockResolvedValueOnce({ confirmation: 'command_ack', config_options: [modeOption('default')] });
+    teamSetModeMock.mockImplementation(async ({ session_mode }: { session_mode: string }) => {
+      teammateMode = session_mode;
+    });
+
+    render(
+      <TeamPermissionProvider
+        team_id='mixed-team'
+        isLeaderAgent
+        leaderConversationId={leaderId}
+        allConversationIds={[leaderId, 'aelix-teammate']}
+        runtimeStartingConversationIds={new Set()}
+      >
+        <AcpSendBox
+          conversation_id={leaderId}
+          backend='antigravity'
+          workspacePath='/tmp/workspace'
+          messageState={makeMessageState()}
+        />
+      </TeamPermissionProvider>
+    );
+
+    const permission = () => mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+    const activeMode = () => permission()?.submenu?.options.find((option) => option.active)?.key;
+    await waitFor(() => expect(activeMode()).toBe('yolo'));
+    await act(async () => permission()?.submenu?.onSelect('default'));
+    expect(teamSetModeMock).toHaveBeenCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
+    expect(teammateMode).toBe('default');
+    expect(activeMode()).toBe('yolo');
+    expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn');
+    expect(Message.success).not.toHaveBeenCalled();
+
+    teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('default')] });
+    await act(async () => {
+      for (const listener of responseListeners) {
+        listener({
+          conversation_id: leaderId,
+          msg_id: 'observed-ask',
+          type: 'acp_config_option',
+          data: { config_options: [modeOption('default')] },
+        });
+      }
+    });
+    await waitFor(() => expect(activeMode()).toBe('default'));
+    expect(teamSetModeMock).toHaveBeenCalledOnce();
+
+    // A command acknowledgment alone must not elevate the teammate.
+    await act(async () => permission()?.submenu?.onSelect('yolo'));
+    expect(Message.error).toHaveBeenCalled();
+    expect(teamSetModeMock).toHaveBeenCalledOnce();
+    expect(teammateMode).toBe('default');
   });
 
   it('labels the effective Aelix Ask mode in the mobile sheet', () => {
