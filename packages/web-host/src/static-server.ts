@@ -178,14 +178,23 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   const port = opts.port ?? DEFAULT_PORT;
   const allowRemote = opts.allowRemote === true;
   const host = allowRemote ? '0.0.0.0' : '127.0.0.1';
-  const interfaces = allowRemote ? networkInterfaces() : {};
-  const lanIP = pickLanIP(interfaces);
-  const lanAddresses = Object.values(interfaces).flatMap(
-    (entries) =>
-      entries?.filter((entry) => entry.family === 'IPv4' && !entry.internal).map((entry) => entry.address) ?? []
-  );
+  const readInterfaces = (): ReturnType<typeof networkInterfaces> => {
+    if (!allowRemote) return {};
+    try {
+      return networkInterfaces();
+    } catch {
+      // A failed lookup cannot authorize any LAN address. Retry on the next request.
+      return {};
+    }
+  };
+  // A wildcard listener can receive traffic on interfaces added after startup.
+  const readLanAddresses = () =>
+    Object.values(readInterfaces()).flatMap(
+      (entries) =>
+        entries?.filter((entry) => entry.family === 'IPv4' && !entry.internal).map((entry) => entry.address) ?? []
+    );
   const configuredOrigin = process.env.AELIX_STUDIO_ORIGIN;
-  let isAllowed = createRequestOriginPolicy(port, lanAddresses, configuredOrigin);
+  let isAllowed = createRequestOriginPolicy(port, readLanAddresses, configuredOrigin);
 
   // Bun's HTTP server upgrade socket does not reliably write the 101 response
   // (#2824). Keep client upgrades on the TCP listener and use this HTTP
@@ -305,16 +314,22 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   }
 
   const actualPort = (tcp_server.address() as { port: number } | null)?.port ?? port;
-  isAllowed = createRequestOriginPolicy(actualPort, lanAddresses, configuredOrigin);
+  isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin);
   const localUrl = `http://127.0.0.1:${actualPort}`;
-  const networkUrl = lanIP ? `http://${lanIP}:${actualPort}` : undefined;
 
   return {
     port: actualPort,
-    url: networkUrl ?? localUrl,
     localUrl,
-    networkUrl,
-    lanIP: lanIP ?? undefined,
+    get url() {
+      return this.networkUrl ?? localUrl;
+    },
+    get networkUrl() {
+      const address = this.lanIP;
+      return address ? `http://${address}:${actualPort}` : undefined;
+    },
+    get lanIP() {
+      return pickLanIP(readInterfaces()) ?? undefined;
+    },
     stop: () =>
       new Promise<void>((resolve) => {
         getNativeAuthService().cancelOwner('web:', true);

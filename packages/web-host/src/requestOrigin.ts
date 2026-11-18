@@ -30,8 +30,8 @@ function parseOrigin(value: string): URL | undefined {
 }
 
 /** Bind the browser origin to the Host authority received by this listener. */
-export function createRequestOriginPolicy(port: number, lanAddresses: string[], configuredOrigin?: string) {
-  const origins = ['127.0.0.1', 'localhost', ...lanAddresses].map((host) => new URL(`http://${host}:${port}`));
+export function createRequestOriginPolicy(port: number, readLanAddresses: () => string[], configuredOrigin?: string) {
+  const origins = ['127.0.0.1', 'localhost'].map((host) => new URL(`http://${host}:${port}`));
   const configured = configuredOrigin && parseOrigin(configuredOrigin);
   if (configured) origins.push(configured);
 
@@ -43,10 +43,14 @@ export function createRequestOriginPolicy(port: number, lanAddresses: string[], 
     const origin = source?.origin === undefined ? undefined : parseOrigin(source.origin);
     if (!origin && (requireOrigin || source?.origin !== undefined)) return false;
 
-    return origins.some((allowed) => {
+    const matchesSource = (allowed: URL): boolean => {
       const defaultPort = allowed.protocol === 'https:' ? '443' : '80';
       const matchesHost = host === allowed.host || (!allowed.port && host === `${allowed.host}:${defaultPort}`);
       return matchesHost && (!origin || origin.origin === allowed.origin);
-    });
+    };
+    return (
+      origins.some(matchesSource) ||
+      readLanAddresses().some((address) => matchesSource(new URL(`http://${address}:${port}`)))
+    );
   };
 }
