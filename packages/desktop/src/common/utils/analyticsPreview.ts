@@ -16,12 +16,14 @@ export const ANALYTICS_PREVIEW_CHANNELS = {
   matches: 'studio:analytics-preview:matches',
   open: 'studio:analytics-preview:open',
   close: 'studio:analytics-preview:close',
+  detach: 'studio:analytics-preview:detach',
 } as const;
 
 export type AnalyticsPreviewAPI = {
   matches: (request: AnalyticsPreviewRequest) => Promise<boolean>;
   open: (request: AnalyticsPreviewRequest) => Promise<AnalyticsPreviewHandle | null>;
   close: (url: string) => Promise<void>;
+  detach: (projectId: string, peId: string) => Promise<void>;
 };
 
 export type AnalyticsPreviewScope =
@@ -38,16 +40,34 @@ export function analyticsPathSegments(relativePath: string): string[] | undefine
     : undefined;
 }
 
-/** Identify an HTML entry in the unmodified Analytics project layout. */
+export function isAnalyticsDocument(filename: string): boolean {
+  return /\.(?:html?|svg)$/i.test(filename);
+}
+
+export function originalReportScope(parts: string[]): Extract<AnalyticsPreviewScope, { kind: 'report' }> | undefined {
+  if (parts[0] === 'artifacts' && parts[1] === 'reports' && parts[4] === 'content' && parts.length >= 6) {
+    return { kind: 'report', project: [], revision: parts.slice(0, 5) };
+  }
+}
+
+/** Identify the unmodified Analytics project layout. */
 export function analyticsPreviewScope(relativePath: string): AnalyticsPreviewScope | undefined {
   const parts = analyticsPathSegments(relativePath);
-  if (!parts || !/\.html?$/i.test(parts.at(-1) ?? '')) return undefined;
+  if (!parts || !isAnalyticsDocument(parts.at(-1) ?? '')) return undefined;
 
   for (let i = parts.length - 2; i >= 0; i--) {
-    if (parts[i] === 'artifacts' && parts[i + 1] === 'reports' && parts[i + 4] === 'content' && i + 5 < parts.length) {
-      return { kind: 'report', project: parts.slice(0, i), revision: parts.slice(i, i + 5) };
-    }
+    const report = originalReportScope(parts.slice(i));
+    if (report) return { ...report, project: parts.slice(0, i) };
   }
   const workspace = parts.lastIndexOf('workspace', parts.length - 2);
   if (workspace !== -1) return { kind: 'workspace', project: parts.slice(0, workspace) };
+}
+
+/** The kit puts copied originals beside each generated Report body. */
+export function isReportViewPath(parts: string[]): boolean {
+  return parts[0] === 'workspace' && parts[1] === 'reports' && parts.length >= 5;
+}
+
+export function isGeneratedReportBody(parts: string[]): boolean {
+  return isReportViewPath(parts) && parts.length === 6 && parts[4] === 'preview' && parts[5] === 'report.html';
 }

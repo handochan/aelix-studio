@@ -909,17 +909,7 @@ const PreviewPanel: React.FC = () => {
     if (metadata?.missingFile) return renderMissingFile();
     if (metadata?.oversized) return renderOversized();
     if (content_type === 'unsupported') return renderUnsupported();
-    if (analyticsProjectId && metadata?.fileRef?.kind === 'project' && activeTabId) {
-      const file = metadata.fileRef;
-      return (
-        <AnalyticsPreview
-          key={JSON.stringify([activeTabId, analyticsProjectId, file.pe_id, file.relative_path])}
-          tabId={activeTabId}
-          projectId={analyticsProjectId}
-          file={file}
-        />
-      );
-    }
+    if (analyticsProjectId) return null;
 
     // 浏览器 tab 由常驻的 BrowserTabLayer 渲染，不能走这里 —— 否则切 tab 会重新加载页面
     // Browser tabs are rendered by the always-mounted BrowserTabLayer; rendering
@@ -1283,6 +1273,28 @@ const PreviewPanel: React.FC = () => {
 
         {/* 预览内容 / Preview content */}
         {renderContent()}
+
+        {!tabs.some((tab) => tab.metadata?.analyticsProjectId) ? null : (
+          <div className={analyticsProjectId ? 'relative flex-1 overflow-hidden' : 'hidden'}>
+            {tabs.map((tab) => {
+              const projectId = tab.metadata?.analyticsProjectId;
+              const file = tab.metadata?.fileRef;
+              if (!projectId || file?.kind !== 'project') return null;
+              const active = tab.id === activeTabId;
+              return (
+                <div
+                  key={JSON.stringify([tab.id, projectId, file.pe_id, file.relative_path])}
+                  className={
+                    active ? 'absolute inset-0 flex flex-col' : 'absolute inset-0 invisible pointer-events-none'
+                  }
+                  aria-hidden={!active}
+                >
+                  <AnalyticsPreview tabId={tab.id} projectId={projectId} file={file} active={active} />
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* 浏览器层：常驻挂载，切 tab 不重新加载页面
             Browser layer: always mounted so tab switches don't reload pages */}

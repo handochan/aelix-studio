@@ -4,12 +4,14 @@
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
 import { MAX_ANALYTICS_PREVIEW_BYTES, resolvePreviewRoot } from '@process/services/analyticsPreview/files';
 import { previewUrl, servePreview, type PreviewGrant } from '@process/services/analyticsPreview/protocol';
+import { savedRevisionFiles } from '@process/services/analyticsPreview/revision';
 
 const workspace = ['workspace'];
 const revision = ['artifacts', 'reports', 'monthly', 'revision-a', 'content'];
@@ -19,12 +21,30 @@ const [workspaceHost, reportHost] = ['a'.repeat(32), 'b'.repeat(32)];
 let scratch: string;
 let rootDirectory: string;
 let grants: Map<string, PreviewGrant>;
+let authorize: () => Promise<boolean>;
+const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 
 async function write(parts: string[], data: string) {
   const filename = path.join(rootDirectory, ...parts);
   await mkdir(path.dirname(filename), { recursive: true });
   await writeFile(filename, data);
   return filename;
+}
+
+function manifest(files: Record<string, string>) {
+  return JSON.stringify({
+    schema: 'analytics.report_revision/1',
+    report_id: revision[2],
+    revision_id: revision[3],
+    request_id: 'request-1',
+    previous_revision: null,
+    entry: 'index.html',
+    files: Object.entries(files).map(([file, value]) => ({
+      path: file,
+      bytes: Buffer.byteLength(value),
+      sha256: sha(value),
+    })),
+  });
 }
 
 beforeEach(async () => {
@@ -34,9 +54,35 @@ beforeEach(async () => {
   const workspaceScope = analyticsPreviewScope([...workspace, 'index.html'].join('/'))!;
   const reportScope = analyticsPreviewScope([...revision, 'index.html'].join('/'))!;
   const root = (await resolvePreviewRoot(rootDirectory, workspaceScope))!;
+  const saved = manifest({ 'index.html': '<h1>Monthly</h1>', 'script.js': 'void 0', 'link/script.js': 'void 0' });
+  await write([...revision.slice(0, -1), 'manifest.json'], saved);
+  await write(
+    ['journal.jsonl'],
+    JSON.stringify({
+      schema: 'analytics.event/2',
+      kind: 'report_revision',
+      id: 'e1',
+      seq: 1,
+      request_id: 'request-1',
+      details: { previous_revision: null },
+      refs: [
+        {
+          type: 'report_revision',
+          report_id: revision[2],
+          revision_id: revision[3],
+          relation: 'about',
+          basis: 'observed',
+          version_binding: 'author',
+          digest: { sha256: sha(saved) },
+        },
+      ],
+    }) + '\n'
+  );
+  authorize = async () => true;
+  const authority = { permits: () => true, authorized: () => authorize() };
   grants = new Map([
-    [workspaceHost, { root, scope: workspaceScope }],
-    [reportHost, { root, scope: reportScope }],
+    [workspaceHost, { root, scope: workspaceScope, ...authority }],
+    [reportHost, { root, scope: reportScope, files: await savedRevisionFiles(root, revision), ...authority }],
   ]);
 });
 
@@ -74,6 +120,38 @@ describe('Analytics preview resource routing', () => {
     expect((await get(previewUrl(reportHost, [...otherRevision, 'script.js']))).status).toBe(404);
     expect((await get(previewUrl(reportHost, [...workspace, 'script.js']))).status).toBe(404);
     expect((await get(previewUrl(workspaceHost, [...revision, 'script.js']))).status).toBe(404);
+  });
+
+  it('rejects added and changed bytes and refuses a rewritten manifest', async () => {
+    await write([...revision, 'script.js'], 'void 1');
+    await write([...revision, 'added.js'], 'void 0');
+    expect((await get(previewUrl(reportHost, [...revision, 'script.js']))).status).toBe(409);
+    expect((await get(previewUrl(reportHost, [...revision, 'added.js']))).status).toBe(404);
+
+    const replacement = manifest({ 'index.html': '<h1>Monthly</h1>', 'script.js': 'void 1', 'added.js': 'void 0' });
+    await write([...revision.slice(0, -1), 'manifest.json'], replacement);
+    expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it('keeps copies out of the Workspace origin and renders the derived body without scripts', async () => {
+    const view = [...workspace, 'reports', 'monthly-stem', 'revision-a'];
+    const copy = [...view, 'files', 'attachment.html'];
+    const body = [...view, 'preview', 'report.html'];
+    await write(copy, '<script>void 0</script>');
+    await write(body, '<h1>Monthly</h1>');
+    expect((await get(previewUrl(workspaceHost, copy))).status).toBe(404);
+    expect((await get(previewUrl(workspaceHost, body))).headers.get('Content-Security-Policy')).toContain(
+      "script-src 'none'"
+    );
+  });
+
+  it('rechecks attachment authority before returning bytes read from an open grant', async () => {
+    const parts = [...workspace, 'index.html'];
+    await write(parts, '<h1>Workspace</h1>');
+    let checks = 0;
+    authorize = async () => ++checks === 1;
+    expect((await get(previewUrl(workspaceHost, parts))).status).toBe(403);
+    expect(checks).toBe(2);
   });
 
   it('denies out-of-scope paths, non-preview origins and writes', async () => {

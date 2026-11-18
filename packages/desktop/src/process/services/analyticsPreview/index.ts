@@ -4,18 +4,24 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { realpath, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { app, protocol, session, type IpcMainInvokeEvent, type WebContents } from 'electron';
+import path from 'node:path';
+import { app, BrowserWindow, dialog, protocol, session, type IpcMainInvokeEvent, type WebContents } from 'electron';
 import { ipcBridge } from '@/common';
 import { isChatFileRef } from '@/common/types/chatFile';
 import {
   ANALYTICS_PREVIEW_CHANNELS,
   analyticsPathSegments,
   analyticsPreviewScope,
+  isAnalyticsDocument,
+  isGeneratedReportBody,
+  isReportViewPath,
+  originalReportScope,
   type AnalyticsPreviewRequest,
   type AnalyticsPreviewScope,
 } from '@/common/utils/analyticsPreview';
-import { previewFileType, resolvePreviewRoot } from './files';
+import { previewFileType, readPreviewFile, resolvePreviewRoot } from './files';
 import {
   ANALYTICS_PARTITION,
   ANALYTICS_SCHEME,
@@ -24,6 +30,7 @@ import {
   servePreview,
   type PreviewGrant,
 } from './protocol';
+import { matchesSavedFile, savedRevisionFiles } from './revision';
 
 const MAX_REPORT_ORIGINS = 32;
 
@@ -33,6 +40,8 @@ type Preview = {
   guest?: WebContents;
   grants: Map<string, PreviewGrant>;
   reportHosts: Map<string, string>;
+  rootKey: string;
+  revoke: () => void;
 };
 
 /** Register before app ready so Chromium gives these documents real, distinct origins. */
@@ -43,10 +52,48 @@ export function registerAnalyticsPreviewScheme(): void {
 }
 
 const previews = new Map<string, Preview>();
+const detachingRoots = new Set<string>();
+const attachmentGenerations = new Map<string, number>();
+const pendingDownloads = new WeakSet<Preview>();
 let previewSession: Promise<Electron.Session> | undefined;
 
 function getGrant(host: string): PreviewGrant | undefined {
   return previews.get(host)?.grants.get(host);
+}
+
+function downloadTarget(url: string) {
+  const target = parsePreviewUrl(url);
+  if (!target) return;
+  const preview = previews.get(target.host);
+  const grant = getGrant(target.host);
+  const scope = originalReportScope(target.parts);
+  if (!preview || !grant || !scope || !grant.permits(target.parts)) return;
+  if (grant.scope.kind === 'report' && grant.scope.revision.join('/') !== scope.revision.join('/')) return;
+  return { target, preview, grant, scope };
+}
+
+async function saveReportDownload(url: string, guest: WebContents): Promise<void> {
+  const download = downloadTarget(url);
+  if (!download || download.preview.guest !== guest) return;
+  const { target, preview, grant, scope } = download;
+  if (parsePreviewUrl(guest.getURL())?.host !== target.host || pendingDownloads.has(preview)) return;
+  pendingDownloads.add(preview);
+  try {
+    const active = async () =>
+      getGrant(target.host) === grant && (await grant.authorized()) && getGrant(target.host) === grant;
+    if (!(await active())) return;
+    const files = grant.scope.kind === 'report' ? grant.files : await savedRevisionFiles(grant.root, scope.revision);
+    const saved = files?.get(target.parts.slice(scope.revision.length).join('/'));
+    if (!saved) return;
+    const bytes = await readPreviewFile(grant.root, target.parts);
+    if (typeof bytes === 'number' || !matchesSavedFile(bytes, saved) || !(await active())) return;
+    const owner = guest.hostWebContents && BrowserWindow.fromWebContents(guest.hostWebContents);
+    if (!owner) return;
+    const result = await dialog.showSaveDialog(owner, { defaultPath: target.parts.at(-1) });
+    if (!result.canceled && result.filePath && (await active())) await writeFile(result.filePath, bytes);
+  } finally {
+    pendingDownloads.delete(preview);
+  }
 }
 
 async function configureDenyProxy(isolated: Electron.Session): Promise<void> {
@@ -79,7 +126,10 @@ async function initializeSession(): Promise<Electron.Session> {
   isolated.setPermissionCheckHandler(() => false);
   isolated.setPermissionRequestHandler((_guest, _permission, callback) => callback(false));
   isolated.setDevicePermissionHandler(() => false);
-  isolated.on('will-download', (event) => event.preventDefault());
+  isolated.on('will-download', (event, item, guest) => {
+    event.preventDefault();
+    void saveReportDownload(item.getURL(), guest).catch(() => {});
+  });
   isolated.webRequest.onBeforeRequest((details, done) => {
     const target = parsePreviewUrl(details.url);
     const preview = target && previews.get(target.host);
@@ -89,7 +139,15 @@ async function initializeSession(): Promise<Electron.Session> {
         !localImage && (!preview || preview.guest?.id !== details.webContentsId || details.resourceType === 'subFrame'),
     });
   });
-  isolated.protocol.handle(ANALYTICS_SCHEME, (request) => servePreview(request, getGrant));
+  isolated.protocol.handle(ANALYTICS_SCHEME, (request) => {
+    // Chromium omits Accept for a same-origin download link. Give its download
+    // pipeline an empty response so will-download can cancel it and validate
+    // the original in the main process. The hint does not authorize file I/O.
+    if (request.method === 'GET' && !request.headers.has('accept') && downloadTarget(request.url)) {
+      return new Response('', { headers: { 'Content-Type': 'application/octet-stream', 'Cache-Control': 'no-store' } });
+    }
+    return servePreview(request, getGrant);
+  });
   return isolated;
 }
 
@@ -108,18 +166,94 @@ function validateRequest(value: unknown): AnalyticsPreviewRequest | undefined {
   }
 }
 
+const rootKeyFor = (projectId: string, peId: string): string => JSON.stringify([projectId, peId]);
+
+async function attachedFolder(projectId: string, peId: string): Promise<string | undefined> {
+  if (detachingRoots.has(rootKeyFor(projectId, peId))) return;
+  const project = await ipcBridge.project.get.invoke({ project_id: projectId });
+  if (project?.project_id !== projectId) return;
+  const entry = project.explorer.entries.find(({ pe_id }) => pe_id === peId);
+  if (entry?.runtime_status === 'available' && path.isAbsolute(entry.display_path)) return entry.display_path;
+}
+
+function locateDocument(filename: string) {
+  const volume = path.parse(filename).root;
+  const parts = path.relative(volume, filename).split(path.sep);
+  let workspace;
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i] !== 'artifacts' && parts[i] !== 'workspace') continue;
+    const suffix = parts.slice(i);
+    if (suffix[0] === 'artifacts' && suffix[1] === 'reports' && suffix[3] === '.staging') {
+      throw new Error('A prepared Report revision cannot be previewed');
+    }
+    const scope: AnalyticsPreviewScope | undefined = isReportViewPath(suffix)
+      ? { kind: 'workspace', project: [] }
+      : analyticsPreviewScope(suffix.join('/'));
+    if (scope?.project.length !== 0) continue;
+    const candidate = { directory: path.join(volume, ...parts.slice(0, i)), scope, parts: suffix };
+    if (scope.kind === 'report' || isReportViewPath(suffix)) return candidate;
+    workspace = candidate;
+  }
+  return workspace;
+}
+
+function canNavigate(grant: PreviewGrant, parts: string[]): boolean {
+  if (!grant.permits(parts)) return false;
+  const mime = previewFileType(grant.scope, parts);
+  if (grant.scope.kind === 'report') {
+    return Boolean(
+      (mime?.startsWith('text/html') || mime === 'image/svg+xml') &&
+      grant.files?.has(parts.slice(grant.scope.revision.length).join('/'))
+    );
+  }
+  return Boolean(mime?.startsWith('text/html'));
+}
+
 async function resolveEntry(request: AnalyticsPreviewRequest) {
-  const scope = analyticsPreviewScope(request.file.relative_path);
-  if (!scope) return;
-  const project = await ipcBridge.project.get.invoke({ project_id: request.projectId });
-  const entry = project?.explorer.entries.find(({ pe_id }) => pe_id === request.file.pe_id);
-  if (project?.project_id !== request.projectId || entry?.runtime_status !== 'available') {
+  const { projectId, file } = request;
+  const key = rootKeyFor(projectId, file.pe_id);
+  const generation = attachmentGenerations.get(key);
+  const requested = analyticsPathSegments(file.relative_path);
+  if (!requested || !isAnalyticsDocument(file.relative_path)) return;
+  const displayPath = await attachedFolder(projectId, file.pe_id);
+  if (!displayPath) {
     throw new Error('Explorer root unavailable');
   }
-  const root = await resolvePreviewRoot(entry.display_path, scope);
+  const explorerRoot = await realpath(displayPath);
+  const filename = path.join(explorerRoot, ...requested);
+  const canonical = await realpath(filename);
+  const location = locateDocument(filename);
+  if (canonical !== filename && (location || locateDocument(canonical))) {
+    throw new Error('Analytics preview cannot follow links');
+  }
+  if (!location) {
+    return;
+  }
+  const { directory, scope, parts } = location;
+  if (scope.kind === 'workspace' && isReportViewPath(parts) && !isGeneratedReportBody(parts)) {
+    throw new Error('Open the original Report revision for this attachment');
+  }
+  const root = await resolvePreviewRoot(directory, scope);
   if (!root) return;
-  const parts = analyticsPathSegments(request.file.relative_path)?.slice(scope.project.length);
-  if (parts && previewFileType(scope, parts)?.startsWith('text/html')) return { root, scope, parts };
+  if (!previewFileType(scope, parts)) throw new Error('Analytics preview file refused');
+  if (scope.kind === 'workspace' && !/\.html?$/i.test(file.relative_path)) return;
+  const permits = (target: string[]) => {
+    const relative = path.relative(explorerRoot, path.join(root.directory, ...target));
+    return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
+  };
+  const authorized = async () => {
+    try {
+      return (
+        (await attachedFolder(projectId, file.pe_id)) === displayPath &&
+        (await realpath(displayPath)) === explorerRoot &&
+        attachmentGenerations.get(key) === generation &&
+        !detachingRoots.has(key)
+      );
+    } catch {
+      return false;
+    }
+  };
+  return { root, scope, parts, permits, authorized };
 }
 
 function addGrant(preview: Preview, grant: PreviewGrant): string {
@@ -138,36 +272,47 @@ function release(preview: Preview): void {
   preview.reportHosts.clear();
 }
 
-function navigationTarget(preview: Preview, url: string): string | undefined {
+function navigationTarget(preview: Preview, url: string): string | Promise<string | undefined> | undefined {
   const current = parsePreviewUrl(preview.guest?.getURL() ?? '');
   const target = parsePreviewUrl(url);
   if (!current || !target || current.host !== target.host) return;
   const grant = preview.grants.get(current.host);
   if (!grant) return;
-  if (previewFileType(grant.scope, target.parts)?.startsWith('text/html')) return url;
+  if (canNavigate(grant, target.parts)) return url;
   if (grant.scope.kind !== 'workspace') return;
 
   // Workspace links to original Reports using the project's relative layout.
   // Only a navigation can grant a Report origin. Subresource requests never can.
   const scope = analyticsPreviewScope(target.parts.join('/'));
   if (scope?.kind !== 'report' || scope.project.length) return;
-  return reportNavigation(preview, grant, scope, target.parts, url);
+  return reportNavigation(preview, grant, scope, target.parts, url, current.host);
 }
 
-function reportNavigation(
+async function reportNavigation(
   preview: Preview,
   grant: PreviewGrant,
   scope: Extract<AnalyticsPreviewScope, { kind: 'report' }>,
   parts: string[],
-  url: string
-): string | undefined {
+  url: string,
+  sourceHost: string
+): Promise<string | undefined> {
+  if (!grant.permits(parts)) return;
   const key = scope.revision.join('/');
   let host = preview.reportHosts.get(key);
   if (!host) {
     if (preview.reportHosts.size >= MAX_REPORT_ORIGINS) return;
-    host = addGrant(preview, { root: grant.root, scope });
-    preview.reportHosts.set(key, host);
+    const files = await savedRevisionFiles(grant.root, scope.revision);
+    const report = { ...grant, scope, files };
+    if (!(await grant.authorized()) || preview.grants.get(sourceHost) !== grant || !canNavigate(report, parts)) return;
+    host = preview.reportHosts.get(key);
+    if (!host) {
+      if (preview.reportHosts.size >= MAX_REPORT_ORIGINS) return;
+      host = addGrant(preview, report);
+      preview.reportHosts.set(key, host);
+    }
   }
+  const report = preview.grants.get(host);
+  if (!report || !canNavigate(report, parts)) return;
   const parsed = new URL(url);
   return previewUrl(host, parts) + parsed.search + parsed.hash;
 }
@@ -178,16 +323,23 @@ function bindGuest(preview: Preview, guest: WebContents): void {
   const load = (url: string): void => {
     void guest.loadURL(url).catch(() => {});
   };
+  const follow = (target: string | Promise<string | undefined> | undefined) => {
+    const from = guest.getURL();
+    void Promise.resolve(target)
+      .then((url) => {
+        if (url && !guest.isDestroyed() && guest.getURL() === from && preview.grants.size) load(url);
+      })
+      .catch(() => {});
+  };
   guest.on('will-frame-navigate', (event) => {
-    const target = event.isMainFrame && navigationTarget(preview, event.url);
+    const target = event.isMainFrame ? navigationTarget(preview, event.url) : undefined;
     if (target === event.url) return;
     event.preventDefault();
-    if (target) load(target);
+    follow(target);
   });
   guest.on('will-redirect', (event) => event.preventDefault());
   guest.setWindowOpenHandler(({ url }) => {
-    const target = navigationTarget(preview, url);
-    if (target) load(target);
+    follow(navigationTarget(preview, url));
     return { action: 'deny' };
   });
 }
@@ -224,20 +376,53 @@ export function registerAnalyticsPreviewWindow(contents: WebContents, rendererUr
     const startingGeneration = generation;
     const entry = await resolveEntry(request);
     if (!entry) return null;
+    const files =
+      entry.scope.kind === 'report' ? await savedRevisionFiles(entry.root, entry.scope.revision) : undefined;
+    const grant = { ...entry, files };
+    if (!canNavigate(grant, entry.parts)) return null;
     previewSession ??= initializeSession().catch((error: unknown) => {
       previewSession = undefined;
       throw error;
     });
     const partition = await previewSession;
+    if (!(await entry.authorized())) return null;
     if (contents.isDestroyed() || generation !== startingGeneration) return null;
-    const preview: Preview = { url: '', partition, grants: new Map(), reportHosts: new Map() };
-    const host = addGrant(preview, { root: entry.root, scope: entry.scope });
+    const rootKey = rootKeyFor(request.projectId, request.file.pe_id);
+    const preview: Preview = {
+      url: '',
+      partition,
+      grants: new Map(),
+      reportHosts: new Map(),
+      rootKey,
+      revoke: () => {
+        close(preview.url);
+        if (preview.guest && !preview.guest.isDestroyed()) void preview.guest.loadURL('about:blank').catch(() => {});
+      },
+    };
+    const host = addGrant(preview, grant);
     preview.url = previewUrl(host, entry.parts);
     owned.set(preview.url, preview);
     return { url: preview.url, partition: ANALYTICS_PARTITION };
   });
   contents.ipc.handle(ANALYTICS_PREVIEW_CHANNELS.close, (event, url: unknown) => {
     if (trusted(event) && typeof url === 'string') close(url);
+  });
+  contents.ipc.handle(ANALYTICS_PREVIEW_CHANNELS.detach, async (event, projectId: unknown, peId: unknown) => {
+    if (!trusted(event) || typeof projectId !== 'string' || typeof peId !== 'string') {
+      throw new Error('Explorer detach refused');
+    }
+    const key = rootKeyFor(projectId, peId);
+    if (detachingRoots.has(key)) throw new Error('Explorer detach already in progress');
+    detachingRoots.add(key);
+    try {
+      await ipcBridge.project.removeFolder.invoke({ project_id: projectId, pe_id: peId });
+      attachmentGenerations.set(key, (attachmentGenerations.get(key) ?? 0) + 1);
+      for (const preview of new Set(previews.values())) {
+        if (preview.rootKey === key) preview.revoke();
+      }
+    } finally {
+      detachingRoots.delete(key);
+    }
   });
 
   let attaching: Preview | undefined;

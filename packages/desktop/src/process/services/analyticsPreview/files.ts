@@ -7,7 +7,12 @@ import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import type { Stats } from 'node:fs';
-import { analyticsPathSegments, type AnalyticsPreviewScope } from '@/common/utils/analyticsPreview';
+import {
+  analyticsPathSegments,
+  isGeneratedReportBody,
+  isReportViewPath,
+  type AnalyticsPreviewScope,
+} from '@/common/utils/analyticsPreview';
 
 export const MAX_ANALYTICS_PREVIEW_BYTES = 16 * 1024 * 1024;
 const MAX_MARKER_BYTES = 64 * 1024;
@@ -38,7 +43,10 @@ export function previewFileType(scope: AnalyticsPreviewScope, parts: string[]): 
       ? contentType
       : undefined;
   }
-  if (parts[0] === 'workspace' && parts.length > 1) return contentType;
+  if (parts[0] === 'workspace' && parts.length > 1) {
+    if (isReportViewPath(parts) && !isGeneratedReportBody(parts)) return;
+    return contentType;
+  }
   if (parts.length === 4 && parts[0] === 'runs' && parts[2] === 'visualizations' && contentType.startsWith('image/')) {
     return contentType;
   }

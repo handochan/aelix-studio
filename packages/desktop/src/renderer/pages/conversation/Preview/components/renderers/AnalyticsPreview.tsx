@@ -11,10 +11,10 @@ import type { AnalyticsPreviewHandle, AnalyticsPreviewRequest } from '@/common/u
 import { usePreviewToolbarExtras } from '../../context/PreviewToolbarExtrasContext';
 import { registerTabReloader } from '../../context/tabReloaderRegistry';
 
-type Props = AnalyticsPreviewRequest & { tabId: string };
+type Props = AnalyticsPreviewRequest & { tabId: string; active?: boolean };
 
 /** Render an Explorer-approved Analytics file in the existing preview pane. */
-export default function AnalyticsPreview({ projectId, file, tabId }: Props) {
+export default function AnalyticsPreview({ projectId, file, tabId, active = true }: Props) {
   const { t } = useTranslation();
   const extras = usePreviewToolbarExtras();
   const guest = useRef<Electron.WebviewTag | null>(null);
@@ -113,7 +113,7 @@ export default function AnalyticsPreview({ projectId, file, tabId }: Props) {
   );
 
   useEffect(() => {
-    if (!extras || !handle) return;
+    if (!active || !extras || !handle) return;
     extras.setExtras({
       left: (
         <div className='flex items-center gap-4px'>
@@ -137,7 +137,7 @@ export default function AnalyticsPreview({ projectId, file, tabId }: Props) {
       ),
     });
     return () => extras.setExtras(null);
-  }, [extras, handle, canGoBack, canGoForward, t]);
+  }, [active, extras, handle, canGoBack, canGoForward, t]);
 
   return (
     <div className='flex flex-col flex-1 min-h-0 overflow-hidden'>

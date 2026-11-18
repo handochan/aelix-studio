@@ -24,9 +24,11 @@
  * this is the entry point worth testing.
  */
 import fs from 'fs';
+import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import os from 'os';
 import path from 'path';
+import { pathToFileURL } from 'node:url';
 import { test, expect } from '../../fixtures';
 import { goToGuid } from '../../helpers';
 
@@ -44,6 +46,7 @@ const UNSUPPORTED_TITLE = /Preview not supported for this format|暂不支持预
 const OPEN_IN_SYSTEM = /Open in system app|使用系统默认应用打开/;
 
 type BackendWindow = Window & { __backendPort?: number };
+const sha256 = (content: string) => createHash('sha256').update(content).digest('hex');
 
 /**
  * One representative per unsupported branch, because they are not equivalent:
@@ -210,6 +213,8 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
     ].join(''),
     'workspace/assets/main.css': 'h1 { color: rgb(23, 45, 67) }',
     'workspace/assets/main.js': 'document.body.dataset.script = "workspace";',
+    'ordinary.txt': 'Switch to this file and back.',
+    'workspace/reports/monthly-stem/revision-a/files/copy.html': '<script>document.title = "copy";</script>',
     'workspace/nested/상세 페이지.html': [
       '<h1>Workspace detail</h1>',
       `<a id="report" href="../../${revision}/index.html" target="_blank" rel="noopener">Report</a>`,
@@ -220,6 +225,42 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
     [`${revision}/report.js`]: 'document.body.dataset.script = "report";',
     [`${anotherRevision}/report.js`]: 'document.body.dataset.script = "other revision";',
   };
+  const manifest = JSON.stringify({
+    schema: 'analytics.report_revision/1',
+    report_id: 'monthly',
+    revision_id: 'revision-a',
+    request_id: 'req-fixture',
+    previous_revision: null,
+    entry: 'index.html',
+    files: Object.entries(files).flatMap(([name, value]) =>
+      name.startsWith(revision + '/')
+        ? [{ path: name.slice(revision.length + 1), bytes: Buffer.byteLength(value), sha256: sha256(value) }]
+        : []
+    ),
+  });
+  Object.assign(files, {
+    'artifacts/reports/monthly/revision-a/manifest.json': manifest,
+    'journal.jsonl':
+      JSON.stringify({
+        schema: 'analytics.event/2',
+        kind: 'report_revision',
+        id: 'e1',
+        seq: 1,
+        request_id: 'req-fixture',
+        details: { previous_revision: null },
+        refs: [
+          {
+            type: 'report_revision',
+            report_id: 'monthly',
+            revision_id: 'revision-a',
+            relation: 'about',
+            basis: 'observed',
+            version_binding: 'author',
+            digest: { sha256: sha256(manifest) },
+          },
+        ],
+      }) + '\n',
+  });
   for (const [name, contents] of Object.entries(files)) {
     fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
     fs.writeFileSync(path.join(workspace, name), contents);
@@ -274,6 +315,12 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
     expect(await guest('location.origin')).not.toBe(workspaceOrigin);
     expect(await guest('[typeof window.electronAPI, window.opener === null]')).toEqual(['undefined', true]);
 
+    await tree.getByText('ordinary.txt', { exact: true }).click();
+    await expect(preview).toBeHidden();
+    await page.locator(PREVIEW_PANEL).getByTitle('index.html', { exact: true }).click();
+    await expect(preview).toBeVisible();
+    expect(await guest('document.body?.dataset.script')).toBe('report');
+
     const port = await page.evaluate(() => (window as BackendWindow).__backendPort);
     const checks = [
       'fetch("./report.js").then(r => r.status)',
@@ -283,15 +330,199 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
     ];
     expect(await guest(`Promise.all([${checks.join(',')}])`)).toEqual([200, 404, 'blocked', 'blocked']);
     expect(externalRequests).toBe(0);
+    fs.writeFileSync(path.join(workspace, revision, 'added.js'), 'void 0');
+    fs.writeFileSync(path.join(workspace, revision, 'report.js'), 'void 1');
+    expect(await guest('Promise.all(["added.js", "report.js"].map(file => fetch(file).then(r => r.status)))')).toEqual([
+      404, 409,
+    ]);
     await page
       .getByRole('button', { name: /^(Back|返回|뒤로)$/ })
       .filter({ visible: true })
       .last()
       .click();
     await expect.poll(() => guest('document.querySelector("h1")?.textContent')).toBe('Workspace detail');
+    expect(await guest('fetch("/workspace/reports/monthly-stem/revision-a/files/copy.html").then(r => r.status)')).toBe(
+      404
+    );
+
+    const detached = path.join(parent, 'Empty workspace');
+    fs.mkdirSync(detached);
+    await deleteConversation(page, conversation);
+    conversation = await createProjectConversation(page, detached);
+    const projectId = await page.evaluate(async (id: string) => {
+      const port = (window as BackendWindow).__backendPort;
+      const response = await fetch(`http://127.0.0.1:${port}/api/conversations/${id}`);
+      return ((await response.json()) as { data: { project_id: string } }).data.project_id;
+    }, conversation);
+    const peId = await page.evaluate(
+      async ({ projectId, uri }) => {
+        const port = (window as BackendWindow).__backendPort;
+        const response = await fetch(`http://127.0.0.1:${port}/api/projects/${projectId}/folders`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ uri, display_name: 'Original Report content' }),
+        });
+        if (!response.ok) throw new Error(`Attaching Report content failed (${response.status})`);
+        return ((await response.json()) as { data: { pe_id: string } }).data.pe_id;
+      },
+      { projectId, uri: pathToFileURL(path.join(workspace, revision)).href }
+    );
+    const match = await page.evaluate(
+      async ({ projectId, peId }) => {
+        const bridge = window.electronAPI!.analyticsPreview!;
+        const file = { kind: 'project' as const, pe_id: peId, relative_path: 'index.html' };
+        const recognized = await bridge.matches({ projectId, file });
+        const opened = await bridge.open({ projectId, file });
+        if (!opened) throw new Error('The nested Report failed to open');
+        const guest = document.createElement('webview');
+        guest.setAttribute('partition', opened.partition);
+        guest.setAttribute('src', opened.url);
+        guest.id = 'attached-report-probe';
+        document.body.append(guest);
+        return recognized;
+      },
+      { projectId, peId }
+    );
+    expect(match).toBe(true);
+    await expect.poll(() => guest('document.querySelector("h1")?.textContent')).toBe('Original Report');
+    await page.evaluate(({ projectId, peId }) => window.electronAPI!.analyticsPreview!.detach(projectId, peId), {
+      projectId,
+      peId,
+    });
+    await expect.poll(() => guest('location.href')).toBeUndefined();
+    await page.locator('#attached-report-probe').evaluate((element) => element.remove());
   } finally {
     otherOrigin.close();
     if (conversation) await deleteConversation(page, conversation);
     fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('opens 0.32.1 kit-generated HTML and SVG original links in isolated revisions', async ({ page, electronApp }) => {
+  const workspace = process.env.STUDIO10_KIT_FIXTURE;
+  test.skip(!workspace, 'Set STUDIO10_KIT_FIXTURE to the generated Analytics test project');
+  if (!workspace) return;
+  test.setTimeout(120_000);
+  let conversation: string | undefined;
+  const guest = async (script: string): Promise<unknown> => {
+    const id = await page
+      .getByTestId('analytics-preview')
+      .filter({ visible: true })
+      .evaluate((element) => (element as Electron.WebviewTag).getWebContentsId())
+      .catch(() => undefined);
+    if (id === undefined) return;
+    return electronApp.evaluate(
+      ({ webContents }, { id, script }) => webContents.fromId(id)?.executeJavaScript(script, true),
+      {
+        id,
+        script,
+      }
+    );
+  };
+
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, workspace);
+    const tree = page.locator('.workspace-tree').first();
+    await tree.getByText('workspace', { exact: true }).click();
+    await tree.getByText('reports', { exact: true }).click();
+
+    const html = fs.readdirSync(path.join(workspace, 'workspace/reports')).find((name) => /^html-.*\.html$/.test(name));
+    const svg = fs.readdirSync(path.join(workspace, 'workspace/reports')).find((name) => /^svg-.*\.html$/.test(name));
+    const markdown = fs
+      .readdirSync(path.join(workspace, 'workspace/reports'), { withFileTypes: true })
+      .find((entry) => entry.isDirectory() && entry.name.startsWith('markdown-'));
+    if (!markdown) throw new Error('Expected generated Markdown view files');
+    const revision = fs.readdirSync(path.join(workspace, 'workspace/reports', markdown.name))[0];
+    const copy = `workspace/reports/${markdown.name}/${revision}/files/copy.html`;
+    expect(fs.existsSync(path.join(workspace, copy))).toBe(true);
+    const blocked = await page.evaluate(
+      async ({ id, copy }) => {
+        const base = `http://127.0.0.1:${(window as BackendWindow).__backendPort}`;
+        const { data: conversation } = await (await fetch(`${base}/api/conversations/${id}`)).json();
+        const { data: project } = await (await fetch(`${base}/api/projects/${conversation.project_id}`)).json();
+        return window
+          .electronAPI!.analyticsPreview!.matches({
+            projectId: project.project_id,
+            file: { kind: 'project', pe_id: project.explorer.workspace_pe_id, relative_path: copy },
+          })
+          .then(
+            () => false,
+            () => true
+          );
+      },
+      { id: conversation, copy }
+    );
+    expect(blocked).toBe(true);
+    if (!html || !svg) throw new Error('Expected generated kit Report pages');
+    await tree.getByText(html, { exact: true }).click();
+    await expect
+      .poll(() => guest('!!document.querySelector("a[target=_blank][href$=\\"/content/index.html\\"]")'))
+      .toBe(true);
+    await guest('document.querySelector("a[target=_blank][href$=\\"/content/index.html\\"]").click()');
+    await expect.poll(() => guest('document.body?.dataset.saved')).toBe('yes');
+
+    await tree.getByText(svg, { exact: true }).click();
+    const svgLink = 'a[target=_blank][href$="/content/entry.svg"]';
+    await expect.poll(() => guest(`!!document.querySelector(${JSON.stringify(svgLink)})`)).toBe(true);
+    await guest(`document.querySelector(${JSON.stringify(svgLink)}).click()`);
+    await expect.poll(() => guest('document.querySelector("svg title")?.textContent')).toBe('Kit SVG original');
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+  }
+});
+
+test('0.26.0 kit-generated download link saves only the verified original after Save As', async ({
+  page,
+  electronApp,
+}) => {
+  const workspace = process.env.STUDIO10_LEGACY_KIT_FIXTURE;
+  test.skip(!workspace, 'Set STUDIO10_LEGACY_KIT_FIXTURE to the generated legacy Analytics test project');
+  if (!workspace) return;
+  test.setTimeout(120_000);
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-analytics-download-'));
+  const destination = path.join(scratch, 'saved.html');
+  let conversation: string | undefined;
+
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, workspace);
+    const tree = page.locator('.workspace-tree').first();
+    await tree.getByText('workspace', { exact: true }).click();
+    await tree.getByText('reports', { exact: true }).click();
+    const report = fs
+      .readdirSync(path.join(workspace, 'workspace/reports'))
+      .find((name) => /^html-.*\.html$/.test(name));
+    if (!report) throw new Error('Expected a kit-generated legacy Report page');
+    await tree.getByText(report, { exact: true }).click();
+    const webview = page.getByTestId('analytics-preview').filter({ visible: true });
+    await expect(webview).toBeVisible();
+    await electronApp.evaluate(({ dialog }, filePath) => {
+      const original = dialog.showSaveDialog;
+      dialog.showSaveDialog = async () => {
+        dialog.showSaveDialog = original;
+        return { canceled: false, filePath };
+      };
+    }, destination);
+    const id = await webview.evaluate((element) => (element as Electron.WebviewTag).getWebContentsId());
+    const inspect = (code: string): Promise<unknown> =>
+      electronApp.evaluate(({ webContents }, { id, code }) => webContents.fromId(id)?.executeJavaScript(code, true), {
+        id,
+        code,
+      });
+    const download = 'a[download][href$="/content/index.html"]';
+    await expect.poll(() => inspect(`!!document.querySelector(${JSON.stringify(download)})`)).toBe(true);
+    await inspect(`document.querySelector(${JSON.stringify(download)}).click()`);
+    await expect.poll(() => fs.existsSync(destination)).toBe(true);
+    const reportRoot = path.join(workspace, 'artifacts/reports/html');
+    const revision = fs.readdirSync(reportRoot).find((name) => !name.startsWith('.'));
+    if (!revision) throw new Error('Expected a saved Report revision');
+    expect(fs.readFileSync(destination)).toEqual(
+      fs.readFileSync(path.join(reportRoot, revision, 'content/index.html'))
+    );
+    expect(await inspect('location.pathname')).toContain('/workspace/reports/');
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(scratch, { force: true, recursive: true });
   }
 });

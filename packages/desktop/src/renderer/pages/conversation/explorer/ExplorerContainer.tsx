@@ -40,7 +40,7 @@ import { projectFileRef } from '@/common/types/chatFile';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { FileOrFolderItem } from '@/renderer/utils/file/fileTypes';
 import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
-import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
+import { isAnalyticsDocument } from '@/common/utils/analyticsPreview';
 
 import { ExplorerPanel } from './ExplorerPanel';
 import {
@@ -144,7 +144,7 @@ export const buildExplorerPreviewPayload = async (
   if (
     projectId &&
     analytics &&
-    analyticsPreviewScope(relativePath) &&
+    isAnalyticsDocument(relativePath) &&
     (await analytics.matches({ projectId, file: fileRef }))
   ) {
     return {
@@ -198,7 +198,7 @@ export const buildExplorerPreviewPayload = async (
 
 export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId }) => {
   const { t } = useTranslation();
-  const { openPreview } = usePreviewContext();
+  const { openPreview, tabs, closeTab } = usePreviewContext();
   const activeConversationId = useCurrentConversation();
   const { data, isLoading, mutate } = useSWR(projectId ? `explorer-project/${projectId}` : null, (key: string) => {
     // Derive the project id from the SWR key, not the captured `projectId`
@@ -259,7 +259,15 @@ export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId 
 
   const handleRemoveFolder = async (peId: string): Promise<void> => {
     try {
-      await ipcBridge.project.removeFolder.invoke({ project_id: projectId, pe_id: peId });
+      const analytics = window.electronAPI?.analyticsPreview;
+      if (analytics) await analytics.detach(projectId, peId);
+      else await ipcBridge.project.removeFolder.invoke({ project_id: projectId, pe_id: peId });
+      for (const tab of tabs ?? []) {
+        const file = tab.metadata?.fileRef;
+        if (tab.metadata?.analyticsProjectId === projectId && file?.kind === 'project' && file.pe_id === peId) {
+          closeTab(tab.id);
+        }
+      }
       await mutate();
     } catch {
       Message.error(t('conversation.explorer.removeFailed'));

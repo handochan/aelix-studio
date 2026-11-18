@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     matches: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.matches, request),
     open: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.open, request),
     close: (url) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.close, url),
+    detach: (projectId, peId) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.detach, projectId, peId),
   } satisfies AnalyticsPreviewAPI,
   emit: (name: string, data: unknown) => {
     return ipcRenderer
