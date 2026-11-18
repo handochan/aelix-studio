@@ -167,12 +167,15 @@ describe('AgentModeSelector', () => {
         conversation_id='team-leader'
         compact
         initialMode='yolo'
+        modeLabelFormatter={(mode) => (mode.value === 'default' ? 'Default' : 'Yolo')}
         configOptionsPort={port}
         onModeChanged={propagateMode}
       />
     );
 
     expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'default');
+    expect(screen.getByTestId('mode-selector')).toHaveTextContent('agentMode.ask');
+    expect(screen.getByTestId('aionrs-mode-option-default')).toHaveTextContent('agentMode.ask');
     expect(select).not.toHaveBeenCalled();
     expect(propagateMode).not.toHaveBeenCalled();
 
@@ -183,13 +186,14 @@ describe('AgentModeSelector', () => {
     expect(select).toHaveBeenCalledWith('permission_mode', 'yolo');
   });
 
-  it('surfaces a rejected Team propagation after applying the leader mode', async () => {
+  it('surfaces a failed Team propagation and retries by selecting the same effective mode', async () => {
     const { Message } = await import('@arco-design/web-react');
-    const onModeChanged = vi.fn().mockRejectedValue(new Error('teammate is busy'));
+    const onModeChanged = vi.fn().mockRejectedValueOnce(new Error('teammate is busy')).mockResolvedValueOnce(undefined);
+    const setConfigOption = vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'bypassPermissions' }]);
     useAcpConfigOptionsMock.mockReturnValue({
       setStatus: { state: 'idle' },
       mode: runtimeMode(),
-      setConfigOption: vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'bypassPermissions' }]),
+      setConfigOption,
     });
     render(<AgentModeSelector backend='acp' conversation_id='team-leader' compact onModeChanged={onModeChanged} />);
 
@@ -198,6 +202,12 @@ describe('AgentModeSelector', () => {
     await waitFor(() => expect(Message.error).toHaveBeenCalledOnce());
     expect(Message.success).not.toHaveBeenCalled();
     expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'bypassPermissions');
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-bypassPermissions'));
+
+    await waitFor(() => expect(Message.success).toHaveBeenCalledOnce());
+    expect(onModeChanged).toHaveBeenCalledTimes(2);
+    expect(setConfigOption).toHaveBeenCalledOnce();
   });
 
   // A switch the backend accepted but has not applied yet (codex always, claude/agy

@@ -199,33 +199,31 @@ const AcpSendBox: React.FC<{
     setCurrentMode(runtimeMode.currentValue);
   }, [runtimeMode?.currentValue]);
 
-  const propagateTeamMode = useCallback(
-    (mode: string) => teamPermission?.propagateMode(mode, runtimeMode?.id === 'permission_mode'),
-    [runtimeMode?.id, teamPermission]
-  );
+  const propagateTeamMode = isLeaderInTeam ? teamPermission?.propagateMode : undefined;
 
   const handleSheetModeChange = useCallback(
     async (mode: string) => {
-      if (!runtimeMode || mode === runtimeMode.currentValue) return;
+      if (!runtimeMode) return;
+      const reapply = mode === runtimeMode.currentValue;
+      if (reapply && !propagateTeamMode) return;
+
       try {
-        const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-        if (
-          teamPermission &&
-          runtimeMode.id === 'permission_mode' &&
-          applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode
-        ) {
-          Message.info(t('agentMode.switchPendingNextTurn'));
-          return;
+        if (!reapply) {
+          const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
+          if (teamPermission && applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode) {
+            Message.info(t('agentMode.switchPendingNextTurn'));
+            return;
+          }
+          setCurrentMode(mode);
         }
-        setCurrentMode(mode);
-        if (isLeaderInTeam) await propagateTeamMode(mode);
+        await propagateTeamMode?.(mode);
         Message.success(t('agentMode.switchSuccess'));
       } catch (error) {
         console.error('[AcpSendBox] Failed to switch mode via sheet:', error);
         Message.error(t(configErrorMessageKey(error)));
       }
     },
-    [isLeaderInTeam, propagateTeamMode, runtimeConfig, runtimeMode, t, teamPermission]
+    [propagateTeamMode, runtimeConfig, runtimeMode, t, teamPermission]
   );
 
   const handleContentChange = useCallback(
@@ -559,7 +557,10 @@ Please check your local CLI tool authentication status`,
       })) ?? [];
     const modeOptions: MobileActionSheetOption[] = availableModes.map((mode) => ({
       key: mode.value,
-      label: t(`agentMode.${mode.value}`, { defaultValue: mode.label }),
+      label:
+        runtimeMode?.id === 'permission_mode' && mode.value === 'default'
+          ? t('agentMode.ask')
+          : t(`agentMode.${mode.value}`, { defaultValue: mode.label }),
       description: mode.description,
       active: (runtimeMode?.currentValue ?? currentMode) === mode.value,
     }));
@@ -873,7 +874,7 @@ Please check your local CLI tool authentication status`,
                 modeLabelFormatter={(mode) => t(`agentMode.${mode.value}`, { defaultValue: mode.label })}
                 compactLabelPrefix={t('agentMode.permission')}
                 hideCompactLabelPrefixOnMobile
-                onModeChanged={isLeaderInTeam ? propagateTeamMode : undefined}
+                onModeChanged={propagateTeamMode}
                 beforeRuntimeSync={prepareRuntimeConfig}
                 beforeRuntimeSet={teamPermission?.warmupSession}
                 configOptionsPort={teamPermission?.configOptionsPort}

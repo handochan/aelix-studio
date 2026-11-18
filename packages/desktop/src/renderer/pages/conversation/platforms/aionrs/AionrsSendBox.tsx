@@ -142,7 +142,8 @@ const AionrsSendBox: React.FC<{
   const { checkAndUpdateTitle } = useAutoTitle();
   const { current_model } = modelSelection;
   const teamPermission = useTeamPermission();
-  const propagateMode = teamPermission?.propagateMode;
+  const propagateMode =
+    conversation_id === teamPermission?.leaderConversationId ? teamPermission?.propagateMode : undefined;
 
   const { thought, running, turnStartedAtMs, setActiveMsgId, setWaitingResponse, resetState } = useAionrsMessage(
     conversation_id,
@@ -486,11 +487,20 @@ const AionrsSendBox: React.FC<{
 
   const handleSheetModeChange = useCallback(
     async (mode: string) => {
-      if (!runtimeMode || mode === runtimeMode.currentValue) return;
+      if (!runtimeMode) return;
+      const reapply = mode === runtimeMode.currentValue;
+      if (reapply && !propagateMode) return;
+
       try {
-        await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-        setCurrentMode(mode);
-        propagateMode?.(mode);
+        if (!reapply) {
+          const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
+          if (propagateMode && applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode) {
+            Message.info(t('agentMode.switchPendingNextTurn'));
+            return;
+          }
+          setCurrentMode(mode);
+        }
+        await propagateMode?.(mode);
         Message.success(t('agentMode.switchSuccess'));
       } catch (error) {
         console.error('[AionrsSendBox] Failed to switch mode via sheet:', error);

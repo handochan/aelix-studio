@@ -136,8 +136,11 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const getDisplayModeLabel = useCallback(
-    (mode: AgentModeOption) => modeLabelFormatter?.(mode) ?? mode.label,
-    [modeLabelFormatter]
+    (mode: AgentModeOption) =>
+      runtimeMode?.id === 'permission_mode' && mode.value === 'default'
+        ? t('agentMode.ask')
+        : (modeLabelFormatter?.(mode) ?? mode.label),
+    [modeLabelFormatter, runtimeMode?.id, t]
   );
 
   // A mode the backend accepted but has not applied yet (codex always; claude/agy when
@@ -175,7 +178,8 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
       // Close dropdown immediately after selection
       setDropdownVisible(false);
 
-      if (mode === current_mode) return;
+      const reapply = mode === current_mode;
+      if (isLoading || (reapply && (!conversation_id || !onModeChanged))) return;
 
       // Local mode (Guid page): update state and notify parent, no IPC needed
       if (!conversation_id && onModeSelect) {
@@ -196,18 +200,15 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
 
       setIsLoading(true);
       try {
-        const applied = await setActiveMode();
-        // A deferred switch comes back with the snapshot still on the OLD value — that is
-        // the backend being honest, not a failure. Leave `current_mode` where it is (the
-        // pill must keep naming the permission actually governing) and say so; the
-        // pending marker is already driven by `pendingValues`. When the agent applies it,
-        // an `acp_config_option` frame updates the snapshot and clears the marker.
-        const landed = applied?.find((option) => option.id === runtimeMode?.id)?.current_value === mode;
-        if (!landed) {
-          Message.info(t('agentMode.switchPendingNextTurn', { defaultValue: 'Takes effect on the next turn' }));
-          return;
+        if (!reapply) {
+          const applied = await setActiveMode();
+          // A deferred switch leaves the effective mode unchanged until the host reports it.
+          if (applied?.find((option) => option.id === runtimeMode?.id)?.current_value !== mode) {
+            Message.info(t('agentMode.switchPendingNextTurn'));
+            return;
+          }
+          setCurrentMode(mode);
         }
-        setCurrentMode(mode);
         await onModeChanged?.(mode);
         Message.success(t('agentMode.switchSuccess'));
       } catch (error) {
@@ -217,7 +218,7 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         setIsLoading(false);
       }
     },
-    [conversation_id, current_mode, onModeChanged, onModeSelect, runtimeConfig, runtimeMode, t]
+    [conversation_id, current_mode, isLoading, onModeChanged, onModeSelect, runtimeConfig, runtimeMode, t]
   );
 
   const renderLogo = () => (

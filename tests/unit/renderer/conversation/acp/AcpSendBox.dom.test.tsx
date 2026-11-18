@@ -10,6 +10,7 @@ import React from 'react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AcpSendBox from '@/renderer/pages/conversation/platforms/acp/AcpSendBox';
 import type { UseAcpMessageReturn } from '@/renderer/pages/conversation/platforms/acp/useAcpMessage';
+import type { MobileActionSheetEntry } from '@/renderer/components/chat/MobileActionSheet/types';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 
 const {
@@ -45,12 +46,7 @@ const {
   sendBoxPropsSpy: vi.fn(),
   isMobileMock: { current: false },
   mobileActionSheetEntries: {
-    current: [] as Array<{
-      key: string;
-      submenu?: {
-        onSelect?: (value: string) => void;
-      };
-    }>,
+    current: [] as MobileActionSheetEntry[],
   },
   runtimeViewMock: {
     hydrated: true,
@@ -178,16 +174,7 @@ vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({
   },
 }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: ({
-    entries,
-  }: {
-    entries?: Array<{
-      key: string;
-      submenu?: {
-        onSelect?: (value: string) => void;
-      };
-    }>;
-  }) => {
+  default: ({ entries }: { entries?: MobileActionSheetEntry[] }) => {
     mobileActionSheetEntries.current = entries ?? [];
     return null;
   },
@@ -624,6 +611,38 @@ describe('AcpSendBox', () => {
 
     expect(useAcpConfigOptionsMock).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }));
     expect(screen.queryByTestId('mock-thought-selector')).not.toBeInTheDocument();
+  });
+
+  it('labels the effective Aelix Ask mode in the mobile sheet', () => {
+    isMobileMock.current = true;
+    useAcpConfigOptionsMock.mockReturnValue({
+      mode: {
+        id: 'permission_mode',
+        category: 'mode',
+        currentValue: 'default',
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      },
+      setStatus: { state: 'idle' },
+    });
+
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='acp'
+        workspacePath='/tmp/workspace'
+        messageState={makeMessageState()}
+      />
+    );
+
+    const permission = mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+    expect(permission?.meta).toBe('agentMode.ask');
+    expect(permission?.submenu?.options.find((option) => option.key === 'default')).toMatchObject({
+      label: 'agentMode.ask',
+      active: true,
+    });
   });
 
   it('applies runtime thought level from the mobile action sheet without persisting a global preference', async () => {
