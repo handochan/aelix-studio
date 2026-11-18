@@ -47,13 +47,22 @@ export function useAcpCompactionGuard(
           return;
         }
       }
-      const history = await ipcBridge.database.getConversationMessages.invoke({
-        conversation_id: conversationId,
-        limit: 50,
-      });
-      const latest = history.items.findLast((message) => message.type === 'text' && message.position === 'right');
-      if (!disposed && latest?.type === 'text') {
-        setResolved({ conversationId, turnId, compaction: isCompactPrompt(latest.content.content) });
+      let before: string | undefined;
+      while (!disposed) {
+        const history = await ipcBridge.database.getConversationMessages.invoke({
+          conversation_id: conversationId,
+          limit: 50,
+          ...(before ? { before } : {}),
+        });
+        if (disposed) return;
+        const latest = history.items.findLast((message) => message.type === 'text' && message.position === 'right');
+        if (latest?.type === 'text') {
+          setResolved({ conversationId, turnId, compaction: isCompactPrompt(latest.content.content) });
+          return;
+        }
+        const cursor = history.oldest_cursor;
+        if (!history.has_more_before || !cursor || cursor === before) return;
+        before = cursor;
       }
     };
     const check = (): void => {

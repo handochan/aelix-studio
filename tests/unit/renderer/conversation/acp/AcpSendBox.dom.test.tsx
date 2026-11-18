@@ -993,6 +993,34 @@ describe('AcpSendBox', () => {
       expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-ordinary' });
     });
 
+    it('recovers ordinary Stop when the current input is older than the latest 50 rows', async () => {
+      runtimeViewMock.activeTurnId = 'turn-long';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      getMessagesInvokeMock
+        .mockResolvedValueOnce({
+          items: Array.from({ length: 50 }, (_, index) => ({ id: `tool-${index}`, type: 'acp_tool_call' })),
+          has_more_before: true,
+          oldest_cursor: 'more-history',
+        })
+        .mockResolvedValueOnce({
+          items: [{ type: 'text', position: 'right', content: { content: 'Ordinary turn still running' } }],
+          has_more_before: false,
+        });
+      stopInvokeMock.mockResolvedValue({ runtime: null });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      expect(getMessagesInvokeMock).toHaveBeenNthCalledWith(2, {
+        conversation_id: 'conv-1',
+        limit: 50,
+        before: 'more-history',
+      });
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-long' });
+    });
+
     it('delivers mid-turn for a supporting agent instead of stopping the turn', async () => {
       runtimeViewMock.supportsMidturnDelivery = true;
       sendMessageInvokeMock.mockResolvedValue({ turn_id: 'turn-1', runtime: null, msg_id: 'msg-1' });

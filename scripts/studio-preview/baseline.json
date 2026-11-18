@@ -26,9 +26,9 @@
   },
   "acp": {
     "repository": "handochan/aelix-acp",
-    "commit": "d340eb9e4ce17d0bb8f58114f049224408d42b3a",
+    "commit": "bd48f45d54c221752ddf51f98b916a8a0a89588f",
     "version": "0.2.0a1",
-    "archiveSha256": "cd6ba0b4f623d616d11d852935562fb55cf152c15ec16d1d55da24d326ea2434",
+    "archiveSha256": "c548a89743785e211591a69a0537f4fe941c4d53b67d77718eeaec76e69f8170",
     "runtimeReferenceSha256": "fc0965b86c0fb776f27a8dd57264dc2a3fe931bb563a08dc4755602177fe1625"
   },
   "aioncore": {
