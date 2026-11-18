@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Esfuerzo de razonamiento",
     "default": "Predeterminado"
+  },
+  "subagents": {
+    "title": "Subagentes",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Agente",
+    "unavailable": "—",
+    "tool": "Herramienta: {{value}}",
+    "elapsed": "Tiempo: {{value}} s",
+    "elapsedHint": "Último tiempo informado por el entorno de ejecución",
+    "tokens": "Tokens: {{value}}",
+    "cost": "Coste: {{value}}",
+    "states": {
+      "starting": "Iniciando",
+      "running": "En ejecución",
+      "done": "Completado",
+      "error": "Fallido",
+      "stopped": "Detenido",
+      "unknown": "Desconocido",
+      "ended": "Turno finalizado; estado final sin informar"
+    },
+    "elapsedReported": "Último tiempo informado: {{value}} s"
   }
 }

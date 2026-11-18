@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Усилия на рассуждение",
     "default": "По умолчанию"
+  },
+  "subagents": {
+    "title": "Субагенты",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Агент",
+    "unavailable": "—",
+    "tool": "Инструмент: {{value}}",
+    "elapsed": "Время: {{value}} с",
+    "elapsedHint": "Последнее время, сообщённое средой выполнения",
+    "tokens": "Токены: {{value}}",
+    "cost": "Стоимость: {{value}}",
+    "states": {
+      "starting": "Запускается",
+      "running": "Выполняется",
+      "done": "Завершён",
+      "error": "Ошибка",
+      "stopped": "Остановлен",
+      "unknown": "Неизвестно",
+      "ended": "Ход завершён; итоговый статус не сообщён"
+    },
+    "elapsedReported": "Последнее сообщённое время: {{value}} с"
   }
 }

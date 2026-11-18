@@ -165,6 +165,38 @@ describe('Electron launch evidence without retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ launch: 3, status: 'failed', error: 'Error: launch failed' });
   });
 
+  it('retains stdout, stderr tails and the original exit code when identity fails', async () => {
+    const { app, main } = application(undefined, null);
+    const stdout = new EventEmitter();
+    const stderr = new EventEmitter();
+    Object.assign(main, { stdout, stderr });
+    const record = vi.fn();
+    app.evaluate.mockImplementation(async () => {
+      stdout.emit('data', Buffer.from('owned main stdout\n'));
+      stderr.emit('data', Buffer.from('owned main stderr\n'));
+      main.exitCode = 17;
+      main.emit('exit', 17, null);
+      stderr.emit('data', Buffer.from('tail after exit\n'));
+      throw destroyed;
+    });
+    app.close.mockImplementation(async () => {
+      stderr.emit('data', Buffer.from('tail during close\n'));
+    });
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const launch = vi.fn().mockResolvedValue(app);
+    await expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed);
+    stderr.emit('data', Buffer.from('tail after shutdown\n'));
+    expect(launch).toHaveBeenCalledTimes(1);
+    // The production recorder uploads these rows under mainLaunches.
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      stdout: 'owned main stdout\n',
+      stderr: 'owned main stderr\ntail after exit\ntail during close\ntail after shutdown\n',
+      exitCode: 17,
+      naturalExit: true,
+      error: String(destroyed),
+    });
+  });
+
   it('records main output and spontaneous exit after identity before smoke closes', async () => {
     const { app, main } = application(undefined, null);
     const stdout = new EventEmitter();

@@ -1,0 +1,139 @@
+{
+  "source": {
+    "method": "Actual host aelix.4, bundled runtime and synthetic loopback model; persisted HTTP tool messages. A stopped child is resumed in a new call.",
+    "hostCommit": "c516fa946ef48adc0119dbf37367e02216b22e70",
+    "acpCommit": "16d6555b08825d1d63c3b082de2b10a1152562c0",
+    "nativeCommit": "e19ab55e17e871a40356fc9802f3f6669ca727de"
+  },
+  "frames": [
+    {
+      "scenario": "stoppedChildResumed",
+      "content": {
+        "session_id": "bacb6cde-5014-4566-8954-15a0bc646e7e",
+        "update": {
+          "session_update": "tool_call_update",
+          "tool_call_id": "agent-2",
+          "status": "in_progress",
+          "title": "agent",
+          "kind": "execute",
+          "raw_input": {
+            "profile": "reviewer",
+            "mode": "parallel",
+            "tasks": ["CHILD_CANCEL_A", "CHILD_CANCEL_B"]
+          },
+          "raw_output": {
+            "content": [
+              {
+                "text": "[1/2] agent reviewer [stopped] · 5s\n[2/2] agent reviewer [stopped] · 5s",
+                "text_signature": "",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "terminate": false
+          },
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "[1/2] agent reviewer [stopped] · 5s\n[2/2] agent reviewer [stopped] · 5s"
+              }
+            }
+          ]
+        },
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-33051484406c",
+                "profile": "reviewer",
+                "state": "stopped",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 5391,
+                "tokens": 20,
+                "cost": 0
+              },
+              {
+                "id": "sub-928564e5272e",
+                "profile": "reviewer",
+                "state": "stopped",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 5384,
+                "tokens": 20,
+                "cost": 0
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "scenario": "stoppedChildResumed",
+      "content": {
+        "session_id": "bacb6cde-5014-4566-8954-15a0bc646e7e",
+        "update": {
+          "session_update": "tool_call_update",
+          "tool_call_id": "agent-3",
+          "status": "completed",
+          "title": "agent",
+          "kind": "execute",
+          "raw_input": {
+            "action": "resume",
+            "profile": "reviewer",
+            "id": "f0eb54f5-a432-4d72-8639-0cd3dc27c646",
+            "task": "CHILD_RESUME finish the interrupted work"
+          },
+          "raw_output": {
+            "content": [
+              {
+                "text": "RESUMED_CHILD_WORK\n\nSession: f0eb54f5-a432-4d72-8639-0cd3dc27c646\n\n[agent reviewer · one · ok · yolo · 1 turns · 17 in / 3 out · 2.4s]",
+                "text_signature": "",
+                "type": "text"
+              }
+            ],
+            "is_error": false,
+            "terminate": false,
+            "details": "RESUMED_CHILD_WORK",
+            "status": "completed"
+          },
+          "content": [
+            {
+              "type": "content",
+              "content": {
+                "type": "text",
+                "text": "RESUMED_CHILD_WORK\n\nSession: f0eb54f5-a432-4d72-8639-0cd3dc27c646\n\n[agent reviewer · one · ok · yolo · 1 turns · 17 in / 3 out · 2.4s]"
+              }
+            }
+          ]
+        },
+        "_meta": {
+          "aelix/subagents": {
+            "version": 1,
+            "children": [
+              {
+                "id": "sub-e68c3ee5292f",
+                "profile": "reviewer",
+                "state": "done",
+                "currentTool": null,
+                "model": "one",
+                "provider": "fixture",
+                "event": "subagent_end",
+                "elapsedMs": 2438,
+                "tokens": 20,
+                "cost": 0
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

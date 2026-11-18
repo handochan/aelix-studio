@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { qualifyRecoveredProfile } from '../../../tests/manual/recoveredProfile.mjs';
+import { qualifyRecoveredProfile } from '../../../../tests/manual/recoveredProfile.mjs';
 import {
   closeElectron as closeElectronProcess,
   electronAppEnvironment,
@@ -11,7 +11,7 @@ import {
   recordLaunchFailure,
   sandboxProcesses,
   verifyConfigPreserved,
-} from './verification.mjs';
+} from '../verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -393,6 +393,73 @@ try {
   assert.ok(fs.existsSync(target));
   assert.equal((await api(`${route}/confirmations`)).length, 0);
   checks.push('renderer_later_yolo_selector_and_actual_write');
+  // Keep the permission-recovery session unchanged; delegation is a separate enabled session.
+  await api('/api/agents/custom', 'POST', {
+    name: 'Immutable native delegation',
+    command: process.env.RECOVERY_ADAPTER,
+    args: JSON.parse(process.env.RECOVERY_DELEGATION_ARGS),
+    env: [],
+    icon: 'S',
+  });
+  const delegationAssistant = (await api('/api/assistants')).find(
+    (item) => item.name === 'Immutable native delegation'
+  );
+  assert.ok(delegationAssistant);
+  const delegationConversation = await api('/api/conversations', 'POST', {
+    name: 'Immutable native delegation',
+    assistant: { id: delegationAssistant.id },
+    extra: { workspace: path.join(sandbox, 'workspace'), custom_workspace: true },
+  });
+  const delegationRoute = `/api/conversations/${delegationConversation.id}`;
+  await api(`${delegationRoute}/runtime/ensure`, 'POST');
+  fs.writeFileSync(
+    path.join(sandbox, 'tool-request.json'),
+    JSON.stringify([
+      'agent',
+      { profile: 'reviewer', mode: 'parallel', tasks: ['Respond briefly A', 'Respond briefly B'] },
+    ])
+  );
+  await api(`${delegationRoute}/messages`, 'POST', { content: 'SYNTHETIC_CHILD_DELEGATION' });
+  await expect
+    .poll(async () => (await api(`${delegationRoute}/runtime/ensure`, 'POST')).runtime.state, { timeout: 30000 })
+    .toBe('idle');
+  let delegated;
+  try {
+    await expect
+      .poll(
+        async () => {
+          delegated = (await api(`${delegationRoute}/messages?limit=100`)).items
+            .filter((row) => row.type === 'acp_tool_call')
+            .map((row) => (typeof row.content === 'string' ? JSON.parse(row.content) : row.content))
+            .find((content) => content._meta?.['aelix/subagents']?.children?.length === 2);
+          return (
+            delegated &&
+            ['completed', 'failed'].includes(delegated.update.status) &&
+            delegated._meta['aelix/subagents'].children.every((child) =>
+              ['done', 'error', 'stopped'].includes(child.state)
+            )
+          );
+        },
+        { timeout: 30000 }
+      )
+      .toBe(true);
+  } finally {
+    // Preserve the actual child result even when the native execution fails.
+    fs.writeFileSync(
+      path.join(output, 'renderer-result.json'),
+      JSON.stringify(
+        { checksPassed: checks, mainLaunches, configPreservation, recoveryProfile, delegation: delegated ?? null },
+        null,
+        2
+      ) + '\n'
+    );
+  }
+  assert.ok(delegated, 'Native delegation must produce two real children');
+  assert.ok(
+    delegated._meta['aelix/subagents'].children.every((child) => child.state === 'done'),
+    `Native children did not complete: ${JSON.stringify(delegated).slice(0, 8000)}`
+  );
+  checks.push('native_two_child_delegation_before_payload_inventory_check');
   await select('default');
   checks.push('renderer_return_to_ask');
   fs.writeFileSync(
@@ -412,6 +479,7 @@ try {
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,
+        delegation: delegated,
       },
       null,
       2

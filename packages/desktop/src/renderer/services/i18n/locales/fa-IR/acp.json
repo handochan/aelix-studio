@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "تلاش استدلال",
     "default": "پیش‌فرض"
+  },
+  "subagents": {
+    "title": "عامل‌های فرعی",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "عامل",
+    "unavailable": "—",
+    "tool": "ابزار: {{value}}",
+    "elapsed": "زمان: {{value}} ثانیه",
+    "elapsedHint": "آخرین زمان گزارش‌شده توسط محیط اجرا",
+    "tokens": "توکن‌ها: {{value}}",
+    "cost": "هزینه: {{value}}",
+    "states": {
+      "starting": "در حال شروع",
+      "running": "در حال اجرا",
+      "done": "تکمیل شد",
+      "error": "ناموفق",
+      "stopped": "متوقف شد",
+      "unknown": "نامشخص",
+      "ended": "نوبت پایان یافت؛ وضعیت نهایی گزارش نشد"
+    },
+    "elapsedReported": "آخرین زمان گزارش‌شده: {{value}} ثانیه"
   }
 }

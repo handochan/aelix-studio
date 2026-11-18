@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Effort de raisonnement",
     "default": "Par défaut"
+  },
+  "subagents": {
+    "title": "Sous-agents",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Agent",
+    "unavailable": "—",
+    "tool": "Outil : {{value}}",
+    "elapsed": "Durée : {{value}} s",
+    "elapsedHint": "Dernière durée signalée par le moteur",
+    "tokens": "Jetons : {{value}}",
+    "cost": "Coût : {{value}}",
+    "states": {
+      "starting": "Démarrage",
+      "running": "En cours",
+      "done": "Terminé",
+      "error": "Échec",
+      "stopped": "Arrêté",
+      "unknown": "Inconnu",
+      "ended": "Tour terminé ; état final non signalé"
+    },
+    "elapsedReported": "Dernière durée signalée : {{value}} s"
   }
 }

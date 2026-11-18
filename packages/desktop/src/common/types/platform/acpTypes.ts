@@ -141,6 +141,7 @@ export interface AcpRawOutput {
 
 /** Tool call session update */
 export interface ToolCallUpdate extends BaseSessionUpdate {
+  _meta?: Record<string, unknown>;
   update: {
     sessionUpdate: 'tool_call' | 'tool_call_update';
     tool_call_id: string;

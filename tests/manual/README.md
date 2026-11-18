@@ -30,7 +30,7 @@ process exits unsuccessfully, or the fixed code fails any preservation check.
 Keep the output as evidence and remove generated bundles when no longer needed.
 
 `recoveredProfile.mjs` exports the separate installed-startup check used by
-`host-release/smoke.mjs`. It launches the real installed executable with an owned
+`host-release/probes/smoke.mjs`. It launches the real installed executable with an owned
 0-byte config, without pre-seeding false. It verifies a visible window, effective
 autoCheck false before and after the normal startup delay, preservation of the
 0-byte original, and false after OS exit. It does not intercept native dialogs.

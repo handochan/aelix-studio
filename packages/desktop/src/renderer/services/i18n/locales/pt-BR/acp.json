@@ -28,5 +28,26 @@
     "download_success": "Download concluído",
     "download_error": "Falha ao baixar",
     "generated_alt": "Imagem gerada"
+  },
+  "subagents": {
+    "title": "Subagentes",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Agente",
+    "unavailable": "—",
+    "tool": "Ferramenta: {{value}}",
+    "elapsed": "Tempo: {{value}} s",
+    "elapsedHint": "Último tempo informado pelo ambiente de execução",
+    "tokens": "Tokens: {{value}}",
+    "cost": "Custo: {{value}}",
+    "states": {
+      "starting": "Iniciando",
+      "running": "Em execução",
+      "done": "Concluído",
+      "error": "Falhou",
+      "stopped": "Interrompido",
+      "unknown": "Desconhecido",
+      "ended": "Turno encerrado; estado final não informado"
+    },
+    "elapsedReported": "Último tempo informado: {{value}} s"
   }
 }
