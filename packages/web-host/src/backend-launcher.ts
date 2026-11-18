@@ -9,10 +9,31 @@
  */
 
 import { type ChildProcess, spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import { connect, createServer, type Socket } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
 import type { AppMetadata, BackendBinaryResolver } from './types.js';
+
+export const STUDIO_CREDENTIAL_HEADER = 'x-aionui-studio-auth';
+const studioCredentials = new Map<number, string>();
+
+/** Get the supervisor credential only for the exact running loopback host. */
+export function studioBackendCredential(url: URL): string | undefined {
+  if (!['http:', 'ws:'].includes(url.protocol) || url.hostname !== '127.0.0.1' || url.username || url.password) {
+    return undefined;
+  }
+  return studioCredentials.get(Number(url.port || 80));
+}
+
+/** Make a privileged main-process call without following redirects. */
+export function fetchStudioBackend(url: string, options?: RequestInit): Promise<Response> {
+  const credential = studioBackendCredential(new URL(url));
+  if (!credential) return fetch(url, options);
+  const headers = new Headers(options?.headers);
+  headers.set(STUDIO_CREDENTIAL_HEADER, credential);
+  return fetch(url, { ...options, headers, redirect: 'error' });
+}
 
 type BackendStatus = 'stopped' | 'starting' | 'running' | 'error';
 type BackendStartupStage =
@@ -65,6 +86,7 @@ type SpawnConfig = {
   port: number;
   dbPath: string;
   local: boolean;
+  studioAuth?: boolean;
   parentPid?: number;
   logDir?: string;
   workDir?: string;
@@ -211,6 +233,7 @@ export function buildSpawnArgs(config: SpawnConfig): string[] {
   if (config.logDir) args.push('--log-dir', config.logDir);
   if (config.workDir) args.push('--work-dir', config.workDir);
   if (config.local) args.push('--local');
+  if (config.studioAuth) args.push('--studio-auth');
   if (config.recoverCorruptedDatabase) args.push('--recover-corrupted-database');
   return args;
 }
@@ -529,7 +552,8 @@ export class BackendLifecycleManager {
 
   constructor(
     private readonly appMeta: AppMetadata,
-    private readonly resolveBackend: BackendBinaryResolver
+    private readonly resolveBackend: BackendBinaryResolver,
+    private readonly studioAuth = false
   ) {}
 
   get port(): number {
@@ -664,10 +688,13 @@ export class BackendLifecycleManager {
       );
     };
 
+    const credential = this.studioAuth ? randomBytes(32).toString('hex') : undefined;
+    let registeredPort: number | undefined;
     const args = buildSpawnArgs({
       port: this._port,
       dbPath,
       local: true,
+      studioAuth: this.studioAuth,
       parentPid: process.pid,
       logDir,
       workDir: dirs?.workDir,
@@ -700,7 +727,14 @@ export class BackendLifecycleManager {
       throw makeStartupError('spawn', 'aioncore process spawn threw before startup', error);
     }
 
-    this.childProcess.stdin?.end();
+    // An unsupported or early-exiting host can close the pipe before the write.
+    this.childProcess.stdin?.on?.('error', () => undefined);
+    this.childProcess.stdin?.end(credential);
+    this.childProcess.once('close', () => {
+      if (registeredPort !== undefined && studioCredentials.get(registeredPort) === credential) {
+        studioCredentials.delete(registeredPort);
+      }
+    });
 
     backendPid = this.childProcess.pid;
     const pid = backendPid;
@@ -811,6 +845,10 @@ export class BackendLifecycleManager {
         const port = parseAioncoreListeningPort(trimmed);
         if (port !== undefined) {
           this._port = port;
+          if (credential) {
+            registeredPort = port;
+            studioCredentials.set(port, credential);
+          }
           serverListeningObserved = true;
           serverListeningObservedAfterMs = Date.now() - startupStartedAt;
           serverListeningLine = trimmed;
@@ -1078,7 +1116,7 @@ export class BackendLifecycleManager {
  * directly to preserve current stop/port getter semantics).
  */
 export async function startBackend(opts: BackendLaunchOptions): Promise<BackendHandle> {
-  const manager = new BackendLifecycleManager(opts.app, opts.resolveBackend);
+  const manager = new BackendLifecycleManager(opts.app, opts.resolveBackend, true);
   const dataDir = opts.dataDir ?? '';
   if (!dataDir) {
     throw new Error('startBackend: dataDir is required');

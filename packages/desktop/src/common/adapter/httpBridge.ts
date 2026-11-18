@@ -6,6 +6,7 @@
  * so existing renderer code works without changes.
  */
 
+import { fetchFromDesktopOrBrowser } from './desktopBackendFetch';
 import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 
 // ---------------------------------------------------------------------------
@@ -210,7 +211,7 @@ function sendHttpRequest(
   body?: unknown
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
-  return fetch(url, {
+  return fetchFromDesktopOrBrowser(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

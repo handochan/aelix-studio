@@ -217,11 +217,16 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
     const response = await fetch(handle.localUrl + '/api/anything', {
-      headers: { 'x-forwarded-for': '192.0.2.1', 'x-aionui-internal': '1' },
+      headers: {
+        'x-forwarded-for': '192.0.2.1',
+        'x-aionui-internal': '1',
+        'x-aionui-studio-auth': 'synthetic-credential',
+      },
     });
     const headers = (await response.json()) as Record<string, unknown>;
     expect(headers['x-forwarded-for']).toBeUndefined();
     expect(headers['x-aionui-internal']).toBeUndefined();
+    expect(headers['x-aionui-studio-auth']).toBeUndefined();
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 
