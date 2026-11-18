@@ -1,13 +1,17 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createProcessTimeline } from '../../../scripts/studio-preview/host-release/probes/processTimeline.mjs';
 import {
   boundedWait,
   closeElectron,
   launchWithIdentity,
   recordLaunchFailure,
+  recordLaunchEvidence,
+  writeRendererResult,
   configSummary,
   electronAppEnvironment,
   verifyConfigPreserved,
@@ -118,6 +122,205 @@ describe('Electron launch evidence without retry', () => {
     record,
     remainingProcesses: { status: 'observed', processes: [] },
   });
+  it('lets an already resolved launch enter identity protection before a previously queued batch', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    let identityDone: (value: { pid: number }) => void;
+    app.evaluate.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          identityDone = resolve;
+        })
+    );
+    let launchResolved = false;
+    let identityFinished = false;
+    const intrusions: string[] = [];
+    const snapshot = vi.fn(() => {
+      if (launchResolved && !identityFinished) intrusions.push('batch-inside-identity-window');
+      return { status: 'observed', rows: [] };
+    });
+    const processTimeline = createProcessTimeline({ snapshot });
+    processTimeline.start(); // Leave the sample queued when launch resolves.
+    const launch = vi.fn(() => {
+      launchResolved = true;
+      return Promise.resolve(app);
+    });
+    const result = launchWithIdentity(launch, { ...options(), processTimeline });
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+    expect(snapshot).not.toHaveBeenCalled();
+    identityFinished = true;
+    identityDone!({ pid: 123 });
+    await expect(result).resolves.toEqual({ app, identity: { pid: 123 } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(intrusions).toEqual([]);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    processTimeline.stop();
+  });
+  it.each(['success', 'failure'])('runs no synchronous batch before the %s identity result', async (outcome) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app } = application();
+    let resolveIdentity: (value: { pid: number }) => void;
+    let rejectIdentity: (error: Error) => void;
+    app.evaluate.mockImplementation(
+      () =>
+        new Promise((resolve, reject) => {
+          resolveIdentity = resolve;
+          rejectIdentity = reject;
+        })
+    );
+    const snapshot = vi.fn(() => ({ status: 'observed', rows: [] }));
+    const timelineRecord = vi.fn();
+    const processTimeline = createProcessTimeline({ snapshot, record: timelineRecord });
+    processTimeline.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(1); // Before-launch observation is retained.
+    snapshot.mockClear();
+    const launch = vi.fn().mockResolvedValue(app);
+    const result = launchWithIdentity(launch, { ...options(), processTimeline });
+    const checked =
+      outcome === 'failure'
+        ? expect(result).rejects.toBe(destroyed)
+        : expect(result).resolves.toEqual({ app, identity: { pid: 123 } });
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+    expect(snapshot).not.toHaveBeenCalled();
+    if (outcome === 'failure') rejectIdentity!(destroyed);
+    else resolveIdentity!({ pid: 123 });
+    await checked;
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      timelineRecord.mock.calls.some(
+        ([, event]) => event?.phase === (outcome === 'failure' ? 'identity-failed' : 'after-identity')
+      )
+    ).toBe(true);
+    expect(snapshot).toHaveBeenCalled();
+    expect(launch).toHaveBeenCalledTimes(1);
+    processTimeline.stop();
+  });
+
+  it.each(['success', 'identity-failure', 'pre-handle-failure'])(
+    'isolates every lifecycle sink call on %s without retrying or changing the outcome',
+    async (outcome) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const { main, app } = application(outcome === 'identity-failure' ? destroyed : undefined);
+      const stdout = new EventEmitter();
+      Object.assign(main, { stdout });
+      const record = vi.fn(() => {
+        throw Object.assign(new Error('diagnostic write denied'), { code: 'EPERM' });
+      });
+      const launch = vi.fn(async () => {
+        if (outcome === 'pre-handle-failure') throw destroyed;
+        return app;
+      });
+      if (outcome === 'success') {
+        await expect(launchWithIdentity(launch, options(record))).resolves.toEqual({ app, identity: { pid: 123 } });
+        expect(() => {
+          stdout.emit('data', Buffer.from('safe fixture output'));
+          main.emit('exit', 0, null);
+        }).not.toThrow();
+        await expect(closeElectron(app)).resolves.toBeUndefined();
+      } else await expect(launchWithIdentity(launch, options(record))).rejects.toBe(destroyed);
+      expect(record).toHaveBeenCalled();
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(app.close).toHaveBeenCalledTimes(outcome === 'pre-handle-failure' ? 0 : 1);
+    }
+  );
+  it('isolates diagnostic sink failure while preserving the original identity failure and single cleanup', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = application(destroyed, 0);
+    let diagnosticFailed = false;
+    const record = vi.fn((value) => {
+      if (value.identityFailedAt && !value.error) {
+        diagnosticFailed = true;
+        throw new Error('diagnostic sink failure');
+      }
+    });
+    const launch = vi.fn().mockResolvedValue(app);
+    await expect(launchWithIdentity(launch, options(record))).rejects.toBe(destroyed);
+    expect(diagnosticFailed).toBe(true);
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+  it('keeps successful identity and lifecycle status unchanged while adding evidence', async () => {
+    const { app } = application();
+    const record = vi.fn();
+    const result = await launchWithIdentity(async () => app, options(record));
+    expect(result).toEqual({ app, identity: { pid: 123 } });
+    expect(record.mock.calls.at(-1)?.[0].status).toBe('identified');
+    const identifiedAt = record.mock.calls.at(-1)?.[0].identifiedAt;
+    await closeElectron(app);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ status: 'closing', identifiedAt: expect.any(String) });
+    expect(record.mock.calls.at(-1)?.[0].identifiedAt).toBe(identifiedAt);
+  });
+  it('keeps the original twenty second identity failure observation and records its launch PID and phase', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { main, app } = application(destroyed, null);
+    const record = vi.fn();
+    app.close.mockImplementation(async () => {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+    });
+    const launch = vi.fn().mockResolvedValue(app);
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toBe(destroyed);
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(app.close).not.toHaveBeenCalled();
+    expect(record.mock.calls.some(([value]) => value.identityFailedAt)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0].waits).toMatchObject([
+      {
+        launch: 3,
+        pid: 123,
+        phase: 'identity-failure-exit-observation',
+        elapsedMs: 20000,
+        timeoutMs: 20000,
+        status: 'failed',
+      },
+      { launch: 3, pid: 123, phase: 'identity-failure-cleanup', alreadyExited: true },
+    ]);
+  });
+
+  it('writes failed launch and process evidence into the real uploaded result and journal', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-launch-evidence-'));
+    try {
+      await fs.writeFile(path.join(root, 'renderer-result.json'), JSON.stringify({ checksPassed: ['existing-check'] }));
+      const launches: object[] = [];
+      const record = (value: { launch: number }) => {
+        launches[value.launch - 1] = value;
+        recordLaunchEvidence(root, { mainLaunches: launches }, value);
+      };
+      const { app } = application(destroyed, 0);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      await expect(launchWithIdentity(async () => app, options(record))).rejects.toBe(destroyed);
+      recordLaunchEvidence(root, { processTimeline: { status: 'observed' } }, { kind: 'process-timeline' });
+      const value = JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8'));
+      expect(value).toMatchObject({
+        checksPassed: ['existing-check'],
+        processTimeline: { status: 'observed' },
+        mainLaunches: [
+          null,
+          null,
+          { error: String(destroyed), identityFailedAt: expect.any(String), protocol: { status: 'active' } },
+        ],
+      });
+      expect(
+        (await fs.readFile(path.join(root, 'startup-lifecycle.jsonl'), 'utf8'))
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+          .some((event) => event.identityFailedAt)
+      ).toBe(true);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('waits for the old OS process even when app.close has already resolved', async () => {
     const { main, app } = application(undefined, null);
     let completed = false;
@@ -227,5 +430,107 @@ describe('Electron launch evidence without retry', () => {
     });
     await closeElectron(app);
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ naturalExit: false, closeRequestedAt: expect.any(String) });
+  });
+});
+
+describe('atomic renderer evidence', () => {
+  it('merges delegation evidence without dropping the process timeline', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-delegation-evidence-'));
+    try {
+      writeRendererResult(root, { processTimeline: { sampleCount: 3 }, checksPassed: [] });
+      recordLaunchEvidence(root, { delegation: { children: [] }, checksPassed: ['delegation'] }, null);
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8'))).toEqual({
+        processTimeline: { sampleCount: 3 },
+        checksPassed: ['delegation'],
+        delegation: { children: [] },
+      });
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('retries transient Windows EPERM replacement while keeping the old complete JSON visible', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-rename-retry-'));
+    try {
+      writeRendererResult(root, { sequence: 0 });
+      const rename = fsSync.renameSync;
+      const replacement = vi
+        .spyOn(fsSync, 'renameSync')
+        .mockImplementationOnce(() => {
+          throw Object.assign(new Error('busy'), { code: 'EPERM' });
+        })
+        .mockImplementation((source, target) => {
+          expect(JSON.parse(fsSync.readFileSync(target, 'utf8')).sequence).toBe(0);
+          rename(source, target);
+        });
+      const pause = vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out');
+      writeRendererResult(root, { sequence: 1 }, { platform: 'win32' });
+      expect(replacement).toHaveBeenCalledTimes(2);
+      expect(pause).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(1);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each([
+    { platform: 'win32', code: 'EPERM', calls: 3 },
+    { platform: 'linux', code: 'EPERM', calls: 1 },
+    { platform: 'win32', code: 'EACCES', calls: 1 },
+  ])(
+    'bounds replacement attempts for $platform/$code and preserves the original result',
+    async ({ platform, code, calls }) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-rename-failure-'));
+      try {
+        writeRendererResult(root, { sequence: 0 });
+        const error = Object.assign(new Error('replacement failed'), { code });
+        const replacement = vi.spyOn(fsSync, 'renameSync').mockImplementation(() => {
+          throw error;
+        });
+        vi.spyOn(Atomics, 'wait').mockReturnValue('timed-out');
+        expect(() => writeRendererResult(root, { sequence: 1 }, { platform })).toThrow(error);
+        expect(replacement).toHaveBeenCalledTimes(calls);
+        expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(0);
+        expect((await fs.readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+      } finally {
+        vi.restoreAllMocks();
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+  it('keeps the previous complete JSON visible until rename and omits empty journal events', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-atomic-evidence-'));
+    try {
+      writeRendererResult(root, { sequence: 0 });
+      const rename = fsSync.renameSync;
+      const observed = vi.spyOn(fsSync, 'renameSync').mockImplementation((source, target) => {
+        expect(JSON.parse(fsSync.readFileSync(target, 'utf8')).sequence).toBe(0);
+        rename(source, target);
+      });
+      recordLaunchEvidence(root, { sequence: 1 }, null);
+      expect(observed).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(1);
+      expect(fsSync.existsSync(path.join(root, 'startup-lifecycle.jsonl'))).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the previous result intact and removes its temporary file if replacement fails', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-atomic-evidence-'));
+    try {
+      writeRendererResult(root, { sequence: 0 });
+      vi.spyOn(fsSync, 'renameSync').mockImplementation(() => {
+        throw new Error('replacement failed');
+      });
+      expect(() => writeRendererResult(root, { sequence: 1 })).toThrow('replacement failed');
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(0);
+      expect((await fs.readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });
