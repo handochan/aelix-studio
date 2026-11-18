@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { TForkCapability } from '@/common/chat/forkConversation';
 import type { SpeechToTextConfig } from '@/common/types/provider/speech';
 import type { Theme } from '@/common/theme/types';
 import { buildStorage } from '@/common/platform/storage';
@@ -191,7 +192,7 @@ interface IChatConversation<T, Extra> {
    * Present = the fork entry point may be shown; `at_turn` = any message may
    * be forked (codex), otherwise only the latest turn (claude / ACP HEAD fork).
    */
-  fork_capability?: { at_turn: boolean };
+  fork_capability?: TForkCapability;
   /**
    * Prompt media capability (from `ConversationResponse.prompt_capability`).
    * Filled ONLY on the single-conversation detail response (never on lists).

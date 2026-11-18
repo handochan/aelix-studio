@@ -488,34 +488,47 @@ try {
       window.location.hash = `/conversation/${id}`;
     }, parent.id);
     await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
-    await marker('PERMISSION_OK').hover();
-    const fork = page.getByTestId('message-fork-button');
-    await expect(fork).toHaveCount(1);
-    await fork.click();
-    const child = await page.waitForFunction(
-      (id) => {
-        const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
-        return match && match[1] !== id ? match[1] : null;
-      },
-      parent.id,
-      { timeout: 30000 }
-    );
-    const childId = await child.jsonValue();
-    const childRoute = `/api/conversations/${childId}`;
-    conversationRoute = childRoute;
-    await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
-    await api(`${childRoute}/runtime/ensure`, 'POST');
-    await sendForkTurn(childRoute, childMarker);
-    await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
-    await expect(marker('PERMISSION_OK')).toHaveCount(2, { timeout: 30000 });
-    await closeElectron(app);
-    await launch(childId, parentMarker);
-    await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
-    await sendForkTurn(childRoute, restartMarker);
-    await expect(marker(restartMarker)).toHaveCount(1, { timeout: 30000 });
-    await expect(marker('PERMISSION_OK')).toHaveCount(3, { timeout: 30000 });
-    await expect(marker(parentMarker)).toHaveCount(1);
-    checks.push('installed_native_head_fork_ui_and_child_restart');
+    const capability = (await api(parentRoute)).fork_capability;
+    if (capability?.requires_native_head) {
+      await marker('PERMISSION_OK').hover();
+      const fork = page.getByTestId('message-fork-button');
+      await expect(fork).toHaveCount(1);
+      await fork.click();
+      const child = await page.waitForFunction(
+        (id) => {
+          const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
+          return match && match[1] !== id ? match[1] : null;
+        },
+        parent.id,
+        { timeout: 30000 }
+      );
+      const childId = await child.jsonValue();
+      const childRoute = `/api/conversations/${childId}`;
+      conversationRoute = childRoute;
+      await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+      await api(`${childRoute}/runtime/ensure`, 'POST');
+      await sendForkTurn(childRoute, childMarker);
+      await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
+      await expect(marker('PERMISSION_OK')).toHaveCount(2, { timeout: 30000 });
+      await closeElectron(app);
+      await launch(childId, parentMarker);
+      await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
+      await sendForkTurn(childRoute, restartMarker);
+      await expect(marker(restartMarker)).toHaveCount(1, { timeout: 30000 });
+      await expect(marker('PERMISSION_OK')).toHaveCount(3, { timeout: 30000 });
+      await expect(marker(parentMarker)).toHaveCount(1);
+      checks.push('installed_native_head_fork_ui_and_child_restart');
+    } else {
+      // The released host still uses plain ACP fork until D16 integration.
+      const { items } = await api(`${parentRoute}/messages?limit=10`);
+      const lastMessage = items.at(-1);
+      assert.ok(lastMessage && JSON.stringify(lastMessage.content).includes('PERMISSION_OK'));
+      const pending = await api(`${parentRoute}/fork`, 'POST', { message_id: lastMessage.id });
+      await api(`/api/conversations/${pending.id}/runtime/ensure`, 'POST', undefined, [502]);
+      const unchanged = await api(`/api/conversations/${pending.id}`);
+      assert.equal(unchanged.extra.acp_session_id ?? null, null);
+      checks.push('installed_legacy_host_refuses_unanchored_native_fork');
+    }
   }
   writeRendererResult(output, {
     checksPassed: checks,

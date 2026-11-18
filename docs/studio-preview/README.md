@@ -39,11 +39,13 @@ The child has a new native session UUID and a separate ACP ID. Native owns the
 child's context and parent link. Studio keeps display messages and conversation
 metadata in the host database.
 
-The host copies the display messages and opens the native child in separate
-requests. Keep the parent at the same HEAD until the child opens. The current
-host does not send a native entry anchor with its fork request. A parent turn
-that completes between these requests can enter the child's model context
-without appearing in the copied display history.
+The host candidate in [Host #43](https://github.com/handochan/aelix-studio-host/issues/43)
+forwards the displayed native HEAD through both requests. If the parent
+advances, ACP refuses before writing the native child and Studio stays in the
+parent. A rejected display copy remains unbound. Legacy messages and a child
+with only inherited history need a completed turn before they can be forked.
+The released host pin does not carry this reference, so
+the updated adapter refuses its unanchored requests until host integration.
 [Studio #6](https://github.com/handochan/aelix-studio/issues/6)
 
 For an internal database that has migration **044** from #25: stop Studio and its host,

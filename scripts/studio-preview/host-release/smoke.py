@@ -155,15 +155,18 @@ def setup(api):
                 raise AssertionError('Public native or installed adapter identity changed')
             if not fixture.requests or not all(item['model'] == 'one' for item in fixture.requests):
                 raise AssertionError('No real synthetic native model requests observed')
-            fork_parent = 'SYNTHETIC_HEAD_FORK_PARENT'
-            fork_child = 'SYNTHETIC_HEAD_FORK_CHILD'
-            for marker, expected in ((fork_child, (fork_parent,)),
-                                     ('SYNTHETIC_HEAD_FORK_RESTART', (fork_parent, fork_child))):
-                turns = [request['messages'] for request in fixture.requests
-                         if request['messages'] and marker in json.dumps(request['messages'][-1])]
-                if len(turns) != 1 or any(text not in json.dumps(turns[0][:-1]) for text in expected):
-                    raise AssertionError(f'Installed native fork lost context at {marker}')
-            report['checksPassed'].append('installed_native_head_fork_context_after_restart')
+            if 'installed_native_head_fork_ui_and_child_restart' in report['checksPassed']:
+                fork_parent = 'SYNTHETIC_HEAD_FORK_PARENT'
+                fork_child = 'SYNTHETIC_HEAD_FORK_CHILD'
+                for marker, expected in ((fork_child, (fork_parent,)),
+                                         ('SYNTHETIC_HEAD_FORK_RESTART', (fork_parent, fork_child))):
+                    turns = [request['messages'] for request in fixture.requests
+                             if request['messages'] and marker in json.dumps(request['messages'][-1])]
+                    if len(turns) != 1 or any(text not in json.dumps(turns[0][:-1]) for text in expected):
+                        raise AssertionError(f'Installed native fork lost context at {marker}')
+                report['checksPassed'].append('installed_native_head_fork_context_after_restart')
+            elif 'installed_legacy_host_refuses_unanchored_native_fork' not in report['checksPassed']:
+                raise AssertionError('Installed native fork qualification did not run')
             report.update(status='passed', providerRequests=len(fixture.requests), installedPayloadUnchanged=True,
                           installedFiles=len(before), defaultHostOverride=False)
         finally:

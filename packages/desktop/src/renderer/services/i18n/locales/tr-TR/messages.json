@@ -84,6 +84,8 @@
     "action": "Buradan çatalla",
     "errorTurnInFlight": "Çatallamadan önce mevcut yanıtın bitmesini bekleyin",
     "errorParentUnbound": "Bu konuşmanın henüz çatallanacak bir arka uç oturumu yok",
+    "errorHeadChanged": "Konuşma ilerledi. En son yanıttan yeniden dallandırın.",
+    "errorHeadUnavailable": "Dallandırmadan önce bir mesaj gönderip yanıtın tamamlanmasını bekleyin.",
     "errorPointUnsupported": "Bu ajan yalnızca en son mesajdan çatallayabilir",
     "errorUnsupported": "Bu ajan çatallamayı desteklemiyor",
     "errorGeneric": "Çatallama başarısız: {{message}}"

@@ -332,9 +332,9 @@ export const conversation = {
    * eagerly. Error reasons carry stable `FORK_*` prefixes for i18n mapping.
    */
   fork: withResponseMap(
-    httpPost<TChatConversation, { conversation_id: string; message_id: string }>(
+    httpPost<TChatConversation, { conversation_id: string; message_id: string; expected_native_head?: string }>(
       (p) => `/api/conversations/${p.conversation_id}/fork`,
-      (p) => ({ message_id: p.message_id })
+      (p) => ({ message_id: p.message_id, expected_native_head: p.expected_native_head })
     ),
     fromApiConversation
   ),

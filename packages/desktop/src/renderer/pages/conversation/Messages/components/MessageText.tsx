@@ -165,7 +165,10 @@ const MessageText: React.FC<{
   const { data, json } = useFormatContent(renderedText);
   const shouldRenderPlainText = isUserMessage || Boolean(contextResetNotice);
   const conversationContext = useConversationContextSafe();
-  const forkConversation = useForkConversation(conversationContext?.conversation_id);
+  const forkConversation = useForkConversation(
+    conversationContext?.conversation_id,
+    conversationContext?.forkCapability?.requires_native_head
+  );
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
   const handleLocalFileLink = useLocalFilePreview(conversationContext?.workspace);
@@ -218,7 +221,7 @@ const MessageText: React.FC<{
     <Tooltip content={t('messages.fork.action')}>
       <div
         className='p-4px rd-4px cursor-pointer hover:bg-3 transition-colors opacity-0 pointer-events-none group-hover:opacity-100 group-hover:pointer-events-auto focus-within:opacity-100 focus-within:pointer-events-auto'
-        onClick={() => void forkConversation(message.msg_id ?? message.id)}
+        onClick={() => void forkConversation(message.msg_id ?? message.id, message.backend_turn_id)}
         style={{ lineHeight: 0 }}
         data-testid='message-fork-button'
       >
