@@ -41,7 +41,9 @@ metadata in the host database.
 
 The host copies the display messages and opens the native child in separate
 requests. Keep the parent at the same HEAD until the child opens. The current
-host does not send a native entry anchor with its fork request.
+host does not send a native entry anchor with its fork request. A parent turn
+that completes between these requests can enter the child's model context
+without appearing in the copied display history.
 [Studio #6](https://github.com/handochan/aelix-studio/issues/6)
 
 For an internal database that has migration **044** from #25: stop Studio and its host,

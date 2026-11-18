@@ -465,6 +465,58 @@ try {
   checks.push('native_two_child_delegation_before_payload_inventory_check');
   await select('default');
   checks.push('renderer_return_to_ask');
+  if (executablePath) {
+    const parentMarker = 'SYNTHETIC_HEAD_FORK_PARENT';
+    const childMarker = 'SYNTHETIC_HEAD_FORK_CHILD';
+    const restartMarker = 'SYNTHETIC_HEAD_FORK_RESTART';
+    const marker = (text) => page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${text}$`) });
+    const sendForkTurn = async (forkRoute, text) => {
+      await api(`${forkRoute}/messages`, 'POST', { content: text });
+      await expect
+        .poll(async () => (await api(`${forkRoute}/runtime/ensure`, 'POST')).runtime.state, { timeout: 30000 })
+        .toBe('idle');
+    };
+    const parent = await api('/api/conversations', 'POST', {
+      name: 'Native HEAD fork',
+      assistant: { id: assistant.id },
+      extra: { workspace: path.join(sandbox, 'workspace'), custom_workspace: true },
+    });
+    const parentRoute = `/api/conversations/${parent.id}`;
+    await api(`${parentRoute}/runtime/ensure`, 'POST');
+    await sendForkTurn(parentRoute, parentMarker);
+    await page.evaluate((id) => {
+      window.location.hash = `/conversation/${id}`;
+    }, parent.id);
+    await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+    await marker('PERMISSION_OK').hover();
+    const fork = page.getByTestId('message-fork-button');
+    await expect(fork).toHaveCount(1);
+    await fork.click();
+    const child = await page.waitForFunction(
+      (id) => {
+        const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
+        return match && match[1] !== id ? match[1] : null;
+      },
+      parent.id,
+      { timeout: 30000 }
+    );
+    const childId = await child.jsonValue();
+    const childRoute = `/api/conversations/${childId}`;
+    conversationRoute = childRoute;
+    await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+    await api(`${childRoute}/runtime/ensure`, 'POST');
+    await sendForkTurn(childRoute, childMarker);
+    await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
+    await expect(marker('PERMISSION_OK')).toHaveCount(2, { timeout: 30000 });
+    await closeElectron(app);
+    await launch(childId, parentMarker);
+    await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
+    await sendForkTurn(childRoute, restartMarker);
+    await expect(marker(restartMarker)).toHaveCount(1, { timeout: 30000 });
+    await expect(marker('PERMISSION_OK')).toHaveCount(3, { timeout: 30000 });
+    await expect(marker(parentMarker)).toHaveCount(1);
+    checks.push('installed_native_head_fork_ui_and_child_restart');
+  }
   writeRendererResult(output, {
     checksPassed: checks,
     host: executablePath
