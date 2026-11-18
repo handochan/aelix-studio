@@ -17,7 +17,8 @@ gh project item-list 9 --owner handochan --format json --limit 100
 - Backlog draft는 아이디어/계획이다. 구현 전 실제 변경 repo의 Issue로 전환하고
   목표·범위/제외·완료 조건·검증·선행 작업을 정리한다.
 - 실제 작업·PR·claim을 확인하고 Issue별 branch/worktree를 사용한다. 공통 계약을 먼저
-  직렬로 정하고, 이후 독립 구현은 최대 두 개씩 진행한다.
+  직렬로 정한다. 독립 구현의 동시 진행 수에는 제한이 없다(2026-11-18 사용자 결정).
+  착수 전에 다른 세션이 진행 중인 카드·PR·branch/worktree를 확인하고 겹치지 않게 한다.
 - 지금 시작할 수 있는 Beta 기능 카드를 구현 슬롯에 먼저 넣는다. 현재 순서는
   [착수 안내](../studio-release-train/readiness.md)의 "기능 우선 착수 순서"를 따른다.
 - 구현과 다른 세션이 기본 한 번 리뷰한다. blocking과 should-fix는 고치고, nit는

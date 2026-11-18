@@ -8,7 +8,7 @@
 
 - Backlog → Ready → In progress → In review → Done. Release는 Preview/Beta/Later, Agent는 Codex/Claude다.
 - 사용자는 Backlog에 제목 한 줄의 draft 아이디어를 추가할 수 있다. 실행 전 agent가 기존 작업과 중복을 확인하고 실제 변경 repo의 Issue로 전환해 범위·완료 조건·검증·선행을 보완한다.
-- 사용자 또는 한 조정 세션이 Ready 순서와 Agent를 정한다. 초기 공통 계약은 직렬로 정하고 이후 독립 구현만 최대 두 개씩 진행한다.
+- 사용자 또는 한 조정 세션이 Ready 순서와 Agent를 정한다. 초기 공통 계약은 직렬로 정한다. 독립 구현의 동시 진행 수에는 제한이 없다(2026-11-18 사용자 결정). 착수 전에 다른 세션이 진행 중인 카드·PR·branch/worktree를 확인하고 겹치지 않게 한다.
 - 지금 시작할 수 있는 Beta 기능 카드를 구현 슬롯에 먼저 넣는다(D15). host 보안 공지는 Beta 직전에 한 번에 고친다(D18).
 - 하나의 Issue·실행자·branch/worktree를 사용한다. 같은 manifest/lockfile/공통 계약/host composition은 직렬로 변경한다.
 - 여러 저장소가 바뀌는 기능은 계약을 예시 JSON으로 먼저 고정하고, 개발 중에는 branch SHA로 묶어 확인한다. host release는 통합 시점에만 낸다(D16).
