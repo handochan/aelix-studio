@@ -1,9 +1,11 @@
 """Released-host smoke keeps owned paths and isolated GUI environment boundaries."""
 import importlib.util
+import contextlib
 import os
 import json
 import sys
 import subprocess
+import sqlite3
 from pathlib import Path
 import tempfile
 import unittest
@@ -23,6 +25,49 @@ class HostReleaseSmokeTests(unittest.TestCase):
         self.assertEqual(smoke.gui_environment(isolated, driver),
                          dict(isolated, DISPLAY=':91', XAUTHORITY='/owned-xvfb/auth'))
 
+
+class InstalledForkTests(unittest.TestCase):
+    def setUp(self):
+        smoke_spec = importlib.util.spec_from_file_location('host_fork_smoke', PATH)
+        self.smoke = importlib.util.module_from_spec(smoke_spec)
+        smoke_spec.loader.exec_module(self.smoke)
+        self.probe_path = PATH.parent / 'probes/installedFork.py'
+        probe_spec = importlib.util.spec_from_file_location('installed_fork_probe', self.probe_path)
+        self.probe = importlib.util.module_from_spec(probe_spec)
+        probe_spec.loader.exec_module(self.probe)
+
+    def test_a_legacy_result_cannot_pass_the_guarded_installation_gate(self):
+        self.assertEqual(self.smoke.expected_fork_mode(self.smoke.LEGACY_FORK_HOST), 'legacy')
+        mode = self.smoke.expected_fork_mode('replacement-host')
+        self.assertEqual(mode, 'guarded')
+        with self.assertRaisesRegex(AssertionError, 'Expected the installed guarded'):
+            self.smoke.verify_fork_result(mode, [self.smoke.FORK_CHECK['legacy']], [])
+
+    def test_only_the_actual_database_distinguishes_missing_unbound_and_bound(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            with contextlib.closing(sqlite3.connect(root / 'aionui-backend.db')) as db, db:
+                db.execute('CREATE TABLE acp_session (conversation_id TEXT PRIMARY KEY, session_id TEXT)')
+                db.executemany('INSERT INTO acp_session VALUES (?, ?)', [('pending', None), ('child', 'real-session')])
+            self.assertEqual(self.probe.observe_binding(root, 'missing'), {'found': False, 'sessionId': None})
+            self.assertEqual(self.probe.observe_binding(root, 'pending'), {'found': True, 'sessionId': None})
+            self.assertEqual(self.probe.observe_binding(root, 'child'), {'found': True, 'sessionId': 'real-session'})
+
+    def test_wire_receipt_matches_the_fork_request_and_omits_other_response_data(self):
+        requests = [{'id': 1, 'method': 'initialize'}, {'id': 2, 'method': 'session/fork'}]
+        responses = [{'id': 1, 'error': {'code': 502, 'message': 'internal'}},
+                     {'id': 2, 'error': {'code': -33003, 'message': 'internal',
+                                        'data': {'kind': 'fork_head_changed', 'retryable': False}}}]
+        fixture = 'import sys\nfor reply in ' + repr(responses) + ':\n sys.stdin.readline(); print(__import__("json").dumps(reply), flush=True)'
+        with tempfile.TemporaryDirectory() as temporary:
+            wire = Path(temporary) / 'fork.jsonl'
+            result = subprocess.run([sys.executable, '-B', str(self.probe_path), 'record',
+                                     str(wire), sys.executable, '-B', '-c', fixture],
+                                    input=''.join(json.dumps(frame) + '\n' for frame in requests),
+                                    text=True, capture_output=True, timeout=15, check=True)
+            self.assertEqual([json.loads(line) for line in result.stdout.splitlines()], responses)
+            self.assertEqual([json.loads(line) for line in wire.read_text().splitlines()],
+                             [{'code': -33003, 'kind': 'fork_head_changed'}])
 
 
 class BundledBytecodeTests(unittest.TestCase):
