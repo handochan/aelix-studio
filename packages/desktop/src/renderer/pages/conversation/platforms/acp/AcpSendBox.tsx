@@ -53,6 +53,7 @@ import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
+import { useAcpCompactionGuard } from './useAcpCompactionGuard';
 import type { UseAcpMessageReturn } from './useAcpMessage';
 
 const configErrorMessageKey = (error: unknown) => {
@@ -233,6 +234,17 @@ const AcpSendBox: React.FC<{
   const addOrUpdateMessageRef = useLatestRef(addOrUpdateMessage);
   const runtimeView = useConversationRuntimeView(conversation_id);
   const { markSendStarted, markSendAccepted, markSendFailed, supportsMidturnDelivery } = runtimeView;
+  const {
+    beginSubmission: beginCompactionSubmission,
+    blocked: compactionStopBlocked,
+    isBlocked: isCompactionStopBlocked,
+  } = useAcpCompactionGuard(
+    conversation_id,
+    runtimeView.isProcessing ? runtimeView.activeTurnId : null,
+    runtimeView.state,
+    manualCompactionRunning
+  );
+  const compactionStopGuardRef = useLatestRef(isCompactionStopBlocked);
 
   // Shared file handling logic
   const { handleFilesAdded, clearFiles } = useSendBoxFiles({
@@ -278,12 +290,14 @@ const AcpSendBox: React.FC<{
     markSendStarted,
     markSendAccepted,
     markSendFailed,
+    beginCompactionSubmission,
     checkAndUpdateTitle,
     addOrUpdateMessage: addOrUpdateMessageRef.current,
   });
 
   const executeCommand = useCallback(
     async ({ input, files, sessions }: Pick<ConversationCommandQueueItem, 'input' | 'files' | 'sessions'>) => {
+      const finishCompactionSubmission = beginCompactionSubmission(input);
       // Plain user text; the backend resolves each ChatFileRef and injects the
       // [[AION_FILES]] marker at the send edge (no front-end path/marker building).
       try {
@@ -384,6 +398,8 @@ Please check your local CLI tool authentication status`,
         resetState();
         setAiProcessing(false);
         throw error;
+      } finally {
+        finishCompactionSubmission?.();
       }
 
       if (files.length > 0) {
@@ -392,6 +408,7 @@ Please check your local CLI tool authentication status`,
     },
     [
       backend,
+      beginCompactionSubmission,
       checkAndUpdateTitle,
       conversation_id,
       markSendAccepted,
@@ -740,10 +757,13 @@ Please check your local CLI tool authentication status`,
       resetActiveExecution('stop');
     }
   };
-  const effectiveHandleStop = teamRuntime?.onStop ?? handleStop;
+  const effectiveHandleStop = async () => {
+    if (compactionStopGuardRef.current()) return;
+    await (teamRuntime?.onStop ?? handleStop)();
+  };
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
-      if (manualCompactionRunning) return;
+      if (compactionStopGuardRef.current()) return;
       if (supportsMidturnDelivery) {
         // Supporting agents can deliver directly into the running turn — no
         // need to stop/restart. Remove the item BEFORE executing (rather than
@@ -776,7 +796,7 @@ Please check your local CLI tool authentication status`,
       await effectiveHandleStop();
       prioritize(item.id);
     },
-    [effectiveHandleStop, enqueue, executeCommand, manualCompactionRunning, prioritize, remove, supportsMidturnDelivery]
+    [compactionStopGuardRef, effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 
@@ -801,7 +821,7 @@ Please check your local CLI tool authentication status`,
         statusText={teamRuntime?.statusText}
         externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
         startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
-        onStop={manualCompactionRunning ? undefined : effectiveHandleStop}
+        onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
@@ -835,7 +855,7 @@ Please check your local CLI tool authentication status`,
           backend: agent_name || backend,
           defaultValue: `Send message to {{backend}}...`,
         })}
-        onStop={manualCompactionRunning ? undefined : effectiveHandleStop}
+        onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
         className='z-10'
         onFilesAdded={handleFilesAdded}
         hasPendingAttachments={uploadFile.length > 0 || atPath.length > 0}

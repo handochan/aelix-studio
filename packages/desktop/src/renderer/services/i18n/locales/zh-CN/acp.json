@@ -30,6 +30,7 @@
     "default": "默认"
   },
   "compaction": {
+    "unknown": "结果未确认",
     "manual": "上下文压缩",
     "automatic": "自动上下文压缩",
     "running": "正在压缩…",

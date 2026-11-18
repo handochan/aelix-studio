@@ -102,7 +102,7 @@ const ToolItemDetail: React.FC<{
           : t(`acp.compaction.${state}`);
     return (
       <div className='flex items-center gap-12px text-t-secondary' role='status' data-tool-call-id={item.key}>
-        <Badge status={statusToBadge(state === 'aborted' ? 'canceled' : item.status)} />
+        <Badge status={statusToBadge(state === 'aborted' || state === 'unknown' ? 'canceled' : item.status)} />
         <span className='text-13px'>
           <span className='font-medium'>{title}</span> {detail}
         </span>

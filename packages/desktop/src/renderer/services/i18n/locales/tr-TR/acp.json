@@ -30,6 +30,7 @@
     "default": "Varsayılan"
   },
   "compaction": {
+    "unknown": "Sonuç bilinmiyor",
     "manual": "Bağlam sıkıştırma",
     "automatic": "Otomatik bağlam sıkıştırma",
     "running": "Sıkıştırılıyor…",

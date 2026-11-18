@@ -30,6 +30,7 @@
     "default": "預設"
   },
   "compaction": {
+    "unknown": "結果未確認",
     "manual": "上下文壓縮",
     "automatic": "自動上下文壓縮",
     "running": "正在壓縮…",

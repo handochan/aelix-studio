@@ -16,6 +16,7 @@ export type I18nKey =
   | 'acp.compaction.manual'
   | 'acp.compaction.running'
   | 'acp.compaction.runningManual'
+  | 'acp.compaction.unknown'
   | 'acp.config.default'
   | 'acp.config.reasoning_effort'
   | 'acp.image.download'

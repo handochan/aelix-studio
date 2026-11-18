@@ -30,6 +30,7 @@
     "default": "Par défaut"
   },
   "compaction": {
+    "unknown": "Résultat inconnu",
     "manual": "Compactage du contexte",
     "automatic": "Compactage automatique du contexte",
     "running": "Compactage en cours…",

@@ -30,6 +30,7 @@
     "default": "Predeterminado"
   },
   "compaction": {
+    "unknown": "Resultado sin confirmar",
     "manual": "Compactación del contexto",
     "automatic": "Compactación automática del contexto",
     "running": "Compactando…",

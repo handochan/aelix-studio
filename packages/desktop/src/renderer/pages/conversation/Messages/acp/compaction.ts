@@ -1,6 +1,6 @@
 export type AcpCompaction = {
   reason: 'manual' | 'threshold' | 'overflow';
-  state: 'running' | 'completed' | 'failed' | 'aborted';
+  state: 'running' | 'completed' | 'failed' | 'aborted' | 'unknown';
   tokensBefore?: number;
 };
 
@@ -11,7 +11,8 @@ export function readAcpCompaction(meta: unknown): AcpCompaction | null {
   if (typeof details !== 'object' || !details || !('reason' in details) || !('state' in details)) return null;
   const { reason, state } = details;
   if (reason !== 'manual' && reason !== 'threshold' && reason !== 'overflow') return null;
-  if (state !== 'running' && state !== 'completed' && state !== 'failed' && state !== 'aborted') return null;
+  if (state !== 'running' && state !== 'completed' && state !== 'failed' && state !== 'aborted' && state !== 'unknown')
+    return null;
   const tokensBefore = 'tokensBefore' in details ? details.tokensBefore : undefined;
   return {
     reason,

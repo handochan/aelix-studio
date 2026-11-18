@@ -34,6 +34,8 @@ const {
   draftContentRef,
   messageWarningMock,
   stopInvokeMock,
+  getMessagesInvokeMock,
+  getConversationOrNullMock,
 } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
   addOrUpdateMessageMock: vi.fn(),
@@ -54,7 +56,7 @@ const {
   },
   runtimeViewMock: {
     hydrated: true,
-    state: 'idle' as const,
+    state: 'idle' as 'idle' | 'running' | 'starting',
     isProcessing: false,
     canSendMessage: true,
     activeTurnId: null as string | null,
@@ -76,6 +78,8 @@ const {
   draftContentRef: { current: '' },
   messageWarningMock: vi.fn(),
   stopInvokeMock: vi.fn().mockResolvedValue(undefined),
+  getMessagesInvokeMock: vi.fn(),
+  getConversationOrNullMock: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -90,6 +94,7 @@ vi.mock('@/common', () => ({
         invoke: stopInvokeMock,
       },
     },
+    database: { getConversationMessages: { invoke: getMessagesInvokeMock } },
   },
 }));
 
@@ -97,6 +102,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
   default: ({
     onSend,
     onChange,
+    onStop,
     rightTools,
     sendButtonPrefix,
     topRightOverlay,
@@ -112,6 +118,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     isTeamConversation,
   }: {
     onSend: (message: string) => Promise<void>;
+    onStop?: () => Promise<void>;
     onChange?: (value: string) => void;
     rightTools?: React.ReactNode;
     sendButtonPrefix?: React.ReactNode;
@@ -128,6 +135,8 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     isTeamConversation?: boolean;
   }) => {
     sendBoxPropsSpy({
+      onSend,
+      onStop,
       active,
       onFocused,
       disabled,
@@ -274,6 +283,9 @@ vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', (
 vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
   useConversationRuntimeView: () => runtimeViewMock,
 }));
+vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
+  getConversationOrNull: getConversationOrNullMock,
+}));
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({
     setSendBoxHandler: setSendBoxHandlerMock,
@@ -349,6 +361,8 @@ describe('AcpSendBox', () => {
     runtimeViewMock.hydrated = true;
     runtimeViewMock.state = 'idle';
     runtimeViewMock.isProcessing = false;
+    getMessagesInvokeMock.mockResolvedValue({ items: [] });
+    getConversationOrNullMock.mockResolvedValue(null);
     runtimeViewMock.canSendMessage = true;
     runtimeViewMock.activeTurnId = null;
     runtimeViewMock.supportsMidturnDelivery = false;
@@ -907,6 +921,76 @@ describe('AcpSendBox', () => {
       await act(async () => getOnSendNow()(queuedItem));
       expect(stopInvokeMock).not.toHaveBeenCalled();
       expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('blocks Stop and queued send-now while /compact submission awaits the first frame', async () => {
+      let finishSend!: (value: unknown) => void;
+      sendMessageInvokeMock.mockReturnValue(new Promise((resolve) => (finishSend = resolve)));
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      const original = sendBoxPropsSpy.mock.calls.at(-1)?.[0];
+      let submitted: Promise<void>;
+      act(() => {
+        submitted = original.onSend('/compact keep decisions');
+      });
+      await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalled());
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await act(async () => {
+        await original.onStop();
+        await getOnSendNow()(queuedItem);
+        finishSend({ turn_id: 'turn-compact', runtime: null, msg_id: 'msg-1' });
+        await submitted;
+      });
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps Stop unavailable after reopening an active manual compaction without a stream frame', async () => {
+      let finishHistory!: (value: unknown) => void;
+      getMessagesInvokeMock.mockReturnValue(new Promise((resolve) => (finishHistory = resolve)));
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(getMessagesInvokeMock).toHaveBeenCalled());
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await act(async () => {
+        finishHistory({
+          items: [{ type: 'text', position: 'right', content: { content: '/compact keep decisions' } }],
+        });
+        await getOnSendNow()(queuedItem);
+      });
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('does not use the previous user message while the host is still persisting the new turn', async () => {
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      runtimeViewMock.state = 'starting';
+      runtimeViewMock.isProcessing = true;
+      getConversationOrNullMock.mockResolvedValue({ runtime: { turn_id: 'turn-compact', state: 'starting' } });
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Previous ordinary message' } }],
+      });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(getConversationOrNullMock).toHaveBeenCalled());
+      expect(getMessagesInvokeMock).not.toHaveBeenCalled();
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('restores Stop for ordinary active turns after checking persisted input', async () => {
+      runtimeViewMock.activeTurnId = 'turn-ordinary';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Keep working' } }],
+      });
+      stopInvokeMock.mockResolvedValue({ runtime: null });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-ordinary' });
     });
 
     it('delivers mid-turn for a supporting agent instead of stopping the turn', async () => {

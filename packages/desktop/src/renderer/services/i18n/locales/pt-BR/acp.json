@@ -30,6 +30,7 @@
     "generated_alt": "Imagem gerada"
   },
   "compaction": {
+    "unknown": "Resultado desconhecido",
     "manual": "Compactação do contexto",
     "automatic": "Compactação automática do contexto",
     "running": "Compactando…",

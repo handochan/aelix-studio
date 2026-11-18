@@ -30,6 +30,7 @@
     "default": "기본값"
   },
   "compaction": {
+    "unknown": "결과 미확정",
     "manual": "컨텍스트 압축",
     "automatic": "자동 컨텍스트 압축",
     "running": "압축 중…",

@@ -30,6 +30,7 @@
     "default": "デフォルト"
   },
   "compaction": {
+    "unknown": "結果未確認",
     "manual": "コンテキストの圧縮",
     "automatic": "コンテキストの自動圧縮",
     "running": "圧縮中…",

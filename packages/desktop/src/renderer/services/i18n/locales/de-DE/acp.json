@@ -30,6 +30,7 @@
     "default": "Standard"
   },
   "compaction": {
+    "unknown": "Ergebnis unbekannt",
     "manual": "Kontextkomprimierung",
     "automatic": "Automatische Kontextkomprimierung",
     "running": "Wird komprimiert…",

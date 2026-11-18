@@ -25,6 +25,27 @@ vi.mock('react-i18next', () => ({
 }));
 
 describe('MessageToolGroupSummary', () => {
+  it('renders an unconfirmed deadline outcome on the steps surface', () => {
+    const message: ToolMessage = {
+      id: 'compact-deadline',
+      conversation_id: 'conversation-1',
+      type: 'acp_tool_call',
+      content: {
+        sessionId: 'session',
+        _meta: { 'aelix/compaction': { reason: 'manual', state: 'unknown' } },
+        update: {
+          sessionUpdate: 'tool_call_update',
+          tool_call_id: 'deadline-compact',
+          title: '/compact',
+          status: 'failed',
+          kind: 'execute',
+        },
+      },
+    };
+    render(<MessageToolGroupSummary messages={[message]} />);
+    expect(screen.getByRole('status')).toHaveTextContent('acp.compaction.unknown');
+  });
+
   it('renders the compaction result on the existing steps surface', () => {
     const completion = contextControls.manualCompactionCompleted;
     const message: ToolMessage = {

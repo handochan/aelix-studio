@@ -30,6 +30,7 @@
     "default": "Default"
   },
   "compaction": {
+    "unknown": "Outcome unknown",
     "manual": "Context compaction",
     "automatic": "Automatic context compaction",
     "running": "Compacting…",
