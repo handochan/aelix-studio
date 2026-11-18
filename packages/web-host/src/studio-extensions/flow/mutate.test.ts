@@ -365,6 +365,16 @@ describe('changing what is installed', () => {
         await expectUntouched(pointer, directories);
       });
 
+      it('loads and records a bare module entry as that module setup', async () => {
+        await install({ name: 'demo-one', reference: 'demo_one', manifest: false });
+        expect(await record('g00000001-0001')).toMatchObject({
+          extensions: { 'demo-one': { reference: 'demo_one', form: 'module' } },
+          launch: { packs: false, modules: ['demo_one:setup'] },
+        });
+        const load = helper.spawn.calls.findLast((call) => call.args.includes('--no-extensions'));
+        expect(load?.args.slice(load.args.indexOf('--no-extensions') + 1)).toEqual(['-e', 'demo_one:setup']);
+      });
+
       it('refuses an extension the adapter would not take as a module reference', async () => {
         const error = await failure(install({ name: 'demo-one', module: 'éclair', manifest: false }));
         expect([error.code, error.detail]).toEqual([

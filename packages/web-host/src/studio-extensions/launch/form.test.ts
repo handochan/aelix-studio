@@ -28,6 +28,7 @@ import { newGenerationRecord, newPointer } from '../store/pointer';
 import { ExtensionFailure } from '../types';
 import {
   chooseForms,
+  conversationReference,
   launchArguments,
   launchFormOf,
   loadedNames,
@@ -68,6 +69,21 @@ describe('the form of each extension, without files', () => {
       'gamma:setup',
     ]);
     expect(launchArguments('/g', { packs: false, modules: [] })).toEqual([]);
+  });
+
+  // Review of the launcher piece, should-fix 2: the adapter takes a bare `demo` for a path when
+  // the conversation's directory holds one, and then starts no session at all.
+  it('gives a bare module as its setup, which is what native loads for it', () => {
+    expect(['demo', 'demo.pack', 'demo:main', 'demo.pack:setup'].map(conversationReference)).toEqual([
+      'demo:setup',
+      'demo.pack:setup',
+      'demo:main',
+      'demo.pack:setup',
+    ]);
+    const bare = new Map([['tools', 'tools']]);
+    const module = new Map<string, ExtensionForm>([['tools', { form: 'module' }]]);
+    expect(launchFormOf(bare, module)).toEqual({ packs: false, modules: ['tools:setup'] });
+    expect([...loadedNames(bare, module)]).toEqual([['tools', 'tools:setup']]);
   });
 
   it('expects a pack under its plugin id and everything else under its reference', () => {
@@ -132,6 +148,11 @@ describe('choosing forms and writing the links of a candidate', () => {
     expect(await readlink(path.join(packs, '000-demo-one'))).toBe(
       path.relative(packs, path.join(candidate.paths.site, 'demo_one'))
     );
+  });
+
+  it('makes a pack of a bare module entry whose manifest names that module setup', async () => {
+    const forms = await choose(await install({ name: 'demo-one', reference: 'demo_one' }));
+    expect(forms.get('demo-one')).toEqual({ form: 'pack', plugin: 'demo-one', directory: 'demo_one' });
   });
 
   it.each<[string, WheelSpec, string[]?]>([

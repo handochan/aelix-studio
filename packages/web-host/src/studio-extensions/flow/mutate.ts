@@ -39,6 +39,7 @@ import {
 } from '../types.js';
 import {
   chooseForms,
+  conversationReference,
   launchArguments,
   launchFormOf,
   loadedNames,
@@ -449,8 +450,11 @@ export async function mutate(
     await writePacks(candidate, forms);
     // Every extension by reference, in the order conversations get them: imports each and runs
     // its setup() now, lazy pack or not. Without packs this is exactly what conversations get.
-    const references = [...gate.expected.keys()].toSorted().map((name) => gate.expected.get(name) ?? '');
-    await loadOrRefuse(guarded, candidate, references, new Map(gate.expected));
+    const byReference = new Map(
+      [...gate.expected].map(([name, reference]): [string, string] => [name, conversationReference(reference)])
+    );
+    const references = [...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? '');
+    await loadOrRefuse(guarded, candidate, references, byReference);
     // Then exactly the way new conversations get them, which binds the manifests of the packs.
     if (launch.packs)
       await loadOrRefuse(

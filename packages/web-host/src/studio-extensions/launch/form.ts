@@ -25,6 +25,18 @@ export const PACKS_DIRECTORY = 'packs';
 
 const MANIFEST = 'aelix-plugin.toml';
 
+/**
+ * The module reference a conversation is given for an entry point. A bare module becomes
+ * `module:setup`: native's `-e` loader reads a bare module as that module's `setup`
+ * (`_factory_from_module` at the native pin), so the meaning is the same, and the adapter
+ * then never takes it for a path. Given as `demo`, it refuses to start any session whose
+ * working directory holds something called `demo` ("A project path shadows this module
+ * reference"); nothing is called `demo:setup`.
+ */
+export function conversationReference(reference: string): string {
+  return reference.includes(':') ? reference : `${reference}:setup`;
+}
+
 /** The `--extension` values of a launch form, in the order they are passed. */
 export function launchArguments(generationDirectory: string, form: LaunchForm): string[] {
   return [...(form.packs ? [path.join(generationDirectory, PACKS_DIRECTORY)] : []), ...form.modules];
@@ -35,7 +47,9 @@ export function launchFormOf(expected: Map<string, string>, forms: Map<string, E
   const names = [...expected.keys()].toSorted();
   return {
     packs: names.some((name) => forms.get(name)?.form === 'pack'),
-    modules: names.filter((name) => forms.get(name)?.form !== 'pack').map((name) => expected.get(name) ?? ''),
+    modules: names
+      .filter((name) => forms.get(name)?.form !== 'pack')
+      .map((name) => conversationReference(expected.get(name) ?? '')),
   };
 }
 
@@ -44,7 +58,7 @@ export function loadedNames(expected: Map<string, string>, forms: Map<string, Ex
   return new Map(
     [...expected].map(([name, reference]) => {
       const form = forms.get(name);
-      return [name, form?.form === 'pack' ? form.plugin : reference];
+      return [name, form?.form === 'pack' ? form.plugin : conversationReference(reference)];
     })
   );
 }
@@ -145,7 +159,12 @@ export async function chooseForms(
   }
   const fitting = Object.keys(wanted).filter((name) => {
     const fields = answers[name];
-    return typeof fields?.id === 'string' && fields.id !== '' && fields.python === expected.get(name);
+    // A bare module entry point names that module's `setup`, as a manifest entry always spells it.
+    return (
+      typeof fields?.id === 'string' &&
+      fields.id !== '' &&
+      fields.python === conversationReference(expected.get(name) ?? '')
+    );
   });
   const plugins = fitting.map((name) => answers[name].id as string);
   for (const name of fitting) {

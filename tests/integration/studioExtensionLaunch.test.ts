@@ -179,6 +179,10 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     };
     service = new ExtensionService({ runtime: bundle, root, env: environment });
     expect((await install({ name: 'fixture-good' })).phase).toBe('switched');
+    // A bare module entry point, passed by reference.
+    expect((await install({ name: 'fixture-bare', reference: 'fixture_bare', manifest: false })).phase).toBe(
+      'switched'
+    );
     // No manifest: passed by module reference.
     expect((await install({ name: 'fixture-legacy', manifest: false })).phase).toBe('switched');
   }, 300_000);
@@ -191,10 +195,24 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
 
   it('lists a pack as ready and an extension passed by reference as manifest_unbound', async () => {
     expect((await list()).extensions.map((extension) => [extension.name, extension.status])).toEqual([
+      ['fixture-bare', 'manifest_unbound'],
       ['fixture-good', 'ready'],
       ['fixture-legacy', 'manifest_unbound'],
     ]);
   });
+
+  // Review of the launcher piece, should-fix 2: given as `fixture_bare`, the adapter took the
+  // entry for a project path and refused to open the session at all.
+  it('opens a conversation in a directory that holds a folder named like a bare module entry', async () => {
+    const project = path.join(sandbox, 'project');
+    await mkdir(path.join(project, 'fixture_bare'), { recursive: true });
+    const started = conversation();
+    const session = await started.open(project);
+    expect(await started.prompt(session, '/fixture-bare-cmd')).toMatchObject({
+      text: expect.stringContaining('fixture-bare ran'),
+    });
+    await started.close();
+  }, 180_000);
 
   it('runs the commands of both in a new conversation and keeps a lease while it runs', async () => {
     const started = conversation();
@@ -250,7 +268,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     try {
       const started = conversation();
       const session = await started.open(workspace);
-      // The pointer before the last switch names the generation with fixture-good alone.
+      // The pointer before the last switch names the generation without fixture-legacy.
       expect(await started.prompt(session, '/fixture-good-cmd')).toMatchObject({
         text: expect.stringContaining('fixture-good ran'),
       });
