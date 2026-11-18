@@ -265,12 +265,14 @@ export function useAcpConfigOptions({
   prepareRuntime,
   prepareSetRuntime,
   configOptionsPort = conversationConfigOptionsPort,
+  requireDeferredModeAcceptance = false,
   enabled = true,
 }: {
   conversation_id: string;
   prepareRuntime?: () => Promise<void>;
   prepareSetRuntime?: () => Promise<void>;
   configOptionsPort?: AcpConfigOptionsPort;
+  requireDeferredModeAcceptance?: boolean;
   enabled?: boolean;
 }) {
   const [setStatus, setSetStatus] = useState<AcpConfigSetStatus>(() => getConversationSetStatus(conversation_id));
@@ -376,11 +378,15 @@ export function useAcpConfigOptions({
               value,
             });
         const confirmation = response.confirmation;
-        // Accepted, but the agent applies it only from the next turn. NOT an error: the
-        // request landed, it just is not governing yet. Record it as pending so the
-        // picker can show the target alongside the mode still in force, and keep the
-        // snapshot the backend returned — which deliberately still reports the OLD value.
         if (confirmation === 'pending_next_turn') {
+          // Older hosts can report this before Codex answers. Require explicit
+          // acceptance before a Team leader can change other slots.
+          if (
+            response.backend_accepted !== true &&
+            (requireDeferredModeAcceptance || response.backend_accepted !== undefined)
+          ) {
+            throw new Error('command_ack');
+          }
           markPending(conversation_id, optionId, value);
           if (response.config_options) replaceSnapshot(response.config_options);
           return response.config_options;
@@ -396,7 +402,16 @@ export function useAcpConfigOptions({
         setConversationSetStatus(conversation_id, { state: 'idle' });
       }
     },
-    [conversation_id, isConfigOptionBlocked, key, configOptionsPort, prepareRuntime, prepareSetRuntime, replaceSnapshot]
+    [
+      conversation_id,
+      isConfigOptionBlocked,
+      key,
+      configOptionsPort,
+      requireDeferredModeAcceptance,
+      prepareRuntime,
+      prepareSetRuntime,
+      replaceSnapshot,
+    ]
   );
 
   useEffect(() => {

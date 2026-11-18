@@ -170,6 +170,7 @@ const AcpSendBox: React.FC<{
     prepareRuntime: prepareRuntimeConfig,
     prepareSetRuntime: teamPermission?.warmupSession,
     configOptionsPort: teamPermission?.configOptionsPort,
+    requireDeferredModeAcceptance: Boolean(isLeaderInTeam) && backend !== 'antigravity',
     enabled: true,
   });
   const runtimeMode = runtimeConfig.mode;

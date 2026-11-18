@@ -645,37 +645,124 @@ describe('AcpSendBox', () => {
     expect(screen.queryByTestId('mock-thought-selector')).not.toBeInTheDocument();
   });
 
-  it('propagates an accepted next-turn Ask to teammates and keeps the leader on its observed mode', async () => {
+  it.each([
+    { backend: 'antigravity', backend_accepted: undefined },
+    { backend: 'codex', backend_accepted: true },
+  ])(
+    'propagates an accepted next-turn Ask from $backend before observing the new leader mode',
+    async ({ backend, backend_accepted }) => {
+      const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
+        '@/renderer/hooks/agent/useAcpConfigOptions'
+      );
+      useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
+      isMobileMock.current = true;
+      const leaderId = `deferred-mixed-team-leader-${backend}`;
+      const modeOption = (current_value: string): AcpConfigOptionDto => ({
+        id: 'mode',
+        category: 'mode',
+        type: 'select',
+        current_value,
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      });
+
+      let teammateMode = 'yolo';
+      teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('yolo')] });
+      teamSetConfigMock
+        .mockReset()
+        .mockResolvedValueOnce({
+          confirmation: 'pending_next_turn',
+          backend_accepted,
+          config_options: [modeOption('yolo')],
+        })
+        .mockResolvedValueOnce({
+          confirmation: backend === 'antigravity' ? 'pending_next_turn' : 'command_ack',
+          backend_accepted: false,
+          config_options: [modeOption('default')],
+        });
+      teamSetModeMock.mockImplementation(async ({ session_mode }: { session_mode: string }) => {
+        teammateMode = session_mode;
+      });
+
+      render(
+        <TeamPermissionProvider
+          team_id='mixed-team'
+          isLeaderAgent
+          leaderConversationId={leaderId}
+          allConversationIds={[leaderId, 'aelix-teammate']}
+          runtimeStartingConversationIds={new Set()}
+        >
+          <AcpSendBox
+            conversation_id={leaderId}
+            backend={backend}
+            workspacePath='/tmp/workspace'
+            messageState={makeMessageState()}
+          />
+        </TeamPermissionProvider>
+      );
+
+      const permission = () => mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+      const activeMode = () => permission()?.submenu?.options.find((option) => option.active)?.key;
+      await waitFor(() => expect(activeMode()).toBe('yolo'));
+      await act(async () => permission()?.submenu?.onSelect('default'));
+      expect(teamSetModeMock).toHaveBeenCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
+      expect(teammateMode).toBe('default');
+      expect(activeMode()).toBe('yolo');
+      expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn');
+      expect(Message.success).not.toHaveBeenCalled();
+
+      teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('default')] });
+      await act(async () => {
+        for (const listener of responseListeners) {
+          listener({
+            conversation_id: leaderId,
+            msg_id: 'observed-ask',
+            type: 'acp_config_option',
+            data: { config_options: [modeOption('default')] },
+          });
+        }
+      });
+      await waitFor(() => expect(activeMode()).toBe('default'));
+      expect(teamSetModeMock).toHaveBeenCalledOnce();
+
+      // An unconfirmed or explicitly unaccepted command cannot elevate the teammate.
+      await act(async () => permission()?.submenu?.onSelect('yolo'));
+      expect(Message.error).toHaveBeenCalled();
+      expect(teamSetModeMock).toHaveBeenCalledOnce();
+      expect(teammateMode).toBe('default');
+    }
+  );
+
+  it('keeps the Team on Ask when a legacy Codex mode selection is only dispatched and later rejected', async () => {
     const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
       '@/renderer/hooks/agent/useAcpConfigOptions'
     );
     useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
     isMobileMock.current = true;
-    const leaderId = 'deferred-mixed-team-leader';
-    const modeOption = (current_value: string): AcpConfigOptionDto => ({
+    const leaderId = 'unconfirmed-codex-team-leader';
+    const ask: AcpConfigOptionDto = {
       id: 'mode',
       category: 'mode',
       type: 'select',
-      current_value,
+      current_value: ':workspace',
       options: [
-        { value: 'default', label: 'Ask' },
-        { value: 'yolo', label: 'Yolo' },
+        { value: ':workspace', label: 'Ask' },
+        { value: ':danger-full-access', label: 'Full Access' },
       ],
-    });
-
-    let teammateMode = 'yolo';
-    teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('yolo')] });
-    teamSetConfigMock
-      .mockReset()
-      .mockResolvedValueOnce({ confirmation: 'pending_next_turn', config_options: [modeOption('yolo')] })
-      .mockResolvedValueOnce({ confirmation: 'command_ack', config_options: [modeOption('default')] });
-    teamSetModeMock.mockImplementation(async ({ session_mode }: { session_mode: string }) => {
-      teammateMode = session_mode;
+    };
+    teamGetConfigMock.mockResolvedValue({ config_options: [ask] });
+    // Even if the legacy response contains the requested value, its confirmation
+    // is only the command write. A later rejection must leave this scope untouched.
+    teamSetConfigMock.mockReset().mockResolvedValueOnce({
+      confirmation: 'pending_next_turn',
+      config_options: [{ ...ask, current_value: ':danger-full-access' }],
     });
 
     render(
       <TeamPermissionProvider
-        team_id='mixed-team'
+        team_id='codex-with-aelix-team'
         isLeaderAgent
         leaderConversationId={leaderId}
         allConversationIds={[leaderId, 'aelix-teammate']}
@@ -683,7 +770,7 @@ describe('AcpSendBox', () => {
       >
         <AcpSendBox
           conversation_id={leaderId}
-          backend='antigravity'
+          backend='codex'
           workspacePath='/tmp/workspace'
           messageState={makeMessageState()}
         />
@@ -692,33 +779,25 @@ describe('AcpSendBox', () => {
 
     const permission = () => mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
     const activeMode = () => permission()?.submenu?.options.find((option) => option.active)?.key;
-    await waitFor(() => expect(activeMode()).toBe('yolo'));
-    await act(async () => permission()?.submenu?.onSelect('default'));
-    expect(teamSetModeMock).toHaveBeenCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
-    expect(teammateMode).toBe('default');
-    expect(activeMode()).toBe('yolo');
-    expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn');
+    await waitFor(() => expect(activeMode()).toBe(':workspace'));
+    await act(async () => permission()?.submenu?.onSelect(':danger-full-access'));
+    expect(teamSetConfigMock).toHaveBeenCalledOnce();
+    expect(teamSetModeMock).not.toHaveBeenCalled();
+    expect(Message.error).toHaveBeenCalled();
     expect(Message.success).not.toHaveBeenCalled();
 
-    teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('default')] });
     await act(async () => {
       for (const listener of responseListeners) {
         listener({
           conversation_id: leaderId,
-          msg_id: 'observed-ask',
+          msg_id: 'refresh-after-rejection',
           type: 'acp_config_option',
-          data: { config_options: [modeOption('default')] },
+          data: { config_options: [ask] },
         });
       }
     });
-    await waitFor(() => expect(activeMode()).toBe('default'));
-    expect(teamSetModeMock).toHaveBeenCalledOnce();
-
-    // A command acknowledgment alone must not elevate the teammate.
-    await act(async () => permission()?.submenu?.onSelect('yolo'));
-    expect(Message.error).toHaveBeenCalled();
-    expect(teamSetModeMock).toHaveBeenCalledOnce();
-    expect(teammateMode).toBe('default');
+    expect(activeMode()).toBe(':workspace');
+    expect(teamSetModeMock).not.toHaveBeenCalled();
   });
 
   it('labels the effective Aelix Ask mode in the mobile sheet', () => {

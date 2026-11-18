@@ -109,6 +109,8 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
     prepareRuntime: beforeRuntimeSync,
     prepareSetRuntime: beforeRuntimeSet ?? beforeRuntimeSync,
     configOptionsPort,
+    // Antigravity queues the selection in the host before returning, including on older hosts.
+    requireDeferredModeAcceptance: Boolean(onModeChanged) && backend !== 'antigravity',
     enabled: Boolean(conversation_id),
   });
   const runtimeMode = runtimeConfig.mode;

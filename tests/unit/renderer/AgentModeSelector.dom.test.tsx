@@ -359,6 +359,18 @@ describe('AgentModeSelector', () => {
     });
   });
 
+  it.each([
+    { backend: 'codex', requireDeferredModeAcceptance: true },
+    { backend: 'antigravity', requireDeferredModeAcceptance: false },
+  ])(
+    'requires deferred mode acceptance before Team propagation from $backend when needed',
+    ({ backend, requireDeferredModeAcceptance }) => {
+      render(<AgentModeSelector backend={backend} conversation_id='conv-1' onModeChanged={vi.fn()} />);
+
+      expect(useAcpConfigOptionsMock).toHaveBeenCalledWith(expect.objectContaining({ requireDeferredModeAcceptance }));
+    }
+  );
+
   it('passes set-only runtime preparation to runtime config options', () => {
     const beforeRuntimeSet = vi.fn().mockResolvedValue(undefined);
 
