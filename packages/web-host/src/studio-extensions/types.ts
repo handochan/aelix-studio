@@ -19,19 +19,21 @@ export type ExtensionCommand =
 export type ExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
 
 /**
- * `load_verified`: the extension was imported and its `setup()` ran when native was started
- * the way a conversation starts it. This is all the helper has checked. Whether what its
- * manifest declares (MCP servers, themes, hooks) is active in a conversation is not known
- * yet: a conversation loads an extension by module reference, which attaches no manifest,
- * and the form that does (decision B5, with its second load check) comes with the launcher.
- * Until then nothing is reported as fully ready.
+ * Every installed extension passed two load checks: once by module reference, which imports
+ * it and runs its `setup()` on the spot, and once exactly the way new conversations get it
+ * (decision B5). The status says which way that is.
  *
- * `manifest_unbound`: it loads, and native reports that its manifest does not bind, so what
- * it declares is certainly inert; the screen marks such an extension.
+ * `ready`: passed as a pack through the links directory. Its manifest binds in conversations:
+ * what it declares (MCP servers, themes, hooks) is active as far as native allows.
+ *
+ * `manifest_unbound`: passed by module reference, because its pack does not fit that form (no
+ * manifest on the entry module's path, one native does not bind, or one whose
+ * `[plugin.entry] python` names something else). Its code loads; what its manifest declares
+ * stays inert. The screen marks such an extension.
  *
  * `reinstall_needed`: the generation belongs to another bundle and is not used.
  */
-export type ExtensionStatus = 'load_verified' | 'manifest_unbound' | 'reinstall_needed';
+export type ExtensionStatus = 'ready' | 'manifest_unbound' | 'reinstall_needed';
 
 export type ExtensionEntry = {
   name: string;

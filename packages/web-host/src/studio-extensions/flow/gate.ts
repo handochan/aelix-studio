@@ -135,19 +135,11 @@ export function compareRequest(request: ChangeRequest, before: SiteSnapshot, aft
 }
 
 /**
- * Starts the bundle's own launcher after appending one directory to the import path.
- * `launch.py` will take the directory as an argument once the launcher change lands
- * (ADR 7.4); until then this does the same thing from outside, without editing the bundle.
+ * Arguments of the conversation launch form (ADR 5.2) for a generation: the bundled
+ * interpreter with `-I -S`, the bundle's own `launch.py`, which puts the generation's
+ * site-packages last on the import path in its `native-generation` mode, exactly as the
+ * launcher does for a conversation.
  */
-const APPEND_SITE = [
-  'import runpy, sys',
-  'launcher, site = sys.argv[1], sys.argv[2]',
-  'sys.argv = [launcher] + sys.argv[3:]',
-  'sys.path.append(site)',
-  "runpy.run_path(launcher, run_name='__main__')",
-].join('\n');
-
-/** Arguments of the conversation launch form (ADR 5.2) for a generation. */
 export function conversationArguments(context: FlowContext, candidate: Candidate, native: string[]): string[] {
   return [
     '-I',
@@ -155,11 +147,9 @@ export function conversationArguments(context: FlowContext, candidate: Candidate
     '-B',
     '-X',
     'utf8',
-    '-c',
-    APPEND_SITE,
     context.bundle.launcher,
+    'native-generation',
     candidate.paths.site,
-    'native',
     ...native,
   ];
 }
@@ -172,8 +162,11 @@ type ResourceReply = {
   data?: { extensions?: { name?: unknown }[]; extensionErrors?: { source?: unknown; message?: unknown }[] };
 };
 
+/** Entry name of each extension that has to load, to the name native reports it under. */
+export type LoadExpectation = Map<string, string>;
+
 /** Problems in a `resources/list` reply, given the extensions that had to load. */
-export function checkLoaded(expected: ExpectedExtensions, reply: ResourceReply | undefined): string[] {
+export function checkLoaded(expected: LoadExpectation, reply: ResourceReply | undefined): string[] {
   if (!reply || reply.success !== true || typeof reply.data !== 'object' || reply.data === null)
     return ['native did not answer resources/list'];
   const errors = Array.isArray(reply.data.extensionErrors) ? reply.data.extensionErrors : [];
@@ -181,31 +174,34 @@ export function checkLoaded(expected: ExpectedExtensions, reply: ResourceReply |
   const loaded = new Set(
     (Array.isArray(reply.data.extensions) ? reply.data.extensions : []).map((entry) => entry.name)
   );
-  for (const [name, reference] of expected)
-    if (!loaded.has(reference) && !errors.some((error) => error.source === reference))
-      problems.push(`${name} (${reference}) is not in the loaded list`);
+  for (const [name, reported] of expected)
+    if (!loaded.has(reported) && !errors.some((error) => error.source === reported))
+      problems.push(`${name} (${reported}) is not in the loaded list`);
   return problems;
 }
 
 export type LoadCheck = { problems: string[]; answered: boolean; cancelled: boolean; timedOut: boolean };
 
 /**
- * The load check (ADR 5.5): start native the way a conversation does (the bundled
- * interpreter with `-I -S`, the generation appended to the import path, `--no-extensions`
- * and one `-e` per expected extension) and ask what loaded.
+ * The load check (ADR 5.5): start native the way a conversation does (see
+ * `conversationArguments`, `--no-extensions`, one `-e` per source) and ask what loaded.
  *
  * Passing each extension as `-e <reference>` imports it and runs its `setup()` on the spot,
  * which is what catches a pack whose import or `setup()` fails; `status --json` and the
- * entry-point path both let such packs through. This runs code of the extension the user
- * chose to install; what that code connects to is outside the helper's control (ADR 5.9).
+ * entry-point path both let such packs through. Passing the links directory instead binds
+ * each pack's manifest, which is what conversations do with a pack (decision B5); there a
+ * pack activated on a command is listed without being imported, so both checks are needed.
+ * This runs code of the extension the user chose to install; what that code connects to is
+ * outside the helper's control (ADR 5.9).
  */
 export async function runLoadCheck(
   context: FlowContext,
   candidate: Candidate,
-  expected: ExpectedExtensions
+  sources: string[],
+  expected: LoadExpectation
 ): Promise<LoadCheck> {
   const native = ['--offline', '--mode', 'rpc', '--no-session', '--no-extensions'];
-  for (const reference of expected.values()) native.push('-e', reference);
+  for (const source of sources) native.push('-e', source);
   let reply: ResourceReply | undefined;
   const result = await runToExit(
     context.spawn,
@@ -237,4 +233,18 @@ export async function runLoadCheck(
     cancelled: result.cancelled,
     timedOut: result.timedOut,
   };
+}
+
+/**
+ * Hide the locations of this machine in text native wrote (a load error names the files it
+ * failed on): each given directory becomes its label, longest first, so a reason can be shown
+ * or reported without the user's paths in it.
+ */
+export function redactPaths(text: string, locations: [directory: string, label: string][]): string {
+  let redacted = text;
+  for (const [directory, label] of locations
+    .filter(([directory]) => directory.length > 1)
+    .toSorted(([left], [right]) => right.length - left.length))
+    redacted = redacted.replaceAll(directory, label);
+  return redacted;
 }
