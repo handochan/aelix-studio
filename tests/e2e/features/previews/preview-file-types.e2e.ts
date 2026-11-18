@@ -1,5 +1,5 @@
 /**
- * E2E — file-type routing: unsupported formats and csv.
+ * E2E — file-type routing: unsupported formats, CSV, and Analytics HTML.
  *
  * Covers the two user-visible outcomes of routing types to renderers that can
  * actually open them:
@@ -24,6 +24,7 @@
  * this is the entry point worth testing.
  */
 import fs from 'fs';
+import { createServer } from 'node:http';
 import os from 'os';
 import path from 'path';
 import { test, expect } from '../../fixtures';
@@ -187,4 +188,110 @@ test.describe('Preview — file type routing', () => {
     // And it must not have landed in the declined branch on the way.
     await expect(page.getByText(UNSUPPORTED_TITLE)).toHaveCount(0);
   });
+});
+
+test('Analytics Workspace preserves relative assets, navigation, and Report isolation', async ({
+  page,
+  electronApp,
+}) => {
+  test.setTimeout(120_000);
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-analytics-e2e-'));
+  const workspace = path.join(parent, '분석 project');
+  const revision = 'artifacts/reports/monthly/revision-a/content';
+  const anotherRevision = 'artifacts/reports/monthly/revision-b/content';
+  const files = {
+    'analytics.json': '{"schema":"analytics.project/2"}',
+    'workspace/index.html': [
+      '<link rel="stylesheet" href="assets/main.css?v=1">',
+      '<h1>Workspace entry</h1>',
+      '<img src="../runs/sample/visualizations/plot.svg" alt="Plot">',
+      '<a id="detail" href="nested/상세 페이지.html">Detail</a>',
+      '<script defer src="assets/main.js"></script>',
+    ].join(''),
+    'workspace/assets/main.css': 'h1 { color: rgb(23, 45, 67) }',
+    'workspace/assets/main.js': 'document.body.dataset.script = "workspace";',
+    'workspace/nested/상세 페이지.html': [
+      '<h1>Workspace detail</h1>',
+      `<a id="report" href="../../${revision}/index.html" target="_blank" rel="noopener">Report</a>`,
+    ].join(''),
+    'runs/sample/visualizations/plot.svg':
+      '<svg xmlns="http://www.w3.org/2000/svg" width="7" height="8"><rect width="7" height="8"/></svg>',
+    [`${revision}/index.html`]: '<h1>Original Report</h1><script src="./report.js"></script>',
+    [`${revision}/report.js`]: 'document.body.dataset.script = "report";',
+    [`${anotherRevision}/report.js`]: 'document.body.dataset.script = "other revision";',
+  };
+  for (const [name, contents] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(workspace, name)), { recursive: true });
+    fs.writeFileSync(path.join(workspace, name), contents);
+  }
+  let conversation: string | undefined;
+  let externalRequests = 0;
+  const otherOrigin = createServer((_request, response) => {
+    externalRequests++;
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.end('fixture');
+  });
+  const preview = page.getByTestId('analytics-preview');
+  const guest = (script: string): Promise<unknown> =>
+    electronApp.evaluate(({ webContents }, code) => {
+      const previewGuest = webContents
+        .getAllWebContents()
+        .find((candidate) => candidate.getURL().startsWith('studio-analytics://'));
+      return previewGuest?.executeJavaScript(code, true);
+    }, script);
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      otherOrigin.once('error', reject);
+      otherOrigin.listen(0, '127.0.0.1', resolve);
+    });
+    const address = otherOrigin.address();
+    if (!address || typeof address === 'string') throw new Error('Fixture server did not bind');
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, workspace);
+    const tree = page.locator('.workspace-tree').first();
+    await tree.getByText('workspace', { exact: true }).click();
+    await tree.getByText('index.html', { exact: true }).click();
+    await expect(preview).toBeVisible();
+    await expect
+      .poll(() =>
+        guest(
+          '[document.body?.dataset.script, document.querySelector("h1") && getComputedStyle(document.querySelector("h1")).color, document.images[0]?.naturalWidth]'
+        )
+      )
+      .toEqual(['workspace', 'rgb(23, 45, 67)', 7]);
+    const workspaceOrigin = await guest('location.origin');
+    expect(workspaceOrigin).toMatch(/^studio-analytics:\/\/[0-9a-f]+$/);
+
+    await guest('document.getElementById("detail").click()');
+    await expect.poll(() => guest('document.querySelector("h1")?.textContent')).toBe('Workspace detail');
+    await guest('document.getElementById("report").click()');
+    await expect
+      .poll(() =>
+        guest('({ heading: document.querySelector("h1")?.textContent, script: document.body?.dataset.script })')
+      )
+      .toEqual({ heading: 'Original Report', script: 'report' });
+    expect(await guest('location.origin')).not.toBe(workspaceOrigin);
+    expect(await guest('[typeof window.electronAPI, window.opener === null]')).toEqual(['undefined', true]);
+
+    const port = await page.evaluate(() => (window as BackendWindow).__backendPort);
+    const checks = [
+      'fetch("./report.js").then(r => r.status)',
+      'fetch("../../revision-b/content/report.js").then(r => r.status)',
+      `fetch("http://127.0.0.1:${port}/health").then(() => "reachable", () => "blocked")`,
+      `fetch("http://127.0.0.1:${address.port}/asset").then(() => "reachable", () => "blocked")`,
+    ];
+    expect(await guest(`Promise.all([${checks.join(',')}])`)).toEqual([200, 404, 'blocked', 'blocked']);
+    expect(externalRequests).toBe(0);
+    await page
+      .getByRole('button', { name: /^(Back|返回|뒤로)$/ })
+      .filter({ visible: true })
+      .last()
+      .click();
+    await expect.poll(() => guest('document.querySelector("h1")?.textContent')).toBe('Workspace detail');
+  } finally {
+    otherOrigin.close();
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
 });

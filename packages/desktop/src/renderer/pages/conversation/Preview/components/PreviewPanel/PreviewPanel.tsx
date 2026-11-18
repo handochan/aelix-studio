@@ -33,6 +33,7 @@ import DiffPreview from '../viewers/DiffViewer';
 import ExcelPreview from '../viewers/ExcelViewer';
 import HTMLEditor from '../editors/HTMLEditor';
 import HTMLRenderer from '../renderers/HTMLRenderer';
+import AnalyticsPreview from '../renderers/AnalyticsPreview';
 import ImagePreview from '../viewers/ImageViewer';
 import MarkdownEditor from '../editors/MarkdownEditor';
 import MarkdownPreview from '../viewers/MarkdownViewer';
@@ -638,7 +639,8 @@ const PreviewPanel: React.FC = () => {
     metadata: undefined,
   };
   const isMarkdown = content_type === 'markdown';
-  const isHTML = content_type === 'html';
+  const analyticsProjectId = metadata?.analyticsProjectId;
+  const isHTML = content_type === 'html' && !analyticsProjectId;
   const isEditable = metadata?.editable !== false; // 默认可编辑 / Default editable
 
   // 「在系统中打开」：有 file_path 或有 fileRef 都能打开。
@@ -701,7 +703,7 @@ const PreviewPanel: React.FC = () => {
 
       // Content-free previews cannot manufacture a download from `content`.
       // Use the renderer-safe ChatFileRef to download the original file.
-      if (CONTENT_FREE_TYPES.has(content_type)) {
+      if (analyticsProjectId || CONTENT_FREE_TYPES.has(content_type)) {
         const fileRef = isOpenableFileRef(metadata?.fileRef) ? metadata.fileRef : undefined;
         if (fileRef) {
           await downloadFileFromRef(fileRef, rawFileName);
@@ -777,6 +779,7 @@ const PreviewPanel: React.FC = () => {
     metadata?.fileRef,
     metadata?.language,
     metadata?.oversized,
+    analyticsProjectId,
     metadata?.workspace,
     messageApi,
     t,
@@ -906,6 +909,17 @@ const PreviewPanel: React.FC = () => {
     if (metadata?.missingFile) return renderMissingFile();
     if (metadata?.oversized) return renderOversized();
     if (content_type === 'unsupported') return renderUnsupported();
+    if (analyticsProjectId && metadata?.fileRef?.kind === 'project' && activeTabId) {
+      const file = metadata.fileRef;
+      return (
+        <AnalyticsPreview
+          key={JSON.stringify([activeTabId, analyticsProjectId, file.pe_id, file.relative_path])}
+          tabId={activeTabId}
+          projectId={analyticsProjectId}
+          file={file}
+        />
+      );
+    }
 
     // 浏览器 tab 由常驻的 BrowserTabLayer 渲染，不能走这里 —— 否则切 tab 会重新加载页面
     // Browser tabs are rendered by the always-mounted BrowserTabLayer; rendering

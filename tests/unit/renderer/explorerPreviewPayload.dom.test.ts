@@ -11,7 +11,7 @@
 // (utf8/dataurl) while pdf/office read none. Oversized files are never read. No
 // WS fs/resolve, no file_path/workspace exposed.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Record ipcBridge.fs calls + script their returns per test.
 const h = vi.hoisted(() => ({ readContent: vi.fn(), getContentMetadata: vi.fn() }));
@@ -43,6 +43,35 @@ const meta = (size: number, lastModified = 1_700_000_000_000) => ({
 });
 
 describe('buildExplorerPreviewPayload', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('opens a recognized Analytics HTML file without using the editor read gate', async () => {
+    const matches = vi.fn().mockResolvedValue(true);
+    vi.stubGlobal('electronAPI', { analyticsPreview: { matches } });
+    h.getContentMetadata.mockClear();
+    h.readContent.mockClear();
+
+    const out = await buildExplorerPreviewPayload('peA', '분석 project/workspace/index.html', 'projectA');
+
+    expect(out.metadata).toMatchObject({ analyticsProjectId: 'projectA', editable: false });
+    expect(out.content).toBe('');
+    expect(matches).toHaveBeenCalledWith({ projectId: 'projectA', file: out.metadata.fileRef });
+    expect(h.getContentMetadata).not.toHaveBeenCalled();
+    expect(h.readContent).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editor size gate for non-Analytics HTML in an ordinary workspace folder', async () => {
+    vi.stubGlobal('electronAPI', { analyticsPreview: { matches: vi.fn().mockResolvedValue(false) } });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(TEXT_CEILING + 1));
+    h.readContent.mockReset();
+
+    const out = await buildExplorerPreviewPayload('peA', 'workspace/index.html', 'projectA');
+
+    expect(out.metadata.analyticsProjectId).toBeUndefined();
+    expect(out.metadata.oversized).toBe(true);
+    expect(h.readContent).not.toHaveBeenCalled();
+  });
+
   it('image: reads dataurl content over /content, carries a Project ref, no file_path', async () => {
     h.getContentMetadata.mockReset().mockResolvedValue(meta(1234));
     h.readContent.mockReset().mockResolvedValue('data:image/png;base64,QUJD');

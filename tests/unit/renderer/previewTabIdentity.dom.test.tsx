@@ -155,6 +155,21 @@ describe('tab identity comes from the file ref', () => {
     expect(ctx.tabs).toHaveLength(2);
   });
 
+  it('opens an isolated Analytics tab even when the file already has a regular HTML preview', () => {
+    mount();
+    const fileRef = projectRef('workspace/index.html');
+    act(() => ctx.openPreview('<h1>Workspace</h1>', 'html', { fileRef }));
+    const ordinaryId = ctx.activeTabId;
+
+    act(() => ctx.openPreview('', 'html', { fileRef, analyticsProjectId: 'projectA', editable: false }));
+    const isolatedId = ctx.activeTabId;
+    expect(isolatedId).not.toBe(ordinaryId);
+    expect(ctx.activeTab?.metadata?.analyticsProjectId).toBe('projectA');
+    act(() => ctx.openPreview('', 'html', { fileRef, analyticsProjectId: 'projectA', editable: false }));
+    expect(ctx.activeTabId).toBe(isolatedId);
+    expect(ctx.tabs).toHaveLength(2);
+  });
+
   describe('ref-less tabs use an explicit namespace key', () => {
     it('reuses the tab for the same diagram', () => {
       mount();

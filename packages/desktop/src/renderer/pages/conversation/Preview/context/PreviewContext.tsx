@@ -39,6 +39,8 @@ export interface PreviewMetadata {
   // file_path/workspace, which are retained only for viewers not yet migrated
   // (pdf file://, office, shell.openFile, download).
   fileRef?: ChatFileRef;
+  /** Explorer project identity for a read-only Analytics preview. */
+  analyticsProjectId?: string;
   file_path?: string; // 工作空间文件的绝对路径 / Absolute file path in workspace
   workspace?: string; // 工作空间根目录 / Workspace root directory
   editable?: boolean; // 是否可编辑 / Whether editable
@@ -705,7 +707,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
         tabList.find((tab) => {
           // Type is a precondition, not a tiebreaker: the same path rendered as
           // source and as a diff are legitimately two different tabs.
-          if (tab.content_type !== type) return false;
+          if (tab.content_type !== type || tab.metadata?.analyticsProjectId !== meta?.analyticsProjectId) return false;
 
           const tabRefKey = tab.metadata?.fileRef ? chatFileRefKey(tab.metadata.fileRef) : '';
 
@@ -1063,7 +1065,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const reloadTabContent = useCallback(async (tabId: string): Promise<boolean> => {
     const tab = tabsRef.current.find((t) => t.id === tabId);
     const fileRef = tab?.metadata?.fileRef;
-    if (!tab || !fileRef) return false;
+    if (!tab || !fileRef || tab.metadata?.analyticsProjectId) return false;
 
     // pdf and office render from their own sources rather than from `content`, so
     // there is nothing to fetch here; their reload paths live in the viewers.

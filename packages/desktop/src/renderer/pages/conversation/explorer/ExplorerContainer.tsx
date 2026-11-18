@@ -40,6 +40,7 @@ import { projectFileRef } from '@/common/types/chatFile';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { FileOrFolderItem } from '@/renderer/utils/file/fileTypes';
 import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
+import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
 
 import { ExplorerPanel } from './ExplorerPanel';
 import {
@@ -122,6 +123,7 @@ export type ExplorerPreviewPayload = {
     sizeBytes?: number;
     thresholdBytes?: number;
     lastModified?: number;
+    analyticsProjectId?: string;
   };
 };
 
@@ -132,11 +134,32 @@ export type ExplorerPreviewPayload = {
 // is ever exposed — the old WS path-resolve patch is gone.
 export const buildExplorerPreviewPayload = async (
   peId: string,
-  relativePath: string
+  relativePath: string,
+  projectId?: string
 ): Promise<ExplorerPreviewPayload> => {
   const name = relativePath.split('/').pop() || relativePath;
   const { contentType, editable } = getFileTypeInfo(name);
-  const fileRef = projectFileRef(peId, relativePath);
+  const fileRef = { kind: 'project', pe_id: peId, relative_path: relativePath } as const;
+  const analytics = window.electronAPI?.analyticsPreview;
+  if (
+    projectId &&
+    analytics &&
+    analyticsPreviewScope(relativePath) &&
+    (await analytics.matches({ projectId, file: fileRef }))
+  ) {
+    return {
+      content: '',
+      contentType: 'html',
+      metadata: {
+        title: name,
+        file_name: name,
+        fileRef,
+        language: 'html',
+        editable: false,
+        analyticsProjectId: projectId,
+      },
+    };
+  }
 
   const payload = await resolvePreviewPayload(fileRef, contentType);
 
@@ -207,7 +230,7 @@ export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId 
   // can stay open at once.
   const handleOpenFile = async (peId: string, relativePath: string): Promise<void> => {
     try {
-      const { content, contentType, metadata } = await buildExplorerPreviewPayload(peId, relativePath);
+      const { content, contentType, metadata } = await buildExplorerPreviewPayload(peId, relativePath, projectId);
       openPreview(content, contentType, metadata);
     } catch (e) {
       Message.error(t(previewErrorToI18nKey(classifyPreviewError(e))));
