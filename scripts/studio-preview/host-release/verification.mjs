@@ -7,12 +7,21 @@ import assert from 'node:assert/strict';
 import { installProtocolDiagnostics } from './probes/protocolDiagnostics.mjs';
 
 /** Atomically replace a complete renderer result using a sibling temporary file. */
-export function writeRendererResult(output, value) {
+export function writeRendererResult(output, value, { platform = process.platform } = {}) {
   const file = path.join(output, 'renderer-result.json');
   const temporary = path.join(output, `.renderer-result-${process.pid}-${randomUUID()}.tmp`);
   try {
     fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
-    fs.renameSync(temporary, file);
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(temporary, file);
+        break;
+      } catch (error) {
+        if (platform !== 'win32' || error.code !== 'EPERM' || attempt === 2) throw error;
+        // Only diagnostic file replacement retries; never retry an app launch.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
   } finally {
     try {
       fs.unlinkSync(temporary);
@@ -228,7 +237,11 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
   let lastStatus = 'launching';
   record = (value) => {
     lastStatus = value.status ?? lastStatus;
-    return write(value);
+    try {
+      return write(value);
+    } catch {
+      /* diagnostic persistence must not change the smoke outcome */
+    }
   };
   const observation = {
     launch: launchNumber,
@@ -260,47 +273,52 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
   let app;
   try {
     app = await launch();
-    protocol.restore();
-    const main = app.process();
-    observation.pid = main.pid;
-    const observeExit = () => {
-      if (exited(main) && !observation.exitObservedAt) {
-        observation.exitCode = main.exitCode;
-        observation.signal = main.signalCode;
-        observation.exitObservedAt = new Date().toISOString();
-        observation.naturalExit = observation.closeRequestedAt === null;
-      }
-    };
-    observations.set(app, { observation, record, observeExit, protocol, diagnostic, processTimeline });
-    processTimeline?.addMain(main.pid, launchNumber);
-    main.on('exit', () => {
-      observeExit();
-      processTimeline?.mainExit(main.pid);
-      record({ ...observation, status: 'exited' });
-    });
-    for (const stream of ['stdout', 'stderr'])
-      main[stream]?.on('data', (chunk) => {
-        observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
-        record({ ...observation, status: 'output' });
-      });
-    observation.identityStartedAt = new Date().toISOString();
-    let identity;
+    processTimeline?.beginIdentity();
     try {
-      identity = await app.evaluate(() => ({
-        pid: process.pid,
-        backendOverride: process.env.AIONUI_BACKEND_BIN,
-        resourcesPath: process.resourcesPath,
-      }));
-    } catch (error) {
-      observation.identityFailedAt = new Date().toISOString();
-      observation.protocol = protocol.snapshot();
-      observation.identityProtocol = protocol.snapshot();
-      diagnostic();
-      processTimeline?.checkpoint('identity-failed', launchNumber);
-      throw error;
+      protocol.restore();
+      const main = app.process();
+      observation.pid = main.pid;
+      const observeExit = () => {
+        if (exited(main) && !observation.exitObservedAt) {
+          observation.exitCode = main.exitCode;
+          observation.signal = main.signalCode;
+          observation.exitObservedAt = new Date().toISOString();
+          observation.naturalExit = observation.closeRequestedAt === null;
+        }
+      };
+      observations.set(app, { observation, record, observeExit, protocol, diagnostic, processTimeline });
+      processTimeline?.addMain(main.pid, launchNumber);
+      main.on('exit', () => {
+        observeExit();
+        processTimeline?.mainExit(main.pid);
+        record({ ...observation, status: 'exited' });
+      });
+      for (const stream of ['stdout', 'stderr'])
+        main[stream]?.on('data', (chunk) => {
+          observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
+          record({ ...observation, status: 'output' });
+        });
+      observation.identityStartedAt = new Date().toISOString();
+      let identity;
+      try {
+        identity = await app.evaluate(() => ({
+          pid: process.pid,
+          backendOverride: process.env.AIONUI_BACKEND_BIN,
+          resourcesPath: process.resourcesPath,
+        }));
+      } catch (error) {
+        observation.identityFailedAt = new Date().toISOString();
+        observation.protocol = protocol.snapshot();
+        observation.identityProtocol = protocol.snapshot();
+        diagnostic();
+        throw error;
+      }
+      observation.identifiedAt = new Date().toISOString();
+      record({ ...observation, status: 'identified' });
+      return { app, identity };
+    } finally {
+      processTimeline?.endIdentity(observation.identifiedAt ? 'after-identity' : 'identity-failed', launchNumber);
     }
-    record({ ...observation, status: 'identified', identifiedAt: new Date().toISOString() });
-    return { app, identity };
   } catch (error) {
     if (app) {
       // Preserve the existing bounded observation before any smoke shutdown.

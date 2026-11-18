@@ -451,13 +451,10 @@ try {
       .toBe(true);
   } finally {
     // Preserve the actual child result even when the native execution fails.
-    fs.writeFileSync(
-      path.join(output, 'renderer-result.json'),
-      JSON.stringify(
-        { checksPassed: checks, mainLaunches, configPreservation, recoveryProfile, delegation: delegated ?? null },
-        null,
-        2
-      ) + '\n'
+    recordLaunchEvidence(
+      output,
+      { checksPassed: checks, mainLaunches, configPreservation, recoveryProfile, delegation: delegated ?? null },
+      null
     );
   }
   assert.ok(delegated, 'Native delegation must produce two real children');

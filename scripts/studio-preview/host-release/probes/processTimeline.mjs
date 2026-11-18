@@ -127,17 +127,18 @@ export function createProcessTimeline({
   let droppedProcesses = 0;
   let refresh = true;
   let forcePublish = true;
+  let identityPending = false;
   let lastPublished = -Infinity;
   const changed = new Set();
-  const publish = (at = new Date().toISOString(), unavailableReason, checkpoint = false) => {
+  const publish = (at = new Date().toISOString(), unavailableReason, checkpoint = false, requested = false) => {
     if (!changed.size && !checkpoint && !unavailableReason && performance.now() - lastPublished < publishIntervalMs)
       return;
     const event =
       changed.size || checkpoint || unavailableReason
         ? {
-            kind: 'process-timeline-delta',
+            kind: requested ? 'process-timeline-checkpoint' : 'process-timeline-delta',
             schema: 'aelix.launch-process-timeline/1',
-            observedAt: at,
+            ...(requested ? { requestedAt: at } : { observedAt: at }),
             phase,
             launch,
             checkpoint,
@@ -278,33 +279,64 @@ export function createProcessTimeline({
     publish(at, undefined, context.checkpoint);
   };
   const sample = () => {
-    if (pending || stopped) return;
-    const context = { phase, launch, startedAt: new Date().toISOString(), refresh, checkpoint: forcePublish };
-    refresh = false;
-    forcePublish = false;
-    pending = Promise.resolve()
-      .then(
-        snapshot ??
-          (() =>
-            processSnapshot(sandbox, process.platform, windowsReader, linuxReader, {
+    if (pending || stopped || identityPending) return;
+    let context;
+    // Launch resolution must reach its await continuation before a queued batch
+    // can start, including a launch that returns an already resolved Promise.
+    pending = new Promise((resolve) => setImmediate(resolve))
+      .then(() => {
+        // A queued checkpoint may reach this microtask after launch resolves.
+        // Do not run a synchronous proc batch in the identity request window.
+        if (stopped || identityPending) return;
+        context = { phase, launch, startedAt: new Date().toISOString(), refresh, checkpoint: forcePublish };
+        refresh = false;
+        forcePublish = false;
+        return snapshot
+          ? snapshot()
+          : processSnapshot(sandbox, process.platform, windowsReader, linuxReader, {
               roots,
               known: new Map(
                 [...entries.values()].filter((entry) => !entry.exitObservedAt).map((entry) => [entry.pid, entry])
               ),
               refresh: context.refresh,
-            }))
-      )
+            });
+      })
       .then((value) => {
+        if (!value) return;
+        if (identityPending) {
+          refresh = true;
+          return;
+        }
         if (!(stopped && value.reason === 'cim-reader-stopped')) observe(value, new Date().toISOString(), context);
       })
-      .catch(() => observe({ status: 'unavailable' }, new Date().toISOString(), context))
+      .catch(() => {
+        if (!identityPending) observe({ status: 'unavailable' }, new Date().toISOString(), context);
+        else refresh = true;
+      })
       .finally(() => {
         pending = null;
-        if (refresh && !stopped) sample();
+        if (refresh && !stopped && !identityPending) sample();
       });
+  };
+  const checkpoint = (nextPhase, number) => {
+    phase = nextPhase;
+    launch = number;
+    refresh = true;
+    forcePublish = true;
+    // A later phase may arrive before collection gets its event-loop turn.
+    // Preserve the request without claiming a process table was sampled here.
+    publish(new Date().toISOString(), undefined, true, true);
+    sample();
   };
   return {
     observe,
+    beginIdentity() {
+      identityPending = true;
+    },
+    endIdentity(nextPhase, number) {
+      identityPending = false;
+      checkpoint(nextPhase, number);
+    },
     addMain(pid, number) {
       roots.set(pid, { active: true, birth: null, launch: number });
       refresh = true;
@@ -318,13 +350,7 @@ export function createProcessTimeline({
       forcePublish = true;
       sample();
     },
-    checkpoint(nextPhase, number) {
-      phase = nextPhase;
-      launch = number;
-      refresh = true;
-      forcePublish = true;
-      sample();
-    },
+    checkpoint,
     start() {
       timer = setInterval(sample, intervalMs);
       timer.unref();

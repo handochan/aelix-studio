@@ -99,10 +99,25 @@ proc batch instead of hundreds of asynchronous reads and libuv/eventfd callbacks
 Sanitized cmdline classification is cached by PID/start ticks. New generations,
 changed comm values and known owned actors/root descendants are reclassified;
 owned actors can exec another Python role without changing start ticks. Launch,
-identity-failure, close-requested/main-exit/after-close and cleanup checkpoints
+identity-success/failure, close-requested/main-exit/after-close and cleanup checkpoints
 also refresh all candidate classifications. Raw argv/executable paths are never
-cached or exported. This reduces collection work without slowing known-process
-exit or reparent observations, adding a polling process, or changing audit hooks.
+cached or exported. This reduces periodic collection work without adding a
+polling process or changing audit hooks.
+Sampling is paused from launch resolution until the identity evaluation settles,
+including already queued batch microtasks and timer ticks. Before-launch capture
+is retained, and an after-identity or identity-failed checkpoint requests a fresh
+process table on the next available sampler turn. An older asynchronous query completing in
+that window is discarded. No product wait is added. Short-lived processes inside
+this intentional observation gap can be missed; main handle/protocol evidence
+still records the identity result and its start/end timestamps. Sample timestamps
+refer to actual collection start, rather than the time its microtask was queued.
+Batch entry yields through `setImmediate` before checking the identity guard so
+an already resolved launch also reaches its await continuation first.
+`process-timeline-checkpoint` journal markers retain the request phase, launch
+and `requestedAt` even if cleanup reaches another phase before collection runs.
+They are requests, not samples; actual rows keep their collection start and
+completion phases. Thus a failed identity checkpoint is retained without
+delaying cleanup or relabeling an after-close sample as an earlier observation.
 
 Full renderer summaries are persisted at most every 5s while unchanged, and
 immediately for structural process changes and checkpoints. Liveness observations
@@ -111,7 +126,10 @@ lower bound. The JSONL contains `process-timeline-delta` events with only change
 generations, or checkpoint/unavailable metadata. A periodic summary refresh has
 no JSONL event. All renderer-result writes (including config/recovery and final
 results) use a sibling temp file plus rename, so readers see complete JSON.
-This is atomic visibility, not a new power-loss durability claim. Existing smoke
+Delegation evidence also merges the existing timeline through this writer.
+Windows EPERM on replacement gets at most two 10ms retries; all lifecycle sink
+exceptions are isolated from the smoke outcome. These are diagnostic file-write
+retries, not app retries. This is atomic visibility, not a new power-loss durability claim. Existing smoke
 assertions, timeouts, retry policy and diagnostic exception isolation remain.
 
 Windows reuses one hidden, diagnostic-only PowerShell CIM reader. A cold query

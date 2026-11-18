@@ -175,6 +175,68 @@ describe('owned process observation', () => {
     expect(snapshot).toHaveBeenCalledTimes(3);
   });
 
+  it('defers an already queued batch and timer samples until identity finishes', async () => {
+    vi.useFakeTimers();
+    const snapshot = vi.fn(() => ({ status: 'observed', rows: [] }));
+    const timeline = createProcessTimeline({ snapshot });
+    timeline.start();
+    timeline.beginIdentity();
+    timeline.addMain(10, 1);
+    await vi.advanceTimersByTimeAsync(2100);
+    expect(snapshot).not.toHaveBeenCalled();
+    timeline.endIdentity('after-identity', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(snapshot).toHaveBeenCalledTimes(1);
+    timeline.stop();
+  });
+
+  it('preserves checkpoint requests independently of the eventual collection phase', async () => {
+    vi.useFakeTimers();
+    const record = vi.fn();
+    const timeline = createProcessTimeline({ record, snapshot: () => ({ status: 'observed', rows: [] }) });
+    timeline.checkpoint('before-launch', 1);
+    timeline.beginIdentity();
+    await vi.advanceTimersByTimeAsync(0);
+    timeline.endIdentity('identity-failed', 1);
+    timeline.checkpoint('after-close', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    const events = record.mock.calls.map(([, event]) => event);
+    expect(events.filter((event) => event.kind === 'process-timeline-checkpoint').map((event) => event.phase)).toEqual([
+      'before-launch',
+      'identity-failed',
+      'after-close',
+    ]);
+    expect(
+      events
+        .filter((event) => event.kind === 'process-timeline-checkpoint')
+        .every((event) => event.requestedAt && !event.observedAt)
+    ).toBe(true);
+    expect(events.at(-1)).toMatchObject({ kind: 'process-timeline-delta', phase: 'after-close', sampleCount: 1 });
+    timeline.stop();
+  });
+
+  it('does not publish an older asynchronous sample that completes during identity', async () => {
+    vi.useFakeTimers();
+    const record = vi.fn();
+    let complete: (value: object) => void;
+    const timeline = createProcessTimeline({
+      record,
+      snapshot: () => new Promise((resolve) => (complete = resolve)),
+    });
+    timeline.start();
+    await vi.advanceTimersByTimeAsync(0);
+    timeline.beginIdentity();
+    complete!({ status: 'observed', rows: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record).not.toHaveBeenCalled();
+    timeline.endIdentity('identity-failed', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    complete!({ status: 'observed', rows: [] });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record.mock.calls.at(-1)?.[1]).toMatchObject({ phase: 'identity-failed', checkpoint: true });
+    timeline.stop();
+  });
+
   it('does not return raw command lines from a real process table', async () => {
     const value = await processSnapshot('PRIVATE_NONMATCHING_ROOT');
     if (value.status === 'observed') expect(value.rows.every((entry: object) => !('command' in entry))).toBe(true);
