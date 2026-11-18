@@ -4,11 +4,11 @@
  * Serves out/renderer/ as the SPA and reverse-proxies /api/*, /ws, /api/stt/stream,
  * /login and /logout to aioncore. All auth goes to backend's aionui-auth crate;
  * /login and /logout are aionui-auth's top-level paths, the rest live under
- * /api/auth/*. /ws and /api/stt/stream are WebSocket/stream upgrades spliced at
- * TCP level; /api/stt/stream is the STT streaming endpoint.
+ * /api/auth/*. The TCP listener checks the complete /ws and /api/stt/stream
+ * WebSocket handshake before it reaches the backend.
  *
  * Design: Node native http + serve-handler. Studio's sessionless native auth
- * facade shares this listener, with separate cookie/Origin admission checks.
+ * facade shares this listener and also verifies the operator session.
  * Other business routes remain on the backend.
  */
 
@@ -16,8 +16,15 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from 'no
 import { networkInterfaces } from 'node:os';
 import net, { type Socket } from 'node:net';
 import serveHandler from 'serve-handler';
+import { createRequestOriginPolicy, readSourceHeaders } from './requestOrigin.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
+import {
+  MAX_UPGRADE_HEADER_BYTES,
+  proxyWebSocket,
+  rejectSocket,
+  requestLineTargetsWebSocket,
+} from './webSocketProxy.js';
 
 export type StaticServerOptions = {
   staticDir: string;
@@ -76,20 +83,42 @@ export function pickLanIP(nets: ReturnType<typeof networkInterfaces>): string | 
   return candidates[0] ?? null;
 }
 
-function getLanIP(): string | null {
-  return pickLanIP(networkInterfaces());
-}
-
 function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort: number): void {
+  const headers: http.OutgoingHttpHeaders = { ...req.headers };
+  const connectionFields = new Set(
+    req.headers.connection
+      ?.toLowerCase()
+      .split(',')
+      .map((name) => name.trim())
+  );
+  for (const name of Object.keys(headers)) {
+    if (
+      name === 'connection' ||
+      name === 'upgrade' ||
+      name === 'expect' ||
+      name === 'forwarded' ||
+      name === 'x-real-ip' ||
+      name.startsWith('x-forwarded-') ||
+      name.startsWith('x-aionui-') ||
+      connectionFields.has(name)
+    ) {
+      delete headers[name];
+    }
+  }
+  headers.host = '127.0.0.1:' + backendPort;
   const options: http.RequestOptions = {
     hostname: '127.0.0.1',
     port: backendPort,
     path: req.url,
     method: req.method,
-    headers: { ...req.headers, host: `127.0.0.1:${backendPort}` },
+    headers,
   };
   const proxy = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode ?? 502, proxyRes.headers);
+    const responseHeaders = { ...proxyRes.headers };
+    for (const name of Object.keys(responseHeaders)) {
+      if (name.startsWith('access-control-')) delete responseHeaders[name];
+    }
+    res.writeHead(proxyRes.statusCode ?? 502, responseHeaders);
     proxyRes.pipe(res);
   });
   proxy.on('error', () => {
@@ -145,50 +174,42 @@ function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: B
   client.on('close', tearDown);
 }
 
-/**
- * Decide routing from the first chunk of an incoming HTTP connection:
- *  - `true`  → `GET /ws[...] HTTP/1.x` or `GET /api/stt/stream[...] HTTP/1.x` (WebSocket/stream upgrades), splice to backend
- *  - `false` → any other HTTP method / path, hand to internal HTTP server
- *  - `null`  → need more bytes (no CRLF yet)
- *
- * We only check the request-line; `Upgrade: websocket` is not strictly
- * required — the backend will reject a non-upgrade GET on these paths on its own.
- * Keeping the rule simple means we can decide after the first ~50 bytes
- * instead of waiting for the full header block.
- */
-function peekWsRoute(buf: Buffer): boolean | null {
-  const newlineIdx = buf.indexOf(0x0a); // \n
-  if (newlineIdx < 0) return null;
-  const firstLine = buf.slice(0, newlineIdx).toString('ascii');
-  return /^GET\s+\/(?:ws|api\/stt\/stream)(?:\?[^\s]*)?\s+HTTP\/1\.[01]\r?$/.test(firstLine);
-}
-
 export async function startStaticServer(opts: StaticServerOptions): Promise<StaticServerHandle> {
   const port = opts.port ?? DEFAULT_PORT;
   const allowRemote = opts.allowRemote === true;
   const host = allowRemote ? '0.0.0.0' : '127.0.0.1';
+  const interfaces = allowRemote ? networkInterfaces() : {};
+  const lanIP = pickLanIP(interfaces);
+  const lanAddresses = Object.values(interfaces).flatMap(
+    (entries) =>
+      entries?.filter((entry) => entry.family === 'IPv4' && !entry.internal).map((entry) => entry.address) ?? []
+  );
+  const configuredOrigin = process.env.AELIX_STUDIO_ORIGIN;
+  let isAllowed = createRequestOriginPolicy(port, lanAddresses, configuredOrigin);
 
-  // The HTTP server listens only on loopback — user traffic hits the outer
-  // net.Server first. We route to this server for everything except WS
-  // upgrades and STT stream upgrades, which go straight to the backend via a raw TCP splice.
-  //
-  // Why two listeners instead of using `http.Server`'s native `upgrade` event:
-  // bun 1.3's http-compat layer does not faithfully forward writes on the
-  // socket delivered to the `upgrade` handler, so the backend's 101 response
-  // never reaches the browser (see #2824). Making the outer listener pure
-  // TCP avoids touching that code path on both bun and node.
-  const http_server: Server = http.createServer(async (req, res) => {
+  // Bun's HTTP server upgrade socket does not reliably write the 101 response
+  // (#2824). Keep client upgrades on the TCP listener and use this HTTP
+  // listener to parse and validate every ordinary request, including keep-alive.
+  const handleHttp = async (req: IncomingMessage, res: ServerResponse, expectContinue = false): Promise<void> => {
     try {
       if (!req.url || !req.method) {
         res.writeHead(400).end();
         return;
       }
 
+      const safeMethod = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
+      if (!isAllowed(readSourceHeaders(req.rawHeaders), !safeMethod)) {
+        res.writeHead(403).end();
+        return;
+      }
+      if (req.method === 'OPTIONS') {
+        res.writeHead(204).end();
+        return;
+      }
+      if (expectContinue) res.writeContinue();
+
       if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
-        const addresses = ['127.0.0.1', 'localhost', ...(allowRemote ? [getLanIP()].filter(Boolean) : [])];
-        const origins = addresses.map((address) => `http://${address}:${actualPort}`);
-        if (process.env.AELIX_STUDIO_ORIGIN) origins.push(process.env.AELIX_STUDIO_ORIGIN);
-        await handleNativeAuth(req, res, { backendPort: opts.backendPort, origins });
+        await handleNativeAuth(req, res, { backendPort: opts.backendPort, origins: [req.headers.origin ?? ''] });
         return;
       }
 
@@ -205,7 +226,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         public: opts.staticDir,
         rewrites: [{ source: '**', destination: '/index.html' }],
       });
-    } catch (err) {
+    } catch {
       if (!res.headersSent) {
         res.writeHead(500, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'INTERNAL_ERROR' }));
@@ -213,7 +234,9 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         res.destroy();
       }
     }
-  });
+  };
+  const http_server: Server = http.createServer((req, res) => void handleHttp(req, res));
+  http_server.on('checkContinue', (req, res) => void handleHttp(req, res, true));
 
   // Internal HTTP server — 127.0.0.1 ephemeral port, never visible to the user.
   await new Promise<void>((resolve, reject) => {
@@ -228,52 +251,61 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     throw new Error('internal HTTP server failed to bind to a port');
   }
 
-  // User-facing listener: inspect the first line of every TCP connection and
-  // route to either the backend (for /ws and /api/stt/stream upgrades) or the internal HTTP
-  // server (everything else). Both routes use raw TCP splice — no reliance
-  // on http.Server's upgrade event.
+  // Closing the listener must also close active upgrades.
+  const clients = new Set<Socket>();
   const tcp_server = net.createServer((client: Socket) => {
+    clients.add(client);
+    client.once('close', () => clients.delete(client));
     let peeked = Buffer.alloc(0);
-    let settled = false;
     const cleanup = (): void => {
-      if (settled) return;
-      settled = true;
       client.removeListener('data', onData);
-      client.removeListener('error', onEarlyError);
-      client.removeListener('end', onEarlyEnd);
+      clearTimeout(headerDeadline);
     };
     const onData = (chunk: Buffer): void => {
       peeked = Buffer.concat([peeked, chunk]);
-      const decision = peekWsRoute(peeked);
-      if (decision === null && peeked.length < PEEK_LIMIT_BYTES) return;
+      const newline = peeked.indexOf(0x0a);
+      if (newline < 0 && peeked.length < PEEK_LIMIT_BYTES) return;
+      if (newline >= 0 && requestLineTargetsWebSocket(peeked.toString('latin1', 0, newline))) {
+        const headerEnd = peeked.indexOf('\r\n\r\n');
+        if (headerEnd < 0 && peeked.length < MAX_UPGRADE_HEADER_BYTES) return;
+        cleanup();
+        if (headerEnd < 0 || headerEnd + 4 > MAX_UPGRADE_HEADER_BYTES) {
+          rejectSocket(client, 431);
+        } else if (peeked.length !== headerEnd + 4) {
+          rejectSocket(client, 400);
+        } else {
+          proxyWebSocket(client, peeked.toString('latin1', 0, headerEnd), opts.backendPort, isAllowed);
+        }
+        return;
+      }
       cleanup();
-      const target = decision === true ? opts.backendPort : internalPort;
-      spliceToTcpEndpoint(client, target, peeked);
+      spliceToTcpEndpoint(client, internalPort, peeked);
     };
-    const onEarlyError = (): void => {
+    const close = (): void => {
       cleanup();
       client.destroy();
     };
-    const onEarlyEnd = (): void => {
-      // Client closed before we saw a request line — nothing to route.
-      cleanup();
-      client.destroy();
-    };
+    const headerDeadline = setTimeout(close, 10000);
     client.on('data', onData);
-    client.on('error', onEarlyError);
-    client.on('end', onEarlyEnd);
+    client.on('error', close);
+    client.once('close', cleanup);
   });
 
-  await new Promise<void>((resolve, reject) => {
-    tcp_server.once('error', reject);
-    tcp_server.listen(port, host, () => {
-      tcp_server.off('error', reject);
-      resolve();
+  try {
+    await new Promise<void>((resolve, reject) => {
+      tcp_server.once('error', reject);
+      tcp_server.listen(port, host, () => {
+        tcp_server.off('error', reject);
+        resolve();
+      });
     });
-  });
+  } catch (error) {
+    http_server.close();
+    throw error;
+  }
 
   const actualPort = (tcp_server.address() as { port: number } | null)?.port ?? port;
-  const lanIP = allowRemote ? (getLanIP() ?? undefined) : undefined;
+  isAllowed = createRequestOriginPolicy(actualPort, lanAddresses, configuredOrigin);
   const localUrl = `http://127.0.0.1:${actualPort}`;
   const networkUrl = lanIP ? `http://${lanIP}:${actualPort}` : undefined;
 
@@ -282,10 +314,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     url: networkUrl ?? localUrl,
     localUrl,
     networkUrl,
-    lanIP,
+    lanIP: lanIP ?? undefined,
     stop: () =>
       new Promise<void>((resolve) => {
         getNativeAuthService().cancelOwner('web:', true);
+        for (const client of clients) client.destroy();
         tcp_server.close(() => {
           http_server.close(() => resolve());
         });

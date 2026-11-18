@@ -32,6 +32,18 @@ console.log(`WebUI running at ${handle.url}`);
 await handle.stop();
 ```
 
+## Request origins
+
+The listener defaults to IPv4 loopback. Its HTTP and WebSocket endpoints accept
+the listener's port on `127.0.0.1` or `localhost`. When remote access is enabled,
+they also accept the machine's IPv4 addresses at startup. WebSocket upgrades and
+state-changing HTTP requests require an Origin matching the request's Host.
+Normal page and asset loads can omit the Origin header.
+
+A reverse proxy can use the existing `AELIX_STUDIO_ORIGIN` setting to declare
+its browser-facing origin. Preserve the browser-facing Host when forwarding
+requests, including WebSocket upgrades.
+
 ## Status
 
 M3: skeleton + type definitions + placeholder implementations (all throw `not implemented yet`)
