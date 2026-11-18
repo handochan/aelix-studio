@@ -8,6 +8,7 @@ import {
   closeElectron,
   launchWithIdentity,
   recordLaunchFailure,
+  recordLaunchEvidence,
   configSummary,
   electronAppEnvironment,
   verifyConfigPreserved,
@@ -117,6 +118,80 @@ describe('Electron launch evidence without retry', () => {
     launchNumber: 3,
     record,
     remainingProcesses: { status: 'observed', processes: [] },
+  });
+  it('keeps successful identity and lifecycle status unchanged while adding evidence', async () => {
+    const { app } = application();
+    const record = vi.fn();
+    const result = await launchWithIdentity(async () => app, options(record));
+    expect(result).toEqual({ app, identity: { pid: 123 } });
+    expect(record.mock.calls.at(-1)?.[0].status).toBe('identified');
+    await closeElectron(app);
+    expect(record.mock.calls.at(-1)?.[0].status).toBe('closing');
+  });
+  it('keeps the original twenty second identity failure observation and records its launch PID and phase', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { main, app } = application(destroyed, null);
+    const record = vi.fn();
+    app.close.mockImplementation(async () => {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+    });
+    const launch = vi.fn().mockResolvedValue(app);
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toBe(destroyed);
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(app.close).not.toHaveBeenCalled();
+    expect(record.mock.calls.some(([value]) => value.identityFailedAt)).toBe(true);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0].waits).toMatchObject([
+      {
+        launch: 3,
+        pid: 123,
+        phase: 'identity-failure-exit-observation',
+        elapsedMs: 20000,
+        timeoutMs: 20000,
+        status: 'failed',
+      },
+      { launch: 3, pid: 123, phase: 'identity-failure-cleanup', alreadyExited: true },
+    ]);
+  });
+
+  it('writes failed launch and process evidence into the real uploaded result and journal', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-launch-evidence-'));
+    try {
+      await fs.writeFile(path.join(root, 'renderer-result.json'), JSON.stringify({ checksPassed: ['existing-check'] }));
+      const launches: object[] = [];
+      const record = (value: { launch: number }) => {
+        launches[value.launch - 1] = value;
+        recordLaunchEvidence(root, { mainLaunches: launches }, value);
+      };
+      const { app } = application(destroyed, 0);
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      await expect(launchWithIdentity(async () => app, options(record))).rejects.toBe(destroyed);
+      recordLaunchEvidence(root, { processTimeline: { status: 'observed' } }, { kind: 'process-timeline' });
+      const value = JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8'));
+      expect(value).toMatchObject({
+        checksPassed: ['existing-check'],
+        processTimeline: { status: 'observed' },
+        mainLaunches: [
+          null,
+          null,
+          { error: String(destroyed), identityFailedAt: expect.any(String), protocol: { status: 'active' } },
+        ],
+      });
+      expect(
+        (await fs.readFile(path.join(root, 'startup-lifecycle.jsonl'), 'utf8'))
+          .split('\n')
+          .filter(Boolean)
+          .map((line) => JSON.parse(line))
+          .some((event) => event.identityFailedAt)
+      ).toBe(true);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
   it('waits for the old OS process even when app.close has already resolved', async () => {
     const { main, app } = application(undefined, null);

@@ -50,6 +50,50 @@ from the start in the job log; bounded main output is also retained after the
 Playwright process handle becomes available. These diagnostics use separate
 fields from PR #45's `main-launch-*` logs.
 
+The #59 diagnostic additions preserve all original checks, timeouts and the
+single-launch behavior. `electron-main-exit` wait rows now include `launch`,
+`pid`, `phase`, start/end timestamps and the unchanged 20,000ms bound. The phase
+distinguishes `identity-failure-exit-observation` from normal
+`cleanup-main-exit` and `identity-failure-cleanup`. Already exited processes
+produce an `alreadyExited` observation without a new wait. Each launch retains
+these rows in `mainLaunches[].waits` in `renderer-result.json`.
+
+`mainLaunches[].identityFailedAt` and `.identityProtocol` are written before
+the existing failure-observation wait. `.protocol` retains ongoing diagnostics.
+An in-process observer wraps the installed Playwright 1.58.2 protocol logger
+before CRSession discards CDP error codes or changes their message. It adds no
+connection, protocol command, DEBUG setting, retry or driver patch. The factory
+is restored after launch; the existing connections' observers retire at cleanup.
+Context IDs/default flags, request IDs, fixed method names and error codes are
+retained. Known CDP message templates are preserved; arbitrary text/suffixes and
+error data are redacted. Names, origins, URLs, evaluation contents, session IDs,
+paths and tokens are never copied into this new protocol evidence. The observer
+keeps 64 events, 8 errors and 16 preceding context events per error; the identity
+snapshot is frozen before later cleanup events. An unsupported adapter is
+recorded as unavailable without changing the smoke result.
+
+`renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)
+samples once per second, with no overlapping query and no process signaling or
+exit wait. Linux uses `/proc` without spawning polling subprocesses; macOS uses
+asynchronous ps and Windows uses CIM. Query failures are unavailable observations,
+never invented exits. Only owned/sandbox-matched main, host, ACP, native-wrapper
+and native generations are retained, using fixed role labels and numeric
+PID/parent IDs. Linux start ticks, Windows creation ticks and macOS ps lstart
+(second precision) distinguish generations. Executable/argv data is classified
+privately and discarded. First/last observation, reparenting, live-sample lower
+bounds and first observed absence/zombie are retained, up to 512 generations.
+`roleEvidence` identifies fixture-argv inference; it is not an executable audit.
+
+Sample start/completion timestamps and phases/launch numbers bound in-flight
+queries spanning a launch transition. `exitObservedAt` is an observation bound,
+not a precise OS exit timestamp. Its live lower bound is
+`lastLiveSampleStartedAt`, or unknown if no live sample was seen (including CIM's
+unknown state). Short-lived processes can fall between samples. Main handle exit
+events remain in `mainLaunches` with their original direct observations.
+The process timeline is also appended to `startup-lifecycle.jsonl`; the complete
+summary is merged into the already uploaded renderer result on both installer
+and whole-app jobs. No artifact path or workflow change is required.
+
 Provider helper smoke's old 5s callback guard came from fixture commit
 `382c819db`, not a product response requirement. Product service limits remain
 20s for ordinary requests and 180s for login. Fixture callbacks now use 20s:

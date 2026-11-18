@@ -1,7 +1,17 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import assert from 'node:assert/strict';
+import { installProtocolDiagnostics } from './probes/protocolDiagnostics.mjs';
+
+/** Merge diagnostics into the already uploaded result and the existing event journal. */
+export function recordLaunchEvidence(output, patch, event) {
+  const file = path.join(output, 'renderer-result.json');
+  const previous = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({ ...previous, ...patch }, null, 2) + '\n');
+  appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(event) + '\n');
+}
 
 /** Keep Playwright's driver logging out of the installed application environment. */
 export function electronAppEnvironment(driver) {
@@ -44,8 +54,13 @@ export function verifyConfigPreserved(file, { phase, launch, record }) {
 }
 
 /** Wait for a fixture result with a finite, logged harness deadline. */
-export async function boundedWait(work, label, { timeoutMs = 20000, log = console.log } = {}) {
+export async function boundedWait(
+  work,
+  label,
+  { timeoutMs = 20000, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
+) {
   const started = performance.now();
+  const startedAt = new Date().toISOString();
   let timer;
   let status = 'passed';
   try {
@@ -60,7 +75,19 @@ export async function boundedWait(work, label, { timeoutMs = 20000, log = consol
     throw error;
   } finally {
     clearTimeout(timer);
-    log(JSON.stringify({ wait: label, elapsedMs: Math.round(performance.now() - started), timeoutMs, status }));
+    log(
+      JSON.stringify({
+        wait: label,
+        launch,
+        pid,
+        phase,
+        startedAt,
+        endedAt: new Date().toISOString(),
+        elapsedMs: Math.round(performance.now() - started),
+        timeoutMs,
+        status,
+      })
+    );
   }
 }
 
@@ -68,18 +95,41 @@ function exited(main) {
   return main.exitCode !== null || main.signalCode !== null;
 }
 
-async function waitForExit(main) {
-  if (exited(main)) return;
+async function waitForExit(main, state, phase) {
+  const context = { launch: state?.observation.launch ?? null, pid: main.pid ?? null, phase };
+  const log = (text) => {
+    console.log(text);
+    if (state) {
+      state.observation.waits.push(JSON.parse(text));
+      state.diagnostic();
+    }
+  };
+  if (exited(main)) {
+    log(
+      JSON.stringify({
+        wait: 'electron-main-exit',
+        ...context,
+        elapsedMs: 0,
+        timeoutMs: 20000,
+        status: 'passed',
+        alreadyExited: true,
+      })
+    );
+    return;
+  }
   let listener;
   try {
-    await boundedWait(new Promise((resolve) => main.once('exit', (listener = resolve))), 'electron-main-exit');
+    await boundedWait(new Promise((resolve) => main.once('exit', (listener = resolve))), 'electron-main-exit', {
+      ...context,
+      log,
+    });
   } finally {
     main.removeListener('exit', listener);
   }
 }
 
 /** Close the old main process before reusing its user root, including disconnect paths. */
-export async function closeElectron(app) {
+export async function closeElectron(app, { phase = 'cleanup-main-exit' } = {}) {
   if (!app) return;
   const main = app.process();
   const state = observations.get(app);
@@ -88,8 +138,12 @@ export async function closeElectron(app) {
     state.observation.closeRequestedAt ??= new Date().toISOString();
     state.record({ ...state.observation, status: 'closing' });
   }
-  await app.close();
-  await waitForExit(main);
+  try {
+    await app.close();
+    await waitForExit(main, state, phase);
+  } finally {
+    state?.protocol.dispose();
+  }
 }
 
 const observations = new WeakMap();
@@ -150,7 +204,13 @@ export function recordLaunchFailure(app, error) {
 }
 
 /** Launch exactly once. A naturally exiting product must fail the original smoke. */
-export async function launchWithIdentity(launch, { launchNumber, record, remainingProcesses }) {
+export async function launchWithIdentity(launch, { launchNumber, record, remainingProcesses, processTimeline }) {
+  const write = record;
+  let lastStatus = 'launching';
+  record = (value) => {
+    lastStatus = value.status ?? lastStatus;
+    return write(value);
+  };
   const observation = {
     launch: launchNumber,
     startedAt: new Date().toISOString(),
@@ -163,11 +223,25 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
     naturalExit: null,
     stdout: '',
     stderr: '',
+    waits: [],
+  };
+  const diagnostic = () => {
+    try {
+      record({ ...observation, status: lastStatus });
+    } catch {
+      /* observation only */
+    }
   };
   record({ ...observation, status: 'launching' });
+  const protocol = installProtocolDiagnostics((value) => {
+    observation.protocol = value;
+    diagnostic();
+  });
+  observation.protocol = protocol.snapshot();
   let app;
   try {
     app = await launch();
+    protocol.restore();
     const main = app.process();
     observation.pid = main.pid;
     const observeExit = () => {
@@ -178,9 +252,11 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
         observation.naturalExit = observation.closeRequestedAt === null;
       }
     };
-    observations.set(app, { observation, record, observeExit });
+    observations.set(app, { observation, record, observeExit, protocol, diagnostic });
+    processTimeline?.addMain(main.pid, launchNumber);
     main.on('exit', () => {
       observeExit();
+      processTimeline?.mainExit(main.pid);
       record({ ...observation, status: 'exited' });
     });
     for (const stream of ['stdout', 'stderr'])
@@ -188,23 +264,37 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
         observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
         record({ ...observation, status: 'output' });
       });
-    const identity = await app.evaluate(() => ({
-      pid: process.pid,
-      backendOverride: process.env.AIONUI_BACKEND_BIN,
-      resourcesPath: process.resourcesPath,
-    }));
+    observation.identityStartedAt = new Date().toISOString();
+    let identity;
+    try {
+      identity = await app.evaluate(() => ({
+        pid: process.pid,
+        backendOverride: process.env.AIONUI_BACKEND_BIN,
+        resourcesPath: process.resourcesPath,
+      }));
+    } catch (error) {
+      observation.identityFailedAt = new Date().toISOString();
+      observation.protocol = protocol.snapshot();
+      observation.identityProtocol = protocol.snapshot();
+      diagnostic();
+      processTimeline?.checkpoint('identity-failed', launchNumber);
+      throw error;
+    }
     record({ ...observation, status: 'identified', identifiedAt: new Date().toISOString() });
     return { app, identity };
   } catch (error) {
     if (app) {
       // Preserve the existing bounded observation before any smoke shutdown.
-      await waitForExit(app.process()).catch(() => {});
+      await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
       recordLaunchFailure(app, error);
-      await closeElectron(app);
+      await closeElectron(app, { phase: 'identity-failure-cleanup' });
     } else {
       record({ ...observation, status: 'failed', error: String(error) });
       console.error(`Studio launch #${launchNumber} FAILED before process handle: ${error}`);
+      protocol.dispose();
     }
     throw error;
+  } finally {
+    protocol.restore();
   }
 }

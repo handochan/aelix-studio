@@ -4,11 +4,13 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
 import { qualifyRecoveredProfile } from '../../../../tests/manual/recoveredProfile.mjs';
+import { createProcessTimeline } from './processTimeline.mjs';
 import {
   closeElectron as closeElectronProcess,
   electronAppEnvironment,
   launchWithIdentity,
   recordLaunchFailure,
+  recordLaunchEvidence,
   sandboxProcesses,
   verifyConfigPreserved,
 } from '../verification.mjs';
@@ -66,12 +68,17 @@ fs.writeFileSync(
 );
 function recordLifecycle(observation) {
   mainLaunches[observation.launch - 1] = observation;
-  const file = path.join(output, 'renderer-result.json');
-  const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
-  fs.writeFileSync(file, JSON.stringify({ ...previous, checksPassed: [...checks], mainLaunches }, null, 2) + '\n');
-  fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
+  recordLaunchEvidence(output, { checksPassed: [...checks], mainLaunches }, observation);
 }
+const processTimeline = createProcessTimeline({
+  sandbox,
+  record: (value) => {
+    recordLaunchEvidence(output, { processTimeline: value }, { kind: 'process-timeline', ...value });
+  },
+});
+processTimeline.start();
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
+  processTimeline.checkpoint('before-launch', mainLaunches.length + 1);
   checkConfig('before-launch', mainLaunches.length + 1);
   const result = await launchWithIdentity(
     () =>
@@ -85,6 +92,7 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
       launchNumber: mainLaunches.length + 1,
       remainingProcesses: sandboxProcesses(sandbox),
       record: recordLifecycle,
+      processTimeline,
     }
   );
   app = result.app;
@@ -476,6 +484,7 @@ try {
         mainLaunches,
         configPreservation,
         recoveryProfile,
+        processTimeline: JSON.parse(fs.readFileSync(path.join(output, 'renderer-result.json'), 'utf8')).processTimeline,
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,
@@ -504,5 +513,10 @@ try {
   }
   throw error;
 } finally {
-  await closeElectron(app);
+  try {
+    await closeElectron(app);
+  } finally {
+    processTimeline.checkpoint('cleanup-complete', mainLaunches.length);
+    processTimeline.stop();
+  }
 }
