@@ -1148,22 +1148,32 @@ int main(void) {
             self.assertEqual(whole['externalAttempts'], 2)
 
 
+    @contextmanager
+    def check_trace_for_sentinels(self, *sentinels):
+        read_text = Path.read_text
+        inspected = False
+        found = set()
+
+        def inspect(path, *args, **kwargs):
+            nonlocal inspected
+            text = read_text(path, *args, **kwargs)
+            if path.name == 'network.trace':
+                found.update(sentinel for sentinel in sentinels if sentinel in text)
+                inspected = True
+            return text
+
+        with patch.object(Path, 'read_text', inspect):
+            yield
+        self.assertTrue(inspected, 'The audit must read the captured strace output')
+        self.assertEqual(found, set())
+
     def test_trace_suppresses_argument_and_environment_sentinels(self):
-        from unittest.mock import patch
         with tempfile.TemporaryDirectory() as directory:
             report = Path(directory)/'report.json'
-            original = audit.analyze_processes
-            inspected = []
-            def inspect(paths, *args):
-                raw = ''.join(path.read_text() for path in paths)
-                self.assertNotIn('SYNTHETIC_ARGUMENT_SECRET', raw)
-                self.assertNotIn('SYNTHETIC_ENV_SECRET', raw)
-                inspected.append(True)
-                return original(paths, *args)
-            with patch.object(audit, 'analyze_processes', inspect), patch.dict(os.environ, SYNTHETIC_ENV_SECRET='hidden'):
+            with self.check_trace_for_sentinels('SYNTHETIC_ARGUMENT_SECRET', 'SYNTHETIC_ENV_SECRET'), \
+                 patch.dict(os.environ, SYNTHETIC_ENV_SECRET='hidden'):
                 result = audit.audit(['/bin/true','SYNTHETIC_ARGUMENT_SECRET'], report)
             self.assertEqual(result, 0)
-            self.assertTrue(inspected)
 
 
     def test_real_inherited_udp_socket_and_message_vector_are_enforced(self):
@@ -1197,12 +1207,7 @@ int main(void) {
                               'ready.release()\n'
                               '_,status=os.waitpid(child,0)\n'
                               'assert status==0\ns.close();receiver.close()\n')
-            from unittest.mock import patch
-            original = audit.analyze_processes
-            def inspect(paths, *args):
-                self.assertNotIn('SYNTHETIC_PAYLOAD_SECRET', ''.join(path.read_text() for path in paths))
-                return original(paths, *args)
-            with patch.object(audit, 'analyze_processes', inspect):
+            with self.check_trace_for_sentinels('SYNTHETIC_PAYLOAD_SECRET'):
                 result = audit.audit([sys.executable,'-I','-B',str(driver),str(worker)], root/'scoped.json',
                                      scope_executables=(worker,), require_executables=(worker,), whole_report_path=root/'whole.json')
             scoped = json.loads((root/'scoped.json').read_text())
