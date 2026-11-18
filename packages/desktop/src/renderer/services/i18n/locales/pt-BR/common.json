@@ -202,5 +202,10 @@
   },
   "selectedCount": "{{count}} selecionado(s)",
   "selectedSkills": "Habilidades selecionadas",
-  "aiAssistant": "Assistente de IA"
+  "aiAssistant": "Assistente de IA",
+  "configurationRecovery": {
+    "title": "Configurações redefinidas",
+    "message": "Não foi possível recuperar suas configurações, por isso elas foram redefinidas.",
+    "detail": "O arquivo danificado foi preservado. A verificação automática de atualizações ficará desativada até você alterar esta opção nas Configurações."
+  }
 }

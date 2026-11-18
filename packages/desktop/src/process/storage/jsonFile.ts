@@ -4,10 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { readFileSync } from 'node:fs';
+import syncFs from 'node:fs';
+import { randomUUID } from 'node:crypto';
 import fs from 'node:fs/promises';
 import { trackPersistedWrite } from '../utils/persistOnQuit';
-import { atomicReplace } from './atomicFile';
+import { atomicReplace, atomicReplaceSync, cleanupStorageTemps } from './atomicFile';
 
 const encode = (data: unknown): string => btoa(encodeURIComponent(JSON.stringify(data)));
 
@@ -29,41 +30,87 @@ function decode<S extends object>(raw: string): S {
   return value as S;
 }
 
-/** A serialized JSON store with atomic replacement and one last-known-good copy. */
-export function createJsonFileStore<S extends object = Record<string, unknown>>(file: string) {
+type StoreOptions<S> = { empty?: () => S; onReset?: (preservedFile: string) => void };
+
+/** A serialized JSON store that preserves damaged profiles before resetting them. */
+export function createJsonFileStore<S extends object = Record<string, unknown>>(
+  file: string,
+  options: StoreOptions<S> = {}
+) {
   const lastGoodFile = `${file}.bak`;
   let cache: S | null = null;
   let lastGoodRaw: string | undefined;
   let recoveryRaw: string | undefined;
   let writeChain: Promise<unknown> = Promise.resolve();
+  const empty = options.empty ?? (() => ({}) as S);
 
   const load = (): S => {
+    cleanupStorageTemps(file);
+    cleanupStorageTemps(lastGoodFile);
+    let primary: Buffer;
     let primaryReason: string;
     try {
-      const raw = readFileSync(file, 'utf8');
-      const value = decode<S>(raw);
-      lastGoodRaw = raw;
-      return value;
+      primary = syncFs.readFileSync(file);
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
-      // Permission and device failures must not be mistaken for a new profile.
-      if (code && code !== 'ENOENT') throw new Error(`[Storage] Cannot read ${file}: ${code}`, { cause: error });
-      primaryReason = code ?? (error as Error).message;
+      // Deleting the primary is an intentional reset. Ignore a stale backup;
+      // the first save replaces it with the new profile's values.
+      if (code === 'ENOENT') return empty();
+      throw new Error(`[Storage] Cannot read ${file}: ${code}`, { cause: error });
     }
     try {
-      const raw = readFileSync(lastGoodFile, 'utf8');
+      const raw = primary.toString('utf8');
       const value = decode<S>(raw);
       lastGoodRaw = raw;
-      console.warn(`[Storage] Recovering ${file} from last-good copy (${primaryReason}); primary retained until save`);
-      recoveryRaw = raw;
       return value;
     } catch (error) {
-      if (primaryReason === 'ENOENT' && (error as NodeJS.ErrnoException).code === 'ENOENT') return {} as S;
-      // Do not log decoded contents or parser messages containing stored values.
-      throw new Error(`[Storage] Cannot load ${file}: ${primaryReason}; no readable last-good copy; files retained`, {
-        cause: error,
-      });
+      primaryReason = (error as Error).message;
     }
+    let recovered: S | undefined;
+    let recoveredRaw: string | undefined;
+    let backup: Buffer | undefined;
+    try {
+      backup = syncFs.readFileSync(lastGoodFile);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT')
+        throw new Error(`[Storage] Cannot read recovery copy ${lastGoodFile}: ${code}`, { cause: error });
+    }
+    if (backup !== undefined) {
+      try {
+        const raw = backup.toString('utf8');
+        recovered = decode<S>(raw);
+        recoveredRaw = raw;
+      } catch {
+        // Preserve the bytes already read when the backup contents are damaged.
+      }
+    }
+    const preserved = `${file}.corrupt-${Date.now()}-${randomUUID()}`;
+    // Config writes its durable update-suppression marker before preservation,
+    // so a process exit between quarantine and reset cannot re-enable checks.
+    if (!recovered) options.onReset?.(preserved);
+    // Keep the primary present until its atomic replacement. An exit between
+    // preservation and recovery must not look like an intentional deletion.
+    atomicReplaceSync(preserved, primary);
+    console.warn(`[Storage] Preserved damaged ${file} at ${preserved} (${primaryReason})`);
+    if (recovered && recoveredRaw !== undefined) {
+      atomicReplaceSync(file, recoveredRaw);
+      lastGoodRaw = recoveredRaw;
+      recoveryRaw = recoveredRaw;
+      console.warn(`[Storage] Recovering ${file} from last-good copy`);
+      return recovered;
+    }
+    if (backup !== undefined) {
+      const preservedBackup = `${lastGoodFile}.corrupt-${Date.now()}-${randomUUID()}`;
+      atomicReplaceSync(preservedBackup, backup);
+      console.warn(`[Storage] Preserved damaged backup at ${preservedBackup}`);
+    }
+    const value = empty();
+    const encoded = encode(value);
+    atomicReplaceSync(file, encoded);
+    lastGoodRaw = encoded;
+    console.warn(`[Storage] Started ${file} with empty settings after recovery failed`);
+    return value;
   };
 
   const ensureLoaded = (): S => (cache ??= load());
@@ -131,7 +178,7 @@ export function createJsonFileStore<S extends object = Record<string, unknown>>(
     },
     async clear(): Promise<S> {
       ensureLoaded();
-      cache = {} as S;
+      cache = empty();
       return persist();
     },
     getSync<K extends keyof S>(key: K): S[K] {

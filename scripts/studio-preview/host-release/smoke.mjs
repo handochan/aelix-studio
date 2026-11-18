@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
+import { qualifyRecoveredProfile } from '../../../tests/manual/recoveredProfile.mjs';
 import {
   closeElectron as closeElectronProcess,
   electronAppEnvironment,
@@ -30,6 +31,14 @@ const appPids = [],
   checks = [];
 const mainLaunches = [];
 const configPreservation = [];
+let recoveryProfile;
+function recordRecovery(result) {
+  recoveryProfile = result;
+  const file = path.join(output, 'renderer-result.json');
+  const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...previous, recoveryProfile }, null, 2) + '\n');
+  console.log(`Studio recovered profile: ${JSON.stringify(result)}`);
+}
 function checkConfig(phase, launch) {
   verifyConfigPreserved(path.join(sandbox, 'studio/config/aionui-config.txt'), {
     phase,
@@ -121,6 +130,13 @@ async function api(route, method = 'GET', body, status = [200, 201, 202]) {
   return result.data ?? result;
 }
 try {
+  if (executablePath)
+    await qualifyRecoveredProfile({
+      executablePath,
+      environment: appEnv,
+      root: path.join(sandbox, 'recovered-profile'),
+      record: recordRecovery,
+    });
   await launch();
   if (executablePath) {
     await expect
@@ -392,6 +408,7 @@ try {
         appPids,
         mainLaunches,
         configPreservation,
+        recoveryProfile,
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,

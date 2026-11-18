@@ -15,7 +15,7 @@ import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtE
 import { createRendererRecoveryPolicy } from './process/utils/rendererRecovery';
 
 import './process/utils/configureConsoleLog';
-import { app, BrowserWindow, ipcMain, nativeImage, powerMonitor, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerMonitor, session } from 'electron';
 import fixPath from 'fix-path';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -27,7 +27,7 @@ import { assertStartupArchitectureCompatible } from './process/startup/architect
 import { classifyBackendStartupFailure } from './process/startup/backendStartupFailure';
 import { installQuitCleanup } from './process/startup/quitCleanup';
 import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
-import { ProcessConfig } from './process/utils/initStorage';
+import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
 import { pathToFileURL } from 'node:url';
@@ -36,7 +36,7 @@ import { resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
 import { wasLaunchedAtLogin } from '@process/bridge/applicationBridge';
 import { onLanguageChanged } from './process/bridge/systemSettingsBridge';
-import { setInitialLanguage } from '@process/services/i18n';
+import mainI18n, { i18nReady, setInitialLanguage } from '@process/services/i18n';
 import { setupApplicationMenu } from './process/utils/appMenu';
 import { startWebHost } from '@aionui/web-host';
 import { initializeZoomFactor, setupZoomForWindow } from './process/utils/zoom';
@@ -540,6 +540,26 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   registerWindowMaximizeListeners(mainWindow);
   attachWindowBoundsPersistence(mainWindow, (bounds) => ProcessConfig.set('window.bounds', bounds));
 
+  const recoveryWindow = mainWindow;
+  recoveryWindow.webContents.once('did-finish-load', () => {
+    void i18nReady
+      .then(() => {
+        if (recoveryWindow.isDestroyed() || isExplicitQuit) return;
+        return ConfigRecovery.showNotice(async (signal) => {
+          recoveryWindow.show();
+          await dialog.showMessageBox(recoveryWindow, {
+            type: 'warning',
+            title: mainI18n.t('common.configurationRecovery.title'),
+            message: mainI18n.t('common.configurationRecovery.message'),
+            detail: mainI18n.t('common.configurationRecovery.detail'),
+            buttons: [mainI18n.t('common.confirm')],
+            signal,
+          });
+        });
+      })
+      .catch((error) => console.error('[Storage] Could not show configuration recovery notice:', error));
+  });
+
   // Initialize updates; the persisted preference is checked again at the startup delay.
   Promise.all([import('./process/services/autoUpdaterService'), import('./process/bridge/updateBridge')])
     .then(([{ autoUpdaterService }, { createAutoUpdateStatusBroadcast }]) => {
@@ -548,7 +568,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         beforeQuit: async () => {
           await backendManager.stop();
         },
-        readAutoCheck: async () => (await ProcessConfig.get('update.autoCheck')) !== false,
+        readAutoCheck: readAutoCheckPreference,
         discontinued: Boolean(process.env.IS_DISCONTINUED_BUILD),
       });
     })
@@ -1129,6 +1149,7 @@ installQuitCleanup({
   setIsQuitting,
   markExplicitQuit: () => {
     isExplicitQuit = true;
+    ConfigRecovery.cancelNotice();
   },
   destroyTray,
   disposeCronResumeListener: () => {

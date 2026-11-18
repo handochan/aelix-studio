@@ -1,4 +1,5 @@
 import fs from 'node:fs/promises';
+import syncFs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -35,7 +36,7 @@ afterEach(async () => {
 });
 
 describe('persisted JSON integrity', () => {
-  it('treats only absence of both files as a new store', async () => {
+  it('starts a new store when the primary is absent', async () => {
     const store = createJsonFileStore(file);
     expect(store.toJsonSync()).toEqual({});
     await store.set('update.autoCheck', false);
@@ -44,22 +45,24 @@ describe('persisted JSON integrity', () => {
   });
 
   it.each(['', 'not base64!', btoa('%7B'), encode(null), encode(42)])(
-    'preserves unreadable contents instead of applying defaults: %j',
+    'preserves damaged contents under a new name and starts with defaults: %j',
     async (raw) => {
       await fs.writeFile(file, raw);
       const store = createJsonFileStore(file);
-      await expect(store.set('update.autoCheck', true)).rejects.toThrow('files retained');
-      expect(await fs.readFile(file, 'utf8')).toBe(raw);
-      expect(await fs.readdir(directory)).toEqual(['settings.txt']);
+      expect(store.toJsonSync()).toEqual({});
+      const preserved = (await fs.readdir(directory)).find((name) => name.startsWith('settings.txt.corrupt-'));
+      expect(await fs.readFile(path.join(directory, preserved!), 'utf8')).toBe(raw);
+      await store.set('newValue', true);
+      expect(decode(await fs.readFile(file, 'utf8'))).toEqual({ newValue: true });
     }
   );
 
-  it.each(['clear', 'setJson'] as const)('does not bypass corruption detection through %s', async (method) => {
+  it.each(['clear', 'setJson'] as const)('allows %s after preserving corruption', async (method) => {
     await fs.writeFile(file, '');
     const store = createJsonFileStore(file);
     const result = method === 'clear' ? store.clear() : store.setJson({});
-    await expect(result).rejects.toThrow('files retained');
-    expect(await fs.readFile(file, 'utf8')).toBe('');
+    await expect(result).resolves.toEqual({});
+    expect(decode(await fs.readFile(file, 'utf8'))).toEqual({});
   });
 
   it('recovers valid settings from the last-good copy with a diagnostic and repairs on save', async () => {
@@ -73,10 +76,12 @@ describe('persisted JSON integrity', () => {
     expect(decode(await fs.readFile(file, 'utf8'))['update.autoCheck']).toBe(false);
   });
 
-  it('does not treat a missing primary with a damaged backup as a new store', async () => {
-    await fs.writeFile(`${file}.bak`, '');
-    expect(() => createJsonFileStore(file).toJsonSync()).toThrow('files retained');
-    expect(await fs.readdir(directory)).toEqual(['settings.txt.bak']);
+  it.each(['', encode({ oldSetting: true })])('ignores a stale backup after primary deletion: %j', async (backup) => {
+    await fs.writeFile(`${file}.bak`, backup);
+    const store = createJsonFileStore(file);
+    expect(store.toJsonSync()).toEqual({});
+    await store.set('newSetting', true);
+    expect(decode(await fs.readFile(`${file}.bak`, 'utf8'))).toEqual({ newSetting: true });
   });
 
   it('rejects a filesystem read error even when a recovery copy exists', async () => {
@@ -86,14 +91,36 @@ describe('persisted JSON integrity', () => {
     expect((await fs.stat(file)).isDirectory()).toBe(true);
   });
 
-  it('does not disclose malformed setting contents in its error', async () => {
+  it.each(['EACCES', 'EIO'])('does not mistake backup %s for absence or overwrite its values', async (code) => {
+    await fs.writeFile(file, '');
+    const original = encode({ 'update.autoCheck': false });
+    await fs.writeFile(`${file}.bak`, original);
+    const read = syncFs.readFileSync.bind(syncFs);
+    vi.spyOn(syncFs, 'readFileSync').mockImplementation((...args) => {
+      if (args[0] === `${file}.bak`) throw Object.assign(new Error('synthetic unreadable backup'), { code });
+      return read(...args);
+    });
+    vi.spyOn(syncFs, 'existsSync').mockReturnValue(false);
+    await expect(createJsonFileStore(file).set('newValue', true)).rejects.toThrow('Cannot read recovery copy');
+    expect(await fs.readFile(`${file}.bak`, 'utf8')).toBe(original);
+    expect(await fs.readFile(file, 'utf8')).toBe('');
+  });
+
+  it('preserves the exact malformed bytes of both primary and backup', async () => {
+    const raw = Buffer.from([0xff, 0xfe, 0x00]);
+    await fs.writeFile(file, raw);
+    await fs.writeFile(`${file}.bak`, raw);
+    expect(createJsonFileStore(file).toJsonSync()).toEqual({});
+    const preserved = (await fs.readdir(directory)).filter((name) => name.includes('.corrupt-'));
+    expect(preserved.length).toBe(2);
+    expect(await Promise.all(preserved.map((name) => fs.readFile(path.join(directory, name))))).toEqual([raw, raw]);
+  });
+
+  it('does not disclose malformed setting contents in recovery diagnostics', async () => {
     await fs.writeFile(file, btoa(encodeURIComponent('{"secret":"SYNTHETIC_PRIVATE_VALUE')));
-    expect(() => createJsonFileStore(file).toJsonSync()).toThrow('invalid JSON');
-    try {
-      createJsonFileStore(file).toJsonSync();
-    } catch (error) {
-      expect(String(error)).not.toContain('SYNTHETIC_PRIVATE_VALUE');
-    }
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(createJsonFileStore(file).toJsonSync()).toEqual({});
+    expect(JSON.stringify(warning.mock.calls)).not.toContain('SYNTHETIC_PRIVATE_VALUE');
   });
 
   it('serializes writes while keeping the latest committed value in one backup', async () => {
@@ -144,6 +171,32 @@ describe('persisted JSON integrity', () => {
   it('round-trips array stores used by conversation histories', async () => {
     await createJsonFileStore<string[]>(file).setJson(['message']);
     expect(createJsonFileStore<string[]>(file).toJsonSync()).toEqual(['message']);
+  });
+
+  it.each(['.aionui-env', 'aionui-chat.txt', 'aionui-chat-message.txt', 'history.txt'])(
+    'starts damaged %s without throwing',
+    async (name) => {
+      const target = path.join(directory, name);
+      await fs.writeFile(target, '');
+      const store = createJsonFileStore(target, { empty: () => (name === 'history.txt' ? [] : {}) });
+      expect(store.toJsonSync()).toEqual(name === 'history.txt' ? [] : {});
+      expect((await fs.readdir(directory)).some((entry) => entry.startsWith(name + '.corrupt-'))).toBe(true);
+    }
+  );
+
+  it('leaves the primary present if restoring a valid backup is interrupted', async () => {
+    await fs.writeFile(file, '');
+    await fs.writeFile(`${file}.bak`, encode({ 'update.autoCheck': false }));
+    const sync = await import('node:fs');
+    const rename = sync.default.renameSync.bind(sync.default);
+    const failure = vi.spyOn(sync.default, 'renameSync').mockImplementation((from, to) => {
+      if (to === file) throw new Error('synthetic interrupted recovery');
+      return rename(from, to);
+    });
+    expect(() => createJsonFileStore(file).toJsonSync()).toThrow('synthetic interrupted recovery');
+    expect(await fs.readFile(file, 'utf8')).toBe('');
+    failure.mockRestore();
+    expect(createJsonFileStore(file).getSync('update.autoCheck')).toBe(false);
   });
 
   it('archives without leaving a recovery file that can resurrect the conversation', async () => {

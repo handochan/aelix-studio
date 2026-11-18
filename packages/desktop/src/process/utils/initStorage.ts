@@ -29,6 +29,7 @@ import {
 } from './utils';
 import { runLegacyDatabaseMigrations } from '@process/services/database/runLegacyDatabaseMigrations';
 import { createJsonFileStore as JsonFileBuilder } from '../storage/jsonFile';
+import { createConfigRecovery } from '../storage/configRecovery';
 import { BUILTIN_IMAGE_GEN_ID } from '../resources/builtinMcp/constants';
 // Platform and architecture types (moved from deleted updateConfig)
 type PlatformType = 'win32' | 'darwin' | 'linux';
@@ -104,13 +105,26 @@ const migrateLegacyData = async () => {
   return false;
 };
 
-const envFile = JsonFileBuilder<IEnvStorageRefer>(path.join(getHomePage(), STORAGE_PATH.env));
+// Stable profile location: resetting env can lose a custom cacheDir as well.
+export const ConfigRecovery = createConfigRecovery(path.join(getHomePage(), STORAGE_PATH.config));
+const envFile = JsonFileBuilder<IEnvStorageRefer>(path.join(getHomePage(), STORAGE_PATH.env), {
+  onReset: (preserved) => ConfigRecovery.mark(preserved),
+});
 
 const dirConfig = envFile.getSync('aionui.dir');
 
 const cacheDir = dirConfig?.cacheDir || getHomePage();
 
-const configFile = JsonFileBuilder<ILegacyConfigStorageRefer>(path.join(cacheDir, STORAGE_PATH.config));
+const configPath = path.join(cacheDir, STORAGE_PATH.config);
+const configFile = JsonFileBuilder<ILegacyConfigStorageRefer>(configPath, {
+  empty: () => (ConfigRecovery.active() ? { 'update.autoCheck': false } : {}) as ILegacyConfigStorageRefer,
+  onReset: (preserved) => ConfigRecovery.mark(preserved),
+});
+
+/** Recovery stays offline until the user explicitly saves the update preference. */
+export async function readAutoCheckPreference(): Promise<boolean> {
+  return ConfigRecovery.autoCheck(await configFile.get('update.autoCheck'));
+}
 type ConversationHistoryData = Record<string, TMessage[]>;
 
 const _chatMessageFile = JsonFileBuilder<ConversationHistoryData>(path.join(cacheDir, STORAGE_PATH.chatMessage));
@@ -123,7 +137,9 @@ const buildMessageListStorage = (conversation_id: string, dir: string) => {
   if (!existsSync(fullName)) {
     mkdirSync(path.join(dir, 'aionui-chat-history'));
   }
-  return JsonFileBuilder<TMessage[]>(path.join(dir, 'aionui-chat-history', conversation_id + '.txt'));
+  return JsonFileBuilder<TMessage[]>(path.join(dir, 'aionui-chat-history', conversation_id + '.txt'), {
+    empty: () => [],
+  });
 };
 
 const conversationHistoryProxy = (options: typeof _chatMessageFile, dir: string) => {

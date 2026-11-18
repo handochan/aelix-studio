@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 const { appHandlers, appQuit } = vi.hoisted(() => ({
   appHandlers: {} as Record<string, Array<(...args: unknown[]) => void>>,
@@ -27,6 +27,10 @@ vi.mock('electron', () => ({
 import { trackPersistedWrite, __resetPersistOnQuitForTests } from '@/process/utils/persistOnQuit';
 
 describe('persistOnQuit', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
   beforeEach(() => {
     for (const key of Object.keys(appHandlers)) delete appHandlers[key];
     appQuit.mockReset();
@@ -51,6 +55,7 @@ describe('persistOnQuit', () => {
   });
 
   it('also drains another write added while the first batch is settling', async () => {
+    vi.useFakeTimers();
     let first: (() => void) | undefined;
     let second: (() => void) | undefined;
     trackPersistedWrite(
@@ -65,11 +70,26 @@ describe('persistOnQuit', () => {
       })
     );
     first?.();
-    await Promise.resolve();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(0);
     expect(appQuit).not.toHaveBeenCalled();
     second?.();
-    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(appQuit).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('continues shutdown after five seconds even if a write never settles', async () => {
+    vi.useFakeTimers();
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    trackPersistedWrite(new Promise(() => {}));
+    fireAppEvent('will-quit', { preventDefault: vi.fn() });
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(appQuit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect([appQuit.mock.calls.length, log.mock.calls.length]).toEqual([1, 1]);
+    const preventDefault = vi.fn();
+    fireAppEvent('will-quit', { preventDefault });
+    expect(preventDefault).not.toHaveBeenCalled();
   });
 
   it('defers app.quit until a pending write resolves', async () => {

@@ -202,5 +202,10 @@
   },
   "selectedCount": "選択済み {{count}}",
   "selectedSkills": "選択済みスキル",
-  "aiAssistant": "AI アシスタント"
+  "aiAssistant": "AI アシスタント",
+  "configurationRecovery": {
+    "title": "設定のリセット",
+    "message": "設定を復元できなかったため、初期化しました。",
+    "detail": "破損したファイルは保存されています。「設定」でこのオプションを変更するまで、更新の自動確認は無効のままです。"
+  }
 }
