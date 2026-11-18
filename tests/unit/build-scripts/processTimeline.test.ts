@@ -157,6 +157,6 @@ describe('owned process observation', () => {
   it('does not return raw command lines from a real process table', async () => {
     const value = await processSnapshot('PRIVATE_NONMATCHING_ROOT');
     if (value.status === 'observed') expect(value.rows.every((entry: object) => !('command' in entry))).toBe(true);
-    else expect(value).toEqual({ status: 'unavailable', rows: [] });
+    else expect(value).toMatchObject({ status: 'unavailable', rows: [] });
   });
 });

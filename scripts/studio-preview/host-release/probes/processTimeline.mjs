@@ -1,9 +1,22 @@
 import { execFile } from 'node:child_process';
 import { readFile, readdir } from 'node:fs/promises';
 import { promisify } from 'node:util';
+import { createWindowsProcessReader } from './windowsProcesses.mjs';
 
 const run = promisify(execFile);
 const ROLES = new Set(['main', 'host', 'acp', 'native-wrapper', 'native']);
+const UNAVAILABLE = new Set([
+  'snapshot-read-error',
+  'snapshot-unavailable',
+  'cim-query-error',
+  'cim-query-timeout',
+  'cim-query-pending',
+  'cim-worker-error',
+  'cim-worker-exited',
+  'cim-worker-input-error',
+  'cim-response-too-large',
+  'cim-reader-stopped',
+]);
 
 /** Classify only fixed fixture/runtime roles; command lines remain private. */
 export function processRole(command, executablePath) {
@@ -21,8 +34,8 @@ export function processRole(command, executablePath) {
   return 'other';
 }
 
-/** Read process identities asynchronously; no signal, wait-for-exit, or product instrumentation. */
-export async function processSnapshot(sandbox, platform = process.platform) {
+/** Read process identities asynchronously; no product signal, exit wait, or instrumentation. */
+export async function processSnapshot(sandbox, platform = process.platform, windowsReader) {
   try {
     let rows;
     if (platform === 'linux') {
@@ -64,18 +77,15 @@ export async function processSnapshot(sandbox, platform = process.platform) {
         )
       ).filter(Boolean);
     } else if (platform === 'win32') {
-      const { stdout } = await run(
-        'powershell.exe',
-        [
-          '-NoProfile',
-          '-NonInteractive',
-          '-Command',
-          '@(Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,CommandLine,ExecutablePath,@{n="Birth";e={if($_.CreationDate){$_.CreationDate.ToUniversalTime().Ticks.ToString()}else{""}}}) | ConvertTo-Json -Compress',
-        ],
-        { timeout: 2000, maxBuffer: 4 * 1024 * 1024 }
-      );
-      const value = JSON.parse(stdout || '[]');
-      rows = (Array.isArray(value) ? value : [value]).map((row) => ({
+      const reader = windowsReader ?? createWindowsProcessReader();
+      let value;
+      try {
+        value = await reader.read();
+      } finally {
+        if (!windowsReader) reader.stop();
+      }
+      if (value.status !== 'observed') return { ...value, rows: [] };
+      rows = value.rows.map((row) => ({
         pid: row.ProcessId,
         parentPid: row.ParentProcessId,
         birth: String(row.Birth ?? ''),
@@ -126,7 +136,7 @@ export async function processSnapshot(sandbox, platform = process.platform) {
         .map(({ command: _command, executablePath: _executablePath, gone: _gone, ...row }) => row),
     };
   } catch {
-    return { status: 'unavailable', rows: [] };
+    return { status: 'unavailable', reason: 'snapshot-read-error', rows: [] };
   }
 }
 
@@ -134,10 +144,12 @@ export async function processSnapshot(sandbox, platform = process.platform) {
 export function createProcessTimeline({ sandbox, record = () => {}, snapshot, intervalMs = 1000 } = {}) {
   const roots = new Map();
   const entries = new Map();
+  const windowsReader = process.platform === 'win32' && !snapshot ? createWindowsProcessReader() : null;
   let timer, pending;
   let stopped = false;
   let sampleCount = 0;
   let unavailableSamples = 0;
+  const unavailableReasons = {};
   let phase = 'before-launch';
   let launch = null;
   let droppedProcesses = 0;
@@ -148,6 +160,7 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
         intervalMs,
         sampleCount,
         unavailableSamples,
+        unavailableReasons: { ...unavailableReasons },
         droppedProcesses,
         exitTimeMeaning: 'first-observed-absent-or-zombie; lower-bound=lastLiveSampleStartedAt-or-unknown',
         processes: [...entries.values()].map((entry) => ({ ...entry, parentChanges: [...entry.parentChanges] })),
@@ -160,6 +173,8 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
     sampleCount++;
     if (value.status !== 'observed') {
       unavailableSamples++;
+      const reason = UNAVAILABLE.has(value.reason) ? value.reason : 'snapshot-unavailable';
+      unavailableReasons[reason] = (unavailableReasons[reason] ?? 0) + 1;
       publish();
       return;
     }
@@ -254,8 +269,10 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
     if (pending || stopped) return;
     const context = { phase, launch, startedAt: new Date().toISOString() };
     pending = Promise.resolve()
-      .then(snapshot ?? (() => processSnapshot(sandbox)))
-      .then((value) => observe(value, new Date().toISOString(), context))
+      .then(snapshot ?? (() => processSnapshot(sandbox, process.platform, windowsReader)))
+      .then((value) => {
+        if (!(stopped && value.reason === 'cim-reader-stopped')) observe(value, new Date().toISOString(), context);
+      })
       .catch(() => observe({ status: 'unavailable' }, new Date().toISOString(), context))
       .finally(() => {
         pending = null;
@@ -285,6 +302,7 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
     stop() {
       stopped = true;
       clearInterval(timer);
+      windowsReader?.stop();
       publish();
     },
   };

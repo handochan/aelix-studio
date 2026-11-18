@@ -73,7 +73,7 @@ snapshot is frozen before later cleanup events. An unsupported adapter is
 recorded as unavailable without changing the smoke result.
 
 `renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)
-samples once per second, with no overlapping query and no process signaling or
+samples once per second, with no overlapping query and no product process signaling or
 exit wait. Linux uses `/proc` without spawning polling subprocesses; macOS uses
 asynchronous ps and Windows uses CIM. Query failures are unavailable observations,
 never invented exits. Only owned/sandbox-matched main, host, ACP, native-wrapper
@@ -93,6 +93,17 @@ events remain in `mainLaunches` with their original direct observations.
 The process timeline is also appended to `startup-lifecycle.jsonl`; the complete
 summary is merged into the already uploaded renderer result on both installer
 and whole-app jobs. No artifact path or workflow change is required.
+
+Windows reuses one hidden, diagnostic-only PowerShell CIM reader. A cold query
+still has the same 2s observation bound and can be unavailable; a late response
+is discarded and the warmed reader serves subsequent periodic samples. No app
+wait or retry is added. `unavailableReasons` counts only fixed, privacy-safe
+reason codes. Stopping the sampler terminates only its directly owned diagnostic
+worker handle, never a product/host/ACP/native process. This avoids repeatedly
+paying PowerShell startup within every 2s query. The earlier short-lived query
+implementation produced 53/53 unavailable observations on Windows CI while the
+installed smoke itself passed; that was a diagnostic failure, not successful
+process evidence. The old pre-launch sandbox check remains unchanged.
 
 Provider helper smoke's old 5s callback guard came from fixture commit
 `382c819db`, not a product response requirement. Product service limits remain
