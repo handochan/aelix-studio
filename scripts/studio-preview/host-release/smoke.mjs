@@ -3,13 +3,20 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
+import {
+  closeElectron as closeElectronProcess,
+  electronAppEnvironment,
+  launchWithIdentity,
+  recordLaunchFailure,
+  sandboxProcesses,
+  verifyConfigPreserved,
+} from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
 assert.ok(sandbox && output, 'Run through smoke.py with isolated synthetic state');
 const executablePath = process.env.RECOVERY_APP_EXECUTABLE;
-const appEnv = { ...process.env };
+const appEnv = electronAppEnvironment(process.env);
 if (executablePath) {
   for (const name of ['AIONUI_BACKEND_BIN', 'AELIX_STUDIO_RUNTIME', 'AIONUI_BUNDLED_MANAGED_RESOURCES'])
     delete appEnv[name];
@@ -22,7 +29,32 @@ let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
 const mainLaunches = [];
-fs.writeFileSync(path.join(output, 'renderer-result.json'), JSON.stringify({ checksPassed: [], mainLaunches }));
+const configPreservation = [];
+function checkConfig(phase, launch) {
+  verifyConfigPreserved(path.join(sandbox, 'studio/config/aionui-config.txt'), {
+    phase,
+    launch,
+    record: (result) => {
+      configPreservation.push(result);
+      const file = path.join(output, 'renderer-result.json');
+      const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
+      fs.writeFileSync(file, JSON.stringify({ ...previous, configPreservation }, null, 2) + '\n');
+      console.log(`Studio config preservation: ${JSON.stringify(result)}`);
+    },
+  });
+}
+async function closeElectron(current) {
+  if (!current) return;
+  await closeElectronProcess(current);
+  // Clear the live handle before an assertion can fail: the disposed Playwright
+  // application must not be closed again by the outer failure cleanup.
+  if (current === app) app = null;
+  checkConfig('after-os-exit', mainLaunches.length);
+}
+fs.writeFileSync(
+  path.join(output, 'renderer-result.json'),
+  JSON.stringify({ checksPassed: [], mainLaunches, configPreservation })
+);
 function recordLifecycle(observation) {
   mainLaunches[observation.launch - 1] = observation;
   const file = path.join(output, 'renderer-result.json');
@@ -31,6 +63,7 @@ function recordLifecycle(observation) {
   fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
 }
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
+  checkConfig('before-launch', mainLaunches.length + 1);
   const result = await launchWithIdentity(
     () =>
       electron.launch({
@@ -358,6 +391,7 @@ try {
         electronVersions: await app.evaluate(() => process.versions),
         appPids,
         mainLaunches,
+        configPreservation,
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,

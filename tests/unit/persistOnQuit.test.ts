@@ -33,6 +33,45 @@ describe('persistOnQuit', () => {
     __resetPersistOnQuitForTests();
   });
 
+  it('waits for writes first created by window close after before-quit', async () => {
+    const beforeQuit = vi.fn();
+    fireAppEvent('before-quit', { preventDefault: beforeQuit });
+    let release: (() => void) | undefined;
+    trackPersistedWrite(
+      new Promise<void>((resolve) => {
+        release = resolve;
+      })
+    );
+    const willQuit = vi.fn();
+    fireAppEvent('will-quit', { preventDefault: willQuit });
+    expect(beforeQuit).not.toHaveBeenCalled();
+    expect(willQuit).toHaveBeenCalled();
+    release?.();
+    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
+  });
+
+  it('also drains another write added while the first batch is settling', async () => {
+    let first: (() => void) | undefined;
+    let second: (() => void) | undefined;
+    trackPersistedWrite(
+      new Promise<void>((resolve) => {
+        first = resolve;
+      })
+    );
+    fireAppEvent('will-quit', { preventDefault: vi.fn() });
+    trackPersistedWrite(
+      new Promise<void>((resolve) => {
+        second = resolve;
+      })
+    );
+    first?.();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(appQuit).not.toHaveBeenCalled();
+    second?.();
+    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
+  });
+
   it('defers app.quit until a pending write resolves', async () => {
     let resolveWrite: (() => void) | undefined;
     trackPersistedWrite(
@@ -42,7 +81,7 @@ describe('persistOnQuit', () => {
     );
 
     const preventDefault = vi.fn();
-    fireAppEvent('before-quit', { preventDefault });
+    fireAppEvent('will-quit', { preventDefault });
     expect(preventDefault).toHaveBeenCalled();
     expect(appQuit).not.toHaveBeenCalled();
 
@@ -50,7 +89,7 @@ describe('persistOnQuit', () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    expect(appQuit).toHaveBeenCalled();
+    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
   });
 
   it('does not block quit when no writes are pending', async () => {
@@ -60,7 +99,7 @@ describe('persistOnQuit', () => {
     await Promise.resolve();
 
     const preventDefault = vi.fn();
-    fireAppEvent('before-quit', { preventDefault });
+    fireAppEvent('will-quit', { preventDefault });
     expect(preventDefault).not.toHaveBeenCalled();
   });
 
@@ -73,17 +112,17 @@ describe('persistOnQuit', () => {
     );
 
     const preventDefault = vi.fn();
-    fireAppEvent('before-quit', { preventDefault });
+    fireAppEvent('will-quit', { preventDefault });
     expect(preventDefault).toHaveBeenCalled();
 
     rejectWrite?.(new Error('disk full'));
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    expect(appQuit).toHaveBeenCalled();
+    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
   });
 
-  it('keeps blocking repeated before-quit events while writes are still flushing', async () => {
+  it('keeps blocking repeated will-quit events while writes are still flushing', async () => {
     let resolveWrite: (() => void) | undefined;
     trackPersistedWrite(
       new Promise<void>((resolve) => {
@@ -92,11 +131,11 @@ describe('persistOnQuit', () => {
     );
 
     const firstPreventDefault = vi.fn();
-    fireAppEvent('before-quit', { preventDefault: firstPreventDefault });
+    fireAppEvent('will-quit', { preventDefault: firstPreventDefault });
     expect(firstPreventDefault).toHaveBeenCalled();
 
     const secondPreventDefault = vi.fn();
-    fireAppEvent('before-quit', { preventDefault: secondPreventDefault });
+    fireAppEvent('will-quit', { preventDefault: secondPreventDefault });
     expect(secondPreventDefault).toHaveBeenCalled();
     expect(appQuit).not.toHaveBeenCalled();
 
@@ -104,6 +143,6 @@ describe('persistOnQuit', () => {
     await Promise.resolve();
     await Promise.resolve();
     await Promise.resolve();
-    expect(appQuit).toHaveBeenCalled();
+    await vi.waitFor(() => expect(appQuit).toHaveBeenCalledTimes(1));
   });
 });

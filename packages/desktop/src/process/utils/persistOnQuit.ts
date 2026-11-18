@@ -19,17 +19,18 @@ let flushing = false;
 const ensureHandlerInstalled = (): void => {
   if (installed) return;
   installed = true;
-  app.on('before-quit', (event) => {
-    if (flushing) {
-      if (pending.size > 0) {
-        event.preventDefault();
-      }
-      return;
-    }
+  // before-quit precedes window close, which can enqueue the final bounds write.
+  // will-quit runs after those close handlers, including the first tracked write.
+  app.on('will-quit', (event) => {
     if (pending.size === 0) return;
-    flushing = true;
     event.preventDefault();
-    Promise.allSettled(pending).finally(() => {
+    if (flushing) return;
+    flushing = true;
+    const drain = async () => {
+      while (pending.size > 0) await Promise.allSettled(pending);
+    };
+    void drain().finally(() => {
+      flushing = false;
       app.quit();
     });
   });
@@ -40,7 +41,7 @@ const ensureHandlerInstalled = (): void => {
  * persistence callers are expected to log their own failures; the only role
  * here is to keep the process alive long enough for the write to land.
  */
-export const trackPersistedWrite = (promise: Promise<unknown>): Promise<unknown> => {
+export const trackPersistedWrite = <T>(promise: Promise<T>): Promise<T> => {
   ensureHandlerInstalled();
   const tracked = promise.catch(() => {});
   pending.add(tracked);
