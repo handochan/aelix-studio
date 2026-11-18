@@ -198,6 +198,10 @@ test('ordinary HTML and SVG open below folders named workspace and reports', asy
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-ordinary-preview-'));
   const directory = path.join(parent, 'workspace', 'reports', 'quarterly', 'site');
   fs.mkdirSync(directory, { recursive: true });
+  fs.writeFileSync(
+    path.join(parent, 'journal.jsonl'),
+    ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
+  );
   fs.writeFileSync(path.join(directory, 'index.html'), '<h1>Ordinary HTML</h1>');
   fs.writeFileSync(
     path.join(directory, 'logo.svg'),
@@ -229,11 +233,12 @@ test('Explorer refuses a markerless prepared Report opened from its content fold
   fs.writeFileSync(path.join(content, 'prepared.html'), '<h1>Prepared Report</h1>');
   fs.writeFileSync(
     path.join(parent, 'journal.jsonl'),
-    [
-      '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project","refs":{}}',
-      '{"schema":"analytics.event/2","id":"e2","seq":2,"kind":"context","refs":[]}',
-      '',
-    ].join('\n')
+    ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512) +
+      [
+        '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project","refs":{}}',
+        '{"schema":"analytics.event/2","id":"e2","seq":2,"kind":"context","refs":[]}',
+        '',
+      ].join('\n')
   );
   fs.writeFileSync(
     path.join(stage, 'manifest.json'),

@@ -6,7 +6,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { appendFileSync } from 'node:fs';
-import { appendFile, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, open, rm, symlink, truncate, writeFile, type FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
@@ -371,5 +371,102 @@ describe('Analytics preview resource routing', () => {
     const result = await locateAnalyticsDocument(filename);
     expect(result?.root.directory).toContain(path.join('workspace', 'demo'));
     expect(result?.parts).toEqual(['workspace', 'index.html']);
+  });
+
+  it('falls back for ordinary HTML and SVG without decoding the tail of a large ancestor journal', async () => {
+    const dir = path.join(scratch, 'workspace', 'reports', 'quarterly', 'site');
+    await mkdir(dir, { recursive: true });
+    await writeFile(
+      path.join(scratch, 'journal.jsonl'),
+      ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512) +
+        '{"schema":"lab.event/1","id":"tail-evidence","seq":1}\n'
+    );
+    for (const name of ['index.html', 'logo.svg']) {
+      const filename = path.join(dir, name);
+      await writeFile(filename, 'ordinary fixture');
+      expect(await locateAnalyticsDocument(filename)).toBeUndefined();
+    }
+  });
+
+  it.each([
+    ['artifacts', 'reports', 'monthly', '.staging', 'revision-a', 'content', 'index.html'],
+    ['artifacts', 'reports', 'monthly', 'revision-a', 'content', 'index.html'],
+    ['workspace', 'reports', 'monthly-stem', 'revision-a', 'files', 'attachment.html'],
+    ['workspace', 'reports', 'monthly-stem', 'revision-a', 'preview', 'report.html'],
+  ])('refuses an unresolved Report content path under %j', async (...parts) => {
+    const directory = await mkdtemp(path.join(scratch, 'unresolved-'));
+    const filename = path.join(directory, ...parts);
+    await mkdir(path.dirname(filename), { recursive: true });
+    await writeFile(filename, '<h1>Report</h1>');
+    await writeFile(
+      path.join(directory, 'journal.jsonl'),
+      ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
+    );
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+  });
+
+  it('admits two probes without queuing ordinary previews or allowing prepared Reports to fall back', async () => {
+    const plain = await Promise.all(
+      ['left', 'right', 'other'].map(async (name) => {
+        const dir = path.join(scratch, name, 'workspace');
+        await mkdir(dir, { recursive: true });
+        await writeFile(path.join(dir, 'index.html'), '<h1>Ordinary</h1>');
+        await writeFile(path.join(path.dirname(dir), 'journal.jsonl'), '{"schema":"unrelated"}\n');
+        return path.join(dir, 'index.html');
+      })
+    );
+    const staged = ['artifacts', 'reports', 'monthly', '.staging', 'revision-a'];
+    const prepared = await write([...staged, 'content', 'index.html'], '<h1>Prepared</h1>');
+    const confirmed = await write([...staged, 'content', 'confirmed.html'], '<h1>Prepared</h1>');
+    await rm(path.join(rootDirectory, 'analytics.json'));
+    const journal = await write(['journal.jsonl'], '{"schema":"unrelated"}\n');
+
+    type Read = (
+      this: FileHandle,
+      buffer: Buffer,
+      offset: number,
+      length: number,
+      position: number
+    ) => Promise<unknown>;
+    const handle = await open(journal, 'r');
+    const prototype = Object.getPrototypeOf(handle) as { read: Read };
+    await handle.close();
+    const read = prototype.read;
+    let entered = 0;
+    let release!: () => void;
+    const pause = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const spy = vi.spyOn(prototype, 'read').mockImplementation(async function (
+      this: FileHandle,
+      buffer: Buffer,
+      offset: number,
+      length: number,
+      position: number
+    ) {
+      if (buffer.length === 64 * 1024 && ++entered <= 2) await pause;
+      return read.call(this, buffer, offset, length, position);
+    });
+    const firstTwo = Promise.all(plain.slice(0, 2).map(locateAnalyticsDocument));
+    let finished = false;
+    const probeRest = async () => {
+      expect(await locateAnalyticsDocument(plain[2])).toBeUndefined();
+      await expect(locateAnalyticsDocument(prepared)).rejects.toThrow('Analytics project marker is unavailable');
+      await write([...staged, 'manifest.json'], manifest({ 'confirmed.html': '<h1>Prepared</h1>' }));
+      await expect(locateAnalyticsDocument(confirmed)).rejects.toThrow('Analytics project marker is unavailable');
+      finished = true;
+    };
+    let rest: Promise<void> | undefined;
+    try {
+      await vi.waitFor(() => expect(entered).toBe(2));
+      rest = probeRest();
+      void rest.catch(() => {});
+      await vi.waitFor(() => expect(finished).toBe(true));
+      expect(entered).toBe(2);
+    } finally {
+      release();
+      await Promise.allSettled([firstTwo, rest]);
+      spy.mockRestore();
+    }
   });
 });

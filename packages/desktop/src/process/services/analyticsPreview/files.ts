@@ -20,6 +20,9 @@ const MAX_MARKER_BYTES = 64 * 1024;
 // Both supported Analytics writers limit a complete record to less than 50 KiB.
 const MAX_JOURNAL_LINE_BYTES = 64 * 1024;
 const JOURNAL_CHUNK_BYTES = 64 * 1024;
+const JOURNAL_PROBE_BYTES = 256 * 1024;
+const MAX_ACTIVE_JOURNAL_PROBES = 2;
+let activeJournalProbes = 0;
 
 const contentTypes = new Map([
   ['.htm', 'text/html; charset=utf-8'],
@@ -127,13 +130,15 @@ export async function readPreviewFile(
   });
 }
 
-async function* journalLines(file: FileHandle, size: number, strict = true): AsyncGenerator<string> {
+async function* journalLines(file: FileHandle, size: number, probeBytes?: number): AsyncGenerator<string> {
+  const strict = probeBytes === undefined;
+  const endOfScan = probeBytes ?? size;
   const decoder = new TextDecoder('utf-8', { fatal: strict, ignoreBOM: true });
   const chunk = Buffer.alloc(JOURNAL_CHUNK_BYTES);
   let carry = Buffer.alloc(0);
   let discardLine = false;
-  for (let offset = 0; offset < size; ) {
-    const { bytesRead } = await file.read(chunk, 0, Math.min(chunk.length, size - offset), offset);
+  for (let offset = 0; offset < endOfScan; ) {
+    const { bytesRead } = await file.read(chunk, 0, Math.min(chunk.length, endOfScan - offset), offset);
     if (!bytesRead) throw new Error('Analytics journal was truncated');
     offset += bytesRead;
     const data = carry.length ? Buffer.concat([carry, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead);
@@ -153,7 +158,7 @@ async function* journalLines(file: FileHandle, size: number, strict = true): Asy
     }
     carry = discardLine ? Buffer.alloc(0) : Buffer.from(data.subarray(start));
   }
-  if (carry.length) yield decoder.decode(carry);
+  if (carry.length && endOfScan === size) yield decoder.decode(carry);
 }
 
 /** Scan a single verified journal snapshot without imposing the asset size limit. */
@@ -164,29 +169,48 @@ export async function scanPreviewJournal<T>(
   return withStableFile(root, ['journal.jsonl'], (file, size) => scan(() => journalLines(file, size)));
 }
 
-async function hasAnalyticsJournal(root: PreviewRoot): Promise<boolean> {
+type JournalProbe = 'analytics' | 'no-evidence' | 'inconclusive';
+type ProbeBudget = { remaining: number };
+
+async function probeAnalyticsJournal(root: PreviewRoot, budget: ProbeBudget): Promise<JournalProbe> {
+  try {
+    await lstat(path.join(root.directory, 'journal.jsonl'));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'no-evidence' : 'inconclusive';
+  }
+  if (budget.remaining <= 0 || activeJournalProbes >= MAX_ACTIVE_JOURNAL_PROBES) return 'inconclusive';
+
+  activeJournalProbes++;
   let recognized = false;
-  await withStableFile(root, ['journal.jsonl'], async (file, size) => {
-    for await (const line of journalLines(file, size, false)) {
-      if (!line.trim()) continue;
-      try {
-        const entry: unknown = JSON.parse(line);
-        if (
-          entry &&
-          typeof entry === 'object' &&
-          'schema' in entry &&
-          (entry.schema === 'lab.event/1' || entry.schema === 'analytics.event/2')
-        ) {
-          recognized = true;
-          return;
+  try {
+    const result = await withStableFile<JournalProbe>(root, ['journal.jsonl'], async (file, size) => {
+      const bytes = Math.min(budget.remaining, size);
+      budget.remaining -= bytes;
+      for await (const line of journalLines(file, size, bytes)) {
+        if (!line.trim()) continue;
+        try {
+          const entry: unknown = JSON.parse(line);
+          if (
+            entry &&
+            typeof entry === 'object' &&
+            'schema' in entry &&
+            (entry.schema === 'lab.event/1' || entry.schema === 'analytics.event/2')
+          ) {
+            recognized = true;
+            return 'analytics';
+          }
+        } catch {
+          // Recognition only denies fallback. Scan past damage within the prefix.
         }
-      } catch {
-        // Recognition only denies fallback. A damaged row must not hide later Analytics evidence.
       }
-    }
-  });
-  // Evidence can only deny ordinary rendering. A concurrent append does not erase it.
-  return recognized;
+      return bytes === size ? 'no-evidence' : 'inconclusive';
+    });
+    // Evidence can only deny ordinary rendering. A concurrent append does not erase it.
+    if (recognized) return 'analytics';
+    return result === 404 ? 'inconclusive' : result;
+  } finally {
+    activeJournalProbes--;
+  }
 }
 
 async function openProjectRoot(directory: string): Promise<PreviewRoot> {
@@ -223,6 +247,15 @@ function isPreparedReportPath(parts: string[]): boolean {
   return parts[0] === 'artifacts' && parts[1] === 'reports' && parts[3] === '.staging';
 }
 
+function isReportContentPath(parts: string[]): boolean {
+  return Boolean(
+    originalReportScope(parts) ||
+    (isPreparedReportPath(parts) && parts[5] === 'content' && parts.length > 6) ||
+    (isReportViewPath(parts) && parts[4] === 'files' && parts.length > 5) ||
+    isGeneratedReportBody(parts)
+  );
+}
+
 async function hasReportRecord(root: PreviewRoot, parts: string[]): Promise<boolean> {
   const report = originalReportScope(parts);
   const prepared = isPreparedReportPath(parts) && parts.length > 5;
@@ -248,6 +281,7 @@ async function hasReportRecord(root: PreviewRoot, parts: string[]): Promise<bool
 export async function locateAnalyticsDocument(filename: string) {
   const volume = path.parse(filename).root;
   const segments = path.relative(volume, filename).split(path.sep);
+  const budget = { remaining: JOURNAL_PROBE_BYTES };
   let workspace;
   for (let index = 0; index < segments.length - 1; index++) {
     const parts = segments.slice(index);
@@ -258,7 +292,8 @@ export async function locateAnalyticsDocument(filename: string) {
     const root = await openProjectRoot(directory);
     const marker = await projectMarker(root);
     if (marker !== 'valid') {
-      if ((await hasReportRecord(root, parts)) || (await hasAnalyticsJournal(root))) {
+      const journal = (await hasReportRecord(root, parts)) ? 'analytics' : await probeAnalyticsJournal(root, budget);
+      if (journal === 'analytics' || (journal === 'inconclusive' && isReportContentPath(parts))) {
         throw new Error(
           marker === 'missing' ? 'Analytics project marker is unavailable' : 'Invalid Analytics project marker'
         );
