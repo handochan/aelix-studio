@@ -1,15 +1,76 @@
 import { EventEmitter } from 'node:events';
+import fs from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   boundedWait,
   closeElectron,
   launchWithIdentity,
   recordLaunchFailure,
+  configSummary,
+  electronAppEnvironment,
+  verifyConfigPreserved,
 } from '../../../scripts/studio-preview/host-release/verification.mjs';
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('installed profile preservation', () => {
+  it.each(['', btoa(encodeURIComponent('{}')), btoa(encodeURIComponent('{"update.autoCheck":true}'))])(
+    'fails immediately on lost or enabled preference and records safe evidence',
+    async (raw) => {
+      const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-profile-'));
+      try {
+        const file = path.join(root, 'config.txt');
+        await fs.writeFile(file, raw);
+        const record = vi.fn();
+        expect(() => verifyConfigPreserved(file, { phase: 'after-os-exit', launch: 1, record })).toThrow(
+          'config preservation failed'
+        );
+        expect(record.mock.calls[0][0]).toMatchObject({
+          phase: 'after-os-exit',
+          launch: 1,
+          bytes: Buffer.byteLength(raw),
+          status: 'failed',
+        });
+        expect(await fs.readFile(file, 'utf8')).toBe(raw);
+      } finally {
+        await fs.rm(root, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('accepts persisted false before the next launch without exposing other values', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-profile-'));
+    try {
+      const file = path.join(root, 'config.txt');
+      await fs.writeFile(
+        file,
+        btoa(encodeURIComponent(JSON.stringify({ 'update.autoCheck': false, secret: 'SYNTHETIC_SECRET' })))
+      );
+      const result = verifyConfigPreserved(file, { phase: 'before-launch', launch: 2, record: vi.fn() });
+      expect(result).toMatchObject({ status: 'passed', keyCount: 2, autoCheck: false });
+      expect(JSON.stringify(result)).not.toContain('SYNTHETIC_SECRET');
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('records a missing file as failure rather than recreating it', () => {
+    expect(configSummary(path.join(os.tmpdir(), 'absent-studio-config', 'missing.txt'))).toMatchObject({
+      bytes: null,
+      errorCode: 'ENOENT',
+    });
+  });
+
+  it('retains DEBUG on the driver and excludes it from the application copy', () => {
+    const driver = { DEBUG: 'pw:browser', PATH: '/synthetic' };
+    expect(electronAppEnvironment(driver)).toEqual({ PATH: '/synthetic' });
+    expect(driver.DEBUG).toBe('pw:browser');
+  });
 });
 
 function application(error?: Error, exitCode: number | null = 0, signalCode: string | null = null) {

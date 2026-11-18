@@ -202,5 +202,10 @@
   },
   "selectedCount": "Selected {{count}}",
   "selectedSkills": "Selected skills",
-  "aiAssistant": "AI Assistant"
+  "aiAssistant": "AI Assistant",
+  "configurationRecovery": {
+    "title": "Settings reset",
+    "message": "Your settings could not be recovered and were reset.",
+    "detail": "The damaged file was preserved. Automatic update checks will stay off until you change this option in Settings."
+  }
 }

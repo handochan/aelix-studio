@@ -1,4 +1,47 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
+
+/** Keep Playwright's driver logging out of the installed application environment. */
+export function electronAppEnvironment(driver) {
+  const environment = { ...driver };
+  delete environment.DEBUG;
+  return environment;
+}
+
+/** Summarize the owned synthetic profile without exporting setting values. */
+export function configSummary(file) {
+  try {
+    const raw = readFileSync(file);
+    let value;
+    try {
+      value = JSON.parse(decodeURIComponent(atob(raw.toString())));
+    } catch {
+      /* retain size and digest for malformed data */
+    }
+    const valid = Boolean(value && typeof value === 'object' && !Array.isArray(value));
+    return {
+      bytes: raw.length,
+      sha256: createHash('sha256').update(raw).digest('hex'),
+      valid,
+      keyCount: valid ? Object.keys(value).length : 0,
+      autoCheck: valid && typeof value['update.autoCheck'] === 'boolean' ? value['update.autoCheck'] : 'missing',
+    };
+  } catch (error) {
+    return { bytes: null, valid: false, autoCheck: 'missing', errorCode: error.code };
+  }
+}
+
+/** Fail on preference loss; callers must never reseed settings between launches. */
+export function verifyConfigPreserved(file, { phase, launch, record }) {
+  const summary = configSummary(file);
+  const passed = summary.valid && summary.autoCheck === false;
+  const result = { phase, launch, ...summary, status: passed ? 'passed' : 'failed' };
+  record(result);
+  assert.ok(passed, `Studio config preservation failed: ${JSON.stringify(result)}`);
+  return result;
+}
 
 /** Wait for a fixture result with a finite, logged harness deadline. */
 export async function boundedWait(work, label, { timeoutMs = 20000, log = console.log } = {}) {
