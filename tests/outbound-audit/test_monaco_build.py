@@ -67,9 +67,9 @@ class CaptureFailureTests(unittest.TestCase):
                            externalAttempts=0, unparsedRecords=1, classificationIssues=[{'reason':'unknown_record'}],
                            processes=[], externalOperationDiagnostics=[])
         @contextmanager
-        def fail(_command, path, **_options):
+        def fail(_command, path, *, allow_recapture, **_options):
             path.write_text(json.dumps(measurement))
-            yield 87, None
+            yield 87, None, allow_recapture and audit.should_recapture(measurement)
         with tempfile.TemporaryDirectory() as directory, patch.object(audit, 'capture_once', side_effect=fail) as run, redirect_stdout(io.StringIO()):
             report = Path(directory) / 'audit.json'
             code = audit.audit(['node', str(FIXTURE), 'managed'], report)

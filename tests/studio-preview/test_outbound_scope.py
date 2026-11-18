@@ -1,6 +1,7 @@
 """Scoped syscall audit: lineage, attribution, fail-closed parsing and real children."""
 import importlib.util
 import copy
+import errno
 import io
 from contextlib import contextmanager, nullcontext, redirect_stderr, redirect_stdout
 import json
@@ -98,10 +99,10 @@ class CaptureStartupFailureTests(unittest.TestCase):
 class RecaptureTests(unittest.TestCase):
     def run_attempts(self, root, measurements, **options):
         @contextmanager
-        def capture(_command, path, **_options):
+        def capture(_command, path, *, allow_recapture, **_options):
             code, report = measurements.pop(0)
             path.write_text(json.dumps(report))
-            yield code, None
+            yield code, None, allow_recapture and audit.should_recapture(report)
         path = root/'audit.json'
         with patch.object(audit, 'capture_once', side_effect=capture) as run, redirect_stdout(io.StringIO()) as output:
             code = audit.audit(['/owned/isolated-fixture'], path, **options)
@@ -318,8 +319,8 @@ class CaptureDeadlineTests(unittest.TestCase):
     def test_capture_bound_includes_report_processing_not_only_collection(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(audit,'_capture_once',side_effect=lambda *a,**k: time.sleep(1)):
             path=Path(directory)/'report.json'
-            with audit.capture_once(['/owned/command'],path,capture_timeout=0.02) as (code, collect):
-                self.assertEqual((code, collect), (87, None))
+            with audit.capture_once(['/owned/command'],path,capture_timeout=0.02) as (code, collect, replay):
+                self.assertEqual((code, collect, replay), (87, None, False))
             self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
 
     def test_failed_collection_analysis_keeps_its_remaining_budget(self):
@@ -332,8 +333,8 @@ class CaptureDeadlineTests(unittest.TestCase):
              patch.object(audit,'Capture',return_value=capture), patch.object(audit.subprocess,'Popen',return_value=process), \
              patch.object(audit,'measure_processes',side_effect=lambda *a,**k: time.sleep(1)):
             path=Path(directory)/'timeout.json'
-            with audit.capture_once(['/owned/command'],path,capture_timeout=0.03) as (code, collect):
-                self.assertEqual((code, collect), (87, None))
+            with audit.capture_once(['/owned/command'],path,capture_timeout=0.03) as (code, collect, replay):
+                self.assertEqual((code, collect, replay), (87, None, False))
             self.assertIsNone(json.loads(path.read_text())['externalAttempts'])
             self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
 
@@ -349,7 +350,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.report = self.root / 'audit.json'
         self.whole = self.root / 'whole.json'
 
-    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None):
+    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None):
         tracer = self.root / 'strace'
         tracer.touch()
         process = Mock(pid=123, returncode=0)
@@ -371,6 +372,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                     '1<app> +++ exited with 0 +++',
                 ]) + '\n')
                 (directory / 'command.stderr').write_bytes(stderr)
+                if on_start is not None:
+                    on_start(directory)
 
             return Mock(namespace=7, start=start, stop=Mock(return_value=copy.deepcopy(capture or task_capture_fixture())))
 
@@ -393,9 +396,41 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
     def read(self, path=None):
         return json.loads((path or self.report).read_text())
 
-    def assert_unavailable(self, report):
-        self.assertEqual(report['taskEvidenceStatus'], 'unavailable')
+    def assert_evidence_absent(self, report, *, status='unavailable'):
+        self.assertEqual(report['taskEvidenceStatus'], status)
         self.assertNotIn('taskEvidence', report)
+
+    def test_replayed_capture_releases_recordings_under_a_ten_mib_capacity(self):
+        raw_root = self.root / 'raw'
+        raw_root.mkdir()
+        capacity = 10 * 1024 * 1024
+        recording = b'x' * (6 * 1024 * 1024)
+        occupied_before_capture = []
+        raw_at_first_report = []
+        write_text = Path.write_text
+
+        def record_events(directory):
+            occupied = sum(path.stat().st_size for path in raw_root.glob('*/events.raw'))
+            occupied_before_capture.append(occupied)
+            if occupied + len(recording) > capacity:
+                raise OSError(errno.ENOSPC, 'simulated 10 MiB capture filesystem')
+            (directory / 'events.raw').write_bytes(recording)
+
+        def observe_report(path, text, *args, **kwargs):
+            if len(occupied_before_capture) == 1 and path in (self.report, self.whole):
+                raw_at_first_report.append(list(raw_root.iterdir()))
+            return write_text(path, text, *args, **kwargs)
+
+        with patch.object(tempfile, 'tempdir', str(raw_root)), patch.object(Path, 'write_text', observe_report):
+            self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []], scoped=True, on_start=record_events), (0, 2))
+        self.assertEqual(occupied_before_capture, [0, 0])
+        self.assertTrue(raw_at_first_report)
+        self.assertFalse(any(raw_at_first_report))
+        self.assertEqual([entry['exitCode'] for entry in self.read()['captureAttempts']], [87, 0])
+        self.assertEqual(self.read()['taskEvidenceStatus'], 'available')
+        for name in ('audit', 'whole'):
+            first = self.read(self.root / f'{name}.capture-1.json')
+            self.assert_evidence_absent(first, status='discarded-before-recapture')
 
     def test_slow_diagnostic_collection_preserves_a_passing_capture(self):
         from uring import network
@@ -411,29 +446,26 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.assertEqual((summarize.call_count, completed), (1, []))
         report = self.read()
         self.assertEqual((report['outcome'], report['recaptures']), ('passed', 0))
-        self.assert_unavailable(report)
+        self.assert_evidence_absent(report)
 
-    def test_first_capture_can_replay_when_its_diagnostic_collection_times_out(self):
+    def test_final_task_evidence_is_collected_after_replay_finishes(self):
         from uring import network
         summarize = network.summarize_tasks
         verdicts_during_collection = []
 
-        def delay_first(*args, **kwargs):
+        def collect_after_verdict(*args, **kwargs):
             verdicts_during_collection.append([entry['exitCode'] for entry in self.read()['captureAttempts']])
-            if len(verdicts_during_collection) == 1:
-                time.sleep(1.3)
             return summarize(*args, **kwargs)
 
-        with patch.object(network, 'summarize_tasks', side_effect=delay_first), \
-             patch.object(audit, 'TASK_EVIDENCE_COLLECTION_TIMEOUT', 0.15):
+        with patch.object(network, 'summarize_tasks', side_effect=collect_after_verdict):
             self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []]), (0, 2))
         report = self.read()
-        self.assertEqual(verdicts_during_collection, [[87, 0], [87, 0]])
+        self.assertEqual(verdicts_during_collection, [[87, 0]])
         self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, 0])
         self.assertEqual((report['recaptures'], report['taskEvidenceStatus']), (1, 'available'))
         first = self.read(self.root / 'audit.capture-1.json')
         self.assertEqual(first['outcome'], 'evidence_incomplete')
-        self.assert_unavailable(first)
+        self.assert_evidence_absent(first, status='discarded-before-recapture')
 
     def test_summary_exception_preserves_pass_denial_and_second_incomplete_capture(self):
         from uring import network
@@ -449,7 +481,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                 self.assertEqual(self.audit_traces(traces, capture=evidence), (codes[-1], len(codes)))
                 report = self.read()
                 self.assertEqual(([row['exitCode'] for row in report['captureAttempts']], report['outcome']), (codes, outcome))
-                self.assert_unavailable(report)
+                self.assert_evidence_absent(report)
 
     def test_partial_diagnostic_write_leaves_scoped_and_whole_verdicts_readable(self):
         write_text = Path.write_text
@@ -468,10 +500,10 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.assertEqual(self.read()['outcome'], 'passed')
         self.assertEqual(self.read(self.whole)['enforcement'], 'report-only')
         for path in (self.report, self.whole, self.root / 'audit.capture-1.json', self.root / 'whole.capture-1.json'):
-            self.assert_unavailable(self.read(path))
+            self.assert_evidence_absent(self.read(path))
         self.assertEqual(list(self.root.glob('.task-evidence-*')), [])
 
-    def test_diagnostic_write_timeout_keeps_the_first_incomplete_capture_and_replays(self):
+    def test_final_evidence_write_timeout_preserves_replay_receipts(self):
         write_text = Path.write_text
         writes = []
 
@@ -488,8 +520,10 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.assertEqual(len(writes), 1)
         first = self.read(self.root / 'audit.capture-1.json')
         self.assertEqual(first['outcome'], 'evidence_incomplete')
-        self.assert_unavailable(first)
-        self.assertEqual(self.read()['taskEvidenceStatus'], 'available')
+        self.assert_evidence_absent(first, status='discarded-before-recapture')
+        report = self.read()
+        self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, 0])
+        self.assert_evidence_absent(report)
 
     def test_late_unsupported_personality_is_indexed_in_both_reports(self):
         stderr = b'Proper structure decoding for this personality is not supported\n'
@@ -597,7 +631,8 @@ class SupervisionTests(unittest.TestCase):
         expected_files.update(f'{name}.capture-{i}.json' for name in ('audit', 'whole') for i in range(1,len(codes)+1))
         self.assertEqual({path.name for path in root.glob('*.json')}, expected_files)
         for path in root.glob('*.json'):
-            self.assertEqual(json.loads(path.read_text())['taskEvidenceStatus'], 'unavailable', path.name)
+            status = 'discarded-before-recapture' if len(codes) > 1 and '.capture-1.' in path.name else 'unavailable'
+            self.assertEqual(json.loads(path.read_text())['taskEvidenceStatus'], status, path.name)
         self.assertEqual(list((root / 'raw').iterdir()), [])
         self.assertEqual(list(root.glob('.task-evidence-*')), [])
 
@@ -611,7 +646,7 @@ class SupervisionTests(unittest.TestCase):
                 self.assert_capture_receipts(root, codes)
                 self.assertFalse((root / 'diagnostic-started').exists())
 
-    def test_supervisor_sigterm_cleans_both_captures_and_a_partial_diagnostic_write(self):
+    def test_supervisor_sigterm_cleans_final_capture_and_partial_diagnostic_write(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             command, env = self.audit_fixture(root, 'recapture', 'write')
@@ -623,6 +658,8 @@ class SupervisionTests(unittest.TestCase):
                     time.sleep(0.02)
                 self.assertTrue((root / 'diagnostic-started').exists())
                 self.assertTrue(list(root.glob('.task-evidence-*')))
+                final_capture = (root / 'captures').read_text().splitlines()[-1]
+                self.assertEqual([path.name for path in (root / 'raw').iterdir()], [final_capture])
             finally:
                 if process.poll() is None:
                     process.terminate()

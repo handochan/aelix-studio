@@ -614,11 +614,13 @@ the strace tasks belonging to the particular report. Classification issue indice
 refer to that report's unchanged `classificationIssues` array. The new evidence
 never copies comm names, executable paths, argv, environment, payloads, raw FD
 annotations or kernel object/file pointers. The existing deadline covers capture,
-required analysis and verdict writes. Once every required capture has finished and
-the audit has saved the verdict and attempt history, it allows up to 30 seconds
-to collect task evidence and up to 10 seconds to attach it per capture. Under
-supervision, both diagnostic limits must fit before the deadline with one second
-reserved for cleanup and exit. Measured reports start with
-`taskEvidenceStatus=unavailable`. Each completed attachment atomically replaces
+required analysis and verdict writes. When recapture is required, the auditor
+deletes the first raw recording after analysis and before report writes. The
+first capture's saved verdict carries `taskEvidenceStatus=discarded-before-recapture`.
+Once the final verdict and attempt history are saved, the auditor allows up to
+30 seconds to collect task evidence and up to 10 seconds to attach it for the
+final capture. Under supervision, both limits must fit before the deadline with
+one second reserved for cleanup and exit. The final report starts with
+`taskEvidenceStatus=unavailable`. A completed attachment atomically replaces
 the saved JSON and sets the status to `available`. SIGTERM unwinds retained
 capture files and an unfinished diagnostic write.
