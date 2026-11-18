@@ -94,6 +94,26 @@ The process timeline is also appended to `startup-lifecycle.jsonl`; the complete
 summary is merged into the already uploaded renderer result on both installer
 and whole-app jobs. No artifact path or workflow change is required.
 
+Linux collection keeps the 1s stat/liveness cadence, but uses one small synchronous
+proc batch instead of hundreds of asynchronous reads and libuv/eventfd callbacks.
+Sanitized cmdline classification is cached by PID/start ticks. New generations,
+changed comm values and known owned actors/root descendants are reclassified;
+owned actors can exec another Python role without changing start ticks. Launch,
+identity-failure, close-requested/main-exit/after-close and cleanup checkpoints
+also refresh all candidate classifications. Raw argv/executable paths are never
+cached or exported. This reduces collection work without slowing known-process
+exit or reparent observations, adding a polling process, or changing audit hooks.
+
+Full renderer summaries are persisted at most every 5s while unchanged, and
+immediately for structural process changes and checkpoints. Liveness observations
+still update internally each second; an exit delta includes the latest live
+lower bound. The JSONL contains `process-timeline-delta` events with only changed
+generations, or checkpoint/unavailable metadata. A periodic summary refresh has
+no JSONL event. All renderer-result writes (including config/recovery and final
+results) use a sibling temp file plus rename, so readers see complete JSON.
+This is atomic visibility, not a new power-loss durability claim. Existing smoke
+assertions, timeouts, retry policy and diagnostic exception isolation remain.
+
 Windows reuses one hidden, diagnostic-only PowerShell CIM reader. A cold query
 still has the same 2s observation bound and can be unavailable; a late response
 is discarded and the warmed reader serves subsequent periodic samples. No app

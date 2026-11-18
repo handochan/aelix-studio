@@ -4,6 +4,7 @@ import {
   processRole,
   processSnapshot,
 } from '../../../scripts/studio-preview/host-release/probes/processTimeline.mjs';
+import { createLinuxProcessReader } from '../../../scripts/studio-preview/host-release/probes/linuxProcesses.mjs';
 
 afterEach(() => vi.useRealTimers());
 
@@ -17,6 +18,26 @@ const row = (pid: number, parentPid: number, role: string, birth = String(pid)) 
 });
 
 describe('owned process observation', () => {
+  it('journals only changed generations and keeps periodic liveness in the full summary', async () => {
+    vi.useFakeTimers();
+    const record = vi.fn();
+    const timeline = createProcessTimeline({ record });
+    const rows = [{ ...row(1, 0, 'host'), sandboxMatched: true }, row(2, 1, 'native')];
+    timeline.observe({ status: 'observed', rows }, 'first');
+    await vi.advanceTimersByTimeAsync(1000);
+    timeline.observe({ status: 'observed', rows }, 'one-second');
+    expect(record).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(4000);
+    timeline.observe({ status: 'observed', rows }, 'five-seconds');
+    expect(record.mock.calls.at(-1)?.[1]).toBeNull();
+    timeline.observe({ status: 'observed', rows: [rows[0], { ...rows[1], parentPid: 99 }] }, 'reparented');
+    expect(record.mock.calls.at(-1)?.[1]).toMatchObject({
+      kind: 'process-timeline-delta',
+      processes: [{ pid: 2, parentPid: 99 }],
+    });
+    expect(record.mock.calls.at(-1)?.[0].processes).toHaveLength(2);
+    timeline.stop();
+  });
   it('retains host ACP wrapper native lineage across reparenting and observes exit bounds', () => {
     const record = vi.fn();
     const timeline = createProcessTimeline({ record, snapshot: async () => ({ status: 'unavailable' }) });
@@ -158,5 +179,85 @@ describe('owned process observation', () => {
     const value = await processSnapshot('PRIVATE_NONMATCHING_ROOT');
     if (value.status === 'observed') expect(value.rows.every((entry: object) => !('command' in entry))).toBe(true);
     else expect(value).toMatchObject({ status: 'unavailable', rows: [] });
+  });
+});
+
+describe('Linux process collection cost and identity', () => {
+  function fixture() {
+    const rows = new Map([
+      [1, { parent: 0, birth: '10', command: '/owned/node\0' }],
+      [2, { parent: 1, birth: '20', command: '/owned/aelix-studio-host\0' }],
+      [99, { parent: 0, birth: '99', command: '/unrelated/PRIVATE\0' }],
+    ]);
+    const io = {
+      readdirSync: () => [...rows.keys()].map(String),
+      readFileSync: vi.fn((file: string) => {
+        const pid = Number(file.split('/')[2]);
+        const value = rows.get(pid)!;
+        if (file.endsWith('/cmdline')) return value.command;
+        const fields = Array(50).fill('0');
+        fields[0] = 'S';
+        fields[1] = String(value.parent);
+        fields[19] = value.birth;
+        return `${pid} (python3) ${fields.join(' ')}`;
+      }),
+    };
+    const reader = createLinuxProcessReader({ sandbox: '/sandbox', classify: processRole, io });
+    return { rows, io, reader };
+  }
+
+  it('reads stat every sample but caches unrelated cmdline by PID and birth', () => {
+    const { io, reader } = fixture();
+    reader.read();
+    io.readFileSync.mockClear();
+    const value = reader.read();
+    expect(io.readFileSync.mock.calls.filter(([file]) => file.endsWith('/stat'))).toHaveLength(3);
+    expect(io.readFileSync.mock.calls.filter(([file]) => file.endsWith('/cmdline'))).toHaveLength(0);
+    expect(JSON.stringify(value)).not.toContain('PRIVATE');
+  });
+
+  it('refreshes owned actors across exec and reparenting without rereading unrelated cmdline', () => {
+    const { rows, io, reader } = fixture();
+    reader.read();
+    io.readFileSync.mockClear();
+    rows.get(2)!.command = '/owned/python\0/owned/launch.py\0native\0';
+    rows.get(2)!.parent = 42;
+    const value = reader.read({ known: new Map([[2, { birth: '20' }]]) });
+    expect(value.rows.find((entry: { pid: number }) => entry.pid === 2)).toMatchObject({
+      role: 'native',
+      parentPid: 42,
+    });
+    expect(io.readFileSync.mock.calls.filter(([file]) => file.endsWith('/cmdline')).map(([file]) => file)).toEqual([
+      '/proc/2/cmdline',
+    ]);
+  });
+
+  it('reclassifies reused PIDs and refreshes sandbox candidates at checkpoints', () => {
+    const { rows, reader } = fixture();
+    reader.read();
+    rows.get(99)!.birth = '100';
+    rows.get(99)!.command = '/owned/python\0/owned/launch.py\0acp\0';
+    expect(reader.read().rows.find((entry: { pid: number }) => entry.pid === 99)).toMatchObject({
+      birth: '100',
+      role: 'acp',
+    });
+    rows.get(99)!.command = '/owned/python\0/sandbox/native-wrapper.py\0';
+    expect(reader.read({ refresh: true }).rows.find((entry: { pid: number }) => entry.pid === 99)).toMatchObject({
+      role: 'native-wrapper',
+      sandboxMatched: true,
+    });
+  });
+
+  it('marks unreadable stat as unavailable rather than an invented exit', () => {
+    const { io, reader } = fixture();
+    io.readFileSync.mockImplementation(() => {
+      throw Object.assign(new Error('PRIVATE'), { code: 'EACCES' });
+    });
+    const value = reader.read();
+    expect(value.rows).toEqual([
+      { pid: 1, unavailable: true },
+      { pid: 2, unavailable: true },
+      { pid: 99, unavailable: true },
+    ]);
   });
 });

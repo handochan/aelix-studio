@@ -1,16 +1,33 @@
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installProtocolDiagnostics } from './probes/protocolDiagnostics.mjs';
 
-/** Merge diagnostics into the already uploaded result and the existing event journal. */
+/** Atomically replace a complete renderer result using a sibling temporary file. */
+export function writeRendererResult(output, value) {
+  const file = path.join(output, 'renderer-result.json');
+  const temporary = path.join(output, `.renderer-result-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+    fs.renameSync(temporary, file);
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+      /* absent after rename; preserve the original write error */
+    }
+  }
+}
+
+/** Merge diagnostics into the uploaded result; journal only supplied lifecycle changes. */
 export function recordLaunchEvidence(output, patch, event) {
   const file = path.join(output, 'renderer-result.json');
   const previous = JSON.parse(readFileSync(file, 'utf8'));
-  writeFileSync(file, JSON.stringify({ ...previous, ...patch }, null, 2) + '\n');
-  appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(event) + '\n');
+  writeRendererResult(output, { ...previous, ...patch });
+  if (event != null) appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(event) + '\n');
 }
 
 /** Keep Playwright's driver logging out of the installed application environment. */
@@ -137,10 +154,12 @@ export async function closeElectron(app, { phase = 'cleanup-main-exit' } = {}) {
     state.observeExit();
     state.observation.closeRequestedAt ??= new Date().toISOString();
     state.record({ ...state.observation, status: 'closing' });
+    state.processTimeline?.checkpoint('close-requested', state.observation.launch);
   }
   try {
     await app.close();
     await waitForExit(main, state, phase);
+    state?.processTimeline?.checkpoint('after-close', state.observation.launch);
   } finally {
     state?.protocol.dispose();
   }
@@ -252,7 +271,7 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
         observation.naturalExit = observation.closeRequestedAt === null;
       }
     };
-    observations.set(app, { observation, record, observeExit, protocol, diagnostic });
+    observations.set(app, { observation, record, observeExit, protocol, diagnostic, processTimeline });
     processTimeline?.addMain(main.pid, launchNumber);
     main.on('exit', () => {
       observeExit();

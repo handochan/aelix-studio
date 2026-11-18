@@ -11,6 +11,7 @@ import {
   launchWithIdentity,
   recordLaunchFailure,
   recordLaunchEvidence,
+  writeRendererResult,
   sandboxProcesses,
   verifyConfigPreserved,
 } from '../verification.mjs';
@@ -38,7 +39,7 @@ function recordRecovery(result) {
   recoveryProfile = result;
   const file = path.join(output, 'renderer-result.json');
   const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
-  fs.writeFileSync(file, JSON.stringify({ ...previous, recoveryProfile }, null, 2) + '\n');
+  writeRendererResult(output, { ...previous, recoveryProfile });
   console.log(`Studio recovered profile: ${JSON.stringify(result)}`);
 }
 function checkConfig(phase, launch) {
@@ -49,7 +50,7 @@ function checkConfig(phase, launch) {
       configPreservation.push(result);
       const file = path.join(output, 'renderer-result.json');
       const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
-      fs.writeFileSync(file, JSON.stringify({ ...previous, configPreservation }, null, 2) + '\n');
+      writeRendererResult(output, { ...previous, configPreservation });
       console.log(`Studio config preservation: ${JSON.stringify(result)}`);
     },
   });
@@ -62,18 +63,15 @@ async function closeElectron(current) {
   if (current === app) app = null;
   checkConfig('after-os-exit', mainLaunches.length);
 }
-fs.writeFileSync(
-  path.join(output, 'renderer-result.json'),
-  JSON.stringify({ checksPassed: [], mainLaunches, configPreservation })
-);
+writeRendererResult(output, { checksPassed: [], mainLaunches, configPreservation });
 function recordLifecycle(observation) {
   mainLaunches[observation.launch - 1] = observation;
   recordLaunchEvidence(output, { checksPassed: [...checks], mainLaunches }, observation);
 }
 const processTimeline = createProcessTimeline({
   sandbox,
-  record: (value) => {
-    recordLaunchEvidence(output, { processTimeline: value }, { kind: 'process-timeline', ...value });
+  record: (value, event) => {
+    recordLaunchEvidence(output, { processTimeline: value }, event);
   },
 });
 processTimeline.start();
@@ -470,30 +468,23 @@ try {
   checks.push('native_two_child_delegation_before_payload_inventory_check');
   await select('default');
   checks.push('renderer_return_to_ask');
-  fs.writeFileSync(
-    path.join(output, 'renderer-result.json'),
-    JSON.stringify(
-      {
-        checksPassed: checks,
-        host: executablePath
-          ? 'actual installed default host without backend override'
-          : 'actual built Electron and explicit recovery candidate',
-        driverNodeVersion: process.version,
-        electronVersions: await app.evaluate(() => process.versions),
-        appPids,
-        mainLaunches,
-        configPreservation,
-        recoveryProfile,
-        processTimeline: JSON.parse(fs.readFileSync(path.join(output, 'renderer-result.json'), 'utf8')).processTimeline,
-        displayedModeAfterRestore: 'default',
-        actualApprovalAfterRestore: 'ask',
-        unapprovedWriteObserved: false,
-        delegation: delegated,
-      },
-      null,
-      2
-    ) + '\n'
-  );
+  writeRendererResult(output, {
+    checksPassed: checks,
+    host: executablePath
+      ? 'actual installed default host without backend override'
+      : 'actual built Electron and explicit recovery candidate',
+    driverNodeVersion: process.version,
+    electronVersions: await app.evaluate(() => process.versions),
+    appPids,
+    mainLaunches,
+    configPreservation,
+    recoveryProfile,
+    processTimeline: JSON.parse(fs.readFileSync(path.join(output, 'renderer-result.json'), 'utf8')).processTimeline,
+    displayedModeAfterRestore: 'default',
+    actualApprovalAfterRestore: 'ask',
+    unapprovedWriteObserved: false,
+    delegation: delegated,
+  });
 } catch (error) {
   recordLaunchFailure(app, error);
   if (conversationRoute)

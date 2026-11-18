@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events';
 import fs from 'node:fs/promises';
+import fsSync from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -9,6 +10,7 @@ import {
   launchWithIdentity,
   recordLaunchFailure,
   recordLaunchEvidence,
+  writeRendererResult,
   configSummary,
   electronAppEnvironment,
   verifyConfigPreserved,
@@ -118,6 +120,22 @@ describe('Electron launch evidence without retry', () => {
     launchNumber: 3,
     record,
     remainingProcesses: { status: 'observed', processes: [] },
+  });
+  it('isolates diagnostic sink failure while preserving the original identity failure and single cleanup', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const { app } = application(destroyed, 0);
+    let diagnosticFailed = false;
+    const record = vi.fn((value) => {
+      if (value.identityFailedAt && !value.error) {
+        diagnosticFailed = true;
+        throw new Error('diagnostic sink failure');
+      }
+    });
+    const launch = vi.fn().mockResolvedValue(app);
+    await expect(launchWithIdentity(launch, options(record))).rejects.toBe(destroyed);
+    expect(diagnosticFailed).toBe(true);
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledTimes(1);
   });
   it('keeps successful identity and lifecycle status unchanged while adding evidence', async () => {
     const { app } = application();
@@ -302,5 +320,42 @@ describe('Electron launch evidence without retry', () => {
     });
     await closeElectron(app);
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ naturalExit: false, closeRequestedAt: expect.any(String) });
+  });
+});
+
+describe('atomic renderer evidence', () => {
+  it('keeps the previous complete JSON visible until rename and omits empty journal events', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-atomic-evidence-'));
+    try {
+      writeRendererResult(root, { sequence: 0 });
+      const rename = fsSync.renameSync;
+      const observed = vi.spyOn(fsSync, 'renameSync').mockImplementation((source, target) => {
+        expect(JSON.parse(fsSync.readFileSync(target, 'utf8')).sequence).toBe(0);
+        rename(source, target);
+      });
+      recordLaunchEvidence(root, { sequence: 1 }, null);
+      expect(observed).toHaveBeenCalledTimes(1);
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(1);
+      expect(fsSync.existsSync(path.join(root, 'startup-lifecycle.jsonl'))).toBe(false);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('leaves the previous result intact and removes its temporary file if replacement fails', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-atomic-evidence-'));
+    try {
+      writeRendererResult(root, { sequence: 0 });
+      vi.spyOn(fsSync, 'renameSync').mockImplementation(() => {
+        throw new Error('replacement failed');
+      });
+      expect(() => writeRendererResult(root, { sequence: 1 })).toThrow('replacement failed');
+      expect(JSON.parse(await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8')).sequence).toBe(0);
+      expect((await fs.readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    } finally {
+      vi.restoreAllMocks();
+      await fs.rm(root, { recursive: true, force: true });
+    }
   });
 });

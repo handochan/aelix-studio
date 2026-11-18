@@ -187,7 +187,7 @@ def main():
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
               'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'probes/smoke.mjs', 'verification.mjs',
-                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/windowsProcesses.mjs', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs')}}
+                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/linuxProcesses.mjs', 'probes/windowsProcesses.mjs', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')

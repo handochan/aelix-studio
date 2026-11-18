@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
-import { readFile, readdir } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { createWindowsProcessReader } from './windowsProcesses.mjs';
+import { createLinuxProcessReader } from './linuxProcesses.mjs';
 
 const run = promisify(execFile);
 const ROLES = new Set(['main', 'host', 'acp', 'native-wrapper', 'native']);
@@ -35,47 +35,11 @@ export function processRole(command, executablePath) {
 }
 
 /** Read process identities asynchronously; no product signal, exit wait, or instrumentation. */
-export async function processSnapshot(sandbox, platform = process.platform, windowsReader) {
+export async function processSnapshot(sandbox, platform = process.platform, windowsReader, linuxReader, linuxScope) {
   try {
     let rows;
     if (platform === 'linux') {
-      rows = (
-        await Promise.all(
-          (
-            await readdir('/proc')
-          )
-            .filter((pid) => /^\d+$/.test(pid))
-            .map(async (pid) => {
-              try {
-                const stat = await readFile(`/proc/${pid}/stat`, 'utf8');
-                const fields = stat.slice(stat.lastIndexOf(')') + 2).split(/\s+/);
-                if (!/^\d+$/.test(fields[19])) return null;
-                let command = '',
-                  executablePath = '';
-                try {
-                  const argumentsText = await readFile(`/proc/${pid}/cmdline`, 'utf8');
-                  executablePath = argumentsText.split('\0', 1)[0];
-                  command = argumentsText.replaceAll('\0', ' ');
-                } catch {
-                  /* metadata only */
-                }
-                return {
-                  pid: Number(pid),
-                  parentPid: Number(fields[1]),
-                  birth: fields[19],
-                  birthSource: 'proc-start-ticks',
-                  command,
-                  executablePath,
-                  state: fields[0] === 'Z' ? 'zombie' : 'live',
-                };
-              } catch (error) {
-                return error.code === 'ENOENT'
-                  ? null
-                  : { pid: Number(pid), unavailable: true, command: '', birth: '', parentPid: null };
-              }
-            })
-        )
-      ).filter(Boolean);
+      return (linuxReader ?? createLinuxProcessReader({ sandbox, classify: processRole })).read(linuxScope);
     } else if (platform === 'win32') {
       const reader = windowsReader ?? createWindowsProcessReader();
       let value;
@@ -141,10 +105,18 @@ export async function processSnapshot(sandbox, platform = process.platform, wind
 }
 
 /** Reconcile sampled process generations; absence is an observed bound, not an exact OS exit time. */
-export function createProcessTimeline({ sandbox, record = () => {}, snapshot, intervalMs = 1000 } = {}) {
+export function createProcessTimeline({
+  sandbox,
+  record = () => {},
+  snapshot,
+  intervalMs = 1000,
+  publishIntervalMs = 5000,
+} = {}) {
   const roots = new Map();
   const entries = new Map();
   const windowsReader = process.platform === 'win32' && !snapshot ? createWindowsProcessReader() : null;
+  const linuxReader =
+    process.platform === 'linux' && !snapshot ? createLinuxProcessReader({ sandbox, classify: processRole }) : null;
   let timer, pending;
   let stopped = false;
   let sampleCount = 0;
@@ -153,29 +125,62 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
   let phase = 'before-launch';
   let launch = null;
   let droppedProcesses = 0;
-  const publish = () => {
+  let refresh = true;
+  let forcePublish = true;
+  let lastPublished = -Infinity;
+  const changed = new Set();
+  const publish = (at = new Date().toISOString(), unavailableReason, checkpoint = false) => {
+    if (!changed.size && !checkpoint && !unavailableReason && performance.now() - lastPublished < publishIntervalMs)
+      return;
+    const event =
+      changed.size || checkpoint || unavailableReason
+        ? {
+            kind: 'process-timeline-delta',
+            schema: 'aelix.launch-process-timeline/1',
+            observedAt: at,
+            phase,
+            launch,
+            checkpoint,
+            sampleCount,
+            unavailableSamples,
+            ...(unavailableReason ? { unavailableReason } : {}),
+            processes: [...entries.values()]
+              .filter((entry) => changed.has(entry.id))
+              .map((entry) => ({ ...entry, parentChanges: [...entry.parentChanges] })),
+          }
+        : null;
     try {
-      record({
-        schema: 'aelix.launch-process-timeline/1',
-        intervalMs,
-        sampleCount,
-        unavailableSamples,
-        unavailableReasons: { ...unavailableReasons },
-        droppedProcesses,
-        exitTimeMeaning: 'first-observed-absent-or-zombie; lower-bound=lastLiveSampleStartedAt-or-unknown',
-        processes: [...entries.values()].map((entry) => ({ ...entry, parentChanges: [...entry.parentChanges] })),
-      });
+      record(
+        {
+          schema: 'aelix.launch-process-timeline/1',
+          intervalMs,
+          publishIntervalMs,
+          sampleCount,
+          unavailableSamples,
+          unavailableReasons: { ...unavailableReasons },
+          droppedProcesses,
+          exitTimeMeaning: 'first-observed-absent-or-zombie; lower-bound=lastLiveSampleStartedAt-or-unknown',
+          processes: [...entries.values()].map((entry) => ({ ...entry, parentChanges: [...entry.parentChanges] })),
+        },
+        event
+      );
+      changed.clear();
+      lastPublished = performance.now();
     } catch {
       /* diagnostics cannot alter the smoke */
     }
   };
-  const observe = (value, at = new Date().toISOString(), context = { phase, launch, startedAt: at }) => {
+  const observe = (value, at = new Date().toISOString(), context) => {
+    if (!context) {
+      context = { phase, launch, startedAt: at, checkpoint: forcePublish };
+      forcePublish = false;
+    }
     sampleCount++;
     if (value.status !== 'observed') {
       unavailableSamples++;
       const reason = UNAVAILABLE.has(value.reason) ? value.reason : 'snapshot-unavailable';
       unavailableReasons[reason] = (unavailableReasons[reason] ?? 0) + 1;
-      publish();
+      publish(at, reason, context.checkpoint);
       return;
     }
     const rows = new Map(value.rows.map((row) => [row.pid, row]));
@@ -238,12 +243,15 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
           parentChanges: [],
         };
         entries.set(key, entry);
+        changed.add(entry.id);
       }
       if (entry.parentPid !== row.parentPid) {
+        changed.add(entry.id);
         entry.parentChanges.push({ observedAt: at, parentPid: row.parentPid });
         entry.parentPid = row.parentPid;
       }
       entry.lastSeenAt = at;
+      if (entry.lastRole !== row.role || entry.state !== row.state) changed.add(entry.id);
       entry.sampleStartedAt = context.startedAt;
       entry.sampleCompletedAt = at;
       entry.lastRole = row.role;
@@ -253,45 +261,68 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
       entry.launchAtStart = context.launch;
       entry.launchAtCompletion = launch;
       if (row.state === 'live') entry.lastLiveSampleStartedAt = context.startedAt;
-      if (row.state === 'zombie' && !entry.exitObservedAt)
+      if (row.state === 'zombie' && !entry.exitObservedAt) {
         Object.assign(entry, { exitObservedAt: at, exitObservation: 'zombie' });
+        changed.add(entry.id);
+      }
     }
     for (const entry of entries.values()) {
       if (entry.exitObservedAt) continue;
       const row = rows.get(entry.pid);
       if (row?.unavailable) continue;
-      if (!row || row.birth !== entry.birth)
+      if (!row || row.birth !== entry.birth) {
         Object.assign(entry, { exitObservedAt: at, exitObservation: row ? 'pid-reused' : 'absent' });
+        changed.add(entry.id);
+      }
     }
-    publish();
+    publish(at, undefined, context.checkpoint);
   };
   const sample = () => {
     if (pending || stopped) return;
-    const context = { phase, launch, startedAt: new Date().toISOString() };
+    const context = { phase, launch, startedAt: new Date().toISOString(), refresh, checkpoint: forcePublish };
+    refresh = false;
+    forcePublish = false;
     pending = Promise.resolve()
-      .then(snapshot ?? (() => processSnapshot(sandbox, process.platform, windowsReader)))
+      .then(
+        snapshot ??
+          (() =>
+            processSnapshot(sandbox, process.platform, windowsReader, linuxReader, {
+              roots,
+              known: new Map(
+                [...entries.values()].filter((entry) => !entry.exitObservedAt).map((entry) => [entry.pid, entry])
+              ),
+              refresh: context.refresh,
+            }))
+      )
       .then((value) => {
         if (!(stopped && value.reason === 'cim-reader-stopped')) observe(value, new Date().toISOString(), context);
       })
       .catch(() => observe({ status: 'unavailable' }, new Date().toISOString(), context))
       .finally(() => {
         pending = null;
+        if (refresh && !stopped) sample();
       });
   };
   return {
     observe,
     addMain(pid, number) {
       roots.set(pid, { active: true, birth: null, launch: number });
+      refresh = true;
+      forcePublish = true;
       sample();
     },
     mainExit(pid) {
       const root = roots.get(pid);
       if (root) root.active = false;
+      refresh = true;
+      forcePublish = true;
       sample();
     },
     checkpoint(nextPhase, number) {
       phase = nextPhase;
       launch = number;
+      refresh = true;
+      forcePublish = true;
       sample();
     },
     start() {
@@ -303,7 +334,8 @@ export function createProcessTimeline({ sandbox, record = () => {}, snapshot, in
       stopped = true;
       clearInterval(timer);
       windowsReader?.stop();
-      publish();
+      forcePublish = false;
+      publish(new Date().toISOString(), undefined, true);
     },
   };
 }
