@@ -3,8 +3,9 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createHash } from 'node:crypto';
+import { appendFileSync } from 'node:fs';
 import { appendFile, mkdir, mkdtemp, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -280,5 +281,95 @@ describe('Analytics preview resource routing', () => {
     await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
     await write(['analytics.json'], '{"schema":"ordinary.project/1"}');
     await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Invalid Analytics project marker');
+  });
+
+  it('refuses staged Report content when only the prepared manifest identifies the project', async () => {
+    await rm(path.join(rootDirectory, 'analytics.json'));
+    await rm(path.join(rootDirectory, 'journal.jsonl'));
+    const stage = ['artifacts', 'reports', 'monthly', '.staging', 'revision-a'];
+    await write([...stage, 'manifest.json'], manifest({ 'index.html': '<h1>Prepared</h1>' }));
+    const filename = await write([...stage, 'content', 'index.html'], '<h1>Prepared</h1>');
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+  });
+
+  it('refuses staged content in a mixed journal before its manifest is written', async () => {
+    await rm(path.join(rootDirectory, 'analytics.json'));
+    const legacy = '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project","refs":{}}';
+    const current = '{"schema":"analytics.event/2","id":"e2","seq":2,"kind":"context","refs":[]}';
+    await write(['journal.jsonl'], [legacy, current, ''].join('\n'));
+    const filename = await write(
+      ['artifacts', 'reports', 'monthly', '.staging', 'revision-a', 'content', 'index.html'],
+      '<h1>Prepared</h1>'
+    );
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+  });
+
+  it('does not let an unreadable journal row or a nested marker turn a staged Report into a Workspace', async () => {
+    await rm(path.join(rootDirectory, 'analytics.json'));
+    await writeFile(
+      path.join(rootDirectory, 'journal.jsonl'),
+      Buffer.concat([
+        Buffer.from([0xff, 10]),
+        Buffer.from('a'.repeat(70 * 1024) + '\n'),
+        Buffer.from(['{"schema":', '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project"}', ''].join('\n')),
+        Buffer.from(completionLine),
+      ])
+    );
+    const content = ['artifacts', 'reports', 'monthly', '.staging', 'revision-a', 'content'];
+    await write([...content, 'analytics.json'], '{"schema":"analytics.project/2"}');
+    const filename = await write([...content, 'workspace', 'index.html'], '<h1>Prepared</h1>');
+    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+  });
+
+  it('does not grant a completed revision when another row contains invalid UTF-8', async () => {
+    await appendFile(
+      path.join(rootDirectory, 'journal.jsonl'),
+      Buffer.concat([
+        Buffer.from('{"schema":"unrelated","id":"e2","seq":2,"text":"'),
+        Buffer.from([0xff]),
+        Buffer.from('"}\n'),
+      ])
+    );
+    expect(await savedRevisionFiles(grants.get(reportHost)!.root, revision)).toBeUndefined();
+  });
+
+  it('keeps known journal evidence when an append invalidates the scanned snapshot', async () => {
+    await rm(path.join(rootDirectory, 'analytics.json'));
+    const journal = await write(['journal.jsonl'], '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project"}\n');
+    const filename = await write(
+      ['artifacts', 'reports', 'monthly', '.staging', 'revision-a', 'content', 'index.html'],
+      '<h1>Prepared</h1>'
+    );
+    const decode = TextDecoder.prototype.decode;
+    let appended = false;
+    const spy = vi.spyOn(TextDecoder.prototype, 'decode').mockImplementation(function (
+      this: TextDecoder,
+      ...args: Parameters<TextDecoder['decode']>
+    ) {
+      const line = decode.apply(this, args);
+      if (!appended && line.includes('"lab.event/1"')) {
+        appendFileSync(journal, '{"schema":"analytics.event/2","id":"e2","seq":2,"kind":"context"}\n');
+        appended = true;
+      }
+      return line;
+    });
+    try {
+      await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+      expect(appended).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it('finds a valid nested Workspace despite an unrelated same-named ancestor configuration', async () => {
+    await writeFile(path.join(scratch, 'analytics.json'), '{"schema":"ordinary.project/1","enabled":true}');
+    const nested = path.join(scratch, 'workspace', 'demo');
+    const filename = path.join(nested, 'workspace', 'index.html');
+    await mkdir(path.dirname(filename), { recursive: true });
+    await writeFile(path.join(nested, 'analytics.json'), '{"schema":"analytics.project/2"}');
+    await writeFile(filename, '<h1>Workspace</h1>');
+    const result = await locateAnalyticsDocument(filename);
+    expect(result?.root.directory).toContain(path.join('workspace', 'demo'));
+    expect(result?.parts).toEqual(['workspace', 'index.html']);
   });
 });

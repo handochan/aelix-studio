@@ -220,13 +220,46 @@ test('ordinary HTML and SVG open below folders named workspace and reports', asy
   }
 });
 
+test('Explorer refuses a markerless prepared Report opened from its content folder', async ({ page }) => {
+  test.setTimeout(120_000);
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-prepared-report-'));
+  const stage = path.join(parent, 'artifacts', 'reports', 'monthly', '.staging', 'revision-a');
+  const content = path.join(stage, 'content');
+  fs.mkdirSync(content, { recursive: true });
+  fs.writeFileSync(path.join(content, 'prepared.html'), '<h1>Prepared Report</h1>');
+  fs.writeFileSync(
+    path.join(parent, 'journal.jsonl'),
+    [
+      '{"schema":"lab.event/1","id":"e1","seq":1,"kind":"project","refs":{}}',
+      '{"schema":"analytics.event/2","id":"e2","seq":2,"kind":"context","refs":[]}',
+      '',
+    ].join('\n')
+  );
+  fs.writeFileSync(
+    path.join(stage, 'manifest.json'),
+    '{"schema":"analytics.report_revision/1","report_id":"monthly","revision_id":"revision-a","entry":"prepared.html"}'
+  );
+  let conversation: string | undefined;
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, content);
+    await page.locator('.workspace-tree').first().getByText('prepared.html', { exact: true }).click();
+    await expect(page.getByText(/^(Failed to preview|预览失败|미리보기 실패)$/)).toBeVisible();
+    await expect(page.locator(PREVIEW_PANEL).locator('webview')).toHaveCount(0);
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
 test('Analytics Workspace preserves relative assets, navigation, and Report isolation', async ({
   page,
   electronApp,
 }) => {
   test.setTimeout(120_000);
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-analytics-e2e-'));
-  const workspace = path.join(parent, '분석 project');
+  const workspace = path.join(parent, 'workspace', '분석 project');
+  fs.writeFileSync(path.join(parent, 'analytics.json'), '{"schema":"ordinary.project/1","enabled":true}');
   const revision = 'artifacts/reports/monthly/revision-a/content';
   const anotherRevision = 'artifacts/reports/monthly/revision-b/content';
   const files = {
