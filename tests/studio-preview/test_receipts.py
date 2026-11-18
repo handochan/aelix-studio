@@ -160,6 +160,20 @@ class FailedAuditReceiptTests(unittest.TestCase):
             acceptance.write_failure_receipt(output)
             self.assertEqual(json.loads(output.read_text()),current)
 
+    def test_recapture_history_survives_an_interrupted_final_acceptance(self):
+        for status in ('failed','passed'):
+            with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
+                root=Path(directory);output=root/'acceptance.json'
+                audits=acceptance.AuditedSessions(root/'host',root/'python',root)
+                audits.sessions=[dict(name='provider',status=status,recaptures=1,
+                    captureAttempts=[{'attempt':1,'outcome':'evidence_incomplete'}, {'attempt':2,'status':'running'}])]
+                acceptance.preserve_recapture_failure(output,audits,'linux-x64')
+                acceptance.write_failure_receipt(output)
+                saved=json.loads(output.read_text())
+                self.assertEqual((saved['status'],saved['outboundRecaptures']),('failed',1))
+                self.assertEqual(saved['recapturedAudits'],['provider'])
+                self.assertEqual(len(saved['auditedSessions'][0]['captureAttempts']),2)
+
     def test_running_or_old_passed_receipt_never_survives_a_failure(self):
         for status in ('running','passed'):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:

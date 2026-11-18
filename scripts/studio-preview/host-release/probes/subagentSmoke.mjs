@@ -7,6 +7,7 @@ import http from 'node:http';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
+import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from '../verification.mjs';
 
 const option = (name) => {
   const index = process.argv.indexOf(name);
@@ -176,7 +177,12 @@ const report = {
   host: 'host-v0.2.2-aelix.4',
   sandbox,
   checks,
+  mainLaunches: [],
 };
+function recordLifecycle(observation) {
+  report.mainLaunches[observation.launch - 1] = observation;
+  fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
+}
 async function api(suffix, method = 'GET', body) {
   const response = await fetch(`http://127.0.0.1:${port}${suffix}`, {
     method,
@@ -207,7 +213,11 @@ async function capture(marker) {
   return row.content;
 }
 try {
-  app = await electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout: 60000 });
+  const launched = await launchWithIdentity(
+    () => electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout: 60000 }),
+    { launchNumber: 1, record: recordLifecycle, remainingProcesses: sandboxProcesses(sandbox) }
+  );
+  app = launched.app;
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);
@@ -306,7 +316,7 @@ try {
   await expect(card('STUDIO31_CANCEL').locator('[data-subagent-state="stopped"]')).toHaveCount(2);
   checks.push('reload_restores_metadata');
   await page.screenshot({ path: path.join(output, 'restored.png') });
-  await app.close();
+  await closeElectron(app);
   app = null;
   assert.deepEqual(inventory(), before, 'Delegation changed the immutable bundled runtime');
   execFileSync(
@@ -317,6 +327,7 @@ try {
   checks.push('post_delegation_strict_inventory_unchanged');
   report.status = 'passed';
 } catch (error) {
+  recordLaunchFailure(app, error);
   report.error = String(error);
   if (page) {
     await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
@@ -335,7 +346,7 @@ try {
     );
   throw error;
 } finally {
-  await app?.close();
+  await closeElectron(app);
   model.closeAllConnections();
   await new Promise((resolve) => model.close(resolve));
   report.providerRequests = requestCount;

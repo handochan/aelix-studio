@@ -134,14 +134,14 @@ def setup(api):
                    RECOVERY_DELEGATION_ARGS=json.dumps([*command, '--enable-agents', '--permission-mode', 'yolo']),
                    RECOVERY_OBSERVER_ARGS=json.dumps([str(python), *prefix]),
                    RECOVERY_APP_EXECUTABLE=os.environ['PROVIDER_APP_EXECUTABLE'],
-                   AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
+                   DEBUG='pw:browser', AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
                    AIONUI_DISABLE_DEVTOOLS='1', AIONUI_CDP_PORT='0',
                    AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
                    AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
         env = gui_environment(env)
         process = None
         try:
-            process = await asyncio.create_subprocess_exec('node', str(HERE / 'smoke.mjs'), cwd=ROOT, env=env,
+            process = await asyncio.create_subprocess_exec('node', str(HERE / 'probes/smoke.mjs'), cwd=ROOT, env=env,
                 **({'start_new_session': True} if os.name != 'nt' else {}))
             async with asyncio.timeout(360):
                 if await process.wait():
@@ -186,7 +186,7 @@ def main():
     report = {'schema': 'aelix-studio.permission-recovery-ui/1', 'status': 'failed',
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
-              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'smoke.mjs', '../fixtures/nativeFailure.py')}}
+              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'probes/smoke.mjs', 'verification.mjs', '../fixtures/nativeFailure.py')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')

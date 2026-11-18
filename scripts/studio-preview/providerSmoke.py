@@ -12,10 +12,16 @@ import os
 from pathlib import Path
 import signal
 import tempfile
+import time
 
 from prepare import verify_prepared
 
 ROOT = Path(__file__).resolve().parents[2]
+
+def phase_timeout(deadline, limit):
+    """Bound each phase by both its unchanged limit and the shared deadline."""
+    return min(limit, max(0, deadline - time.monotonic()))
+
 
 
 class ProviderFixture:
@@ -133,12 +139,26 @@ async def main(args):
             str(Path(__file__).with_name('providerHelperSmoke.mjs')), cwd=ROOT, env=env,
             **({'start_new_session': True} if os.name != 'nt' else {}))
         try:
-            async with asyncio.timeout(120):
-                if await process.wait():
-                    raise RuntimeError('Native helper qualification failed')
+            # Share 450s inside the unchanged 480s per-capture bound; reserve
+            # 30s for attach/drain and the driver setup/receipt work.
+            qualification_deadline = time.monotonic() + 450
+            helper_started = time.monotonic()
+            try:
+                # ~31 cold helper launches at the observed ~4.8s each already
+                # exceed 120s. Keep a finite suite hang guard, separate from
+                # each callback's 20s guard and all unchanged assertions.
+                async with asyncio.timeout(phase_timeout(qualification_deadline, 300)):
+                    if await process.wait():
+                        raise RuntimeError('Native helper qualification failed')
+            finally:
+                print(json.dumps({'wait': 'helper-qualification', 'timeoutSeconds': 300,
+                                  'elapsedSeconds': round(time.monotonic() - helper_started, 3)}), flush=True)
             process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
                 cwd=ROOT, env=env, **({'start_new_session': True} if os.name != 'nt' else {}))
-            async with asyncio.timeout(240):
+            host_timeout = phase_timeout(qualification_deadline, 240)
+            print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
+                              'sharedTimeoutSeconds': 450}), flush=True)
+            async with asyncio.timeout(host_timeout):
                 if await process.wait():
                     raise RuntimeError('Studio Provider UI qualification failed')
             if fixture.accepted < 1 or fixture.rejected < 1:
@@ -168,7 +188,8 @@ async def main(args):
             def digest(file):
                 return hashlib.sha256(file.read_bytes()).hexdigest()
             sources = [Path(__file__), Path(__file__).with_name('providerHostSmoke.mjs'),
-                       Path(__file__).with_name('providerHelperSmoke.mjs')]
+                       Path(__file__).with_name('providerHelperSmoke.mjs'),
+                       Path(__file__).with_name('host-release') / 'verification.mjs']
             sources += sorted((ROOT / 'packages/web-host/src/studio-auth').glob('*.ts'))
             sources += sorted((ROOT / 'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent').glob('*.ts*'))
             sources += [ROOT / 'packages/desktop/src/index.ts', ROOT / 'packages/desktop/src/preload/main.ts',

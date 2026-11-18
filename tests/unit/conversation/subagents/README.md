@@ -31,7 +31,7 @@ synthetic model. Both frames are consumed by the DOM test. To refresh from a
 built local runtime, run:
 
 ```sh
-node scripts/studio-preview/host-release/subagentSmoke.mjs \
+node scripts/studio-preview/host-release/probes/subagentSmoke.mjs \
   --runtime <payload> --prepared <prepared-runtime> --output <probe-output>
 ```
 

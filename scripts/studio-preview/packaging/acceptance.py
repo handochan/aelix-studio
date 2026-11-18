@@ -183,12 +183,21 @@ def write_failure_receipt(output):
         current = json.loads(output.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         current = {}
-    # main() first resets the file to running. Only a newly completed failed
-    # audit can carry these fields when the final mandatory failure is raised.
-    if current.get('status') == 'failed' and current.get('failedAudits') and 'auditedSessions' in current:
+    # main() first resets the file to running. Preserve this run's completed
+    # or interrupted recapture evidence when the mandatory failure is raised.
+    if current.get('status') == 'failed' and 'auditedSessions' in current and (current.get('failedAudits') or current.get('outboundRecaptures', 0)):
         return
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'status': 'failed', 'target': host_target()}) + '\n', encoding='utf-8')
+
+
+def preserve_recapture_failure(output, audits, target):
+    """Keep this run's recapture evidence if final acceptance/cleanup aborts."""
+    summary = audits.recapture_summary()
+    if summary['outboundRecaptures']:
+        output.write_text(json.dumps(dict(status='failed', target=target,
+            failedAudits=audits.failed, auditedSessions=audits.sessions,
+            outboundControls=audits.controls, **summary), indent=2)+'\n', encoding='utf-8')
 
 
 
@@ -351,6 +360,7 @@ def main(args):
         if sys.platform == 'win32':
             qualify_windows_copy_failure(artifact, directory, copy_failure_report)
         executable, payload, app, kind, package = installed(artifact, directory, installer_receipt)
+        audits = None
         try:
             if not executable.is_file():
                 raise ValueError('Installer did not produce its expected executable')
@@ -496,6 +506,7 @@ def main(args):
             report = dict(status='failed' if audits.failed else 'passed', failedAudits=audits.failed, target=target,
                           permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output),
                           auditedSessions=audits.sessions, outboundControls=audits.controls,
+                          **audits.recapture_summary(),
                           artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
@@ -525,7 +536,11 @@ def main(args):
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
         finally:
-            remove_install(app, kind, package)
+            try:
+                if audits is not None:
+                    preserve_recapture_failure(output, audits, target)
+            finally:
+                remove_install(app, kind, package)
         report['ownedTestAppRemoved'] = not app.exists()
         if not report['ownedTestAppRemoved']:
             raise ValueError('Owned installer files remain after cleanup')
