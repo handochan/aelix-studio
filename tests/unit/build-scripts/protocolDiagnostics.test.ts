@@ -211,6 +211,51 @@ describe('safe original CDP diagnostics', () => {
     }
   });
 
+  it.each(['different connection', 'different session', 'duplicate tagged request'])(
+    'cannot attribute an identity error with a %s',
+    (scenario) => {
+      const helper = { debugProtocolLogger: () => vi.fn() };
+      const capture = observeProtocolFactory(helper, 'fixture');
+      const logger = helper.debugProtocolLogger();
+      const token = 'FIXTURE_PRIVATE_TOKEN';
+      const finish = capture.trackIdentityEvaluation(token);
+      const send = {
+        id: 7,
+        sessionId: 'expected',
+        method: 'Runtime.callFunctionOn',
+        params: {
+          awaitPromise: true,
+          returnByValue: true,
+          functionDeclaration: '(utilityScript, ...args) => utilityScript.evaluate(...args)',
+          arguments: [
+            { objectId: 'utility' },
+            { value: true },
+            { value: true },
+            { value: 'identity expression' },
+            { value: 2 },
+            { value: { h: 0 } },
+            { value: token },
+            { objectId: 'electron' },
+          ],
+        },
+      };
+      try {
+        logger('send', send);
+        if (scenario === 'duplicate tagged request') logger('send', { ...send, id: 8 });
+        const receive = scenario === 'different connection' ? helper.debugProtocolLogger() : logger;
+        receive('receive', {
+          id: 7,
+          sessionId: scenario === 'different session' ? 'other' : 'expected',
+          error: { code: -32000, message: 'Promise was collected' },
+        });
+        expect(finish()).toBeNull();
+        expect(JSON.stringify(capture.snapshot())).not.toContain(token);
+      } finally {
+        capture.dispose();
+      }
+    }
+  );
+
   it('redacts arbitrary remote text, error data, URLs, tokens and suffixes', () => {
     const secret = '/Users/PRIVATE/token-PRIVATE https://host/?token=PRIVATE';
     for (const message of [secret, 'Cannot find context with specified id: ' + secret]) {

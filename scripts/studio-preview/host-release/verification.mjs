@@ -231,7 +231,28 @@ export function recordLaunchFailure(app, error) {
   );
 }
 
-/** Launch exactly once. A naturally exiting product must fail the original smoke. */
+async function evaluateIdentity(app, protocol) {
+  const token = randomUUID();
+  const finish = protocol.trackIdentityEvaluation(token);
+  let result;
+  try {
+    const identity = await app.evaluate(
+      () => ({
+        pid: process.pid,
+        backendOverride: process.env.AIONUI_BACKEND_BIN,
+        resourcesPath: process.resourcesPath,
+      }),
+      token
+    );
+    result = { identity };
+  } catch (error) {
+    result = { failedAt: new Date().toISOString(), error };
+  }
+  const protocolError = finish();
+  return { ...result, protocolError };
+}
+
+/** Launch once and retry only a correlated, collected identity evaluation. */
 export async function launchWithIdentity(launch, { launchNumber, record, remainingProcesses, processTimeline }) {
   const write = record;
   let lastStatus = 'launching';
@@ -299,19 +320,39 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
           record({ ...observation, status: 'output' });
         });
       observation.identityStartedAt = new Date().toISOString();
-      let identity;
-      try {
-        identity = await app.evaluate(() => ({
-          pid: process.pid,
-          backendOverride: process.env.AIONUI_BACKEND_BIN,
-          resourcesPath: process.resourcesPath,
-        }));
-      } catch (error) {
-        observation.identityFailedAt = new Date().toISOString();
-        observation.protocol = protocol.snapshot();
-        observation.identityProtocol = protocol.snapshot();
+      const first = await evaluateIdentity(app, protocol);
+      let identity = first.identity;
+      if (first.failedAt) {
+        observation.identityFailedAt = first.failedAt;
+        observation.identityProtocol = observation.protocol = protocol.snapshot();
+        const original = first.protocolError;
+        if (
+          original?.code !== -32000 ||
+          original.messageRedacted !== false ||
+          original.message !== 'Promise was collected' ||
+          exited(main) ||
+          app.process() !== main
+        ) {
+          diagnostic();
+          throw first.error;
+        }
+
+        const retry = { startedAt: new Date().toISOString(), firstProtocolError: original };
+        observation.identityRetry = { ...retry, outcome: 'pending' };
         diagnostic();
-        throw error;
+        const second = await evaluateIdentity(app, protocol);
+        const sameMain =
+          !second.failedAt && !exited(main) && app.process() === main && second.identity?.pid === main.pid;
+        observation.identityRetry = {
+          ...retry,
+          finishedAt: second.failedAt ?? new Date().toISOString(),
+          outcome: second.failedAt || !sameMain ? 'failed' : 'passed',
+          secondProtocolError: second.protocolError,
+        };
+        diagnostic();
+        if (second.failedAt) throw second.error;
+        if (!sameMain) throw new Error('Studio main changed during identity retry');
+        identity = second.identity;
       }
       observation.identifiedAt = new Date().toISOString();
       record({ ...observation, status: 'identified' });

@@ -78,6 +78,17 @@ keeps 64 events, 8 errors and 16 preceding context events per error; the identit
 snapshot is frozen before later cleanup events. An unsupported adapter is
 recorded as unavailable without changing the smoke result.
 
+The launch helper can repeat the read-only identity evaluation once on the
+same live app handle. It requires an exact unredacted CDP `Promise was collected`
+error with code −32000. Each evaluation passes a private one-use token as an
+unused argument. The pinned observer recognizes it in a single
+`Runtime.callFunctionOn` request with both evaluation flags true and matches
+the response by connection, session and request ID. The token is discarded
+from the report. `mainLaunches[].identityRetry` retains the matched first
+error and the second outcome, and `identityFailedAt`/ `identityProtocol` retain
+the first failure even if the retry succeeds. A failed retry follows the usual
+20-second exit observation and cleanup.
+
 `renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)
 samples once per second, with no overlapping query and no product process signaling or
 exit wait. Linux uses `/proc` without spawning polling subprocesses; macOS uses
