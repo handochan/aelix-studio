@@ -347,6 +347,15 @@ async function loadOrRefuse(
   if (reasons.length > 0) throw new ExtensionFailure('LOAD_ERROR', reasons);
 }
 
+/** Whether the pointer in effect names a generation as current or previous: then clean-up keeps it. */
+async function inEffect(layout: FlowContext['layout'], generation: string): Promise<boolean> {
+  const pointer = await readPointer(layout).then(
+    (state) => state.pointer,
+    (): null => null
+  );
+  return pointer?.generation === generation || pointer?.previous === generation;
+}
+
 /** What ended a change under a lock: the loss of the lock outranks whatever it caused. */
 function outcome(error: unknown, lock: MutationLock): unknown {
   return lock.lost() ? new ExtensionFailure('CONFLICT', ['the lock was lost while the change was in progress']) : error;
@@ -496,7 +505,10 @@ export async function mutate(
     return { generation: candidate.id, revision: revision + 1 };
   } catch (error) {
     // Without the lock nothing is removed; the next change under a lock removes what is left.
-    if (unfinished !== undefined) await lock.remove(`generations/${unfinished}`).catch(() => {});
+    // A switch can fail after its rename took effect (flushing the directory, say): then the
+    // candidate is in effect, and a launcher may already use it. It stays.
+    if (unfinished !== undefined && !(await inEffect(context.layout, unfinished)))
+      await lock.remove(`generations/${unfinished}`).catch(() => {});
     throw outcome(error, lock);
   } finally {
     // Clean-up runs after a failure too: a refused import must not leave its wheels in the

@@ -9,6 +9,7 @@ import {
   installWheel,
   scriptedSpawn,
   type FakeHelper,
+  type ScriptedChild,
 } from '../../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
 import { generationPaths, resolveBundle } from '../store/layout';
@@ -547,6 +548,41 @@ describe('changing what is installed', () => {
       expect((await failure(install({ name: 'demo-two' }))).code).toBe('CONFLICT');
       expect(await current()).toEqual(pointer);
       expect(JSON.parse(await readFile(helper.context.layout.pointer, 'utf8'))).toMatchObject({ revision: 1 });
+    });
+
+    // Review of the launcher piece (nit 5): the rename of current.json took effect, then the holder
+    // reported a failure (flushing the directory). The candidate is in effect and must stay.
+    it('keeps a candidate the pointer already names when the switch reports a failure after its rename', async () => {
+      await install({ name: 'demo-one' });
+      const real = helper.context.spawn;
+      helper.context.spawn = (spec) => {
+        const child = real(spec);
+        if (!spec.args.includes('hold')) return child;
+        const writer = directWriter(helper.context.layout.root);
+        return {
+          ...child,
+          onStdout: (listener) => child.onStdout(listener),
+          onStderr: (listener) => child.onStderr(listener),
+          end: () => child.end(),
+          kill: (signal) => child.kill(signal),
+          exited: child.exited,
+          write: (text) => {
+            const request = JSON.parse(text) as { op: string; from: string; to: string };
+            if (request.op !== 'replace' || request.to !== 'current.json') return child.write(text);
+            void writer
+              .replace(request.from, request.to)
+              .then(() => (child as ScriptedChild).print('{"ok": false, "error": "OSError"}\n'));
+          },
+        };
+      };
+      const error = await install({ name: 'demo-two' }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      expect(await current()).toMatchObject({ generation: 'g00000002-0002', previous: 'g00000001-0001' });
+      expect(await generations()).toEqual(['g00000001-0001', 'g00000002-0002']);
+      expect(await extensionNames()).toEqual(['demo-one', 'demo-two']);
+      helper.context.spawn = real;
+      await install({ name: 'demo-three' });
+      expect(await extensionNames()).toEqual(['demo-one', 'demo-three', 'demo-two']);
     });
 
     it('removes what was built when the candidate cannot be created', async () => {
