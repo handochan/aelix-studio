@@ -78,6 +78,9 @@ async def run_installed(args, report):
         fixture = ControlledFixture(sandbox)
         fixture.root = sandbox
         await fixture.start()
+        profiles = sandbox / 'agent/agents'
+        profiles.mkdir()
+        (profiles / 'reviewer.md').write_text('---\nname: reviewer\ndescription: Synthetic delegation\ntools: [read]\n---\nRespond briefly.\n', encoding='utf-8')
         # The host's custom-agent probe tokenizes its command field on spaces.
         # An owned directory alias keeps the executable inside the actual installed
         # payload; no system/developer Python or copied runtime is substituted.
@@ -122,11 +125,13 @@ def setup(api):
                    '--aelix-arg=-Xutf8', '--aelix-arg=' + str(wrapper), '--provider', 'fixture', '--model', 'one',
                    '--state-dir', str(sandbox / 'acp')]
         (sandbox / 'extensions').mkdir()
-        env = dict(fixture.env, PYTHONDONTWRITEBYTECODE='1', NO_PROXY='127.0.0.1,localhost',
+        # Challenge the product launcher rather than suppressing bytecode in the fixture.
+        env = dict(fixture.env, PYTHONDONTWRITEBYTECODE='0', NO_PROXY='127.0.0.1,localhost',
                    XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
                    APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
                    PERMISSION_PROBE_ROOT=str(sandbox), RECOVERY_SANDBOX=str(sandbox), RECOVERY_OUTPUT=str(args.report.parent),
                    RECOVERY_ADAPTER=str(adapter_python), RECOVERY_ADAPTER_ARGS=json.dumps(command),
+                   RECOVERY_DELEGATION_ARGS=json.dumps([*command, '--enable-agents', '--permission-mode', 'yolo']),
                    RECOVERY_OBSERVER_ARGS=json.dumps([str(python), *prefix]),
                    RECOVERY_APP_EXECUTABLE=os.environ['PROVIDER_APP_EXECUTABLE'],
                    DEBUG='pw:browser', AIONUI_E2E_TEST='1', AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
@@ -136,7 +141,7 @@ def setup(api):
         env = gui_environment(env)
         process = None
         try:
-            process = await asyncio.create_subprocess_exec('node', str(HERE / 'smoke.mjs'), cwd=ROOT, env=env,
+            process = await asyncio.create_subprocess_exec('node', str(HERE / 'probes/smoke.mjs'), cwd=ROOT, env=env,
                 **({'start_new_session': True} if os.name != 'nt' else {}))
             async with asyncio.timeout(360):
                 if await process.wait():
@@ -145,6 +150,7 @@ def setup(api):
             if inventory() != before:
                 raise AssertionError('Installed payload changed during permission qualification')
             report['identityAfter'] = audit()
+            report['checksPassed'].append('delegation_payload_inventory_unchanged')
             if report['identityAfter'] != report['identityBefore']:
                 raise AssertionError('Public native or installed adapter identity changed')
             if not fixture.requests or not all(item['model'] == 'one' for item in fixture.requests):
@@ -180,7 +186,7 @@ def main():
     report = {'schema': 'aelix-studio.permission-recovery-ui/1', 'status': 'failed',
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
-              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'smoke.mjs', 'verification.mjs', '../fixtures/nativeFailure.py')}}
+              'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'probes/smoke.mjs', 'verification.mjs', '../fixtures/nativeFailure.py')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')

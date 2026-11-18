@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Akıl Yürütme Çabası",
     "default": "Varsayılan"
+  },
+  "subagents": {
+    "title": "Alt aracılar",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Aracı",
+    "unavailable": "—",
+    "tool": "Araç: {{value}}",
+    "elapsed": "Süre: {{value}} sn",
+    "elapsedHint": "Çalışma zamanının son bildirdiği süre",
+    "tokens": "Token: {{value}}",
+    "cost": "Maliyet: {{value}}",
+    "states": {
+      "starting": "Başlatılıyor",
+      "running": "Çalışıyor",
+      "done": "Tamamlandı",
+      "error": "Başarısız",
+      "stopped": "Durduruldu",
+      "unknown": "Bilinmiyor",
+      "ended": "Tur sona erdi; son durum bildirilmedi"
+    },
+    "elapsedReported": "Son bildirilen süre: {{value}} sn"
   }
 }

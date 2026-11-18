@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "推理深度",
     "default": "預設"
+  },
+  "subagents": {
+    "title": "子代理",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "代理",
+    "unavailable": "—",
+    "tool": "工具：{{value}}",
+    "elapsed": "耗時：{{value}} 秒",
+    "elapsedHint": "執行階段最後回報的耗時",
+    "tokens": "權杖：{{value}}",
+    "cost": "費用：{{value}}",
+    "states": {
+      "starting": "啟動中",
+      "running": "執行中",
+      "done": "已完成",
+      "error": "失敗",
+      "stopped": "已停止",
+      "unknown": "未知",
+      "ended": "回合已結束，未回報最終狀態"
+    },
+    "elapsedReported": "上次回報耗時：{{value}} 秒"
   }
 }

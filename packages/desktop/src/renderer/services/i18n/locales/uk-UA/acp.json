@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Зусилля міркування",
     "default": "За замовчуванням"
+  },
+  "subagents": {
+    "title": "Субагенти",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Агент",
+    "unavailable": "—",
+    "tool": "Інструмент: {{value}}",
+    "elapsed": "Час: {{value}} с",
+    "elapsedHint": "Останній час, повідомлений середовищем виконання",
+    "tokens": "Токени: {{value}}",
+    "cost": "Вартість: {{value}}",
+    "states": {
+      "starting": "Запускається",
+      "running": "Виконується",
+      "done": "Завершено",
+      "error": "Помилка",
+      "stopped": "Зупинено",
+      "unknown": "Невідомо",
+      "ended": "Хід завершено; кінцевий стан не повідомлено"
+    },
+    "elapsedReported": "Останній повідомлений час: {{value}} с"
   }
 }

@@ -1,5 +1,9 @@
 # Immutable Studio host release
 
+Managed runtime entrypoints force `PYTHONDONTWRITEBYTECODE=1` to protect the installed bundle.
+Agent shell tools and the user-project `python`/`pytest` commands they launch inherit this setting too: implicit `.pyc` caches are not written, so cold imports may be slower.
+This performance tradeoff is intentional; the Windows module-path bootstrap remains scoped separately to the owned native interpreter.
+
 `default.json` pins `host-v0.2.2-aelix.4`, its source commit/tree, five archive
 SHA-256 values and release provenance. `provenance.json` is the byte-preserved
 published release asset. The release also publishes `aelix-studio-host-checksums.txt`;
@@ -14,7 +18,7 @@ Mach-O identity normalizes bounded installer signing metadata while retaining co
 The host identity recipe hash is recorded by the host, not compared against a
 Studio script whose docstring differs.
 
-`smoke.py` / `smoke.mjs` exercise the actual installed app and released host with
+`smoke.py` / `probes/smoke.mjs` exercise the actual installed app and released host with
 synthetic native model/tool effects: Ask deny/allow, Yolo and guardrail enforcement,
 Stop, a Yolo→Ask failure under the `fail-start` marker, and full app/host
 restarts in both modes. A transparent native stdio relay closes the real

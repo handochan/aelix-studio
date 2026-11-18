@@ -28,5 +28,26 @@
   "config": {
     "reasoning_effort": "Reasoning Effort",
     "default": "Default"
+  },
+  "subagents": {
+    "title": "Subagents",
+    "child": "{{profile}} · {{index}}",
+    "unknownProfile": "Agent",
+    "unavailable": "—",
+    "tool": "Tool: {{value}}",
+    "elapsed": "Elapsed: {{value}} s",
+    "elapsedHint": "Latest elapsed time reported by the runtime",
+    "tokens": "Tokens: {{value}}",
+    "cost": "Cost: {{value}}",
+    "states": {
+      "starting": "Starting",
+      "running": "Running",
+      "done": "Completed",
+      "error": "Failed",
+      "stopped": "Stopped",
+      "unknown": "Unknown",
+      "ended": "Turn ended; final status not reported"
+    },
+    "elapsedReported": "Last reported elapsed: {{value}} s"
   }
 }
