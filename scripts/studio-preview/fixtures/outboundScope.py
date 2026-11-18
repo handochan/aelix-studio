@@ -123,6 +123,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         if not match:
             if line and not line.startswith(('+++', '---')):
                 classification_issue('unknown_record', pid)
+                # Privacy-safe shape diagnostics: raw traces are intentionally
+                # deleted. Never export arbitrary tokens, paths or payloads.
+                classification_issues[-1].update(
+                    recordShape=('register_unavailable' if line.startswith('???') else
+                                 'resumed' if line.startswith('<...') else 'other'),
+                    recordLength=len(line), sequence=started)
             return
         call = match[1]
         if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):

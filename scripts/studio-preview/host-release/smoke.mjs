@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
+import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -20,19 +21,32 @@ if (executablePath) {
 let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
+const mainLaunches = [];
+fs.writeFileSync(path.join(output, 'renderer-result.json'), JSON.stringify({ checksPassed: [], mainLaunches }));
+function recordLifecycle(observation) {
+  mainLaunches[observation.launch - 1] = observation;
+  const file = path.join(output, 'renderer-result.json');
+  const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
+  fs.writeFileSync(file, JSON.stringify({ ...previous, checksPassed: [...checks], mainLaunches }, null, 2) + '\n');
+  fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
+}
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
-  app = await electron.launch({
-    ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
-    cwd: executablePath ? sandbox : process.cwd(),
-    env: appEnv,
-    timeout: 60000,
-  });
-  // Capture both assertions in the same early main-context evaluation.
-  const identity = await app.evaluate(() => ({
-    pid: process.pid,
-    backendOverride: process.env.AIONUI_BACKEND_BIN,
-    resourcesPath: process.resourcesPath,
-  }));
+  const result = await launchWithIdentity(
+    () =>
+      electron.launch({
+        ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
+        cwd: executablePath ? sandbox : process.cwd(),
+        env: appEnv,
+        timeout: 60000,
+      }),
+    {
+      launchNumber: mainLaunches.length + 1,
+      remainingProcesses: sandboxProcesses(sandbox),
+      record: recordLifecycle,
+    }
+  );
+  app = result.app;
+  const { identity } = result;
   appPids.push(identity.pid);
   launchResources = identity.resourcesPath;
   if (executablePath) assert.equal(identity.backendOverride, undefined);
@@ -56,7 +70,7 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
 }
 for (const signal of ['SIGINT', 'SIGTERM'])
   process.on(signal, async () => {
-    await app?.close();
+    await closeElectron(app);
     process.exit(1);
   });
 async function api(route, method = 'GET', body, status = [200, 201, 202]) {
@@ -240,7 +254,7 @@ try {
   }
   if (executablePath) {
     const oldPort = port;
-    await app.close();
+    await closeElectron(app);
     app = null;
     await assert.rejects(fetch(`http://127.0.0.1:${oldPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
     await launch(conv.id, 'SYNTHETIC_UI_YOLO');
@@ -267,7 +281,7 @@ try {
   assert.deepEqual(startup, { nativeStarted: false, mode: 'default' });
   checks.push('fail_start_blocks_native_rebuild_with_saved_ask');
   const failedPort = port;
-  await app.close();
+  await closeElectron(app);
   app = null;
   await assert.rejects(fetch(`http://127.0.0.1:${failedPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
   fs.unlinkSync(path.join(sandbox, 'fail-start'));
@@ -303,7 +317,7 @@ try {
       .toBe(true);
     checks.push('installed_ask_and_permission_config_observed_in_host_sqlite');
     const oldPort = port;
-    await app.close();
+    await closeElectron(app);
     app = null;
     await assert.rejects(fetch(`http://127.0.0.1:${oldPort}/api/assistants`, { signal: AbortSignal.timeout(2000) }));
     await launch(conv.id);
@@ -343,6 +357,7 @@ try {
         driverNodeVersion: process.version,
         electronVersions: await app.evaluate(() => process.versions),
         appPids,
+        mainLaunches,
         displayedModeAfterRestore: 'default',
         actualApprovalAfterRestore: 'ask',
         unapprovedWriteObserved: false,
@@ -352,6 +367,7 @@ try {
     ) + '\n'
   );
 } catch (error) {
+  recordLaunchFailure(app, error);
   if (conversationRoute)
     fs.writeFileSync(
       path.join(output, 'failure-wire.local'),
@@ -369,5 +385,5 @@ try {
   }
   throw error;
 } finally {
-  await app?.close();
+  await closeElectron(app);
 }

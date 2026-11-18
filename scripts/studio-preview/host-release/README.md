@@ -27,6 +27,37 @@ No Studio permission-restore patch or backend override is used. The old forwardi
 harness and migration 044 are removed; see `docs/studio-preview/README.md` for the
 internal test database reset and phase-two acceptance scope.
 
+The #51 launch failure's root cause remains **unconfirmed**. PR #45 observed the
+third Linux main process exit with code 0 and no signal before identity
+evaluation. The new smoke launches exactly once: a clean spontaneous exit still
+fails. `closeElectron` waits for the previous OS main process to terminate,
+including Playwright's target-closed path, to test the shutdown-race hypothesis
+without masking a product startup failure. Every existing UI/effect assertion
+and timeout is retained.
+
+Each launch records its sequence, start/exit-observation/close-request times,
+exit code/signal, whether exit preceded smoke shutdown, main output, and a
+best-effort list of sandbox-matched process IDs before startup. The existing
+uploaded `renderer-result.json` includes these records even on failure, so no
+workflow path/gate change is needed. `startup-lifecycle.jsonl` is also retained
+for whole-app audits. A failed launch prints one `Studio launch #N FAILED` line
+with natural-exit/code/signal/time. `DEBUG=pw:browser` captures process output
+from the start in the job log; bounded main output is also retained after the
+Playwright process handle becomes available. These diagnostics use separate
+fields from PR #45's `main-launch-*` logs.
+
+Provider helper smoke's old 5s callback guard came from fixture commit
+`382c819db`, not a product response requirement. Product service limits remain
+20s for ordinary requests and 180s for login. Fixture callbacks now use 20s:
+the observed slow darwin-x64 runner needed ~4.8s just for each cold helper start,
+and PR #45's additional imports reduce that margin further. The outer helper
+suite hang guard is 300s instead of 120s (~31 starts × 4.8s ≈ 149s). Every
+request/frame/process-exit wait logs elapsed time and its bound; timers clear on
+settlement. Helper (300s maximum) and host (240s maximum) now share 450s, inside
+the existing 480s capture bound with attachment/receipt margin. A slow helper
+therefore reduces the host phase's remaining budget. Assertions and product deadlines are unchanged, and hung helpers
+still fail and are stopped by the owned fixture cleanup.
+
 The stdout markers, log/data/DB names, bootstrap secret and `AIONUI_*` interfaces
 remain unchanged. Only the executable and release-archive identity have changed.
 

@@ -30,6 +30,75 @@ is only the existing host-scoped diagnostic output; the separate app gate always
 enforces the whole tree. Linux requires strace, bpftrace/BTF/tracepoints and sudo.
 Capture failures/lost events remain fatal, with no syscall-only fallback.
 
+Reports distinguish `outcome: evidence_incomplete` (exit 87) from
+`external_attempts` (exit 86) and `command_failed`. Incomplete evidence may be
+recaptured **once**, using the driver's fresh isolated state. Both reports and
+first provisional counts survive in `*.capture-N.json` and `captureAttempts`;
+a second incomplete capture fails. Only these explicit reasons permit replay:
+
+- classification: `unknown_record`, `kernel_network_strace_entry_missing`;
+- derivative capture markers: `io_uring_kernel_capture_incomplete`,
+  `kernel_network_capture_incomplete`, `udp_socket_capture_incomplete`, only
+  with kernel reason `kernel_bpf_program_recursion_lost`;
+- per-process record kind: `register_stub`.
+
+With an incomplete kernel capture, recording holes must be **zero**: no
+`register_stub`, `unknown_record` or missing strace entry may accompany the
+kernel loss. Only the derivative markers are eligible. A complete kernel capture
+retains the recording-hole recapture path. Perf event loss
+(`io_uring_kernel_events_lost`, `lostEvents > 0`) is not eligible: the real parser
+also marks PID namespace verification false, so it cannot establish the proof
+needed for recapture.
+
+Every issue and unparsed record must be covered by that list. Kernel namespace,
+diagnostics, error counters and already-observed forbidden opcodes cannot
+supply an unlisted failure alongside the loss. An external `accept4`, unreadable
+`sendto` destination, unknown `connect` family, undecodable socket `write` peer,
+or malformed TCP send peer fails the first capture. Known TCP/send/write,
+forbidden opcodes, configuration refusal and command failure also prevent
+replay. No parser, destination or socket-object policy is relaxed.
+
+`AuditedSessions` passes each session's existing bound (480s for Provider and
+permission) as `--capture-timeout`; attachment, command, drain, report parsing and hashing all share it.
+Expiry is failure, never a retry reason. If analysis cannot finish, a minimal
+failed report records `externalAttempts: null`, not zero, and acceptance does
+not defer that unknown result. Cleanup has a separate 75s reserve; after cleanup
+the unused activity budget is restored for remaining analysis.
+The outer budget covers two such captures plus 30s report overhead; the
+supervisor's own shutdown reserve is separate. Linux supervisors adopt detached
+children, retain PID birth identities, terminate descendants before the root,
+and keep rescanning after forced termination. They fail if the owned tree cannot
+be cleared within its bounded grace. A standalone CLI audit also adopts and
+cleans its descendants. Provider helper/host phases share 450s inside that 480s
+capture budget, retaining their respective 300/240s maxima.
+
+A recapture emits a GitHub warning annotation. `outbound-sessions.json` retains
+`recaptures`, `captureAttempts` and per-capture/outer budgets on each session;
+acceptance exposes `outboundRecaptures` and `recapturedAudits`. Passing after a
+recapture is therefore visible rather than indistinguishable from one capture.
+Interrupted acceptance/cleanup also preserves the current run's recapture
+history in its failed receipt.
+
+The two retained/preexisting socket **negative controls** use `--single-capture`:
+their one-shot peer owns state outside the audited command, so replaying only
+that command cannot recreate the fixture. They still require the first capture
+to fail with exit 87 and the exact existing loss/retention evidence. This option
+never turns incomplete evidence into a pass; ordinary product audits still
+recapture once. The first #51 CI was cancelled after logs confirmed a second
+`object-preexisting` invocation waiting for a peer that had already served its
+one request. Real descriptor-exchange regression tests cover both controls.
+
+For #51's x64 failure (job 133707594478), retained evidence proves a complete
+kernel capture but not complete reconciliation: `unknown_record` on PID 15654
+and a missing final strace `write` on PID 15953 (ordinal/lastOrdinal 4684, no
+kernel return/socket hook). Raw traces were deleted by design. Whether that was
+missing strace output or an unsupported parser shape **cannot be determined**
+from that artifact. Unknown records now retain only a fixed shape, length and
+sequence for diagnosis; they still fail closed. The arm64 `__sk_destruct`
+`recursion_misses: 1` is a confirmed capture loss, including when observed after
+detach. That check remains fatal for each capture; recapture mitigates the
+intermittent collection failure rather than treating lost evidence as complete.
+
 TCP connects and every UDP write/send attempt (including failed attempts through
 inherited/duplicated/imported FDs) are denied outside loopback. `udpConnectOnly` (D)
 requires a unique kernel socket-generation connect matching strace, zero protocol

@@ -45,7 +45,7 @@ def invalid_control_fixture(case):
 
 
 class SessionReceiptTests(unittest.TestCase):
-    def run_report(self, root, *, attempts=0, unparsed=0, classification=0, exit_code=0):
+    def run_report(self, root, *, attempts=0, unparsed=0, classification=0, exit_code=0, recaptures=0):
         audit = module.AuditedSessions(Path('/owned/host'), Path('/owned/python'), root)
         audit.enabled = True
         def result(argv, **_options):
@@ -53,31 +53,73 @@ class SessionReceiptTests(unittest.TestCase):
             whole = Path(argv[argv.index('--whole-report') + 1])
             data = dict(scope='selected-process-trees', enforcement='blocking', externalAttempts=attempts,
                         unparsedRecords=unparsed, classificationErrors=classification, processCount=1, rootPids=[1], commandExitCode=0, ioUring=dict(recorded=True,opcodeCounts={},capture=dict(complete=True,drained=True,lostEvents=0)))
+            data.update(recaptures=recaptures, captureAttempts=([{'attempt':1,'outcome':'evidence_incomplete'}, {'attempt':2,'outcome':'passed'}] if recaptures else [{'attempt':1,'outcome':'passed'}]))
             report.write_text(json.dumps(data)); whole.write_text(json.dumps(dict(data, scope='all', enforcement='report-only')))
             return subprocess.CompletedProcess(argv, exit_code)
         return audit, result
 
+    def test_recapture_survives_in_ledger_acceptance_summary_and_warning(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory)
+            audit,run=self.run_report(root,recaptures=1)
+            with patch.object(module,'run_supervised',run), patch('builtins.print') as annotation:
+                audit.run('provider',['/owned/command'],env={},timeout=480)
+            ledger=json.loads((root/'outbound-sessions.json').read_text())
+            self.assertEqual(ledger['auditedSessions'][0]['captureAttempts'][0]['outcome'],'evidence_incomplete')
+            self.assertEqual(audit.recapture_summary(),{'outboundRecaptures':1,'recapturedAudits':['provider']})
+            self.assertTrue(any('::warning' in str(call) for call in annotation.call_args_list))
+
+    def test_outer_budget_covers_two_captures_without_extending_each_capture(self):
+        with tempfile.TemporaryDirectory() as directory:
+            audit,run=self.run_report(Path(directory))
+            def bounded(command,**options):
+                self.assertEqual(command[command.index('--capture-timeout')+1],'480')
+                self.assertGreaterEqual(options['timeout'],2*480)
+                return run(command,**options)
+            with patch.object(module,'run_supervised',bounded):
+                audit.run('provider',['/owned/command'],env={},timeout=480)
+            self.assertEqual(audit.sessions[0]['captureTimeoutSeconds'],480)
+
+    def test_provider_phases_share_one_budget_even_if_helper_uses_its_full_limit(self):
+        import sys
+        source=ROOT/'scripts/studio-preview/providerSmoke.py'
+        with patch.object(sys,'path',[str(source.parent),*sys.path]):
+            spec=importlib.util.spec_from_file_location('provider_phase_budget',source)
+            provider=importlib.util.module_from_spec(spec);spec.loader.exec_module(provider)
+        with patch.object(provider.time,'monotonic',return_value=300):
+            self.assertEqual(provider.phase_timeout(450,240),150)
+        with patch.object(provider.time,'monotonic',return_value=451):
+            self.assertEqual(provider.phase_timeout(450,240),0)
+
     def test_provider_attempts_are_rejected_even_if_command_succeeds(self):
         with tempfile.TemporaryDirectory() as directory:
             audit, run = self.run_report(Path(directory), attempts=1)
-            with patch.object(module.subprocess, 'run', run), self.assertRaisesRegex(RuntimeError, 'provider'):
+            with patch.object(module, 'run_supervised', run), self.assertRaisesRegex(RuntimeError, 'provider'):
                 audit.run('provider', ['/owned/provider-smoke'], required=(audit.core,audit.native), env={}, timeout=1)
             ledger = json.loads((Path(directory)/'outbound-sessions.json').read_text())
             self.assertEqual(ledger['auditedSessions'][0]['status'], 'failed')
             self.assertEqual(ledger['auditedSessions'][0]['externalAttempts'], 1)
 
+    def test_unknown_timeout_counts_cannot_defer_failure_even_after_command_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            audit,run=self.run_report(Path(directory),attempts=None,unparsed=1,classification=1,exit_code=87)
+            with patch.object(module,'run_supervised',run), self.assertRaisesRegex(RuntimeError,'provider'):
+                audit.run('provider',['/owned/command'],env={},timeout=480,defer_failure=True)
+            self.assertIsNone(audit.sessions[0]['externalAttempts'])
+            self.assertEqual(audit.sessions[0]['status'],'failed')
+
     def test_unparsed_or_classification_failure_is_never_a_zero_receipt(self):
         for fields in [dict(unparsed=1),dict(classification=1),dict(exit_code=87)]:
             with self.subTest(fields=fields), tempfile.TemporaryDirectory() as directory:
                 audit, run = self.run_report(Path(directory), **fields)
-                with patch.object(module.subprocess, 'run', run), self.assertRaises(RuntimeError):
+                with patch.object(module, 'run_supervised', run), self.assertRaises(RuntimeError):
                     audit.run('acp-version', ['/owned/python','--version'],env={},timeout=1)
                 self.assertEqual(audit.sessions[0]['status'],'failed')
 
     def test_each_session_has_separate_reports_and_a_durable_ledger(self):
         with tempfile.TemporaryDirectory() as directory:
             audit, run = self.run_report(Path(directory))
-            with patch.object(module.subprocess, 'run', run):
+            with patch.object(module, 'run_supervised', run):
                 for name in ('acp-version','core-version','provider','permission'):
                     audit.run(name, ['/owned/command'],env={},timeout=1)
             self.assertEqual(len({r['report'] for r in audit.sessions}),4)
@@ -87,7 +129,7 @@ class SessionReceiptTests(unittest.TestCase):
     def test_collecting_remaining_functional_evidence_keeps_failure_in_final_receipt(self):
         with tempfile.TemporaryDirectory() as directory:
             audit, run = self.run_report(Path(directory), attempts=1, exit_code=86)
-            with patch.object(module.subprocess,'run',run):
+            with patch.object(module,'run_supervised',run):
                 audit.run('provider',['/owned/provider-smoke'],env={},timeout=1,defer_failure=True)
             self.assertEqual(audit.failed,['provider'])
             self.assertEqual(audit.sessions[0]['status'],'failed')
