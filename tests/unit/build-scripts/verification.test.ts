@@ -82,6 +82,7 @@ function application(error?: Error, exitCode: number | null = 0, signalCode: str
   const main = Object.assign(new EventEmitter(), { pid: 123, exitCode, signalCode });
   const app = {
     process: () => main,
+    firstWindow: vi.fn(async (_options?: { timeout: number }) => ({})),
     evaluate: vi.fn(async (_expression?: () => object, _token?: string) => {
       if (error) throw error;
       return { pid: 123 };
@@ -204,6 +205,99 @@ describe('Electron launch evidence and identity retry', () => {
     remainingProcesses: { status: 'observed', processes: [] },
   });
 
+  it('shares the launch timeout and records readiness before evaluating identity', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    const record = vi.fn();
+    const launch = vi.fn((_timeout: number) => new Promise((resolve) => setTimeout(() => resolve(app), 20000)));
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 39000)));
+    const result = launchWithIdentity(launch, options(record));
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(launch).toHaveBeenCalledWith(60000);
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 40000 });
+    await vi.advanceTimersByTimeAsync(38999);
+    expect(app.evaluate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ app, identity: { pid: 123 } });
+    const row = record.mock.calls.at(-1)?.[0];
+    expect(row).toMatchObject({ launch: 3, firstWindowWait: { outcome: 'passed' }, status: 'identified' });
+    expect(Date.parse(row.firstWindowWait.finishedAt) - Date.parse(row.firstWindowWait.startedAt)).toBe(39000);
+    expect(row.identityStartedAt).toBe(row.firstWindowWait.finishedAt);
+  });
+
+  it('fails and cleans up without identity evaluation when the first window exhausts the remaining budget', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, main } = application(undefined, null);
+    app.close.mockImplementation(async () => {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+    });
+    const error = new Error('firstWindow: timeout');
+    app.firstWindow.mockImplementation(
+      ({ timeout } = { timeout: 0 }) => new Promise((_resolve, reject) => setTimeout(() => reject(error), timeout))
+    );
+    const launch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(app), 59000)));
+    const record = vi.fn();
+    const checked = expect(launchWithIdentity(launch, options(record))).rejects.toBe(error);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(app.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await checked;
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 1000 });
+    expect(app.evaluate).not.toHaveBeenCalled();
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      launch: 3,
+      firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'failed' },
+      waits: [{ phase: 'first-window-failure-cleanup' }],
+    });
+  });
+
+  it.each(['launch deadline already elapsed', 'window arrives after deadline'])('rejects if %s', async (scenario) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app } = application();
+    const lateLaunch = scenario === 'launch deadline already elapsed';
+    const launch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(app), lateLaunch ? 1000 : 0)));
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 1001)));
+    const checked = expect(launchWithIdentity(launch, { ...options(), launchTimeoutMs: 1000 })).rejects.toThrow(
+      'first window exceeded the 1000ms launch timeout'
+    );
+    await vi.advanceTimersByTimeAsync(1001);
+    await checked;
+    expect(app.firstWindow).toHaveBeenCalledTimes(lateLaunch ? 0 : 1);
+    expect(app.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('samples during the first-window wait and pauses only for identity', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 2000)));
+    app.evaluate.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ pid: 123 }), 2000)));
+    const snapshot = vi.fn(() => ({ status: 'observed', rows: [] }));
+    const timeline = createProcessTimeline({ snapshot });
+    timeline.start();
+    try {
+      const result = launchWithIdentity(async () => app, { ...options(), processTimeline: timeline });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(snapshot).toHaveBeenCalled();
+      expect(app.evaluate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(app.evaluate).toHaveBeenCalledTimes(1);
+      snapshot.mockClear();
+      await vi.advanceTimersByTimeAsync(1998);
+      expect(snapshot).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      await expect(result).resolves.toMatchObject({ identity: { pid: 123 } });
+      expect(snapshot).toHaveBeenCalled();
+    } finally {
+      timeline.stop();
+    }
+  });
+
   it('persists the correlated first failure and one successful same-handle retry', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-identity-retry-'));
     try {
@@ -229,6 +323,7 @@ describe('Electron launch evidence and identity retry', () => {
         returnByValue: true,
       };
       expect(JSON.parse(text).mainLaunches[2]).toMatchObject({
+        firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'passed' },
         identityFailedAt: expect.any(String),
         identityProtocol: { errors: [firstError] },
         identityRetry: {

@@ -214,7 +214,7 @@ async function capture(marker) {
 }
 try {
   const launched = await launchWithIdentity(
-    () => electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout: 60000 }),
+    (timeout) => electron.launch({ args: ['.'], cwd: process.cwd(), env, timeout }),
     { launchNumber: 1, record: recordLifecycle, remainingProcesses: sandboxProcesses(sandbox) }
   );
   app = launched.app;

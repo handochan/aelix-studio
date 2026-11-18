@@ -252,8 +252,11 @@ async function evaluateIdentity(app, protocol) {
   return { ...result, protocolError };
 }
 
-/** Launch once and retry only a correlated, collected identity evaluation. */
-export async function launchWithIdentity(launch, { launchNumber, record, remainingProcesses, processTimeline }) {
+/** Share the launch timeout with first-window readiness before evaluating identity. */
+export async function launchWithIdentity(
+  launch,
+  { launchNumber, record, remainingProcesses, processTimeline, launchTimeoutMs = 60000 }
+) {
   const write = record;
   let lastStatus = 'launching';
   record = (value) => {
@@ -293,8 +296,8 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
   observation.protocol = protocol.snapshot();
   let app;
   try {
-    app = await launch();
-    processTimeline?.beginIdentity();
+    const deadline = performance.now() + launchTimeoutMs;
+    app = await launch(launchTimeoutMs);
     try {
       protocol.restore();
       const main = app.process();
@@ -319,6 +322,24 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
           observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
           record({ ...observation, status: 'output' });
         });
+      const startedAt = new Date().toISOString();
+      observation.firstWindowWait = { startedAt, outcome: 'pending' };
+      diagnostic();
+      processTimeline?.checkpoint('first-window-wait', launchNumber);
+      let outcome = 'failed';
+      try {
+        const remaining = deadline - performance.now();
+        if (remaining > 0) await app.firstWindow({ timeout: remaining });
+        if (performance.now() >= deadline)
+          throw new Error(
+            `Studio launch #${launchNumber}: first window exceeded the ${launchTimeoutMs}ms launch timeout`
+          );
+        outcome = 'passed';
+      } finally {
+        observation.firstWindowWait = { startedAt, finishedAt: new Date().toISOString(), outcome };
+        diagnostic();
+      }
+      processTimeline?.beginIdentity();
       observation.identityStartedAt = new Date().toISOString();
       const first = await evaluateIdentity(app, protocol);
       let identity = first.identity;
@@ -358,14 +379,17 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
       record({ ...observation, status: 'identified' });
       return { app, identity };
     } finally {
-      processTimeline?.endIdentity(observation.identifiedAt ? 'after-identity' : 'identity-failed', launchNumber);
+      if (observation.identityStartedAt)
+        processTimeline?.endIdentity(observation.identifiedAt ? 'after-identity' : 'identity-failed', launchNumber);
     }
   } catch (error) {
     if (app) {
-      // Preserve the existing bounded observation before any smoke shutdown.
-      await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
+      const windowFailed = observation.firstWindowWait?.outcome === 'failed';
+      // The extra exit observation belongs to failures during evaluation.
+      if (!windowFailed)
+        await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
       recordLaunchFailure(app, error);
-      await closeElectron(app, { phase: 'identity-failure-cleanup' });
+      await closeElectron(app, { phase: windowFailed ? 'first-window-failure-cleanup' : 'identity-failure-cleanup' });
     } else {
       record({ ...observation, status: 'failed', error: String(error) });
       console.error(`Studio launch #${launchNumber} FAILED before process handle: ${error}`);
