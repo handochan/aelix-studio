@@ -77,6 +77,26 @@ The macOS engine fixture passed with 0 remote requests and 0 worker errors; that
 is renderer-request evidence, not an OS-level outbound audit. Linux CI runs the
 same fixture under the common whole-tree blocking auditor.
 
+The Vite and dictionary builds remain inside that audited command. The dictionary
+uses asynchronous esbuild to avoid its separate synchronous API worker. Before
+starting Electron, `buildMonacoResources` stops the shared build service and
+waits for every child handle observed during the serial build phase to emit both
+OS `exit` and stream `close`. `esbuild.stop()` resolution alone is not evidence
+of process exit. `monaco.json` retains the helper PID/exit/close receipt in
+`buildLifecycle`; a helper failure or bounded shutdown failure fails the fixture.
+No process-name scan, unrelated-process cleanup or audit replay is added. The
+outer auditor still follows all descendants and drains kernel/task/socket events
+after the command, including sends during helper shutdown.
+
+`tests/outbound-audit/test_monaco_build.py` compares original Vite + synchronous
+dictionary, async-only, and managed builds byte-for-byte with a local worker.
+Linux runs additionally retain real-capture controls under
+`.local/outbound/monaco-controls`: the managed build, final child TCP/UDP attempts
+(exit 86), and injected tracer EIO/missing records (exit 87, no recapture).
+The injected EIO control substitutes a failing tracer fixture; it does not claim
+to reproduce the kernel's original PTRACE_LISTEN race. Functional assertions
+and child shutdown failure paths also have focused unit coverage.
+
 ## Shared syscall tracer
 
 Both Linux gates prepare unmodified strace 7.3 from the official release archive,

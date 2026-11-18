@@ -4,9 +4,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import http from 'node:http';
 import { createRequire } from 'node:module';
-import { build } from 'vite';
 import { _electron as electron, expect } from '@playwright/test';
 import { isolatedAppEnvironment } from '../startup.mjs';
+import { buildMonacoResources } from './monacoBuild.mjs';
 
 const require = createRequire(import.meta.url);
 const root = path.resolve(import.meta.dirname, '../../..');
@@ -36,22 +36,13 @@ try {
     window.__workerUrls=[];window.__workerErrors=0;const NativeWorker=window.Worker;window.Worker=class extends NativeWorker{constructor(url,options){super(url,options);window.__workerUrls.push(String(url));this.addEventListener('error',()=>window.__workerErrors++);}};
     createRoot(document.getElementById('root')).render(<I18nextProvider i18n={i18next}><Editor height='400px' language='html' value='<h1>OFFLINE_EDITOR</h1>' onMount={(editor,monaco)=>{window.__testEditor=editor;window.__testMonaco=monaco;}}/></I18nextProvider>);`
   );
-  await build({
-    configFile: false,
-    root: directory,
-    base: './',
-    logLevel: 'error',
-    build: { outDir: 'dist', emptyOutDir: true, target: 'es2022' },
-    worker: { format: 'es' },
-  });
-  const compiled = path.join(directory, 'dictionaryServer.cjs');
-  require('esbuild').buildSync({
-    entryPoints: [path.join(root, 'packages/desktop/src/process/resources/dictionaryServer.ts')],
-    bundle: true,
-    platform: 'node',
-    format: 'cjs',
-    outfile: compiled,
-  });
+  const compiled = await buildMonacoResources(
+    directory,
+    path.join(root, 'packages/desktop/src/process/resources/dictionaryServer.ts'),
+    (lifecycle) => {
+      report.buildLifecycle = lifecycle;
+    }
+  );
   if (process.platform !== 'darwin')
     dictionaries = await require(compiled).createDictionaryServer(path.join(root, '.local/offline-spellcheck'));
   const dist = path.join(directory, 'dist');
