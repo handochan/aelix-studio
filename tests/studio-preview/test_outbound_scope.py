@@ -1,5 +1,6 @@
 """Scoped syscall audit: lineage, attribution, fail-closed parsing and real children."""
 import importlib.util
+import copy
 import io
 from contextlib import nullcontext, redirect_stdout
 import json
@@ -25,6 +26,35 @@ LOCAL = CONNECT.replace('203.0.113.1', '127.0.0.1')
 
 
 class CaptureStartupFailureTests(unittest.TestCase):
+    def test_failed_start_retains_partial_tasks_without_upgrading_namespace_or_capture(self):
+        def factory(directory):
+            (directory/'events.raw').write_text('READY\nROOT|1|100|100|123|1\n'
+                'P|2|101|101|124|124|1|1|3|0\n'
+                'T|5|101|101|124|124|1|100|0|1\n')
+            capture=Mock(namespace=7);capture.start.side_effect=RuntimeError('kernel_tracepoint_unavailable')
+            capture.stop.return_value=dict(status='failed',complete=False,pidNamespaceVerified=False,
+                lostEvents=0,events=[],eventCount=0)
+            return capture
+        with tempfile.TemporaryDirectory() as directory:
+            report=Path(directory)/'report.json';process=Mock(pid=123,returncode=0);process.poll.return_value=0
+            with patch.dict(os.environ,{},clear=True),patch.object(audit.sys,'platform','linux'), \
+                 patch.object(audit,'resolve_strace',return_value='/usr/bin/strace'), \
+                 patch.object(audit,'npm_config_paths',return_value=[]), \
+                 patch.object(audit,'npm_proxy_configured',return_value=False), \
+                 patch.object(audit,'Capture',side_effect=factory), \
+                 patch.object(audit,'capture_deadline',return_value=nullcontext()), \
+                 patch.object(audit.signal,'setitimer',create=True),patch.object(audit.signal,'ITIMER_REAL',0,create=True), \
+                 patch.object(audit.subprocess,'Popen',return_value=process):
+                code=audit.audit(['/owned/command'],report)
+            result=json.loads(report.read_text())
+        self.assertEqual(code,87)
+        self.assertFalse(result['ioUring']['capture']['complete'])
+        self.assertFalse(result['ioUring']['capture']['pidNamespaceVerified'])
+        self.assertTrue(result['taskEvidence']['source']['diagnosticSnapshotUsed'])
+        self.assertEqual(result['taskEvidence']['tasks'][0]['namespaceTid'],124)
+        self.assertEqual(result['taskEvidence']['networkRecordCounts']['P'],1)
+        self.assertNotIn('taskRecordingSnapshot',result['ioUring']['capture'])
+
     def test_start_failure_is_preserved_even_when_broker_evidence_is_unavailable(self):
         for broker_error in (False,True):
             with self.subTest(broker_error=broker_error), tempfile.TemporaryDirectory() as directory:
@@ -1085,3 +1115,118 @@ class TracerSelectionTests(unittest.TestCase):
             self.assertEqual(code,87)
             self.assertEqual(data['straceDiagnostics']['unsupportedPersonalities'],1)
             self.assertIn({'reason':'unsupported_strace_personality'},data['classificationIssues'])
+
+
+class TaskEvidenceReportTests(unittest.TestCase):
+    def fixture(self):
+        return dict(status='captured',complete=True,drained=True,lostEvents=0,pidNamespaceVerified=True,
+            namespaceInode=7,eventCount=0,events=[],root={'kernelPid':100},
+            network={'complete':True,'eventCount':0,'events':[],'workers':[],
+                'tasks':[dict(pid=p,tgid=p,kernelPid=k,kernelTgid=k,parentKernelPid=parent,
+                              start=1,end=100,lastOrdinal=10,kernelThread=False,ioWorker=False)
+                         for p,k,parent in [(100,100,0),(1,101,100)]]})
+
+    def parse(self,lines,capture=None,selected=()):
+        with tempfile.TemporaryDirectory() as directory:
+            path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
+            return audit.analyze_processes([path],selected,(),True,capture)
+
+    def task(self,report,tid=1):
+        return next(row for row in report['taskEvidence']['straceTasks'] if row['tid']==tid)
+
+    def test_observed_close_and_register_syntax_survives_existing_resolution_without_contents(self):
+        lines=['1<app> execve("/Users/SECRET_TRACE/app", ["SECRET_ARG"], ["SECRET_ENV"]) = 0',
+               '1<app> close(7</Users/SECRET_TRACE/file>) = ?',
+               '1<app> ???( <unfinished ...>','1<app> <... ??? resumed>) = ?',
+               '1<app> +++ exited with 0 +++']
+        _,report=self.parse(lines,self.fixture());row=self.task(report)
+        self.assertEqual((report['unparsedRecords'],report['kernelResolvedRecords'],report['kernelMetadataResolvedRecords']),(0,2,1))
+        self.assertEqual((row['existingRegisterResolutions'],row['existingCloseResolutions']),(2,1))
+        self.assertEqual(row['positions'],dict(firstSequence=1,lastSequence=5,records=5))
+        self.assertEqual({gap['kind'] for gap in row['gaps']},{'register-sequence','close-return-unavailable'})
+        self.assertNotIn('SECRET',json.dumps(report))
+        self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
+        self.assertFalse(report['kernelMetadataResolutions'][0]['returnValueKnown'])
+
+    def test_unknown_record_still_globally_blocks_existing_close_resolution(self):
+        capture=self.fixture();capture['network']['tasks'].append(dict(pid=2,tgid=2,kernelPid=102,
+            kernelTgid=102,parentKernelPid=101,start=1,end=100,lastOrdinal=0,kernelThread=False,ioWorker=False))
+        _,report=self.parse(['1<app> execve("/owned/app", [...], 0x1) = 0',
+            '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 2','1<app> close(7) = ?',
+            '2<child> ??? SECRET_TRACE','2<child> +++ exited with 0 +++','1<app> +++ exited with 0 +++'],capture)
+        self.assertEqual(report['kernelMetadataResolvedRecords'],0)
+        self.assertGreater(report['unparsedRecords'],0)
+        row=self.task(report,2)
+        self.assertEqual(row['gaps'],[dict(kind='unclassified-record',records=1,sequence=4,
+            recordLength=len('??? SECRET_TRACE'),recordShape='register_unavailable')])
+        self.assertEqual(report['classificationIssues'][row['classificationIssueIndices'][0]]['reason'],'unknown_record')
+        self.assertNotIn('SECRET',json.dumps(report))
+
+    def test_pending_and_inexact_close_syntax_are_distinct_without_accepting_more(self):
+        for text,shape in [('close(7<anon_inode:inotify> <unfinished ...>','close-pending-complete-argument'),
+                           ('close(7<incomplete <unfinished ...>','other-result-gap')]:
+            with self.subTest(text=text):
+                _,report=self.parse(['1<app> '+text,'1<app> +++ exited with 0 +++'],self.fixture())
+                gap=self.task(report)['gaps'][0]
+                self.assertEqual(gap['kind'],shape)
+                self.assertTrue(gap['pendingAtCaptureEnd'])
+                if shape=='other-result-gap':
+                    self.assertEqual(report['kernelMetadataResolvedRecords'],0)
+                    self.assertGreater(report['unparsedRecords'],0)
+
+    def test_orphan_register_resume_is_not_described_as_a_terminal_delimited_stub(self):
+        _,report=self.parse(['1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++'],self.fixture())
+        self.assertFalse(self.task(report)['gaps'][0]['terminalDelimited'])
+        self.assertGreater(report['unparsedRecords'],0)
+
+    def test_kernel_child_without_strace_has_numeric_identity_even_for_global_issue(self):
+        for fork_known in (False,True):
+            with self.subTest(fork_known=fork_known):
+                capture=self.fixture();capture['network']['tasks'].append(dict(pid=3,tgid=3,kernelPid=103,
+                    kernelTgid=103,parentKernelPid=101,start=2,end=90,lastOrdinal=0,kernelThread=False,ioWorker=False))
+                lines=['1<app> execve("/owned/app", [...], 0x1) = 0']
+                if fork_known:lines+=['1<app> clone(child_stack=NULL, flags=SIGCHLD) = 3']
+                _,report=self.parse(lines+['1<app> +++ exited with 0 +++'],capture)
+                child=next(row for row in report['taskEvidence']['tasks'] if row['namespaceTid']==3)
+                self.assertEqual((child['kernelTid'],child['parentNamespaceTid']),(103,1))
+                self.assertFalse(child['straceObserved'])
+                self.assertGreater(report['unparsedRecords'],0)
+                if fork_known:self.assertFalse(self.task(report,3)['observed'])
+
+    def test_unavailable_kernel_never_creates_zero_network_evidence_for_strace_task(self):
+        _,report=self.parse(['1<app> ???( <unfinished ...>','1<app> <... ??? resumed>) = ?',
+                            '1<app> +++ killed by SIGKILL +++'])
+        source=report['taskEvidence']['source']
+        self.assertFalse(source['networkEventsAvailable'])
+        self.assertIsNone(report['taskEvidence']['networkRecordCounts'])
+        self.assertEqual(self.task(report)['kernelTaskIndices'],[])
+        self.assertGreater(report['unparsedRecords'],0)
+
+    def test_selected_report_retains_capture_wide_identity_context_without_rescoping_verdict(self):
+        capture=self.fixture();capture['network']['tasks'].append(dict(pid=2,tgid=2,kernelPid=102,
+            kernelTgid=102,parentKernelPid=101,start=2,end=90,lastOrdinal=0,kernelThread=False,ioWorker=False))
+        scoped,whole=self.parse(['1<app> execve("/owned/app", [...], 0x1) = 0',
+            '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 2',
+            '2<host> execve("/owned/aelix-studio-host", [...], 0x1) = 0',
+            '2<host> +++ exited with 0 +++','1<app> +++ exited with 0 +++'],capture,(HOST,))
+        self.assertEqual(scoped['taskEvidence']['tasks'],whole['taskEvidence']['tasks'])
+        self.assertFalse(self.task(scoped,1)['inReportScope']);self.assertTrue(self.task(scoped,2)['inReportScope'])
+        self.assertEqual((scoped['processCount'],whole['processCount']),(1,2))
+
+    def test_replacing_diagnostic_payload_cannot_change_any_existing_report_field(self):
+        from uring import network
+        lines=['1<app> close(7) = ?','1<app> ???( <unfinished ...>',
+               '1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++']
+        baseline=self.parse(lines,self.fixture())
+        with patch.object(network,'summarize_tasks',return_value={'tasks':[],'forgedEligibility':True}):
+            replaced=self.parse(lines,self.fixture())
+        for before,after in zip(baseline,replaced):
+            self.assertEqual({key:value for key,value in before.items() if key!='taskEvidence'},
+                             {key:value for key,value in after.items() if key!='taskEvidence'})
+
+    def test_new_diagnostic_claims_cannot_authorize_a_mixed_loss_recapture(self):
+        tests=RecaptureTests();report=tests.kernel_loss()
+        report['processes'][0].update(unparsedRecords=1,unparsedRecordKinds={'register_stub':1})
+        report['unparsedRecords']+=1
+        report['taskEvidence']={'purpose':'forged','source':{'complete':True},'resolved':True,'tasks':[]}
+        tests.assert_no_recapture(report)

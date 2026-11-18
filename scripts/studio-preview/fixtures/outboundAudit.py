@@ -24,7 +24,7 @@ import time
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from outboundScope import analyze_processes
-from uring.capture import Capture
+from uring.capture import Capture, diagnostic_task_snapshot
 from uring.policy import ALLOWED_OPCODES
 
 DENIED = 86
@@ -405,6 +405,10 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
         unsupported=unsupported_personalities(stderr.decode('utf8','replace'))
         process.returncode=process.returncode if process.returncode is not None else INCOMPLETE
         paths = [trace] if trace.exists() else []
+        if not evidence.get('complete') and not isinstance(evidence.get('network'), dict):
+            snapshot = diagnostic_task_snapshot(Path(directory), capture.namespace)
+            if snapshot is not None:
+                evidence['taskRecordingSnapshot'] = snapshot
         if not evidence.get('complete'):
             print('Kernel capture incomplete: '+json.dumps({key:evidence.get(key) for key in
                   ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode',

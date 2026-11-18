@@ -1,5 +1,7 @@
 """Tracepoint preflight requires complete kernel event schemas, never empty success."""
 import importlib.util
+import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -577,3 +579,169 @@ class RingDescriptorTests(unittest.TestCase):
             s.extend(extra+[{'call':'io_uring_enter','pid':10,'tgid':10,'fd':5,'result':1,
                              'registeredRing':not bool(extra),'sequence':2}])
             self.assertTrue(ops.reconcile(c,s,{10},{10})['issuesByPid'][10])
+
+
+class KernelTaskEvidenceTests(unittest.TestCase):
+    """Report partial evidence without authorizing any new parser discharge."""
+    def fixture(self):
+        return dict(complete=True,drained=True,pidNamespaceVerified=True,namespaceInode=7,lostEvents=0,
+            recorderExitCode=0,root={'kernelPid':99},diagnostics=[],recordErrors=[],
+            captureChecks={'ready':True,'done':True,'stderrEmpty':True},
+            attachmentReadiness='reviewed-bpftrace-printf-drained-after-all-attachments',
+            udpProbeLoss={'programs':[{'prog_id':1,'recursion_misses':0}]},
+            network={'complete':True,'eventCount':0,'events':[],'workers':[],
+                'tasks':[dict(pid=99,tgid=99,kernelPid=99,kernelTgid=99,parentKernelPid=0,
+                              start=1,end=200,lastOrdinal=0,kernelThread=False,ioWorker=False),
+                         dict(pid=10,tgid=10,kernelPid=110,kernelTgid=110,parentKernelPid=99,
+                              start=2,end=100,lastOrdinal=10,kernelThread=False,ioWorker=False)]})
+
+    def event(self,kind='P',**fields):
+        return dict(kind=kind,time=3,pid=10,tgid=10,kernelPid=110,kernelTgid=110,
+                    call=5,ordinal=1,value=3,result=0) | fields
+
+    def add(self,capture,*events):
+        capture['network']['events'].extend(events)
+        capture['network']['eventCount']=len(capture['network']['events'])
+
+    def task(self,result,tid=10):
+        return next(row for row in result['tasks'] if row['namespaceTid']==tid)
+
+    def test_balanced_counts_keep_both_namespace_identities_parent_and_final_range(self):
+        capture=self.fixture()
+        self.add(capture,self.event(),self.event('N',time=4),
+                 self.event('V',time=5,value=1,result=0x8000,file=0x12345678),self.event('X',time=6))
+        result=network.summarize_tasks(capture);row=self.task(result)
+        self.assertEqual({key:row[key] for key in ('namespaceTid','namespaceTgid','kernelTid','kernelTgid',
+            'parentKernelTid','parentNamespaceTid','rangeStart','rangeEnd')},
+            dict(namespaceTid=10,namespaceTgid=10,kernelTid=110,kernelTgid=110,
+                 parentKernelTid=99,parentNamespaceTid=99,rangeStart=2,rangeEnd=100))
+        self.assertEqual(row['assignedRecordCounts'],dict(P=1,N=1,X=1,H=0,V=1,other=0))
+        self.assertTrue(all(value==0 for value in row['structuralUnmatched'].values()))
+        self.assertEqual((result['assignedNetworkRecords'],result['unattributedNetworkRecords']),(4,0))
+        self.assertNotIn('file',row)
+
+    def test_missing_sources_are_null_instead_of_zero_activity(self):
+        result=network.summarize_tasks(None)
+        self.assertFalse(result['source']['networkEventsAvailable'])
+        self.assertIsNone(result['networkRecordCounts'])
+        self.assertIsNone(result['source']['retainedProgramMissTotal'])
+        capture=self.fixture();capture['network'].pop('events')
+        row=self.task(network.summarize_tasks(capture))
+        self.assertIsNone(row['assignedRecordCounts']);self.assertIsNone(row['structuralUnmatched'])
+
+    def test_partial_failed_capture_keeps_observed_counts_and_explicit_loss(self):
+        capture=self.fixture();capture.update(complete=False,drained=False,lostEvents=1)
+        capture['network']['complete']=False
+        capture['programLoss']={'programs':[{'programName':'PRIVATE','recursion_misses':2}]}
+        self.add(capture,self.event('H',value=1,result=2))
+        result=network.summarize_tasks(capture,{'issues':[{'reason':'kernel_network_capture_incomplete'}]})
+        self.assertFalse(result['source']['complete'])
+        self.assertEqual(result['source']['reportedProgramMissTotal'],2)
+        self.assertEqual(self.task(result)['assignedRecordCounts']['H'],1)
+        self.assertEqual(result['source']['globalNetworkIssueCount'],1)
+        self.assertNotIn('PRIVATE',json.dumps(result))
+
+    def test_structural_unmatched_channels_are_visible_without_becoming_new_errors(self):
+        cases=[('P','preWithoutEntry'),('N','entryWithoutPre'),('X','returnWithoutEntry'),
+               ('H','hookWithoutCompleteInvocation'),('V','vfsWithoutCompleteInvocation')]
+        for kind,key in cases:
+            with self.subTest(kind=kind):
+                capture=self.fixture();self.add(capture,self.event(kind))
+                result=network.summarize_tasks(capture)
+                self.assertEqual(self.task(result)['structuralUnmatched'][key],1)
+                self.assertEqual(result['purpose'],'diagnostic-only-no-new-resolution')
+                self.assertNotIn('resolved',result)
+
+    def test_hidden_failed_connect_is_visible_even_with_zero_socket_hooks(self):
+        capture=self.fixture();self.add(capture,self.event(call=1),self.event('N',call=1,time=4),
+                                       self.event('X',call=1,time=5,result=-9))
+        checked=network.reconcile(capture,[],{10:2},{10},None)
+        result=network.summarize_tasks(capture,checked)
+        self.assertTrue(checked['issues']);self.assertEqual(checked['resolved'],[])
+        self.assertEqual(self.task(result)['assignedRecordCounts'],dict(P=1,N=1,X=1,H=0,V=0,other=0))
+        self.assertGreater(self.task(result)['networkIssueCount'],0)
+
+    def test_identity_and_range_mismatches_are_not_assigned_to_a_different_task(self):
+        for changed in ({'pid':11},{'tgid':11},{'kernelTgid':111},{'time':101},{'kernelPid':111}):
+            with self.subTest(changed=changed):
+                capture=self.fixture();self.add(capture,self.event(**changed))
+                result=network.summarize_tasks(capture)
+                self.assertEqual(result['assignedNetworkRecords'],0)
+                self.assertEqual(result['unattributedNetworkRecords'],1)
+                self.assertEqual(result['unattributedNetwork'][0]['recordCounts']['P'],1)
+
+    def test_reused_identifiers_retain_each_lifetime_and_ambiguous_events(self):
+        capture=self.fixture();second=copy.deepcopy(capture['network']['tasks'][1])
+        second.update(start=50,end=150);capture['network']['tasks'].append(second)
+        self.add(capture,self.event(time=60))
+        result=network.summarize_tasks(capture);rows=[row for row in result['tasks'] if row['namespaceTid']==10]
+        self.assertEqual([(row['rangeStart'],row['rangeEnd']) for row in rows],[(2,100),(50,150)])
+        self.assertTrue(all(row['kernelTidReused'] and row['namespaceTidReused'] for row in rows))
+        self.assertEqual(result['unattributedNetwork'][0]['reason'],'ambiguous-lifetime')
+        capture['network']['tasks'][1]['end']=49
+        result=network.summarize_tasks(capture)
+        self.assertEqual([row['assignedRecordCounts']['P'] for row in result['tasks'] if row['namespaceTid']==10],[0,1])
+        self.assertEqual(result['unattributedNetworkRecords'],0)
+
+    def test_worker_birth_and_parent_identity_remain_distinct_from_a_userspace_tid(self):
+        capture=self.fixture();capture['network']['tasks'].append(dict(pid=11,tgid=10,kernelPid=111,
+            kernelTgid=110,parentKernelPid=110,start=4,end=50,lastOrdinal=0,kernelThread=False,ioWorker=True))
+        capture['network']['workers']=[dict(kernelPid=111,parentKernelPid=110,start=4,time=5,flags=0x4010)]
+        row=self.task(network.summarize_tasks(capture),11)
+        self.assertEqual((row['namespaceTgid'],row['kernelTgid'],row['parentNamespaceTid']),(10,110,10))
+        self.assertTrue(row['ioWorker']);self.assertEqual(row['workerBirthRecords'],1)
+
+    def test_ring_and_shared_object_results_are_pid_aggregates_without_raw_references(self):
+        capture=self.fixture()
+        rings={'globalIssues':[{'reason':'PRIVATE'}],'issuesByPid':{10:[{'reason':'PRIVATE'}]},
+            'rings':[dict(ctx='PRIVATE',creatorPid=10,submissions=[{'pid':11,'attributedPid':10}])]}
+        objects={'verified':False,'objects':[dict(id='PRIVATE',actorPids=[10,11],valid=False,sends=[{'payload':'PRIVATE'}])]}
+        before=copy.deepcopy((capture,rings,objects))
+        result=network.summarize_tasks(capture,ring_evidence=rings,object_evidence=objects);row=self.task(result)
+        self.assertEqual(row['ringCounts'],{'creations':1,'submissions':1})
+        self.assertEqual(row['objectCounts'],{'generations':1,'validGenerations':0,'unfreedGenerations':1,'sharedObjectSendRecords':1})
+        self.assertEqual(row['ringIssueCount'],1);self.assertFalse(result['source']['objectProofVerified'])
+        self.assertNotIn('PRIVATE',json.dumps(result));self.assertEqual((capture,rings,objects),before)
+
+    def test_malformed_private_values_never_enter_the_numeric_evidence(self):
+        capture=self.fixture();capture['network']['tasks'][1].update(pid='PRIVATE',comm='PRIVATE',path='PRIVATE')
+        self.add(capture,self.event(pid='PRIVATE',payload='PRIVATE',value='PRIVATE'))
+        capture.update(diagnostics=['PRIVATE'],recordErrors=[{'sample':'PRIVATE'}])
+        result=network.summarize_tasks(capture)
+        self.assertNotIn('PRIVATE',json.dumps(result))
+        self.assertEqual(result['unattributedNetworkRecords'],1)
+        self.assertIsNone(result['tasks'][1]['namespaceTid'])
+        self.assertFalse(result['tasks'][1]['identityFieldsPresent'])
+
+    def test_failed_recorder_snapshot_never_promotes_authoritative_capture_fields(self):
+        from uring.capture import diagnostic_task_snapshot
+        raw=('READY\nROOT|1|100|100|10|1\n'
+             'P|2|100|100|10|10|1|1|3|0\nT|5|100|100|10|10|1|0|0|1\n'
+             'UNKNOWN SECRET_SENTINEL\n')
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);(root/'events.raw').write_text(raw)
+            (root/'recorder.stderr').write_text('SECRET_SENTINEL')
+            snapshot=diagnostic_task_snapshot(root,7)
+        failed=dict(status='failed',complete=False,pidNamespaceVerified=False,lostEvents=0,
+                    reason='kernel_recorder_terminated_early',taskRecordingSnapshot=snapshot)
+        original=copy.deepcopy(failed)
+        result=network.summarize_tasks(failed)
+        self.assertTrue(result['source']['diagnosticSnapshotUsed'])
+        self.assertFalse(result['source']['complete']);self.assertFalse(result['source']['networkComplete'])
+        self.assertFalse(result['source']['pidNamespaceVerified'])
+        self.assertEqual(result['networkRecordCounts']['P'],1)
+        self.assertNotIn('SECRET',json.dumps(snapshot));self.assertNotIn('SECRET',json.dumps(result))
+        self.assertEqual(failed,original)
+        self.assertTrue(network.reconcile(failed,[],{10:2},{10},None)['issues'])
+        self.assertNotIn('network',failed)
+
+    def test_snapshot_missing_or_unreadable_raw_is_unavailable_and_deadline_is_not_swallowed(self):
+        from uring import capture
+        with tempfile.TemporaryDirectory() as directory:
+            self.assertIsNone(capture.diagnostic_task_snapshot(Path(directory),7))
+            (Path(directory)/'events.raw').write_bytes(b'\xff')
+            self.assertIsNone(capture.diagnostic_task_snapshot(Path(directory),7))
+            (Path(directory)/'events.raw').write_text('READY\n')
+            with patch.object(capture,'parse',side_effect=RuntimeError('capture_timeout')):
+                with self.assertRaisesRegex(RuntimeError,'capture_timeout'):
+                    capture.diagnostic_task_snapshot(Path(directory),7)

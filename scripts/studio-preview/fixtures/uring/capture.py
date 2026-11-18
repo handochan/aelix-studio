@@ -274,6 +274,32 @@ def broker(directory,root_pid,namespace_inode):
     return 0 if evidence['complete'] else 87
 
 
+def diagnostic_task_snapshot(directory, namespace_inode):
+    """Read available recorder output for reporting only, never capture recovery.
+
+    Failed attachment/drain/stop can leave readable task records without an
+    authoritative network channel. Keep only private numeric task/network data
+    for the report summarizer; never copy parse status, diagnostics or errors.
+    """
+    directory = Path(directory)
+    try:
+        raw = (directory / 'events.raw').read_text()
+        try:
+            stderr = (directory / 'recorder.stderr').read_text()
+        except (OSError, UnicodeError):
+            stderr = None
+        parsed = parse(raw, stderr or '', -1, namespace_inode)
+    except (OSError, UnicodeError, ValueError):
+        return None
+    return {
+        'network': parsed['network'],
+        'root': parsed['root'],
+        'captureChecks': {**parsed['captureChecks'], 'stderrEmpty': None if stderr is None else not stderr.strip()},
+        'kernelNetworkCount': parsed['kernelCounts'].get('network'),
+        'namespaceInode': parsed['namespaceInode'],
+    }
+
+
 class Capture:
     def __init__(self,directory):
         self.directory=directory;self.recorder=None

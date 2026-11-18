@@ -4,7 +4,7 @@ Only complete, uniquely attributable task lifetimes may discharge terminal
 strace register-read failures. Pre-ptrace invocations prevent an emulated
 seccomp result from substituting for a different, hidden executed invocation.
 """
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
 import re
 import platform
 
@@ -191,6 +191,198 @@ def parse(fields):
                 pid=pid, tgid=tgid, call=call, ordinal=ordinal, value=value, result=result,
                 nativeSyscall=int(fields[10]) if fields[0]=='H' else None,
                 file=int(fields[10]) if fields[0]=='V' else None)
+
+
+def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_evidence=None):
+    """Preserve diagnostic task ranges and counts; never authorize a resolution.
+
+    Only numeric identities/times, booleans and fixed labels are exported. Raw
+    FD annotations, object/file pointers, syscall arguments and reason text are
+    deliberately absent. A structural unmatched count is not a verdict: final
+    pre-entry nonexecution and proven VFS writes have separate existing proofs.
+    """
+    def number(value):
+        return value if type(value) is int else None
+    def pid(value):
+        value=number(value)
+        return value if value is not None and 0<=value<=0x7fffffff else None
+    def flag(value):
+        return value if type(value) is bool else None
+    def items(value):
+        return value if isinstance(value,list) else []
+    def counts(events):
+        result=dict.fromkeys(('P','N','X','H','V','other'),0)
+        for event in events:
+            kind=event.get('kind') if isinstance(event,dict) else None
+            result[kind if kind in ('P','N','X','H','V') else 'other']+=1
+        return result
+    def unmatched(events):
+        pairs={kind:Counter() for kind in ('P','N','X')};contexts=defaultdict(lambda:defaultdict(list))
+        probes=[];invalid=0
+        for event in events:
+            kind=event.get('kind');ordinal=number(event.get('ordinal'));call=number(event.get('call'))
+            value=number(event.get('value'));stamp=number(event.get('time'))
+            if kind not in ('P','N','X','H','V') or ordinal is None or call is None or value is None or stamp is None:
+                invalid+=1;continue
+            key=(ordinal,call,value)
+            if kind in pairs:
+                pairs[kind][key]+=1
+                contexts[(ordinal,call)][kind].append(event)
+            elif kind in ('H','V'):probes.append(event)
+        result={name:sum((pairs[left]-pairs[right]).values()) for name,left,right in (
+            ('preWithoutEntry','P','N'),('entryWithoutPre','N','P'),
+            ('entryWithoutReturn','N','X'),('returnWithoutEntry','X','N'))}
+        result.update(duplicatePre=sum(max(0,n-1) for n in pairs['P'].values()),
+                      duplicateEntry=sum(max(0,n-1) for n in pairs['N'].values()),
+                      duplicateReturn=sum(max(0,n-1) for n in pairs['X'].values()),
+                      hookWithoutCompleteInvocation=0,vfsWithoutCompleteInvocation=0,
+                      invalidInvocationFields=invalid)
+        for event in probes:
+            context=contexts[(event['ordinal'],event['call'])]
+            entered=context['N'];returned=context['X']
+            if (len(entered)!=1 or len(returned)!=1 or entered[0]['value']!=returned[0]['value'] or
+                    not entered[0]['time']<=event['time']<=returned[0]['time']):
+                result['hookWithoutCompleteInvocation' if event['kind']=='H' else 'vfsWithoutCompleteInvocation']+=1
+        return result
+
+    capture=capture if isinstance(capture,dict) else {}
+    snapshot=capture.get('taskRecordingSnapshot') if isinstance(capture.get('taskRecordingSnapshot'),dict) else {}
+    diagnostic=not isinstance(capture.get('network'),dict) and isinstance(snapshot.get('network'),dict)
+    channel=(snapshot['network'] if diagnostic else
+             capture.get('network') if isinstance(capture.get('network'),dict) else {})
+    events=channel.get('events');available=isinstance(events,list)
+    raw_tasks=items(channel.get('tasks'));tasks=[];by_kernel=defaultdict(list);by_pid=Counter()
+    worker_births=Counter(pid(e.get('kernelPid')) for e in items(channel.get('workers')) if isinstance(e,dict))
+    for index,raw in enumerate(raw_tasks,1):
+        raw=raw if isinstance(raw,dict) else {}
+        row=dict(taskIndex=index,namespaceTid=pid(raw.get('pid')),namespaceTgid=pid(raw.get('tgid')),
+                 kernelTid=pid(raw.get('kernelPid')),kernelTgid=pid(raw.get('kernelTgid')),
+                 parentKernelTid=pid(raw.get('parentKernelPid')),rangeStart=number(raw.get('start')),
+                 rangeEnd=number(raw.get('end')),lastOrdinal=number(raw.get('lastOrdinal')),
+                 kernelThread=flag(raw.get('kernelThread')),ioWorker=flag(raw.get('ioWorker')))
+        row['rangeValid']=(row['rangeStart'] is not None and row['rangeEnd'] is not None and
+                           0<row['rangeStart']<=row['rangeEnd'])
+        row['identityFieldsPresent']=all(row[k] is not None for k in
+            ('namespaceTid','namespaceTgid','kernelTid','kernelTgid'))
+        row['identityValuesValid']=(row['identityFieldsPresent'] and row['kernelTid']>0 and row['kernelTgid']>0)
+        tasks.append(row)
+        if row['kernelTid'] is not None:by_kernel[row['kernelTid']].append(row)
+        if row['namespaceTid']:by_pid[row['namespaceTid']]+=1
+    for row in tasks:
+        row['kernelTidReused']=row['kernelTid'] is not None and len(by_kernel[row['kernelTid']])>1
+        row['namespaceTidReused']=row['namespaceTid'] is not None and by_pid[row['namespaceTid']]>1
+        parents=[p for p in by_kernel.get(row['parentKernelTid'],[]) if p['rangeValid'] and
+                 row['rangeStart'] is not None and p['rangeStart']<=row['rangeStart']<=p['rangeEnd']]
+        row['parentNamespaceTid']=parents[0]['namespaceTid'] if len(parents)==1 else None
+        row['parentIdentityMatches']=len(parents)
+        row['workerBirthRecords']=(worker_births[row['kernelTid']] if row['kernelTid'] is not None and
+                                   isinstance(channel.get('workers'),list) else None)
+
+    buckets=defaultdict(list);unattributed={}
+    for raw in items(events):
+        event=raw if isinstance(raw,dict) else {}
+        identity=tuple(pid(event.get(k)) for k in ('kernelPid','kernelTgid','pid','tgid'))
+        stamp=number(event.get('time'))
+        matches=[row for row in by_kernel.get(identity[0],[]) if None not in identity and
+                 row['identityValuesValid'] and row['rangeValid'] and stamp is not None and
+                 (row['kernelTid'],row['kernelTgid'],row['namespaceTid'],row['namespaceTgid'])==identity and
+                 row['rangeStart']<=stamp<=row['rangeEnd']]
+        if len(matches)==1:buckets[matches[0]['taskIndex']].append(event);continue
+        reason=('ambiguous-lifetime' if len(matches)>1 else
+                'identity-or-range-mismatch' if by_kernel.get(identity[0]) else 'missing-lifetime')
+        key=(*identity,reason)
+        group=unattributed.setdefault(key,dict(kernelTid=identity[0],kernelTgid=identity[1],
+            namespaceTid=identity[2],namespaceTgid=identity[3],reason=reason,
+            recordCounts=dict.fromkeys(('P','N','X','H','V','other'),0),firstEventAt=None,lastEventAt=None))
+        kind=event.get('kind');group['recordCounts'][kind if kind in ('P','N','X','H','V') else 'other']+=1
+        if stamp is not None:
+            group['firstEventAt']=stamp if group['firstEventAt'] is None else min(group['firstEventAt'],stamp)
+            group['lastEventAt']=stamp if group['lastEventAt'] is None else max(group['lastEventAt'],stamp)
+
+    rings=ring_evidence if isinstance(ring_evidence,dict) else None
+    objects=object_evidence if isinstance(object_evidence,dict) else None
+    ring_counts=defaultdict(Counter);object_counts=defaultdict(Counter)
+    for ring in items((rings or {}).get('rings')):
+        creator=pid(ring.get('creatorPid'))
+        if creator is not None:ring_counts[creator]['creations']+=1
+        for submission in items(ring.get('submissions')):
+            for actor in {pid(submission.get('pid')),pid(submission.get('attributedPid'))}-{None}:
+                ring_counts[actor]['submissions']+=1
+    for obj in items((objects or {}).get('objects')):
+        for actor in {pid(p) for p in items(obj.get('actorPids'))}-{None}:
+            value=object_counts[actor];value['generations']+=1
+            value['validGenerations']+=int(obj.get('valid') is True)
+            value['unfreedGenerations']+=int(number(obj.get('freedAt')) is None)
+            value['sharedObjectSendRecords']+=len(items(obj.get('sends')))
+    network_issues=items((network_evidence or {}).get('issues'));issue_counts=Counter();object_issue_counts=Counter()
+    corroboration={name:Counter(item['pid'] for item in items((network_evidence or {}).get(field)))
+                   for name,field in [('matchedOperations','operationDiagnostics'),
+                       ('nonNetworkWrites','nonNetworkWrites'),('notExecutedInvocations','notExecuted'),
+                       ('resolvedResultFields','resultFields')]}
+    for issue in network_issues:
+        for actor in {pid(issue.get('pid')),pid(issue.get('unattributedPid'))}-{None}:issue_counts[actor]+=1
+    object_issues=items((objects or {}).get('issues'))
+    for issue in object_issues:
+        if pid(issue.get('pid')) is not None:object_issue_counts[pid(issue['pid'])]+=1
+    for row in tasks:
+        observed=buckets[row['taskIndex']];tid=row['namespaceTid']
+        assignable=available and row['identityValuesValid'] and row['rangeValid']
+        row['assignedRecordCounts']=counts(observed) if assignable else None
+        row['structuralUnmatched']=unmatched(observed) if assignable else None
+        row['networkIssueCount']=issue_counts[tid] if tid is not None and network_evidence is not None else None
+        row['existingNetworkCorroboration']=({name:values[tid] for name,values in corroboration.items()}
+                                            if tid is not None and network_evidence is not None else None)
+        row['ringCounts']=dict.fromkeys(('creations','submissions'),0) | dict(ring_counts[tid]) if rings is not None and tid is not None else None
+        row['ringIssueCount']=len((rings or {}).get('issuesByPid',{}).get(tid,[])) if rings is not None and tid is not None else None
+        row['objectCounts']=dict.fromkeys(('generations','validGenerations','unfreedGenerations','sharedObjectSendRecords'),0) | dict(object_counts[tid]) if objects is not None and tid is not None else None
+        row['objectIssueCount']=object_issue_counts[tid] if objects is not None and tid is not None else None
+    checks=capture.get('captureChecks') or (snapshot.get('captureChecks') if diagnostic else None) or {}
+    root=capture.get('root') or (snapshot.get('root') if diagnostic else None) or {}
+    programs=(capture.get('udpProbeLoss') or {}).get('programs')
+    reported=(capture.get('programLoss') or {}).get('programs')
+    def miss_counts(values):
+        if not isinstance(values,list):return None,None,None,None
+        misses=[number(value.get('recursion_misses')) if isinstance(value,dict) else None for value in values]
+        misses=[value if value is not None and value>=0 else None for value in misses]
+        return (len(values),sum(value is not None and value>0 for value in misses),
+                sum(value is None for value in misses),sum(misses) if None not in misses else None)
+    retained,nonzero,unknown,miss_total=miss_counts(programs)
+    reported_count,reported_nonzero,reported_unknown,reported_total=miss_counts(reported)
+    return dict(schema='aelix.outbound-task-evidence/1',purpose='diagnostic-only-no-new-resolution',
+        kernelTimeUnit='monotonic-nanoseconds',rangeMeaning='tracked-start-through-final-do_task_dead',
+        referenceScope='namespace-tid-aggregate',
+        source=dict(capturePresent=bool(capture),complete=flag(capture.get('complete')),
+            diagnosticSnapshotUsed=diagnostic,
+            drained=flag(capture.get('drained')),pidNamespaceVerified=flag(capture.get('pidNamespaceVerified')),
+            namespaceInode=number(capture.get('namespaceInode',snapshot.get('namespaceInode') if diagnostic else None)),
+            lostEvents=number(capture.get('lostEvents')),recordingRootKernelTid=pid(root.get('kernelPid')),
+            recorderExitCode=number(capture.get('recorderExitCode')),ready=flag(checks.get('ready')),
+            done=flag(checks.get('done')),stderrEmpty=flag(checks.get('stderrEmpty')),
+            attachmentBarrierMatched=(capture.get('attachmentReadiness')=='reviewed-bpftrace-printf-drained-after-all-attachments'
+                                      if 'attachmentReadiness' in capture else None),
+            retainedPrograms=retained,retainedProgramsWithMisses=nonzero,
+            retainedProgramsWithUnknownMisses=unknown,retainedProgramMissTotal=miss_total,
+            reportedLossPrograms=reported_count,reportedProgramsWithMisses=reported_nonzero,
+            reportedProgramsWithUnknownMisses=reported_unknown,reportedProgramMissTotal=reported_total,
+            recorderDiagnosticCount=len(capture['diagnostics']) if isinstance(capture.get('diagnostics'),list) else None,
+            recordErrorCount=len(capture['recordErrors']) if isinstance(capture.get('recordErrors'),list) else None,
+            kernelTasksAvailable=isinstance(channel.get('tasks'),list),
+            networkEventsAvailable=available,networkComplete=flag(channel.get('complete')),
+            kernelNetworkCount=number(snapshot.get('kernelNetworkCount') if diagnostic
+                                      else (capture.get('kernelCounts') or {}).get('network')),
+            decodedNetworkRecords=number(channel.get('eventCount')),
+            observedNetworkRecords=len(events) if available else None,
+            networkIssueCount=len(network_issues) if network_evidence is not None else None,
+            globalNetworkIssueCount=(sum('pid' not in issue and 'unattributedPid' not in issue for issue in network_issues)
+                                     if network_evidence is not None else None),
+            ringGlobalIssueCount=len(items((rings or {}).get('globalIssues'))) if rings is not None else None,
+            objectProofVerified=flag((objects or {}).get('verified')),
+            objectIssueCount=len(object_issues) if objects is not None else None,
+            globalObjectIssueCount=sum('pid' not in issue for issue in object_issues) if objects is not None else None),
+        tasks=tasks,networkRecordCounts=counts(items(events)) if available else None,
+        assignedNetworkRecords=sum(len(value) for value in buckets.values()) if available else None,
+        unattributedNetworkRecords=sum(sum(value['recordCounts'].values()) for value in unattributed.values()) if available else None,
+        unattributedNetwork=list(unattributed.values()))
 
 
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None, metadata_allowed=()):

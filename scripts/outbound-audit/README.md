@@ -165,3 +165,21 @@ undrained captures and failed UDP capture controls abort the experiment. The his
 auditor passed through `--audit-script`; it is not a current-policy validation
 command. Current policy is qualified only by the shared auditor and transport
 controls above. The recorded 76 connects / zero packets are retained in the study.
+
+## Task evidence without verdict changes (#59 A, first PR)
+
+`taskEvidence` now preserves task identities/lifetimes, P/N/X/H/V counts,
+structural unmatched counts, existing ring/object outcomes and privacy-safe
+strace gap syntax before raw data deletion. See the
+[shared task-evidence schema](../studio-preview/fixtures/README.md#task-evidence-issue-59-a-first-pr).
+Unavailable data stays distinguishable from zero; PID reuse, missing userspace
+records and unmatched kernel identities remain visible even in incomplete
+captures. Each `*.capture-N.json` retains its own evidence; a successful recapture
+does not replace the first report's task history.
+
+This first PR is recording only. Existing resolutions, global unknown-record
+blocking, external/unknown-destination/opcode/functional failures and the narrow
+one-recapture policy are unchanged. Exact close/stub discharge under #59's new
+sufficient conditions and the dependency-preserving gate are reserved for the
+second PR, with their positive and adversarial controls. This evidence does not
+retroactively turn any earlier incomplete artifact into a pass.
