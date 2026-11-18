@@ -39,7 +39,16 @@ export function protectStudioRequests(session: Session, windows: ReadonlyMap<num
         !['mainFrame', 'subFrame'].includes(details.resourceType) &&
         rendererUrls &&
         isTrustedDocument(contents, rendererUrls);
-      if (desktop) headers[STUDIO_CREDENTIAL_HEADER] = credential;
+      if (desktop) {
+        // The supervisor has verified the originating Electron document.
+        // Forward the canonical source expected by the loopback host.
+        const origins = Object.keys(headers).filter((name) => name.toLowerCase() === 'origin');
+        for (const name of origins) delete headers[name];
+        if (origins.length || details.resourceType === 'webSocket' || details.method === 'OPTIONS') {
+          headers.Origin = 'http://' + url.host;
+        }
+        headers[STUDIO_CREDENTIAL_HEADER] = credential;
+      }
     }
 
     callback({ requestHeaders: headers });

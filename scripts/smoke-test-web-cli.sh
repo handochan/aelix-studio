@@ -17,6 +17,15 @@ echo "Tarball: $TARBALL_PATH"
 echo ""
 echo "1. Extracting tarball..."
 TEMP_DIR=$(mktemp -d)
+SERVER_PID=""
+cleanup() {
+  if [ -n "$SERVER_PID" ]; then
+    kill "$SERVER_PID" 2>/dev/null || true
+    wait "$SERVER_PID" 2>/dev/null || true
+  fi
+  rm -rf "$TEMP_DIR"
+}
+trap cleanup EXIT
 tar -xzf "$TARBALL_PATH" -C "$TEMP_DIR"
 
 # 2. Verify directory structure
@@ -91,122 +100,62 @@ if ! "$BACKEND_BINARY" --help > /dev/null 2>&1; then
 fi
 echo "✓ Backend binary loads on this platform"
 
-# 6. HTTP-level smoke: start web-cli, curl the root, check for SPA shell
-echo ""
-echo "6. Testing HTTP server responds with SPA index..."
-HTTP_PORT=25899
-DATA_DIR="$(mktemp -d)/aionui-web-data"
-# Full-stack start: backend is bundled, so we can also exercise /login below.
-# If the bundled backend is missing the CLI falls back to frontend-only mode
-# and later login probe is skipped.
-./aionui-web start --port "$HTTP_PORT" --data-dir "$DATA_DIR" > /tmp/aionui-web.log 2>&1 &
-SERVER_PID=$!
-
-# Wait up to 30s for HTTP to come up. With backend spawned, first start spends
-# time on SQLite migrations on slower CI runners.
-for i in $(seq 1 30); do
-  if curl -sf "http://127.0.0.1:${HTTP_PORT}/" > /tmp/aionui-web.html 2>/dev/null; then
-    break
-  fi
-  sleep 1
-done
-
-if [ ! -s /tmp/aionui-web.html ]; then
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-  echo "❌ HTTP probe failed — no response body. Server log:"
-  cat /tmp/aionui-web.log
-  exit 1
-fi
-
-# Look for the SPA shell signature — <html + <div id="root" or similar marker
-if grep -q '<html' /tmp/aionui-web.html && grep -qE '<(div id="root"|script)' /tmp/aionui-web.html; then
-  echo "✓ HTTP root returns SPA index ($(wc -c < /tmp/aionui-web.html) bytes)"
-else
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-  echo "❌ HTTP root response does not look like SPA index:"
-  head -20 /tmp/aionui-web.html
-  echo "---server log---"
-  cat /tmp/aionui-web.log
-  exit 1
-fi
-
-# 7. Auth-setup smoke: verify stdout announces a generated admin password on
-#    first launch, then POST it to /login and check for success + session cookie.
-#    Skip when the bundled backend was unavailable — there's no /login to call.
-echo ""
-echo "7. Testing first-launch admin password seeding + login..."
-if grep -q 'Backend binary not found' /tmp/aionui-web.log; then
-  echo "⚠️  frontend-only mode detected (no bundled backend) — skipping login probe"
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-else
-  # Wait up to 20s for the "Generated initial admin password" line — the backend
-  # needs to finish migrations before /api/auth/status replies.
-  PASSWORD=""
-  for i in $(seq 1 20); do
-    PASSWORD=$(grep -oE 'Generated initial admin password: [^ ]+' /tmp/aionui-web.log | head -1 | sed 's/^Generated initial admin password: //')
-    if [ -n "$PASSWORD" ]; then
-      break
+# Exercise the extracted CLI and its bundled host with a fresh data directory.
+DATA_DIR="$TEMP_DIR/data"
+BACKEND_BINARY="$PWD/$BACKEND_BINARY"
+start_webui() {
+  ./aionui-web start --backend-bin "$BACKEND_BINARY" --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &
+  SERVER_PID=$!
+  for _ in $(seq 1 45); do
+    BASE_URL=$(sed -n 's/^  Local  : //p' "$TEMP_DIR/webui.log" | head -1)
+    if [ -n "$BASE_URL" ] && curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
+      grep -q '<html' "$TEMP_DIR/index.html"
+      return
     fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
     sleep 1
   done
+  echo "WebUI did not start" >&2
+  exit 1
+}
+stop_webui() {
+  kill "$SERVER_PID"
+  wait "$SERVER_PID"
+  SERVER_PID=""
+}
+login() {
+  printf '{"username":"admin","password":"%s","remember":false}' "$1" |
+    curl -fsS -c "$TEMP_DIR/cookies" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
+    --data-binary @- "$BASE_URL/login" >"$TEMP_DIR/login.json"
+  grep -q '"success":[[:space:]]*true' "$TEMP_DIR/login.json"
+  grep -q 'aionui-session' "$TEMP_DIR/cookies"
+}
 
-  if [ -z "$PASSWORD" ]; then
-    kill "$SERVER_PID" 2>/dev/null || true
-    wait "$SERVER_PID" 2>/dev/null || true
-    echo "❌ Never saw 'Generated initial admin password: ...' in stdout."
-    echo "---server log---"
-    cat /tmp/aionui-web.log
-    exit 1
-  fi
-  echo "✓ Captured initial admin password from stdout"
+start_webui
+PASSWORD=""
+for _ in $(seq 1 20); do
+  PASSWORD=$(sed -n 's/.*Generated initial admin password: //p' "$TEMP_DIR/webui.log" | head -1)
+  if [ -n "$PASSWORD" ]; then break; fi
+  sleep 1
+done
+test -n "$PASSWORD"
+login "$PASSWORD"
+curl -fsS -b "$TEMP_DIR/cookies" -o /dev/null "$BASE_URL/api/auth/user"
+echo "✓ First launch and browser login"
 
-  # POST /login — static server proxies to backend. Expect 200, success:true,
-  # and at least one Set-Cookie header containing a session cookie.
-  LOGIN_BODY=$(printf '{"username":"admin","password":"%s","remember":false}' "$PASSWORD")
-  LOGIN_RESP_HEADERS=$(mktemp)
-  LOGIN_RESP_BODY=$(mktemp)
-  HTTP_CODE=$(curl -sS -o "$LOGIN_RESP_BODY" -D "$LOGIN_RESP_HEADERS" -w '%{http_code}' \
-    -X POST "http://127.0.0.1:${HTTP_PORT}/login" \
-    -H 'Content-Type: application/json' \
-    --data "$LOGIN_BODY" || echo "000")
-
-  # Stop the server before asserting so we don't leak a process on failure.
-  kill "$SERVER_PID" 2>/dev/null || true
-  wait "$SERVER_PID" 2>/dev/null || true
-
-  if [ "$HTTP_CODE" != "200" ]; then
-    echo "❌ /login returned HTTP $HTTP_CODE"
-    echo "---headers---"
-    cat "$LOGIN_RESP_HEADERS"
-    echo "---body---"
-    cat "$LOGIN_RESP_BODY"
-    echo "---server log---"
-    cat /tmp/aionui-web.log
-    exit 1
-  fi
-
-  if ! grep -q '"success":[[:space:]]*true' "$LOGIN_RESP_BODY"; then
-    echo "❌ /login returned 200 but body had no success:true"
-    cat "$LOGIN_RESP_BODY"
-    exit 1
-  fi
-
-  if ! grep -iq '^set-cookie:' "$LOGIN_RESP_HEADERS"; then
-    echo "❌ /login returned success but no Set-Cookie header"
-    cat "$LOGIN_RESP_HEADERS"
-    exit 1
-  fi
-  echo "✓ Login with printed password succeeded (HTTP 200 + Set-Cookie present)"
+if ./aionui-web resetpass --backend-bin "$BACKEND_BINARY" --data-dir "$DATA_DIR" --password-stdin </dev/null >"$TEMP_DIR/reset.log" 2>&1; then
+  echo "Reset unexpectedly succeeded while WebUI was running" >&2
+  exit 1
 fi
+grep -q 'Stop WebUI before resetting its password' "$TEMP_DIR/reset.log"
+stop_webui
 
-# Cleanup
-cd -
-rm -rf "$TEMP_DIR"
-
-echo ""
-echo "========================================"
-echo "✅ Smoke test passed!"
-echo "========================================"
+NEW_PASSWORD='Synthetic-offline-reset-Pass123'
+printf '%s\n' "$NEW_PASSWORD" |
+  ./aionui-web resetpass --backend-bin "$BACKEND_BINARY" --data-dir "$DATA_DIR" --password-stdin >"$TEMP_DIR/reset.log" 2>&1
+start_webui
+HTTP_CODE=$(curl -sS -b "$TEMP_DIR/cookies" -o /dev/null -w '%{http_code}' "$BASE_URL/api/auth/user")
+test "$HTTP_CODE" = "401"
+login "$NEW_PASSWORD"
+stop_webui
+echo "✓ Running reset refused, offline reset revoked the prior session, new password accepted"

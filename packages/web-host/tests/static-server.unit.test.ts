@@ -408,13 +408,16 @@ describe('static-server', () => {
     }
 
     let backendUpgrades = 0;
+    let upgradeCredential: string | string[] | undefined;
 
     beforeEach(async () => {
       backendUpgrades = 0;
+      upgradeCredential = undefined;
       const server = http.createServer();
       const upstreamSockets = new Set<Duplex>();
-      server.on('upgrade', (_req, socket) => {
+      server.on('upgrade', (req, socket) => {
         backendUpgrades += 1;
+        upgradeCredential = req.headers['x-aionui-studio-auth'];
         upstreamSockets.add(socket);
         socket.once('close', () => upstreamSockets.delete(socket));
         socket.once('error', () => socket.destroy());
@@ -436,6 +439,18 @@ describe('static-server', () => {
         port: 0,
         allowRemote: true,
       });
+    });
+
+    it.each(paths)('does not forward internal credentials over %s', async (path) => {
+      expect(
+        await upgrade(path, {
+          Host: new URL(handle!.localUrl).host,
+          Origin: handle!.localUrl,
+          'X-AionUI-Studio-Auth': 'synthetic-launch-credential',
+        })
+      ).toContain(' 101 ');
+      expect(backendUpgrades).toBe(1);
+      expect(upgradeCredential).toBeUndefined();
     });
 
     it.each(paths)('relays the first server frame and a round trip for %s', async (path) => {

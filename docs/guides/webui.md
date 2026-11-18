@@ -666,13 +666,14 @@ directory you passed to the WebUI. The host checks that no server owns this
 directory before reading or changing the password.
 
 ```bash
-bun run resetpass
+aionui-web resetpass --data-dir /path/to/webui-data
 bun run resetpass --data-dir /path/to/webui-data
 ```
 
 The command uses the host's local account manager. Running it while WebUI
 owns the data directory fails with an instruction to stop WebUI. Start
-WebUI again after changing the password.
+WebUI again after changing the password and sign in with the new one. The
+reset revokes the previous WebUI sessions.
 
 ---
 

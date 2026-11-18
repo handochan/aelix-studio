@@ -319,7 +319,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin);
   const localUrl = `http://127.0.0.1:${actualPort}`;
 
-  return {
+  const handle: StaticServerHandle = {
     port: actualPort,
     localUrl,
     get url() {
@@ -341,6 +341,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         });
       }),
   };
+  return handle;
 }
 
 export async function stopStaticServer(handle: StaticServerHandle): Promise<void> {
