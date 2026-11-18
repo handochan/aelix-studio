@@ -36,7 +36,7 @@ async function waitForExit(main) {
 }
 
 /** Close the old main process before reusing its user root, including disconnect paths. */
-export async function closeElectron(app) {
+export async function closeElectron(app, { waitForMainExit = true } = {}) {
   if (!app) return;
   const main = app.process();
   const state = observations.get(app);
@@ -46,7 +46,8 @@ export async function closeElectron(app) {
     state.record({ ...state.observation, status: 'closing' });
   }
   await app.close();
-  await waitForExit(main);
+  // Investigation branch: ablate the OS wait while preserving shutdown intent.
+  if (waitForMainExit) await waitForExit(main);
 }
 
 const observations = new WeakMap();

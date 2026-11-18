@@ -3,7 +3,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { launchWithIdentity, recordLaunchFailure, sandboxProcesses } from './verification.mjs';
+import {
+  closeElectron as baseCloseElectron,
+  launchWithIdentity,
+  recordLaunchFailure,
+  sandboxProcesses,
+} from './verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
@@ -172,13 +177,14 @@ function logMarkers(directory) {
 }
 async function closeElectron(current) {
   if (!current) return;
+  const main = current.process();
   const configBefore = configState();
   const requests = await current.evaluate(() => globalThis.__egressInvestigation).catch(() => null);
-  await current.close();
+  await baseCloseElectron(current, { waitForMainExit: false });
   diagnostic('after-close', {
     explicitOsWait: false,
     debugEnabled: Boolean(process.env.DEBUG),
-    mainExitCode: current.process().exitCode,
+    mainExitCode: main.exitCode,
     configBefore,
     configAfter: configState(),
     requests,
