@@ -568,7 +568,8 @@ new diagnostic fields. Historical artifacts are not rejudged.
   A failed broker can leave a diagnostic snapshot of available recorder output.
   `diagnosticSnapshotUsed` marks that path. The loss and parse error counts come
   from the snapshot, and the original capture and PID namespace status remain
-  authoritative.
+  authoritative. When recorder stderr is missing or unreadable, `lostEvents`
+  is null and `rawLostEvents` counts loss observed in the readable raw output.
 - `tasks` retains **every** received kernel task lifetime with namespace
   TID/TGID, kernel TID/TGID, parent identity, tracked-start/final-`do_task_dead`
   range, last ordinal and worker-birth count. The recorder root's start is its
@@ -613,9 +614,11 @@ the strace tasks belonging to the particular report. Classification issue indice
 refer to that report's unchanged `classificationIssues` array. The new evidence
 never copies comm names, executable paths, argv, environment, payloads, raw FD
 annotations or kernel object/file pointers. The existing deadline covers capture,
-required analysis and verdict writes. After saving the verdict and attempt history,
-the audit allows up to 30 seconds to collect task evidence and up to 10 seconds
-to attach it per capture. Measured reports start with `taskEvidenceStatus=unavailable`.
-Each completed attachment atomically replaces the saved JSON and sets the status
-to `available`. If a diagnostic fails or exceeds its budget, the saved verdict
-and capture history remain readable.
+required analysis and verdict writes. Once every required capture has finished and
+the audit has saved the verdict and attempt history, it allows up to 30 seconds
+to collect task evidence and up to 10 seconds to attach it per capture. Under
+supervision, both diagnostic limits must fit before the deadline with one second
+reserved for cleanup and exit. Measured reports start with
+`taskEvidenceStatus=unavailable`. Each completed attachment atomically replaces
+the saved JSON and sets the status to `available`. SIGTERM unwinds retained
+capture files and an unfinished diagnostic write.

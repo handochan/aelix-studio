@@ -61,7 +61,8 @@ class CaptureStartupFailureTests(unittest.TestCase):
         self.assertFalse(result['ioUring']['capture']['complete'])
         self.assertFalse(result['ioUring']['capture']['pidNamespaceVerified'])
         self.assertTrue(result['taskEvidence']['source']['diagnosticSnapshotUsed'])
-        self.assertEqual(result['taskEvidence']['source']['lostEvents'],7)
+        self.assertIsNone(result['taskEvidence']['source']['lostEvents'])
+        self.assertEqual(result['taskEvidence']['source']['rawLostEvents'],7)
         self.assertEqual(result['taskEvidence']['source']['recordErrorCount'],1)
         self.assertEqual(result['taskEvidence']['tasks'][0]['namespaceTid'],124)
         self.assertEqual(result['taskEvidence']['networkRecordCounts']['P'],1)
@@ -348,7 +349,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.report = self.root / 'audit.json'
         self.whole = self.root / 'whole.json'
 
-    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False):
+    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None):
         tracer = self.root / 'strace'
         tracer.touch()
         process = Mock(pid=123, returncode=0)
@@ -358,6 +359,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
 
         def factory(directory):
             raw_directories.append(directory)
+            if on_capture is not None:
+                on_capture(directory)
             records = next(inputs)
 
             def start(_pid):
@@ -371,7 +374,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
 
             return Mock(namespace=7, start=start, stop=Mock(return_value=copy.deepcopy(capture or task_capture_fixture())))
 
-        with patch.dict(os.environ, {}, clear=True), patch.object(audit.sys, 'platform', 'linux'), \
+        fixture_env = {key:os.environ[key] for key in ('TMPDIR', audit.SUPERVISOR_DEADLINE_ENV) if key in os.environ}
+        with patch.dict(os.environ, fixture_env, clear=True), patch.object(audit.sys, 'platform', 'linux'), \
              patch.object(audit, 'resolve_strace', return_value=str(tracer)), \
              patch.object(audit, 'npm_config_paths', return_value=[]), \
              patch.object(audit, 'npm_proxy_configured', return_value=False), \
@@ -412,11 +416,11 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
     def test_first_capture_can_replay_when_its_diagnostic_collection_times_out(self):
         from uring import network
         summarize = network.summarize_tasks
-        calls = []
+        verdicts_during_collection = []
 
         def delay_first(*args, **kwargs):
-            calls.append(True)
-            if len(calls) == 1:
+            verdicts_during_collection.append([entry['exitCode'] for entry in self.read()['captureAttempts']])
+            if len(verdicts_during_collection) == 1:
                 time.sleep(1.3)
             return summarize(*args, **kwargs)
 
@@ -424,6 +428,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
              patch.object(audit, 'TASK_EVIDENCE_COLLECTION_TIMEOUT', 0.15):
             self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []]), (0, 2))
         report = self.read()
+        self.assertEqual(verdicts_during_collection, [[87, 0], [87, 0]])
         self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, 0])
         self.assertEqual((report['recaptures'], report['taskEvidenceStatus']), (1, 'available'))
         first = self.read(self.root / 'audit.capture-1.json')
@@ -495,6 +500,39 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             self.assertIn({'reason':'unsupported_strace_personality'}, [report['classificationIssues'][i] for i in indices])
 
 
+def supervised_audit_fixture(directory, scenario, delay_phase):
+    """Stub the tracer inside a real supervised auditor process."""
+    from uring import network
+    root = Path(directory)
+    case = TaskEvidenceIsolationTests()
+    case.root, case.report, case.whole = root, root / 'audit.json', root / 'whole.json'
+    traces = [[]] if scenario == 'pass' else [['??? PORTABLE_UNKNOWN'], []]
+
+    def remember_capture(directory):
+        if audit.SUPERVISOR_DEADLINE_ENV in os.environ:
+            raise AssertionError('The supervisor budget reached the traced command')
+        with (root / 'captures').open('a') as stream:
+            stream.write(directory.name + '\n')
+
+    def block_diagnostic():
+        (root / 'diagnostic-started').touch()
+        time.sleep(8)
+
+    write_text = Path.write_text
+
+    def slow_write(path, text, *args, **kwargs):
+        if '"taskEvidence"' in text:
+            write_text(path, '{')
+            block_diagnostic()
+        return write_text(path, text, *args, **kwargs)
+
+    delay = (patch.object(network, 'summarize_tasks', side_effect=lambda *args, **kwargs: block_diagnostic())
+             if delay_phase == 'collect' else patch.object(Path, 'write_text', slow_write))
+    with delay:
+        code, _ = case.audit_traces(traces, scoped=True, on_capture=remember_capture)
+    return code
+
+
 class CleanupIdentityTests(unittest.TestCase):
     def setUp(self):
         # The algorithm uses mocked /proc and kill; retain that coverage on Windows.
@@ -543,6 +581,55 @@ class CleanupIdentityTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform=='linux','Linux subreaper required')
 class SupervisionTests(unittest.TestCase):
+    def audit_fixture(self, root, scenario, delay_phase):
+        raw = root / 'raw'
+        raw.mkdir()
+        code = 'import runpy,sys; raise SystemExit(runpy.run_path(sys.argv[1])["supervised_audit_fixture"](*sys.argv[2:]))'
+        return [sys.executable, '-I', '-B', '-c', code, str(Path(__file__).resolve()),
+                str(root), scenario, delay_phase], {'TMPDIR':str(raw)}
+
+    def assert_capture_receipts(self, root, codes):
+        report = json.loads((root / 'audit.json').read_text())
+        self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], codes)
+        self.assertEqual(report['recaptures'], len(codes) - 1)
+        self.assertEqual(len((root / 'captures').read_text().splitlines()), len(codes))
+        expected_files = {f'{name}.json' for name in ('audit', 'whole')}
+        expected_files.update(f'{name}.capture-{i}.json' for name in ('audit', 'whole') for i in range(1,len(codes)+1))
+        self.assertEqual({path.name for path in root.glob('*.json')}, expected_files)
+        for path in root.glob('*.json'):
+            self.assertEqual(json.loads(path.read_text())['taskEvidenceStatus'], 'unavailable', path.name)
+        self.assertEqual(list((root / 'raw').iterdir()), [])
+        self.assertEqual(list(root.glob('.task-evidence-*')), [])
+
+    def test_two_second_supervisor_preserves_verdict_and_replay_with_slow_diagnostics(self):
+        for scenario, codes in [('pass', [0]), ('recapture', [87, 0])]:
+            with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                command, env = self.audit_fixture(root, scenario, 'collect')
+                result = audit.run_supervised(command, timeout=2, env=env, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assert_capture_receipts(root, codes)
+                self.assertFalse((root / 'diagnostic-started').exists())
+
+    def test_supervisor_sigterm_cleans_both_captures_and_a_partial_diagnostic_write(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            command, env = self.audit_fixture(root, 'recapture', 'write')
+            process = subprocess.Popen([sys.executable, '-I', '-B', str(SCRIPT), '--supervise', '60', '--', *command],
+                                       env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            try:
+                deadline = time.monotonic() + 10
+                while not (root / 'diagnostic-started').exists() and process.poll() is None and time.monotonic() < deadline:
+                    time.sleep(0.02)
+                self.assertTrue((root / 'diagnostic-started').exists())
+                self.assertTrue(list(root.glob('.task-evidence-*')))
+            finally:
+                if process.poll() is None:
+                    process.terminate()
+                _, stderr = process.communicate(timeout=10)
+            self.assertEqual(process.returncode, 124, stderr)
+            self.assert_capture_receipts(root, [87, 0])
+
     def test_timeout_stops_a_detached_descendant_before_returning(self):
         import time
         with tempfile.TemporaryDirectory() as directory:

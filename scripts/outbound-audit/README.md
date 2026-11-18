@@ -175,9 +175,10 @@ strace gap syntax before raw data deletion. See the
 Unavailable data stays distinguishable from zero; PID reuse, missing userspace
 records and unmatched kernel identities remain visible even in incomplete
 captures. Each `*.capture-N.json` retains its own diagnostic status and any saved
-evidence. The audit saves the verdict before collecting and attaching evidence
-under separate time limits. `taskEvidenceStatus` shows whether attachment
-succeeded.
+evidence. The audit finishes any recapture and saves the verdict before collecting
+and attaching evidence. Under supervision, diagnostics run only when their
+budgets fit in the remaining time reserved for work. `taskEvidenceStatus` shows
+whether attachment succeeded.
 
 This first PR is recording only. Existing resolutions, global unknown-record
 blocking, external/unknown-destination/opcode/functional failures and the narrow

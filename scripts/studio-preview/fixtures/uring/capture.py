@@ -297,7 +297,8 @@ def diagnostic_task_snapshot(directory, namespace_inode):
         'captureChecks': {**parsed['captureChecks'], 'stderrEmpty': None if stderr is None else not stderr.strip()},
         'kernelNetworkCount': parsed['kernelCounts'].get('network'),
         'namespaceInode': parsed['namespaceInode'],
-        'lostEvents': parsed['lostEvents'],
+        'lostEvents': None if stderr is None else parsed['lostEvents'],
+        'rawLostEvents': parsed['lostEvents'] if stderr is None else None,
         'recordErrorCount': len(parsed['recordErrors']),
     }
 

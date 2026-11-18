@@ -12,6 +12,7 @@ import contextlib
 import ctypes
 import hashlib
 import json
+import math
 import os
 import signal
 import re
@@ -103,6 +104,8 @@ SUPERVISOR_CLEANUP = 15
 FORCE_CLEANUP = 5
 TASK_EVIDENCE_COLLECTION_TIMEOUT = 30
 TASK_EVIDENCE_WRITE_TIMEOUT = 10
+TASK_EVIDENCE_EXIT_RESERVE = 1
+SUPERVISOR_DEADLINE_ENV = 'AELIX_OUTBOUND_SUPERVISOR_DEADLINE'
 
 OWNED_SIGNAL = "import os, sys\nfrom pathlib import Path\ntry:\n    fields = (Path('/proc') / sys.argv[1] / 'stat').read_text().rsplit(')', 1)[1].split()\n    if fields[19] == sys.argv[2]:\n        os.kill(int(sys.argv[1]), int(sys.argv[3]))\nexcept (FileNotFoundError, ProcessLookupError):\n    pass\n"
 
@@ -196,6 +199,17 @@ def stop_owned_tree(root, *, include_root=False, grace=None, root_birth=None):
         time.sleep(0.05)
 
 
+def read_supervisor_deadline(value):
+    """An absent limit is unbounded. An invalid hint disables task evidence."""
+    if value is None:
+        return math.inf
+    try:
+        deadline = float(value)
+    except ValueError:
+        return 0.0
+    return 0.0 if math.isnan(deadline) else deadline
+
+
 def supervise(command, timeout):
     """Subreap detached tracer/app descendants before returning to acceptance."""
     if sys.platform != 'linux': raise RuntimeError('Linux supervision required')
@@ -204,7 +218,12 @@ def supervise(command, timeout):
     interrupted = []
     def cancel(signum, _frame): interrupted.append(signum)
     for signum in (signal.SIGTERM, signal.SIGINT): signal.signal(signum, cancel)
-    child = subprocess.Popen(command)
+    # The child uses this conservative cutoff only for optional evidence. The
+    # actual supervision timeout still starts after the child is launched.
+    env = os.environ.copy()
+    env[SUPERVISOR_DEADLINE_ENV] = str(min(time.monotonic() + timeout,
+                                           read_supervisor_deadline(env.get(SUPERVISOR_DEADLINE_ENV))))
+    child = subprocess.Popen(command, env=env)
     deadline = time.monotonic() + timeout
     timed_out = False
     try:
@@ -259,8 +278,14 @@ def capture_deadline(seconds, *, handle_sigterm=True):
         if handle_sigterm: signal.signal(signal.SIGTERM, old_term)
 
 
-def attach_task_evidence(collect, scoped_paths, whole_paths):
+def task_evidence_fits(deadline):
+    return deadline - time.monotonic() >= TASK_EVIDENCE_COLLECTION_TIMEOUT + TASK_EVIDENCE_WRITE_TIMEOUT
+
+
+def attach_task_evidence(collect, scoped_paths, whole_paths, *, deadline):
     """Enrich saved verdicts within separate collection and storage budgets."""
+    if not task_evidence_fits(deadline):
+        return
     try:
         with capture_deadline(TASK_EVIDENCE_COLLECTION_TIMEOUT, handle_sigterm=False):
             scoped, whole = collect()
@@ -268,8 +293,11 @@ def attach_task_evidence(collect, scoped_paths, whole_paths):
         print('Task evidence unavailable: collection failed or exceeded its budget', file=sys.stderr)
         return
 
+    write_timeout = min(TASK_EVIDENCE_WRITE_TIMEOUT, deadline - time.monotonic())
+    if write_timeout <= 0:
+        return
     try:
-        with capture_deadline(TASK_EVIDENCE_WRITE_TIMEOUT, handle_sigterm=False):
+        with capture_deadline(write_timeout, handle_sigterm=False):
             for paths, evidence in ((scoped_paths, scoped), (whole_paths, whole)):
                 for path in paths:
                     path = path.resolve()
@@ -287,20 +315,37 @@ def attach_task_evidence(collect, scoped_paths, whole_paths):
 
 
 def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
-          recapture=True, capture_timeout=CAPTURE_TIMEOUT):
+          recapture=True, capture_timeout=CAPTURE_TIMEOUT, task_evidence_deadline=None):
     """Recapture incomplete evidence once; never retry a functional/policy failure.
 
     Commands must own fresh state per invocation (the installer drivers use
     TemporaryDirectory). Both measurements survive, including provisional counts.
     """
-    attempts = []
-    for attempt in (1, 2):
-        if attempt == 2:
-            report.update(recaptures=1, captureAttempts=[*attempts, {'attempt': 2, 'status': 'running'}])
-            report_path.write_text(json.dumps(report, indent=2) + '\n')
-        with capture_once(command, report_path, scope_executables=scope_executables,
-                          require_executables=require_executables, whole_report_path=whole_report_path,
-                          capture_timeout=capture_timeout) as (code, collect):
+    inherited_hint = os.environ.get(SUPERVISOR_DEADLINE_ENV)
+    inherited_deadline = read_supervisor_deadline(inherited_hint)
+    evidence_deadline = min(inherited_deadline, read_supervisor_deadline(task_evidence_deadline)) - TASK_EVIDENCE_EXIT_RESERVE
+
+    def terminate(signum, _frame):
+        # Let both captures and any partial diagnostic write unwind on TERM.
+        signal.signal(signum, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
+    attempts, pending_evidence = [], []
+    with contextlib.ExitStack() as captures:
+        previous_term = signal.signal(signal.SIGTERM, terminate)
+        captures.callback(signal.signal, signal.SIGTERM, previous_term)
+        if inherited_hint is not None:
+            # Keep the supervisor's budget private to the auditor.
+            captures.callback(os.environ.__setitem__, SUPERVISOR_DEADLINE_ENV, inherited_hint)
+            del os.environ[SUPERVISOR_DEADLINE_ENV]
+        for attempt in (1, 2):
+            if attempt == 2:
+                report.update(recaptures=1, captureAttempts=[*attempts, {'attempt': 2, 'status': 'running'}])
+                report_path.write_text(json.dumps(report, indent=2) + '\n')
+            capture_files = captures.enter_context(contextlib.ExitStack())
+            code, collect = capture_files.enter_context(capture_once(command, report_path,
+                scope_executables=scope_executables, require_executables=require_executables,
+                whole_report_path=whole_report_path, capture_timeout=capture_timeout))
             report = json.loads(report_path.read_text())
             snapshot = report_path.with_name(report_path.stem + f'.capture-{attempt}' + report_path.suffix)
             snapshot.write_text(json.dumps(report, indent=2) + '\n')
@@ -328,13 +373,21 @@ def audit(command, report_path, *, scope_executables=(), require_executables=(),
             report['captureAttempts'] = list(attempts)
             report['recaptures'] = len(attempts) - 1
             report_path.write_text(json.dumps(report, indent=2) + '\n')
-            if collect is not None:
-                attach_task_evidence(collect, (snapshot, report_path), whole_paths)
-            # Drop the closure over raw capture data before a possible replay.
+            replay = attempt == 1 and recapture and retry
+            if collect is not None and task_evidence_fits(evidence_deadline):
+                scoped_paths = (snapshot,) if replay else (snapshot, report_path)
+                pending_evidence.append((collect, scoped_paths, whole_paths[:1] if replay else whole_paths))
+            else:
+                capture_files.close()
             del collect
-        if attempt == 2 or not recapture or not retry:
-            break
-        print('::warning title=Outbound audit recapture::Incomplete evidence; recapturing once; first report '+snapshot.name, flush=True)
+            if not replay:
+                break
+            print('::warning title=Outbound audit recapture::Incomplete evidence; recapturing once; first report '+snapshot.name, flush=True)
+
+        # Once the last verdict is saved, each capture may enrich its receipt
+        # using the time left before the supervisor's cleanup reserve.
+        for collect, scoped_paths, whole_paths in pending_evidence:
+            attach_task_evidence(collect, scoped_paths, whole_paths, deadline=evidence_deadline)
     return code
 
 
@@ -516,6 +569,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--capture-timeout', type=float, default=CAPTURE_TIMEOUT)
+    parser.add_argument('--task-evidence-deadline', type=float, help=argparse.SUPPRESS)
     parser.add_argument('--supervise', type=float)
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
@@ -560,7 +614,8 @@ def main():
     try:
         return audit(command, args.report, scope_executables=args.scope_executable,
                      require_executables=args.require_executable, whole_report_path=args.whole_report,
-                     recapture=not args.single_capture, capture_timeout=args.capture_timeout)
+                     recapture=not args.single_capture, capture_timeout=args.capture_timeout,
+                     task_evidence_deadline=args.task_evidence_deadline)
     finally:
         if sys.platform == 'linux': stop_owned_tree(os.getpid())
 

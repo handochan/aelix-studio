@@ -352,7 +352,7 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
         row['ringIssueCount']=len((rings or {}).get('issuesByPid',{}).get(tid,[])) if rings is not None and tid is not None else None
         row['objectCounts']=dict.fromkeys(('generations','validGenerations','unfreedGenerations','sharedObjectSendRecords'),0) | dict(object_counts[tid]) if objects is not None and tid is not None else None
         row['objectIssueCount']=object_issue_counts[tid] if objects is not None and tid is not None else None
-    checks=capture.get('captureChecks') or (snapshot.get('captureChecks') if diagnostic else None) or {}
+    checks=(snapshot if diagnostic else capture).get('captureChecks') or {}
     root=capture.get('root') or (snapshot.get('root') if diagnostic else None) or {}
     programs=(capture.get('udpProbeLoss') or {}).get('programs')
     reported=(capture.get('programLoss') or {}).get('programs')
@@ -373,6 +373,7 @@ def summarize_tasks(capture, network_evidence=None, ring_evidence=None, object_e
             drained=flag(capture.get('drained')),pidNamespaceVerified=flag(capture.get('pidNamespaceVerified')),
             namespaceInode=number(capture.get('namespaceInode',snapshot.get('namespaceInode') if diagnostic else None)),
             lostEvents=number(loss_source.get('lostEvents')),recordingRootKernelTid=pid(root.get('kernelPid')),
+            rawLostEvents=number(snapshot.get('rawLostEvents')) if diagnostic else None,
             recorderExitCode=number(capture.get('recorderExitCode')),ready=flag(checks.get('ready')),
             done=flag(checks.get('done')),stderrEmpty=flag(checks.get('stderrEmpty')),
             attachmentBarrierMatched=(capture.get('attachmentReadiness')=='reviewed-bpftrace-printf-drained-after-all-attachments'

@@ -756,7 +756,7 @@ class KernelTaskEvidenceTests(unittest.TestCase):
              'UNKNOWN SECRET_SENTINEL\n')
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'events.raw').write_text(raw)
-            (root/'recorder.stderr').write_text('SECRET_SENTINEL')
+            (root/'recorder.stderr').write_text('Lost 7 events\nSECRET_SENTINEL\n')
             snapshot=diagnostic_task_snapshot(root,7)
         failed=dict(status='failed',complete=False,pidNamespaceVerified=False,lostEvents=0,
                     reason='kernel_recorder_terminated_early')
@@ -766,10 +766,27 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         self.assertFalse(result['source']['complete']);self.assertFalse(result['source']['networkComplete'])
         self.assertFalse(result['source']['pidNamespaceVerified'])
         self.assertEqual(result['networkRecordCounts']['P'],1)
+        self.assertEqual(result['source']['lostEvents'],7)
+        self.assertIsNone(result['source']['rawLostEvents'])
         self.assertNotIn('SECRET',json.dumps(snapshot));self.assertNotIn('SECRET',json.dumps(result))
         self.assertEqual(failed,original)
         self.assertTrue(network.reconcile(failed,[],{10:2},{10},None)['issues'])
         self.assertNotIn('network',failed)
+
+    def test_partial_snapshot_loss_is_unknown_when_recorder_stderr_is_unreadable(self):
+        from uring.capture import diagnostic_task_snapshot
+
+        for stderr in (None, b'\xff'):
+            with self.subTest(stderr=stderr), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                (root / 'events.raw').write_text('READY\n')
+                if stderr is not None:
+                    (root / 'recorder.stderr').write_bytes(stderr)
+                snapshot = diagnostic_task_snapshot(root, 7)
+                result = network.summarize_tasks({'complete':False, 'lostEvents':0}, snapshot=snapshot)
+                self.assertIsNone(result['source']['stderrEmpty'])
+                self.assertIsNone(result['source']['lostEvents'])
+                self.assertEqual(result['source']['rawLostEvents'], 0)
 
     def test_snapshot_missing_or_unreadable_raw_is_unavailable_and_deadline_is_not_swallowed(self):
         from uring import capture
