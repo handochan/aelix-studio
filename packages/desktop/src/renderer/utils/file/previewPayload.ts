@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { PreviewContentType } from '@/common/types/office/preview';
 import { isAnalyticsDocument } from '@/common/utils/analyticsPreview';
@@ -153,21 +154,25 @@ export type PreviewPayload = {
  *
  * @param fileRef     Identity to read — resolution to a path stays in the backend.
  * @param contentType Decides the read encoding and which ceiling applies.
+ * @param snapshot    Size ceiling already captured by a tab that is being refreshed.
  */
 export const resolvePreviewPayload = async (
   fileRef: ChatFileRef,
-  contentType: PreviewContentType
+  contentType: PreviewContentType,
+  snapshot?: { thresholdBytes?: number }
 ): Promise<PreviewPayload> => {
   // Snapshot the configured ceiling alongside the stat, before anything is read.
   // Both are per-open facts; neither is re-read for the life of the tab.
-  const [metadata, storedLimitMb] = await Promise.all([
+  const [metadata, thresholdBytes] = await Promise.all([
     // Throws when the file is missing — callers map that to their own fallback.
     ipcBridge.fs.getContentMetadata.invoke({ file: fileRef }),
-    getClientBusinessSetting('preview.textSizeLimitMb').catch((): number | undefined => undefined),
+    snapshot?.thresholdBytes ??
+      getClientBusinessSetting('preview.textSizeLimitMb')
+        .catch((): number | undefined => undefined)
+        .then((limit) => thresholdBytesFor(contentType, textPreviewLimitBytes(limit))),
   ]);
 
   const sizeBytes = metadata.size;
-  const thresholdBytes = thresholdBytesFor(contentType, textPreviewLimitBytes(storedLimitMb));
   // `>` not `>=`: a file of exactly the limit is within it, not over it.
   const oversized = thresholdBytes !== undefined && sizeBytes > thresholdBytes;
 
@@ -266,11 +271,52 @@ type AnalyticsDocumentPayload = {
     editable: false;
     analyticsProjectId?: string;
     sourceOnly?: true;
+    fileRef?: undefined;
     oversized?: boolean;
     sizeBytes?: number;
     thresholdBytes?: number;
   };
 };
+
+type AnalyticsDocumentTarget = {
+  fileRef?: ChatFileRef;
+  name?: string;
+  contentType: PreviewContentType;
+};
+
+export function isDesktopAnalyticsDocument({ fileRef, name, contentType }: AnalyticsDocumentTarget): boolean {
+  const filename = fileRef?.kind === 'project' ? fileRef.relative_path : fileRef?.path;
+  return Boolean(
+    window.electronAPI?.analyticsPreview &&
+    (contentType === 'html' ||
+      (contentType === 'image' && (isAnalyticsDocument(filename ?? '') || isAnalyticsDocument(name ?? ''))))
+  );
+}
+
+function capturedSource(content: string): AnalyticsDocumentPayload {
+  return { content, contentType: 'code', metadata: { editable: false, sourceOnly: true, fileRef: undefined } };
+}
+
+/** A redacted backend 404 cannot distinguish absence from a denied file reference. */
+export async function resolveMissingAnalyticsFilePreview(
+  projectId: string | null | undefined,
+  fileRef: ChatFileRef | undefined,
+  fallbackContent: string | undefined,
+  error: unknown
+): Promise<AnalyticsDocumentPayload | undefined> {
+  const bridge = window.electronAPI?.analyticsPreview;
+  if (
+    typeof fallbackContent !== 'string' ||
+    !bridge ||
+    !projectId ||
+    (fileRef?.kind !== 'project' && fileRef?.kind !== 'local') ||
+    !isBackendHttpError(error) ||
+    error.status !== 404 ||
+    (error.code !== 'FILE_NOT_FOUND' && error.code !== 'NOT_FOUND')
+  )
+    return;
+  if ((await bridge.classify({ projectId, file: fileRef })) === 'missing') return capturedSource(fallbackContent);
+}
 
 /** Route desktop HTML and SVG before a file opener can mount executable content. */
 export async function resolveAnalyticsFilePreview({
@@ -279,19 +325,12 @@ export async function resolveAnalyticsFilePreview({
   name,
   contentType,
   fallbackContent,
-}: {
+}: AnalyticsDocumentTarget & {
   projectId?: string | null;
-  fileRef?: ChatFileRef;
-  name?: string;
-  contentType: PreviewContentType;
   fallbackContent?: string;
 }): Promise<AnalyticsDocumentPayload | undefined> {
   const bridge = window.electronAPI?.analyticsPreview;
-  const filename = fileRef?.kind === 'project' ? fileRef.relative_path : fileRef?.path;
-  const needsClassification =
-    contentType === 'html' ||
-    (contentType === 'image' && (isAnalyticsDocument(filename ?? '') || isAnalyticsDocument(name ?? '')));
-  if (!bridge || !needsClassification) {
+  if (!bridge || !isDesktopAnalyticsDocument({ fileRef, name, contentType })) {
     return;
   }
   if (projectId && fileRef?.kind === 'project' && isAnalyticsDocument(fileRef.relative_path)) {
@@ -299,18 +338,30 @@ export async function resolveAnalyticsFilePreview({
     if (mode === 'isolated') {
       return { content: '', contentType: 'html', metadata: { editable: false, analyticsProjectId: projectId } };
     }
+    if (mode === 'missing') {
+      if (typeof fallbackContent === 'string') return capturedSource(fallbackContent);
+      throw new Error('Preview file is missing');
+    }
     if (mode === 'ordinary' && (contentType !== 'html' || /\.html?$/i.test(fileRef.relative_path))) return;
   }
-  const source = fileRef ? await resolvePreviewPayload(fileRef, 'code') : undefined;
+  if (!fileRef) return capturedSource(fallbackContent ?? '');
+  let source: PreviewPayload;
+  try {
+    source = await resolvePreviewPayload(fileRef, 'code');
+  } catch (error) {
+    const fallback = await resolveMissingAnalyticsFilePreview(projectId, fileRef, fallbackContent, error);
+    if (fallback) return fallback;
+    throw error;
+  }
   return {
-    content: source?.content ?? fallbackContent ?? '',
+    content: source.content,
     contentType: 'code',
     metadata: {
       editable: false,
       sourceOnly: true,
-      oversized: source?.oversized,
-      sizeBytes: source?.sizeBytes,
-      thresholdBytes: source?.thresholdBytes,
+      oversized: source.oversized,
+      sizeBytes: source.sizeBytes,
+      thresholdBytes: source.thresholdBytes,
     },
   };
 }

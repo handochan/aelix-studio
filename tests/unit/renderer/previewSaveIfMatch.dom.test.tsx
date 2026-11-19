@@ -25,6 +25,11 @@ const h = vi.hoisted(() => ({
   writeContent: vi.fn(),
   getContentMetadata: vi.fn(),
   readContent: vi.fn(),
+  getClientBusinessSetting: vi.fn(),
+}));
+
+vi.mock('@/renderer/services/clientBusinessSettings', () => ({
+  getClientBusinessSetting: h.getClientBusinessSetting,
 }));
 
 vi.mock('@/common', () => ({
@@ -48,6 +53,7 @@ import {
   usePreviewContext,
   type PreviewContextValue,
 } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
+import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
 
 let ctx: PreviewContextValue;
 const Probe: React.FC = () => {
@@ -102,6 +108,7 @@ beforeEach(() => {
   localStorage.clear();
   h.writeContent.mockReset().mockResolvedValue(true);
   h.readContent.mockReset().mockResolvedValue(null);
+  h.getClientBusinessSetting.mockReset().mockResolvedValue(undefined);
   // Post-save mtime refresh (a separate, pre-existing fill point).
   h.getContentMetadata.mockReset().mockResolvedValue({
     name: 'a.md',
@@ -238,4 +245,40 @@ describe('save carries the If-Match taken when the tab opened', () => {
     });
     expect(ctx.activeTab?.content).toBe('<h1>Ordinary</h1>');
   });
+
+  it.each([
+    { initialLimit: 4, newLimit: 1, oversized: false },
+    { initialLimit: 1, newLimit: 4, oversized: true },
+  ])(
+    'keeps the limit from opening the source-only tab when settings change from $initialLimit to $newLimit',
+    async ({ initialLimit, newLimit, oversized }) => {
+      mount();
+      const mb = 1024 * 1024;
+      h.getClientBusinessSetting.mockResolvedValue(initialLimit);
+      h.readContent.mockResolvedValue('old source');
+      const opened = await resolvePreviewPayload(fileRef, 'code');
+      act(() =>
+        ctx.openPreview(opened.content, 'code', {
+          fileRef,
+          sourceOnly: true,
+          editable: false,
+          thresholdBytes: opened.thresholdBytes,
+        })
+      );
+      h.getClientBusinessSetting.mockResolvedValue(newLimit);
+      h.getContentMetadata.mockResolvedValue({ size: 2 * mb, lastModified: OPEN_MTIME + 1 });
+      h.readContent.mockClear().mockResolvedValue('fresh source');
+      await act(async () => {
+        expect(await ctx.reloadTabContent(ctx.activeTabId!)).toBe(true);
+      });
+      expect(ctx.activeTab?.metadata).toMatchObject({
+        thresholdBytes: initialLimit * mb,
+        sizeBytes: 2 * mb,
+        oversized,
+      });
+      expect(ctx.activeTab?.content).toBe(oversized ? '' : 'fresh source');
+      expect(h.readContent).toHaveBeenCalledTimes(oversized ? 0 : 1);
+      expect(h.getClientBusinessSetting).toHaveBeenCalledTimes(1);
+    }
+  );
 });

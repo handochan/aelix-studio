@@ -14,6 +14,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { act, renderHook } from '@testing-library/react';
 import { Message } from '@arco-design/web-react';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 // Record ipcBridge.fs calls + script their returns per test.
 const h = vi.hoisted(() => ({
@@ -97,8 +98,9 @@ describe('project document preview entry points', () => {
     expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
       '<script>document.title = "from disk";</script>',
       'code',
-      expect.objectContaining({ sourceOnly: true, editable: false, file_path: undefined })
+      expect.objectContaining({ sourceOnly: true, editable: false })
     );
+    expect(h.openPreview.mock.calls[0][2]).not.toHaveProperty('file_path');
   });
 
   it('does not open a file link or offer a raw URL after Analytics rejects classification', async () => {
@@ -151,6 +153,113 @@ describe('project document preview entry points', () => {
     vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
     expect(await resolveAnalyticsFilePreview({ projectId: 'projectA', fileRef, contentType: 'diff' })).toBeUndefined();
     expect(classify).not.toHaveBeenCalled();
+  });
+
+  const missingFile = () =>
+    new BackendHttpError({
+      method: 'POST',
+      path: '/api/fs/content/metadata',
+      status: 404,
+      body: { code: 'FILE_NOT_FOUND' },
+    });
+
+  it.each(['/project/workspace/index.html', 'C:\\project\\workspace\\index.html'])(
+    'uses the real absolute diff path to confirm a missing file at %s',
+    async (filename) => {
+      const local = { kind: 'local', path: filename };
+      const classify = vi.fn().mockResolvedValue('missing');
+      vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+      h.resolveRef.mockResolvedValue({ file: local });
+      h.getContentMetadata.mockReset().mockRejectedValue(missingFile());
+      h.readContent.mockReset();
+      const captured = '<script>document.title = "captured";</script>';
+      const hook = renderHook(() => usePreviewLauncher());
+      await act(async () => {
+        await hook.result.current.launchPreview({
+          relativePath: local.path,
+          contentType: 'html',
+          editable: true,
+          fallbackContent: captured,
+        });
+      });
+      expect(h.resolveRef).toHaveBeenLastCalledWith({ project_id: 'projectA', file: local });
+      expect(classify).toHaveBeenCalledWith({ projectId: 'projectA', file: local });
+      expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
+        captured,
+        'code',
+        expect.objectContaining({ sourceOnly: true, editable: false, fileRef: undefined })
+      );
+      expect(h.openPreview.mock.calls[0][2]).not.toHaveProperty('file_path');
+      expect(h.readContent).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses parent traversal instead of checking a rewritten path for the fallback', async () => {
+    const classify = vi.fn().mockResolvedValue('missing');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockClear();
+    const hook = renderHook(() => usePreviewLauncher());
+    await act(async () => {
+      await hook.result.current.launchPreview({
+        relativePath: '../outside.html',
+        contentType: 'html',
+        editable: true,
+        fallbackContent: '<h1>Captured</h1>',
+      });
+    });
+    expect(hook.result.current.errorKind).toBe('sandbox');
+    expect(h.resolveRef).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    expect(h.openPreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps the fallback inert when a previously ordinary file disappears before its read', async () => {
+    const classify = vi.fn().mockResolvedValueOnce('ordinary').mockResolvedValueOnce('missing');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(60));
+    h.readContent.mockReset().mockRejectedValue(missingFile());
+    const captured = '<script>document.title = "captured";</script>';
+    const hook = renderHook(() => usePreviewLauncher());
+    await act(async () => {
+      await hook.result.current.launchPreview({
+        relativePath: fileRef.relative_path,
+        contentType: 'html',
+        editable: true,
+        fallbackContent: captured,
+      });
+    });
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
+      captured,
+      'code',
+      expect.objectContaining({ sourceOnly: true, editable: false, fileRef: undefined })
+    );
+  });
+
+  it.each(['opaque 404', 'explicit refusal'])('does not show the captured HTML after %s', async (failure) => {
+    const classify = vi.fn().mockResolvedValue('ordinary');
+    if (failure === 'opaque 404') classify.mockResolvedValueOnce('ordinary').mockResolvedValueOnce('source-only');
+    else classify.mockRejectedValue(new Error('Analytics preview file refused'));
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    h.getContentMetadata.mockReset().mockRejectedValue(missingFile());
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const hook = renderHook(() => usePreviewLauncher());
+      await act(async () => {
+        await hook.result.current.launchPreview({
+          relativePath: fileRef.relative_path,
+          contentType: 'html',
+          editable: true,
+          fallbackContent: '<script>document.title = "captured";</script>',
+        });
+      });
+      expect(h.openPreview).not.toHaveBeenCalled();
+      expect(hook.result.current.errorKind).not.toBeNull();
+    } finally {
+      log.mockRestore();
+    }
   });
 });
 

@@ -10,7 +10,9 @@ import type { PreviewContentType } from '@/common/types/office/preview';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import {
+  isDesktopAnalyticsDocument,
   resolveAnalyticsFilePreview,
+  resolveMissingAnalyticsFilePreview,
   resolvePreviewPayload,
   upgradeFileRef,
 } from '@/renderer/utils/file/previewPayload';
@@ -78,9 +80,26 @@ export const usePreviewLauncher = () => {
       setLoading(true);
       setErrorKind(null);
 
+      const desktopDocumentPath = isDesktopAnalyticsDocument({
+        contentType,
+        name: file_name || relativePath || originalPath,
+      });
+      if (
+        desktopDocumentPath &&
+        [relativePath, originalPath].some((filename) => filename?.split(/[\\/]/).includes('..'))
+      ) {
+        setErrorKind('sandbox');
+        setLoading(false);
+        return;
+      }
+
       // 路径解析 / Path resolution
-      // 优先使用工作区 + 相对路径拼接绝对路径 / Prefer workspace + relative path to build absolute path
-      const absolutePath = workspace && relativePath ? joinPath(workspace, relativePath) : undefined;
+      // Diff headers can supply an absolute path in relativePath. Do not rewrite the target.
+      let absolutePath: string | undefined;
+      if (relativePath) {
+        if (desktopDocumentPath && /^(?:[a-zA-Z]:)?[\\/]/.test(relativePath)) absolutePath = relativePath;
+        else if (workspace) absolutePath = joinPath(workspace, relativePath);
+      }
       const resolvedPath = absolutePath || originalPath || relativePath || undefined;
       // Backend-host absolute path (agent workspace file, no pe identity) → a Local
       // ChatFileRef for content I/O over /api/fs/content. Only when we have an
@@ -98,35 +117,34 @@ export const usePreviewLauncher = () => {
       const previewTitle = title || computedFileName || relativePath || contentType.toUpperCase();
 
       // 预览元数据 / Preview metadata
-      const metadata = {
+      const documentMetadata = {
         title: previewTitle,
         file_name: computedFileName || previewTitle,
         fileRef,
-        file_path: resolvedPath,
-        workspace,
         language,
+      };
+      const metadata = { ...documentMetadata, file_path: resolvedPath, workspace };
+      const target = {
+        projectId,
+        fileRef,
+        name: computedFileName || resolvedPath,
+        contentType,
+        fallbackContent: fallbackContent ?? diffContent,
       };
 
       try {
-        const document = await resolveAnalyticsFilePreview({
-          projectId,
-          fileRef,
-          name: computedFileName || resolvedPath,
-          contentType,
-          fallbackContent: fallbackContent ?? diffContent,
-        });
+        const document = await resolveAnalyticsFilePreview(target);
         if (document) {
           openPreview(document.content, document.contentType, {
-            ...metadata,
-            file_path: undefined,
-            workspace: undefined,
+            ...documentMetadata,
             ...document.metadata,
           });
           return;
         }
 
-        // Only ordinary files can use the optimistic content path.
-        const hasOpened = typeof fallbackContent === 'string';
+        // Desktop HTML and SVG need a successful read before mounting active content.
+        const desktopDocument = isDesktopAnalyticsDocument(target);
+        const hasOpened = typeof fallbackContent === 'string' && !desktopDocument;
         if (hasOpened) openPreview(fallbackContent, contentType, { ...metadata, editable });
 
         // 2. 尝试读取实际文件内容（覆盖乐观预览） / Try to read actual file content (override optimistic preview)
@@ -151,6 +169,18 @@ export const usePreviewLauncher = () => {
             });
             return;
           } catch (error) {
+            if (desktopDocument) {
+              const fallback = await resolveMissingAnalyticsFilePreview(
+                projectId,
+                fileRef,
+                target.fallbackContent,
+                error
+              );
+              if (fallback) {
+                openPreview(fallback.content, fallback.contentType, { ...documentMetadata, ...fallback.metadata });
+                return;
+              }
+            }
             // 读取失败，如果已经显示了乐观预览，则只记录警告
             // Read failed, log warning if optimistic preview is already shown
             setErrorKind(classifyPreviewError(error));

@@ -263,6 +263,66 @@ test('unclassified HTML and SVG show inert source with no guest grant', async ({
   }
 });
 
+test('Desktop distinguishes a deleted tracked document from a refused Report path', async ({ page }) => {
+  test.setTimeout(120_000);
+  const workspace = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'studio-missing-document-')));
+  const vanished = path.join(workspace, 'index.html');
+  const stage = path.join(workspace, 'artifacts', 'reports', 'monthly', '.staging', 'revision-a');
+  fs.mkdirSync(path.join(stage, 'content'), { recursive: true });
+  fs.writeFileSync(path.join(stage, 'manifest.json'), '{"schema":"analytics.report_revision/1","entry":"index.html"}');
+  fs.writeFileSync(vanished, '<h1>Tracked file</h1>');
+  let conversation: string | undefined;
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, workspace);
+    fs.unlinkSync(vanished);
+    const observed = await page.evaluate(
+      async ({ id, vanished, staged, outside }) => {
+        const base = `http://127.0.0.1:${(window as BackendWindow).__backendPort}`;
+        const { data: conversation } = await (await fetch(`${base}/api/conversations/${id}`)).json();
+        const { data: project } = await (await fetch(`${base}/api/projects/${conversation.project_id}`)).json();
+        const projectId: string = project.project_id;
+        const local = { kind: 'local' as const, path: vanished };
+        const resolved = await fetch(`${base}/api/projects/${projectId}/resolve-ref`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ file: local }),
+        });
+        const { data } = await resolved.json();
+        const bridge = window.electronAPI!.analyticsPreview!;
+        return {
+          kind: data.file.kind,
+          missing: await bridge.classify({ projectId, file: data.file }),
+          localGrant: await bridge.open({ projectId, file: data.file }),
+          grant: await bridge.open({
+            projectId,
+            file: { kind: 'project', pe_id: project.explorer.workspace_pe_id, relative_path: 'index.html' },
+          }),
+          staged: await bridge.classify({ projectId, file: { kind: 'local', path: staged } }).catch(() => 'refused'),
+          outside: await bridge.classify({ projectId, file: { kind: 'local', path: outside } }),
+        };
+      },
+      {
+        id: conversation,
+        vanished,
+        staged: path.join(stage, 'content', 'index.html'),
+        outside: path.join(path.dirname(workspace), 'unrelated-missing-file.html'),
+      }
+    );
+    expect(observed).toEqual({
+      kind: 'local',
+      missing: 'missing',
+      localGrant: null,
+      grant: null,
+      staged: 'refused',
+      outside: 'source-only',
+    });
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(workspace, { recursive: true, force: true });
+  }
+});
+
 test('Explorer refuses a markerless prepared Report opened from its content folder', async ({ page }) => {
   test.setTimeout(120_000);
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-prepared-report-'));

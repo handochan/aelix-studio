@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { analyticsPreviewScope } from '@/common/utils/analyticsPreview';
 import {
+  canonicalPreviewDocument,
   locateAnalyticsDocument,
   MAX_ANALYTICS_PREVIEW_BYTES,
   scanPreviewJournal,
@@ -245,6 +246,15 @@ describe('Analytics preview resource routing', () => {
     const current = await write([...revision, 'index.html'], '<h1>Monthly</h1>');
     await symlink(path.dirname(other), path.join(path.dirname(current), 'link'), 'junction');
     expect((await get(previewUrl(reportHost, [...revision, 'link', 'script.js']))).status).toBe(404);
+  });
+
+  it('attests a genuinely missing file but does not classify a missing target through a link as absent', async () => {
+    const root = grants.get(workspaceHost)!.root.directory;
+    const staging = path.join(scratch, 'outside');
+    await mkdir(staging);
+    await symlink(staging, path.join(root, 'outside'), 'junction');
+    expect(await canonicalPreviewDocument(root, ['missing', 'index.html'])).toBeUndefined();
+    await expect(canonicalPreviewDocument(root, ['outside', 'index.html'])).rejects.toThrow('cannot follow links');
   });
 
   it('enforces a resource ceiling independently of the 1 MiB editor default', async () => {

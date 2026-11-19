@@ -18,11 +18,12 @@ import {
   isGeneratedReportBody,
   isReportViewPath,
   originalReportScope,
+  type AnalyticsPreviewClassificationRequest,
   type AnalyticsPreviewMode,
   type AnalyticsPreviewRequest,
   type AnalyticsPreviewScope,
 } from '@/common/utils/analyticsPreview';
-import { locateAnalyticsDocument, previewFileType, readPreviewFile } from './files';
+import { canonicalPreviewDocument, locateAnalyticsDocument, previewFileType, readPreviewFile } from './files';
 import {
   ANALYTICS_PARTITION,
   ANALYTICS_SCHEME,
@@ -152,7 +153,7 @@ async function initializeSession(): Promise<Electron.Session> {
   return isolated;
 }
 
-function validateRequest(value: unknown): AnalyticsPreviewRequest | undefined {
+function validateClassificationRequest(value: unknown): AnalyticsPreviewClassificationRequest | undefined {
   if (
     value &&
     typeof value === 'object' &&
@@ -161,13 +162,43 @@ function validateRequest(value: unknown): AnalyticsPreviewRequest | undefined {
     value.projectId &&
     'file' in value &&
     isChatFileRef(value.file) &&
-    value.file.kind === 'project'
+    (value.file.kind === 'project' || value.file.kind === 'local')
   ) {
     return { projectId: value.projectId, file: value.file };
   }
 }
 
+function validateRequest(value: unknown): AnalyticsPreviewRequest | undefined {
+  const request = validateClassificationRequest(value);
+  if (request?.file.kind === 'project') return { projectId: request.projectId, file: request.file };
+}
+
 const rootKeyFor = (projectId: string, peId: string): string => JSON.stringify([projectId, peId]);
+
+function relativeWithin(directory: string, filename: string): string | undefined {
+  const relative = path.relative(directory, filename);
+  if (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative)) return relative;
+}
+
+async function localProjectCandidate(
+  projectId: string,
+  filename: string
+): Promise<AnalyticsPreviewRequest | undefined> {
+  if (!path.isAbsolute(filename) || filename.split(/[\\/]/).some((part) => part === '.' || part === '..')) return;
+  const project = await ipcBridge.project.get.invoke({ project_id: projectId });
+  if (project?.project_id !== projectId) return;
+  let closest: { pe_id: string; relative_path: string; kind: 'project' } | undefined;
+  for (const entry of project.explorer.entries) {
+    if (!path.isAbsolute(entry.display_path)) continue;
+    const relative = relativeWithin(entry.display_path, filename);
+    if (!relative) continue;
+    const relativePath = relative.split(path.sep).join('/');
+    if (!closest || relativePath.length < closest.relative_path.length) {
+      closest = { kind: 'project', pe_id: entry.pe_id, relative_path: relativePath };
+    }
+  }
+  if (closest) return { projectId, file: closest };
+}
 
 async function attachedFolder(projectId: string, peId: string): Promise<string | undefined> {
   if (detachingRoots.has(rootKeyFor(projectId, peId))) return;
@@ -202,26 +233,14 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
   }
   const explorerRoot = await realpath(displayPath);
   const filename = path.join(explorerRoot, ...requested);
-  const canonical = await realpath(filename);
+  const canonical = await canonicalPreviewDocument(explorerRoot, requested);
   const location = await locateAnalyticsDocument(filename);
-  if (canonical !== filename) {
+  if (canonical && canonical !== filename) {
     if (typeof location === 'object') throw new Error('Analytics preview cannot follow links');
     const canonicalLocation = await locateAnalyticsDocument(canonical);
     if (typeof canonicalLocation === 'object') throw new Error('Analytics preview cannot follow links');
     if (canonicalLocation === 'source-only') return canonicalLocation;
   }
-  if (location === 'source-only') return location;
-  if (!location) return;
-  const { root, scope, parts } = location;
-  if (scope.kind === 'workspace' && isReportViewPath(parts) && !isGeneratedReportBody(parts)) {
-    throw new Error('Open the original Report revision for this attachment');
-  }
-  if (!previewFileType(scope, parts)) throw new Error('Analytics preview file refused');
-  if (scope.kind === 'workspace' && !/\.html?$/i.test(file.relative_path)) return;
-  const permits = (target: string[]) => {
-    const relative = path.relative(explorerRoot, path.join(root.directory, ...target));
-    return relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-  };
   const authorized = async () => {
     try {
       return (
@@ -234,6 +253,29 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
       return false;
     }
   };
+  if (typeof location === 'object') {
+    const { root, scope, parts } = location;
+    if (scope.kind === 'workspace' && isReportViewPath(parts) && !isGeneratedReportBody(parts)) {
+      throw new Error('Open the original Report revision for this attachment');
+    }
+    if (!previewFileType(scope, parts)) throw new Error('Analytics preview file refused');
+    if (!canonical && scope.kind === 'report') {
+      const saved = await savedRevisionFiles(root, scope.revision);
+      if (!saved?.has(parts.slice(scope.revision.length).join('/'))) {
+        throw new Error('Analytics Report file refused');
+      }
+    }
+  }
+  if (!canonical) {
+    if (!(await authorized())) throw new Error('Explorer root unavailable');
+    return 'missing' as const;
+  }
+  if (location === 'source-only') return location;
+  if (!location) return;
+  const { root, scope, parts } = location;
+  if (scope.kind === 'workspace' && !/\.html?$/i.test(file.relative_path)) return;
+  const permits = (target: string[]) =>
+    relativeWithin(explorerRoot, path.join(root.directory, ...target)) !== undefined;
   return { root, scope, parts, permits, authorized };
 }
 
@@ -350,10 +392,15 @@ export function registerAnalyticsPreviewWindow(contents: WebContents, rendererUr
   contents.ipc.handle(
     ANALYTICS_PREVIEW_CHANNELS.classify,
     async (event, value: unknown): Promise<AnalyticsPreviewMode> => {
-      const request = trusted(event) && validateRequest(value);
+      const request = trusted(event) && validateClassificationRequest(value);
       if (!request) throw new Error('Analytics preview classification refused');
-      const entry = await resolveEntry(request);
-      if (entry === 'source-only') return entry;
+      const { projectId, file } = request;
+      if (file.kind === 'local') {
+        const candidate = await localProjectCandidate(projectId, file.path);
+        return candidate && (await resolveEntry(candidate)) === 'missing' ? 'missing' : 'source-only';
+      }
+      const entry = await resolveEntry({ projectId, file });
+      if (entry === 'source-only' || entry === 'missing') return entry;
       return entry ? 'isolated' : 'ordinary';
     }
   );
@@ -362,7 +409,7 @@ export function registerAnalyticsPreviewWindow(contents: WebContents, rendererUr
     if (!request) return null;
     const startingGeneration = generation;
     const entry = await resolveEntry(request);
-    if (!entry || entry === 'source-only') return null;
+    if (!entry || typeof entry === 'string') return null;
     const files =
       entry.scope.kind === 'report' ? await savedRevisionFiles(entry.root, entry.scope.revision) : undefined;
     const grant = { ...entry, files };

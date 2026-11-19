@@ -79,6 +79,26 @@ function sameFile(first: Stats, second: Stats): boolean {
   return first.dev === second.dev && first.ino === second.ino;
 }
 
+/** An absent document is recoverable only beneath an existing root without a link in the missing path. */
+export async function canonicalPreviewDocument(directory: string, parts: string[]): Promise<string | undefined> {
+  try {
+    return await realpath(path.join(directory, ...parts));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  let filename = directory;
+  for (const part of parts) {
+    filename = path.join(filename, part);
+    try {
+      if ((await lstat(filename)).isSymbolicLink()) throw new Error('Analytics preview cannot follow links');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+  throw new Error('Analytics preview document changed');
+}
+
 async function withStableFile<T>(
   root: PreviewRoot,
   parts: string[],
@@ -224,11 +244,16 @@ async function probeAnalyticsJournal(root: PreviewRoot, budget: ProbeBudget): Pr
   }
 }
 
-async function openProjectRoot(directory: string): Promise<PreviewRoot> {
-  const canonical = await realpath(directory);
-  const identity = await lstat(canonical);
-  if (!identity.isDirectory()) throw new Error('Analytics project root is unavailable');
-  return { directory: canonical, identity };
+async function openProjectRoot(directory: string): Promise<PreviewRoot | undefined> {
+  try {
+    const canonical = await realpath(directory);
+    const identity = await lstat(canonical);
+    if (!identity.isDirectory()) throw new Error('Analytics project root is unavailable');
+    return { directory: canonical, identity };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
 }
 
 async function projectMarker(root: PreviewRoot): Promise<'valid' | 'missing' | 'invalid'> {
@@ -302,6 +327,7 @@ export async function locateAnalyticsDocument(filename: string) {
     if (!report && !prepared && parts[0] !== 'workspace') continue;
     const directory = path.join(volume, ...segments.slice(0, index));
     const root = await openProjectRoot(directory);
+    if (!root) continue;
     const marker = await projectMarker(root);
     if (marker !== 'valid') {
       const journal = (await hasReportRecord(root, parts)) ? 'analytics' : await probeAnalyticsJournal(root, budget);

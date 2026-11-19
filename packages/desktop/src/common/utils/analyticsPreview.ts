@@ -10,8 +10,13 @@ export type AnalyticsPreviewRequest = {
   file: Extract<ChatFileRef, { kind: 'project' }>;
 };
 
+export type AnalyticsPreviewClassificationRequest = {
+  projectId: string;
+  file: Extract<ChatFileRef, { kind: 'project' | 'local' }>;
+};
+
 export type AnalyticsPreviewHandle = { url: string; partition: string };
-export type AnalyticsPreviewMode = 'ordinary' | 'isolated' | 'source-only';
+export type AnalyticsPreviewMode = 'ordinary' | 'isolated' | 'source-only' | 'missing';
 
 export const ANALYTICS_PREVIEW_CHANNELS = {
   classify: 'studio:analytics-preview:classify',
@@ -21,7 +26,7 @@ export const ANALYTICS_PREVIEW_CHANNELS = {
 } as const;
 
 export type AnalyticsPreviewAPI = {
-  classify: (request: AnalyticsPreviewRequest) => Promise<AnalyticsPreviewMode>;
+  classify: (request: AnalyticsPreviewClassificationRequest) => Promise<AnalyticsPreviewMode>;
   open: (request: AnalyticsPreviewRequest) => Promise<AnalyticsPreviewHandle | null>;
   close: (url: string) => Promise<void>;
   detach: (projectId: string, peId: string) => Promise<void>;

@@ -1081,7 +1081,9 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const encoding: ContentEncoding = tab.content_type === 'image' ? 'dataurl' : 'utf8';
     try {
-      const source = tab.metadata?.sourceOnly ? await resolvePreviewPayload(fileRef, 'code') : undefined;
+      const source = tab.metadata?.sourceOnly
+        ? await resolvePreviewPayload(fileRef, 'code', { thresholdBytes: tab.metadata.thresholdBytes })
+        : undefined;
       const content = source ? source.content : await ipcBridge.fs.readContent.invoke({ file: fileRef, encoding });
       if (content == null) return false;
 
