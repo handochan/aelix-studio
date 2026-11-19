@@ -44,7 +44,8 @@ const isTerminalAgentStatus = (data: unknown): boolean => {
   return status === 'error' || status === 'disconnected';
 };
 
-const isTerminalStreamMessage = (message: { type: string; data: unknown }): boolean => {
+/** True for stream frames that end a run (finish, error, or a terminal agent status). */
+export const isTerminalStreamMessage = (message: { type: string; data: unknown }): boolean => {
   return (
     message.type === 'finish' ||
     message.type === 'error' ||

@@ -191,5 +191,8 @@
       "idle_notification": "Сповіщення про простій",
       "shutdown_request": "Запит на зупинку"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} очікує на підтвердження (у черзі: {{pending}})"
   }
 }

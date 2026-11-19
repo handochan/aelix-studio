@@ -2960,6 +2960,7 @@ export type I18nKey =
   | 'team.interruptAndSend'
   | 'team.newAgent'
   | 'team.noMessages'
+  | 'team.pendingApproval.label'
   | 'team.removeAgent.confirmContent'
   | 'team.removeAgent.confirmContentActive'
   | 'team.removeAgent.confirmTitle'
