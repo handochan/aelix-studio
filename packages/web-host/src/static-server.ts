@@ -16,7 +16,14 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from 'no
 import { networkInterfaces } from 'node:os';
 import net, { type Socket } from 'node:net';
 import serveHandler from 'serve-handler';
-import { createRequestOriginPolicy, getStudioWebUIDefaultPort, readSourceHeaders } from './requestOrigin.js';
+import {
+  createRequestOriginPolicy,
+  getStudioWebUIDefaultPort,
+  getStudioWebUILocalUrl,
+  parseOrigin,
+  readSourceHeaders,
+} from './requestOrigin.js';
+import { toHostCookieHeader, toStudioSetCookie, usesSharedLoopbackHost } from './studio-auth/cookies.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
 import {
@@ -83,7 +90,7 @@ export function pickLanIP(nets: ReturnType<typeof networkInterfaces>): string | 
   return candidates[0] ?? null;
 }
 
-function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort: number): void {
+function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort: number, secureOrigin: boolean): void {
   const headers: http.OutgoingHttpHeaders = { ...req.headers };
   const connectionFields = new Set(
     req.headers.connection
@@ -105,6 +112,13 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
       delete headers[name];
     }
   }
+  const cookie = toHostCookieHeader(
+    req.headers.host,
+    typeof headers.cookie === 'string' ? headers.cookie : undefined,
+    req.url ?? ''
+  );
+  if (cookie) headers.cookie = cookie;
+  else delete headers.cookie;
   headers.host = '127.0.0.1:' + backendPort;
   if (req.headers.origin) headers.origin = 'http://' + headers.host;
   const options: http.RequestOptions = {
@@ -119,6 +133,9 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
     for (const name of Object.keys(responseHeaders)) {
       if (name.startsWith('access-control-')) delete responseHeaders[name];
     }
+    const cookies = toStudioSetCookie(req.headers.host, proxyRes.headers['set-cookie'] ?? [], secureOrigin);
+    if (cookies.length) responseHeaders['set-cookie'] = cookies;
+    else delete responseHeaders['set-cookie'];
     res.writeHead(proxyRes.statusCode ?? 502, responseHeaders);
     proxyRes.pipe(res);
   });
@@ -195,7 +212,14 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         entries?.filter((entry) => entry.family === 'IPv4' && !entry.internal).map((entry) => entry.address) ?? []
     );
   const configuredOrigin = process.env.AELIX_STUDIO_ORIGIN;
+  const publicOrigin = configuredOrigin ? parseOrigin(configuredOrigin) : undefined;
+  const isSecureOrigin = (authority: string | undefined): boolean => {
+    const host = authority?.toLowerCase();
+    if (publicOrigin?.protocol !== 'https:') return false;
+    return host === publicOrigin.host || (!publicOrigin.port && host === publicOrigin.host + ':443');
+  };
   let isAllowed = createRequestOriginPolicy(port, readLanAddresses, configuredOrigin);
+  let localUrl = getStudioWebUILocalUrl(port);
 
   // Bun's HTTP server upgrade socket does not reliably write the 101 response
   // (#2824). Keep client upgrades on the TCP listener and use this HTTP
@@ -216,6 +240,15 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         res.writeHead(204).end();
         return;
       }
+      if (
+        (req.method === 'GET' || req.method === 'HEAD') &&
+        (req.headers['sec-fetch-mode'] === 'navigate' || req.headers.accept?.includes('text/html')) &&
+        usesSharedLoopbackHost(req.headers.host) &&
+        req.url.startsWith('/')
+      ) {
+        res.writeHead(307, { location: localUrl + req.url, 'cache-control': 'no-store' }).end();
+        return;
+      }
       if (expectContinue) res.writeContinue();
 
       if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
@@ -228,7 +261,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       // so WebUI browser clients reach the backend without a path-rewrite.
       const pathname = req.url.split('?', 1)[0];
       if (pathname.startsWith('/api/') || ['/login', '/logout', '/qr-login', '/api'].includes(pathname)) {
-        forwardToBackend(req, res, opts.backendPort);
+        forwardToBackend(req, res, opts.backendPort, isSecureOrigin(req.headers.host));
         return;
       }
 
@@ -285,7 +318,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         } else if (peeked.length !== headerEnd + 4) {
           rejectSocket(client, 400);
         } else {
-          proxyWebSocket(client, peeked.toString('latin1', 0, headerEnd), opts.backendPort, isAllowed);
+          proxyWebSocket(client, peeked.toString('latin1', 0, headerEnd), opts.backendPort, isAllowed, isSecureOrigin);
         }
         return;
       }
@@ -317,7 +350,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
 
   const actualPort = (tcp_server.address() as { port: number } | null)?.port ?? port;
   isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin);
-  const localUrl = `http://127.0.0.1:${actualPort}`;
+  localUrl = getStudioWebUILocalUrl(actualPort);
 
   const handle: StaticServerHandle = {
     port: actualPort,

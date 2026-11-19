@@ -28,13 +28,24 @@ profiles, temporary data, and URL registration independent.
 
 ## WebUI defaults
 
-Studio WebUI uses port `25982` in production, `25983` in development, and
-`25984` for a second development instance. This lets AionUi keep its default
-port `25808` and gives each app its own browser origin and service worker scope.
-An explicit port or saved preference still takes priority. The local listener
-uses loopback unless remote access is enabled. Browser authentication cookies
-are scoped by host, so use separate browser profiles when signing into both
-apps on the same hostname.
+The default browser address is `http://aelix-studio.localhost:25982`. Development
+uses port `25983`, and a second development instance uses `25984`. An explicit
+port or saved preference takes priority. The local listener still binds IPv4
+loopback unless remote access is enabled. Browser navigation from the old raw
+loopback aliases is redirected to the Studio hostname.
+
+Studio publishes host-only `aelix-studio-session`, `aelix-studio-refresh`, and
+`aelix-studio-csrf-token` cookies. Session and refresh cookies use `HttpOnly`.
+The session and CSRF cookies use `Path=/`, and the refresh cookie uses
+`Path=/api/auth/refresh`. Local HTTP uses `SameSite=Lax`. HTTPS uses
+`SameSite=Strict` and `Secure` when the host enables HTTPS cookies or Studio
+serves the configured HTTPS origin. The WebUI proxy maps only Studio
+credentials to the pinned host. Existing browser sessions require a new login.
+
+For two remote deployments on the same machine, use a dedicated browser
+hostname for Studio. Cookies do not distinguish ports, so a shared LAN address
+with different ports cannot isolate cookie delivery.
+[RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
 
 ## Upstream and compatibility names
 

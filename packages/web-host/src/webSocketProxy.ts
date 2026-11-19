@@ -1,5 +1,6 @@
 import http, { type OutgoingHttpHeaders } from 'node:http';
 import type { Socket } from 'node:net';
+import { toHostCookieHeader, toStudioSetCookie } from './studio-auth/cookies.js';
 import { readSourceHeaders } from './requestOrigin.js';
 
 const UPGRADE_HEADERS = new Set([
@@ -70,7 +71,8 @@ export function proxyWebSocket(
   client: Socket,
   requestHead: string,
   backendPort: number,
-  isAllowed: (source: ReturnType<typeof readSourceHeaders>, requireOrigin: boolean) => boolean
+  isAllowed: (source: ReturnType<typeof readSourceHeaders>, requireOrigin: boolean) => boolean,
+  isSecureOrigin: (authority: string | undefined) => boolean
 ): void {
   const upgrade = parseUpgrade(requestHead);
   if (!upgrade) {
@@ -85,6 +87,11 @@ export function proxyWebSocket(
   client.pause();
   const host = '127.0.0.1:' + backendPort;
   const headers: OutgoingHttpHeaders = { ...upgrade.headers, host, origin: 'http://' + host, connection: 'Upgrade' };
+
+  const authority = upgrade.headers.host;
+  const cookie = toHostCookieHeader(authority, upgrade.headers.cookie, upgrade.path);
+  if (cookie) headers.cookie = cookie;
+  else delete headers.cookie;
 
   const proxy = http.request({ hostname: '127.0.0.1', port: backendPort, path: upgrade.path, headers });
   const closeProxy = () => proxy.destroy();
@@ -105,7 +112,12 @@ export function proxyWebSocket(
     upstream.setTimeout(0);
     const fields: string[] = [];
     for (let i = 0; i < response.rawHeaders.length; i += 2) {
-      fields.push(response.rawHeaders[i] + ': ' + response.rawHeaders[i + 1]);
+      if (response.rawHeaders[i].toLowerCase() !== 'set-cookie') {
+        fields.push(response.rawHeaders[i] + ': ' + response.rawHeaders[i + 1]);
+      }
+    }
+    for (const value of toStudioSetCookie(authority, response.headers['set-cookie'] ?? [], isSecureOrigin(authority))) {
+      fields.push('Set-Cookie: ' + value);
     }
     client.write(['HTTP/1.1 101 Switching Protocols', ...fields, '\r\n'].join('\r\n'));
     client.write(head);

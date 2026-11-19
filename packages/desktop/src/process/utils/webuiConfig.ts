@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { getStudioWebUILocalUrl } from '@aionui/web-host/webui-defaults';
 import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import { app } from 'electron';
 import * as fs from 'fs';
@@ -293,7 +294,7 @@ export function getDesktopWebUIStatus(): {
       running: false,
       port: WEBUI_DEFAULT_PORT,
       allowRemote: false,
-      localUrl: `http://localhost:${WEBUI_DEFAULT_PORT}`,
+      localUrl: getStudioWebUILocalUrl(WEBUI_DEFAULT_PORT),
       lanIP: lanIP ?? undefined,
     };
   }

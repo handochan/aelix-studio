@@ -1,3 +1,4 @@
+import { fetchWebUILoopback } from '../../../../tests/e2e/helpers/httpBridge';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -18,7 +19,7 @@ describe('native auth facade authentication and request boundary', () => {
     vi.spyOn(service, 'request').mockImplementation(handler as NativeAuthService['request']);
     backend = http.createServer((req, res) => {
       seenHeaders = req.headers;
-      res.writeHead(authenticate && req.headers.cookie === 'session=valid' ? 200 : 401, {
+      res.writeHead(authenticate && req.headers.cookie === 'aionui-session=valid' ? 200 : 401, {
         'content-type': 'application/json',
       });
       res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
@@ -32,7 +33,7 @@ describe('native auth facade authentication and request boundary', () => {
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    url = `http://aelix-studio.localhost:${(server.address() as AddressInfo).port}`;
   });
   afterEach(async () => {
     service.dispose();
@@ -48,9 +49,14 @@ describe('native auth facade authentication and request boundary', () => {
     );
   });
   const request = (base: string, headers: Record<string, string> = {}, body = '{"action":"catalog"}') =>
-    fetch(base + NATIVE_AUTH_ROUTE, {
+    fetchWebUILoopback(base + NATIVE_AUTH_ROUTE, {
       method: 'POST',
-      headers: { origin: base, 'content-type': 'application/json', 'x-studio-auth': '1', ...headers },
+      headers: {
+        origin: base,
+        'content-type': 'application/json',
+        'x-studio-auth': '1',
+        ...headers,
+      },
       body,
     });
 
@@ -62,21 +68,32 @@ describe('native auth facade authentication and request boundary', () => {
   });
   it('rejects cross-origin credential requests even with a valid session', async () => {
     authenticate = true;
-    expect((await request(url, { origin: 'https://attacker.example', cookie: 'session=valid' })).status).toBe(403);
+    expect(
+      (await request(url, { origin: 'https://attacker.example', cookie: 'aelix-studio-session=valid' })).status
+    ).toBe(403);
     expect(handler).not.toHaveBeenCalled();
   });
+  it.each(['aionui-session=valid', 'aelix-studio-session=valid; aelix-studio-session=duplicate'])(
+    'rejects legacy and duplicate session cookies before starting the helper',
+    async (cookie) => {
+      authenticate = true;
+      expect((await request(url, { cookie })).status).toBe(401);
+      expect(handler).not.toHaveBeenCalled();
+    }
+  );
+
   it('scopes commands to backend identity and disables response caching', async () => {
     authenticate = true;
-    const response = await request(url, { cookie: 'session=valid' });
+    const response = await request(url, { cookie: 'aelix-studio-session=valid' });
     expect(response.status).toBe(200);
     expect(handler).toHaveBeenCalledWith('web:operator', { action: 'catalog' });
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
   it('bounds oversized bodies and rejects malformed JSON without reflecting it', async () => {
     authenticate = true;
-    const response = await request(url, { cookie: 'session=valid' }, 'sentinel-secret');
+    const response = await request(url, { cookie: 'aelix-studio-session=valid' }, 'sentinel-secret');
     expect(await response.text()).not.toContain('sentinel-secret');
     expect(response.status).toBe(400);
-    expect((await request(url, { cookie: 'session=valid' }, 'x'.repeat(60001))).status).toBe(413);
+    expect((await request(url, { cookie: 'aelix-studio-session=valid' }, 'x'.repeat(60001))).status).toBe(413);
   });
 });

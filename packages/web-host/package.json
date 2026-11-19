@@ -6,7 +6,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./webui-defaults": "./src/requestOrigin.ts"
+    "./webui-defaults": "./src/requestOrigin.ts",
+    "./webui-cookies": "./src/studio-auth/cookies.ts"
   },
   "scripts": {
     "test": "vitest run",

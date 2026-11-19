@@ -184,7 +184,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     currentHandle = handle;
 
     console.log('');
-    console.log('AionUi WebUI (frontend only) is ready');
+    console.log('Aelix Studio WebUI (frontend only) is ready');
     console.log(`  Local  : ${handle.localUrl}`);
     if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
     if (autoOpenBrowser) {

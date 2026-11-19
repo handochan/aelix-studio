@@ -1,3 +1,4 @@
+import http from 'node:http';
 import type { Page } from '@playwright/test';
 
 /**
@@ -74,3 +75,37 @@ export const httpGet = <T = unknown>(page: Page, path: string) => httpInvoke<T>(
 export const httpPost = <T = unknown>(page: Page, path: string, body?: unknown) =>
   httpInvoke<T>(page, 'POST', path, body);
 export const httpDelete = <T = unknown>(page: Page, path: string) => httpInvoke<T>(page, 'DELETE', path);
+
+/** Dial the fixture's loopback listener without relying on the OS to resolve .localhost. */
+export function fetchWebUILoopback(
+  address: string,
+  init?: { method?: string; headers?: Record<string, string>; body?: string; signal?: AbortSignal }
+): Promise<Response> {
+  const url = new URL(address);
+  return new Promise((resolve, reject) => {
+    const request = http.request(
+      url,
+      {
+        hostname: '127.0.0.1',
+        method: init?.method,
+        headers: { ...init?.headers, host: url.host },
+        signal: init?.signal,
+      },
+      (response) => {
+        const chunks: Buffer[] = [];
+        response.on('data', (chunk: Buffer) => chunks.push(chunk));
+        response.once('error', reject);
+        response.once('end', () => {
+          const headers = new Headers();
+          for (let index = 0; index < response.rawHeaders.length; index += 2) {
+            headers.append(response.rawHeaders[index], response.rawHeaders[index + 1]);
+          }
+          resolve(new Response(chunks.length ? Buffer.concat(chunks) : null, { status: response.statusCode, headers }));
+        });
+      }
+    );
+    request.once('error', reject);
+    request.setTimeout(15000, () => request.destroy(new Error('WebUI response timeout')));
+    request.end(init?.body);
+  });
+}

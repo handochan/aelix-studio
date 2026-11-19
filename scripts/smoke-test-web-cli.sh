@@ -103,12 +103,15 @@ echo "✓ Backend binary loads on this platform"
 # Exercise the extracted CLI and its bundled host with a fresh data directory.
 DATA_DIR="$TEMP_DIR/data"
 BACKEND_BINARY="$PWD/$BACKEND_BINARY"
+webui_curl() {
+  curl --noproxy aelix-studio.localhost --resolve "aelix-studio.localhost:${BASE_URL##*:}:127.0.0.1" "$@"
+}
 start_webui() {
   ./aionui-web start --backend-bin "$BACKEND_BINARY" --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 45); do
     BASE_URL=$(sed -n 's/^  Local  : //p' "$TEMP_DIR/webui.log" | head -1)
-    if [ -n "$BASE_URL" ] && curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
+    if [ -n "$BASE_URL" ] && webui_curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
       grep -q '<html' "$TEMP_DIR/index.html"
       return
     fi
@@ -125,10 +128,10 @@ stop_webui() {
 }
 login() {
   printf '{"username":"admin","password":"%s","remember":false}' "$1" |
-    curl -fsS -c "$TEMP_DIR/cookies" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
+    webui_curl -fsS -c "$TEMP_DIR/cookies" -H "Origin: $BASE_URL" -H 'Content-Type: application/json' \
     --data-binary @- "$BASE_URL/login" >"$TEMP_DIR/login.json"
   grep -q '"success":[[:space:]]*true' "$TEMP_DIR/login.json"
-  grep -q 'aionui-session' "$TEMP_DIR/cookies"
+  grep -q 'aelix-studio-session' "$TEMP_DIR/cookies"
 }
 
 start_webui
@@ -140,7 +143,7 @@ for _ in $(seq 1 20); do
 done
 test -n "$PASSWORD"
 login "$PASSWORD"
-curl -fsS -b "$TEMP_DIR/cookies" -o /dev/null "$BASE_URL/api/auth/user"
+webui_curl -fsS -b "$TEMP_DIR/cookies" -o /dev/null "$BASE_URL/api/auth/user"
 echo "✓ First launch and browser login"
 
 if ./aionui-web resetpass --backend-bin "$BACKEND_BINARY" --data-dir "$DATA_DIR" --password-stdin </dev/null >"$TEMP_DIR/reset.log" 2>&1; then

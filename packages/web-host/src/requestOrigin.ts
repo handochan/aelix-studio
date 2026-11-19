@@ -1,3 +1,9 @@
+export const STUDIO_WEBUI_LOOPBACK_HOST = 'aelix-studio.localhost';
+
+export function getStudioWebUILocalUrl(port: number): string {
+  return `http://${STUDIO_WEBUI_LOOPBACK_HOST}:${port}`;
+}
+
 /** Studio uses a different origin from the upstream WebUI on port 25808. */
 export function getStudioWebUIDefaultPort(production: boolean, multiInstance = false): number {
   if (production) return 25982;
@@ -21,7 +27,7 @@ export function readSourceHeaders(rawHeaders: string[]): SourceHeaders | undefin
   return source;
 }
 
-function parseOrigin(value: string): URL | undefined {
+export function parseOrigin(value: string): URL | undefined {
   // URL alone also accepts credentials, paths, and noncanonical IPv4 spellings.
   if (!/^https?:\/\/(?:[a-z\d.-]+|\[[a-f\d:.]+\])(?::\d{1,5})?$/i.test(value)) return undefined;
   try {
@@ -37,7 +43,9 @@ function parseOrigin(value: string): URL | undefined {
 
 /** Bind the browser origin to the Host authority received by this listener. */
 export function createRequestOriginPolicy(port: number, readLanAddresses: () => string[], configuredOrigin?: string) {
-  const origins = ['127.0.0.1', 'localhost'].map((host) => new URL(`http://${host}:${port}`));
+  const origins = ['127.0.0.1', 'localhost', STUDIO_WEBUI_LOOPBACK_HOST].map(
+    (host) => new URL(`http://${host}:${port}`)
+  );
   const configured = configuredOrigin && parseOrigin(configuredOrigin);
   if (configured) origins.push(configured);
 
