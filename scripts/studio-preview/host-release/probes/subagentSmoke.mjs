@@ -184,15 +184,21 @@ function recordLifecycle(observation) {
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n');
 }
 async function api(suffix, method = 'GET', body) {
-  const response = await fetch(`http://127.0.0.1:${port}${suffix}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(60000),
-  });
-  const data = await response.json();
-  assert.ok(response.ok, `${suffix}: ${response.status} ${JSON.stringify(data).slice(0, 300)}`);
-  return data.data ?? data;
+  // Use the app's registered desktop document for authenticated requests.
+  const response = await page.evaluate(
+    async ({ url, method, body }) => {
+      const reply = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(60000),
+      });
+      return { ok: reply.ok, status: reply.status, data: await reply.json() };
+    },
+    { url: `http://127.0.0.1:${port}${suffix}`, method, body }
+  );
+  assert.ok(response.ok, `${suffix}: ${response.status} ${JSON.stringify(response.data).slice(0, 300)}`);
+  return response.data.data ?? response.data;
 }
 const idle = () =>
   expect
@@ -222,6 +228,12 @@ try {
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);
   await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+  const anonymous = await fetch(`http://127.0.0.1:${port}/api/assistants`, {
+    signal: AbortSignal.timeout(60000),
+  });
+  assert.equal(anonymous.status, 401, 'Unauthenticated requests must not access desktop APIs');
+  assert.equal((await anonymous.json()).code, 'AUTH_REQUIRED');
+  checks.push('unauthenticated_desktop_api_denied');
   await api('/api/agents/custom', 'POST', {
     name: 'Subagent smoke',
     command: path.join(runtime, 'python/bin/python3'),
