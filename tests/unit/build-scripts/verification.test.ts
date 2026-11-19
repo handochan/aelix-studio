@@ -1,6 +1,8 @@
-import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
+import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -77,17 +79,107 @@ describe('installed profile preservation', () => {
   });
 });
 
-function application(error?: Error, exitCode: number | null = 0, signalCode: string | null = null) {
-  const main = Object.assign(new EventEmitter(), { pid: 123, exitCode, signalCode });
+function application(error?: Error, failureExitCode: number | null = 0, failureSignal: string | null = null) {
+  const main = Object.assign(new EventEmitter(), {
+    pid: 123,
+    exitCode: null as number | null,
+    signalCode: null as string | null,
+  });
+  const exit = (exitCode: number | null, signalCode: string | null) => {
+    Object.assign(main, { exitCode, signalCode });
+    main.emit('exit', exitCode, signalCode);
+  };
   const app = {
     process: () => main,
-    evaluate: vi.fn(async () => {
-      if (error) throw error;
+    firstWindow: vi.fn(async (_options?: { timeout: number }) => ({})),
+    evaluate: vi.fn(async (_expression?: () => object, _token?: string) => {
+      if (error) {
+        if (failureExitCode !== null || failureSignal !== null) exit(failureExitCode, failureSignal);
+        throw error;
+      }
       return { pid: 123 };
     }),
-    close: vi.fn(async () => {}),
+    close: vi.fn(async () => {
+      if (main.exitCode === null && main.signalCode === null) exit(0, null);
+    }),
   };
   return { main, app };
+}
+
+const collected = { code: -32000, message: 'Promise was collected' };
+
+function inspectorApplication(
+  replies: Array<{ code: number; message: string } | { pid: number }>,
+  { unrelatedError = false } = {}
+) {
+  const require = createRequire(import.meta.url);
+  const testRequire = createRequire(require.resolve('@playwright/test/package.json'));
+  const library = createRequire(testRequire.resolve('playwright/package.json'));
+  const base = path.dirname(library.resolve('playwright-core/package.json'));
+  const { helper } = require(path.join(base, 'lib/server/helper.js'));
+  const { CRConnection } = require(path.join(base, 'lib/server/chromium/crConnection.js'));
+  const { CRExecutionContext } = require(path.join(base, 'lib/server/chromium/crExecutionContext.js'));
+  const { ExecutionContext, JSHandle } = require(path.join(base, 'lib/server/javascript.js'));
+  const { createRootSdkObject } = require(path.join(base, 'lib/server/instrumentation.js'));
+  const { ElectronApplication } = require(path.join(base, 'lib/client/electron.js'));
+  const { parseSerializedValue, serializeValue } = require(path.join(base, 'lib/protocol/serializers.js'));
+  const { serializeAsCallArgument } = require(path.join(base, 'lib/utils/isomorphic/utilityScriptSerializers.js'));
+  const { main, app } = application();
+
+  const launch = vi.fn(async () => {
+    const transport = {
+      onmessage: (_message: unknown) => {},
+      onclose: () => {},
+      close: () => {},
+      send: (request: { id: number; method: string }) => {
+        const { id, method } = request;
+        const reply = method === 'Runtime.evaluate' ? null : replies.shift();
+        if (reply === undefined) throw new Error('Unexpected fixture evaluation');
+        queueMicrotask(() =>
+          transport.onmessage(
+            reply === null
+              ? { id, result: { result: { type: 'object', objectId: 'utility' } } }
+              : 'code' in reply
+                ? { id, error: reply }
+                : {
+                    id,
+                    result: {
+                      result: {
+                        type: 'object',
+                        value: serializeAsCallArgument(reply, (value: unknown) => ({ fallThrough: value })),
+                      },
+                    },
+                  }
+          )
+        );
+      },
+    };
+    const sdk = createRootSdkObject();
+    const connection = new CRConnection(sdk, transport, helper.debugProtocolLogger(), { recentLogs: () => [] });
+    const context = new ExecutionContext(sdk, new CRExecutionContext(connection.rootSession, { id: 1 }), 'electron');
+    const handle = new JSHandle(context, 'object', 'electron', 'electron-handle');
+    // Use the real client and server serializers with the same JSHandle route
+    // as ElectronApplicationDispatcher. Only the inspector transport is fake.
+    const client = {
+      _channel: {
+        async evaluateExpression(params: { expression: string; isFunction: boolean; arg: { value: unknown } }) {
+          if (unrelatedError)
+            await handle
+              .evaluateExpression(params.expression, { isFunction: params.isFunction }, 'unrelated')
+              .catch(() => {});
+          const value = await handle.evaluateExpression(
+            params.expression,
+            { isFunction: params.isFunction },
+            parseSerializedValue(params.arg.value, [])
+          );
+          return { value: serializeValue(value, (item: unknown) => ({ fallThrough: item })) };
+        },
+      },
+    };
+    app.evaluate.mockImplementation((fn, token) => ElectronApplication.prototype.evaluate.call(client, fn, token));
+    return app;
+  });
+  return { app, launch, main };
 }
 
 describe('fixture callback deadlines', () => {
@@ -115,12 +207,517 @@ describe('fixture callback deadlines', () => {
   });
 });
 
-describe('Electron launch evidence without retry', () => {
+describe('Electron launch evidence and identity retry', () => {
   const destroyed = new Error('Execution context was destroyed');
   const options = (record = vi.fn()) => ({
     launchNumber: 3,
     record,
     remainingProcesses: { status: 'observed', processes: [] },
+  });
+
+  it('shares the launch timeout and records readiness before evaluating identity', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    const record = vi.fn();
+    const launch = vi.fn((_timeout: number) => new Promise((resolve) => setTimeout(() => resolve(app), 20000)));
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 39000)));
+    const result = launchWithIdentity(launch, options(record));
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(launch).toHaveBeenCalledWith(60000);
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 40000 });
+    await vi.advanceTimersByTimeAsync(38999);
+    expect(app.evaluate).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ app, identity: { pid: 123 } });
+    const row = record.mock.calls.at(-1)?.[0];
+    expect(row).toMatchObject({ launch: 3, firstWindowWait: { outcome: 'passed' }, status: 'identified' });
+    expect(Date.parse(row.firstWindowWait.finishedAt) - Date.parse(row.firstWindowWait.startedAt)).toBe(39000);
+    expect(row.identityStartedAt).toBe(row.firstWindowWait.finishedAt);
+  });
+
+  it('fails and cleans up without identity evaluation when the first window exhausts the remaining budget', async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, main } = application(undefined, null);
+    app.close.mockImplementation(async () => {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+    });
+    const error = new Error('firstWindow: timeout');
+    app.firstWindow.mockImplementation(
+      ({ timeout } = { timeout: 0 }) => new Promise((_resolve, reject) => setTimeout(() => reject(error), timeout))
+    );
+    const launch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(app), 59000)));
+    const record = vi.fn();
+    const checked = expect(launchWithIdentity(launch, options(record))).rejects.toBe(error);
+    await vi.advanceTimersByTimeAsync(59999);
+    expect(app.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await checked;
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 1000 });
+    expect(app.evaluate).not.toHaveBeenCalled();
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      launch: 3,
+      firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'failed' },
+      waits: [{ phase: 'first-window-failure-cleanup' }],
+    });
+  });
+
+  it.each([
+    [0, null, 'code 0'],
+    [17, null, 'code 17'],
+    [null, 'SIGTERM', 'signal SIGTERM'],
+  ])('fails immediately on an already exited launcher (%s, %s)', async (exitCode, signal, reason) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, main } = application();
+    Object.assign(main, { exitCode, signalCode: signal });
+    const record = vi.fn();
+    const checked = expect(launchWithIdentity(async () => app, options(record))).rejects.toThrow(
+      `application exited with ${reason} before the first window`
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    expect(app.firstWindow).not.toHaveBeenCalled();
+    await checked;
+    expect(app.evaluate).not.toHaveBeenCalled();
+    expect(app.close).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      exitCode,
+      signal,
+      naturalExit: true,
+      firstWindowWait: { outcome: 'failed' },
+      waits: [{ phase: 'first-window-failure-cleanup', alreadyExited: true }],
+    });
+  });
+
+  it('fails on OS exit while a descendant still holds the launcher output pipes open', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-window-exit-'));
+    const release = path.join(root, 'release-pipes');
+    const keeper = `
+      const { existsSync } = require('node:fs');
+      setTimeout(() => process.exit(0), 8000).unref();
+      setInterval(() => { if (existsSync(process.argv[1])) process.exit(0); }, 20);
+    `;
+    const launcher = `
+      const { spawn } = require('node:child_process');
+      process.once('message', () => process.exit(17));
+      if (process.platform !== 'win32')
+        spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], { stdio: 'inherit' }).unref();
+      process.send('ready');
+    `;
+    const main = spawn(process.execPath, ['-e', launcher, keeper, release], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+    const closed = once(main, 'close').then(() => {});
+    let releaseCloseNotification: (() => void) | undefined;
+    // The Windows runner can close those streams at process exit. Exercise the
+    // delayed Playwright notification there with the same real launcher exit.
+    const closeNotification =
+      process.platform === 'win32'
+        ? new Promise<void>((resolve) => {
+            releaseCloseNotification = resolve;
+          })
+        : closed;
+    let closeNotified = false;
+    void closeNotification.then(() => {
+      closeNotified = true;
+    });
+    const { app: fixture } = application();
+    const app = {
+      ...fixture,
+      process: () => main,
+      // Match Playwright's wait and cleanup dependency on ChildProcess 'close'.
+      firstWindow: vi.fn(({ timeout }: { timeout: number }) => {
+        main.send('exit');
+        return new Promise((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('firstWindow: timeout')), timeout);
+          void closeNotification.then(() => {
+            clearTimeout(timer);
+            reject(new Error('Playwright close'));
+          });
+        });
+      }),
+      close: vi.fn(async () => closeNotification),
+    };
+    const record = vi.fn();
+    try {
+      await once(main, 'message');
+      const result = launchWithIdentity(async () => app, { ...options(record), launchTimeoutMs: 1500 });
+      await expect(boundedWait(result, 'OS exit fixture', { timeoutMs: 3000, log: () => {} })).rejects.toThrow(
+        'application exited with code 17 before the first window'
+      );
+      expect(closeNotified).toBe(false);
+      expect(app.evaluate).not.toHaveBeenCalled();
+      expect(app.close).toHaveBeenCalledTimes(1);
+      expect(record.mock.calls.find(([row]) => row.status === 'failed')?.[0]).toMatchObject({
+        exitCode: 17,
+        signal: null,
+        naturalExit: true,
+        firstWindowWait: { outcome: 'failed' },
+      });
+    } finally {
+      releaseCloseNotification?.();
+      await fs.writeFile(release, '');
+      await closed;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['next launch running', 'timeline stopped'])(
+    'isolates a delayed first-window cleanup with %s',
+    async (scenario) => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const first = application();
+      const second = application();
+      second.main.pid = 456;
+      const stdout = new EventEmitter();
+      Object.assign(first.main, { stdout });
+      let finishClose!: () => void;
+      const closing = new Promise<void>((resolve) => (finishClose = resolve));
+      first.app.close.mockImplementation(() => closing);
+      first.app.firstWindow.mockImplementation(() => {
+        first.main.exitCode = 17;
+        first.main.emit('exit', 17, null);
+        return new Promise(() => {});
+      });
+
+      let secondRunning = false;
+      const timelineRecord = vi.fn();
+      const processTimeline = createProcessTimeline({
+        record: timelineRecord,
+        publishIntervalMs: 0,
+        snapshot: () => ({
+          status: 'observed',
+          rows: secondRunning
+            ? [{ pid: second.main.pid, parentPid: 1, birth: 'second', role: 'other', state: 'live' }]
+            : [],
+        }),
+      });
+      const record = vi.fn();
+      try {
+        processTimeline.start();
+        processTimeline.checkpoint('before-launch', 1);
+        await expect(
+          launchWithIdentity(async () => first.app, { ...options(record), launchNumber: 1, processTimeline })
+        ).rejects.toThrow('application exited with code 17 before the first window');
+        expect(first.app.close).toHaveBeenCalledTimes(1);
+        expect.soft(record.mock.calls.at(-1)?.[0]).toMatchObject({
+          launch: 1,
+          exitCode: 17,
+          waits: [{ phase: 'first-window-failure-cleanup', alreadyExited: true }],
+        });
+
+        if (scenario === 'next launch running') {
+          secondRunning = true;
+          processTimeline.checkpoint('before-launch', 2);
+          await launchWithIdentity(async () => second.app, { ...options(record), launchNumber: 2, processTimeline });
+        } else {
+          processTimeline.checkpoint('cleanup-complete', 1);
+          processTimeline.stop();
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        const previousTimelineWrites = timelineRecord.mock.calls.length;
+        const previousLaunchWrites = record.mock.calls.length;
+
+        finishClose();
+        stdout.emit('data', Buffer.from('delayed output from the old launch'));
+        await vi.advanceTimersByTimeAsync(1001);
+
+        expect.soft(record.mock.calls.length).toBe(previousLaunchWrites);
+        const writes = timelineRecord.mock.calls.slice(previousTimelineWrites);
+        if (secondRunning) {
+          expect(writes.length).toBeGreaterThan(0);
+          expect(writes.every(([, event]) => !event || event.launch === 2)).toBe(true);
+          expect(writes.at(-1)?.[0].processes).toContainEqual(
+            expect.objectContaining({ pid: second.main.pid, launchAtStart: 2, launchAtCompletion: 2 })
+          );
+        } else {
+          expect(writes).toEqual([]);
+        }
+      } finally {
+        finishClose();
+        processTimeline.stop();
+      }
+    }
+  );
+
+  it.each(['launch deadline already elapsed', 'window arrives after deadline'])('rejects if %s', async (scenario) => {
+    vi.useFakeTimers();
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app } = application();
+    const lateLaunch = scenario === 'launch deadline already elapsed';
+    const launch = vi.fn(() => new Promise((resolve) => setTimeout(() => resolve(app), lateLaunch ? 1000 : 0)));
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 1001)));
+    const checked = expect(launchWithIdentity(launch, { ...options(), launchTimeoutMs: 1000 })).rejects.toThrow(
+      'first window exceeded the 1000ms launch timeout'
+    );
+    await vi.advanceTimersByTimeAsync(1001);
+    await checked;
+    expect(app.firstWindow).toHaveBeenCalledTimes(lateLaunch ? 0 : 1);
+    expect(app.evaluate).not.toHaveBeenCalled();
+  });
+
+  it('samples during the first-window wait and pauses only for identity', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({}), 2000)));
+    app.evaluate.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve({ pid: 123 }), 2000)));
+    const snapshot = vi.fn(() => ({ status: 'observed', rows: [] }));
+    const timeline = createProcessTimeline({ snapshot });
+    timeline.start();
+    try {
+      const result = launchWithIdentity(async () => app, { ...options(), processTimeline: timeline });
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(snapshot).toHaveBeenCalled();
+      expect(app.evaluate).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(501);
+      expect(app.evaluate).toHaveBeenCalledTimes(1);
+      snapshot.mockClear();
+      await vi.advanceTimersByTimeAsync(1998);
+      expect(snapshot).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(2);
+      await expect(result).resolves.toMatchObject({ identity: { pid: 123 } });
+      expect(snapshot).toHaveBeenCalled();
+    } finally {
+      timeline.stop();
+    }
+  });
+
+  it('persists the correlated first failure and one successful same-handle retry', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-identity-retry-'));
+    try {
+      writeRendererResult(root, {});
+      const launches: object[] = [];
+      const record = vi.fn((value: { launch: number }) => {
+        launches[value.launch - 1] = value;
+        recordLaunchEvidence(root, { mainLaunches: launches }, value);
+      });
+      // Windows installer artifact 14482766412 reports launcher 4888 and Electron 3016.
+      const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+      main.pid = 4888;
+      await expect(launchWithIdentity(launch, options(record))).resolves.toEqual({ app, identity: { pid: 3016 } });
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(app.evaluate).toHaveBeenCalledTimes(2);
+      expect(app.close).not.toHaveBeenCalled();
+      const text = await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8');
+      const firstError = {
+        method: 'Runtime.callFunctionOn',
+        ...collected,
+        messageRedacted: false,
+        connection: 1,
+        requestId: expect.any(Number),
+        awaitPromise: true,
+        returnByValue: true,
+      };
+      expect(JSON.parse(text).mainLaunches[2]).toMatchObject({
+        pid: 4888,
+        firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'passed' },
+        identityFailedAt: expect.any(String),
+        identityProtocol: { errors: [firstError] },
+        identityRetry: {
+          startedAt: expect.any(String),
+          finishedAt: expect.any(String),
+          firstProtocolError: firstError,
+          secondProtocolError: null,
+          outcome: 'passed',
+        },
+        status: 'identified',
+      });
+      for (const [, token] of app.evaluate.mock.calls) expect(text).not.toContain(token);
+      await closeElectron(app);
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it.each(['Promise was collected: path', 'promise was collected', 'Cannot find context with specified id'])(
+    'does not retry a different original CDP message (%s)',
+    async (message) => {
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.useFakeTimers();
+      const { app, launch } = inspectorApplication([{ code: -32000, message }]);
+      const record = vi.fn();
+      const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed.message);
+      await vi.advanceTimersByTimeAsync(20000);
+      await result;
+      expect(app.evaluate).toHaveBeenCalledTimes(1);
+      expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
+    }
+  );
+
+  it('does not use the original error of a different evaluation during the same identity call', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication(
+      [collected, { code: -32000, message: 'Cannot find context with specified id' }],
+      { unrelatedError: true }
+    );
+    const record = vi.fn();
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed.message);
+    await vi.advanceTimersByTimeAsync(20000);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      identityProtocol: { errors: [collected, { message: 'Cannot find context with specified id' }] },
+    });
+    expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
+  });
+
+  it('does not retry the exact message with a different CDP code', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([{ ...collected, code: -32001 }, { pid: 123 }]);
+    const result = expect(launchWithIdentity(launch, options())).rejects.toThrow(destroyed.message);
+    await vi.advanceTimersByTimeAsync(20000);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not retry a correlated error after the app exits', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, launch, main } = inspectorApplication([collected, { pid: 123 }]);
+    const record = vi.fn();
+    await expect(
+      launchWithIdentity(async () => {
+        await launch();
+        const evaluate = app.evaluate.getMockImplementation()!;
+        app.evaluate.mockImplementationOnce(async (fn, token) => {
+          try {
+            return await evaluate(fn, token);
+          } finally {
+            main.exitCode = 17;
+            main.emit('exit', 17, null);
+          }
+        });
+        return app;
+      }, options(record))
+    ).rejects.toThrow(destroyed.message);
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ exitCode: 17, naturalExit: true });
+  });
+
+  it('fails after the second collected response and preserves the exit wait before one cleanup', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([collected, collected]);
+    const record = vi.fn();
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed.message);
+    await vi.advanceTimersByTimeAsync(19999);
+    expect(app.close).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(app.close).toHaveBeenCalledTimes(1);
+    const row = record.mock.calls.at(-1)?.[0];
+    expect(row).toMatchObject({
+      identityFailedAt: expect.any(String),
+      identityRetry: {
+        firstProtocolError: collected,
+        secondProtocolError: collected,
+        outcome: 'failed',
+      },
+      waits: [
+        { phase: 'identity-failure-exit-observation', timeoutMs: 20000, status: 'failed' },
+        { phase: 'identity-failure-cleanup', status: 'passed' },
+      ],
+    });
+    expect(row.identityRetry.firstProtocolError.requestId).not.toBe(row.identityRetry.secondProtocolError.requestId);
+  });
+
+  it('rejects a retry if the app process handle changes', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([collected, { pid: 456 }]);
+    const launchWithChangedHandle = async () => {
+      await launch();
+      const evaluate = app.evaluate.getMockImplementation()!;
+      app.evaluate.mockImplementation(async (fn, token) => {
+        const identity = await evaluate(fn, token);
+        const { main: replacement } = application();
+        replacement.exitCode = 0;
+        app.process = () => replacement;
+        return identity;
+      });
+      return app;
+    };
+    await expect(launchWithIdentity(launchWithChangedHandle, options())).rejects.toThrow(
+      'Studio app changed during identity retry'
+    );
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(app.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start a retry if the launcher handle changed even with the same numeric PID', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const { main: replacement } = application();
+    replacement.pid = main.pid;
+    replacement.exitCode = 0;
+    await expect(
+      launchWithIdentity(async () => {
+        await launch();
+        const evaluate = app.evaluate.getMockImplementation()!;
+        app.evaluate.mockImplementationOnce(async (fn, token) => {
+          try {
+            return await evaluate(fn, token);
+          } finally {
+            app.process = () => replacement;
+          }
+        });
+        return app;
+      }, options())
+    ).rejects.toThrow(destroyed.message);
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a valid identity reply if the original launcher exited during the retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const record = vi.fn();
+    await expect(
+      launchWithIdentity(async () => {
+        await launch();
+        const evaluate = app.evaluate.getMockImplementation()!;
+        app.evaluate.mockImplementation(async (fn, token) => {
+          const identity = await evaluate(fn, token);
+          main.signalCode = 'SIGTERM';
+          main.emit('exit', null, 'SIGTERM');
+          return identity;
+        });
+        return app;
+      }, options(record))
+    ).rejects.toThrow('Studio app changed during identity retry');
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      signal: 'SIGTERM',
+      naturalExit: true,
+      identityRetry: { outcome: 'failed' },
+    });
+  });
+
+  it('rejects a retry that returns an invalid Electron PID', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([collected, { pid: 0 }]);
+    const result = expect(launchWithIdentity(launch, options())).rejects.toThrow(
+      'Studio identity retry returned an invalid PID'
+    );
+    await vi.advanceTimersByTimeAsync(20000);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
   });
   it('lets an already resolved launch enter identity protection before a previously queued batch', async () => {
     vi.useFakeTimers();
@@ -161,7 +758,7 @@ describe('Electron launch evidence without retry', () => {
     vi.useFakeTimers();
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { app } = application();
+    const { app, main } = application();
     let resolveIdentity: (value: { pid: number }) => void;
     let rejectIdentity: (error: Error) => void;
     app.evaluate.mockImplementation(
@@ -187,8 +784,11 @@ describe('Electron launch evidence without retry', () => {
     await vi.advanceTimersByTimeAsync(2100);
     expect(app.evaluate).toHaveBeenCalledTimes(1);
     expect(snapshot).not.toHaveBeenCalled();
-    if (outcome === 'failure') rejectIdentity!(destroyed);
-    else resolveIdentity!({ pid: 123 });
+    if (outcome === 'failure') {
+      main.exitCode = 0;
+      main.emit('exit', 0, null);
+      rejectIdentity!(destroyed);
+    } else resolveIdentity!({ pid: 123 });
     await checked;
     await vi.advanceTimersByTimeAsync(0);
     expect(
@@ -220,6 +820,7 @@ describe('Electron launch evidence without retry', () => {
         await expect(launchWithIdentity(launch, options(record))).resolves.toEqual({ app, identity: { pid: 123 } });
         expect(() => {
           stdout.emit('data', Buffer.from('safe fixture output'));
+          main.exitCode = 0;
           main.emit('exit', 0, null);
         }).not.toThrow();
         await expect(closeElectron(app)).resolves.toBeUndefined();
@@ -246,6 +847,7 @@ describe('Electron launch evidence without retry', () => {
     expect(launch).toHaveBeenCalledTimes(1);
   });
   it('keeps successful identity and lifecycle status unchanged while adding evidence', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
     const { app } = application();
     const record = vi.fn();
     const result = await launchWithIdentity(async () => app, options(record));
@@ -253,7 +855,7 @@ describe('Electron launch evidence without retry', () => {
     expect(record.mock.calls.at(-1)?.[0].status).toBe('identified');
     const identifiedAt = record.mock.calls.at(-1)?.[0].identifiedAt;
     await closeElectron(app);
-    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ status: 'closing', identifiedAt: expect.any(String) });
+    expect(record.mock.calls.find(([row]) => row.status === 'closing')?.[0]).toMatchObject({ identifiedAt });
     expect(record.mock.calls.at(-1)?.[0].identifiedAt).toBe(identifiedAt);
   });
   it('keeps the original twenty second identity failure observation and records its launch PID and phase', async () => {
@@ -323,6 +925,7 @@ describe('Electron launch evidence without retry', () => {
   });
   it('waits for the old OS process even when app.close has already resolved', async () => {
     const { main, app } = application(undefined, null);
+    app.close.mockResolvedValue(undefined);
     let completed = false;
     const closing = closeElectron(app).then(() => {
       completed = true;

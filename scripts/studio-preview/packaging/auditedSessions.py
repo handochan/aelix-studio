@@ -8,6 +8,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'fixtures'))
 from outboundAudit import run_supervised, CAPTURE_CLEANUP
@@ -50,14 +51,15 @@ class AuditedSessions:
         for root in (roots if roots is not None else (self.core, self.native)):
             audited += ['--scope-executable', str(root)]
         for root in required: audited += ['--require-executable', str(root)]
-        audited += ['--report', str(report), '--whole-report', str(whole_path), '--', *map(str, command)]
+        audited += ['--report', str(report), '--whole-report', str(whole_path)]
+        prefix = []
         if namespace:
             # A private namespace has no external interface/routes. Enable only
             # loopback for the control driver's local host API connection.
             for tool in ('sudo', 'unshare', 'ip'):
                 if not shutil.which(tool): raise RuntimeError('Host control requires ' + tool)
-            audited = ['sudo', '-n', shutil.which('unshare'), '--net', '--', '/bin/sh', '-c',
-                       'ip link set lo up && exec "$@"', 'host-control', *audited]
+            prefix = ['sudo', '-n', shutil.which('unshare'), '--net', '--', '/bin/sh', '-c',
+                      'ip link set lo up && exec "$@"', 'host-control']
         expected_code = 87 if expected_ring_opcode is not None else 0 if expected_external is None else 86
         record = {'name': name, 'status': 'running', 'expectedAuditExitCode': expected_code,
                   'report': report.name, 'wholeAppReport': whole_path.name,
@@ -65,7 +67,12 @@ class AuditedSessions:
         collection = self.sessions if expected_external is None and expected_ring_opcode is None else self.controls
         collection.append(record); self.save()
         try:
-            result = run_supervised(audited, cwd=self.root, env=env, timeout=total_timeout, **options)
+            if namespace:
+                # sudo can clear environment variables. Carry the advisory
+                # deadline as an auditor argument through that boundary.
+                audited += ['--task-evidence-deadline', str(time.monotonic() + total_timeout)]
+            argv = [*prefix, *audited, '--', *map(str, command)]
+            result = run_supervised(argv, cwd=self.root, env=env, timeout=total_timeout, **options)
             record.update(status='failed', auditExitCode=result.returncode)
             scoped, whole = json.loads(report.read_text()), json.loads(whole_path.read_text())
         except (subprocess.SubprocessError, OSError, ValueError) as error:

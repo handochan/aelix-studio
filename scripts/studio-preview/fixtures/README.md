@@ -548,3 +548,47 @@ associations are counted separately only with the complete kernel socket-object
 proof above. TCP connects and UDP sends remain attempts, including failed calls.
 No destination-name/address exemption is used. See
 [the app gate](../../outbound-audit/README.md) for commands and controls.
+
+## Task evidence (Issue #59 A, first PR)
+
+The auditor counts facts as the existing verdict parser and comparisons encounter
+them. The optional `aelix.outbound-task-evidence/1` data grows with the number of
+observed tasks and task lifetimes.
+
+- `tasks` contains recorded kernel and namespace TIDs/TGIDs, covered lifetime
+  ranges, parent identities, worker births and P/N/X/H/V counts for the existing
+  network comparison. A reused kernel TID keeps its lifetime rows and leaves
+  record and birth attribution unknown. Unattributed records have a capture-wide
+  count.
+- `straceTasks` contains observed TIDs, fork and exit boundaries, fixed-category
+  gap counts, and separate terminal-boundary and exact-stub flags. It records
+  the existing network issue and unmatched-issue counts, sequence matches,
+  reconciled operations, and existing close/register resolution counts.
+- Ring creation/submission counts and UDP generation/free/send counts come from
+  the existing comparisons. They are grouped by namespace TID. Shared object
+  send counts describe the object across its actors. Skipped comparisons and
+  missing channels use null. Parsed recorder loss and error counts are kept
+  when available.
+
+Per-record positions, descriptors, issue indices, per-ordinal unmatched
+breakdowns, unattributed identity lists, and snapshots from unparsed recorder
+output are omitted. Applicable verdict fields retain their existing details.
+
+Every capture removes its scratch at the base post-analysis boundary, before
+report writes or recapture. The auditor releases the replayed capture's counters.
+Aggregation checks the remaining capture and supervisor time at intervals of up
+to 32 observations and at major phase boundaries. It stops below 250 milliseconds of
+capture time or when the supervisor no longer has the 10-second publication
+allowance and one-second exit reserve. The required verdict then proceeds with
+`taskEvidenceStatus=unavailable` and the corresponding
+`taskEvidenceUnavailableReason`. `taskEvidenceAggregationSeconds` is the sum of
+elapsed wall time in observation and finalization calls, excluding report
+publication.
+
+The final capture can publish completed counters after all required reports and
+attempt history are saved. This best-effort write has a 10-second limit and uses
+a fixed-size buffer to append the counters atomically.
+
+The original capture and supervisor clocks run during aggregation. An individual
+aggregation call that stalls before control reaches the next check can still
+exhaust a required deadline and cause a timeout verdict.

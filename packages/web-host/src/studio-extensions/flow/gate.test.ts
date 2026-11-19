@@ -1,11 +1,11 @@
-import { mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createFakeHelper, scriptedSpawn, type FakeHelper } from '../../../tests/fixtures/extensionRuntime';
 import type { SiteSnapshot } from '../inspect/site';
 import { createCandidate } from './candidate';
-import { checkLoaded, compareRequest, nativeHandle, resolveDistribution, runLoadCheck } from './gate';
+import { checkLoaded, compareRequest, nativeHandle, redactPaths, resolveDistribution, runLoadCheck } from './gate';
 
 type Installed = [name: string, version: string, extensions?: Record<string, string>, record?: string];
 
@@ -288,17 +288,24 @@ describe('the load check', () => {
     ['beta', 'beta.pack:setup'],
   ]);
 
-  it('starts native the way a conversation does, with the generation appended and each extension named', async () => {
+  const sources = [...expected.values()];
+
+  it('starts native through the bundle launcher in the conversation form, with each source named', async () => {
     const candidate = await createCandidate(helper.context, 'g00000001-aaaa', null);
-    const result = await runLoadCheck(helper.context, candidate, expected);
+    const result = await runLoadCheck(helper.context, candidate, sources, expected);
     expect(result).toEqual({ problems: [], answered: true, cancelled: false, timedOut: false });
     const { command, args, env, cwd } = helper.spawn.calls.at(-1) ?? { command: '', args: [], env: {}, cwd: '' };
     expect(command).toBe(helper.context.bundle.python);
-    expect(args.slice(0, 6)).toEqual(['-I', '-S', '-B', '-X', 'utf8', '-c']);
-    expect(args.slice(7)).toEqual([
+    // The same launcher and mode a conversation's worker gets (launch.py, `native-generation`).
+    expect(args).toEqual([
+      '-I',
+      '-S',
+      '-B',
+      '-X',
+      'utf8',
       helper.context.bundle.launcher,
+      'native-generation',
       candidate.paths.site,
-      'native',
       '--offline',
       '--mode',
       'rpc',
@@ -319,15 +326,33 @@ describe('the load check', () => {
   it('reports the extension whose import or setup failed', async () => {
     helper.runtime.loadErrors = { 'beta.pack:setup': 'setup() of beta fails' };
     const candidate = await createCandidate(helper.context, 'g00000001-aaaa', null);
-    expect((await runLoadCheck(helper.context, candidate, expected)).problems).toEqual([
+    expect((await runLoadCheck(helper.context, candidate, sources, expected)).problems).toEqual([
       'load error beta.pack:setup: setup() of beta fails',
+    ]);
+  });
+
+  it('expects each extension under the name native reports it by, which for a pack is its plugin id', async () => {
+    const candidate = await createCandidate(helper.context, 'g00000001-aaaa', null);
+    const packs = path.join(candidate.paths.directory, 'packs');
+    await mkdir(path.join(packs, '000-alpha'), { recursive: true });
+    await writeFile(path.join(packs, '000-alpha', 'aelix-plugin.toml'), '[plugin]\nid = "alpha-plugin"\n');
+    const reported = new Map([
+      ['alpha', 'alpha-plugin'],
+      ['beta', 'beta.pack:setup'],
+    ]);
+    expect((await runLoadCheck(helper.context, candidate, [packs, 'beta.pack:setup'], reported)).problems).toEqual([]);
+    expect((await runLoadCheck(helper.context, candidate, [packs, 'beta.pack:setup'], expected)).problems).toEqual([
+      'alpha (alpha:setup) is not in the loaded list',
     ]);
   });
 
   it('says so when native ends without answering', async () => {
     const candidate = await createCandidate(helper.context, 'g00000001-aaaa', null);
     const silent = { ...helper.context, spawn: scriptedSpawn((_spec, child) => child.exit(1)) };
-    expect(await runLoadCheck(silent, candidate, expected)).toMatchObject({ answered: false, timedOut: false });
+    expect(await runLoadCheck(silent, candidate, sources, expected)).toMatchObject({
+      answered: false,
+      timedOut: false,
+    });
   });
 
   it('gives up on a native that never answers', async () => {
@@ -337,6 +362,38 @@ describe('the load check', () => {
       spawn: scriptedSpawn(() => {}),
       timeouts: { ...helper.context.timeouts, verifyMs: 20 },
     };
-    expect(await runLoadCheck(hanging, candidate, expected)).toMatchObject({ answered: false, timedOut: true });
+    expect(await runLoadCheck(hanging, candidate, sources, expected)).toMatchObject({
+      answered: false,
+      timedOut: true,
+    });
+  });
+});
+
+// Completion condition of the launcher piece: native's load errors name files on this machine.
+describe('hiding the locations of this machine', () => {
+  const locations: [string, string][] = [
+    [
+      '/Users/someone/Library/Application Support/Aelix Studio/aelix-runtime/generations/g00000002-abcd',
+      '<generation>',
+    ],
+    ['/Users/someone/Library/Application Support/Aelix Studio/aelix-runtime', '<extensions>'],
+    ['/Applications/Aelix Studio.app/Contents/Resources/studio-preview', '<runtime>'],
+    ['/Users/someone', '~'],
+  ];
+
+  it('replaces the most specific location first and every occurrence of it', () => {
+    const text =
+      "load error _ManifestEntry(plugin='demo', pkg_dir='/Users/someone/Library/Application Support/Aelix Studio/" +
+      "aelix-runtime/generations/g00000002-abcd/packs/000-demo'): cannot read /Users/someone/project/x and " +
+      '/Applications/Aelix Studio.app/Contents/Resources/studio-preview/native-site/a.py';
+    expect(redactPaths(text, locations)).toBe(
+      "load error _ManifestEntry(plugin='demo', pkg_dir='<generation>/packs/000-demo'): cannot read ~/project/x and " +
+        '<runtime>/native-site/a.py'
+    );
+  });
+
+  it('leaves text without those locations alone and ignores a root directory', () => {
+    expect(redactPaths("No module named 'gone'", locations)).toBe("No module named 'gone'");
+    expect(redactPaths('/a/b', [['/', '<root>']])).toBe('/a/b');
   });
 });

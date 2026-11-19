@@ -8,9 +8,16 @@ import { localFileRef } from '@/common/types/chatFile';
 import type { LocalFileLinkReference } from '@/renderer/components/Markdown/markdownUtils';
 import { getContentTypeByExtension } from '@/renderer/pages/conversation/Preview/fileUtils';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview/context/PreviewContext';
-import { resolvePreviewPayload, upgradeFileRef } from '@/renderer/utils/file/previewPayload';
+import {
+  resolveAnalyticsFilePreview,
+  resolvePreviewPayload,
+  upgradeFileRef,
+} from '@/renderer/utils/file/previewPayload';
 import { getCurrentProject } from '@/renderer/pages/conversation/explorer/currentProjectStore';
+import { classifyPreviewError, previewErrorToI18nKey } from '@/renderer/utils/previewError';
+import { Message } from '@arco-design/web-react';
 import { useCallback } from 'react';
+import { useTranslation } from 'react-i18next';
 
 const getFileNameFromPath = (file_path: string): string => {
   const normalized = file_path.replace(/\\/g, '/');
@@ -24,6 +31,7 @@ const getPreviewLanguage = (file_name: string): string => {
 
 export const useLocalFilePreview = (workspace?: string) => {
   const { openPreview } = usePreviewContext();
+  const { t } = useTranslation();
 
   return useCallback(
     async (file_path: string, reference?: LocalFileLinkReference) => {
@@ -35,7 +43,23 @@ export const useLocalFilePreview = (workspace?: string) => {
       // Upgraded before anything else uses it: the same file opened from the
       // explorer carries a project ref, so without this the two entry points would
       // produce two tabs for one file, and this one would get no change signals.
-      const fileRef = await upgradeFileRef(localFileRef(file_path), getCurrentProject());
+      const projectId = getCurrentProject();
+      const fileRef = await upgradeFileRef(localFileRef(file_path), projectId);
+      try {
+        const document = await resolveAnalyticsFilePreview({ projectId, fileRef, name: fileName, contentType });
+        if (document) {
+          openPreview(
+            document.content,
+            document.contentType,
+            { title: fileName, file_name: fileName, fileRef, ...document.metadata },
+            { replace: true }
+          );
+          return;
+        }
+      } catch (error) {
+        Message.error(t(previewErrorToI18nKey(classifyPreviewError(error))));
+        return;
+      }
 
       try {
         // Shared gate: applies the size ceiling, reads content only when the file
@@ -86,6 +110,6 @@ export const useLocalFilePreview = (workspace?: string) => {
         );
       }
     },
-    [openPreview, workspace]
+    [openPreview, t, workspace]
   );
 };

@@ -35,6 +35,26 @@ const METHODS = new Set([
   'Browser.getVersion',
 ]);
 
+function carriesIdentityToken(method, params, token) {
+  // In Playwright 1.58.2 Electron evaluates via a JSHandle. The utility
+  // arguments contain the handle placeholder followed by the supplied token.
+  const args = params?.arguments;
+  return (
+    method === 'Runtime.callFunctionOn' &&
+    params?.awaitPromise === true &&
+    params.returnByValue === true &&
+    params.functionDeclaration === '(utilityScript, ...args) => utilityScript.evaluate(...args)' &&
+    Array.isArray(args) &&
+    args.length === 8 &&
+    args[1]?.value === true &&
+    args[2]?.value === true &&
+    args[4]?.value === 2 &&
+    args[5]?.value?.h === 0 &&
+    args[6]?.value === token &&
+    typeof args[7]?.objectId === 'string'
+  );
+}
+
 /** Preserve known CDP diagnostics, never arbitrary remote text or error data. */
 export function safeProtocolError(error) {
   const raw = typeof error?.message === 'string' ? error.message : '';
@@ -58,19 +78,22 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
   let active = true;
   let restored = false;
   let connections = 0;
+  let identityEvaluation;
   const events = [];
   const errors = [];
   const emit = (event) => {
     if (!active) return;
     const value = { observedAt: new Date().toISOString(), ...event };
+    let protocolError;
     if (event.kind === 'protocol-error') {
-      errors.push({
+      protocolError = {
         ...value,
         precedingContexts: events
           .filter((entry) => entry.kind !== 'protocol-error' && entry.connection === event.connection)
           .slice(-16)
           .map((entry) => ({ ...entry })),
-      });
+      };
+      errors.push(protocolError);
       if (errors.length > 8) errors.shift();
     }
     events.push(value);
@@ -80,6 +103,7 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
     } catch {
       // Observation must never alter a protocol result or the smoke outcome.
     }
+    return protocolError;
   };
   const snapshot = () => ({
     status: 'active',
@@ -101,8 +125,14 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
         if (active && direction === 'send' && Number.isSafeInteger(message?.id)) {
           const key = `${message.sessionId ?? ''}:${message.id}`;
           const method = METHODS.has(message.method) ? message.method : 'other';
+          const identity =
+            identityEvaluation && carriesIdentityToken(method, message.params, identityEvaluation.token)
+              ? identityEvaluation
+              : undefined;
+          if (identity) identity.requests++;
           requests.set(key, {
             method,
+            identity,
             ...(method === 'Runtime.evaluate' || method === 'Runtime.callFunctionOn'
               ? {
                   awaitPromise: typeof message.params?.awaitPromise === 'boolean' ? message.params.awaitPromise : null,
@@ -115,16 +145,18 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
         } else if (active && direction === 'receive' && message) {
           if (Number.isSafeInteger(message.id)) {
             const key = `${message.sessionId ?? ''}:${message.id}`;
-            const request = requests.get(key) ?? { method: 'unknown' };
+            const { identity, ...request } = requests.get(key) ?? { method: 'unknown' };
             requests.delete(key);
-            if (message.error)
-              emit({
+            if (message.error) {
+              const error = emit({
                 kind: 'protocol-error',
                 connection,
                 requestId: message.id,
                 ...request,
                 ...safeProtocolError(message.error),
               });
+              if (identity && identity === identityEvaluation) identity.error = error;
+            }
           } else if (message.method === 'Runtime.executionContextCreated') {
             const context = message.params?.context;
             emit({
@@ -158,9 +190,19 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
   };
   return {
     snapshot,
+    trackIdentityEvaluation(token) {
+      const tracked = { token, requests: 0, error: null };
+      identityEvaluation = tracked;
+      return () => {
+        if (identityEvaluation !== tracked) return null;
+        identityEvaluation = undefined;
+        return active && tracked.requests === 1 ? tracked.error : null;
+      };
+    },
     restore,
     dispose: () => {
       active = false;
+      identityEvaluation = undefined;
       restore();
     },
   };
@@ -180,6 +222,7 @@ export function installProtocolDiagnostics(record) {
   } catch {
     return {
       snapshot: () => ({ status: 'unavailable', reason: 'protocol-adapter-unavailable' }),
+      trackIdentityEvaluation: () => () => null,
       restore() {},
       dispose() {},
     };

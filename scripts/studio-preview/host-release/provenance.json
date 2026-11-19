@@ -1,48 +1,247 @@
 {
   "schema": "aelix-studio-host.release-provenance/1",
-  "label": "host-v0.2.2-aelix.4",
+  "label": "host-v0.2.2-aelix.5",
   "kind": "release",
   "repository": "handochan/aelix-studio-host",
-  "commit": "c516fa946ef48adc0119dbf37367e02216b22e70",
-  "tree": "098cd53cc80a2a90fa4c5bebdc9cdf281811977c",
+  "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+  "tree": "8f4e1928d24bf9c1e6420e08ee67553725a25560",
   "workspaceVersion": "0.2.2",
   "upstream": {
     "repository": "iOfficeAI/AionCore",
     "tag": "v0.2.2",
     "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
-    "commitsSinceUpstream": 41
+    "commitsSinceUpstream": 116
   },
   "build": {
-    "workflow": "handochan/aelix-studio-host/.github/workflows/release.yml@refs/tags/host-v0.2.2-aelix.4",
+    "workflow": "handochan/aelix-studio-host/.github/workflows/release.yml@refs/tags/host-v0.2.2-aelix.5",
     "event": "push",
-    "runId": "41649966124",
+    "runId": "44456303200",
     "runAttempt": "1",
-    "runUrl": "https://github.com/handochan/aelix-studio-host/actions/runs/41649966124"
+    "runUrl": "https://github.com/handochan/aelix-studio-host/actions/runs/44456303200"
   },
   "rustToolchain": "1.95.0",
-  "cargoLockSha256": "c48ed576c42241cda69d6d09a020e14c6c8d9e16c33515f40f42a48ca6568d9c",
+  "cargoLockSha256": "a873f6ede5079e03a930bfb0af6850d692d966cd4488554226b76bee97b2d794",
   "licenseSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
   "noticeSha256": "71a13b8d813f6a81805972b796141aaeccde761b71afc06b56672cd276113c3f",
+  "sourceAssets": [
+    {
+      "crate": "libgit2-sys",
+      "version": "0.18.4+1.9.3",
+      "name": "libgit2-sys-0.18.4+1.9.3.crate",
+      "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+      "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7"
+    }
+  ],
   "targets": {
     "darwin-arm64": {
       "rustTarget": "aarch64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.4-aarch64-apple-darwin.tar.gz",
-      "archiveSha256": "775be47355919b19388dada39285a1ed77da49a6556e47424aecbb23e0ce171b",
+      "archive": "aelix-studio-host-0.2.2-aelix.5-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "eab1bf451936dec4e89e505d0932a180b428e72e07ed7660070fec5d161abfce",
       "binary": "aelix-studio-host",
-      "binarySha256": "b3b7432c0fb2effac0a792b1bc4dff268bef1c74d7401c754e4568a240ca6c27",
-      "binaryCodeSha256": "882930de6795e4d944c09d348688c2ad00f329937fe3ac30b976bd4b485141d7",
+      "binarySha256": "e6ec1f29004f0f8896a6e9989d8ed106ec17ba62d79918f31a4076afbdd2483a",
+      "binaryCodeSha256": "8080741825abc70b3180228076d41af74eb95e1a07a501ead2f1465fce25c8b7",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": null,
       "maximumGlibcVersionNeeded": null,
       "glibcCeiling": null,
+      "thirdPartyNotices": {
+        "apacheNoticeFiles": [
+          {
+            "crate": "aws-config",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-credential-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-lc-rs",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-lc-sys",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-bedrock",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sso",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-ssooidc",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sts",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sigv4",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-async",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http-client",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-json",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-observability",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-query",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api-macros",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-schema",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-xml",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          }
+        ],
+        "argv": [
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/dist/release-darwin-arm64/license-work/cargo-about",
+          "-c",
+          "never",
+          "generate",
+          "--locked",
+          "--offline",
+          "--fail",
+          "--format",
+          "json",
+          "--config",
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/dist/release-darwin-arm64/license-work/about.toml",
+          "--manifest-path",
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/crates/aionui-app/Cargo.toml",
+          "--target",
+          "aarch64-apple-darwin"
+        ],
+        "configSha256": "5cc2fbe6295d4e424ce1146782d95c9a89d10a4b63b4f187f5e6f747ebf03a70",
+        "crateCount": 487,
+        "denySha256": "9dfc3cc76c7b69c4a7348ffa8ef6cc96cba17c94df45741900a854aed75af81d",
+        "errorDiagnostics": 0,
+        "exitCode": 0,
+        "files": {
+          "THIRD-PARTY-NOTICES.txt": "be00092de3deb63a2bd0f6ae3fb19ab034e5348db96c92767aefb206f9219d6d",
+          "third-party-licenses.json": "243e7602ffa870a74bf70f6a616cdc9ff738f93820911ddfdb961decb127caa4"
+        },
+        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "helperSha256": {
+          "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
+          "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
+          "native_sources.py": "400b2eccae48681ab9288f8ba4126729dd27a9ba3099c8e17f62500d83218362"
+        },
+        "lgplComponents": [
+          "xdiff",
+          "libgit2 winhttp definitions"
+        ],
+        "missingNotices": [],
+        "nativePackageCount": 13,
+        "policySha256": {
+          "license-sources.json": "182ad15ea84b04eabe8919fb4bc0051c1e96109d9d960a2ab88284722f35fa8b",
+          "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
+          "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
+        },
+        "rawResultSha256": "202a77c19b6dd9bb582cff865878998d91c30e23d4f701cbe395c2da79b8c70d",
+        "rustTarget": "aarch64-apple-darwin",
+        "sourceRelease": {
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/Cargo.lock",
+          "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+          "label": "host-v0.2.2-aelix.5",
+          "releaseTag": "host-v0.2.2-aelix.5",
+          "repository": "https://github.com/handochan/aelix-studio-host",
+          "sourceAsset": {
+            "crate": "libgit2-sys",
+            "name": "libgit2-sys-0.18.4+1.9.3.crate",
+            "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7",
+            "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+            "version": "0.18.4+1.9.3"
+          },
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.5"
+        },
+        "status": "passed",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tool": {
+          "archive": "cargo-about-0.8.4-aarch64-apple-darwin.tar.gz",
+          "archiveSha256": "d5255ead3ac861a11c785bf19d4f70f16e59ac8b9519c312da61213d3d57351d",
+          "binarySha256": "29f8089e60d783f2d2521a31e4aed4880996e0313ae5118b87a95c2fbadcc008",
+          "name": "cargo-about",
+          "version": "0.8.4"
+        }
+      },
       "smoke": {
         "status": "passed",
         "checks": [
           "version",
           "startup_listening_event",
           "health",
+          "mcp_http_json_sse_tools_and_rpc_error",
           "update_check_disabled_by_default",
           "remote_images_disabled_by_default",
           "implicit_runtime_policy_enabled",
@@ -64,23 +263,213 @@
     },
     "darwin-x64": {
       "rustTarget": "x86_64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-apple-darwin.tar.gz",
-      "archiveSha256": "55910bb7764f8f8de2d5181f0ac736d79b2ca2394316ead0aa504b2f43973f3a",
+      "archive": "aelix-studio-host-0.2.2-aelix.5-x86_64-apple-darwin.tar.gz",
+      "archiveSha256": "9a484b009b6be8acb32518e77718e1937ace9704cafa76fc3859b3ca86b5d300",
       "binary": "aelix-studio-host",
-      "binarySha256": "1285cfc76e957eeb46184be961d5a495e4dc323b5abd85e2eb4cd6d4b2f5bfd3",
-      "binaryCodeSha256": "b226414c005bf007f085f1d7acfc6d67db3a8ca00a57e8bd9578602710a51910",
+      "binarySha256": "626c9e462dc946980b467c796db1312a5bc11615a69398cd8c1786e01f99ba08",
+      "binaryCodeSha256": "d92a69fe87d69457f75f70ca632cc898cc34d474e5695d099eaaf65faa5456f4",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": null,
       "maximumGlibcVersionNeeded": null,
       "glibcCeiling": null,
+      "thirdPartyNotices": {
+        "apacheNoticeFiles": [
+          {
+            "crate": "aws-config",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-credential-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-lc-rs",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-lc-sys",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-bedrock",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sso",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-ssooidc",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sts",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sigv4",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-async",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http-client",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-json",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-observability",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-query",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api-macros",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-schema",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-xml",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          }
+        ],
+        "argv": [
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/dist/release-darwin-x64/license-work/cargo-about",
+          "-c",
+          "never",
+          "generate",
+          "--locked",
+          "--offline",
+          "--fail",
+          "--format",
+          "json",
+          "--config",
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/dist/release-darwin-x64/license-work/about.toml",
+          "--manifest-path",
+          "/Users/runner/work/aelix-studio-host/aelix-studio-host/crates/aionui-app/Cargo.toml",
+          "--target",
+          "x86_64-apple-darwin"
+        ],
+        "configSha256": "5cc2fbe6295d4e424ce1146782d95c9a89d10a4b63b4f187f5e6f747ebf03a70",
+        "crateCount": 488,
+        "denySha256": "9dfc3cc76c7b69c4a7348ffa8ef6cc96cba17c94df45741900a854aed75af81d",
+        "errorDiagnostics": 0,
+        "exitCode": 0,
+        "files": {
+          "THIRD-PARTY-NOTICES.txt": "f0426943027421dcdc6ebf313aa66e6615b8472a45ed38276adb16a2a2ca2b60",
+          "third-party-licenses.json": "315516933bc558c1576396aca9489c4b99c940004b9ef4a889ffe0aaf624c3ae"
+        },
+        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "helperSha256": {
+          "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
+          "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
+          "native_sources.py": "400b2eccae48681ab9288f8ba4126729dd27a9ba3099c8e17f62500d83218362"
+        },
+        "lgplComponents": [
+          "xdiff",
+          "libgit2 winhttp definitions"
+        ],
+        "missingNotices": [],
+        "nativePackageCount": 13,
+        "policySha256": {
+          "license-sources.json": "182ad15ea84b04eabe8919fb4bc0051c1e96109d9d960a2ab88284722f35fa8b",
+          "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
+          "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
+        },
+        "rawResultSha256": "59c9aa920fa14220c4f987548fb14c15583fc2c7a4909db1029a00071c807a21",
+        "rustTarget": "x86_64-apple-darwin",
+        "sourceRelease": {
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/Cargo.lock",
+          "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+          "label": "host-v0.2.2-aelix.5",
+          "releaseTag": "host-v0.2.2-aelix.5",
+          "repository": "https://github.com/handochan/aelix-studio-host",
+          "sourceAsset": {
+            "crate": "libgit2-sys",
+            "name": "libgit2-sys-0.18.4+1.9.3.crate",
+            "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7",
+            "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+            "version": "0.18.4+1.9.3"
+          },
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.5"
+        },
+        "status": "passed",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tool": {
+          "archive": "cargo-about-0.8.4-x86_64-apple-darwin.tar.gz",
+          "archiveSha256": "e918d49c481f43eb17da92c406839d5c01d480261d8026a017f3d23706009d0d",
+          "binarySha256": "9fe904c008ae3b36f06e20d7eafd75a00c33bbcedc5d5d661d6504804585e53f",
+          "name": "cargo-about",
+          "version": "0.8.4"
+        }
+      },
       "smoke": {
         "status": "passed",
         "checks": [
           "version",
           "startup_listening_event",
           "health",
+          "mcp_http_json_sse_tools_and_rpc_error",
           "update_check_disabled_by_default",
           "remote_images_disabled_by_default",
           "implicit_runtime_policy_enabled",
@@ -102,28 +491,218 @@
     },
     "linux-arm64": {
       "rustTarget": "aarch64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.4-aarch64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "bc6d756d91e4c35e838171464358615326ae0165f67c840b791b9abafdda1109",
+      "archive": "aelix-studio-host-0.2.2-aelix.5-aarch64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "42ecef6d178476b1f77147ba54c850dbe2ca1b6f73ee0180dc45e1d94217ae32",
       "binary": "aelix-studio-host",
-      "binarySha256": "1a93578cfa9eb1ec6c25fbe03469142e0a6897a30f6c0950919dcd430ef418a9",
-      "binaryCodeSha256": "1a93578cfa9eb1ec6c25fbe03469142e0a6897a30f6c0950919dcd430ef418a9",
+      "binarySha256": "13b9f229cb38352c80041d8b6443b88edc335c3c21a38168c19bdea20b989d32",
+      "binaryCodeSha256": "13b9f229cb38352c80041d8b6443b88edc335c3c21a38168c19bdea20b989d32",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:f98ad946a619df21f4341799ff6fdd2975c20f41519e82e8d612dee96ac28b8b",
+        "imageId": "sha256:33831455132e1662040b3002808d0aae51c6c79ae99e9b07463891fb32b290a2",
         "platform": "linux/arm64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
       "maximumGlibcVersionNeeded": "GLIBC_2.30",
       "glibcCeiling": "GLIBC_2.30",
+      "thirdPartyNotices": {
+        "apacheNoticeFiles": [
+          {
+            "crate": "aws-config",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-credential-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-lc-rs",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-lc-sys",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-bedrock",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sso",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-ssooidc",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sts",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sigv4",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-async",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http-client",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-json",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-observability",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-query",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api-macros",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-schema",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-xml",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          }
+        ],
+        "argv": [
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/dist/release-linux-arm64/license-work/cargo-about",
+          "-c",
+          "never",
+          "generate",
+          "--locked",
+          "--offline",
+          "--fail",
+          "--format",
+          "json",
+          "--config",
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/dist/release-linux-arm64/license-work/about.toml",
+          "--manifest-path",
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/crates/aionui-app/Cargo.toml",
+          "--target",
+          "aarch64-unknown-linux-gnu"
+        ],
+        "configSha256": "5cc2fbe6295d4e424ce1146782d95c9a89d10a4b63b4f187f5e6f747ebf03a70",
+        "crateCount": 483,
+        "denySha256": "9dfc3cc76c7b69c4a7348ffa8ef6cc96cba17c94df45741900a854aed75af81d",
+        "errorDiagnostics": 0,
+        "exitCode": 0,
+        "files": {
+          "THIRD-PARTY-NOTICES.txt": "9735dd68f126ad4bd3cd50e6755499a54c29ff230e949c62337729bd3dd833e3",
+          "third-party-licenses.json": "08ab140b6a150ef8452e2e1e62a02bdebff068c15de9a85745a92bc6266445ab"
+        },
+        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "helperSha256": {
+          "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
+          "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
+          "native_sources.py": "400b2eccae48681ab9288f8ba4126729dd27a9ba3099c8e17f62500d83218362"
+        },
+        "lgplComponents": [
+          "xdiff",
+          "libgit2 winhttp definitions"
+        ],
+        "missingNotices": [],
+        "nativePackageCount": 12,
+        "policySha256": {
+          "license-sources.json": "182ad15ea84b04eabe8919fb4bc0051c1e96109d9d960a2ab88284722f35fa8b",
+          "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
+          "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
+        },
+        "rawResultSha256": "955dc80c1deda0d525af731987741b30ea062c38d7298a8ed89dc6801b03ad39",
+        "rustTarget": "aarch64-unknown-linux-gnu",
+        "sourceRelease": {
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/Cargo.lock",
+          "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+          "label": "host-v0.2.2-aelix.5",
+          "releaseTag": "host-v0.2.2-aelix.5",
+          "repository": "https://github.com/handochan/aelix-studio-host",
+          "sourceAsset": {
+            "crate": "libgit2-sys",
+            "name": "libgit2-sys-0.18.4+1.9.3.crate",
+            "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7",
+            "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+            "version": "0.18.4+1.9.3"
+          },
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.5"
+        },
+        "status": "passed",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tool": {
+          "archive": "cargo-about-0.8.4-aarch64-unknown-linux-musl.tar.gz",
+          "archiveSha256": "33e0d54c0366308095fdb9101642d281b224131299e1c62001f43aa02bb3573e",
+          "binarySha256": "f887a41827e7cb7c4ffc9c9c5f505111f60e3016c61f29dc420453867a3d3b6b",
+          "name": "cargo-about",
+          "version": "0.8.4"
+        }
+      },
       "smoke": {
         "status": "passed",
         "checks": [
           "version",
           "startup_listening_event",
           "health",
+          "mcp_http_json_sse_tools_and_rpc_error",
           "update_check_disabled_by_default",
           "remote_images_disabled_by_default",
           "implicit_runtime_policy_enabled",
@@ -145,28 +724,218 @@
     },
     "linux-x64": {
       "rustTarget": "x86_64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "9051c17bcde150d6443e06076c2bd10629023cb56c3106e8c750eb7d4a04e0be",
+      "archive": "aelix-studio-host-0.2.2-aelix.5-x86_64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "fc257015c3c83ce1bc3016529d48273498678802466be7f581d5081597f17113",
       "binary": "aelix-studio-host",
-      "binarySha256": "b5b20acf086c9b53602e781cf0b8c1835c3b50074f00d22d298f904b5a30c703",
-      "binaryCodeSha256": "b5b20acf086c9b53602e781cf0b8c1835c3b50074f00d22d298f904b5a30c703",
+      "binarySha256": "ca55555cb272c7614bcbfbbc01b4d4475afdc1935cf27e612b644c06d9a5e23c",
+      "binaryCodeSha256": "ca55555cb272c7614bcbfbbc01b4d4475afdc1935cf27e612b644c06d9a5e23c",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:941c4281a2e928daba433af8d018996fdabc2716db3cdb8a2ed03b441596be50",
+        "imageId": "sha256:1805d48700fd66e896b4ac3c16630f76203ce47fe807cc72df9bb14bcf5d635c",
         "platform": "linux/amd64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
       "maximumGlibcVersionNeeded": "GLIBC_2.30",
       "glibcCeiling": "GLIBC_2.34",
+      "thirdPartyNotices": {
+        "apacheNoticeFiles": [
+          {
+            "crate": "aws-config",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-credential-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-lc-rs",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-lc-sys",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-bedrock",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sso",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-ssooidc",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sts",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sigv4",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-async",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http-client",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-json",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-observability",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-query",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api-macros",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-schema",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-xml",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          }
+        ],
+        "argv": [
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/dist/release-linux-x64/license-work/cargo-about",
+          "-c",
+          "never",
+          "generate",
+          "--locked",
+          "--offline",
+          "--fail",
+          "--format",
+          "json",
+          "--config",
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/dist/release-linux-x64/license-work/about.toml",
+          "--manifest-path",
+          "/home/runner/work/aelix-studio-host/aelix-studio-host/crates/aionui-app/Cargo.toml",
+          "--target",
+          "x86_64-unknown-linux-gnu"
+        ],
+        "configSha256": "5cc2fbe6295d4e424ce1146782d95c9a89d10a4b63b4f187f5e6f747ebf03a70",
+        "crateCount": 484,
+        "denySha256": "9dfc3cc76c7b69c4a7348ffa8ef6cc96cba17c94df45741900a854aed75af81d",
+        "errorDiagnostics": 0,
+        "exitCode": 0,
+        "files": {
+          "THIRD-PARTY-NOTICES.txt": "86192a764f46ab82be45c2d44d1775a2e07d7c6d156580c8971ab37c1722bbf4",
+          "third-party-licenses.json": "aa1442a9224f74f84afa9ca826ae84540f5d1acb3150dd4b441f13726a70db34"
+        },
+        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "helperSha256": {
+          "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
+          "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
+          "native_sources.py": "400b2eccae48681ab9288f8ba4126729dd27a9ba3099c8e17f62500d83218362"
+        },
+        "lgplComponents": [
+          "xdiff",
+          "libgit2 winhttp definitions"
+        ],
+        "missingNotices": [],
+        "nativePackageCount": 12,
+        "policySha256": {
+          "license-sources.json": "182ad15ea84b04eabe8919fb4bc0051c1e96109d9d960a2ab88284722f35fa8b",
+          "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
+          "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
+        },
+        "rawResultSha256": "56b05d8771cc3cef722c8fa843ef815165acdea3b1290f7c4aa78d9ca6662dce",
+        "rustTarget": "x86_64-unknown-linux-gnu",
+        "sourceRelease": {
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/Cargo.lock",
+          "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+          "label": "host-v0.2.2-aelix.5",
+          "releaseTag": "host-v0.2.2-aelix.5",
+          "repository": "https://github.com/handochan/aelix-studio-host",
+          "sourceAsset": {
+            "crate": "libgit2-sys",
+            "name": "libgit2-sys-0.18.4+1.9.3.crate",
+            "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7",
+            "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+            "version": "0.18.4+1.9.3"
+          },
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.5"
+        },
+        "status": "passed",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tool": {
+          "archive": "cargo-about-0.8.4-x86_64-unknown-linux-musl.tar.gz",
+          "archiveSha256": "c7381aa0cdc41fc0ee662cec8daa260da7817ad8ddea04cd4ddad425460adf14",
+          "binarySha256": "8c5421739f65995867c4db817dc59fcfa738112c78d8339b8a461c863839eaf5",
+          "name": "cargo-about",
+          "version": "0.8.4"
+        }
+      },
       "smoke": {
         "status": "passed",
         "checks": [
           "version",
           "startup_listening_event",
           "health",
+          "mcp_http_json_sse_tools_and_rpc_error",
           "update_check_disabled_by_default",
           "remote_images_disabled_by_default",
           "implicit_runtime_policy_enabled",
@@ -188,23 +957,213 @@
     },
     "win32-x64": {
       "rustTarget": "x86_64-pc-windows-msvc",
-      "archive": "aelix-studio-host-0.2.2-aelix.4-x86_64-pc-windows-msvc.zip",
-      "archiveSha256": "398401e18a62982d36291de6c656a928ce3ae5d6b17b4a035659c5bdf89b7b34",
+      "archive": "aelix-studio-host-0.2.2-aelix.5-x86_64-pc-windows-msvc.zip",
+      "archiveSha256": "bba903bc4e0ecaad8e24752183c230d841925ae5bb0c25033b66383de324a88c",
       "binary": "aelix-studio-host.exe",
-      "binarySha256": "e615e6a0cb2c948793b32d9bfbd4a2c7a24eb86934767e9f4ec2f441213c862e",
-      "binaryCodeSha256": "e615e6a0cb2c948793b32d9bfbd4a2c7a24eb86934767e9f4ec2f441213c862e",
+      "binarySha256": "cee632954596b28dde89eb98f98caed43f0b72affb281131a330617568a40c03",
+      "binaryCodeSha256": "cee632954596b28dde89eb98f98caed43f0b72affb281131a330617568a40c03",
       "rustFlags": "-C target-feature=+crt-static",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": null,
       "maximumGlibcVersionNeeded": null,
       "glibcCeiling": null,
+      "thirdPartyNotices": {
+        "apacheNoticeFiles": [
+          {
+            "crate": "aws-config",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-credential-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-lc-rs",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-lc-sys",
+            "path": "upstream/NOTICE",
+            "sha256": "38959e06d4e48e85ff548e145c944ea8094d227d8ce7fb8cdba0de478de128a5"
+          },
+          {
+            "crate": "aws-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-bedrock",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sso",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-ssooidc",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sdk-sts",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-sigv4",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-async",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-http-client",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-json",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-observability",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-query",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-runtime-api-macros",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-schema",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-smithy-xml",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          },
+          {
+            "crate": "aws-types",
+            "path": "upstream/NOTICE",
+            "sha256": "d4290ed64c2edd0fce1d84e3f9dfb2881240fe534def76b8cd29ed6af683e287"
+          }
+        ],
+        "argv": [
+          "D:\\a\\aelix-studio-host\\aelix-studio-host\\dist\\release-win32-x64\\license-work\\cargo-about.exe",
+          "-c",
+          "never",
+          "generate",
+          "--locked",
+          "--offline",
+          "--fail",
+          "--format",
+          "json",
+          "--config",
+          "D:\\a\\aelix-studio-host\\aelix-studio-host\\dist\\release-win32-x64\\license-work\\about.toml",
+          "--manifest-path",
+          "D:\\a\\aelix-studio-host\\aelix-studio-host\\crates\\aionui-app\\Cargo.toml",
+          "--target",
+          "x86_64-pc-windows-msvc"
+        ],
+        "configSha256": "5cc2fbe6295d4e424ce1146782d95c9a89d10a4b63b4f187f5e6f747ebf03a70",
+        "crateCount": 493,
+        "denySha256": "9dfc3cc76c7b69c4a7348ffa8ef6cc96cba17c94df45741900a854aed75af81d",
+        "errorDiagnostics": 0,
+        "exitCode": 0,
+        "files": {
+          "THIRD-PARTY-NOTICES.txt": "eb58fb7e48d6e748ed01026576bda366512b94d1b18e7d5eafc5ca3687474fd8",
+          "third-party-licenses.json": "1b738573cae67904482a4ddab5b60da4de66954f3ae33fde2341bd502c8f17d1"
+        },
+        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "helperSha256": {
+          "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
+          "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
+          "native_sources.py": "400b2eccae48681ab9288f8ba4126729dd27a9ba3099c8e17f62500d83218362"
+        },
+        "lgplComponents": [
+          "xdiff",
+          "libgit2 winhttp definitions"
+        ],
+        "missingNotices": [],
+        "nativePackageCount": 15,
+        "policySha256": {
+          "license-sources.json": "182ad15ea84b04eabe8919fb4bc0051c1e96109d9d960a2ab88284722f35fa8b",
+          "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
+          "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
+        },
+        "rawResultSha256": "bec3d9821c980bc4321b7f55b433ca173344571fa9998f94c3ae0d479535e2e6",
+        "rustTarget": "x86_64-pc-windows-msvc",
+        "sourceRelease": {
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.5/Cargo.lock",
+          "commit": "8c7baecec0f33d2e790f75f162d9c34921b51fa1",
+          "label": "host-v0.2.2-aelix.5",
+          "releaseTag": "host-v0.2.2-aelix.5",
+          "repository": "https://github.com/handochan/aelix-studio-host",
+          "sourceAsset": {
+            "crate": "libgit2-sys",
+            "name": "libgit2-sys-0.18.4+1.9.3.crate",
+            "sha256": "9b26f66f35e1871b22efcf7191564123d2a446ca0538cde63c23adfefa9b15b7",
+            "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
+            "version": "0.18.4+1.9.3"
+          },
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.5"
+        },
+        "status": "passed",
+        "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "tool": {
+          "archive": "cargo-about-0.8.4-x86_64-pc-windows-msvc.tar.gz",
+          "archiveSha256": "d5c38fb914bbad57c6a7d58c4847315bc3fe11efbe4fb51b3c515f997a56ceb7",
+          "binarySha256": "f074225007dd049f0537f578695ce09d9e4d250d2b3a778439c1ec545055e5c8",
+          "name": "cargo-about",
+          "version": "0.8.4"
+        }
+      },
       "smoke": {
         "status": "passed",
         "checks": [
           "version",
           "startup_listening_event",
           "health",
+          "mcp_http_json_sse_tools_and_rpc_error",
           "update_check_disabled_by_default",
           "remote_images_disabled_by_default",
           "implicit_runtime_policy_enabled",

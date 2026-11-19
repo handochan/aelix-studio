@@ -165,3 +165,18 @@ undrained captures and failed UDP capture controls abort the experiment. The his
 auditor passed through `--audit-script`; it is not a current-policy validation
 command. Current policy is qualified only by the shared auditor and transport
 controls above. The recorded 76 connects / zero packets are retained in the study.
+
+## Task evidence without verdict changes (#59 A, first PR)
+
+`taskEvidence` contains numeric task and lifetime summaries counted by the
+existing verdict parser and comparisons. It covers P/N/X/H/V, existing network
+and ring/UDP results, and strace gap categories. A capture without an observed
+comparison channel reports null for its counts. See the
+[shared task-evidence schema](../studio-preview/fixtures/README.md#task-evidence-issue-59-a-first-pr).
+
+The auditor removes each capture's scratch before required report writes or
+recapture. It publishes completed counters for the final capture after the
+required verdict and attempt history are saved. Aggregation checks its remaining
+time periodically and between phases. Reports include observation time and the
+reason when aggregation stops for a time reserve. An individual aggregation
+call that stalls before the next check can still exhaust a required deadline.

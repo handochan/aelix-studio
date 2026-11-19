@@ -9,6 +9,7 @@ import type { PreviewContentType } from '@/common/types/office/preview';
 import type { ChatFileRef, ContentEncoding } from '@/common/types/chatFile';
 import { chatFileRefKey, isChatFileRef } from '@/common/types/chatFile';
 import { emitter } from '@/renderer/utils/emitter';
+import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { BROWSER_BLANK_URL, BROWSER_TAB_FALLBACK_TITLE, MAX_BROWSER_TABS } from '../browser/constants';
 import { isBrowserMcpActivity, isBrowserMcpSettled } from '../browser/agentActivity';
@@ -39,6 +40,10 @@ export interface PreviewMetadata {
   // file_path/workspace, which are retained only for viewers not yet migrated
   // (pdf file://, office, shell.openFile, download).
   fileRef?: ChatFileRef;
+  /** Explorer project identity for a read-only Analytics preview. */
+  analyticsProjectId?: string;
+  /** Display the bytes as inert source while the document's classification is unknown. */
+  sourceOnly?: boolean;
   file_path?: string; // 工作空间文件的绝对路径 / Absolute file path in workspace
   workspace?: string; // 工作空间根目录 / Workspace root directory
   editable?: boolean; // 是否可编辑 / Whether editable
@@ -705,7 +710,12 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
         tabList.find((tab) => {
           // Type is a precondition, not a tiebreaker: the same path rendered as
           // source and as a diff are legitimately two different tabs.
-          if (tab.content_type !== type) return false;
+          if (
+            tab.content_type !== type ||
+            tab.metadata?.analyticsProjectId !== meta?.analyticsProjectId ||
+            Boolean(tab.metadata?.sourceOnly) !== Boolean(meta?.sourceOnly)
+          )
+            return false;
 
           const tabRefKey = tab.metadata?.fileRef ? chatFileRefKey(tab.metadata.fileRef) : '';
 
@@ -763,7 +773,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       // stay pure. This is the "read once when the tab opens" fill point — without
       // it the first save of every tab carries no If-Match, so the backend skips
       // conflict detection and silently overwrites a concurrent external edit.
-      if (meta?.fileRef && meta.lastModified != null) {
+      if (meta?.fileRef && !meta.sourceOnly && meta.lastModified != null) {
         fileMtimeRef.current.set(chatFileRefKey(meta.fileRef), meta.lastModified);
       }
 
@@ -965,7 +975,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setTabs((prevTabs) => {
         // Clean up mtime record for the closed tab (keyed by ChatFileRef identity)
         const tabToClose = prevTabs.find((tab) => tab.id === tabId);
-        if (tabToClose?.metadata?.fileRef) {
+        if (tabToClose?.metadata?.fileRef && !tabToClose.metadata.sourceOnly) {
           fileMtimeRef.current.delete(chatFileRefKey(tabToClose.metadata.fileRef));
         }
 
@@ -1063,7 +1073,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const reloadTabContent = useCallback(async (tabId: string): Promise<boolean> => {
     const tab = tabsRef.current.find((t) => t.id === tabId);
     const fileRef = tab?.metadata?.fileRef;
-    if (!tab || !fileRef) return false;
+    if (!tab || !fileRef || tab.metadata?.analyticsProjectId) return false;
 
     // pdf and office render from their own sources rather than from `content`, so
     // there is nothing to fetch here; their reload paths live in the viewers.
@@ -1071,12 +1081,34 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const encoding: ContentEncoding = tab.content_type === 'image' ? 'dataurl' : 'utf8';
     try {
-      const content = await ipcBridge.fs.readContent.invoke({ file: fileRef, encoding });
+      const source = tab.metadata?.sourceOnly
+        ? await resolvePreviewPayload(fileRef, 'code', { thresholdBytes: tab.metadata.thresholdBytes })
+        : undefined;
+      const content = source ? source.content : await ipcBridge.fs.readContent.invoke({ file: fileRef, encoding });
       if (content == null) return false;
 
       setTabs((prev) =>
-        prev.map((t) => (t.id === tabId ? { ...t, content, originalContent: content, isDirty: false } : t))
+        prev.map((t) => {
+          if (t.id !== tabId) return t;
+          if (
+            source &&
+            (!t.metadata?.sourceOnly ||
+              !t.metadata.fileRef ||
+              chatFileRefKey(t.metadata.fileRef) !== chatFileRefKey(fileRef))
+          )
+            return t;
+          const metadata = source
+            ? {
+                ...t.metadata,
+                oversized: source.oversized,
+                sizeBytes: source.sizeBytes,
+                thresholdBytes: source.thresholdBytes,
+              }
+            : t.metadata;
+          return { ...t, content, originalContent: content, isDirty: false, metadata };
+        })
       );
+      if (source) return true;
 
       // Best-effort: a stale timestamp only costs one rejected save, which the user
       // is told about, so it is not worth failing the reload over.
@@ -1099,7 +1131,7 @@ export const PreviewProvider: React.FC<{ children: React.ReactNode }> = ({ child
       if (!targetTabId) return false;
 
       const tab = tabs.find((t) => t.id === targetTabId);
-      if (!tab) return false;
+      if (!tab || tab.metadata?.sourceOnly) return false;
 
       // 写回由 ChatFileRef 身份寻址的文件 / Write back to the file addressed by ChatFileRef identity
       const fileRef = tab.metadata?.fileRef;

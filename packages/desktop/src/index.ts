@@ -9,6 +9,7 @@
 import './process/utils/configureChromium';
 import { initializeOfflineSpellcheck } from './process/resources/offlineSpellcheck';
 import { initializeDesktopUpdates } from './process/services/updateFeed';
+import { registerAnalyticsPreviewScheme, registerAnalyticsPreviewWindow } from './process/services/analyticsPreview';
 import { installGpuCrashHandler } from './process/utils/gpuRecovery';
 import { describeUncaughtError } from './process/utils/describeUncaughtError';
 import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtError';
@@ -79,6 +80,8 @@ import {
 import { readCloseToTraySetting } from './process/utils/closeToTraySetting';
 // @ts-expect-error - electron-squirrel-startup doesn't have types
 import electronSquirrelStartup from 'electron-squirrel-startup';
+
+registerAnalyticsPreviewScheme();
 
 // ============ Single Instance Lock ============
 // Acquire lock early so the second instance quits before doing unnecessary work.
@@ -584,10 +587,9 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   // Load the renderer: dev server URL in development, built HTML file in production
   const rendererUrl = process.env['ELECTRON_RENDERER_URL'];
   const fallbackFile = path.join(__dirname, '../renderer/index.html');
-  registerNativeAuthWindow(mainWindow, [
-    pathToFileURL(fallbackFile).href,
-    ...(!app.isPackaged && rendererUrl ? [rendererUrl] : []),
-  ]);
+  const rendererUrls = [pathToFileURL(fallbackFile).href, ...(!app.isPackaged && rendererUrl ? [rendererUrl] : [])];
+  registerNativeAuthWindow(mainWindow, rendererUrls);
+  registerAnalyticsPreviewWindow(mainWindow.webContents, rendererUrls);
 
   if (!app.isPackaged && rendererUrl) {
     console.log(`[AionUi] Loading renderer URL: ${rendererUrl}`);

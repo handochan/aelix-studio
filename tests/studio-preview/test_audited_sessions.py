@@ -80,6 +80,20 @@ class SessionReceiptTests(unittest.TestCase):
                 audit.run('provider',['/owned/command'],env={},timeout=480)
             self.assertEqual(audit.sessions[0]['captureTimeoutSeconds'],480)
 
+    def test_private_namespace_passes_the_optional_cutoff_in_auditor_arguments(self):
+        with tempfile.TemporaryDirectory() as directory:
+            audit,run=self.run_report(Path(directory))
+            def check_command(command,**options):
+                position=command.index('--task-evidence-deadline')
+                self.assertGreater(position,command.index(str(audit.auditor)))
+                self.assertEqual(command[position+2:],['--','/owned/command'])
+                self.assertEqual(float(command[position+1]),100+options['timeout'])
+                return run(command,**options)
+            with patch.object(module.shutil,'which',side_effect=lambda tool:f'/usr/bin/{tool}'), \
+                 patch.object(module.time,'monotonic',return_value=100), \
+                 patch.object(module,'run_supervised',check_command):
+                audit.run('provider',['/owned/command'],env={},timeout=480,namespace=True)
+
     def test_provider_phases_share_one_budget_even_if_helper_uses_its_full_limit(self):
         import sys
         source=ROOT/'scripts/studio-preview/providerSmoke.py'
