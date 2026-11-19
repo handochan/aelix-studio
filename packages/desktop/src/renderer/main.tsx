@@ -305,20 +305,30 @@ const Config: React.FC<PropsWithChildren> = ({ children }) => {
 };
 
 const Main = () => {
-  const { ready } = useAuth();
+  const { ready, status } = useAuth();
+  const authenticated = ready && status === 'authenticated';
   const [configReady, setConfigReady] = useState(false);
 
   useEffect(() => {
-    if (!ready) return;
-    void bootstrapRendererConfig().finally(() => setConfigReady(true));
-  }, [ready]);
+    if (!authenticated) {
+      setConfigReady(false);
+      return;
+    }
+    let current = true;
+    void bootstrapRendererConfig().finally(() => {
+      if (current) setConfigReady(true);
+    });
+    return () => {
+      current = false;
+    };
+  }, [authenticated]);
 
   useEffect(() => {
-    if (!ready) return;
+    if (!authenticated) return;
     void repairAllCronJobTimeZonesOnce();
-  }, [ready]);
+  }, [authenticated]);
 
-  if (!ready || !configReady) {
+  if (!ready || (authenticated && !configReady)) {
     return null;
   }
 

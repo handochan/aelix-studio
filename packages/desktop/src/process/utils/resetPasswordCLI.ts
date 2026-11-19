@@ -7,6 +7,8 @@
  * 打包应用的密码重置命令行工具
  */
 
+import { fetchStudioBackend } from '@aionui/web-host';
+
 // Color output
 const colors = {
   reset: '\x1b[0m',
@@ -47,7 +49,7 @@ export async function resetPasswordCLI(username: string): Promise<void> {
     process.exit(1);
   }
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/webui/reset-password`, {
+    const res = await fetchStudioBackend(`http://127.0.0.1:${port}/api/webui/reset-password`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });

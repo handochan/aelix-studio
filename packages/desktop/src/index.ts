@@ -32,7 +32,8 @@ import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from './proces
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
 import { pathToFileURL } from 'node:url';
-import { BackendLifecycleManager } from '@aionui/web-host';
+import { BackendLifecycleManager, fetchStudioBackend } from '@aionui/web-host';
+import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
 import { resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
 import { wasLaunchedAtLogin } from '@process/bridge/applicationBridge';
@@ -220,8 +221,10 @@ const backendManager = new BackendLifecycleManager(
     resourcesPath: process.resourcesPath,
     userDataPath: app.getPath('userData'),
   },
-  resolveBinaryPath
+  resolveBinaryPath,
+  true
 );
+registerDesktopBackendFetcher(fetchStudioBackend);
 let disposeCronResumeListener: (() => void) | null = null;
 
 // Flag tracking whether the backend subprocess started successfully. Read by
@@ -326,7 +329,7 @@ function registerCronResumeBridge(backendPort: number): void {
   disposeCronResumeListener?.();
 
   const onResume = () => {
-    void fetch(`http://127.0.0.1:${backendPort}/api/cron/internal/system-resume`, {
+    void fetchStudioBackend(`http://127.0.0.1:${backendPort}/api/cron/internal/system-resume`, {
       method: 'POST',
       headers: {
         'x-aionui-internal': '1',

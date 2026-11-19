@@ -122,18 +122,24 @@ for (const signal of ['SIGINT', 'SIGTERM'])
     process.exit(1);
   });
 async function api(route, method = 'GET', body, status = [200, 201, 202]) {
-  const response = await fetch(`http://127.0.0.1:${port}${route}`, {
-    method,
-    headers: { 'Content-Type': 'application/json' },
-    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    signal: AbortSignal.timeout(60000),
-  });
-  const result = await response.json();
+  // Use the app's registered desktop document for authenticated requests.
+  const response = await page.evaluate(
+    async ({ url, method, body }) => {
+      const reply = await fetch(url, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+        signal: AbortSignal.timeout(60000),
+      });
+      return { status: reply.status, result: await reply.json() };
+    },
+    { url: `http://127.0.0.1:${port}${route}`, method, body }
+  );
   assert.ok(
     status.includes(response.status),
-    `${route}: HTTP ${response.status}: ${JSON.stringify(result).slice(0, 1000)}`
+    `${route}: HTTP ${response.status}: ${JSON.stringify(response.result).slice(0, 1000)}`
   );
-  return result.data ?? result;
+  return response.result.data ?? response.result;
 }
 try {
   if (executablePath)
@@ -144,6 +150,12 @@ try {
       record: recordRecovery,
     });
   await launch();
+  const anonymous = await fetch(`http://127.0.0.1:${port}/api/mcp/servers`, {
+    signal: AbortSignal.timeout(60000),
+  });
+  assert.equal(anonymous.status, 401, 'Unauthenticated requests must not access desktop APIs');
+  assert.equal((await anonymous.json()).code, 'AUTH_REQUIRED');
+  checks.push('unauthenticated_desktop_api_denied');
   if (executablePath) {
     await expect
       .poll(async () => (await api('/api/mcp/servers')).some((row) => row.name === 'chrome-devtools'))

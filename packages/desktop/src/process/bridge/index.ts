@@ -14,6 +14,7 @@ import { initWebuiBridge } from './webuiBridge';
 import { initThemeBridge } from './themeBridge';
 import { app, BrowserWindow, ipcMain } from 'electron';
 import { getNativeAuthService } from '@aionui/web-host';
+import { protectStudioRequests } from '../backend/studioRequest';
 
 export type BridgeDependencies = Record<string, never>;
 
@@ -28,6 +29,7 @@ const withoutHash = (value: string): string => {
 export function registerNativeAuthWindow(win: BrowserWindow, rendererUrls: string[]): void {
   const id = win.webContents.id;
   nativeAuthWindows.set(id, new Set(rendererUrls.map(withoutHash)));
+  protectStudioRequests(win.webContents.session, nativeAuthWindows);
   win.webContents.on('did-start-navigation', (_event, _url, inPlace, mainFrame) => {
     if (mainFrame && !inPlace) getNativeAuthService().cancelOwner(`desktop:${id}`);
   });

@@ -24,7 +24,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { startWebHost } from '@aionui/web-host';
+import { fetchStudioBackend, startWebHost } from '@aionui/web-host';
 import { verifyDefaultHostBundle } from '../packages/shared-scripts/src/default-host.js';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
 
@@ -180,7 +180,7 @@ function augmentPathWithNvm(): void {
  */
 async function fetchAdminUsername(backendPort: number): Promise<string> {
   try {
-    const res = await fetch(`http://127.0.0.1:${backendPort}/api/auth/internal/users/system`);
+    const res = await fetchStudioBackend(`http://127.0.0.1:${backendPort}/api/auth/internal/users/system`);
     if (!res.ok) return 'admin';
     const json = (await res.json()) as { data?: { username?: string } };
     return json.data?.username || 'admin';
@@ -252,11 +252,11 @@ async function main(): Promise<void> {
   // user as `system` instead of `admin`, and Electron users can rename it via
   // Settings. Always read it from the backend rather than assuming a value.
   try {
-    const statusRes = await fetch(`http://127.0.0.1:${handle.backendPort}/api/auth/status`);
+    const statusRes = await fetchStudioBackend(`http://127.0.0.1:${handle.backendPort}/api/auth/status`);
     if (statusRes.ok) {
       const status = (await statusRes.json()) as { needs_setup?: boolean };
       if (status.needs_setup === true) {
-        const resetRes = await fetch(`http://127.0.0.1:${handle.backendPort}/api/webui/reset-password`, {
+        const resetRes = await fetchStudioBackend(`http://127.0.0.1:${handle.backendPort}/api/webui/reset-password`, {
           method: 'POST',
         });
         if (resetRes.ok) {
@@ -275,7 +275,7 @@ async function main(): Promise<void> {
         const adminUsername = await fetchAdminUsername(handle.backendPort);
         console.log('');
         console.log(`Login username: ${adminUsername}`);
-        console.log('(forgot the password? run `bun run resetpass` to generate a new one)');
+        console.log('(forgot the password? stop WebUI, then run `bun run resetpass`)');
       }
     }
   } catch (err) {

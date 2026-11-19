@@ -106,6 +106,7 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
     }
   }
   headers.host = '127.0.0.1:' + backendPort;
+  if (req.headers.origin) headers.origin = 'http://' + headers.host;
   const options: http.RequestOptions = {
     hostname: '127.0.0.1',
     port: backendPort,
@@ -225,7 +226,8 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       // /api/* — reverse proxy to backend (includes /api/auth/*).
       // /login and /logout are aionui-auth's top-level auth endpoints: proxy them too
       // so WebUI browser clients reach the backend without a path-rewrite.
-      if (req.url.startsWith('/api/') || req.url.startsWith('/api?') || req.url === '/login' || req.url === '/logout') {
+      const pathname = req.url.split('?', 1)[0];
+      if (pathname.startsWith('/api/') || ['/login', '/logout', '/qr-login', '/api'].includes(pathname)) {
         forwardToBackend(req, res, opts.backendPort);
         return;
       }
@@ -317,7 +319,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin);
   const localUrl = `http://127.0.0.1:${actualPort}`;
 
-  return {
+  const handle: StaticServerHandle = {
     port: actualPort,
     localUrl,
     get url() {
@@ -339,6 +341,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         });
       }),
   };
+  return handle;
 }
 
 export async function stopStaticServer(handle: StaticServerHandle): Promise<void> {

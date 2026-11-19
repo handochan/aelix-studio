@@ -1,5 +1,6 @@
-import { startWebHost, startStaticServer } from '@aionui/web-host';
+import { fetchStudioBackend, startWebHost, startStaticServer } from '@aionui/web-host';
 import type { WebHostHandle, StaticServerHandle } from '@aionui/web-host';
+import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -232,7 +233,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     await ensureAdminPassword(
       { backendPort: handle.backendPort, resetCommand: RESET_COMMAND },
       {
-        fetch: (...args) => fetch(...args),
+        fetch: fetchStudioBackend,
         log: (msg) => console.log(msg),
         warn: (msg) => console.warn(msg),
         sleep: (ms) => delay(ms),
@@ -269,98 +270,14 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
   process.on('SIGTERM', () => void shutdown('SIGTERM'));
 }
 
-/**
- * `aionui-web resetpass` — spin up the backend just long enough to POST
- * /api/webui/reset-password, print the new plaintext password, then tear down.
- * Uses the same data-dir resolution as `start`, so the reset targets whichever
- * DB the user normally runs against.
- */
-async function runResetPassword(flags: Map<string, string | true>): Promise<void> {
+/** Change the standalone operator's password with the host stopped. */
+function runResetPassword(flags: Map<string, string | true>): void {
   const backendBin = resolveBackendBinary(flags);
-  if (!fs.existsSync(backendBin)) {
-    console.error(`[aionui-web] backend binary not found: ${backendBin}`);
-    console.error('  hint: pass --backend-bin <path> or set AIONUI_BACKEND_BIN');
-    process.exit(1);
-  }
-  const dataDir = resolveDataDir(flags);
-  fs.mkdirSync(dataDir, { recursive: true });
-  const logDir = resolveLogDir(flags, dataDir);
-  fs.mkdirSync(logDir, { recursive: true });
-  const staticDir = resolveStaticDir(flags);
-  const version = readPackageVersion();
-
-  console.log(`[aionui-web] resetting admin password in ${dataDir}`);
-
-  const handle = await startWebHost({
-    app: {
-      version,
-      isPackaged: true,
-      resourcesPath: cliRoot,
-      userDataPath: dataDir,
-    },
-    // resetpass only needs the backend up; serve static anyway so the web-host
-    // does not choke on a missing staticDir.
-    staticDir,
-    // Use an ephemeral port (0) so a concurrent running instance does not clash.
-    port: 0,
-    allowRemote: false,
-    dataDir,
-    logDir,
-    dirs: { cacheDir: dataDir, workDir: dataDir, logDir },
-    backend: { kind: 'ownBackend', resolveBackend: () => backendBin },
-  });
-  currentHandle = handle;
-
-  try {
-    // Wait for backend to finish migrating + seeding before we hit the endpoint.
-    const deadline = Date.now() + 15_000;
-    let ready = false;
-    while (Date.now() < deadline) {
-      try {
-        const res = await fetch(`http://127.0.0.1:${handle.backendPort}/api/auth/status`);
-        if (res.ok) {
-          ready = true;
-          break;
-        }
-      } catch {
-        /* backend still booting */
-      }
-      await delay(500);
-    }
-    if (!ready) {
-      console.error('[aionui-web] backend did not become ready within 15s');
-      process.exit(1);
-    }
-
-    const res = await fetch(`http://127.0.0.1:${handle.backendPort}/api/webui/reset-password`, {
-      method: 'POST',
-    });
-    if (!res.ok) {
-      console.error(`[aionui-web] /api/webui/reset-password returned ${res.status}`);
-      process.exit(1);
-    }
-    const payload = (await res.json()) as {
-      data?: { new_password?: string; username?: string };
-      new_password?: string;
-      username?: string;
-    };
-    const newPassword = payload.data?.new_password ?? payload.new_password;
-    const username = payload.data?.username ?? payload.username ?? 'admin';
-    if (!newPassword) {
-      console.error('[aionui-web] reset-password response missing new_password');
-      process.exit(1);
-    }
-    console.log(`[aionui-web] username: ${username}`);
-    console.log(`[aionui-web] new password: ${newPassword}`);
-    console.log('[aionui-web] existing sessions have been invalidated.');
-  } finally {
-    try {
-      await handle.stop();
-    } catch {
-      /* best-effort shutdown */
-    }
-    currentHandle = null;
-  }
+  const args = ['--data-dir', resolveDataDir(flags), 'user', 'set-password', '--require-stopped'];
+  if (flags.has('password-stdin')) args.push('--password-stdin');
+  const result = spawnSync(backendBin, args, { stdio: 'inherit' });
+  if (result.error) console.error(`[aionui-web] could not run the host account manager: ${result.error.message}`);
+  process.exitCode = result.status ?? 1;
 }
 
 async function main(): Promise<void> {
@@ -376,7 +293,7 @@ async function main(): Promise<void> {
 
 Commands:
   start              Start the WebUI (default)
-  resetpass          Reset the admin password and print the new one
+  resetpass          Reset the admin password after stopping WebUI
   version            Print version
   help               Show this help
 
@@ -392,6 +309,7 @@ Options for start:
 
 Options for resetpass:
   --data-dir <path>       Which data dir to reset (default: ~/.aionui-web)
+  --password-stdin        Read the new password from stdin
   --backend-bin <path>    Override backend binary path
 
 Environment variables:
@@ -402,7 +320,7 @@ Environment variables:
   }
 
   if (command === 'resetpass') {
-    await runResetPassword(flags);
+    runResetPassword(flags);
     return;
   }
 

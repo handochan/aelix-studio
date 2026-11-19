@@ -659,17 +659,21 @@ aionui --resetpass username
 3. You will be redirected to the login page
 4. Login with the new password shown in the terminal
 
-### Development Environment Only
+### Standalone WebUI
 
-If you're in a development environment with Node.js, you can also use:
+Stop the standalone WebUI before resetting its password. Use the same data
+directory you passed to the WebUI. The host checks that no server owns this
+directory before reading or changing the password.
 
 ```bash
-# In the project directory
-npm run resetpass
-
-# Or for a specific user
-npm run resetpass -- username
+aionui-web resetpass --data-dir /path/to/webui-data
+bun run resetpass --data-dir /path/to/webui-data
 ```
+
+The command uses the host's local account manager. Running it while WebUI
+owns the data directory fails with an instruction to stop WebUI. Start
+WebUI again after changing the password and sign in with the new one. The
+reset revokes the previous WebUI sessions.
 
 ---
 
