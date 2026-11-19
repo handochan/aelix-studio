@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
+import { STATE_DIRECTORY, STATE_ENVIRONMENT } from '../../packages/web-host/src/studio-extensions/store/layout.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
 import { boundedWait, closeElectron } from './host-release/verification.mjs';
 
@@ -176,7 +177,17 @@ try {
   await expect(native.getByRole('button', { name: strings.startConversation, exact: true })).toBeEnabled({
     timeout: 15000,
   });
+  const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
+  const expectedExtensionState = path.join(userDataPath, STATE_DIRECTORY);
+  const registration = page.waitForRequest(
+    (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/agents/custom'
+  );
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+  assert.equal(
+    (await registration).postDataJSON().env?.find(({ name }) => name === STATE_ENVIRONMENT)?.value,
+    expectedExtensionState,
+    'The managed command must send the original Studio data path to the host as an environment value'
+  );
   let input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
   await input.fill('Check rejected credentials');
@@ -338,6 +349,7 @@ try {
   webui = await startStaticServer({
     staticDir: path.resolve('out/renderer'),
     backendPort: port,
+    userDataPath,
     port: 0,
     allowRemote: true,
   });
@@ -364,6 +376,17 @@ try {
   assert.equal(status.status, 200);
   const nativeStatus = await status.json();
   assert.equal(nativeStatus.ok, true);
+  const selected = await fetch(route, {
+    method: 'POST',
+    headers: { ...headers, cookie },
+    body: JSON.stringify({ action: 'select', provider: 'fixture', model: 'fixture-model' }),
+  });
+  const selectedLaunch = await selected.json();
+  assert.equal(
+    selectedLaunch.data?.env?.find(({ name }) => name === STATE_ENVIRONMENT)?.value,
+    expectedExtensionState,
+    'The WebUI must use the same Studio data path as the desktop'
+  );
   const stored = await fetch(route, {
     method: 'POST',
     headers: { ...headers, cookie },

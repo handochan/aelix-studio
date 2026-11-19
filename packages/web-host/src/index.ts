@@ -77,6 +77,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
     staticHandle = await startStaticServer({
       staticDir: opts.staticDir,
       backendPort: backendHandle.port,
+      userDataPath: opts.app.userDataPath,
       port: opts.port,
       allowRemote: opts.allowRemote ?? false,
     });

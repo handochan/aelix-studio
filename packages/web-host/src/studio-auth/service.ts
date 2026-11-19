@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { STATE_DIRECTORY, STATE_ENVIRONMENT } from '../studio-extensions/store/layout.js';
 import { NATIVE_AUTH_HELPER } from './helperSource.js';
 import { resolveNativeRuntime, type NativeRuntime } from './runtime.js';
 import type { NativeAuthCommand, NativeAuthData, NativeAuthOperation, NativeAuthReply } from './types.js';
@@ -60,7 +61,7 @@ export class NativeAuthService {
   }
 
   /** Returns only safe error codes; request bodies/native exception text must not be logged. */
-  async request(owner: string, input: unknown): Promise<NativeAuthReply> {
+  async request(owner: string, input: unknown, userDataPath?: string): Promise<NativeAuthReply> {
     try {
       if (!input || typeof input !== 'object' || Array.isArray(input) || JSON.stringify(input).length > 60000)
         return fail('INVALID_INPUT');
@@ -96,6 +97,11 @@ export class NativeAuthService {
       try {
         const reply = await this.run(runtime, command);
         if (command.action === 'select' && reply.ok && 'root' in reply.data) {
+          const env = [{ name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root }];
+          if (userDataPath) {
+            // The host applies the command environment after the login shell environment.
+            env.push({ name: STATE_ENVIRONMENT, value: path.resolve(userDataPath, STATE_DIRECTORY) });
+          }
           return {
             ok: true,
             data: {
@@ -108,7 +114,7 @@ export class NativeAuthService {
                 `--provider=${command.provider}`,
                 `--model=${command.model}`,
               ],
-              env: [{ name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root }],
+              env,
             },
           };
         }
