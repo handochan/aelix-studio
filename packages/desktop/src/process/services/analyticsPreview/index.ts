@@ -18,6 +18,7 @@ import {
   isGeneratedReportBody,
   isReportViewPath,
   originalReportScope,
+  type AnalyticsPreviewMode,
   type AnalyticsPreviewRequest,
   type AnalyticsPreviewScope,
 } from '@/common/utils/analyticsPreview';
@@ -192,8 +193,9 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
   const { projectId, file } = request;
   const key = rootKeyFor(projectId, file.pe_id);
   const generation = attachmentGenerations.get(key);
+  if (!isAnalyticsDocument(file.relative_path)) return;
   const requested = analyticsPathSegments(file.relative_path);
-  if (!requested || !isAnalyticsDocument(file.relative_path)) return;
+  if (!requested) return 'source-only' as const;
   const displayPath = await attachedFolder(projectId, file.pe_id);
   if (!displayPath) {
     throw new Error('Explorer root unavailable');
@@ -202,12 +204,14 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
   const filename = path.join(explorerRoot, ...requested);
   const canonical = await realpath(filename);
   const location = await locateAnalyticsDocument(filename);
-  if (canonical !== filename && (location || (await locateAnalyticsDocument(canonical)))) {
-    throw new Error('Analytics preview cannot follow links');
+  if (canonical !== filename) {
+    if (typeof location === 'object') throw new Error('Analytics preview cannot follow links');
+    const canonicalLocation = await locateAnalyticsDocument(canonical);
+    if (typeof canonicalLocation === 'object') throw new Error('Analytics preview cannot follow links');
+    if (canonicalLocation === 'source-only') return canonicalLocation;
   }
-  if (!location) {
-    return;
-  }
+  if (location === 'source-only') return location;
+  if (!location) return;
   const { root, scope, parts } = location;
   if (scope.kind === 'workspace' && isReportViewPath(parts) && !isGeneratedReportBody(parts)) {
     throw new Error('Open the original Report revision for this attachment');
@@ -343,16 +347,22 @@ export function registerAnalyticsPreviewWindow(contents: WebContents, rendererUr
     release(preview);
   };
 
-  contents.ipc.handle(ANALYTICS_PREVIEW_CHANNELS.matches, async (event, value: unknown) => {
-    const request = trusted(event) && validateRequest(value);
-    return Boolean(request && (await resolveEntry(request)));
-  });
+  contents.ipc.handle(
+    ANALYTICS_PREVIEW_CHANNELS.classify,
+    async (event, value: unknown): Promise<AnalyticsPreviewMode> => {
+      const request = trusted(event) && validateRequest(value);
+      if (!request) throw new Error('Analytics preview classification refused');
+      const entry = await resolveEntry(request);
+      if (entry === 'source-only') return entry;
+      return entry ? 'isolated' : 'ordinary';
+    }
+  );
   contents.ipc.handle(ANALYTICS_PREVIEW_CHANNELS.open, async (event, value: unknown) => {
     const request = trusted(event) && validateRequest(value);
     if (!request) return null;
     const startingGeneration = generation;
     const entry = await resolveEntry(request);
-    if (!entry) return null;
+    if (!entry || entry === 'source-only') return null;
     const files =
       entry.scope.kind === 'report' ? await savedRevisionFiles(entry.root, entry.scope.revision) : undefined;
     const grant = { ...entry, files };

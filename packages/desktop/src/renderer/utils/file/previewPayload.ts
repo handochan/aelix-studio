@@ -7,6 +7,7 @@
 import { ipcBridge } from '@/common';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { PreviewContentType } from '@/common/types/office/preview';
+import { isAnalyticsDocument } from '@/common/utils/analyticsPreview';
 import { getClientBusinessSetting } from '@/renderer/services/clientBusinessSettings';
 
 /**
@@ -257,3 +258,59 @@ export const upgradeFileRef = async (fileRef: ChatFileRef, projectId: string | n
     return fileRef;
   }
 };
+
+type AnalyticsDocumentPayload = {
+  content: string;
+  contentType: 'html' | 'code';
+  metadata: {
+    editable: false;
+    analyticsProjectId?: string;
+    sourceOnly?: true;
+    oversized?: boolean;
+    sizeBytes?: number;
+    thresholdBytes?: number;
+  };
+};
+
+/** Route desktop HTML and SVG before a file opener can mount executable content. */
+export async function resolveAnalyticsFilePreview({
+  projectId,
+  fileRef,
+  name,
+  contentType,
+  fallbackContent,
+}: {
+  projectId?: string | null;
+  fileRef?: ChatFileRef;
+  name?: string;
+  contentType: PreviewContentType;
+  fallbackContent?: string;
+}): Promise<AnalyticsDocumentPayload | undefined> {
+  const bridge = window.electronAPI?.analyticsPreview;
+  const filename = fileRef?.kind === 'project' ? fileRef.relative_path : fileRef?.path;
+  const needsClassification =
+    contentType === 'html' ||
+    (contentType === 'image' && (isAnalyticsDocument(filename ?? '') || isAnalyticsDocument(name ?? '')));
+  if (!bridge || !needsClassification) {
+    return;
+  }
+  if (projectId && fileRef?.kind === 'project' && isAnalyticsDocument(fileRef.relative_path)) {
+    const mode = await bridge.classify({ projectId, file: fileRef });
+    if (mode === 'isolated') {
+      return { content: '', contentType: 'html', metadata: { editable: false, analyticsProjectId: projectId } };
+    }
+    if (mode === 'ordinary' && (contentType !== 'html' || /\.html?$/i.test(fileRef.relative_path))) return;
+  }
+  const source = fileRef ? await resolvePreviewPayload(fileRef, 'code') : undefined;
+  return {
+    content: source?.content ?? fallbackContent ?? '',
+    contentType: 'code',
+    metadata: {
+      editable: false,
+      sourceOnly: true,
+      oversized: source?.oversized,
+      sizeBytes: source?.sizeBytes,
+      thresholdBytes: source?.thresholdBytes,
+    },
+  };
+}

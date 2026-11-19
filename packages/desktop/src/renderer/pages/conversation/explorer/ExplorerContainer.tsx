@@ -39,8 +39,7 @@ import { emitter } from '@/renderer/utils/emitter';
 import { projectFileRef } from '@/common/types/chatFile';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { FileOrFolderItem } from '@/renderer/utils/file/fileTypes';
-import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
-import { isAnalyticsDocument } from '@/common/utils/analyticsPreview';
+import { resolveAnalyticsFilePreview, resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
 
 import { ExplorerPanel } from './ExplorerPanel';
 import {
@@ -124,6 +123,7 @@ export type ExplorerPreviewPayload = {
     thresholdBytes?: number;
     lastModified?: number;
     analyticsProjectId?: string;
+    sourceOnly?: boolean;
   };
 };
 
@@ -140,24 +140,12 @@ export const buildExplorerPreviewPayload = async (
   const name = relativePath.split('/').pop() || relativePath;
   const { contentType, editable } = getFileTypeInfo(name);
   const fileRef = { kind: 'project', pe_id: peId, relative_path: relativePath } as const;
-  const analytics = window.electronAPI?.analyticsPreview;
-  if (
-    projectId &&
-    analytics &&
-    isAnalyticsDocument(relativePath) &&
-    (await analytics.matches({ projectId, file: fileRef }))
-  ) {
+  const metadata = { title: name, file_name: name, fileRef, language: name.split('.').pop() || '' };
+  const document = await resolveAnalyticsFilePreview({ projectId, fileRef, name, contentType });
+  if (document) {
     return {
-      content: '',
-      contentType: 'html',
-      metadata: {
-        title: name,
-        file_name: name,
-        fileRef,
-        language: 'html',
-        editable: false,
-        analyticsProjectId: projectId,
-      },
+      ...document,
+      metadata: { ...metadata, ...document.metadata },
     };
   }
 
@@ -167,10 +155,7 @@ export const buildExplorerPreviewPayload = async (
     content: payload.content,
     contentType,
     metadata: {
-      title: name,
-      file_name: name,
-      fileRef,
-      language: name.split('.').pop() || '',
+      ...metadata,
       // Taken from the type table, then tightened — never decided here.
       //
       // This entry point used to compute editability itself, which made it a second

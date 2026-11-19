@@ -198,10 +198,7 @@ test('ordinary HTML and SVG open below folders named workspace and reports', asy
   const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-ordinary-preview-'));
   const directory = path.join(parent, 'workspace', 'reports', 'quarterly', 'site');
   fs.mkdirSync(directory, { recursive: true });
-  fs.writeFileSync(
-    path.join(parent, 'journal.jsonl'),
-    ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
-  );
+  fs.writeFileSync(path.join(parent, 'journal.jsonl'), '{"schema":"other.event/1","text":"Unrelated journal"}\n');
   fs.writeFileSync(path.join(directory, 'index.html'), '<h1>Ordinary HTML</h1>');
   fs.writeFileSync(
     path.join(directory, 'logo.svg'),
@@ -218,6 +215,48 @@ test('ordinary HTML and SVG open below folders named workspace and reports', asy
     await expect(panel.getByTestId('analytics-preview')).toHaveCount(0);
     await tree.getByText('logo.svg', { exact: true }).click();
     await expect(panel.getByRole('img', { name: 'logo.svg' })).toBeVisible();
+  } finally {
+    if (conversation) await deleteConversation(page, conversation);
+    fs.rmSync(parent, { recursive: true, force: true });
+  }
+});
+
+test('unclassified HTML and SVG show inert source with no guest grant', async ({ page }) => {
+  test.setTimeout(120_000);
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-inert-source-'));
+  const content = path.join(parent, 'artifacts', 'reports', 'monthly', 'build', 'content');
+  fs.mkdirSync(content, { recursive: true });
+  fs.writeFileSync(
+    path.join(parent, 'journal.jsonl'),
+    ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
+  );
+  const documents = {
+    'index.html': '<h1>Report</h1><script>document.title = "executed";</script><a href="about:blank">Link</a>',
+    'chart.svg': '<svg xmlns="http://www.w3.org/2000/svg"><script>document.title = "executed";</script></svg>',
+  };
+  for (const [name, source] of Object.entries(documents)) fs.writeFileSync(path.join(content, name), source);
+  let conversation: string | undefined;
+  try {
+    await goToGuid(page);
+    conversation = await createProjectConversation(page, content);
+    const panel = page.locator(PREVIEW_PANEL);
+    const source = panel.getByTestId('preview-inert-source');
+    for (const [name, markup] of Object.entries(documents)) {
+      await page.locator('.workspace-tree').first().getByText(name, { exact: true }).click();
+      await expect(source).toHaveText(markup);
+      await expect(source.locator('script, svg, a, img')).toHaveCount(0);
+      await expect(panel.locator('webview, iframe')).toHaveCount(0);
+    }
+    const opened = await page.evaluate(async (id) => {
+      const base = `http://127.0.0.1:${(window as BackendWindow).__backendPort}`;
+      const { data: conversation } = await (await fetch(`${base}/api/conversations/${id}`)).json();
+      const { data: project } = await (await fetch(`${base}/api/projects/${conversation.project_id}`)).json();
+      return window.electronAPI!.analyticsPreview!.open({
+        projectId: project.project_id,
+        file: { kind: 'project', pe_id: project.explorer.workspace_pe_id, relative_path: 'index.html' },
+      });
+    }, conversation);
+    expect(opened).toBeNull();
   } finally {
     if (conversation) await deleteConversation(page, conversation);
     fs.rmSync(parent, { recursive: true, force: true });
@@ -461,7 +500,7 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
       async ({ projectId, peId }) => {
         const bridge = window.electronAPI!.analyticsPreview!;
         const file = { kind: 'project' as const, pe_id: peId, relative_path: 'index.html' };
-        const recognized = await bridge.matches({ projectId, file });
+        const recognized = await bridge.classify({ projectId, file });
         const opened = await bridge.open({ projectId, file });
         if (!opened) throw new Error('The nested Report failed to open');
         const guest = document.createElement('webview');
@@ -473,7 +512,7 @@ test('Analytics Workspace preserves relative assets, navigation, and Report isol
       },
       { projectId, peId }
     );
-    expect(match).toBe(true);
+    expect(match).toBe('isolated');
     await expect.poll(() => guest('document.querySelector("h1")?.textContent')).toBe('Original Report');
     await page.evaluate(({ projectId, peId }) => window.electronAPI!.analyticsPreview!.detach(projectId, peId), {
       projectId,
@@ -532,7 +571,7 @@ test('opens 0.32.1 kit-generated HTML and SVG original links in isolated revisio
         const { data: conversation } = await (await fetch(`${base}/api/conversations/${id}`)).json();
         const { data: project } = await (await fetch(`${base}/api/projects/${conversation.project_id}`)).json();
         return window
-          .electronAPI!.analyticsPreview!.matches({
+          .electronAPI!.analyticsPreview!.classify({
             projectId: project.project_id,
             file: { kind: 'project', pe_id: project.explorer.workspace_pe_id, relative_path: copy },
           })

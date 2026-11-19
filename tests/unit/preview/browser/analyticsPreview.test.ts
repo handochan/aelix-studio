@@ -59,7 +59,9 @@ beforeEach(async () => {
   await write(['analytics.json'], '{"schema":"analytics.project/2"}');
   const workspaceScope = analyticsPreviewScope([...workspace, 'index.html'].join('/'))!;
   const reportScope = analyticsPreviewScope([...revision, 'index.html'].join('/'))!;
-  const root = (await locateAnalyticsDocument(path.join(rootDirectory, 'workspace/index.html')))!.root;
+  const location = await locateAnalyticsDocument(path.join(rootDirectory, 'workspace/index.html'));
+  if (!location || location === 'source-only') throw new Error('Expected an Analytics Workspace');
+  const root = location.root;
   const saved = manifest({ 'index.html': '<h1>Monthly</h1>', 'script.js': 'void 0', 'link/script.js': 'void 0' });
   await write([...revision.slice(0, -1), 'manifest.json'], saved);
   completionLine =
@@ -276,7 +278,7 @@ describe('Analytics preview resource routing', () => {
 
   it('requires the marker for an Analytics document even with an attached subfolder', async () => {
     const filename = await write([...revision, 'index.html'], '<h1>Monthly</h1>');
-    expect((await locateAnalyticsDocument(filename))?.scope.kind).toBe('report');
+    expect(await locateAnalyticsDocument(filename)).toMatchObject({ scope: { kind: 'report' } });
     await rm(path.join(rootDirectory, 'analytics.json'));
     await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
     await write(['analytics.json'], '{"schema":"ordinary.project/1"}');
@@ -369,11 +371,13 @@ describe('Analytics preview resource routing', () => {
     await writeFile(path.join(nested, 'analytics.json'), '{"schema":"analytics.project/2"}');
     await writeFile(filename, '<h1>Workspace</h1>');
     const result = await locateAnalyticsDocument(filename);
-    expect(result?.root.directory).toContain(path.join('workspace', 'demo'));
-    expect(result?.parts).toEqual(['workspace', 'index.html']);
+    expect(result).toMatchObject({
+      root: { directory: expect.stringContaining(path.join('workspace', 'demo')) },
+      parts: ['workspace', 'index.html'],
+    });
   });
 
-  it('falls back for ordinary HTML and SVG without decoding the tail of a large ancestor journal', async () => {
+  it('offers inert source for HTML and SVG without decoding the tail of a large ancestor journal', async () => {
     const dir = path.join(scratch, 'workspace', 'reports', 'quarterly', 'site');
     await mkdir(dir, { recursive: true });
     await writeFile(
@@ -384,8 +388,32 @@ describe('Analytics preview resource routing', () => {
     for (const name of ['index.html', 'logo.svg']) {
       const filename = path.join(dir, name);
       await writeFile(filename, 'ordinary fixture');
-      expect(await locateAnalyticsDocument(filename)).toBeUndefined();
+      expect(await locateAnalyticsDocument(filename)).toBe('source-only');
     }
+  });
+
+  it('keeps source inert when the inspected journal contains a damaged record', async () => {
+    const dir = path.join(scratch, 'workspace');
+    await mkdir(dir, { recursive: true });
+    const filename = path.join(dir, 'index.html');
+    await writeFile(filename, '<h1>Fixture</h1>');
+    await writeFile(path.join(scratch, 'journal.jsonl'), '{"schema":"analytics.event/');
+    expect(await locateAnalyticsDocument(filename)).toBe('source-only');
+  });
+
+  it('does not inherit active preview from an outer Workspace when a nested Workspace is unresolved', async () => {
+    const nested = ['workspace', 'nested'];
+    const filename = await write([...nested, 'workspace', 'index.html'], '<h1>Nested</h1>');
+    await write(
+      [...nested, 'journal.jsonl'],
+      ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
+    );
+    expect(await locateAnalyticsDocument(filename)).toBe('source-only');
+    await write([...nested, 'analytics.json'], '{"schema":"analytics.project/2"}');
+    expect(await locateAnalyticsDocument(filename)).toMatchObject({
+      parts: ['workspace', 'index.html'],
+      root: { directory: expect.stringContaining(path.join(...nested)) },
+    });
   });
 
   it.each([
@@ -393,7 +421,7 @@ describe('Analytics preview resource routing', () => {
     ['artifacts', 'reports', 'monthly', 'revision-a', 'content', 'index.html'],
     ['workspace', 'reports', 'monthly-stem', 'revision-a', 'files', 'attachment.html'],
     ['workspace', 'reports', 'monthly-stem', 'revision-a', 'preview', 'report.html'],
-  ])('refuses an unresolved Report content path under %j', async (...parts) => {
+  ])('offers inert source at unresolved Report content paths under %j', async (...parts) => {
     const directory = await mkdtemp(path.join(scratch, 'unresolved-'));
     const filename = path.join(directory, ...parts);
     await mkdir(path.dirname(filename), { recursive: true });
@@ -402,10 +430,10 @@ describe('Analytics preview resource routing', () => {
       path.join(directory, 'journal.jsonl'),
       ('{"schema":"other.event/1","text":"' + 'a'.repeat(1024) + '"}\n').repeat(512)
     );
-    await expect(locateAnalyticsDocument(filename)).rejects.toThrow('Analytics project marker is unavailable');
+    expect(await locateAnalyticsDocument(filename)).toBe('source-only');
   });
 
-  it('admits two probes without queuing ordinary previews or allowing prepared Reports to fall back', async () => {
+  it('keeps both Workspace and Report paths inert when the journal probes are saturated', async () => {
     const plain = await Promise.all(
       ['left', 'right', 'other'].map(async (name) => {
         const dir = path.join(scratch, name, 'workspace');
@@ -418,8 +446,9 @@ describe('Analytics preview resource routing', () => {
     const staged = ['artifacts', 'reports', 'monthly', '.staging', 'revision-a'];
     const prepared = await write([...staged, 'content', 'index.html'], '<h1>Prepared</h1>');
     const confirmed = await write([...staged, 'content', 'confirmed.html'], '<h1>Prepared</h1>');
+    const workspacePage = await write([...workspace, 'index.html'], '<h1>Markerless Workspace</h1>');
     await rm(path.join(rootDirectory, 'analytics.json'));
-    const journal = await write(['journal.jsonl'], '{"schema":"unrelated"}\n');
+    const journal = path.join(rootDirectory, 'journal.jsonl');
 
     type Read = (
       this: FileHandle,
@@ -450,8 +479,9 @@ describe('Analytics preview resource routing', () => {
     const firstTwo = Promise.all(plain.slice(0, 2).map(locateAnalyticsDocument));
     let finished = false;
     const probeRest = async () => {
-      expect(await locateAnalyticsDocument(plain[2])).toBeUndefined();
-      await expect(locateAnalyticsDocument(prepared)).rejects.toThrow('Analytics project marker is unavailable');
+      expect(await locateAnalyticsDocument(plain[2])).toBe('source-only');
+      expect(await locateAnalyticsDocument(workspacePage)).toBe('source-only');
+      expect(await locateAnalyticsDocument(prepared)).toBe('source-only');
       await write([...staged, 'manifest.json'], manifest({ 'confirmed.html': '<h1>Prepared</h1>' }));
       await expect(locateAnalyticsDocument(confirmed)).rejects.toThrow('Analytics project marker is unavailable');
       finished = true;
@@ -468,5 +498,7 @@ describe('Analytics preview resource routing', () => {
       await Promise.allSettled([firstTwo, rest]);
       spy.mockRestore();
     }
+    await expect(locateAnalyticsDocument(workspacePage)).rejects.toThrow('Analytics project marker is unavailable');
+    expect(await locateAnalyticsDocument(plain[2])).toBeUndefined();
   });
 });

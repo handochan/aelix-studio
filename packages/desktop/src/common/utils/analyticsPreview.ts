@@ -11,16 +11,17 @@ export type AnalyticsPreviewRequest = {
 };
 
 export type AnalyticsPreviewHandle = { url: string; partition: string };
+export type AnalyticsPreviewMode = 'ordinary' | 'isolated' | 'source-only';
 
 export const ANALYTICS_PREVIEW_CHANNELS = {
-  matches: 'studio:analytics-preview:matches',
+  classify: 'studio:analytics-preview:classify',
   open: 'studio:analytics-preview:open',
   close: 'studio:analytics-preview:close',
   detach: 'studio:analytics-preview:detach',
 } as const;
 
 export type AnalyticsPreviewAPI = {
-  matches: (request: AnalyticsPreviewRequest) => Promise<boolean>;
+  classify: (request: AnalyticsPreviewRequest) => Promise<AnalyticsPreviewMode>;
   open: (request: AnalyticsPreviewRequest) => Promise<AnalyticsPreviewHandle | null>;
   close: (url: string) => Promise<void>;
   detach: (projectId: string, peId: string) => Promise<void>;

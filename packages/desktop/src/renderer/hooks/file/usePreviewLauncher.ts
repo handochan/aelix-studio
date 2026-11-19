@@ -9,7 +9,11 @@ import { localFileRef } from '@/common/types/chatFile';
 import type { PreviewContentType } from '@/common/types/office/preview';
 import { useConversationContextSafe } from '@/renderer/hooks/context/ConversationContext';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
-import { resolvePreviewPayload, upgradeFileRef } from '@/renderer/utils/file/previewPayload';
+import {
+  resolveAnalyticsFilePreview,
+  resolvePreviewPayload,
+  upgradeFileRef,
+} from '@/renderer/utils/file/previewPayload';
 import { getCurrentProject } from '@/renderer/pages/conversation/explorer/currentProjectStore';
 import { classifyPreviewError, type PreviewErrorKind } from '@/renderer/utils/previewError';
 import { useCallback, useState } from 'react';
@@ -85,7 +89,8 @@ export const usePreviewLauncher = () => {
       // Upgraded to a project identity where possible, so a file opened from a tool
       // card and the same file opened from the explorer are one tab, and this one can
       // receive change signals too.
-      const fileRef = readPath ? await upgradeFileRef(localFileRef(readPath), getCurrentProject()) : undefined;
+      const projectId = getCurrentProject();
+      const fileRef = readPath ? await upgradeFileRef(localFileRef(readPath), projectId) : undefined;
 
       // 文件名和标题计算 / Compute file name and title
       const computedFileName =
@@ -102,17 +107,28 @@ export const usePreviewLauncher = () => {
         language,
       };
 
-      // 1. 乐观预览：如果有回退内容（如 Diff 中提取的内容），立即显示 / Optimistic preview: Show fallback content immediately if available
-      let hasOpened = false;
-      if (typeof fallbackContent === 'string') {
-        openPreview(fallbackContent, contentType, {
-          ...metadata,
-          editable,
-        });
-        hasOpened = true;
-      }
-
       try {
+        const document = await resolveAnalyticsFilePreview({
+          projectId,
+          fileRef,
+          name: computedFileName || resolvedPath,
+          contentType,
+          fallbackContent: fallbackContent ?? diffContent,
+        });
+        if (document) {
+          openPreview(document.content, document.contentType, {
+            ...metadata,
+            file_path: undefined,
+            workspace: undefined,
+            ...document.metadata,
+          });
+          return;
+        }
+
+        // Only ordinary files can use the optimistic content path.
+        const hasOpened = typeof fallbackContent === 'string';
+        if (hasOpened) openPreview(fallbackContent, contentType, { ...metadata, editable });
+
         // 2. 尝试读取实际文件内容（覆盖乐观预览） / Try to read actual file content (override optimistic preview)
         if (fileRef) {
           try {

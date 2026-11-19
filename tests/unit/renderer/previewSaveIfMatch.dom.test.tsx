@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const h = vi.hoisted(() => ({
   writeContent: vi.fn(),
   getContentMetadata: vi.fn(),
+  readContent: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -37,7 +38,7 @@ vi.mock('@/common', () => ({
       getFileMetadata: { invoke: async () => null },
       readFile: { invoke: async () => null },
       getImageBase64: { invoke: async () => null },
-      readContent: { invoke: async () => null },
+      readContent: { invoke: h.readContent },
     },
   },
 }));
@@ -100,6 +101,7 @@ const editAndSave = async (text = 'edited body'): Promise<boolean> => {
 beforeEach(() => {
   localStorage.clear();
   h.writeContent.mockReset().mockResolvedValue(true);
+  h.readContent.mockReset().mockResolvedValue(null);
   // Post-save mtime refresh (a separate, pre-existing fill point).
   h.getContentMetadata.mockReset().mockResolvedValue({
     name: 'a.md',
@@ -205,5 +207,35 @@ describe('save carries the If-Match taken when the tab opened', () => {
 
     expect(h.writeContent).toHaveBeenCalledTimes(1);
     expect(lastIfMatch()).toBeUndefined();
+  });
+
+  it('does not put a pending source-only refresh into a replacement HTML tab', async () => {
+    mount();
+    act(() => ctx.openPreview('<h1>Source</h1>', 'code', { fileRef, sourceOnly: true, editable: false }));
+    const tabId = ctx.activeTabId!;
+    h.getContentMetadata.mockResolvedValue({ size: 32, lastModified: OPEN_MTIME + 1 });
+    let finish!: (content: string) => void;
+    h.readContent.mockReturnValue(
+      new Promise<string>((resolve) => {
+        finish = resolve;
+      })
+    );
+
+    const pending = ctx.reloadTabContent(tabId);
+    await vi.waitFor(() => expect(h.readContent).toHaveBeenCalled());
+    act(() =>
+      ctx.openPreview(
+        '<h1>Ordinary</h1>',
+        'html',
+        { fileRef: { ...fileRef, relative_path: 'ordinary.html' } },
+        { replace: true }
+      )
+    );
+    expect(ctx.activeTabId).toBe(tabId);
+    await act(async () => {
+      finish('<script>document.title = "source";</script>');
+      await pending;
+    });
+    expect(ctx.activeTab?.content).toBe('<h1>Ordinary</h1>');
   });
 });

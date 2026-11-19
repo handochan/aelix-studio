@@ -170,6 +170,16 @@ describe('tab identity comes from the file ref', () => {
     expect(ctx.tabs).toHaveLength(2);
   });
 
+  it('keeps an inert source tab separate from an editable tab for the same file and refuses saves', async () => {
+    mount();
+    const fileRef = projectRef('workspace/index.html');
+    act(() => ctx.openPreview('<h1>Existing editor</h1>', 'code', { fileRef, editable: true }));
+    act(() => ctx.openPreview('<h1>Fresh source</h1>', 'code', { fileRef, editable: false, sourceOnly: true }));
+    expect(ctx.tabs).toHaveLength(2);
+    expect(ctx.activeTab?.content).toBe('<h1>Fresh source</h1>');
+    expect(await ctx.saveContent()).toBe(false);
+  });
+
   describe('ref-less tabs use an explicit namespace key', () => {
     it('reuses the tab for the same diagram', () => {
       mount();

@@ -130,10 +130,17 @@ export async function readPreviewFile(
   });
 }
 
-async function* journalLines(file: FileHandle, size: number, probeBytes?: number): AsyncGenerator<string> {
-  const strict = probeBytes === undefined;
-  const endOfScan = probeBytes ?? size;
+type JournalPrefix = { bytes: number; damaged: boolean };
+
+async function* journalLines(file: FileHandle, size: number, prefix?: JournalPrefix): AsyncGenerator<string> {
+  const strict = prefix === undefined;
+  const endOfScan = prefix?.bytes ?? size;
   const decoder = new TextDecoder('utf-8', { fatal: strict, ignoreBOM: true });
+  const decode = (bytes: Buffer) => {
+    const line = decoder.decode(bytes);
+    if (prefix && line.includes('\uFFFD')) prefix.damaged = true;
+    return line;
+  };
   const chunk = Buffer.alloc(JOURNAL_CHUNK_BYTES);
   let carry = Buffer.alloc(0);
   let discardLine = false;
@@ -145,20 +152,22 @@ async function* journalLines(file: FileHandle, size: number, probeBytes?: number
     let start = 0;
     for (let end = data.indexOf(10, start); end !== -1; end = data.indexOf(10, start)) {
       if (end - start > MAX_JOURNAL_LINE_BYTES) {
-        if (strict) throw new Error('Analytics journal record is too large');
+        if (!prefix) throw new Error('Analytics journal record is too large');
+        prefix.damaged = true;
       } else if (!discardLine) {
-        yield decoder.decode(data.subarray(start, end));
+        yield decode(data.subarray(start, end));
       }
       discardLine = false;
       start = end + 1;
     }
     if (data.length - start > MAX_JOURNAL_LINE_BYTES) {
-      if (strict) throw new Error('Analytics journal record is too large');
+      if (!prefix) throw new Error('Analytics journal record is too large');
+      prefix.damaged = true;
       discardLine = true;
     }
     carry = discardLine ? Buffer.alloc(0) : Buffer.from(data.subarray(start));
   }
-  if (carry.length && endOfScan === size) yield decoder.decode(carry);
+  if (carry.length && endOfScan === size) yield decode(carry);
 }
 
 /** Scan a single verified journal snapshot without imposing the asset size limit. */
@@ -186,7 +195,8 @@ async function probeAnalyticsJournal(root: PreviewRoot, budget: ProbeBudget): Pr
     const result = await withStableFile<JournalProbe>(root, ['journal.jsonl'], async (file, size) => {
       const bytes = Math.min(budget.remaining, size);
       budget.remaining -= bytes;
-      for await (const line of journalLines(file, size, bytes)) {
+      const prefix = { bytes, damaged: false };
+      for await (const line of journalLines(file, size, prefix)) {
         if (!line.trim()) continue;
         try {
           const entry: unknown = JSON.parse(line);
@@ -201,9 +211,10 @@ async function probeAnalyticsJournal(root: PreviewRoot, budget: ProbeBudget): Pr
           }
         } catch {
           // Recognition only denies fallback. Scan past damage within the prefix.
+          prefix.damaged = true;
         }
       }
-      return bytes === size ? 'no-evidence' : 'inconclusive';
+      return bytes === size && !prefix.damaged ? 'no-evidence' : 'inconclusive';
     });
     // Evidence can only deny ordinary rendering. A concurrent append does not erase it.
     if (recognized) return 'analytics';
@@ -277,12 +288,13 @@ async function hasReportRecord(root: PreviewRoot, parts: string[]): Promise<bool
   }
 }
 
-/** Apply Analytics document rules only inside an identified Analytics project. */
+/** Identify an Analytics document or require inert source when the evidence is incomplete. */
 export async function locateAnalyticsDocument(filename: string) {
   const volume = path.parse(filename).root;
   const segments = path.relative(volume, filename).split(path.sep);
   const budget = { remaining: JOURNAL_PROBE_BYTES };
   let workspace;
+  let needsSource = false;
   for (let index = 0; index < segments.length - 1; index++) {
     const parts = segments.slice(index);
     const report = originalReportScope(parts);
@@ -293,10 +305,15 @@ export async function locateAnalyticsDocument(filename: string) {
     const marker = await projectMarker(root);
     if (marker !== 'valid') {
       const journal = (await hasReportRecord(root, parts)) ? 'analytics' : await probeAnalyticsJournal(root, budget);
-      if (journal === 'analytics' || (journal === 'inconclusive' && isReportContentPath(parts))) {
+      if (journal === 'analytics') {
         throw new Error(
           marker === 'missing' ? 'Analytics project marker is unavailable' : 'Invalid Analytics project marker'
         );
+      }
+      if (journal === 'inconclusive') {
+        // A nested marker must not turn ambiguous Report content into executable Workspace HTML.
+        if (isReportContentPath(parts)) return 'source-only' as const;
+        needsSource = true;
       }
       continue;
     }
@@ -306,6 +323,7 @@ export async function locateAnalyticsDocument(filename: string) {
     const location = { root, scope, parts };
     if (isReportViewPath(parts)) return location;
     workspace = location;
+    needsSource = false;
   }
-  return workspace;
+  return needsSource ? ('source-only' as const) : workspace;
 }

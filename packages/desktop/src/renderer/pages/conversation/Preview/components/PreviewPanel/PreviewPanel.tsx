@@ -639,9 +639,10 @@ const PreviewPanel: React.FC = () => {
     metadata: undefined,
   };
   const isMarkdown = content_type === 'markdown';
-  const analyticsProjectId = metadata?.analyticsProjectId;
-  const isHTML = content_type === 'html' && !analyticsProjectId;
-  const isEditable = metadata?.editable !== false; // 默认可编辑 / Default editable
+  const sourceOnly = metadata?.sourceOnly === true;
+  const analyticsProjectId = sourceOnly ? undefined : metadata?.analyticsProjectId;
+  const isHTML = content_type === 'html' && !analyticsProjectId && !sourceOnly;
+  const isEditable = !sourceOnly && metadata?.editable !== false;
 
   // 「在系统中打开」：有 file_path 或有 fileRef 都能打开。
   // fileRef 分支是超限 / 不支持态的逃生出口 —— Explorer 打开的 tab 刻意不带
@@ -663,6 +664,7 @@ const PreviewPanel: React.FC = () => {
   );
 
   const showOpenInSystemButton =
+    !sourceOnly &&
     canOpenInSystem(Boolean(metadata?.file_path), metadata?.fileRef) &&
     shouldOfferOpenInSystem(content_type, Boolean(metadata?.oversized), FILE_TYPES_WITH_BUILTIN_OPEN);
 
@@ -787,6 +789,7 @@ const PreviewPanel: React.FC = () => {
 
   // 在系统默认应用中打开文件 / Open file in system default application
   const handleOpenInSystem = useCallback(async () => {
+    if (sourceOnly) return;
     // 只接受真正指向文件的 ref —— project ref 的空 relative_path 表示 pe root
     // 本身（一个目录），送去 shell 打开就不是这个按钮承诺的行为了。
     // Only accept a ref that addresses a file: an empty relative_path on a project
@@ -833,7 +836,7 @@ const PreviewPanel: React.FC = () => {
         // Context holder may be unmounted after async operation
       }
     }
-  }, [metadata?.fileRef, metadata?.file_path, messageApi, t]);
+  }, [metadata?.fileRef, metadata?.file_path, messageApi, sourceOnly, t]);
 
   // Every hook has now run, so bailing out here keeps the hook count stable.
   if (!isOpen || !activeTab) return null;
@@ -910,6 +913,16 @@ const PreviewPanel: React.FC = () => {
     if (metadata?.oversized) return renderOversized();
     if (content_type === 'unsupported') return renderUnsupported();
     if (analyticsProjectId) return null;
+    if (sourceOnly) {
+      return (
+        <pre
+          data-testid='preview-inert-source'
+          className='min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-12px text-t-primary'
+        >
+          {content}
+        </pre>
+      );
+    }
 
     // 浏览器 tab 由常驻的 BrowserTabLayer 渲染，不能走这里 —— 否则切 tab 会重新加载页面
     // Browser tabs are rendered by the always-mounted BrowserTabLayer; rendering
@@ -1279,7 +1292,7 @@ const PreviewPanel: React.FC = () => {
             {tabs.map((tab) => {
               const projectId = tab.metadata?.analyticsProjectId;
               const file = tab.metadata?.fileRef;
-              if (!projectId || file?.kind !== 'project') return null;
+              if (!projectId || file?.kind !== 'project' || tab.metadata?.sourceOnly) return null;
               const active = tab.id === activeTabId;
               return (
                 <div

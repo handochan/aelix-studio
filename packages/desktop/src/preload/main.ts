@@ -18,7 +18,7 @@ contextBridge.exposeInMainWorld('__studioNativeAuth', {
  * */
 contextBridge.exposeInMainWorld('electronAPI', {
   analyticsPreview: {
-    matches: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.matches, request),
+    classify: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.classify, request),
     open: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.open, request),
     close: (url) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.close, url),
     detach: (projectId, peId) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.detach, projectId, peId),
