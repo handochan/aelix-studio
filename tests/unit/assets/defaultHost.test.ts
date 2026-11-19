@@ -324,6 +324,10 @@ describe('release pin generation', () => {
   it('regenerates the committed policy from the immutable release inputs', () => {
     expect(releasePolicy(provenance.label, release, bytes, checksums, commit)).toEqual(pinned);
   });
+  it('accepts a checksum entry for a crate with build metadata in its filename', () => {
+    const crateChecksum = `${'9'.repeat(64)}  libgit2-sys-0.18.4+1.9.3.crate`;
+    expect(releasePolicy(provenance.label, release, bytes, `${checksums}\n${crateChecksum}`, commit)).toEqual(pinned);
+  });
   it('keeps all four pin files and the final formatted manifest hash consistent', () => {
     const baseline = JSON.parse(fs.readFileSync('scripts/studio-preview/baseline.json', 'utf8'));
     expect(baseline.aioncore.sourceManifestSha256).toBe(
