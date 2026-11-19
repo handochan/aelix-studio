@@ -263,13 +263,15 @@ if sys.platform == 'win32' and mode != 'acp':
     _dll_handles.append(os.add_dll_directory(str(site / 'pywin32_system32')))
     import pywin32_bootstrap
 if mode == 'windows-child' and sys.platform == 'win32':
+    import secrets
     import subprocess
     import win32api
     import win32job
 
     # Join before creating the child: pip and descendants inherit the job at birth,
     # including when Node terminates this supervisor during process creation.
-    job = win32job.CreateJobObject(None, None)
+    # The bundled pywin32 requires a string. Each supervisor owns a distinct job.
+    job = win32job.CreateJobObject(None, 'AelixStudioExtensions-' + secrets.token_hex(16))
     info_class = win32job.JobObjectExtendedLimitInformation
     limits = win32job.QueryInformationJobObject(job, info_class)
     limits['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
