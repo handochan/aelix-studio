@@ -25,6 +25,9 @@ HOST = '/owned/aelix-studio-host'
 PYTHON = '/owned/native/python3'
 CONNECT = 'connect(3, {sa_family=AF_INET, sin_port=htons(443), sin_addr=inet_addr("203.0.113.1")}, 16) = -1 ENETUNREACH (Network unreachable)'
 LOCAL = CONNECT.replace('203.0.113.1', '127.0.0.1')
+CLONE_CALL = 'clone(child_stack=NULL, flags=SIGCHLD)'
+CLONE_RESTART = CLONE_CALL + ' = ? ERESTARTNOINTR (To be restarted)'
+CLONE_FAILED = CLONE_CALL + ' = -1 EAGAIN (Resource temporarily unavailable)'
 
 
 def task_capture_fixture():
@@ -453,6 +456,23 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
     def assert_evidence_absent(self, report, *, status='unavailable'):
         self.assertEqual(report['taskEvidenceStatus'], status)
         self.assertNotIn('taskEvidence', report)
+
+    def test_unresolved_clone_restart_fails_the_audit_without_recapture(self):
+        for scoped in (False, True):
+            with self.subTest(scoped=scoped):
+                self.assertEqual(self.audit_traces([[CLONE_RESTART]], scoped=scoped), (87, 1))
+                report = self.read()
+                self.assertEqual(report['cloneRestartResults'], 1)
+                self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
+                              report['classificationIssues'])
+
+    def test_kernel_only_child_still_blocks_after_a_clone_restart(self):
+        capture = task_capture_fixture()
+        capture['network']['tasks'].append(dict(pid=3, tgid=3, kernelPid=103, kernelTgid=103,
+            parentKernelPid=101, start=2, end=90, lastOrdinal=0, kernelThread=False, ioWorker=False))
+        self.assertEqual(self.audit_traces([[CLONE_RESTART, CLONE_FAILED]], capture=capture), (87, 1))
+        self.assertIn('kernel_userspace_task_strace_missing',
+                      {issue['reason'] for issue in self.read()['classificationIssues']})
 
     def test_replayed_capture_releases_recordings_under_a_ten_mib_capacity(self):
         raw_root = self.root / 'raw'
@@ -1220,11 +1240,104 @@ class ScopedParserTests(unittest.TestCase):
         self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 3)['parentPid'], 2)
 
     def test_unknown_clone_return_is_still_blocking(self):
-        for suffix in ('?', '? <unavailable>', '? ERESTARTNOINTR (To be restarted) extra'):
+        for suffix in ('?', '? <unavailable>', '? ERESTARTNOINTR (To be restarted) extra',
+                       '-1 ERESTARTNOINTR (To be restarted)',
+                       '? <unavailable>) = ? ERESTARTNOINTR (To be restarted)',
+                       '-1 EAGAIN (Resource temporarily unavailable)) = ? ERESTARTNOINTR (To be restarted)'):
             with self.subTest(suffix=suffix):
-                scoped, _ = self.parse(self.base() + ['2<lsb_release> clone(child_stack=NULL, flags=SIGCHLD) = ' + suffix])
+                scoped, _ = self.parse(self.base() + [
+                    f'2<lsb_release> {CLONE_CALL} = {suffix}',
+                    f'2<lsb_release> {CLONE_FAILED}',
+                    '2<lsb_release> +++ exited with 0 +++',
+                    '1<app> +++ exited with 0 +++'], lifecycle=True)
                 self.assertEqual(scoped['cloneRestartResults'], 0)
                 self.assertIn('unknown_fork_result', {issue['reason'] for issue in scoped['classificationIssues']})
+                self.assertGreater(scoped['unparsedRecords'], 0)
+
+    def test_repeated_clone_notices_are_counted_before_a_definitive_failure_result(self):
+        scoped, _ = self.parse(self.base() + [
+            f'2<host> {CLONE_RESTART}',
+            '2<host> clone(child_stack=NULL, flags=SIGCHLD <unfinished ...>',
+            '1<app> close(4) = 0',
+            '2<host> <... clone resumed>) = ? ERESTARTNOINTR (To be restarted)',
+            f'2<host> {CLONE_FAILED}',
+            '2<host> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual((scoped['unparsedRecords'], scoped['cloneRestartResults']), (0, 2))
+        self.assertEqual(scoped['cloneRestartResultsUnit'], 'strace-restart-notices')
+
+    def test_clone_restart_can_end_with_same_task_signaled_before_retry(self):
+        scoped, _ = self.parse(self.base() + [
+            f'2<host> {CLONE_RESTART}',
+            '2<host> --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=1, si_uid=0} ---',
+            '2<host> +++ killed by SIGTERM +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual((scoped['unparsedRecords'], scoped['cloneRestartResults']), (0, 1))
+
+    def test_clone_retry_can_return_the_written_parent_tid(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<host> clone(child_stack=NULL, flags=CLONE_PARENT_SETTID|SIGCHLD, parent_tid=0x1234) = ? ERESTARTNOINTR (To be restarted)',
+            '2<host> clone(child_stack=NULL, flags=CLONE_PARENT_SETTID|SIGCHLD, parent_tid=[3<child>]) = 3<child>',
+            '3<child> +++ exited with 0 +++',
+            '2<host> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual((scoped['unparsedRecords'], scoped['cloneRestartResults']), (0, 1))
+        self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 3)['parentPid'], 2)
+
+    def test_later_records_cannot_hide_an_unproven_retry(self):
+        for followup in [
+            [f'1<app> {CLONE_FAILED}', '2<host> +++ exited with 0 +++'],
+            ['2<host> clone(child_stack=NULL, flags=CLONE_FILES|SIGCHLD) = -1 EAGAIN (Resource temporarily unavailable)',
+             '2<host> +++ exited with 0 +++'],
+            ['2<host> close(4) = 0', f'2<host> {CLONE_FAILED}', '2<host> +++ exited with 0 +++'],
+            [f'2<host> {CLONE_CALL} = 0', '2<host> +++ exited with 0 +++'],
+            ['2<host> clone(child_stack=NULL, flags=SIGCHLD <unfinished ...>',
+             '2<host> +++ killed by SIGKILL +++'],
+            ['2<host> +++ killed by SIGKILL +++', f'2<host> {CLONE_FAILED}'],
+            ['2<host> +++ killed by 0 +++'],
+        ]:
+            with self.subTest(followup=followup):
+                scoped, _ = self.parse(self.base() + [f'2<host> {CLONE_RESTART}', *followup,
+                    '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertIn(dict(reason='unknown_fork_result', pid=2, syscall='clone'),
+                              scoped['classificationIssues'])
+
+    def test_a_changed_parent_tid_pointer_cannot_resolve_a_clone_restart(self):
+        clone = 'clone(child_stack=NULL, flags=CLONE_PARENT_SETTID|SIGCHLD, parent_tid=0x1234)'
+        scoped, _ = self.parse(self.base() + [
+            f'2<host> {clone} = ? ERESTARTNOINTR (To be restarted)',
+            f'2<host> {clone.replace("0x1234", "0x5678")} = -1 EAGAIN (Resource temporarily unavailable)',
+            '2<host> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertIn(dict(reason='unknown_fork_result', pid=2, syscall='clone'),
+                      scoped['classificationIssues'])
+
+    def test_pending_clone_restart_at_end_of_trace_is_unparsed(self):
+        scoped, _ = self.parse(self.base() + [f'2<host> {CLONE_RESTART}'])
+        self.assertIn(dict(reason='unknown_fork_result', pid=2, syscall='clone'),
+                      scoped['classificationIssues'])
+
+    def test_clone_resume_from_another_task_is_rejected(self):
+        scoped, _ = self.parse(self.base() + [
+            f'2<host> {CLONE_RESTART}',
+            '2<host> clone(child_stack=NULL, flags=SIGCHLD <unfinished ...>',
+            '1<app> <... clone resumed>) = -1 EAGAIN (Resource temporarily unavailable)',
+            '2<host> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertIn(dict(reason='unknown_fork_result', pid=2, syscall='clone'),
+                      scoped['classificationIssues'])
+        self.assertIn(dict(reason='incomplete_syscall', pid=1, syscall='clone'),
+                      scoped['classificationIssues'])
+
+    def test_a_different_syscalls_restart_errno_remains_unparsed(self):
+        for call in ('clone3({flags=0}, 88)', 'close(4)'):
+            with self.subTest(call=call):
+                scoped, _ = self.parse(self.base() + [
+                    f'2<host> {call} = ? ERESTARTNOINTR (To be restarted)',
+                    f'2<host> {CLONE_FAILED}',
+                    '2<host> +++ exited with 0 +++',
+                    '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertEqual(scoped['cloneRestartResults'], 0)
                 self.assertGreater(scoped['unparsedRecords'], 0)
 
     def test_clone_restart_does_not_account_for_a_missing_child_trace(self):
@@ -1244,6 +1357,16 @@ class ScopedParserTests(unittest.TestCase):
             f'99<worker> {CONNECT}'])
         self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords']), (1, 0))
         self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 99)['parentPid'], 2)
+
+    def test_zero_clone_result_cannot_supply_a_namespaced_child(self):
+        scoped, whole = self.parse(self.base() + [
+            "2<host> clone(child_stack=NULL, flags=SIGCHLD) = 0 /* 3 in strace's PID NS */",
+            '3<child> +++ exited with 0 +++',
+            '2<host> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertIn(dict(reason='unknown_fork_result', pid=2, syscall='clone'),
+                      scoped['classificationIssues'])
+        self.assertIsNone(next(p for p in whole['processes'] if p['pid'] == 3)['parentPid'])
 
     def test_classification_diagnostics_preserve_failure_without_trace_secrets(self):
         scoped, _ = self.parse(self.base() + [
