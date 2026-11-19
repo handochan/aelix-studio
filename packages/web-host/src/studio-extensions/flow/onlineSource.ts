@@ -71,7 +71,7 @@ export function parseOnlineSource(source: Record<string, unknown>): OnlineExtens
   if (source.kind !== 'git' || typeof source.url !== 'string' || source.url.includes('#')) return undefined;
   const target = source.url.replace(/^git\+/, '');
   const url = address(target, ['https:', 'ssh:', 'git:', 'file:']);
-  if (!url || url.pathname === '/' || target.includes('?')) return undefined;
+  if (!url?.pathname || url.pathname === '/' || target.includes('?')) return undefined;
   // Check the spelling before URL normalization can remove dot segments from a ref.
   const pathname = target.slice(target.indexOf('/', target.indexOf('://') + 3));
   // pip owns the checkout. Even a plain relative subdirectory can be a symlink in it.

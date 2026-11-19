@@ -480,6 +480,9 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   known-hosts 파일로 호스트를 검증한다. 로드 검증과 패키지의 빌드 코드는 별도의 네트워크 격리 경계 밖이다.
 - Git 요청은 저장소 루트 URL과 선택적인 ref를 받는다. 옵션처럼 해석되는 ref와 `subdirectory` 등 URL
   fragment는 pip 실행 전에 거절한다. 하위 경로는 체크아웃 전에 심볼릭 링크 여부를 확인할 수 없다.
+- 프록시는 Studio 설정에 직접 입력한 주소만 쓰도록 1b에서 설정과 함께 구현할 예정. [2026-11-19 Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)
+- 비공개 Git은 기본 꺼짐이며 사용자가 켜면 SSH 키·agent와 Git 인증 도구를 쓰도록 1b에서 설정과 함께 구현할 예정. [2026-11-19 Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)
+- Git 하위 경로는 체크아웃 후 심볼릭 링크·`..`·절대 경로를 거절하고 저장소 안의 실제 디렉터리인지 확인해 설치하도록 1b에서 설정과 함께 구현할 예정. [2026-11-19 Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)
 - 온라인 설치의 접속 대상을 제한하는 수단은 지금 없다. wheel만 받거나 받은 뒤에 검사하는 것은 접속 대상을
   제한하는 것이 아니다. 받는 동안 이미 접속한다. 어떻게 낼지는 사용자 결정이고, 내되 설정으로 끌 수
   있게 하기로 정해졌다(8.2의 A3).

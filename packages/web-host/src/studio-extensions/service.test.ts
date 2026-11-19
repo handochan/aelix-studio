@@ -106,6 +106,10 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
   });
 
   it.each([
+    'git+ssh://git.invalid',
+    'git+ssh://git.invalid/',
+    'git+git://git.invalid',
+    'git+git://git.invalid/',
     'git+https://git.invalid/demo.git@--upload-pack=other',
     'git+https://git.invalid/demo.git@%2Doption',
     'git+https://git.invalid/demo.git@%00',

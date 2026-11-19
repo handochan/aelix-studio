@@ -215,17 +215,16 @@ async function carryOver(
       if (rewritten) await writeFile(destination, rewritten);
     }
   }
-  // Links in the agent directory are left behind: native would write through them.
+  // Leave nested links behind: native would write through them. A non-directory agent
+  // root must fail the copy so bundle reconciliation can replay the stored wheels.
   await cp(parent.agent, candidate.agent, {
     recursive: true,
     filter: async (source) => {
       const stats = await lstat(source);
-      return stats.isDirectory() || stats.isFile();
+      return source === parent.agent || stats.isDirectory() || stats.isFile();
     },
-  }).catch((error: unknown) => {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation agent data is missing']);
-    throw error;
+  }).catch(() => {
+    throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation agent data could not be copied']);
   });
 }
 

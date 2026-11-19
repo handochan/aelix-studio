@@ -899,13 +899,19 @@ describe('changing what is installed', () => {
       expect(await generations()).toHaveLength(2);
     });
 
-    it.each([true, false])(
-      'tries stored wheels when the old agent directory is missing (installer succeeds: %s)',
-      async (succeeds) => {
+    it.each([
+      { damage: 'missing', succeeds: true },
+      { damage: 'missing', succeeds: false },
+      { damage: 'regular file', succeeds: true },
+      { damage: 'regular file', succeeds: false },
+    ])(
+      'tries stored wheels when old agent data is damaged ($damage) (installer succeeds: $succeeds)',
+      async ({ damage, succeeds }) => {
         const request = await source({ name: 'demo-one' });
         const original = await mutate(helper.context, { action: 'install', source: request }, hooks);
         const agent = path.join(helper.context.layout.generations, original.generation, 'agent');
         await rm(agent, { recursive: true });
+        if (damage === 'regular file') await writeFile(agent, 'damaged agent state');
         await rm(request.path);
         await replaceBundle();
         let replays = 0;
@@ -915,12 +921,15 @@ describe('changing what is installed', () => {
           await installWheel(venv, stored);
           return 0;
         };
+        const [pointer, directories] = [await current(), await generations()];
         const listing = await reconcileBundle(helper.context);
         expect(replays).toBe(1);
         expect(listing.extensions[0].status).toBe(succeeds ? 'ready' : 'reinstall_needed');
-        expect(listing.revision).toBe(succeeds ? 2 : 1);
-        expect(await generations()).toHaveLength(succeeds ? 2 : 1);
-        expect(await generations()).toContain(original.generation);
+        if (succeeds) {
+          expect(await current()).toMatchObject({ revision: 2, previous: original.generation });
+          expect(await generations()).toHaveLength(2);
+        } else await expectUntouched(pointer, directories);
+        if (damage === 'regular file') expect(await readFile(agent, 'utf8')).toBe('damaged agent state');
       }
     );
 
