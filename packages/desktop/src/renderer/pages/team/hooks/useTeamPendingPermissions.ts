@@ -27,20 +27,53 @@ export const createSeedJournal = (): PendingSeedJournal => ({
 });
 
 /**
- * Key a backend confirmation the way stream frames and `confirmation.remove` identify it
- * (`call_id`, falling back to `id`).
+ * One pending confirmation: the key the badge tracks plus every id the backend may later
+ * send on `confirmation.remove` for it.
  */
-export const confirmationKey = (confirmation: Pick<IConfirmation<unknown>, 'id' | 'call_id'>): string =>
-  confirmation.call_id || confirmation.id;
+export type ConfirmationRef = { key: string; ids: string[] };
+
+const toRef = (ids: unknown[]): ConfirmationRef | undefined => {
+  const valid = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  return valid.length > 0 ? { key: valid[0], ids: valid } : undefined;
+};
+
+/** Identify a backend confirmation by `call_id` (falling back to `id`), keeping both ids. */
+export const confirmationRef = (
+  confirmation: Pick<IConfirmation<unknown>, 'id' | 'call_id'>
+): ConfirmationRef | undefined => toRef([confirmation.call_id, confirmation.id]);
+
+/**
+ * Identify a waiting-confirmation stream frame. Reuses the conversation-list parser and also
+ * accepts the flat Confirmation payload (`id` + `call_id`, no `tool_call`) that built-in Aionrs
+ * members send as `acp_permission`.
+ */
+export const streamConfirmationRef = (message: { type?: string; data?: unknown }): ConfirmationRef | undefined => {
+  const parsed = extractConfirmationId(message);
+  if (message.type === 'ask') return toRef([parsed]);
+  const data = message.data && typeof message.data === 'object' ? (message.data as Record<string, unknown>) : {};
+  if (message.type === 'acp_permission' && parsed) return toRef([parsed]);
+  return toRef([parsed, data.call_id, data.id]);
+};
 
 /**
  * Merge a `confirmation.list` snapshot with the live events that arrived while it was in flight,
  * so a slow response can neither resurrect an answered request nor drop one that was just raised.
+ * A request counts as answered when any of its ids was removed, so a removal by confirmation id
+ * also drops a live mark that only knew the call id.
  */
-export const mergeSeedSnapshot = (snapshotKeys: readonly string[], journal: PendingSeedJournal): string[] => {
-  const merged = new Set(journal.cleared ? [] : snapshotKeys.filter((key) => !journal.removed.has(key)));
+export const mergeSeedSnapshot = (snapshot: readonly ConfirmationRef[], journal: PendingSeedJournal): string[] => {
+  const answered = new Set(journal.removed);
+  for (const entry of snapshot) {
+    if (entry.ids.some((id) => journal.removed.has(id))) answered.add(entry.key);
+  }
+  const merged = new Set<string>();
+  if (!journal.cleared) {
+    for (const entry of snapshot) {
+      if (!answered.has(entry.key)) merged.add(entry.key);
+    }
+  }
   for (const key of journal.marked) {
-    merged.add(key);
+    if (!answered.has(key)) merged.add(key);
   }
   return [...merged];
 };
@@ -123,12 +156,18 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
       });
     };
 
-    const mark = (cid: string, key: string) => {
+    // Every id a backend may send on `confirmation.remove` maps to the badge key it clears.
+    const remember = (ref: ConfirmationRef) => {
+      for (const id of ref.ids) aliases.set(id, ref.key);
+    };
+
+    const mark = (cid: string, ref: ConfirmationRef) => {
+      remember(ref);
       const journal = journals.get(cid);
-      journal?.marked.add(key);
-      journal?.removed.delete(key);
+      journal?.marked.add(ref.key);
+      journal?.removed.delete(ref.key);
       updateIds(cid, (current) => {
-        current.add(key);
+        current.add(ref.key);
       });
     };
 
@@ -155,14 +194,16 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
     const seed = async (cid: string) => {
       const journal = createSeedJournal();
       journals.set(cid, journal);
-      let snapshot: string[];
+      let snapshot: ConfirmationRef[];
       try {
         const confirmations = await ipcBridge.conversation.confirmation.list.invoke({ conversation_id: cid });
-        snapshot = (confirmations ?? []).map((confirmation) => {
-          const key = confirmationKey(confirmation);
-          if (confirmation.id && confirmation.id !== key) aliases.set(confirmation.id, key);
-          return key;
-        });
+        snapshot = [];
+        for (const confirmation of confirmations ?? []) {
+          const ref = confirmationRef(confirmation);
+          if (!ref) continue;
+          remember(ref);
+          snapshot.push(ref);
+        }
       } catch {
         // Keep the live state; the next turn completion or reconnect reseeds.
         if (journals.get(cid) === journal) journals.delete(cid);
@@ -183,13 +224,16 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
           return;
         }
         if (!isWaitingConfirmationStreamMessage(message.type)) return;
-        const key = extractConfirmationId(message);
-        if (key) mark(cid, key);
+        const ref = streamConfirmationRef(message);
+        if (ref) mark(cid, ref);
       }),
       ipcBridge.conversation.confirmation.remove.on((event) => {
         if (!event?.id || !idSet.has(event.conversation_id)) return;
-        const alias = aliases.get(event.id);
-        unmark(event.conversation_id, alias ? [event.id, alias] : [event.id]);
+        const key = aliases.get(event.id);
+        unmark(event.conversation_id, key && key !== event.id ? [event.id, key] : [event.id]);
+        // An id the badge never saw cannot be matched to a live mark (e.g. a frame that only carried
+        // the call id); reseed so the backend list decides what is still pending.
+        if (!key) void seed(event.conversation_id);
       }),
       ipcBridge.conversation.turnCompleted.on((event) => {
         if (idSet.has(event.session_id)) void seed(event.session_id);

@@ -60,7 +60,11 @@ vi.mock('@/renderer/pages/team/components/memberPicker/TeamAddMemberPopover', ()
 
 import TeamTabs from '@/renderer/pages/team/components/TeamTabs';
 import { TeamTabsProvider } from '@/renderer/pages/team/hooks/TeamTabsContext';
-import { useTeamPendingPermissions } from '@/renderer/pages/team/hooks/useTeamPendingPermissions';
+import {
+  createSeedJournal,
+  mergeSeedSnapshot,
+  useTeamPendingPermissions,
+} from '@/renderer/pages/team/hooks/useTeamPendingPermissions';
 
 const renameAssistantMock = vi.fn();
 
@@ -254,6 +258,12 @@ describe('TeamTabs live approval badge', () => {
 
   it('does not resurrect a request answered while the backend snapshot was in flight', async () => {
     await renderLive();
+    await emit('stream', {
+      type: 'acp_permission',
+      conversation_id: 'worker-conv',
+      msg_id: 'm1',
+      data: { tool_call: { tool_call_id: 'call-1' } },
+    });
 
     const snapshot = deferred();
     ipcMocks.list.mockImplementation(() => snapshot.promise);
@@ -271,5 +281,62 @@ describe('TeamTabs live approval badge', () => {
 
     expect(workerBadge()).toBeInTheDocument();
     expect(workerBadge()).not.toHaveTextContent('2');
+  });
+
+  it('marks a built-in Aionrs member from its flat acp_permission payload', async () => {
+    await renderLive();
+
+    await emit('stream', {
+      type: 'acp_permission',
+      conversation_id: 'worker-conv',
+      msg_id: 'm1',
+      data: { id: 'conf-7', call_id: 'call-7', title: 'Run tool', description: '', options: [] },
+    });
+    expect(workerBadge()).toBeInTheDocument();
+
+    // The answer may carry either id; the confirmation id must clear the call-id badge.
+    await emit('remove', { conversation_id: 'worker-conv', id: 'conf-7' });
+    expect(workerBadge()).not.toBeInTheDocument();
+    expect(ipcMocks.list).toHaveBeenCalledTimes(2);
+  });
+
+  it('clears a request answered by confirmation id before the first snapshot returns', async () => {
+    const firstSnapshot = deferred();
+    ipcMocks.list.mockImplementation(({ conversation_id }: { conversation_id: string }) =>
+      conversation_id === 'worker-conv' ? firstSnapshot.promise : Promise.resolve([])
+    );
+    await renderLive();
+    await emit('stream', {
+      type: 'acp_permission',
+      conversation_id: 'worker-conv',
+      msg_id: 'm1',
+      data: { tool_call: { tool_call_id: 'call-1' } },
+    });
+    expect(workerBadge()).toBeInTheDocument();
+
+    ipcMocks.list.mockResolvedValue([]);
+    await emit('remove', { conversation_id: 'worker-conv', id: 'conf-1' });
+    await act(async () => {
+      firstSnapshot.resolve([{ id: 'conf-1', call_id: 'call-1' }]);
+    });
+
+    expect(workerBadge()).not.toBeInTheDocument();
+  });
+});
+
+describe('mergeSeedSnapshot', () => {
+  it('drops a live mark whose request was removed by its other id while the snapshot was in flight', () => {
+    const journal = createSeedJournal();
+    journal.marked.add('call-1');
+    journal.removed.add('conf-1');
+
+    expect(mergeSeedSnapshot([{ key: 'call-1', ids: ['call-1', 'conf-1'] }], journal)).toEqual([]);
+  });
+
+  it('keeps unanswered snapshot entries and new live marks', () => {
+    const journal = createSeedJournal();
+    journal.marked.add('call-3');
+
+    expect(mergeSeedSnapshot([{ key: 'call-2', ids: ['call-2', 'conf-2'] }], journal)).toEqual(['call-2', 'call-3']);
   });
 });
