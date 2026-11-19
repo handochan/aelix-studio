@@ -63,8 +63,18 @@ def read_fork_identity(root, parent_id, child_id):
 
 
 def verify_restarted_fork(root, parent_id, child_id, before):
-    if read_fork_identity(root, parent_id, child_id) != before:
-        raise AssertionError('Cold restart changed the persisted ACP or native child identity')
+    observed = read_fork_identity(root, parent_id, child_id)
+    if observed != before:
+        changed = ', '.join(key for key, value in observed.items() if before.get(key) != value)
+        raise AssertionError(f'Cold restart changed the persisted ACP or native child identity ({changed})')
+
+
+def read_provider_report(root, file):
+    # Node writes UTF-8, including any Unicode in the native child path.
+    report = json.loads(file.read_text(encoding='utf-8'))
+    fork = report.pop('headFork')
+    verify_restarted_fork(root, fork['parentId'], fork['childId'], fork['beforeRestart'])
+    return report
 
 
 class ProviderFixture:
@@ -230,9 +240,7 @@ async def main(args):
                 raise AssertionError('Installed wheel payload changed')
             if helper_manifest and bundled_before != helper_bytes():
                 raise AssertionError('Installed bundled helper payload changed')
-            report = json.loads((output / 'host.json').read_text())
-            fork = report.pop('headFork')
-            verify_restarted_fork(sandbox, fork['parentId'], fork['childId'], fork['beforeRestart'])
+            report = read_provider_report(sandbox, output / 'host.json')
             fixture.verify_fork_context()
             report['checks'] += ['native_head_fork_distinct_stored_acp_bindings',
                                  'native_head_fork_same_acp_and_native_child', 'native_head_fork_model_context']
@@ -266,7 +274,7 @@ async def main(args):
             renderer = {file.relative_to(ROOT / 'out/renderer').as_posix(): digest(file)
                         for file in sorted((ROOT / 'out/renderer').rglob('*.js'))}
             report['rendererManifestSha256'] = hashlib.sha256(json.dumps(renderer, sort_keys=True).encode()).hexdigest()
-            (output / 'host.json').write_text(json.dumps(report, indent=2) + '\n')
+            (output / 'host.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
         finally:
             if process.returncode is None:
                 if os.name == 'nt':
@@ -304,7 +312,7 @@ if __name__ == '__main__':
         output.mkdir(parents=True, exist_ok=True)
         for name in ('host.json', 'helper.json'):
             file = output / name
-            completed = json.loads(file.read_text()) if file.exists() else {}
+            completed = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
             if completed.get('status') != 'passed':
                 file.write_text(json.dumps({'status': 'failed'}) + '\n')
         raise

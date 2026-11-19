@@ -58,7 +58,8 @@ class InstalledForkTests(unittest.TestCase):
                 db.executemany('INSERT INTO acp_session VALUES (?, ?)', [('parent', 'parent-acp'), ('child', 'child-acp')])
             (root / 'acp').mkdir()
             parent = root / 'parent.jsonl'
-            child = root / 'child.jsonl'
+            child = root / '한글' / 'child.jsonl'
+            child.parent.mkdir()
             parent.write_text(json.dumps({'id': '63087769-155d-4dce-9d17-b0f06f3ffd25'}), encoding='utf-8')
             child_header = {'id': '703bf557-4078-42d5-81a5-22f8edf29459', 'parentSession': str(parent)}
             child.write_text(json.dumps(child_header), encoding='utf-8')
@@ -69,6 +70,14 @@ class InstalledForkTests(unittest.TestCase):
                 ])
             before = self.smoke.read_fork_identity(root, 'parent', 'child')
             self.smoke.verify_restarted_fork(root, 'parent', 'child', before)
+            report = root / 'host.json'
+            report.write_text(json.dumps({'status': 'pending_payload_audit', 'headFork': {
+                'parentId': 'parent', 'childId': 'child', 'beforeRestart': before,
+            }}, ensure_ascii=False), encoding='utf-8')
+            read_text = Path.read_text
+            with patch.object(Path, 'read_text', autospec=True,
+                              side_effect=lambda p, encoding=None: read_text(p, encoding=encoding or 'cp1252')):
+                self.assertEqual(self.smoke.read_provider_report(root, report), {'status': 'pending_payload_audit'})
             with self.subTest(changed='native child'):
                 child.write_text(json.dumps(dict(child_header, id='51d93b4b-e16c-4cba-b2db-8ce8785d2404')), encoding='utf-8')
                 with self.assertRaisesRegex(AssertionError, 'changed the persisted ACP or native child'):
