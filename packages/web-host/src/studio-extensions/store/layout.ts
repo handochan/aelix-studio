@@ -51,16 +51,13 @@ export function locateStudioExtensionLayout(userDataPath: string): Promise<Layou
 
 /** Locate the Studio profile for a standalone WebUI database directory. */
 export async function resolveStandaloneStudioUserDataPath(dataDir: string): Promise<string> {
-  const absolute = path.resolve(dataDir);
-  const resolved = await realpath(absolute);
+  const resolved = await realpath(path.resolve(dataDir));
   const databaseName = path.basename(resolved);
   if ((process.platform === 'win32' ? databaseName.toLowerCase() : databaseName) !== 'aionui') return resolved;
 
   // Desktop keeps its database in <userData>/aionui and settings in <userData>/config.
-  // It also exposes the database directory through a CLI-safe home link on macOS.
+  // Inspect the resolved profile so a link and its target receive the same decision.
   const profile = path.dirname(resolved);
-  const desktopAlias = /^\.aionui(?:-dev(?:-2)?)?$/.test(path.basename(absolute));
-  if (desktopAlias && (await lstat(absolute)).isSymbolicLink()) return profile;
   const config = path.join(profile, 'config');
   const markers = await Promise.all(
     ['aionui-config.txt', '.aionui-env'].map((name) => stat(path.join(config, name)).catch((): undefined => undefined))

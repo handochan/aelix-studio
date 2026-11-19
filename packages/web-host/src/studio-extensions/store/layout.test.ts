@@ -49,21 +49,24 @@ describe('helper layout', () => {
     );
   });
 
-  it.each(['.aionui', '.aionui-dev', '.aionui-dev-2'])(
-    'shares the Desktop extension state through the %s database link',
-    async (name) => {
-      const desktop = path.join(scratch, 'Studio 사용자 데이터');
-      const database = path.join(desktop, 'aionui');
-      const alias = path.join(scratch, name);
-      await mkdir(database, { recursive: true });
-      await symlink(database, alias, 'junction');
+  it.each([
+    { link: '.aionui-dev', marker: 'aionui-config.txt' },
+    { link: 'shared-db', marker: '.aionui-env' },
+  ])('shares the Desktop extension state through $link when the profile has $marker', async ({ link, marker }) => {
+    const desktop = path.join(scratch, 'Studio 사용자 데이터');
+    const database = path.join(desktop, 'aionui');
+    const alias = path.join(scratch, link);
+    await mkdir(database, { recursive: true });
+    await mkdir(path.join(desktop, 'config'));
+    await writeFile(path.join(desktop, 'config', marker), '');
+    await symlink(database, alias, 'junction');
 
-      const webProfile = await resolveStandaloneStudioUserDataPath(alias);
-      const desktopLayout = await locateStudioExtensionLayout(desktop);
-      expect(await locateStudioExtensionLayout(webProfile)).toEqual(desktopLayout);
-      expect(desktopLayout.root).toBe(path.join(desktop, 'aelix-runtime'));
-    }
-  );
+    const webProfile = await resolveStandaloneStudioUserDataPath(alias);
+    const desktopLayout = await locateStudioExtensionLayout(desktop);
+    expect(webProfile).toBe(await resolveStandaloneStudioUserDataPath(database));
+    expect(await locateStudioExtensionLayout(webProfile)).toEqual(desktopLayout);
+    expect(desktopLayout.root).toBe(path.join(desktop, 'aelix-runtime'));
+  });
 
   it('recognizes the direct Desktop database path in a Desktop profile', async () => {
     const desktop = path.join(scratch, 'Studio 사용자 데이터');
@@ -75,15 +78,21 @@ describe('helper layout', () => {
     expect(await resolveStandaloneStudioUserDataPath(database)).toBe(desktop);
   });
 
-  it('keeps unrelated aliases to an aionui directory isolated even with a generic sibling config directory', async () => {
-    const database = path.join(scratch, 'aionui');
-    const alias = path.join(scratch, 'standalone-link');
-    await mkdir(database);
-    await mkdir(path.join(scratch, 'config'));
-    await symlink(database, alias, 'junction');
+  it.each(['.aionui-dev', 'standalone-link'])(
+    'keeps independent WebUI state the same through the %s link and the direct database path',
+    async (name) => {
+      const database = path.join(scratch, 'aionui');
+      const alias = path.join(scratch, name);
+      await mkdir(database);
+      await mkdir(path.join(scratch, 'config'));
+      await symlink(database, alias, 'junction');
 
-    expect(await resolveStandaloneStudioUserDataPath(alias)).toBe(database);
-  });
+      const profiles = await Promise.all([database, alias].map(resolveStandaloneStudioUserDataPath));
+      const layouts = await Promise.all(profiles.map(locateStudioExtensionLayout));
+      const expected = path.join(database, 'aelix-runtime');
+      expect(layouts.map(({ root }) => root)).toEqual([expected, expected]);
+    }
+  );
 
   it.each(['standalone', 'aionui'])('keeps independent WebUI data under its own %s directory', async (name) => {
     const database = path.join(scratch, name);
