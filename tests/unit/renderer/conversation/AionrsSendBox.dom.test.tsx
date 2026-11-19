@@ -343,7 +343,7 @@ describe('AionrsSendBox', () => {
       .mockReset()
       .mockRejectedValueOnce(new Error('Aelix teammate is busy'))
       .mockResolvedValueOnce(undefined);
-    const setConfigOption = vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'default' }]);
+    const setConfigOption = vi.fn().mockResolvedValue({ confirmation: 'observed' });
     const runtime = {
       setStatus: { state: 'idle' },
       mode: {
@@ -354,7 +354,7 @@ describe('AionrsSendBox', () => {
           { value: 'yolo', label: 'Yolo' },
         ],
       },
-      setConfigOption,
+      setConfigOptionWithConfirmation: setConfigOption,
     };
     useAcpConfigOptionsMock.mockReturnValue(runtime);
     const view = () => (

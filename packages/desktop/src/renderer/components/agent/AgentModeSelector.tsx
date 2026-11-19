@@ -197,15 +197,15 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         if (!runtimeMode) {
           throw new Error('config_not_observed');
         }
-        return runtimeConfig.setConfigOption(runtimeMode.id, mode);
+        return runtimeConfig.setConfigOptionWithConfirmation(runtimeMode.id, mode);
       };
 
       setIsLoading(true);
       try {
-        let deferred = false;
+        let deferred = reapply && pendingMode === mode;
         if (!reapply) {
-          const applied = await setActiveMode();
-          deferred = applied?.find((option) => option.id === runtimeMode?.id)?.current_value !== mode;
+          const result = await setActiveMode();
+          deferred = result.confirmation === 'pending_next_turn';
           if (!deferred) setCurrentMode(mode);
         }
         // The leader's effective mode stays unchanged until the host reports
@@ -223,7 +223,7 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         setIsLoading(false);
       }
     },
-    [conversation_id, current_mode, isLoading, onModeChanged, onModeSelect, runtimeConfig, runtimeMode, t]
+    [conversation_id, current_mode, isLoading, onModeChanged, onModeSelect, pendingMode, runtimeConfig, runtimeMode, t]
   );
 
   const renderLogo = () => (

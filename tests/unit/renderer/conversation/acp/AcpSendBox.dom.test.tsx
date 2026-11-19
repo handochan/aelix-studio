@@ -646,17 +646,18 @@ describe('AcpSendBox', () => {
   });
 
   it.each([
-    { backend: 'antigravity', backend_accepted: undefined },
-    { backend: 'codex', backend_accepted: true },
+    { backend: 'antigravity', backend_accepted: undefined, snapshotMode: 'yolo' },
+    { backend: 'codex', backend_accepted: true, snapshotMode: 'yolo' },
+    { backend: 'codex', backend_accepted: true, snapshotMode: 'default' },
   ])(
-    'propagates an accepted next-turn Ask from $backend before observing the new leader mode',
-    async ({ backend, backend_accepted }) => {
+    'propagates an accepted next-turn Ask from $backend and shows pending with snapshot mode $snapshotMode',
+    async ({ backend, backend_accepted, snapshotMode }) => {
       const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
         '@/renderer/hooks/agent/useAcpConfigOptions'
       );
       useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
       isMobileMock.current = true;
-      const leaderId = `deferred-mixed-team-leader-${backend}`;
+      const leaderId = `deferred-mixed-team-leader-${backend}-${snapshotMode}`;
       const modeOption = (current_value: string): AcpConfigOptionDto => ({
         id: 'mode',
         category: 'mode',
@@ -675,7 +676,7 @@ describe('AcpSendBox', () => {
         .mockResolvedValueOnce({
           confirmation: 'pending_next_turn',
           backend_accepted,
-          config_options: [modeOption('yolo')],
+          config_options: [modeOption(snapshotMode)],
         })
         .mockResolvedValueOnce({
           confirmation: backend === 'antigravity' ? 'pending_next_turn' : 'command_ack',
@@ -709,9 +710,19 @@ describe('AcpSendBox', () => {
       await act(async () => permission()?.submenu?.onSelect('default'));
       expect(teamSetModeMock).toHaveBeenCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
       expect(teammateMode).toBe('default');
-      expect(activeMode()).toBe('yolo');
+      expect(activeMode()).toBe(snapshotMode);
       expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn');
       expect(Message.success).not.toHaveBeenCalled();
+
+      if (snapshotMode === 'default') {
+        // The HTTP snapshot can already match while the request is pending.
+        // A same-mode retry should still report pending and only retry the Team write.
+        await act(async () => permission()?.submenu?.onSelect('default'));
+        expect(teamSetConfigMock).toHaveBeenCalledOnce();
+        expect(Message.info).toHaveBeenCalledTimes(2);
+        expect(Message.success).not.toHaveBeenCalled();
+      }
+      const propagationCount = snapshotMode === 'default' ? 2 : 1;
 
       teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('default')] });
       await act(async () => {
@@ -725,12 +736,12 @@ describe('AcpSendBox', () => {
         }
       });
       await waitFor(() => expect(activeMode()).toBe('default'));
-      expect(teamSetModeMock).toHaveBeenCalledOnce();
+      expect(teamSetModeMock).toHaveBeenCalledTimes(propagationCount);
 
       // An unconfirmed or explicitly unaccepted command cannot elevate the teammate.
       await act(async () => permission()?.submenu?.onSelect('yolo'));
       expect(Message.error).toHaveBeenCalled();
-      expect(teamSetModeMock).toHaveBeenCalledOnce();
+      expect(teamSetModeMock).toHaveBeenCalledTimes(propagationCount);
       expect(teammateMode).toBe('default');
     }
   );

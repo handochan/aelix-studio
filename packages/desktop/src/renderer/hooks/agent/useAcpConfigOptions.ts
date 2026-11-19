@@ -358,7 +358,7 @@ export function useAcpConfigOptions({
     }
   }, [key, configOptionsPort, prepareRuntime, replaceSnapshot]);
 
-  const setConfigOption = useCallback(
+  const setConfigOptionWithConfirmation = useCallback(
     async (optionId: string, value: string) => {
       if (getConversationSetStatus(conversation_id).state === 'setting' || isConfigOptionBlocked(optionId)) {
         throw new Error('config_update_in_progress');
@@ -389,7 +389,7 @@ export function useAcpConfigOptions({
           }
           markPending(conversation_id, optionId, value);
           if (response.config_options) replaceSnapshot(response.config_options);
-          return response.config_options;
+          return response;
         }
         if (!hasObservedValue(response, optionId, value)) {
           throw new Error(confirmation === 'command_ack' ? 'command_ack' : 'config_not_observed');
@@ -397,7 +397,7 @@ export function useAcpConfigOptions({
         // A switch that landed supersedes any pending entry for the same option.
         resolvePendingFromSnapshot(conversation_id, response.config_options);
         replaceSnapshot(response.config_options);
-        return response.config_options;
+        return response;
       } finally {
         setConversationSetStatus(conversation_id, { state: 'idle' });
       }
@@ -412,6 +412,11 @@ export function useAcpConfigOptions({
       prepareSetRuntime,
       replaceSnapshot,
     ]
+  );
+
+  const setConfigOption = useCallback(
+    async (optionId: string, value: string) => (await setConfigOptionWithConfirmation(optionId, value)).config_options,
+    [setConfigOptionWithConfirmation]
   );
 
   useEffect(() => {
@@ -453,6 +458,7 @@ export function useAcpConfigOptions({
     thoughtLevel: deriveSelectOption(configOptions, 'thought_level', ['thought_level', 'reasoning_effort']),
     reload,
     setConfigOption,
+    setConfigOptionWithConfirmation,
     isConfigOptionBlocked,
   };
 }

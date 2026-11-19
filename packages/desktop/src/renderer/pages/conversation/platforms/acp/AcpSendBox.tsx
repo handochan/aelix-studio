@@ -209,10 +209,10 @@ const AcpSendBox: React.FC<{
       if (reapply && !propagateTeamMode) return;
 
       try {
-        let deferred = false;
+        let deferred = reapply && runtimeConfig.pendingValues?.[runtimeMode.id] === mode;
         if (!reapply) {
-          const applied = await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-          deferred = applied?.find((option) => option.id === runtimeMode.id)?.current_value !== mode;
+          const result = await runtimeConfig.setConfigOptionWithConfirmation(runtimeMode.id, mode);
+          deferred = result.confirmation === 'pending_next_turn';
           if (!deferred) setCurrentMode(mode);
         }
         // A resolved deferred selection still authorizes the Team change.
