@@ -66,9 +66,9 @@ class CaptureFailureTests(unittest.TestCase):
         measurement = dict(status='failed', outcome='evidence_incomplete', commandStarted=True, commandExitCode=1,
                            externalAttempts=0, unparsedRecords=1, classificationIssues=[{'reason':'unknown_record'}],
                            processes=[], externalOperationDiagnostics=[])
-        def fail(_command, path, **_options):
+        def fail(_command, path, *, allow_recapture, **_options):
             path.write_text(json.dumps(measurement))
-            return 87
+            return 87, None, allow_recapture and audit.should_recapture(measurement)
         with tempfile.TemporaryDirectory() as directory, patch.object(audit, 'capture_once', side_effect=fail) as run, redirect_stdout(io.StringIO()):
             report = Path(directory) / 'audit.json'
             code = audit.audit(['node', str(FIXTURE), 'managed'], report)

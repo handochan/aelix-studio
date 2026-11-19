@@ -97,7 +97,14 @@ class SocketObjectTests(unittest.TestCase):
                 '1<app> close(3<UDPv6:[123]> <unfinished ...>', '1<app> +++ exited with 0 +++']
             with self.subTest(final_free=final_free),tempfile.TemporaryDirectory() as directory:
                 path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
-                report=audit.analyze_processes([path],require_lifecycle=True,kernel_capture=capture)[0]
+                aggregate = audit.TaskEvidence()
+                report=audit.analyze_processes([path],require_lifecycle=True,kernel_capture=capture,
+                                               task_evidence=aggregate)[0]
+                evidence=aggregate.measurement
+                task=next(row for row in evidence['straceTasks'] if row['tid']==1)
+                self.assertEqual(task['objectCounts'], dict(generations=1,validGenerations=int(final_free),
+                    unfreedGenerations=int(not final_free),sharedObjectSendRecords=0))
+                self.assertEqual(evidence['assignedNetworkRecords'], capture['network']['eventCount'])
                 self.assertEqual(report['udpConnectOnly'],int(final_free))
                 self.assertEqual(report['kernelMetadataResolvedRecords'],int(final_free))
                 if final_free:
