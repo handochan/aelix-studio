@@ -11,6 +11,7 @@ NETWORK = {'connect', 'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev'
 UDP_META = {'socket', 'unshare'}
 FD_META = {'close','close_range','mmap','mmap2','dup','dup2','dup3','fcntl'}
 FORK = {'clone', 'clone3', 'fork', 'vfork'}
+CLONE_RESTART_RESULT = ') = ? ERESTARTNOINTR (To be restarted)'
 EXEC = {'execve', 'execveat'}
 IO_URING = {'io_uring_setup', 'io_uring_enter', 'io_uring_register'}
 SETUP_FLAGS = {name:1<<index for index,name in enumerate([
@@ -69,7 +70,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     states, parents, roots, matches = {}, {}, set(), set()
     root_executables = {}
     fork_at, executions = {}, {}
-    clone_threads, io_calls = {}, []
+    clone_threads, clone_restarts, io_calls = {}, {}, []
     sequence = 0
     classification_issues = []
     observed_order = []
@@ -209,6 +210,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             io_calls.append(entry)
             return
         if call in FORK:
+            if call == 'clone' and line.endswith(CLONE_RESTART_RESULT):
+                # The kernel interrupted clone before creating a child. The tracer
+                # prints an explicit restart errno; a later attempt needs its own
+                # result and every observed child still needs a normal fork edge.
+                clone_restarts[pid] = clone_restarts.get(pid, 0) + 1
+                return
             result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
             if not result:
                 classification_issue('unknown_fork_result', pid, call); return
@@ -651,6 +658,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                               'unparsedRecordKinds':dict(sorted(item['unparsed_kinds'].items()))})
         return {'schema': 'aelix-studio-host.outbound-audit/1', 'scope': scope,
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
+                'cloneRestartResults': sum(clone_restarts.get(pid, 0) for pid in pids),
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
                 'udpConnectOnly': sum(event['udpAssociationOnly'] for event in events),

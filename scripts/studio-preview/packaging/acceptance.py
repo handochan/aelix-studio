@@ -257,6 +257,8 @@ def record_extension_qualification(report, output, audits, verify, *, signature=
     report['status'] = 'running'
     verdict = dict(status='running', captureTimeoutSeconds=EXTENSIONS_CAPTURE_TIMEOUT,
                    totalTimeoutSeconds=audits.time_budget(EXTENSIONS_CAPTURE_TIMEOUT),
+                   timeoutScope='audit-supervisor' if audits.enabled else 'qualifier-command',
+                   bundleInventoryOutsideTimeout=True,
                    signatureTimeoutSeconds=EXTENSIONS_SIGNATURE_TIMEOUT if signature else None)
     report['extensionQualification'] = verdict
     output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
@@ -412,8 +414,11 @@ def main(args):
     # Clear only the extension receipts this run can upload, even if their phase
     # is never reached. The existing smoke uses its own report names.
     output.with_name('extensions-qualification.json').unlink(missing_ok=True)
-    for filename in ('outbound-extensions.json', 'outbound-app-extensions.json', 'outbound-extensions-sessions.json'):
-        (output.parent / 'permission' / filename).unlink(missing_ok=True)
+    extension_audits = output.parent / 'permission'
+    (extension_audits / 'outbound-extensions-sessions.json').unlink(missing_ok=True)
+    for stem in ('outbound-extensions', 'outbound-app-extensions'):
+        for suffix in ('.json', '.capture-1.json', '.capture-2.json'):
+            (extension_audits / (stem + suffix)).unlink(missing_ok=True)
     installer_receipt = output.with_name('installer-progress.json')
     if sys.platform == 'win32':
         installer_receipt.write_text(json.dumps({'attempts': []}) + '\n', encoding='utf-8')

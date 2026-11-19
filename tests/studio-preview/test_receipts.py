@@ -237,7 +237,30 @@ class FailedAuditReceiptTests(unittest.TestCase):
             self.assertEqual(extension['status'], 'failed')
             self.assertEqual(extension['audit']['unparsedRecords'], 2)
             self.assertEqual((extension['captureTimeoutSeconds'], extension['totalTimeoutSeconds']), (180, 540))
+            self.assertEqual(extension['timeoutScope'], 'audit-supervisor')
+            self.assertTrue(extension['bundleInventoryOutsideTimeout'])
             self.assertGreaterEqual(extension['elapsedSeconds'], 0)
+
+    def test_installer_start_clears_only_stale_extension_receipts_and_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            permission = root / 'permission'
+            permission.mkdir()
+            extension_files = [
+                root / 'extensions-qualification.json',
+                permission / 'outbound-extensions-sessions.json',
+                *(permission / (name + suffix) for name in ('outbound-extensions', 'outbound-app-extensions')
+                  for suffix in ('.json', '.capture-1.json', '.capture-2.json')),
+            ]
+            smoke = permission / 'outbound.capture-2.json'
+            for file in (*extension_files, smoke):
+                file.write_text('old evidence')
+            args = Mock(runtime=str(root/'runtime'), output=str(root/'acceptance.json'),
+                        artifact=None, dmg=None, artifacts=str(root/'missing'))
+            with self.assertRaises(ValueError):
+                acceptance.main(args)
+            self.assertFalse(any(file.exists() for file in extension_files))
+            self.assertEqual(smoke.read_text(), 'old evidence')
 
     def test_extension_pass_keeps_a_failed_smoke_verdict(self):
         with tempfile.TemporaryDirectory() as directory:

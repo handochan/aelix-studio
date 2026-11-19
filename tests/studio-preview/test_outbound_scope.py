@@ -1205,6 +1205,38 @@ class ScopedParserTests(unittest.TestCase):
             _scoped, whole = audit.analyze_processes([trace], require_lifecycle=True)
             self.assertGreater(whole['unparsedRecords'], 0)
 
+    def test_restarted_clone_from_lsb_release_preserves_the_next_child_edge(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<lsb_release> clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD <unfinished ...>',
+            '2<lsb_release> <... clone resumed>, child_tidptr=0xffff890b8ff0) = ? ERESTARTNOINTR (To be restarted)',
+            '2<lsb_release> --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4} ---',
+            '2<lsb_release> clone(child_stack=NULL, flags=CLONE_CHILD_CLEARTID|CLONE_CHILD_SETTID|SIGCHLD, child_tidptr=0xffff890b8ff0) = 3<tr>',
+            f'3<tr> {CONNECT}',
+            '3<tr> +++ exited with 0 +++',
+            '2<lsb_release> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual((scoped['externalAttempts'], scoped['unparsedRecords'], scoped['cloneRestartResults']),
+                         (1, 0, 1))
+        self.assertEqual(next(p for p in scoped['processes'] if p['pid'] == 3)['parentPid'], 2)
+
+    def test_unknown_clone_return_is_still_blocking(self):
+        for suffix in ('?', '? <unavailable>', '? ERESTARTNOINTR (To be restarted) extra'):
+            with self.subTest(suffix=suffix):
+                scoped, _ = self.parse(self.base() + ['2<lsb_release> clone(child_stack=NULL, flags=SIGCHLD) = ' + suffix])
+                self.assertEqual(scoped['cloneRestartResults'], 0)
+                self.assertIn('unknown_fork_result', {issue['reason'] for issue in scoped['classificationIssues']})
+                self.assertGreater(scoped['unparsedRecords'], 0)
+
+    def test_clone_restart_does_not_account_for_a_missing_child_trace(self):
+        scoped, _ = self.parse(self.base() + [
+            '2<lsb_release> clone(child_stack=NULL, flags=SIGCHLD) = ? ERESTARTNOINTR (To be restarted)',
+            '2<lsb_release> clone(child_stack=NULL, flags=SIGCHLD) = 3<tr>',
+            '2<lsb_release> +++ exited with 0 +++',
+            '1<app> +++ exited with 0 +++'], lifecycle=True)
+        self.assertEqual(scoped['cloneRestartResults'], 1)
+        self.assertIn('missing_child_records', {issue['reason'] for issue in scoped['classificationIssues']})
+        self.assertGreater(scoped['unparsedRecords'], 0)
+
     def test_namespaced_fork_return_uses_tracer_pid_without_colliding(self):
         scoped, _ = self.parse(self.base() + [
             "2<host> clone(child_stack=NULL, flags=CLONE_NEWPID|SIGCHLD) = 2<worker> /* 99 in strace's PID NS */",
