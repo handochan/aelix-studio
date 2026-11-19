@@ -14,7 +14,7 @@ def reconcile(capture, network, states, selected, connect_keys, required_udp=(),
     if not isinstance(channel, dict):
         return empty
     if task_evidence is not None:
-        task_evidence.note(task_evidence.start_objects)
+        task_evidence.note(task_evidence.start_objects, force_check=True)
     issues = []
     def error(reason, pid=None, **metadata):
         item = dict(reason=reason, **metadata)

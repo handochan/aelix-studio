@@ -578,12 +578,55 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                 report = self.read()
                 self.assertEqual(([row['exitCode'] for row in report['captureAttempts']], report['outcome']), (codes, outcome))
                 self.assert_evidence_absent(report)
+                self.assertEqual(report['taskEvidenceUnavailableReason'], 'aggregation_error')
+
+    def test_small_record_delays_stop_aggregation_without_expiring_the_one_second_capture(self):
+        count = 84
+        capture = task_capture_fixture()
+        capture['network']['tasks'][1].update(lastOrdinal=count, end=count * 4 + 10)
+        events = [dict(pid=1, tgid=1, kernelPid=101, kernelTgid=101, call=5, ordinal=ordinal,
+                       time=ordinal * 4 + phase, kind=kind, value=1 if kind == 'V' else 7,
+                       result=0x8000 if kind == 'V' else 1, file=7 if kind == 'V' else None)
+                  for ordinal in range(1, count + 1) for phase, kind in enumerate('PNVX')]
+        capture['network'].update(events=events, eventCount=len(events))
+        lines = ['write(7</owned/file>, ""..., 1) = 1'] * count
+        paths = (self.report, self.whole, self.root / 'audit.capture-1.json', self.root / 'whole.capture-1.json')
+
+        def verdict(path):
+            return {key: value for key, value in self.read(path).items() if not key.startswith('taskEvidence')}
+
+        self.assertEqual(self.audit_traces([lines], capture=capture, scoped=True,
+                                           evidence_deadline=time.monotonic() + 2), (0, 1))
+        baseline = [verdict(path) for path in paths]
+        observe = audit.TaskEvidence.network_record
+        calls = 0
+
+        def small_delay(evidence, *args):
+            nonlocal calls
+            calls += 1
+            time.sleep(0.004)
+            return observe(evidence, *args)
+
+        # The whole phase would spend more than one second in the observer.
+        # Phase-boundary checks alone cannot stop it before the capture alarm.
+        with patch.object(audit.TaskEvidence, 'network_record', small_delay):
+            self.assertEqual(self.audit_traces([lines], capture=capture, scoped=True), (0, 1))
+        self.assertEqual([verdict(path) for path in paths], baseline)
+        self.assertGreater(calls, 32)
+        self.assertLess(calls, len(events))
+        for path in paths:
+            report = self.read(path)
+            self.assert_evidence_absent(report)
+            self.assertEqual(report['taskEvidenceUnavailableReason'], 'capture_time_reserve')
+            self.assertGreaterEqual(report['taskEvidenceAggregationSeconds'], calls * 0.004 - 0.000001)
+            self.assertLess(report['taskEvidenceAggregationSeconds'], 1)
 
     def test_capture_alarm_is_not_swallowed_by_an_aggregate_observer(self):
         with patch.object(audit.TaskEvidence, 'result', side_effect=audit.CaptureInterrupted('capture_timeout')):
             self.assertEqual(self.audit_traces([[]]), (87, 1))
         self.assertEqual(self.read()['outcome'], 'capture_timeout')
         self.assertIsNone(self.read()['externalAttempts'])
+        self.assertEqual(self.read()['taskEvidenceUnavailableReason'], 'capture_interrupted')
 
     def test_partial_diagnostic_write_leaves_scoped_and_whole_verdicts_readable(self):
         failures = []
@@ -786,6 +829,9 @@ class SupervisionTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assert_capture_receipts(root, codes)
                 self.assertFalse((root / 'diagnostic-started').exists())
+                report = json.loads((root / 'audit.json').read_text())
+                self.assertEqual(report['taskEvidenceUnavailableReason'], 'supervisor_time_reserve')
+                self.assertEqual(report['taskEvidenceAggregationSeconds'], 0)
 
     def test_supervisor_sigterm_cleans_final_capture_and_partial_diagnostic_write(self):
         with tempfile.TemporaryDirectory() as directory:

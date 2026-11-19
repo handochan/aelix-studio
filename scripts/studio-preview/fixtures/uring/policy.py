@@ -16,6 +16,8 @@ NETWORK_OPCODES = {9:'SENDMSG',10:'RECVMSG',13:'ACCEPT',16:'CONNECT',26:'SEND',2
 
 def reconcile(capture, calls, all_pids, selected_pids, *, task_evidence=None):
     """Unknown collection/identity is global; known outside operations are report-only."""
+    if task_evidence is not None:
+        task_evidence.checkpoint(force=True)
     global_issues=[];by_pid=defaultdict(list);rings={};records=[]
     totals=Counter();selected_totals=Counter()
     def global_error(reason,pid=None):

@@ -576,9 +576,19 @@ output are omitted. Applicable verdict fields retain their existing details.
 
 Every capture removes its scratch at the base post-analysis boundary, before
 report writes or recapture. The auditor releases the replayed capture's counters.
+Aggregation checks the remaining capture and supervisor time at intervals of up
+to 32 observations and at major phase boundaries. It stops below 250 milliseconds of
+capture time or when the supervisor no longer has the 10-second publication
+allowance and one-second exit reserve. The required verdict then proceeds with
+`taskEvidenceStatus=unavailable` and the corresponding
+`taskEvidenceUnavailableReason`. `taskEvidenceAggregationSeconds` is the sum of
+elapsed wall time in observation and finalization calls, excluding report
+publication.
+
 The final capture can publish completed counters after all required reports and
 attempt history are saved. This best-effort write has a 10-second limit and uses
-a fixed-size buffer to append the counters to each already-saved verdict
-atomically. Low remaining supervisor time, an aggregation error, or a failed
-publication leaves `taskEvidenceStatus=unavailable`. The audit keeps the
-existing capture and supervisor deadlines.
+a fixed-size buffer to append the counters atomically.
+
+The original capture and supervisor clocks run during aggregation. An individual
+aggregation call that stalls before control reaches the next check can still
+exhaust a required deadline and cause a timeout verdict.

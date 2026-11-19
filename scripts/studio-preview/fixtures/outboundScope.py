@@ -547,6 +547,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         for pid in sorted(conflict_pids):udp_issues.append({'pid':pid,'reason':'udp_kernel_tcp_connect_conflict'})
         exempt.difference_update(conflicts)
         network_evidence['metadataFields']=[item for item in network_evidence['metadataFields'] if item['pid'] not in conflict_pids]
+        if task_evidence is not None:
+            task_evidence.checkpoint(force=True)
         for evidence in network_evidence['resolved']:
             unparsed(evidence['pid'],'register_stub',-evidence['records'])
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
@@ -601,6 +603,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                              and register_records == register_holes[pid]) if register_records else None))
 
     def report(pids, scope):
+        if scope == 'all' and task_evidence is not None:
+            task_evidence.checkpoint(force=True)
         events = [event for pid in pids for event in states[pid]['events']]
         external = [event for event in events if event['external']]
         processes = []
@@ -698,6 +702,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole
     if task_evidence is not None:
-        task_evidence.measurement = task_evidence.note(task_evidence.result, kernel_capture, states, network_evidence,
-                                                       ring_evidence, object_evidence)
+        measurement = task_evidence.note(task_evidence.result, kernel_capture, states, network_evidence,
+                                         ring_evidence, object_evidence, force_check=True)
+        if task_evidence.checkpoint(force=True):
+            task_evidence.measurement = measurement
     return scoped, whole

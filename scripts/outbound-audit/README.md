@@ -176,5 +176,7 @@ comparison channel reports null for its counts. See the
 
 The auditor removes each capture's scratch before required report writes or
 recapture. It publishes completed counters for the final capture after the
-required verdict and attempt history are saved. The existing one-recapture
-policy and audit deadlines apply.
+required verdict and attempt history are saved. Aggregation checks its remaining
+time periodically and between phases. Reports include observation time and the
+reason when aggregation stops for a time reserve. An individual aggregation
+call that stalls before the next check can still exhaust a required deadline.

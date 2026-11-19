@@ -5,8 +5,10 @@ strace register-read failures. Pre-ptrace invocations prevent an emulated
 seccomp result from substituting for a different, hidden executed invocation.
 """
 from collections import Counter, defaultdict, deque
+from math import inf
 import re
 import platform
+import time
 
 CALLS = ('connect', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4')
 SOCKET_ARGUMENTS = {'kernel_connect':'socket','sock_write_iter':'kiocb',
@@ -194,6 +196,8 @@ def parse(fields):
 
 
 RECORD_KINDS = ('P', 'N', 'X', 'H', 'V', 'other')
+TASK_EVIDENCE_CHECK_INTERVAL = 32
+TASK_EVIDENCE_CAPTURE_RESERVE = 0.25
 UNMATCHED_NETWORK_ISSUES = frozenset({
     'kernel_network_event_unattributed', 'kernel_network_pre_entry_missing',
     'kernel_network_return_unmatched', 'kernel_network_return_missing',
@@ -206,11 +210,16 @@ UNMATCHED_NETWORK_ISSUES = frozenset({
 class TaskEvidence:
     """Optional numeric counters fed by the existing audit loops."""
 
-    def __init__(self, interrupt=(), unsupported=0):
+    def __init__(self, interrupt=(), unsupported=0, *, supervisor_cutoff=inf):
         self.interrupt = interrupt
         self.unsupported = unsupported
+        self.capture_deadline = inf
+        self.supervisor_cutoff = supervisor_cutoff
         self.available = True
         self.measurement = None
+        self.unavailable_reason = None
+        self.aggregation_seconds = 0.0
+        self.checks_until_due = 1
         self.tasks = []
         self.kernel_tasks = {}
         self.lifetimes = set()
@@ -225,14 +234,38 @@ class TaskEvidence:
         self.objects = defaultdict(Counter)
         self.global_object_issues = 0
 
-    def note(self, operation, *args):
-        if self.available:
-            try:
+    def stop(self, reason):
+        self.available = False
+        self.unavailable_reason = reason
+        self.measurement = None
+
+    def checkpoint(self, *, force=False, now=None):
+        if not self.available:
+            return False
+        self.checks_until_due -= 1
+        if not force and self.checks_until_due > 0:
+            return True
+        self.checks_until_due = TASK_EVIDENCE_CHECK_INTERVAL
+        current = time.monotonic() if now is None else now
+        if self.capture_deadline - current < TASK_EVIDENCE_CAPTURE_RESERVE:
+            self.stop('capture_time_reserve')
+        elif current > self.supervisor_cutoff:
+            self.stop('supervisor_time_reserve')
+        return self.available
+
+    def note(self, operation, *args, force_check=False):
+        if not self.available:
+            return None
+        started = time.monotonic()
+        try:
+            if self.checkpoint(force=force_check, now=started):
                 return operation(*args)
-            except self.interrupt:
-                raise
-            except Exception:
-                self.available = False
+        except self.interrupt:
+            raise
+        except Exception:
+            self.stop('aggregation_error')
+        finally:
+            self.aggregation_seconds += time.monotonic() - started
         return None
 
     def start_network(self, has_records, has_workers):
@@ -320,6 +353,8 @@ class TaskEvidence:
 
     def object_generation(self, owners, valid, freed, sends):
         for pid in owners:
+            if not self.checkpoint():
+                return
             counts = self.objects[pid]
             counts['generations'] += 1
             counts['validGenerations'] += int(valid)
@@ -345,6 +380,8 @@ class TaskEvidence:
             return value if type(value) is bool else None
 
         for row in self.tasks:
+            if not self.checkpoint():
+                return None
             reused = self.kernel_tasks[row['kernelTid']] is None
             parent = self.kernel_tasks.get(row['parentKernelTid'])
             born = row['rangeStart']
@@ -355,7 +392,11 @@ class TaskEvidence:
             if reused or not 0 < born <= row['rangeEnd']:
                 row['assignedRecordCounts'] = row['workerBirthRecords'] = None
 
+        if not self.checkpoint(force=True):
+            return None
         for row in self.strace_tasks:
+            if not self.checkpoint():
+                return None
             pid = row['tid']
             if network_checked:
                 counts = self.network.get(pid, {})
@@ -402,6 +443,8 @@ class TaskEvidence:
 def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None,
               known_destinations=None, metadata_allowed=(), *, task_evidence=None):
     """Cross-check all kernel activity, even when strace has no decode failure."""
+    if task_evidence is not None:
+        task_evidence.checkpoint(force=True)
     issues = []; resolved = []; entries = defaultdict(list); tasks = {}; mapping = {}
     def error(reason, pid=None, **metadata):
         issue = {'reason': reason}

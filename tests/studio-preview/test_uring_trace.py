@@ -752,3 +752,23 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         evidence.note(evidence.kernel_task, task)
         self.assertFalse(evidence.available)
         self.assertEqual(evidence.tasks, [])
+
+    def test_periodic_check_reserves_supervisor_time_and_measures_only_aggregation(self):
+        evidence = network.TaskEvidence(supervisor_cutoff=20.25)
+        evidence.capture_deadline = 25
+        now = 20
+        calls = 0
+
+        def observe():
+            nonlocal calls, now
+            calls += 1
+            now += 0.01
+
+        with patch.object(network.time, 'monotonic', side_effect=lambda: now):
+            self.assertTrue(evidence.checkpoint(force=True))
+            for _ in range(96):
+                evidence.note(observe)
+                now += 0.001  # existing verdict work between observations
+        self.assertEqual(evidence.unavailable_reason, 'supervisor_time_reserve')
+        self.assertEqual(calls, network.TASK_EVIDENCE_CHECK_INTERVAL - 1)
+        self.assertAlmostEqual(evidence.aggregation_seconds, calls * 0.01)
