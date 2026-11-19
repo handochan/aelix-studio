@@ -8,6 +8,7 @@ import { ipcBridge } from '@/common';
 import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyCheckFailure, type CheckFailure } from './checkFailure';
+import { useSessionLockView } from './useSessionLockView';
 import { sessionHolderFromError, sessionHolderFromStreamMessage, type SessionHolder } from './sessionHolder';
 
 /**
@@ -64,16 +65,16 @@ const withoutResult = (current: State, error: unknown): State => ({
  * Tracks whether another writer (the CLI or another Aelix process) holds this
  * conversation's native session.
  *
- * It only observes outcomes the host already reports: the `runtime/ensure` call the
- * conversation makes on open (deduplicated with the existing warmup), and lock errors
- * on the response stream. It never takes, releases, or polls the lock on its own;
- * `recheck` repeats the same ensure call that reopening the conversation would make.
+ * Host ensure and stream errors are the source of the holder state. The view also
+ * asks the host to release the solo runtime when the conversation closes.
+ * `recheck` repeats the ensure call that opening the conversation makes.
  *
  * Only a successful ensure (a confirmed lock-free result) makes the conversation
  * writable: on first open, on return, and on recheck. Any other failure keeps sending,
  * the stored first message, and the Draft Box blocked and saved until a check succeeds.
  */
 export const useSessionHolder = (conversationId: string, onWritable?: () => void): SessionHolderState => {
+  useSessionLockView(conversationId);
   const [state, setState] = useState<State>(() => initialState(conversationId));
   const activeIdRef = useRef(conversationId);
   activeIdRef.current = conversationId;

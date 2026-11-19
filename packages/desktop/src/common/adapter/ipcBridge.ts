@@ -354,9 +354,17 @@ export const conversation = {
     (p) => `/api/conversations/${p.conversation_id}/runtime/restart`,
     () => undefined
   ),
-  activeLease: httpPost<void, { conversation_id: string }>(
+  activeLease: httpPost<void, { conversation_id: string; view_id?: string }>(
     (p) => `/api/conversations/${p.conversation_id}/active-lease`,
-    () => undefined
+    (p) => (p.view_id ? { view_id: p.view_id } : undefined)
+  ),
+  releaseRuntime: httpPost<
+    { outcome: 'released' | 'inactive' | 'view_active' | 'busy' },
+    { conversation_id: string; view_id: string }
+  >(
+    (p) => `/api/conversations/${p.conversation_id}/runtime/release`,
+    (p) => ({ view_id: p.view_id }),
+    { keepalive: true, silentStatuses: [404, 405] }
   ),
   stop: httpPost<{ runtime: TConversationRuntimeSummary }, { conversation_id: string; turn_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/cancel`,

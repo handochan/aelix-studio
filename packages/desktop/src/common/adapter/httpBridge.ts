@@ -153,6 +153,7 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
+  keepalive?: boolean;
   /** Extra request headers merged on top of the default `Content-Type`. */
   headers?: Record<string, string>;
 };
@@ -208,13 +209,15 @@ function sendHttpRequest(
   method: string,
   path: string,
   headers: Record<string, string>,
-  body?: unknown
+  body?: unknown,
+  keepalive?: boolean
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
   return fetchFromDesktopOrBrowser(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    ...(keepalive ? { keepalive } : {}),
   });
 }
 
@@ -239,7 +242,7 @@ export async function httpRequest<T>(
     body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
   );
 
-  let response = await sendHttpRequest(method, path, headers, body);
+  let response = await sendHttpRequest(method, path, headers, body, options?.keepalive);
 
   // Expired access cookie → 401. Attempt one silent session refresh, then replay
   // the original request — the WebUI half of the #4124 fix. refreshSession() is a
@@ -250,7 +253,7 @@ export async function httpRequest<T>(
     const refreshed = await refreshSession();
     if (refreshed) {
       console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
-      response = await sendHttpRequest(method, path, headers, body);
+      response = await sendHttpRequest(method, path, headers, body, options?.keepalive);
     }
   }
 
@@ -323,14 +326,15 @@ export function httpGet<Data, Params = undefined>(
 
 export function httpPost<Data, Params = undefined>(
   path: string | ((params: Params) => string),
-  mapBody?: (params: Params) => unknown
+  mapBody?: (params: Params) => unknown,
+  options?: HttpRequestOptions
 ): ProviderLike<Data, Params> {
   return {
     provider: () => {},
     invoke: (async (params?: Params) => {
       const resolvedPath = typeof path === 'function' ? path(params!) : path;
       const body = mapBody ? mapBody(params!) : params;
-      return httpRequest<Data>('POST', resolvedPath, body);
+      return httpRequest<Data>('POST', resolvedPath, body, options);
     }) as ProviderLike<Data, Params>['invoke'],
   };
 }

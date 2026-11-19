@@ -277,7 +277,6 @@ const ChatConversation: React.FC<{
     (ready: boolean) => setRuntimeReadyConversationId(ready ? (conversation?.id ?? null) : null),
     [conversation?.id]
   );
-  useActiveLease({ type: 'conversation', id: conversation?.id });
   const workspaceEnabled = Boolean(conversation?.extra?.workspace) && !conversation?.project_id;
   const cronJobId = resolveCronJobId(conversation?.extra);
   const layout = useLayoutContext();
@@ -286,6 +285,8 @@ const ChatConversation: React.FC<{
   const isAionrsConversation = conversation?.type === 'aionrs';
   const isLegacyReadOnlyConversation = isLegacyReadOnlyConversationType(conversation?.type);
   const resolvedHideSendBox = hideSendBox || isLegacyReadOnlyConversationType(conversation?.type);
+  const usesHolderView = !resolvedHideSendBox && (conversation?.type === 'acp' || conversation?.type === 'antigravity');
+  useActiveLease({ type: 'conversation', id: usesHolderView ? undefined : conversation?.id });
 
   // 使用统一的 Hook 获取预设助手信息（ACP/Codex 会话）
   // Use unified hook for preset assistant info (ACP/Codex conversations)

@@ -31,6 +31,10 @@ vi.mock('@/renderer/pages/conversation/utils/ensureConversationRuntime', () => (
   ensureConversationRuntime: (conversationId: string) => mocks.ensure(conversationId),
 }));
 
+vi.mock('@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionLockView', () => ({
+  useSessionLockView: vi.fn(),
+}));
+
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({ t: (key: string) => key }),
 }));
