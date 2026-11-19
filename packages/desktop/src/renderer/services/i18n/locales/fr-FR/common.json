@@ -202,5 +202,10 @@
   },
   "selectedCount": "{{count}} sélectionné(s)",
   "selectedSkills": "Compétences sélectionnées",
-  "aiAssistant": "Assistant IA"
+  "aiAssistant": "Assistant IA",
+  "configurationRecovery": {
+    "title": "Paramètres réinitialisés",
+    "message": "Vos paramètres n’ont pas pu être récupérés et ont été réinitialisés.",
+    "detail": "Le fichier endommagé a été conservé. La recherche automatique de mises à jour restera désactivée jusqu’à ce que vous modifiiez cette option dans les paramètres."
+  }
 }

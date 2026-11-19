@@ -1,8 +1,92 @@
 import { spawnSync } from 'node:child_process';
+import { createHash, randomUUID } from 'node:crypto';
+import { appendFileSync, readFileSync } from 'node:fs';
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import { installProtocolDiagnostics } from './probes/protocolDiagnostics.mjs';
+
+/** Atomically replace a complete renderer result using a sibling temporary file. */
+export function writeRendererResult(output, value, { platform = process.platform } = {}) {
+  const file = path.join(output, 'renderer-result.json');
+  const temporary = path.join(output, `.renderer-result-${process.pid}-${randomUUID()}.tmp`);
+  try {
+    fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
+    for (let attempt = 0; ; attempt++) {
+      try {
+        fs.renameSync(temporary, file);
+        break;
+      } catch (error) {
+        if (platform !== 'win32' || error.code !== 'EPERM' || attempt === 2) throw error;
+        // Only diagnostic file replacement retries; never retry an app launch.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 10);
+      }
+    }
+  } finally {
+    try {
+      fs.unlinkSync(temporary);
+    } catch {
+      /* absent after rename; preserve the original write error */
+    }
+  }
+}
+
+/** Merge diagnostics into the uploaded result; journal only supplied lifecycle changes. */
+export function recordLaunchEvidence(output, patch, event) {
+  const file = path.join(output, 'renderer-result.json');
+  const previous = JSON.parse(readFileSync(file, 'utf8'));
+  writeRendererResult(output, { ...previous, ...patch });
+  if (event != null) appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(event) + '\n');
+}
+
+/** Keep Playwright's driver logging out of the installed application environment. */
+export function electronAppEnvironment(driver) {
+  const environment = { ...driver };
+  delete environment.DEBUG;
+  return environment;
+}
+
+/** Summarize the owned synthetic profile without exporting setting values. */
+export function configSummary(file) {
+  try {
+    const raw = readFileSync(file);
+    let value;
+    try {
+      value = JSON.parse(decodeURIComponent(atob(raw.toString())));
+    } catch {
+      /* retain size and digest for malformed data */
+    }
+    const valid = Boolean(value && typeof value === 'object' && !Array.isArray(value));
+    return {
+      bytes: raw.length,
+      sha256: createHash('sha256').update(raw).digest('hex'),
+      valid,
+      keyCount: valid ? Object.keys(value).length : 0,
+      autoCheck: valid && typeof value['update.autoCheck'] === 'boolean' ? value['update.autoCheck'] : 'missing',
+    };
+  } catch (error) {
+    return { bytes: null, valid: false, autoCheck: 'missing', errorCode: error.code };
+  }
+}
+
+/** Fail on preference loss; callers must never reseed settings between launches. */
+export function verifyConfigPreserved(file, { phase, launch, record }) {
+  const summary = configSummary(file);
+  const passed = summary.valid && summary.autoCheck === false;
+  const result = { phase, launch, ...summary, status: passed ? 'passed' : 'failed' };
+  record(result);
+  assert.ok(passed, `Studio config preservation failed: ${JSON.stringify(result)}`);
+  return result;
+}
 
 /** Wait for a fixture result with a finite, logged harness deadline. */
-export async function boundedWait(work, label, { timeoutMs = 20000, log = console.log } = {}) {
+export async function boundedWait(
+  work,
+  label,
+  { timeoutMs = 20000, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
+) {
   const started = performance.now();
+  const startedAt = new Date().toISOString();
   let timer;
   let status = 'passed';
   try {
@@ -17,7 +101,19 @@ export async function boundedWait(work, label, { timeoutMs = 20000, log = consol
     throw error;
   } finally {
     clearTimeout(timer);
-    log(JSON.stringify({ wait: label, elapsedMs: Math.round(performance.now() - started), timeoutMs, status }));
+    log(
+      JSON.stringify({
+        wait: label,
+        launch,
+        pid,
+        phase,
+        startedAt,
+        endedAt: new Date().toISOString(),
+        elapsedMs: Math.round(performance.now() - started),
+        timeoutMs,
+        status,
+      })
+    );
   }
 }
 
@@ -25,28 +121,70 @@ function exited(main) {
   return main.exitCode !== null || main.signalCode !== null;
 }
 
-async function waitForExit(main) {
-  if (exited(main)) return;
+async function waitForExit(main, state, phase) {
+  const context = { launch: state?.observation.launch ?? null, pid: main.pid ?? null, phase };
+  const log = (text) => {
+    console.log(text);
+    if (state) {
+      state.observation.waits.push(JSON.parse(text));
+      state.diagnostic();
+    }
+  };
+  if (exited(main)) {
+    log(
+      JSON.stringify({
+        wait: 'electron-main-exit',
+        ...context,
+        elapsedMs: 0,
+        timeoutMs: 20000,
+        status: 'passed',
+        alreadyExited: true,
+      })
+    );
+    return;
+  }
   let listener;
   try {
-    await boundedWait(new Promise((resolve) => main.once('exit', (listener = resolve))), 'electron-main-exit');
+    await boundedWait(new Promise((resolve) => main.once('exit', (listener = resolve))), 'electron-main-exit', {
+      ...context,
+      log,
+    });
   } finally {
     main.removeListener('exit', listener);
   }
 }
 
 /** Close the old main process before reusing its user root, including disconnect paths. */
-export async function closeElectron(app) {
+export async function closeElectron(app, { phase = 'cleanup-main-exit', backgroundAfterExit = false } = {}) {
   if (!app) return;
   const main = app.process();
   const state = observations.get(app);
+  const background = backgroundAfterExit && exited(main);
   if (state) {
     state.observeExit();
     state.observation.closeRequestedAt ??= new Date().toISOString();
     state.record({ ...state.observation, status: 'closing' });
+    state.processTimeline?.checkpoint('close-requested', state.observation.launch);
   }
-  await app.close();
-  await waitForExit(main);
+  try {
+    if (background) {
+      // Finalize the known OS exit while this launch still owns the timeline.
+      // Deferred Playwright cleanup can outlive both the launch and its evidence.
+      await waitForExit(main, state, phase);
+      void Promise.resolve()
+        .then(() => app.close())
+        .catch(() =>
+          console.error(`Studio launch #${state?.observation.launch}: Playwright cleanup failed after OS exit`)
+        );
+      return;
+    }
+    await app.close();
+    await waitForExit(main, state, phase);
+    state?.processTimeline?.checkpoint('after-close', state.observation.launch);
+  } finally {
+    if (background) state?.retireEvidence();
+    state?.protocol.dispose();
+  }
 }
 
 const observations = new WeakMap();
@@ -106,8 +244,44 @@ export function recordLaunchFailure(app, error) {
   );
 }
 
-/** Launch exactly once. A naturally exiting product must fail the original smoke. */
-export async function launchWithIdentity(launch, { launchNumber, record, remainingProcesses }) {
+async function evaluateIdentity(app, protocol) {
+  const token = randomUUID();
+  const finish = protocol.trackIdentityEvaluation(token);
+  let result;
+  try {
+    const identity = await app.evaluate(
+      () => ({
+        pid: process.pid,
+        backendOverride: process.env.AIONUI_BACKEND_BIN,
+        resourcesPath: process.resourcesPath,
+      }),
+      token
+    );
+    result = { identity };
+  } catch (error) {
+    result = { failedAt: new Date().toISOString(), error };
+  }
+  const protocolError = finish();
+  return { ...result, protocolError };
+}
+
+/** Share the launch timeout with first-window readiness before evaluating identity. */
+export async function launchWithIdentity(
+  launch,
+  { launchNumber, record, remainingProcesses, processTimeline, launchTimeoutMs = 60000 }
+) {
+  const write = record;
+  let lastStatus = 'launching';
+  let recording = true;
+  record = (value) => {
+    if (!recording) return;
+    lastStatus = value.status ?? lastStatus;
+    try {
+      return write(value);
+    } catch {
+      /* diagnostic persistence must not change the smoke outcome */
+    }
+  };
   const observation = {
     launch: launchNumber,
     startedAt: new Date().toISOString(),
@@ -120,48 +294,156 @@ export async function launchWithIdentity(launch, { launchNumber, record, remaini
     naturalExit: null,
     stdout: '',
     stderr: '',
+    waits: [],
+  };
+  const diagnostic = () => {
+    try {
+      record({ ...observation, status: lastStatus });
+    } catch {
+      /* observation only */
+    }
   };
   record({ ...observation, status: 'launching' });
+  const protocol = installProtocolDiagnostics((value) => {
+    observation.protocol = value;
+    diagnostic();
+  });
+  observation.protocol = protocol.snapshot();
   let app;
   try {
-    app = await launch();
-    const main = app.process();
-    observation.pid = main.pid;
-    const observeExit = () => {
-      if (exited(main) && !observation.exitObservedAt) {
-        observation.exitCode = main.exitCode;
-        observation.signal = main.signalCode;
-        observation.exitObservedAt = new Date().toISOString();
-        observation.naturalExit = observation.closeRequestedAt === null;
-      }
-    };
-    observations.set(app, { observation, record, observeExit });
-    main.on('exit', () => {
-      observeExit();
-      record({ ...observation, status: 'exited' });
-    });
-    for (const stream of ['stdout', 'stderr'])
-      main[stream]?.on('data', (chunk) => {
-        observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
-        record({ ...observation, status: 'output' });
+    const deadline = performance.now() + launchTimeoutMs;
+    app = await launch(launchTimeoutMs);
+    try {
+      protocol.restore();
+      const main = app.process();
+      observation.pid = main.pid;
+      let rejectFirstWindowOnExit;
+      const firstWindowExitError = () => {
+        const reason = main.exitCode !== null ? `code ${main.exitCode}` : `signal ${main.signalCode}`;
+        return new Error(`Studio launch #${launchNumber}: application exited with ${reason} before the first window`);
+      };
+      const observeExit = () => {
+        if (exited(main) && !observation.exitObservedAt) {
+          observation.exitCode = main.exitCode;
+          observation.signal = main.signalCode;
+          observation.exitObservedAt = new Date().toISOString();
+          observation.naturalExit = observation.closeRequestedAt === null;
+        }
+      };
+      observations.set(app, {
+        observation,
+        record,
+        observeExit,
+        protocol,
+        diagnostic,
+        processTimeline,
+        retireEvidence: () => {
+          recording = false;
+        },
       });
-    const identity = await app.evaluate(() => ({
-      pid: process.pid,
-      backendOverride: process.env.AIONUI_BACKEND_BIN,
-      resourcesPath: process.resourcesPath,
-    }));
-    record({ ...observation, status: 'identified', identifiedAt: new Date().toISOString() });
-    return { app, identity };
+      processTimeline?.addMain(main.pid, launchNumber);
+      main.on('exit', () => {
+        observeExit();
+        rejectFirstWindowOnExit?.(firstWindowExitError());
+        processTimeline?.mainExit(main.pid);
+        record({ ...observation, status: 'exited' });
+      });
+      for (const stream of ['stdout', 'stderr'])
+        main[stream]?.on('data', (chunk) => {
+          observation[stream] = (observation[stream] + chunk.toString()).slice(-65536);
+          record({ ...observation, status: 'output' });
+        });
+      const startedAt = new Date().toISOString();
+      observation.firstWindowWait = { startedAt, outcome: 'pending' };
+      diagnostic();
+      processTimeline?.checkpoint('first-window-wait', launchNumber);
+      let outcome = 'failed';
+      try {
+        if (exited(main)) throw firstWindowExitError();
+        const remaining = deadline - performance.now();
+        if (remaining > 0) {
+          // Playwright's close event can wait for descendants to release inherited pipes.
+          const osExit = new Promise((_, reject) => {
+            rejectFirstWindowOnExit = reject;
+          });
+          await Promise.race([osExit, app.firstWindow({ timeout: remaining })]);
+        }
+        if (exited(main)) throw firstWindowExitError();
+        if (performance.now() >= deadline)
+          throw new Error(
+            `Studio launch #${launchNumber}: first window exceeded the ${launchTimeoutMs}ms launch timeout`
+          );
+        outcome = 'passed';
+      } finally {
+        rejectFirstWindowOnExit = undefined;
+        observation.firstWindowWait = { startedAt, finishedAt: new Date().toISOString(), outcome };
+        diagnostic();
+      }
+      processTimeline?.beginIdentity();
+      observation.identityStartedAt = new Date().toISOString();
+      const first = await evaluateIdentity(app, protocol);
+      let identity = first.identity;
+      if (first.failedAt) {
+        observation.identityFailedAt = first.failedAt;
+        observation.identityProtocol = observation.protocol = protocol.snapshot();
+        const original = first.protocolError;
+        if (
+          original?.code !== -32000 ||
+          original.messageRedacted !== false ||
+          original.message !== 'Promise was collected' ||
+          exited(main) ||
+          app.process() !== main
+        ) {
+          diagnostic();
+          throw first.error;
+        }
+
+        const retry = { startedAt: new Date().toISOString(), firstProtocolError: original };
+        observation.identityRetry = { ...retry, outcome: 'pending' };
+        diagnostic();
+        const second = await evaluateIdentity(app, protocol);
+        // The same Playwright app uses its original inspector handle.
+        // app.process() can be the Windows launcher, with a different PID.
+        const sameApp = !second.failedAt && !exited(main) && app.process() === main;
+        const pid = second.identity?.pid;
+        const validPid = Number.isSafeInteger(pid) && pid > 0;
+        observation.identityRetry = {
+          ...retry,
+          finishedAt: second.failedAt ?? new Date().toISOString(),
+          outcome: sameApp && validPid ? 'passed' : 'failed',
+          secondProtocolError: second.protocolError,
+        };
+        diagnostic();
+        if (second.failedAt) throw second.error;
+        if (!sameApp) throw new Error('Studio app changed during identity retry');
+        if (!validPid) throw new Error('Studio identity retry returned an invalid PID');
+        identity = second.identity;
+      }
+      observation.identifiedAt = new Date().toISOString();
+      record({ ...observation, status: 'identified' });
+      return { app, identity };
+    } finally {
+      if (observation.identityStartedAt)
+        processTimeline?.endIdentity(observation.identifiedAt ? 'after-identity' : 'identity-failed', launchNumber);
+    }
   } catch (error) {
     if (app) {
-      // Preserve the existing bounded observation before any smoke shutdown.
-      await waitForExit(app.process()).catch(() => {});
+      const windowFailed = observation.firstWindowWait?.outcome === 'failed';
+      // The extra exit observation belongs to failures during evaluation.
+      if (!windowFailed)
+        await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
       recordLaunchFailure(app, error);
-      await closeElectron(app);
+      await closeElectron(app, {
+        phase: windowFailed ? 'first-window-failure-cleanup' : 'identity-failure-cleanup',
+        backgroundAfterExit: windowFailed,
+      });
     } else {
       record({ ...observation, status: 'failed', error: String(error) });
       console.error(`Studio launch #${launchNumber} FAILED before process handle: ${error}`);
+      protocol.dispose();
     }
     throw error;
+  } finally {
+    protocol.restore();
   }
 }

@@ -3,13 +3,24 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
-import { closeElectron, launchWithIdentity, recordLaunchFailure, sandboxProcesses } from '../verification.mjs';
+import { qualifyRecoveredProfile } from '../../../../tests/manual/recoveredProfile.mjs';
+import { createProcessTimeline } from './processTimeline.mjs';
+import {
+  closeElectron as closeElectronProcess,
+  electronAppEnvironment,
+  launchWithIdentity,
+  recordLaunchFailure,
+  recordLaunchEvidence,
+  writeRendererResult,
+  sandboxProcesses,
+  verifyConfigPreserved,
+} from '../verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
 const output = process.env.RECOVERY_OUTPUT;
 assert.ok(sandbox && output, 'Run through smoke.py with isolated synthetic state');
 const executablePath = process.env.RECOVERY_APP_EXECUTABLE;
-const appEnv = { ...process.env };
+const appEnv = electronAppEnvironment(process.env);
 if (executablePath) {
   for (const name of ['AIONUI_BACKEND_BIN', 'AELIX_STUDIO_RUNTIME', 'AIONUI_BUNDLED_MANAGED_RESOURCES'])
     delete appEnv[name];
@@ -22,27 +33,64 @@ let app, page, port, selector, conversationRoute, launchResources;
 const appPids = [],
   checks = [];
 const mainLaunches = [];
-fs.writeFileSync(path.join(output, 'renderer-result.json'), JSON.stringify({ checksPassed: [], mainLaunches }));
-function recordLifecycle(observation) {
-  mainLaunches[observation.launch - 1] = observation;
+const configPreservation = [];
+let recoveryProfile;
+function recordRecovery(result) {
+  recoveryProfile = result;
   const file = path.join(output, 'renderer-result.json');
   const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
-  fs.writeFileSync(file, JSON.stringify({ ...previous, checksPassed: [...checks], mainLaunches }, null, 2) + '\n');
-  fs.appendFileSync(path.join(output, 'startup-lifecycle.jsonl'), JSON.stringify(observation) + '\n');
+  writeRendererResult(output, { ...previous, recoveryProfile });
+  console.log(`Studio recovered profile: ${JSON.stringify(result)}`);
 }
+function checkConfig(phase, launch) {
+  verifyConfigPreserved(path.join(sandbox, 'studio/config/aionui-config.txt'), {
+    phase,
+    launch,
+    record: (result) => {
+      configPreservation.push(result);
+      const file = path.join(output, 'renderer-result.json');
+      const previous = JSON.parse(fs.readFileSync(file, 'utf8'));
+      writeRendererResult(output, { ...previous, configPreservation });
+      console.log(`Studio config preservation: ${JSON.stringify(result)}`);
+    },
+  });
+}
+async function closeElectron(current) {
+  if (!current) return;
+  await closeElectronProcess(current);
+  // Clear the live handle before an assertion can fail: the disposed Playwright
+  // application must not be closed again by the outer failure cleanup.
+  if (current === app) app = null;
+  checkConfig('after-os-exit', mainLaunches.length);
+}
+writeRendererResult(output, { checksPassed: [], mainLaunches, configPreservation });
+function recordLifecycle(observation) {
+  mainLaunches[observation.launch - 1] = observation;
+  recordLaunchEvidence(output, { checksPassed: [...checks], mainLaunches }, observation);
+}
+const processTimeline = createProcessTimeline({
+  sandbox,
+  record: (value, event) => {
+    recordLaunchEvidence(output, { processTimeline: value }, event);
+  },
+});
+processTimeline.start();
 async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
+  processTimeline.checkpoint('before-launch', mainLaunches.length + 1);
+  checkConfig('before-launch', mainLaunches.length + 1);
   const result = await launchWithIdentity(
-    () =>
+    (timeout) =>
       electron.launch({
         ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
         cwd: executablePath ? sandbox : process.cwd(),
         env: appEnv,
-        timeout: 60000,
+        timeout,
       }),
     {
       launchNumber: mainLaunches.length + 1,
       remainingProcesses: sandboxProcesses(sandbox),
       record: recordLifecycle,
+      processTimeline,
     }
   );
   app = result.app;
@@ -88,6 +136,13 @@ async function api(route, method = 'GET', body, status = [200, 201, 202]) {
   return result.data ?? result;
 }
 try {
+  if (executablePath)
+    await qualifyRecoveredProfile({
+      executablePath,
+      environment: appEnv,
+      root: path.join(sandbox, 'recovered-profile'),
+      record: recordRecovery,
+    });
   await launch();
   if (executablePath) {
     await expect
@@ -396,9 +451,10 @@ try {
       .toBe(true);
   } finally {
     // Preserve the actual child result even when the native execution fails.
-    fs.writeFileSync(
-      path.join(output, 'renderer-result.json'),
-      JSON.stringify({ checksPassed: checks, mainLaunches, delegation: delegated ?? null }, null, 2) + '\n'
+    recordLaunchEvidence(
+      output,
+      { checksPassed: checks, mainLaunches, configPreservation, recoveryProfile, delegation: delegated ?? null },
+      null
     );
   }
   assert.ok(delegated, 'Native delegation must produce two real children');
@@ -409,27 +465,23 @@ try {
   checks.push('native_two_child_delegation_before_payload_inventory_check');
   await select('default');
   checks.push('renderer_return_to_ask');
-  fs.writeFileSync(
-    path.join(output, 'renderer-result.json'),
-    JSON.stringify(
-      {
-        checksPassed: checks,
-        host: executablePath
-          ? 'actual installed default host without backend override'
-          : 'actual built Electron and explicit recovery candidate',
-        driverNodeVersion: process.version,
-        electronVersions: await app.evaluate(() => process.versions),
-        appPids,
-        mainLaunches,
-        displayedModeAfterRestore: 'default',
-        actualApprovalAfterRestore: 'ask',
-        unapprovedWriteObserved: false,
-        delegation: delegated,
-      },
-      null,
-      2
-    ) + '\n'
-  );
+  writeRendererResult(output, {
+    checksPassed: checks,
+    host: executablePath
+      ? 'actual installed default host without backend override'
+      : 'actual built Electron and explicit recovery candidate',
+    driverNodeVersion: process.version,
+    electronVersions: await app.evaluate(() => process.versions),
+    appPids,
+    mainLaunches,
+    configPreservation,
+    recoveryProfile,
+    processTimeline: JSON.parse(fs.readFileSync(path.join(output, 'renderer-result.json'), 'utf8')).processTimeline,
+    displayedModeAfterRestore: 'default',
+    actualApprovalAfterRestore: 'ask',
+    unapprovedWriteObserved: false,
+    delegation: delegated,
+  });
 } catch (error) {
   recordLaunchFailure(app, error);
   if (conversationRoute)
@@ -449,5 +501,10 @@ try {
   }
   throw error;
 } finally {
-  await closeElectron(app);
+  try {
+    await closeElectron(app);
+  } finally {
+    processTimeline.checkpoint('cleanup-complete', mainLaunches.length);
+    processTimeline.stop();
+  }
 }

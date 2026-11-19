@@ -1,16 +1,30 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import http from 'node:http';
-import os from 'node:os';
-import path from 'node:path';
+import net from 'node:net';
+import os, { networkInterfaces } from 'node:os';
+import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
+import type { Duplex } from 'node:stream';
+import { startWebHost } from '../src/index.js';
 import { startStaticServer, type StaticServerHandle } from '../src/static-server.js';
 
+vi.mock('node:os', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:os')>();
+  return { ...actual, networkInterfaces: vi.fn<typeof actual.networkInterfaces>(() => ({})) };
+});
+
+function setLanAddress(address: string): void {
+  vi.mocked(networkInterfaces).mockReturnValue({
+    lan: [{ address, family: 'IPv4', internal: false, netmask: '255.255.255.0', cidr: address + '/24', mac: '' }],
+  });
+}
+
 async function mkRendererFixture(): Promise<string> {
-  const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'ws-static-'));
-  await fs.writeFile(path.join(dir, 'index.html'), '<!doctype html><title>root</title>');
-  await fs.mkdir(path.join(dir, 'assets'));
-  await fs.writeFile(path.join(dir, 'assets', 'main.js'), 'console.log("hi")');
+  const dir = await fs.mkdtemp(join(os.tmpdir(), 'ws-static-'));
+  await fs.writeFile(join(dir, 'index.html'), '<!doctype html><title>root</title>');
+  await fs.mkdir(join(dir, 'assets'));
+  await fs.writeFile(join(dir, 'assets', 'main.js'), 'console.log("hi")');
   return dir;
 }
 
@@ -24,6 +38,22 @@ async function startMockBackend(
     port,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
+}
+
+function requestStatus(
+  port: number,
+  path: string,
+  options: { method?: string; headers?: http.OutgoingHttpHeaders } = {}
+): Promise<number | undefined> {
+  return new Promise((resolve, reject) => {
+    const req = http.request({ host: '127.0.0.1', port, path, ...options }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on('error', reject);
+    req.setTimeout(3000, () => req.destroy(new Error('HTTP response timeout')));
+    req.end();
+  });
 }
 
 describe('static-server', () => {
@@ -44,6 +74,8 @@ describe('static-server', () => {
       await stopBackend();
       stopBackend = null;
     }
+    vi.unstubAllEnvs();
+    vi.mocked(networkInterfaces).mockReset();
     await fs.rm(staticDir, { recursive: true, force: true });
   });
 
@@ -75,6 +107,109 @@ describe('static-server', () => {
     expect(await r.text()).toContain('hi');
   });
 
+  describe('request source checks', () => {
+    let backendRequests = 0;
+
+    beforeEach(async () => {
+      backendRequests = 0;
+      vi.stubEnv('AELIX_STUDIO_ORIGIN', undefined);
+      const backend = await startMockBackend((_req, res) => {
+        backendRequests += 1;
+        res.end('backend response');
+      });
+      stopBackend = backend.close;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    });
+
+    it.each(['/api/anything', '/', '/client/route', '/assets/main.js'])(
+      'requires an allowed Host for %s',
+      async (path) => {
+        const server = handle!;
+        expect(await requestStatus(server.port, path, { headers: { host: 'unlisted.invalid:' + server.port } })).toBe(
+          403
+        );
+        expect(backendRequests).toBe(0);
+      }
+    );
+
+    it.each(['/api/anything', '/', '/assets/main.js'])(
+      'requires an allowed Origin when supplied for %s',
+      async (path) => {
+        const server = handle!;
+        expect(await requestStatus(server.port, path, { headers: { origin: 'http://unlisted.invalid' } })).toBe(403);
+        expect(backendRequests).toBe(0);
+      }
+    );
+
+    it('denies a cross-site asset request without an Origin', async () => {
+      expect(
+        await requestStatus(handle!.port, '/assets/main.js', { headers: { 'sec-fetch-site': 'cross-site' } })
+      ).toBe(403);
+    });
+
+    it('accepts case-insensitive localhost with the actual port', async () => {
+      const { port } = handle!;
+      const headers = { host: 'LOCALHOST:' + port, origin: 'http://LocalHost:' + port };
+      expect(await requestStatus(port, '/api/anything', { headers })).toBe(200);
+    });
+
+    it.each(['localhost', 'localhost:1', '[::1]', '[::1]:1', '[::ffff:127.0.0.1]', '127.0.0.1.'])(
+      'rejects unbound Host authority %s',
+      async (host) => {
+        expect(await requestStatus(handle!.port, '/', { headers: { host } })).toBe(403);
+      }
+    );
+
+    it('rejects bracketed IPv6 at the IPv4 listener port', async () => {
+      const { port } = handle!;
+      expect(await requestStatus(port, '/', { headers: { host: '[::1]:' + port } })).toBe(403);
+    });
+
+    it('rejects mixing two individually allowed authorities', async () => {
+      const server = handle!;
+      expect(
+        await requestStatus(server.port, '/api/anything', {
+          headers: { host: 'localhost:' + server.port, origin: server.localUrl },
+        })
+      ).toBe(403);
+    });
+
+    it('requires a same-origin value on state-changing requests', async () => {
+      const server = handle!;
+      expect(await requestStatus(server.port, '/api/anything', { method: 'POST' })).toBe(403);
+      expect(await requestStatus(server.port, '/api/anything', { method: 'POST', headers: { origin: 'null' } })).toBe(
+        403
+      );
+      expect(backendRequests).toBe(0);
+    });
+
+    it('rejects cross-origin preflight before forwarding', async () => {
+      const server = handle!;
+      const headers = { origin: 'http://unlisted.invalid', 'access-control-request-method': 'POST' };
+      expect(await requestStatus(server.port, '/api/anything', { method: 'OPTIONS', headers })).toBe(403);
+      expect(backendRequests).toBe(0);
+    });
+
+    it('handles same-origin OPTIONS locally', async () => {
+      const server = handle!;
+      expect(
+        await requestStatus(server.port, '/api/anything', { method: 'OPTIONS', headers: { origin: server.localUrl } })
+      ).toBe(204);
+      expect(backendRequests).toBe(0);
+    });
+  });
+
+  it('accepts a configured proxy origin only with its matching Host', async () => {
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', 'https://[2001:db8::1]:8443');
+    const backend = await startMockBackend((_req, res) => res.end('backend response'));
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+
+    const origin = 'https://[2001:db8::1]:8443';
+    expect(await requestStatus(handle.port, '/', { headers: { host: '[2001:DB8::1]:8443', origin } })).toBe(200);
+    expect(await requestStatus(handle.port, '/', { headers: { host: '[2001:db8::1]:8444', origin } })).toBe(403);
+  });
+
   it('/api/* reverse-proxies to backend', async () => {
     const backend = await startMockBackend((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
@@ -86,6 +221,61 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const json = (await r.json()) as { path: string };
     expect(json.path).toBe('/api/anything');
+  });
+
+  it('keeps proxy metadata and CORS decisions at the WebUI listener', async () => {
+    const backend = await startMockBackend((req, res) => {
+      res.writeHead(200, { 'access-control-allow-origin': '*' });
+      res.end(JSON.stringify(req.headers));
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const response = await fetch(handle.localUrl + '/api/anything', {
+      headers: { 'x-forwarded-for': '192.0.2.1', 'x-aionui-internal': '1' },
+    });
+    const headers = (await response.json()) as Record<string, unknown>;
+    expect(headers['x-forwarded-for']).toBeUndefined();
+    expect(headers['x-aionui-internal']).toBeUndefined();
+    expect(response.headers.get('access-control-allow-origin')).toBeNull();
+  });
+
+  it('shares the backend login rate limit between clients behind a configured reverse proxy', async () => {
+    const host = 'studio.example.test';
+    const origin = 'https://' + host;
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', origin);
+    const failuresByIP = new Map<string, number>();
+    const backend = await startMockBackend((req, res) => {
+      // The pinned host uses the first forwarded IP, then x-real-ip, then "unknown".
+      const ip = req.headers['x-forwarded-for']?.toString().split(',')[0] || req.headers['x-real-ip']?.toString();
+      const key = ip || 'unknown';
+      const failures = failuresByIP.get(key) ?? 0;
+      if (failures >= 5) {
+        res.writeHead(429).end();
+        return;
+      }
+      failuresByIP.set(key, failures + 1);
+      res.writeHead(401).end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+
+    const login = (ip: string) =>
+      requestStatus(handle!.port, '/login', {
+        method: 'POST',
+        headers: {
+          host,
+          origin,
+          forwarded: 'for=' + ip,
+          'x-forwarded-for': ip,
+          'x-real-ip': ip,
+        },
+      });
+
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      expect(await login('192.0.2.1')).toBe(401);
+    }
+    expect(await login('192.0.2.2')).toBe(429);
+    expect([...failuresByIP]).toEqual([['unknown', 5]]);
   });
 
   it('/login reverse-proxies to backend (no local handler)', async () => {
@@ -105,7 +295,7 @@ describe('static-server', () => {
 
     const r = await fetch(`${handle.localUrl}/login`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', origin: handle.localUrl },
       body: JSON.stringify({ username: 'admin', password: 'anything' }),
     });
     expect(r.status).toBe(200);
@@ -147,7 +337,7 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
 
-    const r = await fetch(`${handle.localUrl}/logout`, { method: 'POST' });
+    const r = await fetch(`${handle.localUrl}/logout`, { method: 'POST', headers: { origin: handle.localUrl } });
     expect(r.status).toBe(200);
     expect(r.headers.get('set-cookie')).toMatch(/Max-Age=0/);
   });
@@ -163,179 +353,157 @@ describe('static-server', () => {
     expect(r.status).toBe(502);
   });
 
-  it('/ws WebSocket upgrade is spliced to backend and 101 is relayed', async () => {
-    // Mock backend that accepts any WebSocket upgrade and replies with 101.
-    // We don't run a real ws protocol — just verify the upgrade response makes
-    // it back through the TCP-splice proxy. This is the exact regression path
-    // that bun 1.3's http-compat upgrade handler broke.
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
-    const httpMod = await import('node:http');
-    const backendServer = httpMod.createServer();
-    backendServer.on('upgrade', (req, socket) => {
-      const wsKey = (req.headers['sec-websocket-key'] as string) || '';
-      const accept = createHash('sha1')
-        .update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-        .digest('base64');
-      socket.write('HTTP/1.1 101 Switching Protocols\r\n');
-      socket.write('Upgrade: websocket\r\n');
-      socket.write('Connection: Upgrade\r\n');
-      socket.write(`Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
-      // Send a single 0-length WS text frame as a liveness marker then close.
-      socket.write(Buffer.from([0x81, 0x00]));
-      socket.end();
-    });
-    await new Promise<void>((r) => backendServer.listen(0, '127.0.0.1', () => r()));
-    stopBackend = () => new Promise<void>((r) => backendServer.close(() => r()));
-    const backendPort = (backendServer.address() as { port: number }).port;
+  describe('WebSocket upgrades', () => {
+    const wsHeaders = {
+      Connection: 'Upgrade',
+      Upgrade: 'websocket',
+      'Sec-WebSocket-Version': '13',
+      'Sec-WebSocket-Key': 'dGhlIHNhbXBsZSBub25jZQ==',
+    };
+    const paths = ['/ws', '/api/stt/stream', '/api/stt/stream?lang=en&model=default'];
+    const handshake = Buffer.from(
+      [
+        'HTTP/1.1 101 Switching Protocols',
+        'Upgrade: websocket',
+        'Connection: Upgrade',
+        'Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=',
+        '\r\n',
+      ].join('\r\n')
+    );
+    const firstFrame = Buffer.from('\x81\x05hello', 'latin1');
+    const replyFrame = Buffer.from('\x81\x04pong', 'latin1');
+    const mask = Buffer.from([1, 2, 3, 4]);
+    const maskedPayload = Buffer.from('ping').map((byte, index) => byte ^ mask[index]);
+    const clientFrame = Buffer.concat([Buffer.from([0x81, 0x84]), mask, maskedPayload]);
 
-    handle = await startStaticServer({ staticDir, backendPort, port: 0 });
-
-    // Speak raw HTTP/1.1 upgrade over a TCP socket against the public listener.
-    const { port: publicPort } = handle;
-    const status: string = await new Promise((resolve, reject) => {
-      const sock = net.connect({ host: '127.0.0.1', port: publicPort }, () => {
-        sock.write(
-          'GET /ws HTTP/1.1\r\n' +
-            `Host: 127.0.0.1:${publicPort}\r\n` +
-            'Upgrade: websocket\r\n' +
-            'Connection: Upgrade\r\n' +
-            'Sec-WebSocket-Version: 13\r\n' +
-            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-            '\r\n'
-        );
+    function connectUpgrade(path: string, headers: Record<string, string>): net.Socket {
+      const lines = Object.entries({ ...wsHeaders, ...headers }).map(([name, value]) => name + ': ' + value);
+      const sock = net.connect({ host: '127.0.0.1', port: handle!.port }, () => {
+        // Send the request line before the rest of the handshake.
+        sock.write('GET ' + path + ' HTTP/1.1\r\n');
+        setImmediate(() => sock.write([...lines, '\r\n'].join('\r\n')));
       });
-      let buf = Buffer.alloc(0);
-      sock.on('data', (d) => {
-        buf = Buffer.concat([buf, d]);
-        const headEnd = buf.indexOf('\r\n\r\n');
-        if (headEnd >= 0) {
-          const firstLine = buf.slice(0, buf.indexOf(0x0a)).toString('ascii');
+      sock.setTimeout(3000, () => sock.destroy(new Error('WebSocket response timeout')));
+      return sock;
+    }
+
+    async function upgrade(path: string, headers: Record<string, string>): Promise<string> {
+      return new Promise((resolve, reject) => {
+        const sock = connectUpgrade(path, headers);
+        let response = '';
+        sock.on('data', (chunk) => {
+          response += chunk.toString('latin1');
+          if (!response.includes('\r\n\r\n')) return;
           sock.destroy();
-          resolve(firstLine.trim());
-        }
+          resolve(response.split('\r\n')[0]);
+        });
+        sock.on('error', reject);
+        sock.once('close', () => reject(new Error('WebSocket closed before the handshake')));
       });
-      sock.on('error', reject);
-      setTimeout(() => {
-        sock.destroy();
-        reject(new Error('timeout waiting for 101'));
-      }, 3000).unref();
+    }
+
+    let backendUpgrades = 0;
+
+    beforeEach(async () => {
+      backendUpgrades = 0;
+      const server = http.createServer();
+      const upstreamSockets = new Set<Duplex>();
+      server.on('upgrade', (_req, socket) => {
+        backendUpgrades += 1;
+        upstreamSockets.add(socket);
+        socket.once('close', () => upstreamSockets.delete(socket));
+        socket.once('error', () => socket.destroy());
+        socket.write(Buffer.concat([handshake, firstFrame]));
+        let received = Buffer.alloc(0);
+        socket.on('data', (chunk: Buffer) => {
+          received = Buffer.concat([received, chunk]);
+          if (received.equals(clientFrame)) socket.write(replyFrame);
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      stopBackend = () => {
+        for (const socket of upstreamSockets) socket.destroy();
+        return new Promise<void>((resolve) => server.close(() => resolve()));
+      };
+      handle = await startStaticServer({
+        staticDir,
+        backendPort: (server.address() as AddressInfo).port,
+        port: 0,
+        allowRemote: true,
+      });
     });
-    expect(status).toMatch(/HTTP\/1\.1 101/i);
+
+    it.each(paths)('relays the first server frame and a round trip for %s', async (path) => {
+      const server = handle!;
+      const sock = connectUpgrade(path, {
+        Host: 'LOCALHOST:' + server.port,
+        Origin: 'http://localhost:' + server.port,
+      });
+      try {
+        const payload = await new Promise<Buffer>((resolve, reject) => {
+          let response = Buffer.alloc(0);
+          let sent = false;
+          sock.on('data', (chunk: Buffer) => {
+            response = Buffer.concat([response, chunk]);
+            const headerEnd = response.indexOf('\r\n\r\n');
+            if (headerEnd < 0) return;
+            if (!response.subarray(0, headerEnd).toString('latin1').startsWith('HTTP/1.1 101 ')) {
+              reject(new Error('Expected a WebSocket 101 response'));
+              return;
+            }
+            const frames = response.subarray(headerEnd + 4);
+            if (frames.length >= firstFrame.length && !sent) {
+              sent = true;
+              sock.write(clientFrame);
+            }
+            if (frames.length >= firstFrame.length + replyFrame.length) resolve(frames);
+          });
+          sock.once('error', reject);
+          sock.once('close', () => reject(new Error('WebSocket closed before both frames arrived')));
+        });
+        expect(payload).toEqual(Buffer.concat([firstFrame, replyFrame]));
+      } finally {
+        sock.destroy();
+      }
+      expect(backendUpgrades).toBe(1);
+    });
+
+    it('accepts a new LAN authority after startup and rejects it when removed', async () => {
+      const host = '192.168.40.23:' + handle!.port;
+      const headers = { Host: host, Origin: 'http://' + host };
+      expect(await upgrade('/ws', headers)).toMatch(/HTTP\/1\.1 403/);
+      setLanAddress('192.168.40.23');
+      vi.mocked(networkInterfaces).mockImplementationOnce(() => {
+        throw new Error('Interface lookup unavailable');
+      });
+      expect(await upgrade('/ws', headers)).toMatch(/HTTP\/1\.1 403/);
+      expect(await upgrade('/ws', headers)).toMatch(/HTTP\/1\.1 101/);
+      setLanAddress('192.168.41.46');
+      expect(await upgrade('/ws', headers)).toMatch(/HTTP\/1\.1 403/);
+    });
+
+    it.each(paths)('rejects an upgrade from a different origin for %s', async (path) => {
+      expect(await upgrade(path, { Host: '127.0.0.1:' + handle!.port, Origin: 'https://unlisted.invalid' })).toMatch(
+        /HTTP\/1\.1 403/
+      );
+      expect(backendUpgrades).toBe(0);
+    });
+
+    it('requires Origin on an upgrade', async () => {
+      expect(await upgrade('/ws', { Host: '127.0.0.1:' + handle!.port })).toMatch(/HTTP\/1\.1 403/);
+      expect(backendUpgrades).toBe(0);
+    });
+
+    it('rejects a different Host even with a valid Origin', async () => {
+      const server = handle!;
+      expect(await upgrade('/ws', { Host: 'unlisted.invalid:' + server.port, Origin: server.localUrl })).toMatch(
+        /HTTP\/1\.1 403/
+      );
+      expect(backendUpgrades).toBe(0);
+    });
   });
 
-  it('/api/stt/stream WebSocket upgrade is spliced to backend and 101 is relayed', async () => {
-    // Same as /ws test but for STT streaming endpoint.
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
-    const httpMod = await import('node:http');
-    const backendServer = httpMod.createServer();
-    backendServer.on('upgrade', (req, socket) => {
-      const wsKey = (req.headers['sec-websocket-key'] as string) || '';
-      const accept = createHash('sha1')
-        .update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-        .digest('base64');
-      socket.write('HTTP/1.1 101 Switching Protocols\r\n');
-      socket.write('Upgrade: websocket\r\n');
-      socket.write('Connection: Upgrade\r\n');
-      socket.write(`Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
-      socket.write(Buffer.from([0x81, 0x00]));
-      socket.end();
-    });
-    await new Promise<void>((r) => backendServer.listen(0, '127.0.0.1', () => r()));
-    stopBackend = () => new Promise<void>((r) => backendServer.close(() => r()));
-    const backendPort = (backendServer.address() as { port: number }).port;
-
-    handle = await startStaticServer({ staticDir, backendPort, port: 0 });
-
-    const { port: publicPort } = handle;
-    const status: string = await new Promise((resolve, reject) => {
-      const sock = net.connect({ host: '127.0.0.1', port: publicPort }, () => {
-        sock.write(
-          'GET /api/stt/stream HTTP/1.1\r\n' +
-            `Host: 127.0.0.1:${publicPort}\r\n` +
-            'Upgrade: websocket\r\n' +
-            'Connection: Upgrade\r\n' +
-            'Sec-WebSocket-Version: 13\r\n' +
-            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-            '\r\n'
-        );
-      });
-      let buf = Buffer.alloc(0);
-      sock.on('data', (d) => {
-        buf = Buffer.concat([buf, d]);
-        const headEnd = buf.indexOf('\r\n\r\n');
-        if (headEnd >= 0) {
-          const firstLine = buf.slice(0, buf.indexOf(0x0a)).toString('ascii');
-          sock.destroy();
-          resolve(firstLine.trim());
-        }
-      });
-      sock.on('error', reject);
-      setTimeout(() => {
-        sock.destroy();
-        reject(new Error('timeout waiting for 101'));
-      }, 3000).unref();
-    });
-    expect(status).toMatch(/HTTP\/1\.1 101/i);
-  });
-
-  it('/api/stt/stream with query params is spliced to backend', async () => {
-    const { createHash } = await import('node:crypto');
-    const net = await import('node:net');
-    const httpMod = await import('node:http');
-    const backendServer = httpMod.createServer();
-    backendServer.on('upgrade', (req, socket) => {
-      const wsKey = (req.headers['sec-websocket-key'] as string) || '';
-      const accept = createHash('sha1')
-        .update(wsKey + '258EAFA5-E914-47DA-95CA-C5AB0DC85B11')
-        .digest('base64');
-      socket.write('HTTP/1.1 101 Switching Protocols\r\n');
-      socket.write('Upgrade: websocket\r\n');
-      socket.write('Connection: Upgrade\r\n');
-      socket.write(`Sec-WebSocket-Accept: ${accept}\r\n\r\n`);
-      socket.write(Buffer.from([0x81, 0x00]));
-      socket.end();
-    });
-    await new Promise<void>((r) => backendServer.listen(0, '127.0.0.1', () => r()));
-    stopBackend = () => new Promise<void>((r) => backendServer.close(() => r()));
-    const backendPort = (backendServer.address() as { port: number }).port;
-
-    handle = await startStaticServer({ staticDir, backendPort, port: 0 });
-
-    const { port: publicPort } = handle;
-    const status: string = await new Promise((resolve, reject) => {
-      const sock = net.connect({ host: '127.0.0.1', port: publicPort }, () => {
-        sock.write(
-          'GET /api/stt/stream?lang=en&model=default HTTP/1.1\r\n' +
-            `Host: 127.0.0.1:${publicPort}\r\n` +
-            'Upgrade: websocket\r\n' +
-            'Connection: Upgrade\r\n' +
-            'Sec-WebSocket-Version: 13\r\n' +
-            'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n' +
-            '\r\n'
-        );
-      });
-      let buf = Buffer.alloc(0);
-      sock.on('data', (d) => {
-        buf = Buffer.concat([buf, d]);
-        const headEnd = buf.indexOf('\r\n\r\n');
-        if (headEnd >= 0) {
-          const firstLine = buf.slice(0, buf.indexOf(0x0a)).toString('ascii');
-          sock.destroy();
-          resolve(firstLine.trim());
-        }
-      });
-      sock.on('error', reject);
-      setTimeout(() => {
-        sock.destroy();
-        reject(new Error('timeout waiting for 101'));
-      }, 3000).unref();
-    });
-    expect(status).toMatch(/HTTP\/1\.1 101/i);
-  });
-
-  it('POST body with a large payload is fully forwarded to backend (no byte drop during splice)', async () => {
+  it.each([false, true])('forwards a large upload (Expect: 100-continue %s)', async (expectContinue) => {
     // Regression for #4058: WebUI uploads hang forever at 100%. When the routing
     // decision fired on the first chunk, the pre-router removed its 'data'
     // listener but left the socket in flowing mode; body bytes arriving before
@@ -369,8 +537,10 @@ describe('static-server', () => {
           method: 'POST',
           path: '/api/fs/upload',
           headers: {
+            origin: handle!.localUrl,
             'content-type': 'application/octet-stream',
             'content-length': BODY_LEN,
+            ...(expectContinue ? { expect: '100-continue' } : {}),
           },
         },
         (res) => {
@@ -392,32 +562,49 @@ describe('static-server', () => {
       request.setTimeout(5000, () => {
         request.destroy(new Error('timeout: backend never received the full body (bytes dropped in splice)'));
       });
-      request.end(body);
+      if (expectContinue) {
+        request.once('continue', () => request.end(body));
+        request.flushHeaders();
+      } else {
+        request.end(body);
+      }
     });
 
     expect(received).toBe(BODY_LEN);
   });
 
-  it('network URL populated only when allowRemote=true', async () => {
+  it('rejects a LAN authority when remote access is disabled', async () => {
     const backend = await startMockBackend((_req, res) => res.end('nope'));
     stopBackend = backend.close;
-    const h1 = await startStaticServer({
-      staticDir,
-      backendPort: backend.port,
-      port: 0,
-      allowRemote: false,
-    });
-    expect(h1.networkUrl).toBeUndefined();
-    await h1.stop();
+    setLanAddress('192.168.40.23');
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    expect(handle.networkUrl).toBeUndefined();
+    expect(await requestStatus(handle.port, '/', { headers: { host: '192.168.40.23:' + handle.port } })).toBe(403);
+  });
 
-    const h2 = await startStaticServer({
+  it('refreshes the network URL and HTTP authorities after an interface change', async () => {
+    const backend = await startMockBackend((_req, res) => res.end('backend response'));
+    stopBackend = backend.close;
+    setLanAddress('192.168.40.23');
+    const webHost = await startWebHost({
+      app: { version: 'test', isPackaged: false, resourcesPath: '', userDataPath: '' },
       staticDir,
-      backendPort: backend.port,
+      backend: { kind: 'useExistingBackend', port: backend.port },
       port: 0,
       allowRemote: true,
     });
-    // may still be undefined on CI machines without a LAN interface
-    expect(typeof h2.networkUrl === 'string' || h2.networkUrl === undefined).toBe(true);
-    await h2.stop();
+    handle = webHost;
+    const oldHost = '192.168.40.23:' + webHost.port;
+    const newHost = '192.168.41.46:' + webHost.port;
+    const postFrom = (host: string) =>
+      requestStatus(webHost.port, '/api/anything', { method: 'POST', headers: { host, origin: 'http://' + host } });
+
+    expect(webHost.networkUrl).toBe('http://' + oldHost);
+    expect(await postFrom(oldHost)).toBe(200);
+    expect(await postFrom(newHost)).toBe(403);
+    setLanAddress('192.168.41.46');
+    expect(webHost.networkUrl).toBe('http://' + newHost);
+    expect(await postFrom(newHost)).toBe(200);
+    expect(await postFrom(oldHost)).toBe(403);
   });
 });

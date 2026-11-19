@@ -39,7 +39,7 @@ import { emitter } from '@/renderer/utils/emitter';
 import { projectFileRef } from '@/common/types/chatFile';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { FileOrFolderItem } from '@/renderer/utils/file/fileTypes';
-import { resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
+import { resolveAnalyticsFilePreview, resolvePreviewPayload } from '@/renderer/utils/file/previewPayload';
 
 import { ExplorerPanel } from './ExplorerPanel';
 import {
@@ -122,6 +122,8 @@ export type ExplorerPreviewPayload = {
     sizeBytes?: number;
     thresholdBytes?: number;
     lastModified?: number;
+    analyticsProjectId?: string;
+    sourceOnly?: boolean;
   };
 };
 
@@ -132,11 +134,20 @@ export type ExplorerPreviewPayload = {
 // is ever exposed — the old WS path-resolve patch is gone.
 export const buildExplorerPreviewPayload = async (
   peId: string,
-  relativePath: string
+  relativePath: string,
+  projectId?: string
 ): Promise<ExplorerPreviewPayload> => {
   const name = relativePath.split('/').pop() || relativePath;
   const { contentType, editable } = getFileTypeInfo(name);
-  const fileRef = projectFileRef(peId, relativePath);
+  const fileRef = { kind: 'project', pe_id: peId, relative_path: relativePath } as const;
+  const metadata = { title: name, file_name: name, fileRef, language: name.split('.').pop() || '' };
+  const document = await resolveAnalyticsFilePreview({ projectId, fileRef, name, contentType });
+  if (document) {
+    return {
+      ...document,
+      metadata: { ...metadata, ...document.metadata },
+    };
+  }
 
   const payload = await resolvePreviewPayload(fileRef, contentType);
 
@@ -144,10 +155,7 @@ export const buildExplorerPreviewPayload = async (
     content: payload.content,
     contentType,
     metadata: {
-      title: name,
-      file_name: name,
-      fileRef,
-      language: name.split('.').pop() || '',
+      ...metadata,
       // Taken from the type table, then tightened — never decided here.
       //
       // This entry point used to compute editability itself, which made it a second
@@ -175,7 +183,7 @@ export const buildExplorerPreviewPayload = async (
 
 export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId }) => {
   const { t } = useTranslation();
-  const { openPreview } = usePreviewContext();
+  const { openPreview, tabs, closeTab } = usePreviewContext();
   const activeConversationId = useCurrentConversation();
   const { data, isLoading, mutate } = useSWR(projectId ? `explorer-project/${projectId}` : null, (key: string) => {
     // Derive the project id from the SWR key, not the captured `projectId`
@@ -207,7 +215,7 @@ export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId 
   // can stay open at once.
   const handleOpenFile = async (peId: string, relativePath: string): Promise<void> => {
     try {
-      const { content, contentType, metadata } = await buildExplorerPreviewPayload(peId, relativePath);
+      const { content, contentType, metadata } = await buildExplorerPreviewPayload(peId, relativePath, projectId);
       openPreview(content, contentType, metadata);
     } catch (e) {
       Message.error(t(previewErrorToI18nKey(classifyPreviewError(e))));
@@ -236,7 +244,15 @@ export const ExplorerContainer: React.FC<ExplorerContainerProps> = ({ projectId 
 
   const handleRemoveFolder = async (peId: string): Promise<void> => {
     try {
-      await ipcBridge.project.removeFolder.invoke({ project_id: projectId, pe_id: peId });
+      const analytics = window.electronAPI?.analyticsPreview;
+      if (analytics) await analytics.detach(projectId, peId);
+      else await ipcBridge.project.removeFolder.invoke({ project_id: projectId, pe_id: peId });
+      for (const tab of tabs ?? []) {
+        const file = tab.metadata?.fileRef;
+        if (tab.metadata?.analyticsProjectId === projectId && file?.kind === 'project' && file.pe_id === peId) {
+          closeTab(tab.id);
+        }
+      }
       await mutate();
     } catch {
       Message.error(t('conversation.explorer.removeFailed'));

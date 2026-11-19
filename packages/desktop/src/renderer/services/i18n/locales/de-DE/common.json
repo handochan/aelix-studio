@@ -202,5 +202,10 @@
   "goBack": "Zurück",
   "selectedCount": "{{count}} ausgewählt",
   "selectedSkills": "Ausgewählte Skills",
-  "aiAssistant": "KI-Assistent"
+  "aiAssistant": "KI-Assistent",
+  "configurationRecovery": {
+    "title": "Einstellungen zurückgesetzt",
+    "message": "Ihre Einstellungen konnten nicht wiederhergestellt werden und wurden zurückgesetzt.",
+    "detail": "Die beschädigte Datei wurde aufbewahrt. Die automatische Suche nach Updates bleibt deaktiviert, bis Sie diese Option in den Einstellungen ändern."
+  }
 }

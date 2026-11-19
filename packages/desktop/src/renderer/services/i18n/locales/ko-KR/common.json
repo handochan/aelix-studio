@@ -202,5 +202,10 @@
   },
   "selectedCount": "선택됨 {{count}}",
   "selectedSkills": "선택된 스킬",
-  "aiAssistant": "AI 어시스턴트"
+  "aiAssistant": "AI 어시스턴트",
+  "configurationRecovery": {
+    "title": "설정 초기화",
+    "message": "설정을 복구하지 못해 초기화했습니다.",
+    "detail": "손상된 파일은 보존했습니다. 설정에서 이 옵션을 다시 선택할 때까지 자동 업데이트 확인은 꺼져 있습니다."
+  }
 }

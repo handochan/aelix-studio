@@ -202,5 +202,10 @@
   },
   "selectedCount": "已選 {{count}}",
   "selectedSkills": "已選技能",
-  "aiAssistant": "AI 助手"
+  "aiAssistant": "AI 助手",
+  "configurationRecovery": {
+    "title": "設定已重設",
+    "message": "無法復原設定，已將其重設。",
+    "detail": "損壞的檔案已保留。在您前往設定變更此選項之前，自動檢查更新將保持關閉。"
+  }
 }

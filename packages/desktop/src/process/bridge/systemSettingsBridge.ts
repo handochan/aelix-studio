@@ -13,7 +13,7 @@
  */
 
 import { ipcBridge } from '@/common';
-import { ProcessConfig } from '@process/utils/initStorage';
+import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from '@process/utils/initStorage';
 import { changeLanguage } from '@process/services/i18n';
 import type { PetSize } from '@process/pet/petTypes';
 import { createOrUpdateTray, destroyTray, setCloseToTrayEnabled } from '@process/utils/tray';
@@ -31,12 +31,11 @@ export function onLanguageChanged(listener: LanguageChangeListener): void {
 }
 
 export function initSystemSettingsBridge(): void {
-  ipcBridge.systemSettings.getAutoUpdateEnabled.provider(
-    async () => (await ProcessConfig.get('update.autoCheck')) !== false
-  );
+  ipcBridge.systemSettings.getAutoUpdateEnabled.provider(readAutoCheckPreference);
   ipcBridge.systemSettings.setAutoUpdateEnabled.provider(async ({ enabled }) => {
     if (typeof enabled !== 'boolean') throw new TypeError('Expected boolean update setting');
     await ProcessConfig.set('update.autoCheck', enabled);
+    await ConfigRecovery.finish();
   });
   ipcBridge.systemSettings.getCloseToTray.provider(async () => readCloseToTraySetting());
 

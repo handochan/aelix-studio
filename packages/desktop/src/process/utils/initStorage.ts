@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { mkdirSync as _mkdirSync, existsSync, readdirSync, readFileSync } from 'fs';
+import { mkdirSync as _mkdirSync, existsSync, readdirSync } from 'fs';
 import fs from 'fs/promises';
 import path from 'path';
 import { getPlatformServices } from '@/common/platform';
@@ -28,12 +28,12 @@ import {
   verifyDirectoryFiles,
 } from './utils';
 import { runLegacyDatabaseMigrations } from '@process/services/database/runLegacyDatabaseMigrations';
+import { createJsonFileStore as JsonFileBuilder } from '../storage/jsonFile';
+import { createConfigRecovery } from '../storage/configRecovery';
 import { BUILTIN_IMAGE_GEN_ID } from '../resources/builtinMcp/constants';
 // Platform and architecture types (moved from deleted updateConfig)
 type PlatformType = 'win32' | 'darwin' | 'linux';
 type ArchitectureType = 'x64' | 'arm64' | 'ia32' | 'arm';
-
-const nodePath = path;
 
 const STORAGE_PATH = {
   config: 'aionui-config.txt',
@@ -105,142 +105,26 @@ const migrateLegacyData = async () => {
   return false;
 };
 
-const WriteFile = async (file_path: string, data: string) => {
-  // Ensure parent directory exists to prevent ENOENT on first write
-  const dir = nodePath.dirname(file_path);
-  await fs.mkdir(dir, { recursive: true });
-  return fs.writeFile(file_path, data);
-};
-
-/**
- * In-memory JSON store backed by a file on disk.
- *
- * Data is loaded once (synchronously on first access) and kept in memory.
- * - `get` / `getSync` read from the in-memory cache (microseconds).
- * - `set` / `remove` / `clear` update the cache first, then persist to disk.
- * - Disk writes are serialized via a simple promise chain to prevent corruption.
- *
- * The on-disk format stays base64(encodeURIComponent(JSON)) for backward compat.
- */
-const JsonFileBuilder = <S extends object = Record<string, unknown>>(file_path: string) => {
-  // -- encoding helpers (unchanged, keeps backward compat) --
-  const encode = (data: unknown) => btoa(encodeURIComponent(String(data)));
-  const decode = (base64: string) => decodeURIComponent(atob(base64));
-
-  // -- in-memory cache --
-  let cache: S | null = null;
-
-  const loadSync = (): S => {
-    try {
-      const raw = readFileSync(file_path).toString();
-      if (!raw || raw.trim() === '') return {} as S;
-      const decoded = decode(raw);
-      if (!decoded || decoded.trim() === '') return {} as S;
-      const parsed = JSON.parse(decoded) as S;
-      if (file_path.includes('chat.txt') && Object.keys(parsed).length === 0) {
-        console.warn(`[Storage] Chat history file appears to be empty: ${file_path}`);
-      }
-      return parsed;
-    } catch {
-      return {} as S;
-    }
-  };
-
-  const ensureLoaded = (): S => {
-    if (cache === null) {
-      cache = loadSync();
-    }
-    return cache;
-  };
-
-  // -- serialized disk persistence --
-  let writeChain: Promise<unknown> = Promise.resolve();
-
-  const persist = (): Promise<S> => {
-    const data = cache ?? ({} as S);
-    const encoded = encode(JSON.stringify(data));
-    // Write once, branch the promise: writeChain stays resolved (so one
-    // failure doesn't block subsequent writes), callers get the real error.
-    const writeOp = writeChain.then(() => WriteFile(file_path, encoded));
-    writeChain = writeOp.catch(() => {});
-    return writeOp.then(
-      () => data,
-      (err) => {
-        console.error(`[Storage] Failed to persist ${file_path}:`, err);
-        throw err;
-      }
-    );
-  };
-
-  // -- public API (same shape as before) --
-  const toJson = async (): Promise<S> => ensureLoaded();
-
-  const setJson = async (data: S): Promise<S> => {
-    cache = data;
-    return persist();
-  };
-
-  const toJsonSync = (): S => ensureLoaded();
-
-  return {
-    toJson,
-    setJson,
-    toJsonSync,
-    async set<K extends keyof S>(key: K, value: Awaited<S>[K]): Promise<Awaited<S>[K]> {
-      const data = ensureLoaded();
-      data[key] = value;
-      await persist();
-      return value;
-    },
-    async get<K extends keyof S>(key: K): Promise<Awaited<S>[K]> {
-      return ensureLoaded()[key] as Awaited<S>[K];
-    },
-    async remove<K extends keyof S>(key: K) {
-      const data = ensureLoaded();
-      delete data[key];
-      return persist();
-    },
-    clear() {
-      cache = {} as S;
-      return persist();
-    },
-    getSync<K extends keyof S>(key: K): S[K] {
-      return ensureLoaded()[key];
-    },
-    update<K extends keyof S>(key: K, updateFn: (value: S[K], data: S) => Promise<S[K]>) {
-      const data = ensureLoaded();
-      return updateFn(data[key], data).then((value) => {
-        data[key] = value;
-        return persist();
-      });
-    },
-    backup(fullName: string) {
-      const dir = nodePath.dirname(fullName);
-      if (!existsSync(dir)) {
-        mkdirSync(dir);
-      }
-      // Backup: copy the file then remove original
-      const doCopy = () => fs.copyFile(file_path, fullName).then(() => fs.rm(file_path, { recursive: true }));
-      const backupOp = writeChain.then(doCopy);
-      writeChain = backupOp.catch(() => {});
-      return backupOp.then(
-        () => {},
-        (err) => {
-          console.error(`[Storage] Backup failed:`, err);
-          throw err;
-        }
-      );
-    },
-  };
-};
-
-const envFile = JsonFileBuilder<IEnvStorageRefer>(path.join(getHomePage(), STORAGE_PATH.env));
+// Stable profile location: resetting env can lose a custom cacheDir as well.
+export const ConfigRecovery = createConfigRecovery(path.join(getHomePage(), STORAGE_PATH.config));
+const envFile = JsonFileBuilder<IEnvStorageRefer>(path.join(getHomePage(), STORAGE_PATH.env), {
+  onReset: (preserved) => ConfigRecovery.mark(preserved),
+});
 
 const dirConfig = envFile.getSync('aionui.dir');
 
 const cacheDir = dirConfig?.cacheDir || getHomePage();
 
-const configFile = JsonFileBuilder<ILegacyConfigStorageRefer>(path.join(cacheDir, STORAGE_PATH.config));
+const configPath = path.join(cacheDir, STORAGE_PATH.config);
+const configFile = JsonFileBuilder<ILegacyConfigStorageRefer>(configPath, {
+  empty: () => (ConfigRecovery.active() ? { 'update.autoCheck': false } : {}) as ILegacyConfigStorageRefer,
+  onReset: (preserved) => ConfigRecovery.mark(preserved),
+});
+
+/** Recovery stays offline until the user explicitly saves the update preference. */
+export async function readAutoCheckPreference(): Promise<boolean> {
+  return ConfigRecovery.autoCheck(await configFile.get('update.autoCheck'));
+}
 type ConversationHistoryData = Record<string, TMessage[]>;
 
 const _chatMessageFile = JsonFileBuilder<ConversationHistoryData>(path.join(cacheDir, STORAGE_PATH.chatMessage));
@@ -253,7 +137,9 @@ const buildMessageListStorage = (conversation_id: string, dir: string) => {
   if (!existsSync(fullName)) {
     mkdirSync(path.join(dir, 'aionui-chat-history'));
   }
-  return JsonFileBuilder<TMessage[]>(path.join(dir, 'aionui-chat-history', conversation_id + '.txt'));
+  return JsonFileBuilder<TMessage[]>(path.join(dir, 'aionui-chat-history', conversation_id + '.txt'), {
+    empty: () => [],
+  });
 };
 
 const conversationHistoryProxy = (options: typeof _chatMessageFile, dir: string) => {

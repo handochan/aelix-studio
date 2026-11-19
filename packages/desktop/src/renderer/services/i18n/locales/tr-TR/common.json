@@ -202,5 +202,10 @@
   },
   "selectedCount": "{{count}} seçili",
   "selectedSkills": "Seçili beceriler",
-  "aiAssistant": "Yapay Zekâ Asistanı"
+  "aiAssistant": "Yapay Zekâ Asistanı",
+  "configurationRecovery": {
+    "title": "Ayarlar sıfırlandı",
+    "message": "Ayarlarınız kurtarılamadığı için sıfırlandı.",
+    "detail": "Hasarlı dosya korundu. Ayarlar bölümünde bu seçeneği değiştirene kadar otomatik güncelleme denetimleri kapalı kalacaktır."
+  }
 }

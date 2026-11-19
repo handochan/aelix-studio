@@ -23,8 +23,10 @@
 | Beta 전 묶음 | [host #30 공지 검사 분리](https://github.com/handochan/aelix-studio-host/issues/30), [host #29](https://github.com/handochan/aelix-studio-host/issues/29), host #23의 RUSTSEC-2026-0459, 그 사이 나온 공지                     | host #30의 `release.yml` 변경은 host PR #28 병합 뒤                                                                                                                                                                                                                                                                                                              | host #30의 `ci.yml` 변경은 진행 중이다                                                                                                                                                                                                                   |
 | 마지막       | [Studio #15](https://github.com/handochan/aelix-studio/issues/15) 나머지 → [Studio #8](https://github.com/handochan/aelix-studio/issues/8) → [Studio #9](https://github.com/handochan/aelix-studio/issues/9)                   | 위 기능 결과, 최종 beta.3·Analytics wheel                                                                                                                                                                                                                                                                                                                        | 공동 출시                                                                                                                                                                                                                                                |
 
-- 새 구현의 동시 진행은 최대 두 개다. ∥ 표시는 함께 진행할 수 있는 쌍이다. 2026-11-16에는 사용자 요청으로
-  host 줄과 함께 Studio #31, Studio #43, host #30의 `ci.yml` 부분을 같이 시작했다.
+- 새 구현의 동시 진행 수에는 제한이 없다(2026-11-18 사용자 결정. 그 전에는 최대 두 개였다). 표의 순서와 ∥ 표시는
+  두 개 제한 때 정한 것이므로 착수 우선순위로 읽는다. 착수 전에 다른 세션이 진행 중인 카드·PR·branch/worktree를
+  확인하고 겹치지 않게 한다. 2026-11-16에는 사용자 요청으로 host 줄과 함께 Studio #31, Studio #43, host #30의
+  `ci.yml` 부분을 같이 시작했다.
 - 서브에이전트(11-16 사용자 결정): 첫 Beta는 S1·S2를 확정한다. S3(자식 기록 펼쳐 보기, 자식 승인,
   자식별 중지·steer, 재접속 재생)는 aelix-ai #612가 beta.3에 들어오면 첫 Beta에 포함하고, 들어오지 못하면
   다음 릴리스로 넘긴다.
