@@ -256,6 +256,16 @@ async function openProjectRoot(directory: string): Promise<PreviewRoot | undefin
   }
 }
 
+async function projectRootStillCurrent(root: PreviewRoot): Promise<boolean> {
+  const current = await lstat(root.directory).catch((): null => null);
+  return Boolean(
+    current?.isDirectory() &&
+    sameFile(root.identity, current) &&
+    current.ctimeMs === root.identity.ctimeMs &&
+    current.mtimeMs === root.identity.mtimeMs
+  );
+}
+
 async function projectMarker(root: PreviewRoot): Promise<'valid' | 'missing' | 'invalid'> {
   try {
     await lstat(path.join(root.directory, 'analytics.json'));
@@ -313,8 +323,8 @@ async function hasReportRecord(root: PreviewRoot, parts: string[]): Promise<bool
   }
 }
 
-/** Identify an Analytics document or require inert source when the evidence is incomplete. */
-export async function locateAnalyticsDocument(filename: string) {
+/** Missing candidates can be skipped only after the requested document is known to be absent. */
+export async function locateAnalyticsDocument(filename: string, { documentMissing = false } = {}) {
   const volume = path.parse(filename).root;
   const segments = path.relative(volume, filename).split(path.sep);
   const budget = { remaining: JOURNAL_PROBE_BYTES };
@@ -327,7 +337,10 @@ export async function locateAnalyticsDocument(filename: string) {
     if (!report && !prepared && parts[0] !== 'workspace') continue;
     const directory = path.join(volume, ...segments.slice(0, index));
     const root = await openProjectRoot(directory);
-    if (!root) continue;
+    if (!root) {
+      if (documentMissing) continue;
+      throw new Error('Analytics project root is unavailable');
+    }
     const marker = await projectMarker(root);
     if (marker !== 'valid') {
       const journal = (await hasReportRecord(root, parts)) ? 'analytics' : await probeAnalyticsJournal(root, budget);
@@ -340,6 +353,8 @@ export async function locateAnalyticsDocument(filename: string) {
         // A nested marker must not turn ambiguous Report content into executable Workspace HTML.
         if (isReportContentPath(parts)) return 'source-only' as const;
         needsSource = true;
+      } else if (!documentMissing && !(await projectRootStillCurrent(root))) {
+        return 'source-only' as const;
       }
       continue;
     }

@@ -234,7 +234,7 @@ async function resolveEntry(request: AnalyticsPreviewRequest) {
   const explorerRoot = await realpath(displayPath);
   const filename = path.join(explorerRoot, ...requested);
   const canonical = await canonicalPreviewDocument(explorerRoot, requested);
-  const location = await locateAnalyticsDocument(filename);
+  const location = await locateAnalyticsDocument(filename, { documentMissing: canonical === undefined });
   if (canonical && canonical !== filename) {
     if (typeof location === 'object') throw new Error('Analytics preview cannot follow links');
     const canonicalLocation = await locateAnalyticsDocument(canonical);
