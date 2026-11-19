@@ -809,5 +809,22 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "계획 펼치기",
     "collapse": "계획 접기"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "CLI에서 실행 중",
+      "body": "이 세션은 Aelix CLI나 다른 Aelix 프로세스에서 열려 있습니다. 그 프로세스가 세션을 닫을 때까지 Studio에서는 보기만 할 수 있습니다."
+    },
+    "acp": {
+      "title": "다른 Studio 창에서 열려 있음",
+      "body": "이 세션은 다른 Studio 창에서 열려 있습니다. 그 창이 세션을 놓을 때까지 여기서는 보기만 할 수 있습니다."
+    },
+    "unknown": {
+      "title": "사용 중인 세션",
+      "body": "다른 프로세스가 이 세션에 쓰고 있습니다. 그 프로세스가 세션을 놓을 때까지 여기서는 보기만 할 수 있습니다."
+    },
+    "readOnly": "보기 전용",
+    "recheck": "다시 확인",
+    "stillHeld": "아직 사용 중입니다. 그쪽에서 세션을 닫은 뒤 다시 확인하세요."
   }
 }

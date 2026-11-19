@@ -810,5 +810,22 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Plan ausklappen",
     "collapse": "Plan einklappen"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "Läuft in der CLI",
+      "body": "Diese Sitzung ist in der Aelix-CLI oder einem anderen Aelix-Prozess geöffnet. Studio zeigt sie schreibgeschützt an, bis dieser Prozess die Sitzung schließt."
+    },
+    "acp": {
+      "title": "In einem anderen Studio-Fenster geöffnet",
+      "body": "Diese Sitzung ist in einem anderen Studio-Fenster geöffnet. Diese Ansicht bleibt schreibgeschützt, bis das Fenster sie freigibt."
+    },
+    "unknown": {
+      "title": "Sitzung wird verwendet",
+      "body": "Ein anderer Prozess schreibt in diese Sitzung. Diese Ansicht bleibt schreibgeschützt, bis der Prozess sie freigibt."
+    },
+    "readOnly": "Schreibgeschützt",
+    "recheck": "Erneut prüfen",
+    "stillHeld": "Noch in Verwendung. Schließen Sie die Sitzung dort und prüfen Sie dann erneut."
   }
 }

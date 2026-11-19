@@ -811,5 +811,22 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Planı genişlet",
     "collapse": "Planı daralt"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "CLI'da çalışıyor",
+      "body": "Bu oturum Aelix CLI'da veya başka bir Aelix işleminde açık. Bu işlem oturumu kapatana kadar Studio oturumu salt okunur gösterir."
+    },
+    "acp": {
+      "title": "Başka bir Studio penceresinde açık",
+      "body": "Bu oturum başka bir Studio penceresinde açık. O pencere oturumu bırakana kadar bu görünüm salt okunurdur."
+    },
+    "unknown": {
+      "title": "Oturum kullanımda",
+      "body": "Başka bir işlem bu oturuma yazıyor. İşlem oturumu bırakana kadar bu görünüm salt okunurdur."
+    },
+    "readOnly": "Salt okunur",
+    "recheck": "Yeniden denetle",
+    "stillHeld": "Hâlâ kullanımda. Oturumu orada kapatın, ardından yeniden denetleyin."
   }
 }

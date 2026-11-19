@@ -809,5 +809,22 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Développer le plan",
     "collapse": "Réduire le plan"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "En cours dans la CLI",
+      "body": "Cette session est ouverte dans la CLI Aelix ou un autre processus Aelix. Studio l'affiche en lecture seule jusqu'à ce que ce processus ferme la session."
+    },
+    "acp": {
+      "title": "Ouverte dans une autre fenêtre Studio",
+      "body": "Cette session est ouverte dans une autre fenêtre Studio. Cette vue reste en lecture seule jusqu'à ce que cette fenêtre la libère."
+    },
+    "unknown": {
+      "title": "Session utilisée",
+      "body": "Un autre processus écrit dans cette session. Cette vue reste en lecture seule jusqu'à ce que ce processus la libère."
+    },
+    "readOnly": "Lecture seule",
+    "recheck": "Vérifier à nouveau",
+    "stillHeld": "Toujours utilisée. Fermez la session là-bas, puis vérifiez à nouveau."
   }
 }

@@ -809,5 +809,22 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "展開計劃",
     "collapse": "收合計劃"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "正在 CLI 中執行",
+      "body": "此工作階段已在 Aelix CLI 或其他 Aelix 處理程序中開啟。在該處理程序關閉工作階段之前，Studio 中只能檢視。"
+    },
+    "acp": {
+      "title": "已在另一個 Studio 視窗中開啟",
+      "body": "此工作階段已在另一個 Studio 視窗中開啟。在該視窗釋放工作階段之前，此處只能檢視。"
+    },
+    "unknown": {
+      "title": "工作階段使用中",
+      "body": "另一個處理程序正在寫入此工作階段。在該處理程序釋放工作階段之前，此處只能檢視。"
+    },
+    "readOnly": "唯讀",
+    "recheck": "重新檢查",
+    "stillHeld": "仍在使用中。請先在該處關閉工作階段，然後重新檢查。"
   }
 }

@@ -26,6 +26,7 @@ import HOC from '@renderer/utils/ui/HOC';
 import React from 'react';
 import AcpE2EStreamInjector from './AcpE2EStreamInjector';
 import AcpSendBox from './AcpSendBox';
+import SessionHolderGate from './SessionHolder';
 import { useAcpMessage } from './useAcpMessage';
 
 const AcpChat: React.FC<{
@@ -72,6 +73,18 @@ const AcpChat: React.FC<{
     prepareRuntime: teamPermission?.warmupSession,
   });
 
+  const sendBox = (
+    <AcpSendBox
+      conversation_id={conversation_id}
+      backend={backend}
+      session_mode={session_mode}
+      agent_name={agent_name}
+      messageState={messageState}
+      teamSendMessage={teamSendMessage}
+      teamRuntime={teamRuntime}
+    ></AcpSendBox>
+  );
+
   return (
     <ConversationProvider
       value={{
@@ -95,17 +108,15 @@ const AcpChat: React.FC<{
           </FlexFullContainer>
           <AcpE2EStreamInjector conversationId={conversation_id} />
           <ConversationPlanBar conversation_id={conversation_id} />
-          {!hideSendBox && (
-            <AcpSendBox
-              conversation_id={conversation_id}
-              backend={backend}
-              session_mode={session_mode}
-              agent_name={agent_name}
-              messageState={messageState}
-              teamSendMessage={teamSendMessage}
-              teamRuntime={teamRuntime}
-            ></AcpSendBox>
-          )}
+          {/* Team chats prepare their runtime through the team, so the holder probe stays out of them. */}
+          {!hideSendBox &&
+            (teamPermission ? (
+              sendBox
+            ) : (
+              <SessionHolderGate conversationId={conversation_id} onWritable={messageState.fetchSlashCommands}>
+                {sendBox}
+              </SessionHolderGate>
+            ))}
         </div>
       </ConversationArtifactProvider>
     </ConversationProvider>
