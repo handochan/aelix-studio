@@ -86,6 +86,30 @@ describe('useAcpInitialMessage', () => {
     expect(setAiProcessing).not.toHaveBeenCalledWith(false);
   });
 
+  it('holds the stored first message while sending is blocked and sends it once unblocked', async () => {
+    sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
+    sendMessageInvokeMock.mockResolvedValue({ turn_id: 't1', runtime: {}, msg_id: 'm1' });
+    const params = {
+      conversation_id: 'conv-1',
+      backend: 'codex',
+      setAiProcessing: vi.fn(),
+      resetState: vi.fn(),
+      checkAndUpdateTitle: vi.fn(),
+      addOrUpdateMessage: vi.fn(),
+    };
+
+    const { rerender } = renderHook(({ blocked }) => useAcpInitialMessage({ ...params, blocked }), {
+      initialProps: { blocked: true },
+    });
+    await Promise.resolve();
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).not.toBeNull();
+
+    rerender({ blocked: false });
+    await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1));
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBeNull();
+  });
+
   it('keeps ordinary initial ACP send failures visible and resets loading state', async () => {
     sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
     sendMessageInvokeMock.mockRejectedValue(new Error('boom'));

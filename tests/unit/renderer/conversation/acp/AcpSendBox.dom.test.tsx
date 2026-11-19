@@ -501,6 +501,16 @@ describe('AcpSendBox', () => {
     expect(resetStateMock).not.toHaveBeenCalled();
   });
 
+  it('disables the send box while the session holder check blocks sending', () => {
+    const { rerender } = render(
+      <AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} sendBlocked />
+    );
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ disabled: true });
+
+    rerender(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ disabled: false });
+  });
+
   it('uses container-responsive fluid width instead of a fixed max width', () => {
     render(
       <AcpSendBox
@@ -1125,6 +1135,26 @@ describe('AcpSendBox', () => {
       };
       return props.onSendNow;
     };
+
+    it('holds the Draft Box queue and disables its send-now while the session holder check blocks sending', async () => {
+      const queueArgs = () =>
+        useConversationCommandQueueSpy.mock.calls.at(-1)?.[0] as { holdExecution?: boolean } | undefined;
+      const panelProps = () =>
+        commandQueuePanelPropsSpy.mock.calls.at(-1)?.[0] as { sendNowDisabledReason?: string } | undefined;
+      const { rerender } = render(
+        <AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} sendBlocked />
+      );
+      expect(queueArgs()?.holdExecution).toBe(true);
+      expect(panelProps()?.sendNowDisabledReason).toBe('conversation.sessionHolder.checking');
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+
+      rerender(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      expect(queueArgs()?.holdExecution).toBe(false);
+      expect(panelProps()?.sendNowDisabledReason).toBeUndefined();
+    });
 
     it('keeps a queued command from stopping a manual compaction', async () => {
       runtimeViewMock.activeTurnId = 'turn-compact';

@@ -811,5 +811,25 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Planı genişlet",
     "collapse": "Planı daralt"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "CLI'da çalışıyor",
+      "body": "Bu oturum Aelix CLI'da veya başka bir Aelix işleminde açık. Bu işlem oturumu kapatana kadar Studio oturumu salt okunur gösterir."
+    },
+    "other": {
+      "title": "Başka bir işlem tarafından kullanılıyor",
+      "body": "Bu oturumu başka bir Aelix işlemi kullanıyor. İşlem oturumu bırakana kadar bu görünüm salt okunurdur."
+    },
+    "readOnly": "Salt okunur",
+    "recheck": "Yeniden denetle",
+    "stillHeld": "Hâlâ kullanımda. Oturumu orada kapatın, ardından yeniden denetleyin.",
+    "checking": "Bu oturumun başka bir yerde açık olup olmadığı denetleniyor…",
+    "checkFailed": "Oturum denetlenemedi. Yeniden deneyin.",
+    "unconfirmed": {
+      "title": "Bu oturum denetlenemedi",
+      "body": "Studio bu oturumu başka bir işlemin kullanmadığını doğrulayamadı; gönderme ve taslak kutusu duraklatıldı. Devam etmek için yeniden denetleyin."
+    },
+    "paused": "Bir denetim başarılı olana kadar gönderme ve taslak kutusu duraklatılmış kalır."
   }
 }

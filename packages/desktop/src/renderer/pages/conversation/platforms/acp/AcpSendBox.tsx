@@ -115,7 +115,18 @@ const AcpSendBox: React.FC<{
   messageState: UseAcpMessageReturn;
   teamSendMessage?: (payload: { input: string; files: ChatFileRef[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
-}> = ({ conversation_id, backend, session_mode, agent_name, messageState, teamSendMessage, teamRuntime }) => {
+  /** Blocks typing, sending, and the stored first message (e.g. while the session holder is unknown). */
+  sendBlocked?: boolean;
+}> = ({
+  conversation_id,
+  backend,
+  session_mode,
+  agent_name,
+  messageState,
+  teamSendMessage,
+  teamRuntime,
+  sendBlocked = false,
+}) => {
   const {
     aiProcessing,
     setAiProcessing,
@@ -300,6 +311,7 @@ const AcpSendBox: React.FC<{
   // Check for and send initial message from guid page
   useAcpInitialMessage({
     conversation_id: conversation_id,
+    blocked: sendBlocked,
     backend,
     setAiProcessing,
     resetState,
@@ -463,6 +475,9 @@ Please check your local CLI tool authentication status`,
     enabled: true,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
+    // While sending is blocked, the Draft Box keeps its items, including after this
+    // send box unmounts, instead of auto-sending them.
+    holdExecution: sendBlocked,
     onExecute: executeCommand,
   });
 
@@ -782,7 +797,7 @@ Please check your local CLI tool authentication status`,
   };
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
-      if (compactionStopGuardRef.current()) return;
+      if (sendBlocked || compactionStopGuardRef.current()) return;
       if (supportsMidturnDelivery) {
         // Supporting agents can deliver directly into the running turn — no
         // need to stop/restart. Remove the item BEFORE executing (rather than
@@ -815,7 +830,16 @@ Please check your local CLI tool authentication status`,
       await effectiveHandleStop();
       prioritize(item.id);
     },
-    [compactionStopGuardRef, effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
+    [
+      compactionStopGuardRef,
+      effectiveHandleStop,
+      enqueue,
+      executeCommand,
+      prioritize,
+      remove,
+      sendBlocked,
+      supportsMidturnDelivery,
+    ]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 
@@ -830,6 +854,7 @@ Please check your local CLI tool authentication status`,
         onInteractionUnlock={unlockInteraction}
         onEdit={handleEditQueuedCommand}
         onSendNow={handleSendNowQueued}
+        sendNowDisabledReason={sendBlocked ? t('conversation.sessionHolder.checking') : undefined}
         onToggleMode={toggleMode}
         onReorder={reorder}
         onRemove={remove}
@@ -860,7 +885,7 @@ Please check your local CLI tool authentication status`,
         loading={teamRuntime?.loading ?? isBusy}
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
-        disabled={false}
+        disabled={sendBlocked}
         sendDisabled={!supportsMidturnDelivery && isBusy}
         sendDisabledTooltip={
           !supportsMidturnDelivery && isBusy
@@ -870,10 +895,14 @@ Please check your local CLI tool authentication status`,
               })
             : undefined
         }
-        placeholder={t('acp.sendbox.placeholder', {
-          backend: agent_name || backend,
-          defaultValue: `Send message to {{backend}}...`,
-        })}
+        placeholder={
+          sendBlocked
+            ? t('conversation.sessionHolder.checking')
+            : t('acp.sendbox.placeholder', {
+                backend: agent_name || backend,
+                defaultValue: `Send message to {{backend}}...`,
+              })
+        }
         onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
         className='z-10'
         onFilesAdded={handleFilesAdded}

@@ -815,5 +815,25 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plano",
     "collapse": "Recolher plano"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "Em execução na CLI",
+      "body": "Esta sessão está aberta na CLI do Aelix ou em outro processo Aelix. O Studio a mantém somente leitura até esse processo fechar a sessão."
+    },
+    "other": {
+      "title": "Em uso por outro processo",
+      "body": "Outro processo Aelix está usando esta sessão. Esta visualização fica somente leitura até esse processo liberá-la."
+    },
+    "readOnly": "Somente leitura",
+    "recheck": "Verificar novamente",
+    "stillHeld": "Ainda em uso. Feche a sessão lá e verifique novamente.",
+    "checking": "Verificando se esta sessão está aberta em outro lugar…",
+    "checkFailed": "Não foi possível verificar a sessão. Tente novamente.",
+    "unconfirmed": {
+      "title": "Não foi possível verificar esta sessão",
+      "body": "O Studio não conseguiu confirmar que nenhum outro processo está usando esta sessão, então o envio e a caixa de rascunhos estão pausados. Verifique novamente para continuar."
+    },
+    "paused": "O envio e a caixa de rascunhos ficam pausados até que uma verificação seja bem-sucedida."
   }
 }

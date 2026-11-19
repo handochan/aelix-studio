@@ -809,5 +809,25 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Développer le plan",
     "collapse": "Réduire le plan"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "En cours dans la CLI",
+      "body": "Cette session est ouverte dans la CLI Aelix ou un autre processus Aelix. Studio l'affiche en lecture seule jusqu'à ce que ce processus ferme la session."
+    },
+    "other": {
+      "title": "Utilisée par un autre processus",
+      "body": "Un autre processus Aelix utilise cette session. Cette vue reste en lecture seule jusqu'à ce que ce processus la libère."
+    },
+    "readOnly": "Lecture seule",
+    "recheck": "Vérifier à nouveau",
+    "stillHeld": "Toujours utilisée. Fermez la session là-bas, puis vérifiez à nouveau.",
+    "checking": "Vérification de l'ouverture de cette session ailleurs…",
+    "checkFailed": "Impossible de vérifier la session. Réessayez.",
+    "unconfirmed": {
+      "title": "Impossible de vérifier cette session",
+      "body": "Studio n'a pas pu confirmer qu'aucun autre processus n'utilise cette session : l'envoi et la boîte de brouillons sont en pause. Vérifiez à nouveau pour continuer."
+    },
+    "paused": "L'envoi et la boîte de brouillons restent en pause jusqu'à ce qu'une vérification réussisse."
   }
 }
