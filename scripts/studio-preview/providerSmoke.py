@@ -11,12 +11,16 @@ import json
 import os
 from pathlib import Path
 import signal
+import sqlite3
+import sys
 import tempfile
 import time
-
-from prepare import verify_prepared
+from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[2]
+FORK_PARENT = 'SYNTHETIC_HEAD_FORK_PARENT'
+FORK_CHILD = 'SYNTHETIC_HEAD_FORK_CHILD'
+FORK_RESTART = 'SYNTHETIC_HEAD_FORK_RESTART'
 
 def phase_timeout(deadline, limit):
     """Bound each phase by both its unchanged limit and the shared deadline."""
@@ -24,11 +28,74 @@ def phase_timeout(deadline, limit):
 
 
 
+def verify_fork_bindings(root, parent_id, child_id):
+    root = root.resolve()
+    databases = list(root.rglob('aionui-backend.db'))
+    if len(databases) != 1 or not databases[0].resolve().is_relative_to(root):
+        raise AssertionError('Expected one isolated host database for the displayed fork')
+    with contextlib.closing(sqlite3.connect(f'{databases[0].as_uri()}?mode=ro', uri=True)) as db:
+        bindings = dict(db.execute('SELECT conversation_id, session_id FROM acp_session '
+                                   'WHERE conversation_id IN (?, ?)', (parent_id, child_id)))
+    if len(bindings) != 2 or not all(bindings.values()) or len(set(bindings.values())) != 2:
+        raise AssertionError('Displayed parent and child need distinct stored ACP session IDs')
+    return bindings
+
+
+def read_fork_identity(root, parent_id, child_id):
+    root = root.resolve()
+    bindings = verify_fork_bindings(root, parent_id, child_id)
+    store = (root / 'acp/sessions.sqlite3').resolve(strict=True)
+    if not store.is_relative_to(root):
+        raise AssertionError('ACP store escaped the isolated profile')
+    parent_acp, child_acp = bindings[parent_id], bindings[child_id]
+    with contextlib.closing(sqlite3.connect(f'{store.as_uri()}?mode=ro', uri=True)) as db:
+        files = dict(db.execute('SELECT id, file FROM sessions WHERE id IN (?, ?)', (parent_acp, child_acp)))
+    parent_file, child_file = (Path(files[id]).resolve(strict=True) for id in (parent_acp, child_acp))
+    if not all(file.is_relative_to(root) for file in (parent_file, child_file)) or parent_file == child_file:
+        raise AssertionError('Expected distinct native session files in the isolated profile')
+    with parent_file.open(encoding='utf-8') as parent, child_file.open(encoding='utf-8') as child:
+        parent_header, child_header = json.loads(parent.readline()), json.loads(child.readline())
+    parent_native, child_native = (str(UUID(header['id'])) for header in (parent_header, child_header))
+    if child_native == parent_native or Path(child_header['parentSession']).resolve(strict=True) != parent_file:
+        raise AssertionError('Expected a distinct native child with the original parent link')
+    return dict(parentAcpId=parent_acp, childAcpId=child_acp, nativeChildId=child_native,
+                nativeChildFile=child_file.relative_to(root).as_posix())
+
+
+def verify_restarted_fork(root, parent_id, child_id, before):
+    observed = read_fork_identity(root, parent_id, child_id)
+    if observed != before:
+        changed = ', '.join(key for key, value in observed.items() if before.get(key) != value)
+        raise AssertionError(f'Cold restart changed the persisted ACP or native child identity ({changed})')
+
+
+def read_provider_report(root, file):
+    # Node writes UTF-8, including any Unicode in the native child path.
+    report = json.loads(file.read_text(encoding='utf-8'))
+    fork = report.pop('headFork')
+    verify_restarted_fork(root, fork['parentId'], fork['childId'], fork['beforeRestart'])
+    return report
+
+
 class ProviderFixture:
     def __init__(self):
         self.accepted = 0
         self.rejected = 0
         self.handlers = set()
+        self.fork_contexts = {FORK_CHILD: [], FORK_RESTART: []}
+
+    def observe_fork_context(self, messages):
+        if not messages:
+            return
+        prompt = json.dumps(messages[-1])
+        for marker, contexts in self.fork_contexts.items():
+            if marker in prompt:
+                history = json.dumps(messages[:-1])
+                contexts.append(tuple(value for value in (FORK_PARENT, FORK_CHILD) if value in history))
+
+    def verify_fork_context(self):
+        if self.fork_contexts != {FORK_CHILD: [(FORK_PARENT,)], FORK_RESTART: [(FORK_PARENT, FORK_CHILD)]}:
+            raise AssertionError('The model did not receive the displayed parent and continued child context')
 
     async def start(self):
         self.server = await asyncio.start_server(self.respond, '127.0.0.1', 0)
@@ -51,6 +118,7 @@ class ProviderFixture:
                 self.accepted += 1
                 if body['model'] != 'fixture-model':
                     raise AssertionError('Wrong selected model')
+                self.observe_fork_context(body.get('messages'))
                 chunks = [{'id': 'fixture', 'object': 'chat.completion.chunk', 'created': 0,
                            'model': body['model'], 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}
                           for delta, finish in (({'role': 'assistant', 'content': 'NATIVE_PROVIDER_FIRST_RESPONSE'}, None), ({}, 'stop'))]
@@ -75,6 +143,8 @@ class ProviderFixture:
 
 
 async def main(args):
+    from prepare import verify_prepared
+
     output = ROOT / '.local/studio-provider'
     output.mkdir(parents=True, exist_ok=True)
     for name in ('host.json', 'helper.json'):
@@ -125,6 +195,7 @@ async def main(args):
                ('API_KEY', 'AUTH_TOKEN', 'ACCESS_TOKEN', 'BASE_URL', 'AELIX_', 'ANTHROPIC_', 'OPENAI_',
                 'AWS_', 'GOOGLE_', 'GEMINI_', 'AZURE_', 'OPENROUTER_', 'PROXY'))}
         env.update(HOME=str(sandbox / 'home'), AELIX_CODING_AGENT_DIR=str(sandbox / 'agent'),
+                   AELIX_ACP_STATE_DIR=str(sandbox / 'acp'),
                    AELIX_SETTINGS_PATH=str(settings),
                    USERPROFILE=str(sandbox / 'home'), NO_PROXY='127.0.0.1,localhost',
                    XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
@@ -154,7 +225,8 @@ async def main(args):
                 print(json.dumps({'wait': 'helper-qualification', 'timeoutSeconds': 300,
                                   'elapsedSeconds': round(time.monotonic() - helper_started, 3)}), flush=True)
             process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
-                cwd=ROOT, env=env, **({'start_new_session': True} if os.name != 'nt' else {}))
+                cwd=ROOT, env=dict(env, PROVIDER_DRIVER_PYTHON=sys.executable),
+                **({'start_new_session': True} if os.name != 'nt' else {}))
             host_timeout = phase_timeout(qualification_deadline, 240)
             print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
                               'sharedTimeoutSeconds': 450}), flush=True)
@@ -168,7 +240,10 @@ async def main(args):
                 raise AssertionError('Installed wheel payload changed')
             if helper_manifest and bundled_before != helper_bytes():
                 raise AssertionError('Installed bundled helper payload changed')
-            report = json.loads((output / 'host.json').read_text())
+            report = read_provider_report(sandbox, output / 'host.json')
+            fixture.verify_fork_context()
+            report['checks'] += ['native_head_fork_distinct_stored_acp_bindings',
+                                 'native_head_fork_same_acp_and_native_child', 'native_head_fork_model_context']
             scanned = 0
             for file in sandbox.rglob('*'):
                 if file.is_file() and (file.suffix in ('.log', '.jsonl', '.db', '.sqlite', '.sqlite3') or '-wal' in file.name):
@@ -199,7 +274,7 @@ async def main(args):
             renderer = {file.relative_to(ROOT / 'out/renderer').as_posix(): digest(file)
                         for file in sorted((ROOT / 'out/renderer').rglob('*.js'))}
             report['rendererManifestSha256'] = hashlib.sha256(json.dumps(renderer, sort_keys=True).encode()).hexdigest()
-            (output / 'host.json').write_text(json.dumps(report, indent=2) + '\n')
+            (output / 'host.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
         finally:
             if process.returncode is None:
                 if os.name == 'nt':
@@ -221,16 +296,23 @@ async def main(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--runtime', required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument('--runtime')
+    mode.add_argument('--read-fork-identity', nargs=3, metavar=('PROFILE', 'PARENT', 'CHILD'))
     parser.add_argument('--helper-runtime', help='Installed bundled payload; the prepared runtime still supplies provenance')
+    args = parser.parse_args()
+    if args.read_fork_identity:
+        root, parent_id, child_id = args.read_fork_identity
+        print(json.dumps(read_fork_identity(Path(root), parent_id, child_id)))
+        sys.exit(0)
     try:
-        asyncio.run(main(parser.parse_args()))
+        asyncio.run(main(args))
     except BaseException:
         output = ROOT / '.local/studio-provider'
         output.mkdir(parents=True, exist_ok=True)
         for name in ('host.json', 'helper.json'):
             file = output / name
-            completed = json.loads(file.read_text()) if file.exists() else {}
+            completed = json.loads(file.read_text(encoding='utf-8')) if file.exists() else {}
             if completed.get('status') != 'passed':
                 file.write_text(json.dumps({'status': 'failed'}) + '\n')
         raise

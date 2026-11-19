@@ -8,6 +8,8 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMessageText } from '@/common/chat/chatLib';
+import type { TForkCapability } from '@/common/chat/forkConversation';
+import { Message } from '@arco-design/web-react';
 import { ipcBridge } from '@/common';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
 import MessageText, {
@@ -766,14 +768,18 @@ describe('MessageText fork entry point', () => {
   });
 
   const renderWithCapability = (
-    capability: { at_turn: boolean } | undefined,
-    props: { isLastMessage?: boolean; hasForkAnchor?: boolean } = {}
+    capability: TForkCapability | undefined,
+    props: { isLastMessage?: boolean; hasForkAnchor?: boolean; nativeHead?: string } = {}
   ) => {
     render(
       <ConversationProvider
         value={{ conversation_id: 'conv-fork', workspace: '/workspace/demo', type: 'acp', forkCapability: capability }}
       >
-        <MessageText message={forkMessage()} isLastMessage={props.isLastMessage} hasForkAnchor={props.hasForkAnchor} />
+        <MessageText
+          message={forkMessage({ backend_turn_id: props.nativeHead })}
+          isLastMessage={props.isLastMessage}
+          hasForkAnchor={props.hasForkAnchor}
+        />
       </ConversationProvider>
     );
   };
@@ -782,6 +788,7 @@ describe('MessageText fork entry point', () => {
     forkMocks.fork.mockReset().mockResolvedValue({ id: 'conv-forked' });
     forkMocks.ensureRuntime.mockReset().mockResolvedValue(undefined);
     forkMocks.navigate.mockReset();
+    vi.mocked(Message.error).mockClear();
   });
 
   it('hides the fork button when the agent declares no capability', () => {
@@ -817,5 +824,24 @@ describe('MessageText fork entry point', () => {
       expect(forkMocks.navigate).toHaveBeenCalledWith('/conversation/conv-forked');
       expect(forkMocks.ensureRuntime).toHaveBeenCalledWith({ conversation_id: 'conv-forked' });
     });
+  });
+
+  it('sends the anchor shown on the message and stays on the parent when native rejects it', async () => {
+    forkMocks.ensureRuntime.mockRejectedValue(new Error('FORK_HEAD_CHANGED'));
+    renderWithCapability(
+      { at_turn: false, requires_native_head: true },
+      {
+        isLastMessage: true,
+        nativeHead: 'turn-visible',
+      }
+    );
+    fireEvent.click(screen.getByTestId('message-fork-button'));
+    await waitFor(() => expect(Message.error).toHaveBeenCalledWith('messages.fork.errorHeadChanged'));
+    expect(forkMocks.fork).toHaveBeenCalledWith({
+      conversation_id: 'conv-fork',
+      message_id: 'msg-fork-1',
+      expected_native_head: 'turn-visible',
+    });
+    expect(forkMocks.navigate).not.toHaveBeenCalled();
   });
 });

@@ -11,7 +11,7 @@
  * the agent declares no fork support (e.g. antigravity) and the entry point
  * must stay hidden.
  */
-export type TForkCapability = { at_turn: boolean };
+export type TForkCapability = { at_turn: boolean; requires_native_head?: boolean };
 
 /**
  * Whether the fork entry point should be shown on one message.

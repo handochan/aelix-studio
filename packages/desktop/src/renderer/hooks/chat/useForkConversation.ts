@@ -22,6 +22,8 @@ export function getForkErrorMessage(error: unknown, t: TFunction): string {
   const raw = parseError(error);
   if (raw.includes('FORK_TURN_IN_FLIGHT')) return t('messages.fork.errorTurnInFlight');
   if (raw.includes('FORK_PARENT_UNBOUND')) return t('messages.fork.errorParentUnbound');
+  if (raw.includes('FORK_HEAD_CHANGED')) return t('messages.fork.errorHeadChanged');
+  if (raw.includes('FORK_HEAD_UNAVAILABLE')) return t('messages.fork.errorHeadUnavailable');
   if (raw.includes('FORK_POINT_UNSUPPORTED')) return t('messages.fork.errorPointUnsupported');
   if (raw.includes('FORK_UNSUPPORTED')) return t('messages.fork.errorUnsupported');
   return t('messages.fork.errorGeneric', { message: raw });
@@ -32,28 +34,38 @@ export function getForkErrorMessage(error: unknown, t: TFunction): string {
  * forked conversation, and pre-warm its runtime so a backend-side fork failure
  * surfaces immediately instead of on the first send.
  */
-export function useForkConversation(conversationId: string | undefined) {
+export function useForkConversation(conversationId: string | undefined, requiresNativeHead = false) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const forkingRef = useRef(false);
 
   return useCallback(
-    async (messageId: string) => {
+    async (messageId: string, nativeHead?: string) => {
       if (!conversationId || forkingRef.current) return;
       forkingRef.current = true;
       try {
+        if (requiresNativeHead && !nativeHead) {
+          Message.error(t('messages.fork.errorHeadUnavailable'));
+          return;
+        }
         const forked = await ipcBridge.conversation.fork.invoke({
           conversation_id: conversationId,
           message_id: messageId,
+          ...(requiresNativeHead ? { expected_native_head: nativeHead } : {}),
         });
         if (!forked?.id) {
           throw new Error('fork returned no conversation');
+        }
+        if (requiresNativeHead) {
+          await ipcBridge.conversation.ensureRuntime.invoke({ conversation_id: forked.id });
         }
         emitter.emit('chat.history.refresh');
         void navigate(`/conversation/${forked.id}`);
         // Lazy fork + eager surfacing: materialize the backend session now so
         // "parent session gone" style failures show up before the first send.
-        void ipcBridge.conversation.ensureRuntime.invoke({ conversation_id: forked.id }).catch((): void => undefined);
+        if (!requiresNativeHead) {
+          void ipcBridge.conversation.ensureRuntime.invoke({ conversation_id: forked.id }).catch((): void => undefined);
+        }
       } catch (error) {
         console.error('Failed to fork conversation:', error);
         Message.error(getForkErrorMessage(error, t));
@@ -61,6 +73,6 @@ export function useForkConversation(conversationId: string | undefined) {
         forkingRef.current = false;
       }
     },
-    [conversationId, navigate, t]
+    [conversationId, navigate, requiresNativeHead, t]
   );
 }

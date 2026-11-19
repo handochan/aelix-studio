@@ -2,19 +2,23 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
+import { boundedWait, closeElectron } from './host-release/verification.mjs';
 
 const { httpGet, httpPost } = httpBridge;
 
 const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
-assert.ok(sandbox && output && process.env.PROVIDER_ENDPOINT);
+const driverPython = process.env.PROVIDER_DRIVER_PYTHON;
+assert.ok(sandbox && output && process.env.PROVIDER_ENDPOINT && driverPython);
 const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
 const appEnv = { ...process.env };
+delete appEnv.PROVIDER_DRIVER_PYTHON;
 if (executablePath) {
   delete appEnv.AELIX_STUDIO_RUNTIME;
   delete appEnv.AIONUI_BACKEND_BIN;
@@ -24,12 +28,6 @@ if (executablePath) {
       ? `${process.env.SystemRoot ?? process.env.SYSTEMROOT}\\System32;${process.env.SystemRoot ?? process.env.SYSTEMROOT}`
       : '/usr/bin:/bin';
 }
-const app = await electron.launch({
-  ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
-  cwd: executablePath ? sandbox : process.cwd(),
-  env: appEnv,
-  timeout: 60000,
-});
 // Keep only known startup markers; raw process output may contain credentials.
 const startupMarkers = new Set();
 const markerPatterns = [
@@ -47,12 +45,42 @@ const markerPatterns = [
   ['missing_file', 'ENOENT'],
   ['access_denied', 'EACCES'],
 ];
-for (const stream of [app.process().stdout, app.process().stderr]) {
-  stream?.on('data', (chunk) => {
-    const text = chunk.toString();
-    for (const [code, marker] of markerPatterns) if (text.includes(marker)) startupMarkers.add(code);
+async function launch() {
+  const launched = await electron.launch({
+    ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
+    cwd: executablePath ? sandbox : process.cwd(),
+    env: appEnv,
+    timeout: 60000,
   });
+  for (const stream of [launched.process().stdout, launched.process().stderr]) {
+    stream?.on('data', (chunk) => {
+      const text = chunk.toString();
+      for (const [code, marker] of markerPatterns) if (text.includes(marker)) startupMarkers.add(code);
+    });
+  }
+  return launched;
 }
+function readForkIdentity(parentId, childId) {
+  const script = path.join(import.meta.dirname, 'providerSmoke.py');
+  const result = spawnSync(driverPython, ['-I', '-B', script, '--read-fork-identity', sandbox, parentId, childId], {
+    encoding: 'utf8',
+    timeout: 10000,
+  });
+  assert.equal(result.status, 0, `Could not read the native fork identity: ${result.error ?? result.stderr}`);
+  return JSON.parse(result.stdout);
+}
+async function waitForIdle(page, route) {
+  await expect
+    .poll(
+      async () => {
+        const { runtime } = await httpGet(page, route);
+        return runtime?.state === 'idle' && !runtime.is_processing && runtime.turn_id == null;
+      },
+      { timeout: 30000 }
+    )
+    .toBe(true);
+}
+let app;
 let page;
 let lanPage;
 let foreign;
@@ -64,6 +92,7 @@ const trace = (next) => {
   fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
 try {
+  app = await launch();
   let archive;
   if (executablePath) {
     const selected = process.env.AELIX_STUDIO_RUNTIME;
@@ -126,7 +155,7 @@ try {
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
   });
-  const native = page.getByTestId('native-provider-settings');
+  let native = page.getByTestId('native-provider-settings');
   await expect(native).toBeVisible({ timeout: 30000 });
   await expect(native).toContainText('auth.json', { timeout: 15000 });
   const language = await page.evaluate(() => document.documentElement.lang);
@@ -148,7 +177,7 @@ try {
     timeout: 15000,
   });
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
-  const input = page.getByTestId('sendbox-input');
+  let input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
   await input.fill('Check rejected credentials');
   await page.getByTestId('sendbox-send-btn').click();
@@ -168,14 +197,17 @@ try {
   });
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
   await expect(input).toBeVisible({ timeout: 30000 });
-  await input.fill('Verify first response with native credentials');
+  const parentMarker = 'SYNTHETIC_HEAD_FORK_PARENT';
+  const childMarker = 'SYNTHETIC_HEAD_FORK_CHILD';
+  const restartMarker = 'SYNTHETIC_HEAD_FORK_RESTART';
+  const providerReply = 'NATIVE_PROVIDER_FIRST_RESPONSE';
+  const marker = (value) => page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${value}$`) });
+  await input.fill(parentMarker);
   await page.getByTestId('sendbox-send-btn').click();
-  await expect(page.getByTestId('message-text-left').filter({ hasText: 'NATIVE_PROVIDER_FIRST_RESPONSE' })).toBeVisible(
-    { timeout: 30000 }
-  );
+  await expect(marker(providerReply)).toHaveCount(1, { timeout: 30000 });
   assert.ok(fs.existsSync(path.join(sandbox, 'agent/auth.json')));
   assert.equal(fs.existsSync(path.join(sandbox, 'wrong-root/auth.json')), false);
-  const port = await page.evaluate(() => window.__backendPort);
+  let port = await page.evaluate(() => window.__backendPort);
   const providers = await httpGet(page, '/api/providers');
   assert.ok(!JSON.stringify(providers).includes('synthetic-provider-key'));
   // A credential-bearing endpoint is refused before writing native config.
@@ -193,6 +225,82 @@ try {
   });
   assert.deepEqual(badEndpoint, { ok: false, code: 'INVALID_ENDPOINT' });
   await page.screenshot({ path: path.join(output, 'first-response.png') });
+
+  trace('native_head_fork');
+  const parentId = await page.evaluate(() => /^#\/conversation\/([^/]+)$/.exec(window.location.hash)?.[1]);
+  assert.ok(parentId, 'The Provider conversation must be open before fork');
+  const parentRoute = `/api/conversations/${parentId}`;
+  const anonymous = await fetch(`http://127.0.0.1:${port}${parentRoute}`, { signal: AbortSignal.timeout(5000) });
+  assert.equal(anonymous.status, 401);
+  assert.equal((await anonymous.json()).code, 'AUTH_REQUIRED');
+  const capability = (await httpGet(page, parentRoute)).fork_capability;
+  assert.equal(capability?.at_turn, false);
+  assert.equal(capability?.requires_native_head, true, 'The pinned host must guard native HEAD');
+  await waitForIdle(page, parentRoute);
+  await marker(providerReply).hover();
+  const fork = page.getByTestId('message-fork-button');
+  await expect(fork).toHaveCount(1);
+  await fork.click();
+  const childRoute = await page.waitForFunction(
+    (id) => {
+      const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
+      return match && match[1] !== id ? match[1] : null;
+    },
+    parentId,
+    { timeout: 30000 }
+  );
+  const childId = await childRoute.jsonValue();
+  await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+  await input.fill(childMarker);
+  await page.getByTestId('sendbox-send-btn').click();
+  await expect(marker(providerReply)).toHaveCount(2, { timeout: 30000 });
+  const childEndpoint = `/api/conversations/${childId}`;
+  await waitForIdle(page, childEndpoint);
+  const beforeRestart = readForkIdentity(parentId, childId);
+
+  trace('native_head_fork_restart');
+  const previousPid = app.process().pid;
+  const previousPort = port;
+  await closeElectron(app, { phase: 'fork-restart-main-exit' });
+  app = undefined;
+  page = undefined;
+  await expect
+    .poll(
+      async () => {
+        try {
+          await fetch(`http://127.0.0.1:${previousPort}/api/assistants`, { signal: AbortSignal.timeout(2000) });
+          return false;
+        } catch (error) {
+          return error.cause?.code === 'ECONNREFUSED';
+        }
+      },
+      { timeout: 15000 }
+    )
+    .toBe(true);
+  app = await launch();
+  assert.notEqual(app.process().pid, previousPid);
+  page = await app.firstWindow();
+  await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
+    timeout: 60000,
+  });
+  port = await page.evaluate(() => window.__backendPort);
+  await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+  await page.locator(`[id="c-${childId}"]`).click();
+  await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(`#/conversation/${childId}`);
+  await boundedWait(httpPost(page, `${childEndpoint}/runtime/ensure`), 'fork-runtime-resume', { timeoutMs: 30000 });
+  await waitForIdle(page, childEndpoint);
+  assert.deepEqual(readForkIdentity(parentId, childId), beforeRestart);
+  await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+  await expect(marker(childMarker)).toHaveCount(1);
+  await expect(marker(providerReply)).toHaveCount(2);
+  input = page.getByTestId('sendbox-input');
+  native = page.getByTestId('native-provider-settings');
+  await input.fill(restartMarker);
+  await page.getByTestId('sendbox-send-btn').click();
+  await expect(marker(providerReply)).toHaveCount(3, { timeout: 30000 });
+  await expect(marker(parentMarker)).toHaveCount(1);
+  await expect(marker(childMarker)).toHaveCount(1);
+  await waitForIdle(page, childEndpoint);
 
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
@@ -394,6 +502,7 @@ try {
         webuiScope: executablePath
           ? 'source-imported facade/helper with installed backend; compiled app-owned WebUI listener not exercised'
           : 'source-imported facade/helper with development backend',
+        headFork: { parentId, childId, beforeRestart },
         checks: [
           'fresh_store',
           'ui_endpoint_registration',
@@ -401,6 +510,8 @@ try {
           'wrong_key_rejected',
           'key_update_new_conversation',
           'first_response',
+          'native_head_fork_desktop_authentication',
+          'native_head_fork_ui_and_full_app_host_restart',
           'explicit_cli_root',
           'aion_provider_db_separate',
           'secret_endpoint_rejected',
@@ -445,7 +556,7 @@ try {
 } finally {
   // Close the owned browser clients before waiting for fixture TCP listeners.
   trace('stop_app');
-  await app.close();
+  await closeElectron(app);
   trace('stop_webui');
   if (webui) await webui.stop();
   if (foreign) {

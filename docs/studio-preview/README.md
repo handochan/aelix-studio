@@ -10,7 +10,7 @@ It does not establish acceptance for this candidate or for the public joint Beta
 | Host                    | See generated `baseline.json` → `aioncore.tag` / `commit`                                                                     |
 | Host provenance         | See generated `baseline.json` → `aioncore.provenanceSha256`                                                                   |
 | Native beta.3 candidate | `e19ab55e17e871a40356fc9802f3f6669ca727de`; source archive `c6088edb122c8e3dec4b954e104bf12ff4db749674b6d540b70c5ac5b1ebf997` |
-| ACP                     | `16d6555b08825d1d63c3b082de2b10a1152562c0`; source archive `6d4b9e4c918ca51345b4b39ff93e31141a4f31decd67f628b7a54c496078c111` |
+| ACP                     | See `baseline.json` → `acp.commit` / `archiveSha256`                                                                          |
 
 The native source still declares `0.1.0b2`. Studio builds its four wheels without patches,
 using the exact candidate source, a fixed build timestamp and declared build constraints.
@@ -29,6 +29,24 @@ host. No upstream source download, Rust build, permission patch or forwarding pa
 The host retains `AIONCORE_LISTENING`, `AIONCORE_READY`, `.aioncore.log`, exit 3 /
 `BOOTSTRAP_PEER_ALREADY_RUNNING`, `AIONCORE_BOOTSTRAP_SECRET`, `x-aioncore-bootstrap-secret`,
 `AIONUI_*`, existing data directories and `aionui-backend.db`.
+
+### Aelix conversation fork
+
+The existing Fork action can branch a Studio-bound Aelix conversation at its
+latest message when the parent remains idle throughout the operation. Opening
+an existing conversation with the new adapter refreshes its fork capability.
+The child has a new native session UUID and a separate ACP ID. Native owns the
+child's context and parent link. Studio keeps display messages and conversation
+metadata in the host database.
+
+The pinned host forwards the displayed native HEAD to ACP `session/fork`.
+If the parent advances, ACP refuses before writing the native child and Studio
+stays in the parent. The conversation list omits a rejected display copy.
+Legacy messages and a child with only inherited history need a completed turn
+before they can be forked. The installed Provider smoke checks the Fork button,
+the same stored ACP and native child identity, and model context after a full
+app and host restart.
+[Host #43](https://github.com/handochan/aelix-studio-host/issues/43) · [Studio #6](https://github.com/handochan/aelix-studio/issues/6)
 
 For an internal database that has migration **044** from #25: stop Studio and its host,
 back up the entire owned internal test data directory (including SQLite sidecars), then
