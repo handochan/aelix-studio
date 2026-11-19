@@ -277,6 +277,55 @@ class NativeFailureRelayTests(unittest.TestCase):
                     if stream: stream.close()
 
 
+class ExtensionGenerationCleanupTests(unittest.TestCase):
+    def setUp(self):
+        lock_file = ROOT / 'packages/web-host/src/studio-extensions/store/lock.ts'
+        source = lock_file.read_text(encoding='utf-8').split('const LOCK_SOURCE = '+chr(96), 1)[1]
+        namespace = {}
+        exec(compile(source.split('mode, target = sys.argv', 1)[0], str(lock_file), 'exec'), namespace)
+        self.remove_generation = namespace['remove_generation']
+
+    def test_windows_partial_delete_retires_record_until_the_running_executable_can_be_removed(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            generation = Path(temporary) / 'g00000001-aaaa'
+            scripts = generation / 'venv' / 'Scripts'
+            scripts.mkdir(parents=True)
+            record = generation / 'generation.json'
+            record.write_text('{}')
+            executable = scripts / 'locked.exe'
+            executable.write_text('fixture')
+            removable = scripts / 'unused.exe'
+            removable.touch()
+
+            def partial_delete(_target):
+                removable.unlink()
+                raise PermissionError(executable)
+
+            with patch.object(shutil, 'rmtree', side_effect=partial_delete):
+                with self.assertRaises(PermissionError):
+                    self.remove_generation(str(generation))
+            self.assertFalse(removable.exists())
+            self.assertTrue(executable.exists())
+            self.assertFalse(record.exists())
+            self.assertEqual((generation.parent/'.retired-g00000001-aaaa').read_text(), '{}')
+            self.remove_generation(str(generation))
+            self.assertFalse(generation.exists())
+
+
+    def test_locked_generation_directory_keeps_a_retirement_marker_until_a_later_collection(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            generation = Path(temporary) / 'g00000001-aaaa'
+            generation.mkdir()
+            (generation/'generation.json').write_text('{}')
+            with patch.object(os, 'rmdir', side_effect=PermissionError(generation)):
+                with self.assertRaises(PermissionError):
+                    self.remove_generation(str(generation))
+            self.assertEqual(list(generation.iterdir()), [])
+            self.assertTrue((generation.parent/'.retired-g00000001-aaaa').is_file())
+            self.remove_generation(str(generation))
+            self.assertFalse(generation.exists())
+
+
 class OutboundAuditTests(unittest.TestCase):
     def setUp(self):
         spec = importlib.util.spec_from_file_location('outbound_audit_fixture', ROOT / 'scripts/studio-preview/fixtures/outboundAudit.py')

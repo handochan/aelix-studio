@@ -28,6 +28,10 @@ from auditedSessions import AuditedSessions
 WINDOWS_INSTALL_TIMEOUT = 600
 INSTALL_PROGRESS_INTERVAL = 30
 INSTALL_PROBE_TIMEOUT = 5
+# Installer traces completed well inside this capture budget. Keep one bounded
+# recapture for incomplete measurements, without extending the smoke budget.
+EXTENSIONS_CAPTURE_TIMEOUT = 180
+EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
 INSTALL_PROGRESS_PROBE = r"""
 $ErrorActionPreference = 'Stop'
@@ -183,8 +187,12 @@ def write_failure_receipt(output):
         current = json.loads(output.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         current = {}
-    # main() first resets the file to running. Preserve this run's completed
-    # or interrupted recapture evidence when the mandatory failure is raised.
+    # main() resets the file to running. A saved smoke verdict belongs to this run.
+    if 'smokeStatus' in current:
+        current['status'] = 'failed'
+        output.write_text(json.dumps(current, indent=2) + '\n', encoding='utf-8')
+        return
+    # Preserve interrupted recapture evidence before the smoke verdict exists.
     if current.get('status') == 'failed' and 'auditedSessions' in current and (current.get('failedAudits') or current.get('outboundRecaptures', 0)):
         return
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -225,7 +233,7 @@ def qualify_extensions(audits, env, payload, app, kind, installed_python, report
         audits.run('extensions', [
             'node', '--import', 'tsx', str(ROOT / 'packages/web-host/tests/extensionInstallerQualification.ts'),
             str(payload), str(report_path),
-        ], env=env, timeout=300, roots=(installed_python,), required=(installed_python,))
+        ], env=env, timeout=EXTENSIONS_CAPTURE_TIMEOUT, roots=(installed_python,), required=(installed_python,))
         if audits.enabled:
             audit = audits.sessions[-1]
             if any(audit[field] for field in ('wholeAppExternalAttempts', 'wholeAppUnparsedRecords',
@@ -235,10 +243,44 @@ def qualify_extensions(audits, env, payload, app, kind, installed_python, report
         if runtime_inventory(payload) != before:
             raise RuntimeError('Extension qualification changed the installed runtime')
         if kind == 'dmg':
-            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True,
+                           timeout=EXTENSIONS_SIGNATURE_TIMEOUT)
     report = json.loads(report_path.read_text(encoding='utf-8'))
     report.update(installedRuntimeUnchanged=True, adHocSignatureVerifiedAfter=kind == 'dmg')
     report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+
+
+def record_extension_qualification(report, output, audits, verify, *, signature=False):
+    """Checkpoint the existing smoke verdict before adding the independent extension result."""
+    smoke_status = report['status']
+    report['smokeStatus'] = smoke_status
+    report['status'] = 'running'
+    verdict = dict(status='running', captureTimeoutSeconds=EXTENSIONS_CAPTURE_TIMEOUT,
+                   totalTimeoutSeconds=audits.time_budget(EXTENSIONS_CAPTURE_TIMEOUT),
+                   signatureTimeoutSeconds=EXTENSIONS_SIGNATURE_TIMEOUT if signature else None)
+    report['extensionQualification'] = verdict
+    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    extension_report = output.with_name('extensions-qualification.json')
+    started = time.monotonic()
+    try:
+        extension_report.unlink(missing_ok=True)
+        verify(extension_report)
+        verdict['status'] = 'passed'
+        report['status'] = smoke_status
+    except BaseException as error:
+        report['status'] = verdict['status'] = 'failed'
+        verdict['exceptionKind'] = type(error).__name__
+        raise
+    finally:
+        verdict['elapsedSeconds'] = round(time.monotonic() - started, 3)
+        if audits.sessions:
+            verdict['audit'] = audits.sessions[-1]
+            if audits.ledger.is_file():
+                verdict['auditLedgerSha256'] = digest(audits.ledger)
+            report['failedAudits'] = [*report['failedAudits'], *audits.failed]
+        if extension_report.is_file():
+            report['extensionsQualificationSha256'] = digest(extension_report)
+        output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
 
 
 def assert_windows_install_unused():
@@ -367,6 +409,11 @@ def main(args):
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'status': 'running'}) + '\n', encoding='utf-8')
+    # Clear only the extension receipts this run can upload, even if their phase
+    # is never reached. The existing smoke uses its own report names.
+    output.with_name('extensions-qualification.json').unlink(missing_ok=True)
+    for filename in ('outbound-extensions.json', 'outbound-app-extensions.json', 'outbound-extensions-sessions.json'):
+        (output.parent / 'permission' / filename).unlink(missing_ok=True)
     installer_receipt = output.with_name('installer-progress.json')
     if sys.platform == 'win32':
         installer_receipt.write_text(json.dumps({'attempts': []}) + '\n', encoding='utf-8')
@@ -393,6 +440,7 @@ def main(args):
             qualify_windows_copy_failure(artifact, directory, copy_failure_report)
         executable, payload, app, kind, package = installed(artifact, directory, installer_receipt)
         audits = None
+        report = None
         try:
             if not executable.is_file():
                 raise ValueError('Installer did not produce its expected executable')
@@ -530,8 +578,6 @@ def main(args):
             # audit. The final receipt and process still fail if any audit fails.
             audits.run('permission', permission_command, required=(core, installed_python), env=environment,
                        timeout=480, defer_failure=True)
-            extension_output = output.with_name('extensions-qualification.json')
-            qualify_extensions(audits, environment, payload, app, kind, installed_python, extension_output)
             if sys.platform == 'linux':
                 audits.positive_controls(environment, defer_failure=True)
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
@@ -556,7 +602,6 @@ def main(args):
                           installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
                           installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
                           windowsInstaller=(json.loads(installer_receipt.read_text(encoding='utf-8')) if sys.platform == 'win32' else None),
-                          extensionsQualificationSha256=digest(extension_output),
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if sys.platform == 'linux':
                 report.update(outboundScope='host-and-installed-native-process-trees',
@@ -570,16 +615,23 @@ def main(args):
                               wholeAppUnparsedRecords=sum(item['wholeAppUnparsedRecords'] for item in audits.sessions))
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
+            extensions = AuditedSessions(core, installed_python, audits.directory,
+                                         ledger='outbound-extensions-sessions.json')
+            record_extension_qualification(report, output, extensions, lambda receipt: qualify_extensions(
+                extensions, environment, payload, app, kind, installed_python, receipt), signature=kind == 'dmg')
         finally:
             try:
-                if audits is not None:
-                    preserve_recapture_failure(output, audits, target)
-            finally:
                 remove_install(app, kind, package)
-        report['ownedTestAppRemoved'] = not app.exists()
+            finally:
+                if report is not None:
+                    report['ownedTestAppRemoved'] = not app.exists()
+                    if not report['ownedTestAppRemoved']:
+                        report['status'] = 'failed'
+                    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+                elif audits is not None:
+                    preserve_recapture_failure(output, audits, target)
         if not report['ownedTestAppRemoved']:
             raise ValueError('Owned installer files remain after cleanup')
-        output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
         if audits.failed:
             raise RuntimeError('Installed host/native outbound audit failed: ' + ', '.join(audits.failed))
 

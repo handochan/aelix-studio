@@ -26,7 +26,7 @@ import { stateRelative, type Bundle, type Layout } from './layout.js';
  * is locked or cannot be checked.
  */
 const LOCK_SOURCE = `
-import errno, json, os, shutil, sys, time
+import errno, json, os, re, shutil, sys, time
 
 NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
 DEDICATED = ('generations', 'artifacts', 'leases')
@@ -66,8 +66,7 @@ def confined(root, relative):
         raise Refused()
     return os.path.join(parent, parts[-1])
 
-def remove(root, relative):
-    target = confined(root, relative)
+def remove_entry(target):
     if os.path.islink(target) or not os.path.isdir(target):
         try:
             os.unlink(target)
@@ -75,6 +74,28 @@ def remove(root, relative):
             pass
     else:
         shutil.rmtree(target)
+
+def remove_generation(target):
+    # Keep a retirement record outside the tree until its deletion completes.
+    # A fallback pointer cannot select a generation after retirement, and
+    # recovery can proceed even if a handle or interruption leaves part of it.
+    record = os.path.join(target, 'generation.json')
+    retired = os.path.join(os.path.dirname(target), '.retired-' + os.path.basename(target))
+    try:
+        os.replace(record, retired)
+    except FileNotFoundError:
+        pass
+    shutil.rmtree(target)
+    remove_entry(retired)
+
+def remove(root, relative):
+    target = confined(root, relative)
+    if (os.name == 'nt' and relative.startswith('generations/')
+            and re.fullmatch(r'g[0-9]{8}-[0-9a-f]{4}', os.path.basename(target))
+            and os.path.isdir(target) and not os.path.islink(target) and not os.path.isjunction(target)):
+        remove_generation(target)
+    else:
+        remove_entry(target)
 
 def replace(root, source, target):
     if target not in POINTERS or not plain(source) or not source.endswith('.tmp') or not own(root):

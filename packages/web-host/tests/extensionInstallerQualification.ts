@@ -12,7 +12,7 @@ import { baseEnvironment } from '../src/studio-extensions/flow/environment';
 import { runToExit, spawnChild, windowsChildSpawn, type Child } from '../src/studio-extensions/process';
 import { generationPaths, locateLayout, resolveBundle } from '../src/studio-extensions/store/layout';
 import { acquireMutationLock } from '../src/studio-extensions/store/lock';
-import { readPointer } from '../src/studio-extensions/store/pointer';
+import { readPointer, type GenerationRecord } from '../src/studio-extensions/store/pointer';
 import type { ExtensionCommand, ExtensionListing, ExtensionOperation } from '../src/studio-extensions/types';
 import { buildWheel, writeWheel } from './fixtures/extensionWheels';
 
@@ -21,6 +21,11 @@ type Message = {
   error?: unknown;
   result?: { sessionId?: string };
   params?: { sessionId?: string; update?: { sessionUpdate?: string; availableCommands?: { name: string }[] } };
+};
+
+type Evidence = {
+  checks: string[];
+  windowsPathLengths?: { dataFilePathUtf16Units: number; consoleExePathUtf16Units: number; shebangUtf8Bytes: number };
 };
 
 const windows = process.platform === 'win32';
@@ -50,7 +55,8 @@ async function close(child: Child): Promise<void> {
   }
 }
 
-async function qualify(payload: string, scratch: string, checks: string[]): Promise<void> {
+async function qualify(payload: string, scratch: string, evidence: Evidence): Promise<void> {
+  const { checks } = evidence;
   const bundle = await resolveBundle(payload);
   assert(bundle, 'installed Preview bundle did not resolve');
   const root = path.join(scratch, 'user data 한글', 'studio-managed-extensions');
@@ -239,10 +245,38 @@ async function qualify(payload: string, scratch: string, checks: string[]): Prom
     // realpath would collapse a POSIX venv symlink to the bundle. Compare interpreter spellings.
     const pathKey = (value: string) => (windows ? value.replace(/^\\\\\?\\/, '').toLowerCase() : value);
     assert.equal(pathKey(JSON.parse(consoleResult.output.trim()) as string), pathKey(paths(second).python));
-    assert.equal(await readFile(path.join(paths(second).site, longFile), 'utf8'), 'long path verified');
+    const dataFile = path.join(paths(second).site, longFile);
+    assert.equal(await readFile(dataFile, 'utf8'), 'long path verified');
+    if (windows) {
+      const shim = await readFile(script);
+      const zip = shim.lastIndexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+      const shebang = shim.lastIndexOf('#!', zip);
+      assert(zip > shebang && shebang >= 0);
+      evidence.windowsPathLengths = {
+        dataFilePathUtf16Units: dataFile.length,
+        consoleExePathUtf16Units: script.length,
+        shebangUtf8Bytes: zip - shebang,
+      };
+      assert(dataFile.length > 260, 'Windows long data path did not exceed MAX_PATH');
+    }
     checks.push('console script names the copied generation interpreter');
 
     const held = await worker([localName, onlineName], bundle, true);
+    // Change only the stored lock hash. Keep the installed app and Python minor intact
+    // so removing the launcher's binding check would load these extensions.
+    const generationRecord = paths(second).record;
+    const originalRecord = await readFile(generationRecord);
+    const alteredRecord = JSON.parse(originalRecord.toString('utf8')) as GenerationRecord;
+    alteredRecord.binding.dependencyLockSha256 = '0'.repeat(64);
+    assert.notEqual(alteredRecord.binding.dependencyLockSha256, bundle.binding.dependencyLockSha256);
+    await writeFile(generationRecord, JSON.stringify(alteredRecord));
+    try {
+      await worker([]);
+    } finally {
+      await writeFile(generationRecord, originalRecord);
+    }
+    checks.push('same Python minor with mismatched lock hash starts bare');
+
     const alternate = path.join(scratch, 'replacement');
     await mkdir(alternate);
     for (const directory of ['python', 'native-site', 'adapter-site']) {
@@ -256,7 +290,6 @@ async function qualify(payload: string, scratch: string, checks: string[]): Prom
     const replacement = await resolveBundle(alternate);
     assert(replacement);
     const before = await readPointer(layout);
-    await worker([], replacement);
     const incompatible = new ExtensionService({ runtime: alternate, root, env });
     try {
       const result = await incompatible.request(owner, { action: 'reconcile_bundle' });
@@ -267,7 +300,7 @@ async function qualify(payload: string, scratch: string, checks: string[]): Prom
     } finally {
       await incompatible.dispose();
     }
-    checks.push('incompatible bundle starts bare and preserves reinstall_needed');
+    checks.push('incompatible bundle preserves reinstall_needed and the pointer');
 
     const rolled = await service.request(owner, { action: 'rollback' });
     assert(rolled.ok && 'current' in rolled.data && rolled.data.current === first, JSON.stringify(rolled));
@@ -290,13 +323,26 @@ async function qualify(payload: string, scratch: string, checks: string[]): Prom
     assert(restored.ok && 'current' in restored.data && restored.data.current === first, JSON.stringify(restored));
     if (consoleHolding) {
       assert((await lstat(script)).isFile(), 'Windows retired a still running executable');
+      assert(
+        (await lstat(path.join(layout.generations, '.retired-' + second))).isFile(),
+        'partial cleanup did not record retirement'
+      );
+      await applied({ action: 'remove', name: localName });
+      const whileLocked = await service.request(owner, { action: 'rollback' });
+      assert(
+        whileLocked.ok && 'current' in whileLocked.data && whileLocked.data.current === first,
+        JSON.stringify(whileLocked)
+      );
+      assert((await lstat(script)).isFile(), 'Windows lost the running executable during the next change');
       await close(consoleHolding);
       conversations.delete(consoleHolding);
       const sweep = await service.request(owner, { action: 'rollback' });
       assert(sweep.ok, JSON.stringify(sweep));
-      checks.push('Windows running executable is retained and collected after exit');
+      checks.push('Windows locked executable permits changes and rollback and is collected after exit');
     }
-    assert(!(await readdir(layout.generations)).includes(second), 'released generation was not collected');
+    const remaining = await readdir(layout.generations);
+    assert(!remaining.includes(second), 'released generation was not collected');
+    assert(!remaining.includes('.retired-' + second), 'released generation still has a retirement record');
     checks.push('rollback, remove, and live then released ACP lease');
   } finally {
     await Promise.all([...conversations].map(close));
@@ -309,12 +355,12 @@ async function qualify(payload: string, scratch: string, checks: string[]): Prom
 const [payload, report] = process.argv.slice(2);
 assert(payload && report, 'usage: extensionInstallerQualification.ts INSTALLED_PAYLOAD REPORT');
 const scratch = await realpath(await mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', 'studio-ext-')));
-const checks: string[] = [];
+const evidence: Evidence = { checks: [] };
 try {
-  await qualify(payload, scratch, checks);
-  await writeFile(report, JSON.stringify({ status: 'passed', checks }, null, 2) + '\n');
+  await qualify(payload, scratch, evidence);
+  await writeFile(report, JSON.stringify({ status: 'passed', ...evidence }, null, 2) + '\n');
 } catch (error) {
-  await writeFile(report, JSON.stringify({ status: 'failed', checks, error: String(error) }, null, 2) + '\n');
+  await writeFile(report, JSON.stringify({ status: 'failed', ...evidence, error: String(error) }, null, 2) + '\n');
   throw error;
 } finally {
   await rm(scratch, { recursive: true, force: true });
