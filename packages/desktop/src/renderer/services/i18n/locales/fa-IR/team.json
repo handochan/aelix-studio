@@ -189,5 +189,8 @@
       "idle_notification": "اعلان بی‌کاری",
       "shutdown_request": "درخواست توقف"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} منتظر تأیید است ({{pending}} در انتظار)"
   }
 }

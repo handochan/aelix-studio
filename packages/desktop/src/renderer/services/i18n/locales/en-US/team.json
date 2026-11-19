@@ -189,5 +189,8 @@
       "idle_notification": "Idle notice",
       "shutdown_request": "Shutdown request"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} is waiting for approval ({{pending}} pending)"
   }
 }
