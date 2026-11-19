@@ -110,7 +110,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption: vi.fn(),
+      setConfigOptionWithConfirmation: vi.fn(),
     }));
   });
 
@@ -143,6 +143,73 @@ describe('AgentModeSelector', () => {
     expect(screen.getByText('权限 · 默认')).toBeInTheDocument();
   });
 
+  it('shows Ask in the desktop Team selector and only propagates Yolo after selection', async () => {
+    const port = { setConfigOption: vi.fn() };
+    const propagateMode = vi.fn();
+    const select = vi.fn().mockResolvedValue({ confirmation: 'observed' });
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: {
+        id: 'permission_mode',
+        category: 'mode',
+        currentValue: 'default',
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      },
+      setConfigOptionWithConfirmation: select,
+    });
+
+    render(
+      <AgentModeSelector
+        backend='acp'
+        conversation_id='team-leader'
+        compact
+        initialMode='yolo'
+        modeLabelFormatter={(mode) => (mode.value === 'default' ? 'Default' : 'Yolo')}
+        configOptionsPort={port}
+        onModeChanged={propagateMode}
+      />
+    );
+
+    expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'default');
+    expect(screen.getByTestId('mode-selector')).toHaveTextContent('agentMode.ask');
+    expect(screen.getByTestId('aionrs-mode-option-default')).toHaveTextContent('agentMode.ask');
+    expect(select).not.toHaveBeenCalled();
+    expect(propagateMode).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-yolo'));
+
+    await waitFor(() => expect(propagateMode).toHaveBeenCalledWith('yolo'));
+    expect(select).toHaveBeenCalledOnce();
+    expect(select).toHaveBeenCalledWith('permission_mode', 'yolo');
+  });
+
+  it('surfaces a failed Team propagation and retries by selecting the same effective mode', async () => {
+    const { Message } = await import('@arco-design/web-react');
+    const onModeChanged = vi.fn().mockRejectedValueOnce(new Error('teammate is busy')).mockResolvedValueOnce(undefined);
+    const setConfigOption = vi.fn().mockResolvedValue({ confirmation: 'observed' });
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: runtimeMode(),
+      setConfigOptionWithConfirmation: setConfigOption,
+    });
+    render(<AgentModeSelector backend='acp' conversation_id='team-leader' compact onModeChanged={onModeChanged} />);
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-bypassPermissions'));
+
+    await waitFor(() => expect(Message.error).toHaveBeenCalledOnce());
+    expect(Message.success).not.toHaveBeenCalled();
+    expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'bypassPermissions');
+
+    fireEvent.click(screen.getByTestId('aionrs-mode-option-bypassPermissions'));
+
+    await waitFor(() => expect(Message.success).toHaveBeenCalledOnce());
+    expect(onModeChanged).toHaveBeenCalledTimes(2);
+    expect(setConfigOption).toHaveBeenCalledOnce();
+  });
+
   // A switch the backend accepted but has not applied yet (codex always, claude/agy
   // mid-turn) must not move the pill onto the requested mode: the pill answers "what
   // permission is governing right now", and showing the target would tell the user a
@@ -157,7 +224,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption: vi.fn(),
+      setConfigOptionWithConfirmation: vi.fn(),
       pendingValues: { mode: 'bypassPermissions' },
     }));
 
@@ -178,41 +245,50 @@ describe('AgentModeSelector', () => {
   // Picking a mode the backend defers must NOT be reported as a failure, and must not
   // move the pill: the old code threw `config_not_observed` for anything that did not
   // read back as the requested value, which is exactly what a deferred switch looks like.
-  it('treats a deferred switch as pending rather than an error', async () => {
-    const { Message } = (await import('@arco-design/web-react')) as unknown as {
-      Message: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn> };
-    };
-    // The backend answers with the mode still in force, not the one just requested.
-    const setConfigOption = vi.fn().mockResolvedValue([{ id: 'mode', current_value: 'default' }]);
-    useAcpConfigOptionsMock.mockImplementation(() => ({
-      setStatus: { state: 'idle' },
-      isLoading: false,
-      mode: runtimeMode(),
-      model: null,
-      thoughtLevel: null,
-      reload: vi.fn(),
-      setConfigOption,
-      pendingValues: {},
-    }));
+  it.each(['default', 'bypassPermissions'])(
+    'shows next-turn confirmation with snapshot mode %s',
+    async (snapshotMode) => {
+      const { Message } = (await import('@arco-design/web-react')) as unknown as {
+        Message: { success: ReturnType<typeof vi.fn>; error: ReturnType<typeof vi.fn>; info: ReturnType<typeof vi.fn> };
+      };
+      const propagateMode = vi.fn().mockResolvedValue(undefined);
+      const setConfigOption = vi.fn().mockResolvedValue({
+        confirmation: 'pending_next_turn',
+        backend_accepted: true,
+        config_options: [{ id: 'mode', current_value: snapshotMode }],
+      });
+      useAcpConfigOptionsMock.mockImplementation(() => ({
+        setStatus: { state: 'idle' },
+        isLoading: false,
+        mode: runtimeMode(),
+        model: null,
+        thoughtLevel: null,
+        reload: vi.fn(),
+        setConfigOptionWithConfirmation: setConfigOption,
+        pendingValues: {},
+      }));
 
-    render(
-      <AgentModeSelector
-        backend='claude'
-        conversation_id='conv-1'
-        compact
-        modeLabelFormatter={(mode) => (mode.value === 'default' ? '默认' : '全自动')}
-        compactLabelPrefix='权限'
-      />
-    );
+      render(
+        <AgentModeSelector
+          backend='codex'
+          conversation_id='conv-1'
+          compact
+          modeLabelFormatter={(mode) => (mode.value === 'default' ? '默认' : '全自动')}
+          compactLabelPrefix='权限'
+          onModeChanged={propagateMode}
+        />
+      );
 
-    fireEvent.click(screen.getByText('全自动'));
+      fireEvent.click(screen.getByText('全自动'));
 
-    await waitFor(() => expect(setConfigOption).toHaveBeenCalledWith('mode', 'bypassPermissions'));
-    await waitFor(() => expect(Message.info).toHaveBeenCalled());
-    expect(Message.error).not.toHaveBeenCalled();
-    expect(Message.success).not.toHaveBeenCalled();
-    expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'default');
-  });
+      await waitFor(() => expect(setConfigOption).toHaveBeenCalledWith('mode', 'bypassPermissions'));
+      expect(propagateMode).toHaveBeenCalledWith('bypassPermissions');
+      await waitFor(() => expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn'));
+      expect(Message.error).not.toHaveBeenCalled();
+      expect(Message.success).not.toHaveBeenCalled();
+      expect(screen.getByTestId('mode-selector')).toHaveAttribute('data-current-mode', 'default');
+    }
+  );
 
   it('keeps compact mode selector hidden while runtime mode is initializing', () => {
     useAcpConfigOptionsMock.mockImplementation(() => ({
@@ -222,7 +298,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption: vi.fn(),
+      setConfigOptionWithConfirmation: vi.fn(),
     }));
 
     render(
@@ -247,7 +323,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption: vi.fn(),
+      setConfigOptionWithConfirmation: vi.fn(),
     }));
 
     render(
@@ -269,7 +345,7 @@ describe('AgentModeSelector', () => {
   });
 
   it('does not persist runtime mode changes to global agent preferences', async () => {
-    const setConfigOption = vi.fn().mockResolvedValue(undefined);
+    const setConfigOption = vi.fn().mockResolvedValue({ confirmation: 'observed' });
     useAcpConfigOptionsMock.mockImplementation(() => ({
       setStatus: { state: 'idle' },
       isLoading: false,
@@ -277,7 +353,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption,
+      setConfigOptionWithConfirmation: setConfigOption,
     }));
 
     render(<AgentModeSelector backend='claude' conversation_id='conv-1' />);
@@ -288,6 +364,18 @@ describe('AgentModeSelector', () => {
       expect(setConfigOption).toHaveBeenCalledWith('mode', 'bypassPermissions');
     });
   });
+
+  it.each([
+    { backend: 'codex', requireDeferredModeAcceptance: true },
+    { backend: 'antigravity', requireDeferredModeAcceptance: false },
+  ])(
+    'requires deferred mode acceptance before Team propagation from $backend when needed',
+    ({ backend, requireDeferredModeAcceptance }) => {
+      render(<AgentModeSelector backend={backend} conversation_id='conv-1' onModeChanged={vi.fn()} />);
+
+      expect(useAcpConfigOptionsMock).toHaveBeenCalledWith(expect.objectContaining({ requireDeferredModeAcceptance }));
+    }
+  );
 
   it('passes set-only runtime preparation to runtime config options', () => {
     const beforeRuntimeSet = vi.fn().mockResolvedValue(undefined);
@@ -319,7 +407,7 @@ describe('AgentModeSelector', () => {
       model: null,
       thoughtLevel: null,
       reload: vi.fn(),
-      setConfigOption: vi.fn(),
+      setConfigOptionWithConfirmation: vi.fn(),
     }));
 
     render(<AgentModeSelector backend='codex' conversation_id='conv-1' compact compactLabelPrefix='权限' />);

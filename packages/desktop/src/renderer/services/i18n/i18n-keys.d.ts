@@ -84,6 +84,7 @@ export type I18nKey =
   | 'agent.thoughtLevel.switchSuccess'
   | 'agent.warmup.clickToWake'
   | 'agentMode.acceptEdits'
+  | 'agentMode.ask'
   | 'agentMode.auto'
   | 'agentMode.autoEdit'
   | 'agentMode.auto_edit'

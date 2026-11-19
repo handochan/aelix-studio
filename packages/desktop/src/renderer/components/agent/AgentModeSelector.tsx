@@ -60,7 +60,7 @@ export interface AgentModeSelectorProps {
   /** Hide compact prefix on mobile */
   hideCompactLabelPrefixOnMobile?: boolean;
   /** Callback fired after a successful mode change (for team-mode propagation) */
-  onModeChanged?: (mode: string) => void;
+  onModeChanged?: (mode: string) => void | Promise<void>;
   /** Dynamic modes from capabilities (overrides static list when non-empty) */
   dynamicModes?: AgentModeOption[];
   /** Optional runtime preparation before reading active-session mode. */
@@ -109,6 +109,8 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
     prepareRuntime: beforeRuntimeSync,
     prepareSetRuntime: beforeRuntimeSet ?? beforeRuntimeSync,
     configOptionsPort,
+    // Antigravity queues the selection in the host before returning, including on older hosts.
+    requireDeferredModeAcceptance: Boolean(onModeChanged) && backend !== 'antigravity',
     enabled: Boolean(conversation_id),
   });
   const runtimeMode = runtimeConfig.mode;
@@ -136,8 +138,11 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
   const [isLoading, setIsLoading] = useState(false);
   const [dropdownVisible, setDropdownVisible] = useState(false);
   const getDisplayModeLabel = useCallback(
-    (mode: AgentModeOption) => modeLabelFormatter?.(mode) ?? mode.label,
-    [modeLabelFormatter]
+    (mode: AgentModeOption) =>
+      runtimeMode?.id === 'permission_mode' && mode.value === 'default'
+        ? t('agentMode.ask')
+        : (modeLabelFormatter?.(mode) ?? mode.label),
+    [modeLabelFormatter, runtimeMode?.id, t]
   );
 
   // A mode the backend accepted but has not applied yet (codex always; claude/agy when
@@ -175,7 +180,8 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
       // Close dropdown immediately after selection
       setDropdownVisible(false);
 
-      if (mode === current_mode) return;
+      const reapply = mode === current_mode;
+      if (isLoading || (reapply && (!conversation_id || !onModeChanged))) return;
 
       // Local mode (Guid page): update state and notify parent, no IPC needed
       if (!conversation_id && onModeSelect) {
@@ -191,25 +197,25 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         if (!runtimeMode) {
           throw new Error('config_not_observed');
         }
-        return runtimeConfig.setConfigOption(runtimeMode.id, mode);
+        return runtimeConfig.setConfigOptionWithConfirmation(runtimeMode.id, mode);
       };
 
       setIsLoading(true);
       try {
-        const applied = await setActiveMode();
-        // A deferred switch comes back with the snapshot still on the OLD value — that is
-        // the backend being honest, not a failure. Leave `current_mode` where it is (the
-        // pill must keep naming the permission actually governing) and say so; the
-        // pending marker is already driven by `pendingValues`. When the agent applies it,
-        // an `acp_config_option` frame updates the snapshot and clears the marker.
-        const landed = applied?.find((option) => option.id === runtimeMode?.id)?.current_value === mode;
-        if (!landed) {
-          Message.info(t('agentMode.switchPendingNextTurn', { defaultValue: 'Takes effect on the next turn' }));
-          return;
+        let deferred = reapply && pendingMode === mode;
+        if (!reapply) {
+          const result = await setActiveMode();
+          deferred = result.confirmation === 'pending_next_turn';
+          if (!deferred) setCurrentMode(mode);
         }
-        setCurrentMode(mode);
-        onModeChanged?.(mode);
-        Message.success(t('agentMode.switchSuccess'));
+        // The leader's effective mode stays unchanged until the host reports
+        // it. An accepted selection can still be applied to other Team slots.
+        await onModeChanged?.(mode);
+        if (deferred) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+        } else {
+          Message.success(t('agentMode.switchSuccess'));
+        }
       } catch (error) {
         console.error('[AgentModeSelector] Failed to switch mode:', error);
         Message.error(t(configErrorMessageKey(error)));
@@ -217,7 +223,7 @@ const AgentModeSelector: React.FC<AgentModeSelectorProps> = ({
         setIsLoading(false);
       }
     },
-    [conversation_id, current_mode, onModeChanged, onModeSelect, runtimeConfig, runtimeMode, t]
+    [conversation_id, current_mode, isLoading, onModeChanged, onModeSelect, pendingMode, runtimeConfig, runtimeMode, t]
   );
 
   const renderLogo = () => (

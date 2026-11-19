@@ -265,12 +265,14 @@ export function useAcpConfigOptions({
   prepareRuntime,
   prepareSetRuntime,
   configOptionsPort = conversationConfigOptionsPort,
+  requireDeferredModeAcceptance = false,
   enabled = true,
 }: {
   conversation_id: string;
   prepareRuntime?: () => Promise<void>;
   prepareSetRuntime?: () => Promise<void>;
   configOptionsPort?: AcpConfigOptionsPort;
+  requireDeferredModeAcceptance?: boolean;
   enabled?: boolean;
 }) {
   const [setStatus, setSetStatus] = useState<AcpConfigSetStatus>(() => getConversationSetStatus(conversation_id));
@@ -356,7 +358,7 @@ export function useAcpConfigOptions({
     }
   }, [key, configOptionsPort, prepareRuntime, replaceSnapshot]);
 
-  const setConfigOption = useCallback(
+  const setConfigOptionWithConfirmation = useCallback(
     async (optionId: string, value: string) => {
       if (getConversationSetStatus(conversation_id).state === 'setting' || isConfigOptionBlocked(optionId)) {
         throw new Error('config_update_in_progress');
@@ -376,14 +378,18 @@ export function useAcpConfigOptions({
               value,
             });
         const confirmation = response.confirmation;
-        // Accepted, but the agent applies it only from the next turn. NOT an error: the
-        // request landed, it just is not governing yet. Record it as pending so the
-        // picker can show the target alongside the mode still in force, and keep the
-        // snapshot the backend returned — which deliberately still reports the OLD value.
         if (confirmation === 'pending_next_turn') {
+          // Older hosts can report this before Codex answers. Require explicit
+          // acceptance before a Team leader can change other slots.
+          if (
+            response.backend_accepted !== true &&
+            (requireDeferredModeAcceptance || response.backend_accepted !== undefined)
+          ) {
+            throw new Error('command_ack');
+          }
           markPending(conversation_id, optionId, value);
           if (response.config_options) replaceSnapshot(response.config_options);
-          return response.config_options;
+          return response;
         }
         if (!hasObservedValue(response, optionId, value)) {
           throw new Error(confirmation === 'command_ack' ? 'command_ack' : 'config_not_observed');
@@ -391,12 +397,26 @@ export function useAcpConfigOptions({
         // A switch that landed supersedes any pending entry for the same option.
         resolvePendingFromSnapshot(conversation_id, response.config_options);
         replaceSnapshot(response.config_options);
-        return response.config_options;
+        return response;
       } finally {
         setConversationSetStatus(conversation_id, { state: 'idle' });
       }
     },
-    [conversation_id, isConfigOptionBlocked, key, configOptionsPort, prepareRuntime, prepareSetRuntime, replaceSnapshot]
+    [
+      conversation_id,
+      isConfigOptionBlocked,
+      key,
+      configOptionsPort,
+      requireDeferredModeAcceptance,
+      prepareRuntime,
+      prepareSetRuntime,
+      replaceSnapshot,
+    ]
+  );
+
+  const setConfigOption = useCallback(
+    async (optionId: string, value: string) => (await setConfigOptionWithConfirmation(optionId, value)).config_options,
+    [setConfigOptionWithConfirmation]
   );
 
   useEffect(() => {
@@ -438,6 +458,7 @@ export function useAcpConfigOptions({
     thoughtLevel: deriveSelectOption(configOptions, 'thought_level', ['thought_level', 'reasoning_effort']),
     reload,
     setConfigOption,
+    setConfigOptionWithConfirmation,
     isConfigOptionBlocked,
   };
 }

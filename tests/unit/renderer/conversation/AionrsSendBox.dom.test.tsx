@@ -5,6 +5,8 @@ import { Message } from '@arco-design/web-react';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AionrsSendBox from '@/renderer/pages/conversation/platforms/aionrs/AionrsSendBox';
 import type { AionrsModelSelection } from '@/renderer/pages/conversation/platforms/aionrs/useAionrsModelSelection';
+import type { MobileActionSheetEntry } from '@/renderer/components/chat/MobileActionSheet/types';
+import { TeamPermissionProvider } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 
 const {
@@ -12,6 +14,9 @@ const {
   sendMessageInvokeMock,
   translateMock,
   useTeamPermissionMock,
+  useAcpConfigOptionsMock,
+  mobileSheet,
+  setSessionModeMock,
   setSendBoxHandlerMock,
   markSendFailedMock,
   markSendStartedMock,
@@ -27,6 +32,9 @@ const {
   sendMessageInvokeMock: vi.fn().mockResolvedValue(undefined),
   translateMock: (key: string, options?: { defaultValue?: string }) => options?.defaultValue ?? key,
   useTeamPermissionMock: vi.fn(),
+  useAcpConfigOptionsMock: vi.fn(),
+  mobileSheet: { enabled: false, entries: [] as MobileActionSheetEntry[] },
+  setSessionModeMock: vi.fn(),
   setSendBoxHandlerMock: vi.fn(),
   markSendFailedMock: vi.fn(),
   markSendStartedMock: vi.fn(),
@@ -41,6 +49,10 @@ const {
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    team: {
+      setSessionMode: { invoke: setSessionModeMock },
+      ensureSession: { invoke: vi.fn().mockResolvedValue(undefined) },
+    },
     conversation: {
       sendMessage: {
         invoke: sendMessageInvokeMock,
@@ -125,7 +137,10 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
 vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({ default: () => null }));
 vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({ default: () => null }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: () => null,
+  default: ({ entries }: { entries?: MobileActionSheetEntry[] }) => {
+    mobileSheet.entries = entries ?? [];
+    return null;
+  },
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
 }));
 vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({ default: () => null }));
@@ -136,14 +151,7 @@ vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
 }));
 vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', () => ({
   classifyConfigSetError: () => 'unknown',
-  useAcpConfigOptions: () => ({
-    setStatus: { state: 'idle' },
-    mode: null,
-    model: null,
-    thoughtLevel: null,
-    reload: vi.fn(),
-    setConfigOption: vi.fn(),
-  }),
+  useAcpConfigOptions: useAcpConfigOptionsMock,
 }));
 vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
   useConversationContextSafe: () => ({
@@ -152,7 +160,7 @@ vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
   }),
 }));
 vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
-  useLayoutContext: () => ({ isMobile: false }),
+  useLayoutContext: () => ({ isMobile: mobileSheet.enabled }),
 }));
 vi.mock('@/renderer/hooks/chat/useAutoTitle', () => ({
   useAutoTitle: () => ({
@@ -236,9 +244,16 @@ vi.mock('@/renderer/pages/conversation/Preview', () => ({
     setSendBoxHandler: setSendBoxHandlerMock,
   }),
 }));
-vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', () => ({
-  useTeamPermission: useTeamPermissionMock,
-}));
+vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/pages/team/hooks/TeamPermissionContext')>();
+  return {
+    ...actual,
+    useTeamPermission: () => {
+      const context = actual.useTeamPermission();
+      return useTeamPermissionMock() ?? context;
+    },
+  };
+});
 vi.mock('@/renderer/services/FileService', () => ({
   allSupportedExts: [],
 }));
@@ -295,6 +310,7 @@ vi.mock('@/renderer/pages/conversation/platforms/aionrs/useAionrsMessage', () =>
 }));
 
 const modelSelection = {
+  providers: [],
   current_model: {
     provider_id: 'openai',
     model: 'gpt-4.1',
@@ -307,8 +323,69 @@ describe('AionrsSendBox', () => {
     vi.clearAllMocks();
     ensureConversationRuntimeMock.mockResolvedValue({ recovered: false, config_options: [], runtime: null });
     useTeamPermissionMock.mockReturnValue(null);
+    mobileSheet.enabled = false;
+    mobileSheet.entries = [];
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: null,
+      model: null,
+      thoughtLevel: null,
+      reload: vi.fn(),
+      setConfigOption: vi.fn(),
+    });
     draftContentRef.current = '';
     runtimeViewIsProcessingRef.current = false;
+  });
+
+  it('reports a mixed Team propagation failure from the mobile sheet and retries Ask', async () => {
+    mobileSheet.enabled = true;
+    setSessionModeMock
+      .mockReset()
+      .mockRejectedValueOnce(new Error('Aelix teammate is busy'))
+      .mockResolvedValueOnce(undefined);
+    const setConfigOption = vi.fn().mockResolvedValue({ confirmation: 'observed' });
+    const runtime = {
+      setStatus: { state: 'idle' },
+      mode: {
+        id: 'mode',
+        currentValue: 'yolo',
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      },
+      setConfigOptionWithConfirmation: setConfigOption,
+    };
+    useAcpConfigOptionsMock.mockReturnValue(runtime);
+    const view = () => (
+      <TeamPermissionProvider
+        team_id='mixed-team'
+        isLeaderAgent
+        leaderConversationId='conv-1'
+        allConversationIds={['conv-1', 'aelix-worker']}
+        runtimeStartingConversationIds={new Set()}
+      >
+        <AionrsSendBox conversation_id='conv-1' modelSelection={modelSelection} />
+      </TeamPermissionProvider>
+    );
+    const { rerender } = render(view());
+    const chooseAsk = () => {
+      const permission = mobileSheet.entries.find((entry) => entry.key === 'permission');
+      expect(permission?.submenu).toBeDefined();
+      permission?.submenu?.onSelect('default');
+    };
+    await act(async () => chooseAsk());
+    expect(Message.error).toHaveBeenCalledOnce();
+    expect(Message.success).not.toHaveBeenCalled();
+
+    useAcpConfigOptionsMock.mockReturnValue({ ...runtime, mode: { ...runtime.mode, currentValue: 'default' } });
+    rerender(view());
+    await act(async () => chooseAsk());
+
+    expect(setConfigOption).toHaveBeenCalledOnce();
+    expect(setSessionModeMock).toHaveBeenCalledTimes(2);
+    expect(setSessionModeMock).toHaveBeenLastCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
+    expect(Message.success).toHaveBeenCalledOnce();
   });
 
   it('does not warm up team session when draft content changes', async () => {
