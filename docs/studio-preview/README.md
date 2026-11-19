@@ -44,7 +44,8 @@ If the parent advances, ACP refuses before writing the native child and Studio
 stays in the parent. The conversation list omits a rejected display copy.
 Legacy messages and a child with only inherited history need a completed turn
 before they can be forked. The installed Provider smoke checks the Fork button,
-distinct stored ACP bindings, and model context after a renderer reload.
+the same stored ACP and native child identity, and model context after a full
+app and host restart.
 [Host #43](https://github.com/handochan/aelix-studio-host/issues/43) · [Studio #6](https://github.com/handochan/aelix-studio/issues/6)
 
 For an internal database that has migration **044** from #25: stop Studio and its host,

@@ -49,13 +49,44 @@ class InstalledForkTests(unittest.TestCase):
                     self.smoke.verify_fork_bindings(root, 'parent', child)
             self.smoke.verify_fork_bindings(root, 'parent', 'child')
 
+    def test_cold_restart_rejects_replacement_acp_or_native_child(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary).resolve()
+            host_db = root / 'aionui-backend.db'
+            with contextlib.closing(sqlite3.connect(host_db)) as db, db:
+                db.execute('CREATE TABLE acp_session (conversation_id TEXT PRIMARY KEY, session_id TEXT)')
+                db.executemany('INSERT INTO acp_session VALUES (?, ?)', [('parent', 'parent-acp'), ('child', 'child-acp')])
+            (root / 'acp').mkdir()
+            parent = root / 'parent.jsonl'
+            child = root / 'child.jsonl'
+            parent.write_text(json.dumps({'id': '63087769-155d-4dce-9d17-b0f06f3ffd25'}), encoding='utf-8')
+            child_header = {'id': '703bf557-4078-42d5-81a5-22f8edf29459', 'parentSession': str(parent)}
+            child.write_text(json.dumps(child_header), encoding='utf-8')
+            with contextlib.closing(sqlite3.connect(root / 'acp/sessions.sqlite3')) as db, db:
+                db.execute('CREATE TABLE sessions (id TEXT PRIMARY KEY, file TEXT)')
+                db.executemany('INSERT INTO sessions VALUES (?, ?)', [
+                    ('parent-acp', str(parent)), ('child-acp', str(child)), ('replacement-acp', str(child)),
+                ])
+            before = self.smoke.read_fork_identity(root, 'parent', 'child')
+            self.smoke.verify_restarted_fork(root, 'parent', 'child', before)
+            with self.subTest(changed='native child'):
+                child.write_text(json.dumps(dict(child_header, id='51d93b4b-e16c-4cba-b2db-8ce8785d2404')), encoding='utf-8')
+                with self.assertRaisesRegex(AssertionError, 'changed the persisted ACP or native child'):
+                    self.smoke.verify_restarted_fork(root, 'parent', 'child', before)
+                child.write_text(json.dumps(child_header), encoding='utf-8')
+            with self.subTest(changed='ACP binding'):
+                with contextlib.closing(sqlite3.connect(host_db)) as db, db:
+                    db.execute('UPDATE acp_session SET session_id=? WHERE conversation_id=?', ('replacement-acp', 'child'))
+                with self.assertRaisesRegex(AssertionError, 'changed the persisted ACP or native child'):
+                    self.smoke.verify_restarted_fork(root, 'parent', 'child', before)
+
     def test_fork_requires_parent_context_and_child_continuation_in_model_requests(self):
-        parent, child, reload = (self.smoke.FORK_PARENT, self.smoke.FORK_CHILD, self.smoke.FORK_RELOAD)
+        parent, child, restart = (self.smoke.FORK_PARENT, self.smoke.FORK_CHILD, self.smoke.FORK_RESTART)
         fixture = self.smoke.ProviderFixture()
         fixture.observe_fork_context([{'content': value} for value in (parent, child)])
         with self.assertRaisesRegex(AssertionError, 'continued child context'):
             fixture.verify_fork_context()
-        fixture.observe_fork_context([{'content': value} for value in (parent, child, reload)])
+        fixture.observe_fork_context([{'content': value} for value in (parent, child, restart)])
         fixture.verify_fork_context()
 
 
