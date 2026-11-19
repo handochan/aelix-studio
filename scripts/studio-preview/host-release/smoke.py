@@ -18,32 +18,6 @@ import tempfile
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parents[2]
 
-# This released host predates guarded Fork. A replacement release is expected
-# to support it. The result cannot choose its mode from a live capability.
-LEGACY_FORK_HOST = 'c516fa946ef48adc0119dbf37367e02216b22e70'
-FORK_CHECK = {'legacy': 'installed_legacy_host_refuses_unanchored_native_fork',
-              'guarded': 'installed_native_head_fork_ui_and_child_restart'}
-
-
-def expected_fork_mode(host_commit):
-    return 'legacy' if host_commit == LEGACY_FORK_HOST else 'guarded'
-
-
-def verify_fork_result(mode, checks, requests):
-    if {check for check in checks if check in FORK_CHECK.values()} != {FORK_CHECK[mode]}:
-        raise AssertionError(f'Expected the installed {mode} fork qualification')
-    if mode == 'legacy':
-        return
-    fork_parent = 'SYNTHETIC_HEAD_FORK_PARENT'
-    fork_child = 'SYNTHETIC_HEAD_FORK_CHILD'
-    for marker, expected in ((fork_child, (fork_parent,)),
-                             ('SYNTHETIC_HEAD_FORK_RESTART', (fork_parent, fork_child))):
-        turns = [request['messages'] for request in requests
-                 if request['messages'] and marker in json.dumps(request['messages'][-1])]
-        if len(turns) != 1 or any(text not in json.dumps(turns[0][:-1]) for text in expected):
-            raise AssertionError(f'Installed native fork lost context at {marker}')
-    checks.append('installed_native_head_fork_context_after_restart')
-
 
 def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
@@ -68,7 +42,6 @@ async def run_installed(args, report):
     from prepare import verify_prepared
     runtime, payload = args.runtime.resolve(), args.payload.resolve()
     receipt = verify_prepared(runtime)
-    fork_mode = expected_fork_mode(receipt['aioncore']['commit'])
     source = runtime / 'source' / ('aelix-acp-' + receipt['acp']['commit'])
     sys.path.insert(0, str(HERE.parent / 'fixtures'))
     sys.path.insert(0, str(HERE.parent / 'packaging'))
@@ -89,7 +62,6 @@ async def run_installed(args, report):
 
     before = inventory()
     report.update(installer=True, identityBefore=audit(), acpSourceCommit=receipt['acp']['commit'],
-                  expectedForkMode=fork_mode,
                   hostBuildReceipt=json.loads((runtime / 'aioncore/build-receipt.json').read_text()),
                   preparedReceiptSha256=digest(runtime / 'receipt.json'), installedPayloadManifestSha256=digest(payload / 'manifest.json'))
 
@@ -152,10 +124,6 @@ def setup(api):
         command = [*prefix, 'acp', '--aelix', str(python), '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B',
                    '--aelix-arg=-Xutf8', '--aelix-arg=' + str(wrapper), '--provider', 'fixture', '--model', 'one',
                    '--state-dir', str(sandbox / 'acp')]
-        fork_wire_log = sandbox / 'fork-wire.jsonl'
-        fork_probe = HERE / 'probes/installedFork.py'
-        fork_adapter_args = ['-I', '-S', '-B', '-X', 'utf8', str(fork_probe), 'record',
-                             str(fork_wire_log), str(python), *command]
         (sandbox / 'extensions').mkdir()
         # Challenge the product launcher rather than suppressing bytecode in the fixture.
         env = dict(fixture.env, PYTHONDONTWRITEBYTECODE='0', NO_PROXY='127.0.0.1,localhost',
@@ -163,8 +131,6 @@ def setup(api):
                    APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
                    PERMISSION_PROBE_ROOT=str(sandbox), RECOVERY_SANDBOX=str(sandbox), RECOVERY_OUTPUT=str(args.report.parent),
                    RECOVERY_ADAPTER=str(adapter_python), RECOVERY_ADAPTER_ARGS=json.dumps(command),
-                   RECOVERY_EXPECTED_FORK_MODE=fork_mode, RECOVERY_FORK_WIRE_LOG=str(fork_wire_log),
-                   RECOVERY_FORK_ADAPTER_ARGS=json.dumps(fork_adapter_args),
                    RECOVERY_DELEGATION_ARGS=json.dumps([*command, '--enable-agents', '--permission-mode', 'yolo']),
                    RECOVERY_OBSERVER_ARGS=json.dumps([str(python), *prefix]),
                    RECOVERY_APP_EXECUTABLE=os.environ['PROVIDER_APP_EXECUTABLE'],
@@ -189,7 +155,6 @@ def setup(api):
                 raise AssertionError('Public native or installed adapter identity changed')
             if not fixture.requests or not all(item['model'] == 'one' for item in fixture.requests):
                 raise AssertionError('No real synthetic native model requests observed')
-            verify_fork_result(fork_mode, report['checksPassed'], fixture.requests)
             report.update(status='passed', providerRequests=len(fixture.requests), installedPayloadUnchanged=True,
                           installedFiles=len(before), defaultHostOverride=False)
         finally:
@@ -222,7 +187,7 @@ def main():
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
               'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'probes/smoke.mjs', 'verification.mjs',
-                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/linuxProcesses.mjs', 'probes/windowsProcesses.mjs', 'probes/installedFork.py', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs')}}
+                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/linuxProcesses.mjs', 'probes/windowsProcesses.mjs', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')

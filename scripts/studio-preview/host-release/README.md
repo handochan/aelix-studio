@@ -78,6 +78,30 @@ keeps 64 events, 8 errors and 16 preceding context events per error; the identit
 snapshot is frozen before later cleanup events. An unsupported adapter is
 recorded as unavailable without changing the smoke result.
 
+The launch helper waits for the first window within the 60-second budget
+shared with Electron launch. `mainLaunches[].firstWindowWait` records the
+start, completion and outcome. On expiry, the launch fails and closes the app
+through the normal cleanup. An OS exit before or during the window wait fails
+the launch immediately and retains the exit code or signal. The launch records
+its OS exit and closes its evidence before any deferred Playwright cleanup.
+A stopped process timeline also discards outstanding snapshots. After identity,
+the smoke selects the current first window and runs its renderer checks in their
+established order.
+
+After the first window opens, the launch helper can repeat the read-only
+identity evaluation once on the same live app handle. It requires an exact unredacted CDP `Promise was collected`
+error with code −32000. Each evaluation passes a private one-use token as an
+unused argument. The pinned observer recognizes it in a single
+`Runtime.callFunctionOn` request with both evaluation flags true and matches
+the response by connection, session and request ID. The same app handle uses
+its original inspector session for both evaluations. The launcher handle must
+stay live and the result must contain a valid Electron PID. Windows can report
+different PIDs for the launcher and Electron. The token is discarded from the
+report. `mainLaunches[].identityRetry` retains the matched first
+error and the second outcome, and `identityFailedAt`/ `identityProtocol` retain
+the first failure even if the retry succeeds. A failed retry follows the usual
+20-second exit observation and cleanup.
+
 `renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)
 samples once per second, with no overlapping query and no product process signaling or
 exit wait. Linux uses `/proc` without spawning polling subprocesses; macOS uses
@@ -109,8 +133,9 @@ identity-success/failure, close-requested/main-exit/after-close and cleanup chec
 also refresh all candidate classifications. Raw argv/executable paths are never
 cached or exported. This reduces periodic collection work without adding a
 polling process or changing audit hooks.
-Sampling is paused from launch resolution until the identity evaluation settles,
-including already queued batch microtasks and timer ticks. Before-launch capture
+Sampling continues during the first-window wait and pauses from the start of
+identity evaluation through its result, including any retry. The pause also
+covers already queued batch microtasks and timer ticks. Before-launch capture
 is retained, and an after-identity or identity-failed checkpoint requests a fresh
 process table on the next available sampler turn. An older asynchronous query completing in
 that window is discarded. No product wait is added. Short-lived processes inside

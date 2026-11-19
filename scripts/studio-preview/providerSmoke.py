@@ -11,12 +11,16 @@ import json
 import os
 from pathlib import Path
 import signal
+import sqlite3
 import tempfile
 import time
 
 from prepare import verify_prepared
 
 ROOT = Path(__file__).resolve().parents[2]
+FORK_PARENT = 'SYNTHETIC_HEAD_FORK_PARENT'
+FORK_CHILD = 'SYNTHETIC_HEAD_FORK_CHILD'
+FORK_RELOAD = 'SYNTHETIC_HEAD_FORK_RELOAD'
 
 def phase_timeout(deadline, limit):
     """Bound each phase by both its unchanged limit and the shared deadline."""
@@ -24,11 +28,37 @@ def phase_timeout(deadline, limit):
 
 
 
+def verify_fork_bindings(root, parent_id, child_id):
+    root = root.resolve()
+    databases = list(root.rglob('aionui-backend.db'))
+    if len(databases) != 1 or not databases[0].resolve().is_relative_to(root):
+        raise AssertionError('Expected one isolated host database for the displayed fork')
+    with contextlib.closing(sqlite3.connect(f'{databases[0].as_uri()}?mode=ro', uri=True)) as db:
+        bindings = dict(db.execute('SELECT conversation_id, session_id FROM acp_session '
+                                   'WHERE conversation_id IN (?, ?)', (parent_id, child_id)))
+    if len(bindings) != 2 or not all(bindings.values()) or len(set(bindings.values())) != 2:
+        raise AssertionError('Displayed parent and child need distinct stored ACP session IDs')
+
+
 class ProviderFixture:
     def __init__(self):
         self.accepted = 0
         self.rejected = 0
         self.handlers = set()
+        self.fork_contexts = {FORK_CHILD: [], FORK_RELOAD: []}
+
+    def observe_fork_context(self, messages):
+        if not messages:
+            return
+        prompt = json.dumps(messages[-1])
+        for marker, contexts in self.fork_contexts.items():
+            if marker in prompt:
+                history = json.dumps(messages[:-1])
+                contexts.append(tuple(value for value in (FORK_PARENT, FORK_CHILD) if value in history))
+
+    def verify_fork_context(self):
+        if self.fork_contexts != {FORK_CHILD: [(FORK_PARENT,)], FORK_RELOAD: [(FORK_PARENT, FORK_CHILD)]}:
+            raise AssertionError('The model did not receive the displayed parent and continued child context')
 
     async def start(self):
         self.server = await asyncio.start_server(self.respond, '127.0.0.1', 0)
@@ -51,6 +81,7 @@ class ProviderFixture:
                 self.accepted += 1
                 if body['model'] != 'fixture-model':
                     raise AssertionError('Wrong selected model')
+                self.observe_fork_context(body.get('messages'))
                 chunks = [{'id': 'fixture', 'object': 'chat.completion.chunk', 'created': 0,
                            'model': body['model'], 'choices': [{'index': 0, 'delta': delta, 'finish_reason': finish}]}
                           for delta, finish in (({'role': 'assistant', 'content': 'NATIVE_PROVIDER_FIRST_RESPONSE'}, None), ({}, 'stop'))]
@@ -169,6 +200,10 @@ async def main(args):
             if helper_manifest and bundled_before != helper_bytes():
                 raise AssertionError('Installed bundled helper payload changed')
             report = json.loads((output / 'host.json').read_text())
+            fork = report.pop('headFork')
+            verify_fork_bindings(sandbox, fork['parentId'], fork['childId'])
+            fixture.verify_fork_context()
+            report['checks'] += ['native_head_fork_distinct_stored_acp_bindings', 'native_head_fork_model_context']
             scanned = 0
             for file in sandbox.rglob('*'):
                 if file.is_file() and (file.suffix in ('.log', '.jsonl', '.db', '.sqlite', '.sqlite3') or '-wal' in file.name):

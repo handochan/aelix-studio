@@ -1,4 +1,5 @@
 {
+  "analyticsUnavailable": "Не вдалося відкрити попередній перегляд цього файлу Analytics.",
   "loading": "Завантаження...",
   "downloadFile": "Завантажити файл",
   "closePreview": "Закрити перегляд",

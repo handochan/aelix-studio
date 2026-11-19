@@ -2,7 +2,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 import { _electron as electron, expect } from '@playwright/test';
 import { qualifyRecoveredProfile } from '../../../../tests/manual/recoveredProfile.mjs';
 import { createProcessTimeline } from './processTimeline.mjs';
@@ -80,12 +79,12 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   processTimeline.checkpoint('before-launch', mainLaunches.length + 1);
   checkConfig('before-launch', mainLaunches.length + 1);
   const result = await launchWithIdentity(
-    () =>
+    (timeout) =>
       electron.launch({
         ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
         cwd: executablePath ? sandbox : process.cwd(),
         env: appEnv,
-        timeout: 60000,
+        timeout,
       }),
     {
       launchNumber: mainLaunches.length + 1,
@@ -136,19 +135,6 @@ async function api(route, method = 'GET', body, status = [200, 201, 202]) {
   );
   return result.data ?? result;
 }
-
-function installedForkBinding(conversationId) {
-  const observer = fileURLToPath(new URL('./installedFork.py', import.meta.url));
-  const result = spawnSync(process.env.RECOVERY_ADAPTER, ['-I', '-S', '-B', '-X', 'utf8', observer, 'observe'], {
-    encoding: 'utf8',
-    env: appEnv,
-    input: JSON.stringify({ root: sandbox, conversationId }),
-    timeout: 10000,
-  });
-  assert.equal(result.status, 0, 'Installed fork SQLite observer failed');
-  return JSON.parse(result.stdout.trim());
-}
-
 try {
   if (executablePath)
     await qualifyRecoveredProfile({
@@ -479,96 +465,6 @@ try {
   checks.push('native_two_child_delegation_before_payload_inventory_check');
   await select('default');
   checks.push('renderer_return_to_ask');
-  if (executablePath) {
-    const expectedMode = process.env.RECOVERY_EXPECTED_FORK_MODE;
-    assert.ok(expectedMode === 'legacy' || expectedMode === 'guarded', 'Expected installed fork mode is required');
-    const parentMarker = 'SYNTHETIC_HEAD_FORK_PARENT';
-    const childMarker = 'SYNTHETIC_HEAD_FORK_CHILD';
-    const restartMarker = 'SYNTHETIC_HEAD_FORK_RESTART';
-    const marker = (text) => page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${text}$`) });
-    const sendForkTurn = async (forkRoute, text) => {
-      await api(`${forkRoute}/messages`, 'POST', { content: text });
-      await expect
-        .poll(async () => (await api(`${forkRoute}/runtime/ensure`, 'POST')).runtime.state, { timeout: 30000 })
-        .toBe('idle');
-    };
-    await api('/api/agents/custom', 'POST', {
-      name: 'Installed native fork probe',
-      command: process.env.RECOVERY_ADAPTER,
-      args: JSON.parse(process.env.RECOVERY_FORK_ADAPTER_ARGS),
-      env: [],
-      icon: 'F',
-    });
-    const forkAssistant = (await api('/api/assistants')).find((item) => item.name === 'Installed native fork probe');
-    assert.ok(forkAssistant);
-    const parent = await api('/api/conversations', 'POST', {
-      name: 'Native HEAD fork',
-      assistant: { id: forkAssistant.id },
-      extra: { workspace: path.join(sandbox, 'workspace'), custom_workspace: true },
-    });
-    const parentRoute = `/api/conversations/${parent.id}`;
-    await api(`${parentRoute}/runtime/ensure`, 'POST');
-    await sendForkTurn(parentRoute, parentMarker);
-    await page.evaluate((id) => {
-      window.location.hash = `/conversation/${id}`;
-    }, parent.id);
-    await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
-    const capability = (await api(parentRoute)).fork_capability;
-    assert.equal(capability?.at_turn, false);
-    assert.equal(capability.requires_native_head ?? false, expectedMode === 'guarded');
-    const parentBinding = installedForkBinding(parent.id);
-    assert.ok(parentBinding.found && parentBinding.sessionId, 'The parent must have an installed ACP binding');
-    if (expectedMode === 'guarded') {
-      await marker('PERMISSION_OK').hover();
-      const fork = page.getByTestId('message-fork-button');
-      await expect(fork).toHaveCount(1);
-      await fork.click();
-      const child = await page.waitForFunction(
-        (id) => {
-          const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
-          return match && match[1] !== id ? match[1] : null;
-        },
-        parent.id,
-        { timeout: 30000 }
-      );
-      const childId = await child.jsonValue();
-      const childRoute = `/api/conversations/${childId}`;
-      conversationRoute = childRoute;
-      await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
-      await api(`${childRoute}/runtime/ensure`, 'POST');
-      const childBinding = installedForkBinding(childId);
-      assert.ok(childBinding.found && childBinding.sessionId, 'The child must have an installed ACP binding');
-      assert.notEqual(childBinding.sessionId, parentBinding.sessionId);
-      await sendForkTurn(childRoute, childMarker);
-      await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
-      await expect(marker('PERMISSION_OK')).toHaveCount(2, { timeout: 30000 });
-      await closeElectron(app);
-      await launch(childId, parentMarker);
-      await expect(marker(childMarker)).toHaveCount(1, { timeout: 30000 });
-      await sendForkTurn(childRoute, restartMarker);
-      await expect(marker(restartMarker)).toHaveCount(1, { timeout: 30000 });
-      await expect(marker('PERMISSION_OK')).toHaveCount(3, { timeout: 30000 });
-      await expect(marker(parentMarker)).toHaveCount(1);
-      assert.deepEqual(installedForkBinding(childId), childBinding);
-      checks.push('installed_native_head_fork_ui_and_child_restart');
-    } else {
-      // The released host still uses plain ACP fork until D16 integration.
-      const { items } = await api(`${parentRoute}/messages?limit=10`);
-      const lastMessage = items.at(-1);
-      assert.ok(lastMessage && JSON.stringify(lastMessage.content).includes('PERMISSION_OK'));
-      const pending = await api(`${parentRoute}/fork`, 'POST', { message_id: lastMessage.id });
-      await api(`/api/conversations/${pending.id}/runtime/ensure`, 'POST', undefined, [502]);
-      const replies = fs
-        .readFileSync(process.env.RECOVERY_FORK_WIRE_LOG, 'utf8')
-        .trim()
-        .split('\n')
-        .filter(Boolean)
-        .map((line) => JSON.parse(line));
-      assert.deepEqual(replies, [{ code: -33003, kind: 'fork_head_changed' }]);
-      assert.deepEqual(installedForkBinding(pending.id), { found: true, sessionId: null });
-      checks.push('installed_legacy_host_refuses_unanchored_native_fork');
-    }
-  }
   writeRendererResult(output, {
     checksPassed: checks,
     host: executablePath

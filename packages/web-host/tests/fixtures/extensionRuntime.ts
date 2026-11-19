@@ -33,6 +33,16 @@ import { ensureLayout, locateLayout, resolveBundle } from '../../src/studio-exte
 import type { StateWriter } from '../../src/studio-extensions/store/lock';
 import { ExtensionFailure } from '../../src/studio-extensions/types';
 
+/** `[plugin] id` and `[plugin.entry] python` of a fixture manifest, read with patterns. */
+export function manifestFields(text: string): { id: string | null; python: string | null } {
+  const plugin = /^\[plugin\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+  const entry = /^\[plugin\.entry\]\s*$([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(text)?.[1] ?? '';
+  return {
+    id: /^id\s*=\s*"([^"]*)"/m.exec(plugin)?.[1] ?? null,
+    python: /^python\s*=\s*"([^"]*)"/m.exec(entry)?.[1] ?? null,
+  };
+}
+
 /** A child whose behaviour a test scripts. */
 export class ScriptedChild implements Child {
   readonly written: string[] = [];
@@ -371,12 +381,38 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
       });
       return;
     }
-    if (inline.includes('runpy')) {
+    if (inline.includes('tomllib')) {
+      // The manifest reader: `[plugin] id` and `[plugin.entry] python` of each manifest it is given.
+      finish(child, async () => {
+        const site = args[args.indexOf('-c') + 2];
+        const wanted = JSON.parse(args[args.indexOf('-c') + 3]) as Record<string, string>;
+        const answers: Record<string, { id: string | null; python: string | null }> = {};
+        for (const [name, relative] of Object.entries(wanted)) {
+          const text = await readFile(path.join(site, ...relative.split('/')), 'utf8').catch(() => '');
+          answers[name] = manifestFields(text);
+        }
+        child.print(JSON.stringify(answers) + '\n');
+        return 0;
+      });
+      return;
+    }
+    if (args.includes('native-generation')) {
       child.onEnd = () => child.exit(0);
       child.onInput = (text) => {
         void (async () => {
           if ((await options.beforeLoad?.(child)) === false) return;
-          const references = args.flatMap((arg, index) => (arg === '-e' ? [args[index + 1]] : []));
+          // A directory is a links directory: each pack in it is reported by its plugin id.
+          const references: string[] = [];
+          for (const source of args.flatMap((arg, index) => (arg === '-e' ? [args[index + 1]] : []))) {
+            if (!path.isAbsolute(source)) {
+              references.push(source);
+              continue;
+            }
+            for (const link of (await readdir(source)).toSorted()) {
+              const text = await readFile(path.join(source, link, 'aelix-plugin.toml'), 'utf8').catch(() => '');
+              references.push(manifestFields(text).id ?? link);
+            }
+          }
           const failed = references.filter((reference) => options.loadErrors?.[reference] !== undefined);
           child.print('not json\n');
           child.print(

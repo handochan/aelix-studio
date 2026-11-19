@@ -165,11 +165,14 @@ try {
   });
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
   await expect(input).toBeVisible({ timeout: 30000 });
-  await input.fill('Verify first response with native credentials');
+  const parentMarker = 'SYNTHETIC_HEAD_FORK_PARENT';
+  const childMarker = 'SYNTHETIC_HEAD_FORK_CHILD';
+  const reloadMarker = 'SYNTHETIC_HEAD_FORK_RELOAD';
+  const providerReply = 'NATIVE_PROVIDER_FIRST_RESPONSE';
+  const marker = (value) => page.getByTestId('message-text-content').filter({ hasText: new RegExp(`^${value}$`) });
+  await input.fill(parentMarker);
   await page.getByTestId('sendbox-send-btn').click();
-  await expect(page.getByTestId('message-text-left').filter({ hasText: 'NATIVE_PROVIDER_FIRST_RESPONSE' })).toBeVisible(
-    { timeout: 30000 }
-  );
+  await expect(marker(providerReply)).toHaveCount(1, { timeout: 30000 });
   assert.ok(fs.existsSync(path.join(sandbox, 'agent/auth.json')));
   assert.equal(fs.existsSync(path.join(sandbox, 'wrong-root/auth.json')), false);
   const port = await page.evaluate(() => window.__backendPort);
@@ -190,6 +193,52 @@ try {
   });
   assert.deepEqual(badEndpoint, { ok: false, code: 'INVALID_ENDPOINT' });
   await page.screenshot({ path: path.join(output, 'first-response.png') });
+
+  trace('native_head_fork');
+  const parentId = await page.evaluate(() => /^#\/conversation\/([^/]+)$/.exec(window.location.hash)?.[1]);
+  assert.ok(parentId, 'The Provider conversation must be open before fork');
+  const parentRoute = `http://127.0.0.1:${port}/api/conversations/${parentId}`;
+  const parent = await fetch(parentRoute);
+  assert.equal(parent.ok, true);
+  const detail = await parent.json();
+  const capability = (detail.data ?? detail).fork_capability;
+  assert.equal(capability?.at_turn, false);
+  assert.equal(capability?.requires_native_head, true, 'The pinned host must guard native HEAD');
+  await expect
+    .poll(
+      async () => {
+        const response = await fetch(`${parentRoute}/runtime/ensure`, { method: 'POST' });
+        assert.equal(response.ok, true);
+        const body = await response.json();
+        return (body.data ?? body).runtime.state;
+      },
+      { timeout: 30000 }
+    )
+    .toBe('idle');
+  await marker(providerReply).hover();
+  const fork = page.getByTestId('message-fork-button');
+  await expect(fork).toHaveCount(1);
+  await fork.click();
+  const childRoute = await page.waitForFunction(
+    (id) => {
+      const match = /^#\/conversation\/([^/]+)$/.exec(window.location.hash);
+      return match && match[1] !== id ? match[1] : null;
+    },
+    parentId,
+    { timeout: 30000 }
+  );
+  const childId = await childRoute.jsonValue();
+  await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+  await input.fill(childMarker);
+  await page.getByTestId('sendbox-send-btn').click();
+  await expect(marker(providerReply)).toHaveCount(2, { timeout: 30000 });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
+  await expect(marker(childMarker)).toHaveCount(1);
+  await input.fill(reloadMarker);
+  await page.getByTestId('sendbox-send-btn').click();
+  await expect(marker(providerReply)).toHaveCount(3, { timeout: 30000 });
+  await expect(marker(parentMarker)).toHaveCount(1);
 
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
@@ -392,6 +441,7 @@ try {
         webuiScope: executablePath
           ? 'source-imported facade/helper with installed backend; compiled app-owned WebUI listener not exercised'
           : 'source-imported facade/helper with development backend',
+        headFork: { parentId, childId },
         checks: [
           'fresh_store',
           'ui_endpoint_registration',
@@ -399,6 +449,7 @@ try {
           'wrong_key_rejected',
           'key_update_new_conversation',
           'first_response',
+          'native_head_fork_ui_and_renderer_reload',
           'explicit_cli_root',
           'aion_provider_db_separate',
           'secret_endpoint_rejected',

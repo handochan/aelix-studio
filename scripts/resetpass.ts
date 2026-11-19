@@ -134,7 +134,7 @@ async function detectRunningWebUI(port: number): Promise<boolean> {
 }
 
 async function resetPasswordVia(url: string): Promise<string> {
-  const res = await fetch(url, { method: 'POST' });
+  const res = await fetch(url, { method: 'POST', headers: { origin: new URL(url).origin } });
   if (!res.ok) {
     const body = await res.text();
     throw new Error(`reset-password failed (${res.status}): ${body}`);

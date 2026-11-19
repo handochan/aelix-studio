@@ -12,11 +12,13 @@ import contextlib
 import ctypes
 import hashlib
 import json
+import math
 import os
 import signal
 import re
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -25,6 +27,7 @@ import time
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from outboundScope import analyze_processes
 from uring.capture import Capture
+from uring.network import TaskEvidence
 from uring.policy import ALLOWED_OPCODES
 
 DENIED = 86
@@ -100,6 +103,9 @@ CAPTURE_TIMEOUT = 480
 CAPTURE_CLEANUP = 75
 SUPERVISOR_CLEANUP = 15
 FORCE_CLEANUP = 5
+TASK_EVIDENCE_WRITE_TIMEOUT = 10
+TASK_EVIDENCE_EXIT_RESERVE = 1
+SUPERVISOR_DEADLINE_ENV = 'AELIX_OUTBOUND_SUPERVISOR_DEADLINE'
 
 OWNED_SIGNAL = "import os, sys\nfrom pathlib import Path\ntry:\n    fields = (Path('/proc') / sys.argv[1] / 'stat').read_text().rsplit(')', 1)[1].split()\n    if fields[19] == sys.argv[2]:\n        os.kill(int(sys.argv[1]), int(sys.argv[3]))\nexcept (FileNotFoundError, ProcessLookupError):\n    pass\n"
 
@@ -127,6 +133,22 @@ def recapture_reasons_allowed(report):
     if any(not isinstance(item, dict) or item.get('reason') not in RECAPTURE_KERNEL_LOSSES
            for item in capture.get('recordErrors', [])): return False
     return bool(issues or any(kinds))
+
+
+def should_recapture(report):
+    diagnostics = report.get('externalOperationDiagnostics', [])
+    # Only unresolved, unsent UDP associations can be provisional counts.
+    # A real TCP connect/send/write observed alongside a capture hole must
+    # never be erased by a quieter second execution. Missing diagnostics
+    # are also conservative failure evidence, not permission to replay.
+    provisional = len(diagnostics) == report.get('externalAttempts', 0) and all(
+        item.get('syscall') == 'connect' and item.get('straceSocketKind') == 'udp' and
+        not item.get('udpWriteAssociations') and not
+        (set((item.get('kernel') or {}).get('socketHooks', [])) & {'tcp_v4_connect', 'tcp_v6_connect'})
+        for item in diagnostics)
+    command_failed = report.get('commandStarted') and report.get('commandExitCode') != 0
+    return (report.get('outcome') == 'evidence_incomplete' and provisional and
+            recapture_reasons_allowed(report) and not command_failed)
 
 
 def process_table():
@@ -193,6 +215,17 @@ def stop_owned_tree(root, *, include_root=False, grace=None, root_birth=None):
         time.sleep(0.05)
 
 
+def read_supervisor_deadline(value):
+    """An absent limit is unbounded. An invalid hint disables task evidence."""
+    if value is None:
+        return math.inf
+    try:
+        deadline = float(value)
+    except ValueError:
+        return 0.0
+    return 0.0 if math.isnan(deadline) else deadline
+
+
 def supervise(command, timeout):
     """Subreap detached tracer/app descendants before returning to acceptance."""
     if sys.platform != 'linux': raise RuntimeError('Linux supervision required')
@@ -201,7 +234,12 @@ def supervise(command, timeout):
     interrupted = []
     def cancel(signum, _frame): interrupted.append(signum)
     for signum in (signal.SIGTERM, signal.SIGINT): signal.signal(signum, cancel)
-    child = subprocess.Popen(command)
+    # The child uses this conservative cutoff only for optional evidence. The
+    # actual supervision timeout still starts after the child is launched.
+    env = os.environ.copy()
+    env[SUPERVISOR_DEADLINE_ENV] = str(min(time.monotonic() + timeout,
+                                           read_supervisor_deadline(env.get(SUPERVISOR_DEADLINE_ENV))))
+    child = subprocess.Popen(command, env=env)
     deadline = time.monotonic() + timeout
     timed_out = False
     try:
@@ -242,78 +280,164 @@ def run_supervised(command, *, timeout, **options):
     return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
+class CaptureInterrupted(RuntimeError):
+    pass
+
+
 @contextlib.contextmanager
-def capture_deadline(seconds):
-    def timeout(_signum, _frame): raise RuntimeError('capture_timeout')
-    def cancel(_signum, _frame): raise RuntimeError('capture_cancelled')
+def capture_deadline(seconds, *, handle_sigterm=True):
+    def timeout(_signum, _frame): raise CaptureInterrupted('capture_timeout')
+    def cancel(_signum, _frame): raise CaptureInterrupted('capture_cancelled')
     old_alarm = signal.signal(signal.SIGALRM, timeout)
-    old_term = signal.signal(signal.SIGTERM, cancel)
+    old_term = signal.signal(signal.SIGTERM, cancel) if handle_sigterm else None
     old_timer = signal.setitimer(signal.ITIMER_REAL, seconds)
     try: yield time.monotonic() + seconds
     finally:
         signal.setitimer(signal.ITIMER_REAL, *old_timer)
         signal.signal(signal.SIGALRM, old_alarm)
-        signal.signal(signal.SIGTERM, old_term)
+        if handle_sigterm: signal.signal(signal.SIGTERM, old_term)
+
+
+def task_evidence_write_fits(deadline):
+    return deadline - time.monotonic() >= TASK_EVIDENCE_WRITE_TIMEOUT
+
+
+def task_evidence_receipt(task_evidence, *, replay=False, interrupted=False):
+    discarded = replay and task_evidence is not None and task_evidence.measurement is not None
+    elapsed = task_evidence.aggregation_seconds if task_evidence is not None else 0.0
+    fields = dict(taskEvidenceStatus='discarded-before-recapture' if discarded else 'unavailable',
+                  taskEvidenceAggregationSeconds=round(elapsed, 6))
+    reason = task_evidence.unavailable_reason if task_evidence is not None else None
+    if reason is None:
+        if interrupted:
+            reason = 'capture_interrupted'
+        elif task_evidence is None:
+            reason = 'aggregation_error'
+    if reason is not None:
+        fields['taskEvidenceUnavailableReason'] = reason
+    return fields
+
+
+def write_task_evidence(report, pending, payload):
+    """Append the counters while streaming the already-saved verdict."""
+    with report.open('rb') as source, pending.open('wb') as target:
+        opening = source.readline(4)
+        if opening not in (b'{\n', b'{\r\n'):
+            raise ValueError('unexpected audit receipt opening')
+        newline = opening[1:]
+        ending = newline + b'}' + newline
+        body_end = source.seek(-len(ending), os.SEEK_END)
+        if source.read(len(ending)) != ending:
+            raise ValueError('unexpected audit receipt ending')
+        source.seek(len(opening))
+        unavailable = b'  "taskEvidenceStatus": "unavailable",' + newline
+        if source.read(len(unavailable)) != unavailable:
+            raise ValueError('unexpected task evidence status')
+        remaining = body_end - source.tell()
+        target.write(opening + b'  "taskEvidenceStatus": "available",' + newline)
+        while remaining > 0:
+            block = source.read(min(65536, remaining))
+            if not block:
+                raise OSError('audit receipt changed during publication')
+            target.write(block)
+            remaining -= len(block)
+        target.write(b',' + newline + b'  "taskEvidence": ')
+        target.write(payload)
+        target.write(ending)
+
+
+def attach_task_evidence(evidence, paths, *, deadline):
+    """Publish completed counters after all required report writes."""
+    if not task_evidence_write_fits(deadline):
+        return
+    try:
+        with capture_deadline(TASK_EVIDENCE_WRITE_TIMEOUT, handle_sigterm=False):
+            payload = json.dumps(evidence, separators=(',', ':')).encode('ascii')
+            for path in paths:
+                path = path.resolve()
+                # A short write or timeout leaves the verdict at its original path.
+                with tempfile.TemporaryDirectory(dir=path.parent, prefix='.task-evidence-') as directory:
+                    pending = Path(directory) / path.name
+                    write_task_evidence(path, pending, payload)
+                    pending.chmod(stat.S_IMODE(path.stat().st_mode))
+                    pending.replace(path)
+    except Exception:
+        print('Task evidence unavailable on remaining reports: storage failed or exceeded its budget', file=sys.stderr)
 
 
 def audit(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
-          recapture=True, capture_timeout=CAPTURE_TIMEOUT):
+          recapture=True, capture_timeout=CAPTURE_TIMEOUT, task_evidence_deadline=None):
     """Recapture incomplete evidence once; never retry a functional/policy failure.
 
     Commands must own fresh state per invocation (the installer drivers use
     TemporaryDirectory). Both measurements survive, including provisional counts.
     """
+    inherited_hint = os.environ.get(SUPERVISOR_DEADLINE_ENV)
+    inherited_deadline = read_supervisor_deadline(inherited_hint)
+    evidence_deadline = min(inherited_deadline, read_supervisor_deadline(task_evidence_deadline)) - TASK_EVIDENCE_EXIT_RESERVE
+
+    def terminate(signum, _frame):
+        # Let capture files and any partial diagnostic write unwind on TERM.
+        signal.signal(signum, signal.SIG_IGN)
+        raise SystemExit(128 + signum)
+
     attempts = []
-    for attempt in (1, 2):
-        if attempt == 2:
-            report.update(recaptures=1, captureAttempts=[*attempts, {'attempt': 2, 'status': 'running'}])
+    with contextlib.ExitStack() as cleanup:
+        previous_term = signal.signal(signal.SIGTERM, terminate)
+        cleanup.callback(signal.signal, signal.SIGTERM, previous_term)
+        if inherited_hint is not None:
+            # Keep the supervisor's budget private to the auditor.
+            cleanup.callback(os.environ.__setitem__, SUPERVISOR_DEADLINE_ENV, inherited_hint)
+            del os.environ[SUPERVISOR_DEADLINE_ENV]
+        for attempt in (1, 2):
+            if attempt == 2:
+                report.update(recaptures=1, captureAttempts=[*attempts, {'attempt': 2, 'status': 'running'}])
+                report_path.write_text(json.dumps(report, indent=2) + '\n')
+            code, evidence, replay = capture_once(command, report_path, scope_executables=scope_executables,
+                require_executables=require_executables, whole_report_path=whole_report_path,
+                capture_timeout=capture_timeout, allow_recapture=attempt == 1 and recapture,
+                evidence_deadline=evidence_deadline)
+            report = json.loads(report_path.read_text())
+            snapshot = report_path.with_name(report_path.stem + f'.capture-{attempt}' + report_path.suffix)
+            snapshot.write_text(json.dumps(report, indent=2) + '\n')
+            attempts.append(dict(attempt=attempt, report=snapshot.name, exitCode=code,
+                                 outcome=report.get('outcome', report.get('reason')),
+                                 externalAttempts=report.get('externalAttempts'),
+                                 unparsedRecords=report.get('unparsedRecords')))
+            whole_paths = ()
+            if whole_report_path is not None and whole_report_path.exists():
+                whole_snapshot = whole_report_path.with_name(whole_report_path.stem + f'.capture-{attempt}' + whole_report_path.suffix)
+                whole_snapshot.write_bytes(whole_report_path.read_bytes())
+                whole_paths = (whole_snapshot, whole_report_path)
+            report['captureAttempts'] = list(attempts)
+            report['recaptures'] = len(attempts) - 1
             report_path.write_text(json.dumps(report, indent=2) + '\n')
-        code = capture_once(command, report_path, scope_executables=scope_executables,
-                            require_executables=require_executables, whole_report_path=whole_report_path,
-                            capture_timeout=capture_timeout)
-        report = json.loads(report_path.read_text())
-        snapshot = report_path.with_name(report_path.stem + f'.capture-{attempt}' + report_path.suffix)
-        snapshot.write_text(json.dumps(report, indent=2) + '\n')
-        attempts.append(dict(attempt=attempt, report=snapshot.name, exitCode=code,
-                             outcome=report.get('outcome', report.get('reason')),
-                             externalAttempts=report.get('externalAttempts'),
-                             unparsedRecords=report.get('unparsedRecords')))
-        if whole_report_path is not None and whole_report_path.exists():
-            whole_report_path.with_name(whole_report_path.stem + f'.capture-{attempt}' + whole_report_path.suffix).write_bytes(whole_report_path.read_bytes())
-        diagnostics = report.get('externalOperationDiagnostics', [])
-        # Only unresolved, unsent UDP associations can be provisional counts.
-        # A real TCP connect/send/write observed alongside a capture hole must
-        # never be erased by a quieter second execution. Missing diagnostics
-        # are also conservative failure evidence, not permission to replay.
-        provisional = len(diagnostics) == report.get('externalAttempts', 0) and all(
-            item.get('syscall') == 'connect' and item.get('straceSocketKind') == 'udp' and
-            not item.get('udpWriteAssociations') and not
-            (set((item.get('kernel') or {}).get('socketHooks', [])) & {'tcp_v4_connect', 'tcp_v6_connect'})
-            for item in diagnostics)
-        command_failed = report.get('commandStarted') and report.get('commandExitCode') != 0
-        retry = report.get('outcome') == 'evidence_incomplete' and provisional and recapture_reasons_allowed(report) and not command_failed
-        report['captureAttempts'] = list(attempts)
-        report['recaptures'] = len(attempts) - 1
-        report_path.write_text(json.dumps(report, indent=2) + '\n')
-        if attempt == 2 or not recapture or not retry:
-            break
-        print('::warning title=Outbound audit recapture::Incomplete evidence; recapturing once; first report '+snapshot.name, flush=True)
-    report['captureAttempts'] = attempts
-    report['recaptures'] = len(attempts) - 1
-    report_path.write_text(json.dumps(report, indent=2) + '\n')
+            if not replay:
+                break
+            print('::warning title=Outbound audit recapture::Incomplete evidence; recapturing once; first report '+snapshot.name, flush=True)
+        if evidence is not None:
+            attach_task_evidence(evidence, (snapshot, report_path, *whole_paths), deadline=evidence_deadline)
     return code
 
 
 def capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
-                 capture_timeout=CAPTURE_TIMEOUT):
-    # Report parsing and hashing are part of the same original capture budget.
+                 capture_timeout=CAPTURE_TIMEOUT, allow_recapture=False, evidence_deadline=math.inf):
+    # Required analysis, hashing and report writing keep the capture budget.
+    task_evidence = None
     try:
         with capture_deadline(capture_timeout) as deadline:
-            return _capture_once(command, report_path, scope_executables=scope_executables,
-                                 require_executables=require_executables, whole_report_path=whole_report_path,
-                                 capture_timeout=capture_timeout, activity_deadline=deadline)
-    except RuntimeError as error:
-        if str(error) not in ('capture_timeout', 'capture_cancelled'): raise
+            try:
+                task_evidence = TaskEvidence(CaptureInterrupted,
+                    supervisor_cutoff=evidence_deadline - TASK_EVIDENCE_WRITE_TIMEOUT)
+            except CaptureInterrupted:
+                raise
+            except Exception:
+                pass
+            return _capture_once(command, report_path,
+                scope_executables=scope_executables, require_executables=require_executables,
+                whole_report_path=whole_report_path, capture_timeout=capture_timeout, activity_deadline=deadline,
+                allow_recapture=allow_recapture, task_evidence=task_evidence)
+    except CaptureInterrupted as error:
         # No analysis budget remains. Unknown counts are not a zero receipt.
         report = dict(schema='aelix-studio-host.outbound-audit/1', status='failed',
             outcome=str(error), reason=str(error), evidenceComplete=False,
@@ -322,24 +446,25 @@ def capture_once(command, report_path, *, scope_executables=(), require_executab
             unparsedRecords=1, classificationErrors=1, classificationIssues=[{'reason':str(error)}],
             commandStarted=None, commandExitCode=None, captureTimeoutSeconds=capture_timeout,
             ioUring=dict(recorded=False, opcodeCounts={},capture=dict(complete=False,reason=str(error))))
+        report = task_evidence_receipt(task_evidence, interrupted=True) | report
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(report, indent=2)+'\n')
         if whole_report_path is not None:
             whole_report_path.parent.mkdir(parents=True, exist_ok=True)
             whole_report_path.write_text(json.dumps(dict(report,scope='all',enforcement='report-only',status='reported'),indent=2)+'\n')
         print('Capture failed within its original bound: '+str(error), file=sys.stderr)
-        return INCOMPLETE
+        return INCOMPLETE, None, False
 
 
 def _capture_once(command, report_path, *, scope_executables=(), require_executables=(), whole_report_path=None,
-                  capture_timeout=CAPTURE_TIMEOUT, activity_deadline=None):
+                  capture_timeout=CAPTURE_TIMEOUT, activity_deadline=None, allow_recapture=False, task_evidence=None):
     activity_deadline = activity_deadline or time.monotonic() + capture_timeout
     proxy_keys = [key for key, value in os.environ.items() if value.strip() and key.lower().replace('-', '_') in ('http_proxy', 'https_proxy', 'all_proxy', 'npm_config_proxy', 'npm_config_https_proxy')]
     if proxy_keys:
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps({'schema': 'aelix-studio-host.outbound-audit/1', 'status': 'failed', 'reason': 'proxy_environment', 'proxyKeys': proxy_keys}) + '\n')
         print('Audit refused: proxy environment may hide destination attempts', file=sys.stderr)
-        return INCOMPLETE
+        return INCOMPLETE, None, False
     try:
         npm_proxy = npm_proxy_configured(npm_config_paths())
     except (OSError, UnicodeError):
@@ -349,7 +474,7 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps({'schema': 'aelix-studio-host.outbound-audit/1', 'status': 'failed', 'reason': reason}) + '\n')
         print('Audit refused: npm configuration may hide destination attempts', file=sys.stderr)
-        return INCOMPLETE
+        return INCOMPLETE, None, False
     tracer = resolve_strace()
     if sys.platform != 'linux' or tracer is None:
         raise RuntimeError('Linux strace is required; audit cannot be skipped')
@@ -395,8 +520,9 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
                 evidence.setdefault('recordErrors',[]).append({'reason':evidence['reason']})
             evidence.update(status='failed',complete=False,reason=reason)
             evidence.setdefault('recordErrors',[]).append({'reason':reason})
-            if not remaining: raise RuntimeError('capture_timeout')
+            if not remaining: raise CaptureInterrupted('capture_timeout')
             signal.setitimer(signal.ITIMER_REAL, remaining)
+            activity_deadline = time.monotonic() + remaining
         stderr_stream.close()
         stderr=stderr_path.read_bytes()
         # Restore command diagnostics, but never retain them in JSON/artifacts.
@@ -409,7 +535,34 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
             print('Kernel capture incomplete: '+json.dumps({key:evidence.get(key) for key in
                   ('reason','recordErrors','kernelCounts','captureChecks','diagnostics','recorderExitCode',
                    'preEntryProbe','socketSymbols')}),file=sys.stderr)
-        report, whole = analyze_processes(paths, scope_executables, require_executables, True,evidence)
+        active_evidence = None
+        if task_evidence is not None:
+            task_evidence.unsupported = unsupported
+            task_evidence.capture_deadline = activity_deadline
+            if task_evidence.checkpoint(force=True):
+                active_evidence = task_evidence
+        report, whole = analyze_processes(paths, scope_executables, require_executables, True, evidence,
+                                          task_evidence=active_evidence)
+    measurements = (report,) if whole is report else (report, whole)
+    for measurement in measurements:
+        measurement['straceDiagnostics']={'unsupportedPersonalities':unsupported}
+        if unsupported:
+            measurement['classificationIssues'].append({'reason':'unsupported_strace_personality'})
+            measurement['classificationErrors']+=1
+            measurement['unparsedRecords']+=1
+    complete = bool(report['traceFiles']) and report['processCount'] > 0 and report['unparsedRecords'] == 0
+    code = INCOMPLETE if not complete else DENIED if report['externalAttempts'] else process.returncode
+    verdict = dict(commandExitCode=process.returncode,
+        observedRejectedOpcodes=sorted({event['opcode'] for event in evidence.get('events', [])
+            if event.get('kind') in ('submit', 'failed') and event.get('opcode') not in ALLOWED_OPCODES}),
+        commandStarted=command_started, captureTimeoutSeconds=capture_timeout, enforcement='blocking',
+        status='passed' if code == 0 else 'failed', evidenceComplete=complete,
+        outcome=('evidence_incomplete' if not complete else 'external_attempts' if report['externalAttempts']
+                 else 'command_failed' if process.returncode else 'passed'))
+    replay = allow_recapture and should_recapture(report | verdict)
+    counters = task_evidence.measurement if task_evidence is not None else None
+    evidence_receipt = task_evidence_receipt(task_evidence, replay=replay)
+
     recipes = {name: hashlib.sha256(Path(__file__).with_name(name).read_bytes()).hexdigest()
                for name in ('outboundAudit.py', 'outboundScope.py', 'udpLifecycle.py')}
     recipes.update({f'uring/{path.name}':hashlib.sha256(path.read_bytes()).hexdigest()
@@ -420,12 +573,6 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
         tracer_metadata={'version':version.splitlines()[0],
                          'optionalFeatures':version.split('Optional features enabled:',1)[-1].strip(),
                          'binarySha256':hashlib.sha256(Path(tracer).read_bytes()).hexdigest()}
-    for measurement in {id(report):report,id(whole):whole}.values():
-        measurement['straceDiagnostics']={'unsupportedPersonalities':unsupported}
-        if unsupported:
-            measurement['classificationIssues'].append({'reason':'unsupported_strace_personality'})
-            measurement['classificationErrors']+=1
-            measurement['unparsedRecords']+=1
     report['strace'] = tracer_metadata
     whole['strace'] = tracer_metadata
     report['sourceSha256'] = recipes
@@ -433,23 +580,12 @@ def _capture_once(command, report_path, *, scope_executables=(), require_executa
     if whole_report_path is not None:
         whole.update(commandExitCode=process.returncode, status='reported', enforcement='report-only')
         whole_report_path.parent.mkdir(parents=True, exist_ok=True)
-        whole_report_path.write_text(json.dumps(whole, indent=2) + '\n')
-    report['commandExitCode'] = process.returncode
-    report['observedRejectedOpcodes'] = sorted({event['opcode'] for event in evidence.get('events', [])
-        if event.get('kind') in ('submit', 'failed') and event.get('opcode') not in ALLOWED_OPCODES})
-    report['commandStarted'] = command_started
-    report['captureTimeoutSeconds'] = capture_timeout
-    complete = bool(report['traceFiles']) and report['processCount'] > 0 and report['unparsedRecords'] == 0
-    code = INCOMPLETE if not complete else DENIED if report['externalAttempts'] else process.returncode
-    report['enforcement'] = 'blocking'
-    report['status'] = 'passed' if code == 0 else 'failed'
-    report['evidenceComplete'] = complete
-    report['outcome'] = ('evidence_incomplete' if not complete else 'external_attempts' if report['externalAttempts']
-                         else 'command_failed' if process.returncode else 'passed')
+        whole_report_path.write_text(json.dumps(evidence_receipt | whole, indent=2) + '\n')
+    report.update(verdict)
     report_path.parent.mkdir(parents=True, exist_ok=True)
-    report_path.write_text(json.dumps(report, indent=2) + '\n')
+    report_path.write_text(json.dumps(evidence_receipt | report, indent=2) + '\n')
     print(json.dumps({key: report[key] for key in ('status', 'externalAttempts', 'unparsedRecords', 'commandExitCode')}))
-    return code
+    return code, None if replay else counters, replay
 
 
 def positive_control():
@@ -471,6 +607,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--report', type=Path)
     parser.add_argument('--capture-timeout', type=float, default=CAPTURE_TIMEOUT)
+    parser.add_argument('--task-evidence-deadline', type=float, help=argparse.SUPPRESS)
     parser.add_argument('--supervise', type=float)
     parser.add_argument('--scope-executable', action='append', type=Path, default=[], help='Successful exec roots whose complete descendant trees are enforced')
     parser.add_argument('--require-executable', action='append', type=Path, default=[], help='Selected executable that must be observed at least once')
@@ -515,7 +652,8 @@ def main():
     try:
         return audit(command, args.report, scope_executables=args.scope_executable,
                      require_executables=args.require_executable, whole_report_path=args.whole_report,
-                     recapture=not args.single_capture, capture_timeout=args.capture_timeout)
+                     recapture=not args.single_capture, capture_timeout=args.capture_timeout,
+                     task_evidence_deadline=args.task_evidence_deadline)
     finally:
         if sys.platform == 'linux': stop_owned_tree(os.getpid())
 

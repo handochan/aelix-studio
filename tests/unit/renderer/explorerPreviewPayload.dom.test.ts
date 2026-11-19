@@ -11,24 +11,44 @@
 // (utf8/dataurl) while pdf/office read none. Oversized files are never read. No
 // WS fs/resolve, no file_path/workspace exposed.
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { Message } from '@arco-design/web-react';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 // Record ipcBridge.fs calls + script their returns per test.
-const h = vi.hoisted(() => ({ readContent: vi.fn(), getContentMetadata: vi.fn() }));
+const h = vi.hoisted(() => ({
+  readContent: vi.fn(),
+  getContentMetadata: vi.fn(),
+  resolveRef: vi.fn(),
+  openPreview: vi.fn(),
+}));
 
 // Isolate the container module from React/UI + WS/IPC side effects; the builder
 // under test is a pure async fn needing only fs.readContent + fs.getContentMetadata.
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
-vi.mock('@/renderer/pages/conversation/Preview', () => ({ usePreviewContext: () => ({ openPreview: () => {} }) }));
+vi.mock('@/renderer/pages/conversation/Preview', () => ({ usePreviewContext: () => ({ openPreview: h.openPreview }) }));
+vi.mock('@/renderer/pages/conversation/Preview/context/PreviewContext', () => ({
+  usePreviewContext: () => ({ openPreview: h.openPreview }),
+}));
+vi.mock('@/renderer/pages/conversation/explorer/currentProjectStore', () => ({
+  getCurrentProject: () => 'projectA',
+}));
+vi.mock('@/renderer/hooks/context/ConversationContext', () => ({
+  useConversationContextSafe: () => ({ workspace: '/project' }),
+}));
 vi.mock('@/common', () => ({
   ipcBridge: {
-    project: { get: { invoke: () => Promise.resolve() } },
+    project: { get: { invoke: () => Promise.resolve() }, resolveRef: { invoke: h.resolveRef } },
     fs: { readContent: { invoke: h.readContent }, getContentMetadata: { invoke: h.getContentMetadata } },
   },
 }));
 vi.mock('@/renderer/pages/conversation/explorer/monitorTransport', () => ({ initExplorerRuntime: () => ({}) }));
 
 import { buildExplorerPreviewPayload } from '@/renderer/pages/conversation/explorer/ExplorerContainer';
+import { usePreviewLauncher } from '@/renderer/hooks/file/usePreviewLauncher';
+import { useLocalFilePreview } from '@/renderer/pages/conversation/Preview/hooks/useLocalFilePreview';
+import { resolveAnalyticsFilePreview } from '@/renderer/utils/file/previewPayload';
 
 const TEXT_CEILING = 1024 * 1024;
 const IMAGE_CEILING = 20 * 1024 * 1024;
@@ -42,7 +62,261 @@ const meta = (size: number, lastModified = 1_700_000_000_000) => ({
   lastModified,
 });
 
+describe('project document preview entry points', () => {
+  const fileRef = { kind: 'project', pe_id: 'peA', relative_path: 'workspace/index.html' };
+
+  afterEach(() => {
+    h.openPreview.mockReset();
+    vi.unstubAllGlobals();
+  });
+
+  it('waits for classification before mounting a tracked HTML file or its fallback', async () => {
+    let classifyAsSource!: (mode: string) => void;
+    const classify = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          classifyAsSource = resolve;
+        })
+    );
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(60));
+    h.readContent.mockReset().mockResolvedValue('<script>document.title = "from disk";</script>');
+    const hook = renderHook(() => usePreviewLauncher());
+    await act(async () => {
+      const pending = hook.result.current.launchPreview({
+        relativePath: fileRef.relative_path,
+        contentType: 'html',
+        editable: true,
+        fallbackContent: '<script>document.title = "fallback";</script>',
+      });
+      await vi.waitFor(() => expect(classify).toHaveBeenCalled());
+      expect(h.openPreview).not.toHaveBeenCalled();
+      classifyAsSource('source-only');
+      await pending;
+    });
+    expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
+      '<script>document.title = "from disk";</script>',
+      'code',
+      expect.objectContaining({ sourceOnly: true, editable: false })
+    );
+    expect(h.openPreview.mock.calls[0][2]).not.toHaveProperty('file_path');
+  });
+
+  it('does not open a file link or offer a raw URL after Analytics rejects classification', async () => {
+    const classify = vi.fn().mockRejectedValue(new Error('Analytics project marker is unavailable'));
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    const failure = vi.spyOn(Message, 'error').mockImplementation(() => '' as never);
+    try {
+      const hook = renderHook(() => useLocalFilePreview('/project'));
+      await act(async () => {
+        await hook.result.current('/project/workspace/index.html');
+      });
+      expect(classify).toHaveBeenCalledWith({ projectId: 'projectA', file: fileRef });
+      expect(h.openPreview).not.toHaveBeenCalled();
+      expect(failure).toHaveBeenCalled();
+    } finally {
+      failure.mockRestore();
+    }
+  });
+
+  it('uses source-only when a desktop file has no project classifier', async () => {
+    const classify = vi.fn();
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(40));
+    h.readContent.mockReset().mockResolvedValue('<script>document.title = "local";</script>');
+    const document = await resolveAnalyticsFilePreview({
+      fileRef: { kind: 'local', path: '/project/workspace/index.html' },
+      contentType: 'html',
+    });
+    expect(document).toMatchObject({ contentType: 'code', metadata: { sourceOnly: true, editable: false } });
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  it('does not treat an ordinary SVG classification as permission to mount an HTML renderer', async () => {
+    const classify = vi.fn().mockResolvedValue('ordinary');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(40));
+    h.readContent.mockReset().mockResolvedValue('<svg><script>document.title = "svg";</script></svg>');
+    const document = await resolveAnalyticsFilePreview({
+      projectId: 'projectA',
+      fileRef: { ...fileRef, relative_path: 'workspace/chart.svg' },
+      contentType: 'html',
+    });
+    expect(classify).toHaveBeenCalled();
+    expect(document).toMatchObject({ contentType: 'code', metadata: { sourceOnly: true } });
+  });
+
+  it('does not promote an inert diff request for HTML into an executable preview', async () => {
+    const classify = vi.fn().mockResolvedValue('isolated');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    expect(await resolveAnalyticsFilePreview({ projectId: 'projectA', fileRef, contentType: 'diff' })).toBeUndefined();
+    expect(classify).not.toHaveBeenCalled();
+  });
+
+  const missingFile = () =>
+    new BackendHttpError({
+      method: 'POST',
+      path: '/api/fs/content/metadata',
+      status: 404,
+      body: { code: 'FILE_NOT_FOUND' },
+    });
+
+  it.each(['/project/workspace/index.html', 'C:\\project\\workspace\\index.html'])(
+    'uses the real absolute diff path to confirm a missing file at %s',
+    async (filename) => {
+      const local = { kind: 'local', path: filename };
+      const classify = vi.fn().mockResolvedValue('missing');
+      vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+      h.resolveRef.mockResolvedValue({ file: local });
+      h.getContentMetadata.mockReset().mockRejectedValue(missingFile());
+      h.readContent.mockReset();
+      const captured = '<script>document.title = "captured";</script>';
+      const hook = renderHook(() => usePreviewLauncher());
+      await act(async () => {
+        await hook.result.current.launchPreview({
+          relativePath: local.path,
+          contentType: 'html',
+          editable: true,
+          fallbackContent: captured,
+        });
+      });
+      expect(h.resolveRef).toHaveBeenLastCalledWith({ project_id: 'projectA', file: local });
+      expect(classify).toHaveBeenCalledWith({ projectId: 'projectA', file: local });
+      expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
+        captured,
+        'code',
+        expect.objectContaining({ sourceOnly: true, editable: false, fileRef: undefined })
+      );
+      expect(h.openPreview.mock.calls[0][2]).not.toHaveProperty('file_path');
+      expect(h.readContent).not.toHaveBeenCalled();
+    }
+  );
+
+  it('refuses parent traversal instead of checking a rewritten path for the fallback', async () => {
+    const classify = vi.fn().mockResolvedValue('missing');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockClear();
+    const hook = renderHook(() => usePreviewLauncher());
+    await act(async () => {
+      await hook.result.current.launchPreview({
+        relativePath: '../outside.html',
+        contentType: 'html',
+        editable: true,
+        fallbackContent: '<h1>Captured</h1>',
+      });
+    });
+    expect(hook.result.current.errorKind).toBe('sandbox');
+    expect(h.resolveRef).not.toHaveBeenCalled();
+    expect(classify).not.toHaveBeenCalled();
+    expect(h.openPreview).not.toHaveBeenCalled();
+  });
+
+  it('keeps the fallback inert when a previously ordinary file disappears before its read', async () => {
+    const classify = vi.fn().mockResolvedValueOnce('ordinary').mockResolvedValueOnce('missing');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(60));
+    h.readContent.mockReset().mockRejectedValue(missingFile());
+    const captured = '<script>document.title = "captured";</script>';
+    const hook = renderHook(() => usePreviewLauncher());
+    await act(async () => {
+      await hook.result.current.launchPreview({
+        relativePath: fileRef.relative_path,
+        contentType: 'html',
+        editable: true,
+        fallbackContent: captured,
+      });
+    });
+    expect(classify).toHaveBeenCalledTimes(2);
+    expect(h.openPreview).toHaveBeenCalledExactlyOnceWith(
+      captured,
+      'code',
+      expect.objectContaining({ sourceOnly: true, editable: false, fileRef: undefined })
+    );
+  });
+
+  it.each(['opaque 404', 'explicit refusal'])('does not show the captured HTML after %s', async (failure) => {
+    const classify = vi.fn().mockResolvedValue('ordinary');
+    if (failure === 'opaque 404') classify.mockResolvedValueOnce('ordinary').mockResolvedValueOnce('source-only');
+    else classify.mockRejectedValue(new Error('Analytics preview file refused'));
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.resolveRef.mockResolvedValue({ file: fileRef });
+    h.getContentMetadata.mockReset().mockRejectedValue(missingFile());
+    const log = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      const hook = renderHook(() => usePreviewLauncher());
+      await act(async () => {
+        await hook.result.current.launchPreview({
+          relativePath: fileRef.relative_path,
+          contentType: 'html',
+          editable: true,
+          fallbackContent: '<script>document.title = "captured";</script>',
+        });
+      });
+      expect(h.openPreview).not.toHaveBeenCalled();
+      expect(hook.result.current.errorKind).not.toBeNull();
+    } finally {
+      log.mockRestore();
+    }
+  });
+});
+
 describe('buildExplorerPreviewPayload', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('opens a recognized Analytics HTML file without using the editor read gate', async () => {
+    const classify = vi.fn().mockResolvedValue('isolated');
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify } });
+    h.getContentMetadata.mockClear();
+    h.readContent.mockClear();
+
+    const out = await buildExplorerPreviewPayload('peA', '분석 project/workspace/index.html', 'projectA');
+
+    expect(out.metadata).toMatchObject({ analyticsProjectId: 'projectA', editable: false });
+    expect(out.content).toBe('');
+    expect(classify).toHaveBeenCalledWith({ projectId: 'projectA', file: out.metadata.fileRef });
+    expect(h.getContentMetadata).not.toHaveBeenCalled();
+    expect(h.readContent).not.toHaveBeenCalled();
+  });
+
+  it('keeps the editor size gate for non-Analytics HTML in an ordinary workspace folder', async () => {
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify: vi.fn().mockResolvedValue('ordinary') } });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(TEXT_CEILING + 1));
+    h.readContent.mockReset();
+
+    const out = await buildExplorerPreviewPayload('peA', 'workspace/index.html', 'projectA');
+
+    expect(out.metadata.analyticsProjectId).toBeUndefined();
+    expect(out.metadata.oversized).toBe(true);
+    expect(h.readContent).not.toHaveBeenCalled();
+  });
+
+  it.each(['workspace/index.html', 'artifacts/reports/monthly/rev/content/chart.svg'])(
+    'reads an unclassified document as read-only source for %s',
+    async (file) => {
+      vi.stubGlobal('electronAPI', { analyticsPreview: { classify: vi.fn().mockResolvedValue('source-only') } });
+      const content = '<script>document.body.textContent = "rendered";</script>';
+      h.getContentMetadata.mockReset().mockResolvedValue(meta(content.length));
+      h.readContent.mockReset().mockResolvedValue(content);
+
+      const out = await buildExplorerPreviewPayload('peA', file, 'projectA');
+      expect(out).toMatchObject({ contentType: 'code', content, metadata: { editable: false, sourceOnly: true } });
+      expect(out.metadata).not.toHaveProperty('analyticsProjectId');
+      expect(h.readContent).toHaveBeenCalledWith({ file: out.metadata.fileRef, encoding: 'utf8' });
+    }
+  );
+
+  it('uses the text limit for an unclassified SVG', async () => {
+    vi.stubGlobal('electronAPI', { analyticsPreview: { classify: vi.fn().mockResolvedValue('source-only') } });
+    h.getContentMetadata.mockReset().mockResolvedValue(meta(TEXT_CEILING + 1));
+    h.readContent.mockReset();
+
+    const out = await buildExplorerPreviewPayload('peA', 'workspace/logo.svg', 'projectA');
+    expect(out).toMatchObject({ content: '', metadata: { oversized: true, sourceOnly: true, editable: false } });
+    expect(h.readContent).not.toHaveBeenCalled();
+  });
   it('image: reads dataurl content over /content, carries a Project ref, no file_path', async () => {
     h.getContentMetadata.mockReset().mockResolvedValue(meta(1234));
     h.readContent.mockReset().mockResolvedValue('data:image/png;base64,QUJD');

@@ -11,7 +11,11 @@ export type {
   NativeAuthOperation,
   NativeAuthSelection,
 } from './studio-auth/types.js';
-export { ExtensionService, STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY } from './studio-extensions/index.js';
+export {
+  ExtensionService,
+  STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY,
+  STATE_ENVIRONMENT as EXTENSION_STATE_ENVIRONMENT,
+} from './studio-extensions/index.js';
 export type {
   ExtensionCommand,
   ExtensionListing,
@@ -84,10 +88,16 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
   return {
     port: staticHandle.port,
     backendPort: backendHandle.port,
-    url: staticHandle.url,
     localUrl: staticHandle.localUrl,
-    networkUrl: staticHandle.networkUrl,
-    lanIP: staticHandle.lanIP,
+    get url() {
+      return staticHandle.url;
+    },
+    get networkUrl() {
+      return staticHandle.networkUrl;
+    },
+    get lanIP() {
+      return staticHandle.lanIP;
+    },
     async stop() {
       await staticHandle.stop();
       await backendHandle.stop();

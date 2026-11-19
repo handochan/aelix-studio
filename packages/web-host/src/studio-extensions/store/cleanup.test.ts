@@ -44,6 +44,7 @@ describe('recovery and clean-up', () => {
           ? { demo: { version: '1', recordSha256: 'h', origin: { kind: 'file', artifact, wheel: 'w', sha256: 's' } } }
           : {},
         extensions: {},
+        launch: { packs: false, modules: [] },
       })
     );
   };
