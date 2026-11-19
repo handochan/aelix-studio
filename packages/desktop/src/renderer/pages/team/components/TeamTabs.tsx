@@ -1,7 +1,7 @@
 import { DndContext, PointerSensor, closestCenter, useSensor, useSensors, type DragEndEvent } from '@dnd-kit/core';
 import { SortableContext, horizontalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { CloseSmall, Drag, Edit, Plus } from '@icon-park/react';
+import { Attention, CloseSmall, Drag, Edit, Plus } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { TeammateStatus } from '@/common/types/team/teamTypes';
@@ -111,6 +111,7 @@ const TeamTabView: React.FC<TeamTabViewProps> = ({
   // 手柄和按钮可见，宽度全程恒定。
   const showDragHandle = !isLeader && !editing && ((hovered && !dragActive) || isDragging);
   const showHoverActions = !editing && ((hovered && !dragActive) || isDragging);
+  const pendingLabel = t('team.pendingApproval.label', { name: assistant_name, pending: pendingCount });
   return (
     <div
       ref={setNodeRef}
@@ -131,6 +132,10 @@ const TeamTabView: React.FC<TeamTabViewProps> = ({
       onClick={() => !editing && onSwitch(slot_id)}
       onDoubleClick={onRename ? startEditing : undefined}
     >
+      {/* Polite live region so screen readers hear when this member starts or stops waiting. */}
+      <span role='status' className='sr-only' data-testid={`team-tab-pending-status-${slot_id}`}>
+        {pendingCount > 0 ? pendingLabel : ''}
+      </span>
       {showDragHandle && (
         <span
           ref={setActivatorNodeRef}
@@ -161,10 +166,13 @@ const TeamTabView: React.FC<TeamTabViewProps> = ({
         <div className='min-w-0 flex-1 flex items-center gap-4px'>
           {pendingCount > 0 && (
             <span
-              className='shrink-0 text-14px leading-none animate-wiggle'
-              title={`${pendingCount} pending permission request(s)`}
+              className='shrink-0 inline-flex items-center gap-2px text-warning text-11px font-600 leading-none animate-wiggle'
+              title={pendingLabel}
+              aria-hidden='true'
+              data-testid={`team-tab-pending-${slot_id}`}
             >
-              ‼️
+              <Attention theme='filled' size='14' fill='currentColor' />
+              {pendingCount > 1 && <span>{pendingCount}</span>}
             </span>
           )}
           <TeamAgentIdentity

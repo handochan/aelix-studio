@@ -191,5 +191,8 @@
       "idle_notification": "Уведомление о простое",
       "shutdown_request": "Запрос на остановку"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} ожидает подтверждения (в очереди: {{pending}})"
   }
 }

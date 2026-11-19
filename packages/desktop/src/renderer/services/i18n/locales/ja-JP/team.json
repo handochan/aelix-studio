@@ -189,5 +189,8 @@
       "idle_notification": "アイドル通知",
       "shutdown_request": "停止リクエスト"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} が承認を待っています（保留中 {{pending}} 件）"
   }
 }

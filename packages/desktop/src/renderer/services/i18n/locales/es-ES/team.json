@@ -189,5 +189,8 @@
       "idle_notification": "Aviso de inactividad",
       "shutdown_request": "Solicitud de cierre"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} está esperando aprobación ({{pending}} pendientes)"
   }
 }

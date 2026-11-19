@@ -189,5 +189,8 @@
       "idle_notification": "Leerlaufhinweis",
       "shutdown_request": "Stopp-Anfrage"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} wartet auf Freigabe ({{pending}} ausstehend)"
   }
 }

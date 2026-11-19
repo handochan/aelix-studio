@@ -189,5 +189,8 @@
       "idle_notification": "유휴 알림",
       "shutdown_request": "종료 요청"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} 승인 대기 중 ({{pending}}건 대기)"
   }
 }

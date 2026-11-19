@@ -91,6 +91,9 @@ vi.mock('@/common', () => ({
     },
     conversation: {
       listChanged: makeTeamEventChannel('conversationListChanged'),
+      // The Team tab approval badge follows stream frames and turn completion.
+      responseStream: makeTeamEventChannel('conversationResponseStream'),
+      turnCompleted: makeTeamEventChannel('conversationTurnCompleted'),
       confirmation: {
         list: { invoke: vi.fn(async () => []) },
         add: makeTeamEventChannel('confirmationAdd'),

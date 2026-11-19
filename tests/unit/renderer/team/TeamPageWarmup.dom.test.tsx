@@ -111,6 +111,9 @@ vi.mock('@/common', () => ({
       // TeamPage subscribes to conversation.listChanged on mount to refetch the
       // leader's dispatch conversation; stub it so the passive effect can run.
       listChanged: makeTeamEventChannel('conversationListChanged'),
+      // The Team tab approval badge follows stream frames and turn completion.
+      responseStream: makeTeamEventChannel('conversationResponseStream'),
+      turnCompleted: makeTeamEventChannel('conversationTurnCompleted'),
       confirmation: {
         list: { invoke: vi.fn(async () => []) },
         add: makeTeamEventChannel('confirmationAdd'),

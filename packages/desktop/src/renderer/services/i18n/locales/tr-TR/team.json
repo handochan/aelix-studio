@@ -189,5 +189,8 @@
       "idle_notification": "Boşta bildirimi",
       "shutdown_request": "Kapatma isteği"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} onay bekliyor ({{pending}} bekleyen)"
   }
 }
