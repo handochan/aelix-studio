@@ -551,8 +551,8 @@ No destination-name/address exemption is used. See
 
 ## Task evidence (Issue #59 A, first PR)
 
-The audit attaches `taskEvidence` before deleting the private traces and kernel
-events. Its schema is `aelix.outbound-task-evidence/1` and its
+The audit attaches `taskEvidence` after saving the required reports. Its
+schema is `aelix.outbound-task-evidence/1` and its
 purpose is explicitly `diagnostic-only-no-new-resolution`. This first PR does
 not change any parser classification, resolution, UDP exemption, outcome or
 recapture decision. The exact-hole resolver and dependency-preserving validation
@@ -614,13 +614,23 @@ the strace tasks belonging to the particular report. Classification issue indice
 refer to that report's unchanged `classificationIssues` array. The new evidence
 never copies comm names, executable paths, argv, environment, payloads, raw FD
 annotations or kernel object/file pointers. The existing deadline covers capture,
-required analysis and verdict writes. When recapture is required, the auditor
-deletes the first raw recording after analysis and before report writes. The
-first capture's saved verdict carries `taskEvidenceStatus=discarded-before-recapture`.
-Once the final verdict and attempt history are saved, the auditor allows up to
-30 seconds to collect task evidence and up to 10 seconds to attach it for the
-final capture. Under supervision, both limits must fit before the deadline with
-one second reserved for cleanup and exit. The final report starts with
+required analysis and verdict writes. Every capture deletes its scratch at
+the post-analysis boundary before any required report write or recapture.
+A replayed capture's saved verdict carries
+`taskEvidenceStatus=discarded-before-recapture`.
+
+The final capture hands off the already-read strace text, up to 64 MiB of
+retained text, and the kernel facts already parsed for the verdict. A missing
+parsed kernel channel can be backed by a read-only copy of up to 4 MiB of
+partial recorder inputs. The copy has its own one-second timer, pauses the
+capture timer, and needs room under supervision for the remaining capture
+budget and required history writes. The copy performs no classification or
+aggregation.
+
+Once the final verdict and attempt history are saved, the auditor allows up
+to 30 seconds to summarize the in-memory facts and 10 seconds to attach the
+result. Under supervision, both limits must fit before the deadline with one
+second reserved for cleanup and exit. The final report starts with
 `taskEvidenceStatus=unavailable`. A completed attachment atomically replaces
-the saved JSON and sets the status to `available`. SIGTERM unwinds retained
-capture files and an unfinished diagnostic write.
+the saved JSON and sets the status to `available`. SIGTERM unwinds capture
+scratch and any unfinished diagnostic write.

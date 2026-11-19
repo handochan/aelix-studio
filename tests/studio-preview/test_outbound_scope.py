@@ -98,11 +98,10 @@ class CaptureStartupFailureTests(unittest.TestCase):
 
 class RecaptureTests(unittest.TestCase):
     def run_attempts(self, root, measurements, **options):
-        @contextmanager
         def capture(_command, path, *, allow_recapture, **_options):
             code, report = measurements.pop(0)
             path.write_text(json.dumps(report))
-            yield code, None, allow_recapture and audit.should_recapture(report)
+            return code, None, allow_recapture and audit.should_recapture(report)
         path = root/'audit.json'
         with patch.object(audit, 'capture_once', side_effect=capture) as run, redirect_stdout(io.StringIO()) as output:
             code = audit.audit(['/owned/isolated-fixture'], path, **options)
@@ -319,24 +318,39 @@ class CaptureDeadlineTests(unittest.TestCase):
     def test_capture_bound_includes_report_processing_not_only_collection(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(audit,'_capture_once',side_effect=lambda *a,**k: time.sleep(1)):
             path=Path(directory)/'report.json'
-            with audit.capture_once(['/owned/command'],path,capture_timeout=0.02) as (code, collect, replay):
-                self.assertEqual((code, collect, replay), (87, None, False))
+            self.assertEqual(audit.capture_once(['/owned/command'],path,capture_timeout=0.02), (87, None, False))
             self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
 
     def test_failed_collection_analysis_keeps_its_remaining_budget(self):
         capture=Mock();capture.start.side_effect=RuntimeError('kernel_tracepoint_unavailable')
         capture.stop.return_value={'status':'failed','complete':False,'reason':'kernel_tracepoint_unavailable'}
         process=Mock(pid=123,returncode=0);process.poll.return_value=0
+        raw_directories, required_writes = [], []
+        write_text = Path.write_text
+
+        def make_capture(directory):
+            raw_directories.append(directory)
+            return capture
+
+        def observe_write(path, text, *args, **kwargs):
+            if path.name in ('timeout.json', 'timeout-whole.json'):
+                required_writes.append((path.name, any(raw.exists() for raw in raw_directories),
+                                        audit.signal.getitimer(audit.signal.ITIMER_REAL)[0]))
+            return write_text(path, text, *args, **kwargs)
+
         with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ,{},clear=True), \
              patch.object(audit.sys,'platform','linux'), patch.object(audit,'resolve_strace',return_value='/bin/true'), \
              patch.object(audit,'npm_config_paths',return_value=[]), patch.object(audit,'npm_proxy_configured',return_value=False), \
-             patch.object(audit,'Capture',return_value=capture), patch.object(audit.subprocess,'Popen',return_value=process), \
+             patch.object(audit,'Capture',side_effect=make_capture), patch.object(audit.subprocess,'Popen',return_value=process), \
+             patch.object(Path,'write_text',observe_write), \
              patch.object(audit,'measure_processes',side_effect=lambda *a,**k: time.sleep(1)):
-            path=Path(directory)/'timeout.json'
-            with audit.capture_once(['/owned/command'],path,capture_timeout=0.03) as (code, collect, replay):
-                self.assertEqual((code, collect, replay), (87, None, False))
+            path=Path(directory)/'timeout.json';whole=path.with_name('timeout-whole.json')
+            result=audit.capture_once(['/owned/command'],path,capture_timeout=0.2,whole_report_path=whole)
+            self.assertEqual(result, (87, None, False))
             self.assertIsNone(json.loads(path.read_text())['externalAttempts'])
             self.assertEqual(json.loads(path.read_text())['outcome'],'capture_timeout')
+        self.assertEqual(len(raw_directories),1)
+        self.assertEqual(required_writes, [('timeout.json',False,0), ('timeout-whole.json',False,0)])
 
     def test_capture_deadline_fails_without_extending_the_bound_for_replay(self):
         with self.assertRaisesRegex(RuntimeError,'capture_timeout'):
@@ -350,7 +364,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.report = self.root / 'audit.json'
         self.whole = self.root / 'whole.json'
 
-    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None):
+    def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None,
+                     evidence_deadline=None):
         tracer = self.root / 'strace'
         tracer.touch()
         process = Mock(pid=123, returncode=0)
@@ -389,7 +404,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             code = audit.audit(['/owned/app'], self.report, capture_timeout=1,
                                scope_executables=('/owned/app',) if scoped else (),
-                               whole_report_path=self.whole if scoped else None)
+                               whole_report_path=self.whole if scoped else None,
+                               task_evidence_deadline=evidence_deadline)
         self.assertFalse(any(directory.exists() for directory in raw_directories))
         return code, len(raw_directories)
 
@@ -431,6 +447,126 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         for name in ('audit', 'whole'):
             first = self.read(self.root / f'{name}.capture-1.json')
             self.assert_evidence_absent(first, status='discarded-before-recapture')
+
+    def test_required_writes_and_replay_follow_base_disk_and_timer_checkpoints(self):
+        from uring import network
+        summarize = network.summarize_tasks
+        write_text, write_bytes, read_text = Path.write_text, Path.write_bytes, Path.read_text
+        raw_root = self.root / 'raw'
+        raw_root.mkdir()
+
+        def capture_checkpoints(number):
+            # The base uses the capture alarm for the verdict pair, followed
+            # by the snapshots and durable attempt history outside that alarm.
+            return [('capture-start', True), ('whole.json', True), ('audit.json', True),
+                    (f'audit.capture-{number}.json', False), (f'whole.capture-{number}.json', False),
+                    ('audit.json', False)]
+
+        for traces, expected, codes in (
+            ([[]], capture_checkpoints(1), [0]),
+            ([['??? PORTABLE_UNKNOWN'], []], capture_checkpoints(1) + [('audit.json', False)] + capture_checkpoints(2), [87, 0]),
+        ):
+            with self.subTest(codes=codes):
+                checkpoints, trace_reads = [], []
+
+                def observe(operation, current_capture=None):
+                    active = audit.signal.getitimer(audit.signal.ITIMER_REAL)[0] > 0
+                    raw = tuple(sorted(path.name for path in raw_root.iterdir() if path != current_capture))
+                    temporary = tuple(sorted(path.name for path in self.root.glob('.task-evidence-*')))
+                    checkpoints.append((operation, active, raw, temporary))
+
+                def observe_writer(writer):
+                    def write(path, data, *args, **kwargs):
+                        if path.parent == self.root and path.suffix == '.json':
+                            observe(path.name)
+                        return writer(path, data, *args, **kwargs)
+                    return write
+
+                def observe_trace_read(path, *args, **kwargs):
+                    if path.name == 'network.trace':
+                        trace_reads.append(path)
+                    return read_text(path, *args, **kwargs)
+
+                def collect_after_required_writes(*args, **kwargs):
+                    # This hook already has its own timer. The required
+                    # checkpoints must all have been observed by this point.
+                    observe('summarize')
+                    return summarize(*args, **kwargs)
+
+                with patch.object(tempfile, 'tempdir', str(raw_root)), \
+                     patch.object(Path, 'write_text', observe_writer(write_text)), \
+                     patch.object(Path, 'write_bytes', observe_writer(write_bytes)), \
+                     patch.object(Path, 'read_text', observe_trace_read), \
+                     patch.object(network, 'summarize_tasks', side_effect=collect_after_required_writes):
+                    self.assertEqual(self.audit_traces(traces, scoped=True,
+                        on_capture=lambda directory: observe('capture-start', directory)), (0, len(codes)))
+                self.assertEqual(checkpoints, [(name, active, (), ()) for name, active in [*expected, ('summarize', True)]])
+                self.assertEqual([entry['exitCode'] for entry in self.read()['captureAttempts']], codes)
+                self.assertEqual(len(trace_reads), len(codes))
+
+    def test_final_verdict_fits_shared_ten_mib_capacity_with_or_without_diagnostic_budget(self):
+        from uring import network
+        capacity = 10 * 1024 * 1024
+        write_text = Path.write_text
+        raw_root = self.root / 'raw'
+        raw_root.mkdir()
+
+        def consume_last_block(directory):
+            # Emulate a full mount in the portable regression. The separate
+            # tmpfs reproduction exercises the kernel's ENOSPC behavior.
+            with (directory / 'events.raw').open('wb') as stream:
+                stream.truncate(capacity - 4096)
+            (directory / 'kernel.json').write_bytes(b'k' * 4096)
+
+        def write_receipt(path, text, *args, **kwargs):
+            if path.parent == self.root and path.suffix == '.json':
+                occupied = sum(file.stat().st_size for file in raw_root.glob('*/*') if file.is_file())
+                if occupied + len(text.encode()) > capacity:
+                    path.touch()
+                    raise OSError(errno.ENOSPC, 'simulated shared 10 MiB capture and report mount')
+            return write_text(path, text, *args, **kwargs)
+
+        for has_budget in (False, True):
+            with self.subTest(has_budget=has_budget), patch.object(tempfile, 'tempdir', str(raw_root)), \
+                 patch.object(Path, 'write_text', write_receipt), \
+                 patch.object(network, 'summarize_tasks', wraps=network.summarize_tasks) as summarize:
+                deadline = None if has_budget else time.monotonic() + 2
+                self.assertEqual(self.audit_traces([[]], scoped=True, on_start=consume_last_block,
+                                                   evidence_deadline=deadline), (0, 1))
+                self.assertEqual(summarize.call_count, int(has_budget))
+                for path in (self.report, self.whole, self.root/'audit.capture-1.json', self.root/'whole.capture-1.json'):
+                    report = self.read(path)
+                    self.assertEqual((report['externalAttempts'], report['unparsedRecords']), (0, 0))
+                    self.assertEqual(report['taskEvidenceStatus'], 'available' if has_budget else 'unavailable')
+
+    def test_partial_input_timeout_does_not_spend_the_required_capture_clock(self):
+        capture = task_capture_fixture()
+        capture.update(status='failed', complete=False, reason='kernel_tracepoint_unavailable')
+        del capture['network']
+        with patch.object(audit, 'read_task_recording', side_effect=lambda directory: time.sleep(1.4)), \
+             patch.object(audit, 'TASK_EVIDENCE_INPUT_TIMEOUT', 1.1):
+            self.assertEqual(self.audit_traces([[]], capture=capture), (87, 1))
+        report = self.read()
+        self.assertEqual(report['outcome'], 'evidence_incomplete')
+        self.assert_evidence_absent(report)
+
+    def test_partial_input_copy_reserves_required_capture_and_report_time(self):
+        capture = task_capture_fixture()
+        capture.update(status='failed', complete=False, reason='kernel_tracepoint_unavailable')
+        del capture['network']
+        # This window can fit the final summary and write alone, but not the
+        # optional input copy plus the protected receipt allowance.
+        with patch.object(audit, 'read_task_recording') as read:
+            self.assertEqual(self.audit_traces([[]], capture=capture,
+                evidence_deadline=time.monotonic() + 45), (87, 1))
+        read.assert_not_called()
+        self.assert_evidence_absent(self.read())
+
+    def test_oversized_trace_buffer_leaves_the_verdict_available(self):
+        import outboundScope
+        with patch.object(outboundScope, 'TASK_TRACE_MEMORY_LIMIT', 1):
+            self.assertEqual(self.audit_traces([[]]), (0, 1))
+        self.assert_evidence_absent(self.read())
 
     def test_slow_diagnostic_collection_preserves_a_passing_capture(self):
         from uring import network
@@ -658,8 +794,7 @@ class SupervisionTests(unittest.TestCase):
                     time.sleep(0.02)
                 self.assertTrue((root / 'diagnostic-started').exists())
                 self.assertTrue(list(root.glob('.task-evidence-*')))
-                final_capture = (root / 'captures').read_text().splitlines()[-1]
-                self.assertEqual([path.name for path in (root / 'raw').iterdir()], [final_capture])
+                self.assertEqual(list((root / 'raw').iterdir()), [])
             finally:
                 if process.poll() is None:
                     process.terminate()

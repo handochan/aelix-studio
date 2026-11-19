@@ -750,14 +750,15 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         self.assertFalse(result['tasks'][1]['identityFieldsPresent'])
 
     def test_failed_recorder_snapshot_never_promotes_authoritative_capture_fields(self):
-        from uring.capture import diagnostic_task_snapshot
+        from uring.capture import diagnostic_task_snapshot, read_task_recording
         raw=('READY\nROOT|1|100|100|10|1\n'
              'P|2|100|100|10|10|1|1|3|0\nT|5|100|100|10|10|1|0|0|1\n'
              'UNKNOWN SECRET_SENTINEL\n')
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);(root/'events.raw').write_text(raw)
             (root/'recorder.stderr').write_text('Lost 7 events\nSECRET_SENTINEL\n')
-            snapshot=diagnostic_task_snapshot(root,7)
+            recording=read_task_recording(root)
+        snapshot=diagnostic_task_snapshot(recording,7)
         failed=dict(status='failed',complete=False,pidNamespaceVerified=False,lostEvents=0,
                     reason='kernel_recorder_terminated_early')
         original=copy.deepcopy(failed)
@@ -774,7 +775,7 @@ class KernelTaskEvidenceTests(unittest.TestCase):
         self.assertNotIn('network',failed)
 
     def test_partial_snapshot_loss_is_unknown_when_recorder_stderr_is_unreadable(self):
-        from uring.capture import diagnostic_task_snapshot
+        from uring.capture import diagnostic_task_snapshot, read_task_recording
 
         for stderr in (None, b'\xff'):
             with self.subTest(stderr=stderr), tempfile.TemporaryDirectory() as directory:
@@ -782,7 +783,7 @@ class KernelTaskEvidenceTests(unittest.TestCase):
                 (root / 'events.raw').write_text('READY\n')
                 if stderr is not None:
                     (root / 'recorder.stderr').write_bytes(stderr)
-                snapshot = diagnostic_task_snapshot(root, 7)
+                snapshot = diagnostic_task_snapshot(read_task_recording(root), 7)
                 result = network.summarize_tasks({'complete':False, 'lostEvents':0}, snapshot=snapshot)
                 self.assertIsNone(result['source']['stderrEmpty'])
                 self.assertIsNone(result['source']['lostEvents'])
@@ -791,10 +792,21 @@ class KernelTaskEvidenceTests(unittest.TestCase):
     def test_snapshot_missing_or_unreadable_raw_is_unavailable_and_deadline_is_not_swallowed(self):
         from uring import capture
         with tempfile.TemporaryDirectory() as directory:
-            self.assertIsNone(capture.diagnostic_task_snapshot(Path(directory),7))
+            root=Path(directory)
+            self.assertIsNone(capture.read_task_recording(root))
             (Path(directory)/'events.raw').write_bytes(b'\xff')
-            self.assertIsNone(capture.diagnostic_task_snapshot(Path(directory),7))
+            self.assertIsNone(capture.diagnostic_task_snapshot(capture.read_task_recording(root),7))
             (Path(directory)/'events.raw').write_text('READY\n')
+            recording=capture.read_task_recording(root)
             with patch.object(capture,'parse',side_effect=RuntimeError('capture_timeout')):
                 with self.assertRaisesRegex(RuntimeError,'capture_timeout'):
-                    capture.diagnostic_task_snapshot(Path(directory),7)
+                    capture.diagnostic_task_snapshot(recording,7)
+
+    def test_partial_recording_limit_includes_raw_and_stderr(self):
+        from uring import capture
+        with tempfile.TemporaryDirectory() as directory, patch.object(capture,'TASK_RECORDING_MEMORY_LIMIT',8):
+            root=Path(directory)
+            (root/'events.raw').write_bytes(b'READY\n')
+            (root/'recorder.stderr').write_bytes(b'123')
+            with self.assertRaisesRegex(ValueError,'diagnostic_task_recording_too_large'):
+                capture.read_task_recording(root)

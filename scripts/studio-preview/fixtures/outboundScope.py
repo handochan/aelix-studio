@@ -7,6 +7,7 @@ import ipaddress
 from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 import re
+import sys
 
 NETWORK = {'connect', 'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4'}
 UDP_META = {'socket', 'unshare'}
@@ -25,6 +26,7 @@ ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 QUOTED = r'"(?:[^"\\]|\\.)*"'
 REGISTER_ENTRY = '???( <unfinished ...>'
 REGISTER_RESUME = '<... ??? resumed>) = ?'
+TASK_TRACE_MEMORY_LIMIT = 64 * 1024 * 1024
 
 
 def is_register_terminal(line, with_kernel):
@@ -61,11 +63,13 @@ def canonical(value):
 
 def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
     """Return the scoped and whole-command measurements."""
-    scoped, whole, _ = measure_processes(paths, scope_executables, require_executables, require_lifecycle, kernel_capture)
+    scoped, whole, _ = measure_processes(paths, scope_executables, require_executables, require_lifecycle, kernel_capture,
+                                        retain_task_trace=False)
     return scoped, whole
 
 
-def measure_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
+def measure_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None,
+                      *, retain_task_trace=True):
     """Scope by executable and lineage; defer optional task evidence until after measurement."""
     selected = {canonical(path) for path in scope_executables}
     required = {canonical(path) for path in require_executables}
@@ -83,6 +87,19 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
     register_holes, hole_resumes = {}, set()
     result_holes = {}
     invalid_terminal_stops = set()
+    trace_inputs = [] if retain_task_trace else None
+    trace_memory = 0
+
+    def read_trace_lines(path, legacy_pid):
+        nonlocal trace_inputs, trace_memory
+        text = path.read_text()
+        if trace_inputs is not None:
+            trace_memory += sys.getsizeof(text)
+            if trace_memory <= TASK_TRACE_MEMORY_LIMIT:
+                trace_inputs.append((legacy_pid, text))
+            else:
+                trace_inputs = None
+        return text.splitlines()
 
     def state(pid, name=None):
         if pid not in states:
@@ -300,7 +317,7 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
 
     for index, path in enumerate(sorted(paths)):
         legacy_pid = int(path.suffix[1:]) if path.suffix[1:].isdigit() else -(index+1)
-        for raw in path.read_text().splitlines():
+        for raw in read_trace_lines(path, legacy_pid):
             sequence += 1
             if not raw: continue
             prefix = PREFIX.match(raw)
@@ -662,18 +679,19 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
 
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole
+    if trace_inputs is None:
+        return scoped, whole, None
 
     def summarize(snapshot=None):
-        # Re-read strace positions under the diagnostic budget. The verdict
-        # parser has no diagnostic bookkeeping in its per-record loop.
+        # Use the verdict's input after deleting the on-disk recording. The
+        # verdict parser has no diagnostic bookkeeping in its per-record loop.
         trace_positions={}
         register_positions=defaultdict(list)
         terminal_shape_counts=defaultdict(Counter)
         seen_entries=set()
         sequence=0
-        for index,path in enumerate(sorted(paths)):
-            legacy_pid=int(path.suffix[1:]) if path.suffix[1:].isdigit() else -(index+1)
-            for raw in path.read_text().splitlines():
+        for legacy_pid, text in trace_inputs:
+            for raw in text.splitlines():
                 sequence+=1
                 if not raw: continue
                 prefix=PREFIX.match(raw)

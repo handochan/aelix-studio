@@ -170,16 +170,17 @@ controls above. The recorded 76 connects / zero packets are retained in the stud
 
 `taskEvidence` now preserves task identities/lifetimes, P/N/X/H/V counts,
 structural unmatched counts, existing ring/object outcomes and privacy-safe
-strace gap syntax before raw data deletion. See the
+strace gap syntax from in-memory inputs. See the
 [shared task-evidence schema](../studio-preview/fixtures/README.md#task-evidence-issue-59-a-first-pr).
 Unavailable data stays distinguishable from zero; PID reuse, missing userspace
 records and unmatched kernel identities remain visible even in incomplete
 captures. Each `*.capture-N.json` retains its own diagnostic status and any saved
-evidence. When a recapture is required, the first verdict carries
-`taskEvidenceStatus=discarded-before-recapture` and its raw recording is freed
-before report writes and the next capture. The audit saves the final verdict
-before collecting and attaching its evidence. Under supervision, diagnostics
-run only when their budgets fit in the remaining time reserved for work.
+evidence. The auditor frees each raw recording before required report writes
+and any recapture. A replayed capture carries
+`taskEvidenceStatus=discarded-before-recapture`. Once the final verdict is
+saved, the audit summarizes retained inputs in memory and attaches the result.
+Under supervision, diagnostics run only when their budgets fit in the remaining
+time reserved for work.
 
 This first PR is recording only. Existing resolutions, global unknown-record
 blocking, external/unknown-destination/opcode/functional failures and the narrow
