@@ -11,6 +11,7 @@ import {
   sessionHolderFromError,
   sessionHolderFromStreamMessage,
 } from '@/renderer/pages/conversation/platforms/acp/SessionHolder/sessionHolder';
+import { classifyCheckFailure } from '@/renderer/pages/conversation/platforms/acp/SessionHolder/checkFailure';
 
 const ensureError = (code: string, details?: unknown) =>
   new BackendHttpError({
@@ -103,5 +104,40 @@ describe('sessionHolderFromStreamMessage', () => {
     ['an unrelated event type', streamMessage('content', { error: { code: 'USER_AGENT_SESSION_LOCKED' } })],
   ])('ignores %s', (_label, message) => {
     expect(sessionHolderFromStreamMessage(message)).toBeNull();
+  });
+});
+
+describe('classifyCheckFailure', () => {
+  it('keeps a structured agent error with its resolution', () => {
+    const details = { message: 'auth', code: 'USER_AGENT_AUTH_REQUIRED', resolution: { kind: 'check_agent_login' } };
+    expect(classifyCheckFailure(ensureError('USER_AGENT_AUTH_REQUIRED', details))).toEqual({
+      kind: 'agent',
+      code: 'USER_AGENT_AUTH_REQUIRED',
+      resolutions: ['check_agent_login'],
+      detail: 'auth',
+    });
+  });
+
+  it('falls back to the login suggestion for an auth error without a resolution', () => {
+    expect(classifyCheckFailure(ensureError('USER_AGENT_AUTH_REQUIRED'))).toMatchObject({
+      kind: 'agent',
+      resolutions: ['check_agent_login'],
+    });
+  });
+
+  it('suggests agent login and installation for a plain upstream failure', () => {
+    expect(classifyCheckFailure(ensureError('BAD_GATEWAY'))).toEqual({
+      kind: 'upstream',
+      resolutions: ['check_agent_login', 'check_agent_installation'],
+      detail: 'upstream failure',
+    });
+  });
+
+  it.each([
+    ['a transport failure', new TypeError('Failed to fetch'), 'Failed to fetch'],
+    ['another host error', ensureError('INTERNAL_ERROR'), 'upstream failure'],
+    ['a non-error value', 'boom', undefined],
+  ])('gives no agent guidance for %s', (_label, error, detail) => {
+    expect(classifyCheckFailure(error)).toEqual({ kind: 'unknown', detail });
   });
 });

@@ -828,6 +828,7 @@
     "unconfirmed": {
       "title": "Sitzung konnte nicht geprüft werden",
       "body": "Studio konnte nicht bestätigen, dass kein anderer Prozess diese Sitzung verwendet. Senden und Entwurfsbox sind pausiert. Prüfen Sie erneut, um fortzufahren."
-    }
+    },
+    "paused": "Senden und Entwurfsbox bleiben pausiert, bis eine Prüfung erfolgreich ist."
   }
 }

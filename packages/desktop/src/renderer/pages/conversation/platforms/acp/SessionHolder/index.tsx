@@ -6,7 +6,7 @@
 
 import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
-import SessionHolderBar from './SessionHolderBar';
+import SessionHolderBar, { useHolderNotice } from './SessionHolderBar';
 import { useSessionHolder, type SessionHolderState } from './useSessionHolder';
 
 type SessionHolderGateProps = {
@@ -23,13 +23,13 @@ type SessionHolderGateProps = {
 
 const isBlockedNotice = (status: SessionHolderState['status']) => status === 'held' || status === 'unconfirmed';
 
-const useAnnouncement = ({ status, holder, recheckState }: SessionHolderState): string => {
+const useAnnouncement = ({ status, holder, recheckState, failure }: SessionHolderState): string => {
   const { t } = useTranslation();
+  const notice = useHolderNotice(holder, failure);
   if (!isBlockedNotice(status) || recheckState === 'checking') return '';
   if (recheckState === 'stillHeld') return t('conversation.sessionHolder.stillHeld');
-  const variant = holder?.kind ?? 'unconfirmed';
-  const notice = `${t(`conversation.sessionHolder.${variant}.title`)}. ${t(`conversation.sessionHolder.${variant}.body`)}`;
-  return recheckState === 'failed' && holder ? `${notice} ${t('conversation.sessionHolder.checkFailed')}` : notice;
+  const text = [`${notice.title}.`, notice.body, ...notice.hints].join(' ');
+  return recheckState === 'failed' && holder ? `${text} ${t('conversation.sessionHolder.checkFailed')}` : text;
 };
 
 /**
@@ -43,7 +43,7 @@ const useAnnouncement = ({ status, holder, recheckState }: SessionHolderState): 
 const SessionHolderGate: React.FC<SessionHolderGateProps> = ({ conversationId, onWritable, children }) => {
   const state = useSessionHolder(conversationId, onWritable);
   const announcement = useAnnouncement(state);
-  const { status, holder, recheckState, errorDetail, recheck } = state;
+  const { status, holder, recheckState, failure, recheck } = state;
   const blocked = isBlockedNotice(status);
   const sendBoxRef = useRef<HTMLDivElement>(null);
   const previousStatusRef = useRef(status);
@@ -62,7 +62,7 @@ const SessionHolderGate: React.FC<SessionHolderGateProps> = ({ conversationId, o
         {announcement}
       </span>
       {blocked && (
-        <SessionHolderBar holder={holder} recheckState={recheckState} errorDetail={errorDetail} onRecheck={recheck} />
+        <SessionHolderBar holder={holder} recheckState={recheckState} failure={failure} onRecheck={recheck} />
       )}
       {/* The send box stays mounted but hidden while blocked; its Draft Box is held (see
           AcpSendBox `holdExecution`) and never detaches to the background runner. */}

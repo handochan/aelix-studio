@@ -153,6 +153,63 @@ describe('SessionHolderGate', () => {
     expect(onWritable).toHaveBeenCalledTimes(1);
   });
 
+  it('shows the existing login guidance while blocked when the agent needs authentication', async () => {
+    mocks.ensure.mockRejectedValueOnce(
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/conversations/c1/runtime/ensure',
+        status: 502,
+        body: {
+          code: 'USER_AGENT_AUTH_REQUIRED',
+          error: 'auth required',
+          details: {
+            message: 'auth required',
+            code: 'USER_AGENT_AUTH_REQUIRED',
+            resolution: { kind: 'check_agent_login' },
+          },
+        },
+      })
+    );
+    renderGate();
+    await flush();
+    const bar = within(screen.getByTestId('session-holder-bar'));
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('agent');
+    expect(bar.getByText('conversation.agentError.codes.USER_AGENT_AUTH_REQUIRED.title')).toBeTruthy();
+    expect(bar.getByText('conversation.agentError.codes.USER_AGENT_AUTH_REQUIRED.body')).toBeTruthy();
+    expect(
+      bar.getByText('conversation.agentError.resolutionPrefixconversation.agentError.resolution.check_agent_login')
+    ).toBeTruthy();
+    expect(bar.getByText('conversation.sessionHolder.paused')).toBeTruthy();
+    expect(bar.queryByText('conversation.sessionHolder.unconfirmed.title')).toBeNull();
+    expect(statusText()).toContain('conversation.agentError.codes.USER_AGENT_AUTH_REQUIRED.title');
+    expectHeldSendBox();
+  });
+
+  it('suggests agent login and installation when the agent fails to start without details', async () => {
+    mocks.ensure.mockRejectedValueOnce(
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/conversations/c1/runtime/ensure',
+        status: 502,
+        body: { code: 'BAD_GATEWAY', error: 'Upstream service unavailable.' },
+      })
+    );
+    renderGate();
+    await flush();
+    const bar = within(screen.getByTestId('session-holder-bar'));
+    expect(bar.getByText('conversation.sessionHolder.unconfirmed.title')).toBeTruthy();
+    expect(
+      bar.getByText('conversation.agentError.resolutionPrefixconversation.agentError.resolution.check_agent_login')
+    ).toBeTruthy();
+    expect(
+      bar.getByText(
+        'conversation.agentError.resolutionPrefixconversation.agentError.resolution.check_agent_installation'
+      )
+    ).toBeTruthy();
+    expect(bar.getByText('Upstream service unavailable.')).toBeTruthy();
+    expectHeldSendBox();
+  });
+
   it('stays read-only when returning to a locked conversation and the check fails to connect', async () => {
     mocks.ensure.mockRejectedValueOnce(lockError('native'));
     const first = renderGate();

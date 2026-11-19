@@ -827,6 +827,7 @@
     "unconfirmed": {
       "title": "Couldn't check this session",
       "body": "Studio couldn't confirm that no other process is using this session, so sending and the Draft Box are paused. Check again to continue."
-    }
+    },
+    "paused": "Sending and the Draft Box stay paused until a check succeeds."
   }
 }

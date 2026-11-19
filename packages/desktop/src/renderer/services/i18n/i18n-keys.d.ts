@@ -842,6 +842,7 @@ export type I18nKey =
   | 'conversation.sessionHolder.native.title'
   | 'conversation.sessionHolder.other.body'
   | 'conversation.sessionHolder.other.title'
+  | 'conversation.sessionHolder.paused'
   | 'conversation.sessionHolder.readOnly'
   | 'conversation.sessionHolder.recheck'
   | 'conversation.sessionHolder.stillHeld'

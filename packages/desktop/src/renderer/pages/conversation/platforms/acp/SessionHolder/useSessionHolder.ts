@@ -5,9 +5,9 @@
  */
 
 import { ipcBridge } from '@/common';
-import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { classifyCheckFailure, type CheckFailure } from './checkFailure';
 import { sessionHolderFromError, sessionHolderFromStreamMessage, type SessionHolder } from './sessionHolder';
 
 /**
@@ -25,8 +25,8 @@ type State = {
   status: SessionHolderStatus;
   holder: SessionHolder | null;
   recheckState: SessionRecheckState;
-  /** Message of the last failure that carried no lock result. */
-  errorDetail?: string;
+  /** The last failure that carried no lock result. */
+  failure?: CheckFailure;
 };
 
 export type SessionHolderState = State & { recheck: () => void };
@@ -52,17 +52,12 @@ const initialState = (conversationId: string): State => {
   return holder ? held(holder) : CHECKING;
 };
 
-const errorDetailOf = (error: unknown): string | undefined => {
-  const detail = isBackendHttpError(error) ? error.backendMessage : error instanceof Error ? error.message : '';
-  return detail.trim() || undefined;
-};
-
 /** A failure without a lock result never unblocks: it keeps a known holder or stays unconfirmed. */
 const withoutResult = (current: State, error: unknown): State => ({
   status: current.holder ? 'held' : 'unconfirmed',
   holder: current.holder,
   recheckState: 'failed',
-  errorDetail: errorDetailOf(error),
+  failure: classifyCheckFailure(error),
 });
 
 /**

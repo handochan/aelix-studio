@@ -828,6 +828,7 @@
     "unconfirmed": {
       "title": "No se pudo comprobar esta sesión",
       "body": "Studio no pudo confirmar que ningún otro proceso use esta sesión, así que el envío y la bandeja de borradores están en pausa. Compruebe de nuevo para continuar."
-    }
+    },
+    "paused": "El envío y la bandeja de borradores seguirán en pausa hasta que una comprobación tenga éxito."
   }
 }

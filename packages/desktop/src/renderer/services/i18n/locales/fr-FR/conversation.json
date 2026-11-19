@@ -827,6 +827,7 @@
     "unconfirmed": {
       "title": "Impossible de vérifier cette session",
       "body": "Studio n'a pas pu confirmer qu'aucun autre processus n'utilise cette session : l'envoi et la boîte de brouillons sont en pause. Vérifiez à nouveau pour continuer."
-    }
+    },
+    "paused": "L'envoi et la boîte de brouillons restent en pause jusqu'à ce qu'une vérification réussisse."
   }
 }

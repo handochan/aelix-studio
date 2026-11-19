@@ -833,6 +833,7 @@
     "unconfirmed": {
       "title": "Não foi possível verificar esta sessão",
       "body": "O Studio não conseguiu confirmar que nenhum outro processo está usando esta sessão, então o envio e a caixa de rascunhos estão pausados. Verifique novamente para continuar."
-    }
+    },
+    "paused": "O envio e a caixa de rascunhos ficam pausados até que uma verificação seja bem-sucedida."
   }
 }

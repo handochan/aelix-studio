@@ -829,6 +829,7 @@
     "unconfirmed": {
       "title": "Bu oturum denetlenemedi",
       "body": "Studio bu oturumu başka bir işlemin kullanmadığını doğrulayamadı; gönderme ve taslak kutusu duraklatıldı. Devam etmek için yeniden denetleyin."
-    }
+    },
+    "paused": "Bir denetim başarılı olana kadar gönderme ve taslak kutusu duraklatılmış kalır."
   }
 }
