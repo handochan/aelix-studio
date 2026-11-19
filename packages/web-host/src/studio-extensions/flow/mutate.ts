@@ -1,10 +1,13 @@
+import { randomBytes } from 'node:crypto';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { isAdapterReference } from '../inspect/metadata.js';
 import { contentDistributions, readSite, type SiteSnapshot } from '../inspect/site.js';
 import type { WheelFacts } from '../inspect/wheel.js';
 import { runToExit, type RunResult } from '../process.js';
-import { discardStage, promoteImport, stageImport, type ImportSet } from '../store/artifacts.js';
+import { discardStage, promoteImport, readStoredImport, stageImport, type ImportSet } from '../store/artifacts.js';
 import { collect, recover } from '../store/cleanup.js';
 import {
   ensureLayout,
@@ -36,6 +39,8 @@ import {
   type ExtensionPhase,
   type ExtensionRollback,
   type ExtensionSource,
+  type FileExtensionSource,
+  type OnlineExtensionSource,
 } from '../types.js';
 import {
   chooseForms,
@@ -60,10 +65,11 @@ import {
   type LoadExpectation,
 } from './gate.js';
 import { checkImport } from './importCheck.js';
+import { installedGitOrigin, matchesVersion, onlineIndex } from './onlineSource.js';
 
 export type MutationRequest =
-  | { action: 'install'; source: ExtensionSource }
-  | { action: 'update'; name: string; source: ExtensionSource }
+  | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
+  | { action: 'update'; name: string; source: FileExtensionSource }
   | { action: 'remove'; name: string };
 
 export type MutationHooks = {
@@ -116,7 +122,8 @@ function runManagement(
   candidate: Candidate,
   env: Record<string, string>,
   native: string[],
-  timeoutMs: number
+  timeoutMs: number,
+  cwd = candidate.paths.directory
 ): Promise<RunResult> {
   return runToExit(
     context.spawn,
@@ -124,7 +131,7 @@ function runManagement(
       command: candidate.paths.python,
       args: ['-I', '-B', '-X', 'utf8', context.bundle.launcher, 'native', ...native],
       env,
-      cwd: candidate.paths.directory,
+      cwd,
     },
     { timeoutMs, signal: context.signal }
   );
@@ -166,7 +173,9 @@ async function manifestBindings(
   return bound;
 }
 
-type Preparation = { change: ChangeRequest; native: string[]; importSet?: ImportSet; wheels: WheelFacts[] };
+type Installer = { native: string[]; importSet?: ImportSet; wheels: WheelFacts[] };
+type Preparation = Installer & { change: ChangeRequest };
+type OnlineInstaller = Installer & { source: OnlineExtensionSource };
 
 /** Work out what the request means against the current generation, and store an import. */
 async function prepare(
@@ -175,7 +184,7 @@ async function prepare(
   request: MutationRequest,
   before: SiteSnapshot,
   bundle: BundleFacts
-): Promise<Preparation> {
+): Promise<Preparation | OnlineInstaller> {
   const name = request.action === 'install' ? undefined : request.name;
   const resolution = name === undefined ? undefined : resolveDistribution(before, name);
   if (resolution && 'ambiguous' in resolution)
@@ -195,6 +204,16 @@ async function prepare(
       native: ['extension', 'remove', handle, '--yes'],
       wheels: [],
     };
+  }
+  if (request.source.kind !== 'file') {
+    const source = request.source;
+    const native = ['extension', 'install'];
+    if (source.kind === 'index') {
+      native.push(source.version === undefined ? source.name : `${source.name}==${source.version}`);
+      // A flag also prevents native from falling back to registered extra indexes.
+      native.push('--index-url', onlineIndex(source));
+    } else native.push(source.url);
+    return { native: [...native, '--yes'], source, wheels: [] };
   }
   const staged = await stageImport(context.layout, request.source, lock);
   try {
@@ -223,7 +242,7 @@ async function prepare(
 }
 
 /** The record of a verified candidate: what it holds and where each distribution came from. */
-function describeCandidate(
+function describeMutation(
   context: FlowContext,
   candidate: Candidate,
   parent: GenerationRecord | null,
@@ -233,7 +252,8 @@ function describeCandidate(
   bound: Map<string, boolean>,
   forms: Map<string, ExtensionForm>,
   launch: LaunchForm,
-  createdAt: Date
+  createdAt: Date,
+  onlineOrigin?: ExtensionOrigin
 ): GenerationRecord {
   const imported = (name: string, version: string): ExtensionOrigin | undefined => {
     const wheel = preparation.wheels.find((facts) => facts.name === name && facts.version === version);
@@ -247,18 +267,46 @@ function describeCandidate(
     const inherited = parent?.distributions[name];
     // An untouched distribution keeps its origin; one this change wrote came from the import set.
     const untouched = inherited?.version === version && inherited.recordSha256 === recordSha256;
-    const origin = untouched ? inherited.origin : imported(name, version);
+    const origin =
+      name === preparation.change.distribution && onlineOrigin
+        ? onlineOrigin
+        : untouched
+          ? inherited.origin
+          : imported(name, version);
     distributions[name] = { version, recordSha256, ...(origin ? { origin } : {}) };
   }
+  const operation = {
+    action: request.action,
+    target: request.action === 'remove' ? request.name : preparation.change.distribution,
+  };
+  return describeCandidate(
+    context,
+    candidate,
+    parent,
+    operation,
+    distributions,
+    snapshot,
+    { bound, forms, launch },
+    createdAt
+  );
+}
+
+function describeCandidate(
+  context: FlowContext,
+  candidate: Candidate,
+  parent: GenerationRecord | null,
+  operation: GenerationRecord['operation'],
+  distributions: GenerationRecord['distributions'],
+  snapshot: SiteSnapshot,
+  { bound, forms, launch }: Awaited<ReturnType<typeof verifyCandidate>>,
+  createdAt: Date
+): GenerationRecord {
   return newGenerationRecord({
     generation: candidate.id,
     parent: parent?.generation ?? null,
     createdAt: createdAt.toISOString(),
     binding: context.bundle.binding,
-    operation: {
-      action: request.action,
-      target: request.action === 'remove' ? request.name : preparation.change.distribution,
-    },
+    operation,
     distributions,
     extensions: Object.fromEntries(
       [...snapshot.extensions].map(([name, extension]) => {
@@ -347,6 +395,47 @@ async function loadOrRefuse(
   if (reasons.length > 0) throw new ExtensionFailure('LOAD_ERROR', reasons);
 }
 
+async function verifyCandidate(
+  context: FlowContext,
+  candidate: Candidate,
+  env: Record<string, string>,
+  snapshot: SiteSnapshot,
+  expected: ExpectedExtensions,
+  unboundDistribution?: string
+): Promise<{ bound: Map<string, boolean>; forms: Map<string, ExtensionForm>; launch: LaunchForm }> {
+  const bound = await manifestBindings(context, candidate, env, expected);
+  // The installer's verdict stands even when `extension verify` does not repeat it.
+  if (unboundDistribution !== undefined && [...bound.values()].every(Boolean))
+    for (const [name, extension] of snapshot.extensions)
+      if (extension.distribution === unboundDistribution) bound.set(name, false);
+  const forms = await chooseForms(context, candidate, snapshot, expected, bound);
+  const launch = launchFormOf(expected, forms);
+  const unsupported = launch.modules.filter((reference) => !isAdapterReference(reference));
+  if (unsupported.length > 0)
+    throw new ExtensionFailure(
+      'LOAD_ERROR',
+      unsupported.map((reference) => `${reference} cannot be passed to a conversation by module reference`)
+    );
+  await writePacks(candidate, forms);
+  // Every extension by reference, in the order conversations get them: imports each and runs
+  // its setup() now, lazy pack or not. Without packs this is exactly what conversations get.
+  const byReference = new Map(
+    [...expected].map(([name, reference]): [string, string] => [name, conversationReference(reference)])
+  );
+  const references = [...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? '');
+  await loadOrRefuse(context, candidate, references, byReference);
+  // Then exactly the way new conversations get them, which binds the manifests of the packs.
+  if (launch.packs)
+    await loadOrRefuse(
+      context,
+      candidate,
+      launchArguments(candidate.paths.directory, launch),
+      loadedNames(expected, forms)
+    );
+
+  return { bound, forms, launch };
+}
+
 /** Whether the pointer in effect names a generation as current or previous: then clean-up keeps it. */
 async function inEffect(layout: FlowContext['layout'], generation: string): Promise<boolean> {
   const pointer = await readPointer(layout).then(
@@ -359,6 +448,32 @@ async function inEffect(layout: FlowContext['layout'], generation: string): Prom
 /** What ended a change under a lock: the loss of the lock outranks whatever it caused. */
 function outcome(error: unknown, lock: MutationLock): unknown {
   return lock.lost() ? new ExtensionFailure('CONFLICT', ['the lock was lost while the change was in progress']) : error;
+}
+
+/** Publish a verified candidate only if the pointer and lock still belong to this change. */
+async function commitCandidate(
+  context: FlowContext,
+  lock: MutationLock,
+  base: PointerState,
+  record: GenerationRecord
+): Promise<void> {
+  const { layout } = context;
+  const revision = base.pointer?.revision ?? 0;
+  await writeGenerationRecord(layout, record);
+  const latest = await readPointer(layout);
+  if (
+    lock.lost() ||
+    (latest.pointer?.revision ?? 0) !== revision ||
+    latest.pointer?.generation !== base.pointer?.generation
+  )
+    throw new ExtensionFailure('CONFLICT', ['the current generation changed while this one was prepared']);
+  if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+  await switchPointer(
+    layout,
+    newPointer(record.generation, base.pointer?.generation ?? null, revision + 1, record.binding),
+    base.pointer,
+    lock
+  );
 }
 
 /**
@@ -387,19 +502,24 @@ export async function mutate(
   let unfinished: string | undefined;
   try {
     const { bundle, layout, platform } = guarded;
-    if (base.record && !sameBinding(base.record.binding, bundle.binding))
+    const stale = base.record && !sameBinding(base.record.binding, bundle.binding);
+    if (stale && !(request.action === 'install' && request.replaceIncompatible))
       throw new ExtensionFailure('BUNDLE_CHANGED', ['the installed extensions belong to another Studio runtime']);
+    // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
+    const parent = stale ? null : base.record;
     const facts = await readBundleFacts(bundle);
-    const before = base.record
-      ? await readSite(generationPaths(layout, base.record.generation, base.record.binding.pythonMinor, platform).site)
+    const before = parent
+      ? await readSite(generationPaths(layout, parent.generation, parent.binding.pythonMinor, platform).site)
       : EMPTY_SITE;
-    const preparation = await prepare(guarded, lock, request, before, facts);
+    const prepared = await prepare(guarded, lock, request, before, facts);
+    const source = 'source' in prepared ? prepared.source : undefined;
+    const offlineImport = prepared.importSet !== undefined;
 
     hooks.progress('preparing');
     const constraintsUrl = await writeConstraints(layout, bundle, facts);
     const revision = base.pointer?.revision ?? 0;
     unfinished = generationId(revision + 1, hooks.suffix());
-    const candidate = await createCandidate(guarded, unfinished, base.record);
+    const candidate = await createCandidate(guarded, unfinished, parent);
     const refuse = (problems: { code: ExtensionFailureCode; message: string }[], output?: string): void => {
       if (problems.length > 0)
         throw new ExtensionFailure(
@@ -408,19 +528,25 @@ export async function mutate(
           output
         );
     };
-    refuse((await scanGeneration(candidate, facts)).problems);
+    refuse((await scanGeneration(candidate, facts, offlineImport)).problems);
 
     hooks.progress('installing');
     const management = { agentDirectory: candidate.paths.agent, nativeSite: bundle.nativeSite, constraintsUrl };
+    // native treats an existing relative path as a local install, even when it looks like a package name.
+    const cwd = source ? path.join(candidate.paths.directory, 'install-work') : candidate.paths.directory;
+    const home = path.join(candidate.paths.directory, 'install-home');
+    if (source) await Promise.all([mkdir(cwd), mkdir(home, { mode: 0o700 })]);
     const installer = await runManagement(
       guarded,
       candidate,
       managementEnvironment(guarded.base, platform, {
         ...management,
-        ...(preparation.importSet ? { offlineLinksUrl: pathToFileURL(preparation.importSet.directory).href } : {}),
+        ...(prepared.importSet ? { offlineLinksUrl: pathToFileURL(prepared.importSet.directory).href } : {}),
+        ...(source ? { online: { indexUrl: onlineIndex(source), home, work: cwd } } : {}),
       }),
-      preparation.native,
-      guarded.timeouts.installerMs
+      prepared.native,
+      guarded.timeouts.installerMs,
+      cwd
     );
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
     // native's "did not run" and "not bound", so every non-zero code is a plain failure.
@@ -431,76 +557,54 @@ export async function mutate(
         INSTALLED_NOT_BOUND,
       ]);
     // The candidate's interpreter is not started again unless this second scan passes.
-    const scan = await scanGeneration(candidate, facts);
+    const scan = await scanGeneration(candidate, facts, offlineImport);
     refuse(scan.problems, installer.output);
 
     hooks.progress('verifying');
+    let onlineOrigin: ExtensionOrigin | undefined;
+    let preparation: Preparation;
+    if ('change' in prepared) preparation = prepared;
+    else if (prepared.source.kind === 'git') {
+      const { distribution, origin } = await installedGitOrigin(
+        prepared.source,
+        candidate.paths.site,
+        before,
+        scan.snapshot
+      );
+      preparation = { ...prepared, change: { action: 'install', distribution } };
+      onlineOrigin = origin;
+    } else {
+      const { name, version } = prepared.source;
+      preparation = { ...prepared, change: { action: 'install', distribution: name, version, matchesVersion } };
+      if (before.distributions.get(name)?.recordSha256 !== scan.snapshot.distributions.get(name)?.recordSha256)
+        onlineOrigin = { kind: 'index', indexUrl: onlineIndex(prepared.source) };
+    }
     const gate = compareRequest(preparation.change, before, scan.snapshot);
     if (!gate.changed) throw new ExtensionFailure('NO_CHANGE', ['nothing was installed or removed'], installer.output);
     if (gate.problems.length > 0) throw new ExtensionFailure('REQUEST_MISMATCH', gate.problems, installer.output);
-    const bound = await manifestBindings(
+    const { bound, forms, launch } = await verifyCandidate(
       guarded,
       candidate,
       managementEnvironment(guarded.base, platform, management),
-      gate.expected
+      scan.snapshot,
+      gate.expected,
+      installer.code === INSTALLED_NOT_BOUND ? preparation.change.distribution : undefined
     );
-    // The installer's verdict stands even when `extension verify` does not repeat it.
-    if (installer.code === INSTALLED_NOT_BOUND && [...bound.values()].every(Boolean))
-      for (const [name, extension] of scan.snapshot.extensions)
-        if (extension.distribution === preparation.change.distribution) bound.set(name, false);
-    const forms = await chooseForms(guarded, candidate, scan.snapshot, gate.expected, bound);
-    const launch = launchFormOf(gate.expected, forms);
-    const unsupported = launch.modules.filter((reference) => !isAdapterReference(reference));
-    if (unsupported.length > 0)
-      throw new ExtensionFailure(
-        'LOAD_ERROR',
-        unsupported.map((reference) => `${reference} cannot be passed to a conversation by module reference`)
-      );
-    await writePacks(candidate, forms);
-    // Every extension by reference, in the order conversations get them: imports each and runs
-    // its setup() now, lazy pack or not. Without packs this is exactly what conversations get.
-    const byReference = new Map(
-      [...gate.expected].map(([name, reference]): [string, string] => [name, conversationReference(reference)])
-    );
-    const references = [...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? '');
-    await loadOrRefuse(guarded, candidate, references, byReference);
-    // Then exactly the way new conversations get them, which binds the manifests of the packs.
-    if (launch.packs)
-      await loadOrRefuse(
-        guarded,
-        candidate,
-        launchArguments(candidate.paths.directory, launch),
-        loadedNames(gate.expected, forms)
-      );
 
-    const record = describeCandidate(
+    const record = describeMutation(
       guarded,
       candidate,
-      base.record,
+      parent,
       request,
       preparation,
       scan.snapshot,
       bound,
       forms,
       launch,
-      hooks.now()
+      hooks.now(),
+      onlineOrigin
     );
-    await writeGenerationRecord(layout, record);
-    // The lock is the first guard, the revision the second (ADR 5.6).
-    const latest = await readPointer(layout);
-    if (
-      lock.lost() ||
-      (latest.pointer?.revision ?? 0) !== revision ||
-      latest.pointer?.generation !== base.pointer?.generation
-    )
-      throw new ExtensionFailure('CONFLICT', ['the current generation changed while this one was prepared']);
-    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
-    await switchPointer(
-      layout,
-      newPointer(candidate.id, base.pointer?.generation ?? null, revision + 1, bundle.binding),
-      base.pointer,
-      lock
-    );
+    await commitCandidate(guarded, lock, base, record);
     unfinished = undefined;
     return { generation: candidate.id, revision: revision + 1 };
   } catch (error) {
@@ -518,10 +622,185 @@ export async function mutate(
   }
 }
 
+/** Read a rebuild plan from preserved wheel bytes, before starting any installer. */
+async function replayPlan(
+  context: FlowContext,
+  old: GenerationRecord,
+  facts: BundleFacts
+): Promise<{ targets: string[]; links: string }> {
+  const roots = new Set(Object.values(old.extensions).map((entry) => entry.distribution));
+  const targets = [];
+  const links = new Set<string>();
+  for (const name of roots) {
+    const origin = old.distributions[name]?.origin;
+    // A bundle upgrade is not consent to fetch an index or a repository again.
+    if (origin?.kind !== 'file') throw new ExtensionFailure('BUNDLE_CHANGED');
+    // oxlint-disable-next-line no-await-in-loop -- verify one wheel set at a time
+    const set = await readStoredImport(context.layout, origin);
+    if (!set) throw new ExtensionFailure('BUNDLE_CHANGED');
+    const files = Object.keys(set.digests).map((wheel) => path.join(set.directory, wheel));
+    // oxlint-disable-next-line no-await-in-loop -- same static checks as a normal offline import
+    const check = await checkImport(set.target, files, facts);
+    if (
+      check.problems.length > 0 ||
+      check.target?.name !== name ||
+      check.target.version !== old.distributions[name].version
+    )
+      throw new ExtensionFailure('BUNDLE_CHANGED');
+    targets.push(set.target);
+    links.add(pathToFileURL(set.directory).href);
+  }
+  return { targets, links: [...links].join(' ') };
+}
+
+function assertSafeScan(scan: Awaited<ReturnType<typeof scanGeneration>>): SiteSnapshot {
+  if (scan.problems.length > 0)
+    throw new ExtensionFailure(
+      scan.problems[0].code,
+      scan.problems.map((problem) => problem.message)
+    );
+  return scan.snapshot;
+}
+
+async function verifyReboundCandidate(
+  context: FlowContext,
+  candidate: Candidate,
+  old: GenerationRecord,
+  facts: BundleFacts,
+  replay?: Awaited<ReturnType<typeof replayPlan>>
+): Promise<GenerationRecord> {
+  const { bundle, layout, platform } = context;
+  const env = managementEnvironment(context.base, platform, {
+    agentDirectory: candidate.paths.agent,
+    nativeSite: bundle.nativeSite,
+    constraintsUrl: await writeConstraints(layout, bundle, facts),
+    offlineLinksUrl: replay?.links || undefined,
+  });
+  let snapshot = assertSafeScan(await scanGeneration(candidate, facts, replay !== undefined));
+  for (const target of replay?.targets ?? []) {
+    /* oxlint-disable no-await-in-loop -- each install must pass its scan before another interpreter starts */
+    const installer = await runManagement(
+      context,
+      candidate,
+      env,
+      ['--offline', 'extension', 'install', target, '--yes'],
+      context.timeouts.installerMs
+    );
+    requireSuccess(installer, { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN' }, 'the installer', [
+      0,
+      INSTALLED_NOT_BOUND,
+    ]);
+    snapshot = assertSafeScan(await scanGeneration(candidate, facts));
+    /* oxlint-enable no-await-in-loop */
+  }
+  const expected: ExpectedExtensions = new Map();
+  for (const [name, entry] of Object.entries(old.extensions)) {
+    const actual = snapshot.extensions.get(name);
+    if (
+      actual?.reference !== entry.reference ||
+      actual.distribution !== entry.distribution ||
+      !old.distributions[entry.distribution] ||
+      snapshot.distributions.get(entry.distribution)?.version !== old.distributions[entry.distribution].version
+    )
+      throw new ExtensionFailure('REQUEST_MISMATCH', [`the new runtime did not preserve extension ${name}`]);
+    expected.set(name, entry.reference);
+  }
+  if (expected.size !== snapshot.extensions.size) throw new ExtensionFailure('REQUEST_MISMATCH');
+  const distributions: GenerationRecord['distributions'] = {};
+  for (const { name, version, recordSha256 } of contentDistributions(snapshot)) {
+    const prior = old.distributions[name];
+    if (!replay && (prior?.version !== version || prior.recordSha256 !== recordSha256))
+      throw new ExtensionFailure('GENERATION_MODIFIED');
+    const origin = prior?.version === version ? prior.origin : undefined;
+    distributions[name] = { version, recordSha256, ...(origin ? { origin } : {}) };
+  }
+  if (!replay && Object.keys(distributions).length !== Object.keys(old.distributions).length)
+    throw new ExtensionFailure('GENERATION_MODIFIED');
+  // Import alone can miss a dependency used only after setup. Ask pip to check the installed
+  // metadata using both the new bundle and the candidate on its search path.
+  const dependencies = await runToExit(
+    context.spawn,
+    {
+      command: candidate.paths.python,
+      args: ['-P', '-B', '-m', 'pip', 'check'],
+      env,
+      cwd: candidate.paths.directory,
+    },
+    { timeoutMs: context.timeouts.verifyMs, signal: context.signal }
+  );
+  requireSuccess(dependencies, { 1: 'VERIFICATION_FAILED' }, 'the dependency check');
+  const verified = await verifyCandidate(context, candidate, env, snapshot, expected);
+  return describeCandidate(context, candidate, old, old.operation, distributions, snapshot, verified, new Date());
+}
+
+/** Try to move a whole generation to the current bundle. The old generation stays intact. */
+async function rebind(
+  context: FlowContext,
+  lock: MutationLock,
+  base: PointerState,
+  old: GenerationRecord
+): Promise<GenerationRecord | undefined> {
+  const facts = await readBundleFacts(context.bundle);
+  const current = context.bundle.binding;
+  const canCopy = old.binding.target === current.target && old.binding.pythonMinor === current.pythonMinor;
+  for (const copy of canCopy ? [true, false] : [false]) {
+    const id = generationId((base.pointer?.revision ?? 0) + 1, randomBytes(2).toString('hex'));
+    let preparing = false;
+    /* oxlint-disable no-await-in-loop -- copy first, then an independent empty candidate for replay */
+    try {
+      const replay = copy ? undefined : await replayPlan(context, old, facts);
+      preparing = true;
+      const candidate = await createCandidate(context, id, copy ? old : null, copy);
+      return await verifyReboundCandidate(context, candidate, old, facts, replay);
+    } catch (error) {
+      if (lock.lost()) throw outcome(error, lock);
+      if (preparing && (error as NodeJS.ErrnoException).code !== 'EEXIST') await lock.remove(`generations/${id}`);
+      if (context.signal?.aborted || !(error instanceof ExtensionFailure)) throw error;
+    }
+    /* oxlint-enable no-await-in-loop */
+  }
+  return undefined;
+}
+
+async function switchRebound(
+  context: FlowContext,
+  lock: MutationLock,
+  base: PointerState,
+  old: GenerationRecord
+): Promise<GenerationRecord | undefined> {
+  const guarded = underLock(context, lock);
+  const record = await rebind(guarded, lock, base, old);
+  if (!record) return undefined;
+  try {
+    await commitCandidate(guarded, lock, base, record);
+  } catch (error) {
+    if (!(await inEffect(context.layout, record.generation)))
+      await lock.remove(`generations/${record.generation}`).catch(() => {});
+    throw outcome(error, lock);
+  }
+  await tidy(guarded, lock);
+  return record;
+}
+
+/** Startup hook for the helper owner. A failed move keeps the old pointer and its reinstall status. */
+export async function reconcileBundle(context: FlowContext): Promise<ExtensionListing> {
+  await verifyLayout(context.layout);
+  const current = await readPointer(context.layout);
+  if (!current.record || sameBinding(current.record.binding, context.bundle.binding)) return describe(context);
+  const { lock, base } = await begin(context);
+  try {
+    if (base.record && !sameBinding(base.record.binding, context.bundle.binding))
+      await switchRebound(context, lock, base, base.record);
+    return await describe(context);
+  } finally {
+    await lock.release();
+  }
+}
+
 /**
  * Go back one step (ADR 5.7): make the previous generation current. The pointer is read
- * after the lock is taken, never before. A previous generation bound to another bundle
- * would have to be fitted to this one first, which is not part of this piece.
+ * after the lock is taken, never before. When the previous generation belongs to another
+ * bundle, move it into a new, verified generation before switching.
  */
 export async function rollback(context: FlowContext): Promise<ExtensionRollback> {
   const { lock, base } = await begin(context);
@@ -531,8 +810,12 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
       : undefined;
     if (!base.pointer || !target)
       throw new ExtensionFailure('NOTHING_TO_ROLL_BACK', ['there is no previous generation']);
-    if (!sameBinding(target.binding, context.bundle.binding))
-      throw new ExtensionFailure('BUNDLE_CHANGED', ['the previous generation belongs to another Studio runtime']);
+    if (!sameBinding(target.binding, context.bundle.binding)) {
+      const record = await switchRebound(context, lock, base, target);
+      if (!record) throw new ExtensionFailure('BUNDLE_CHANGED', ['the previous generation did not fit the new bundle']);
+      return { current: record.generation, previous: base.pointer.generation, revision: base.pointer.revision + 1 };
+    }
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
     const next = newPointer(target.generation, base.pointer.generation, base.pointer.revision + 1, target.binding);
     await switchPointer(context.layout, next, base.pointer, lock);
     await tidy(context, lock);
@@ -571,7 +854,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
     previous: pointer.previous,
     revision: pointer.revision,
     appliesAt: 'new_session',
-    rollbackAvailable: previous !== undefined && sameBinding(previous.binding, context.bundle.binding),
+    rollbackAvailable: previous !== undefined,
     extensions: Object.entries(record.extensions)
       .map(([name, extension]) => ({
         name,

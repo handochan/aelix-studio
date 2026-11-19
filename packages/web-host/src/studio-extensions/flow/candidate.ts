@@ -150,7 +150,8 @@ const inside = (directory: string, file: string): boolean => {
 async function carryOver(
   parent: GenerationPaths,
   candidate: GenerationPaths,
-  platform: NodeJS.Platform
+  platform: NodeJS.Platform,
+  requireCompleteFiles: boolean
 ): Promise<void> {
   const snapshot = await readSite(parent.site);
   if (snapshot.problems.length > 0)
@@ -158,7 +159,9 @@ async function carryOver(
   const refuse = (distribution: string, reason: string): never => {
     throw new ExtensionFailure('GENERATION_MODIFIED', [`${distribution} ${reason}`]);
   };
-  const [parentRoot, candidateRoot] = await Promise.all([realpath(parent.venv), realpath(candidate.venv)]);
+  const [parentRoot, candidateRoot] = await Promise.all([realpath(parent.venv), realpath(candidate.venv)]).catch(() => {
+    throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation environment is missing']);
+  });
   const within = async (root: string, directory: string): Promise<boolean> => {
     const real = await realpath(directory);
     return real === root || inside(root, real);
@@ -177,7 +180,10 @@ async function carryOver(
       if (copied.has(destination)) continue;
       // oxlint-disable-next-line no-await-in-loop -- files are copied one at a time, in RECORD order
       const origin = await fileIdentity(source);
-      if (origin === undefined) continue;
+      if (origin === undefined) {
+        if (requireCompleteFiles) refuse(distribution.name, 'is missing a regular file listed in its RECORD');
+        continue;
+      }
       // oxlint-disable-next-line no-await-in-loop
       await mkdir(path.dirname(destination), { recursive: true });
       // oxlint-disable-next-line no-await-in-loop
@@ -209,13 +215,16 @@ async function carryOver(
       if (rewritten) await writeFile(destination, rewritten);
     }
   }
-  // Links in the agent directory are left behind: native would write through them.
+  // Leave nested links behind: native would write through them. A non-directory agent
+  // root must fail the copy so bundle reconciliation can replay the stored wheels.
   await cp(parent.agent, candidate.agent, {
     recursive: true,
     filter: async (source) => {
       const stats = await lstat(source);
-      return stats.isDirectory() || stats.isFile();
+      return source === parent.agent || stats.isDirectory() || stats.isFile();
     },
+  }).catch(() => {
+    throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation agent data could not be copied']);
   });
 }
 
@@ -232,7 +241,8 @@ async function carryOver(
 export async function createCandidate(
   context: FlowContext,
   id: string,
-  parent: GenerationRecord | null
+  parent: GenerationRecord | null,
+  requireCompleteFiles = false
 ): Promise<Candidate> {
   const paths = generationPaths(context.layout, id, context.bundle.binding.pythonMinor, context.platform);
   await mkdir(paths.directory);
@@ -274,7 +284,7 @@ export async function createCandidate(
       parent.binding.pythonMinor,
       context.platform
     );
-    await carryOver(parentPaths, paths, context.platform);
+    await carryOver(parentPaths, paths, context.platform, requireCompleteFiles);
   }
   return { id, paths, skeleton };
 }
@@ -288,12 +298,13 @@ export async function createCandidate(
  *   interpreter (the interpreter under all its names included), the installer.
  * - No distribution and no top-level name the bundle ships. The bundle wins only if a
  *   generation never holds its names; path order alone does not guarantee it.
- * - No installed distribution declares a direct reference. This is read from the metadata
- *   that ended up on disk, which is what the installer consults on every later install.
+ * - For a file import, no installed distribution declares a direct reference. pip might
+ *   resolve it while satisfying the imported wheel's dependencies even with no index.
  */
 export async function scanGeneration(
   candidate: Candidate,
-  bundle: BundleFacts
+  bundle: BundleFacts,
+  offlineImport = true
 ): Promise<{ snapshot: SiteSnapshot; problems: ScanProblem[] }> {
   const { paths, skeleton } = candidate;
   const snapshot = await readSite(paths.site);
@@ -323,7 +334,8 @@ export async function scanGeneration(
     for (const text of distribution.requires) {
       const requirement = parseRequirement(text);
       if (!requirement) report('INVALID_WHEEL', `${distribution.name} declares a requirement that cannot be read`);
-      else if (requirement.url !== undefined) report('DIRECT_REFERENCE', `${distribution.name} requires ${text}`);
+      else if (offlineImport && requirement.url !== undefined)
+        report('DIRECT_REFERENCE', `${distribution.name} requires ${text}`);
     }
   }
   for (const name of snapshot.topLevel)

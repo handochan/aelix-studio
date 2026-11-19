@@ -84,6 +84,8 @@
     "action": "Ab hier verzweigen",
     "errorTurnInFlight": "Warten Sie, bis die aktuelle Antwort abgeschlossen ist, bevor Sie verzweigen",
     "errorParentUnbound": "Diese Unterhaltung hat noch keine Backend-Sitzung zum Verzweigen",
+    "errorHeadChanged": "Das Gespräch wurde fortgesetzt. Erstelle den Zweig erneut ab der neuesten Antwort.",
+    "errorHeadUnavailable": "Sende eine Nachricht und warte auf die Antwort, bevor du einen Zweig erstellst.",
     "errorPointUnsupported": "Dieser Agent kann nur ab der neuesten Nachricht verzweigen",
     "errorUnsupported": "Dieser Agent unterstützt kein Verzweigen",
     "errorGeneric": "Verzweigen fehlgeschlagen: {{message}}"

@@ -38,6 +38,7 @@
     "commandAck": "Befehl gesendet, aber Status nicht bestätigt. Aktualisiere oder versuche es später erneut.",
     "timeout": "Einstellungsbestätigung zeitüberschritten. Vorheriger Status wird angezeigt.",
     "busy": "Eine andere Einstellung wird gerade angewendet. Versuche es später erneut.",
+    "modelChangeObservedWithError": "Der Agent hat beim Modellwechsel einen Fehler gemeldet. Die Auswahl zeigt das aktuelle Modell und die aktuelle Denkstufe.",
     "failed": "Einstellung konnte nicht angewendet werden. Vorheriger Status wird angezeigt."
   },
   "thoughtLevel": {

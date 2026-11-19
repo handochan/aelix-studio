@@ -5,18 +5,29 @@
  */
 
 /** A wheel on disk. `folder` names a directory whose other wheels may satisfy dependencies. */
-export type ExtensionSource = { kind: 'file'; path: string; folder?: string };
+export type FileExtensionSource = { kind: 'file'; path: string; folder?: string };
+
+export type OnlineExtensionSource =
+  | { kind: 'index'; name: string; version?: string; indexUrl?: string }
+  | { kind: 'git'; url: string; indexUrl?: string };
+
+export type ExtensionSource = FileExtensionSource | OnlineExtensionSource;
 
 export type ExtensionCommand =
   | { action: 'list' }
-  | { action: 'install'; source: ExtensionSource }
-  | { action: 'update'; name: string; source: ExtensionSource }
+  | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
+  | { action: 'update'; name: string; source: FileExtensionSource }
   | { action: 'remove'; name: string }
-  | { action: 'rollback' }
+  | { action: 'rollback' | 'reconcile_bundle' }
   | { action: 'poll' | 'cancel'; operationId: string };
 
-/** Where an installed distribution came from. Online origins are added with online installs. */
-export type ExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
+/** Where an installed distribution came from. Only file imports retain wheel bytes. */
+export type FileExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
+
+export type ExtensionOrigin =
+  | FileExtensionOrigin
+  | { kind: 'index'; indexUrl: string }
+  | { kind: 'git'; url: string; commit: string; indexUrl: string };
 
 /**
  * Every installed extension passed two load checks: once by module reference, which imports
@@ -50,6 +61,7 @@ export type ExtensionListing = {
   revision: number;
   /** A running conversation keeps the generation it started with. */
   appliesAt: 'new_session';
+  /** There is a previous record. A different bundle requires revalidation before it can be restored. */
   rollbackAvailable: boolean;
   extensions: ExtensionEntry[];
 };
@@ -94,7 +106,8 @@ export type ExtensionFailureCode =
   | 'NO_CHANGE'
   | 'NOT_INSTALLED'
   | 'NOTHING_TO_ROLL_BACK'
-  /** The generation is bound to another bundle; fitting it to this one is a later piece. */
+  | 'ONLINE_INSTALL_DISABLED'
+  /** The generation could not be used with the current bundle. */
   | 'BUNDLE_CHANGED'
   /** Another change is running, here or in another Studio process. */
   | 'BUSY'

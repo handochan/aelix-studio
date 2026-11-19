@@ -38,6 +38,7 @@
     "commandAck": "Command sent, but the state is not confirmed. Refresh or try again later.",
     "timeout": "Setting confirmation timed out. The previous state is still shown.",
     "busy": "Another setting is being applied. Try again later.",
+    "modelChangeObservedWithError": "The agent reported an error while changing the model. The selector shows the current model and thinking level.",
     "failed": "Failed to apply setting. The previous state is still shown."
   },
   "thoughtLevel": {

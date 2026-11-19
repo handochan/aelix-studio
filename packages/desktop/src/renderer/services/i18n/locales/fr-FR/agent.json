@@ -38,6 +38,7 @@
     "commandAck": "Commande envoyée, mais l'état n'est pas confirmé. Actualisez ou réessayez plus tard.",
     "timeout": "Le délai de confirmation du paramètre a expiré. L'état précédent est toujours affiché.",
     "busy": "Un autre paramètre est en cours d'application. Réessayez plus tard.",
+    "modelChangeObservedWithError": "L’agent a signalé une erreur lors du changement de modèle. Le sélecteur affiche le modèle et le niveau de raisonnement actuels.",
     "failed": "Échec de l'application du paramètre. L'état précédent est toujours affiché."
   },
   "thoughtLevel": {
