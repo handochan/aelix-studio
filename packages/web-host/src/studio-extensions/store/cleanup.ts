@@ -93,8 +93,8 @@ export async function collect(request: CollectRequest): Promise<CollectReport> {
     if (pointer && !keep.has(entry)) report.leased.push(entry);
     // oxlint-disable-next-line no-await-in-loop
     const record = await readGenerationRecord(layout, entry);
-    for (const distribution of Object.values(record?.distributions ?? {}))
-      if (isImportSetId(distribution.origin?.artifact)) referenced.add(distribution.origin.artifact);
+    for (const { origin } of Object.values(record?.distributions ?? {}))
+      if (origin?.kind === 'file' && isImportSetId(origin.artifact)) referenced.add(origin.artifact);
   }
   report.removedArtifacts = await pruneArtifacts(layout, referenced, writer);
   return report;
