@@ -85,6 +85,7 @@ let page;
 let lanPage;
 let foreign;
 let webui;
+let sharedDbLink;
 let stage = 'startup';
 const lanFailures = [];
 const trace = (next) => {
@@ -347,6 +348,7 @@ try {
   assert.equal(typeof password, 'string');
   const sharedDb = path.join(sandbox, '.aionui-dev');
   fs.symlinkSync(path.join(userDataPath, 'aionui'), sharedDb, 'junction');
+  sharedDbLink = sharedDb;
   webui = await startWebHost({
     app: {
       version: '0.0.0',
@@ -587,10 +589,15 @@ try {
   throw error;
 } finally {
   // Close the owned browser clients before waiting for fixture TCP listeners.
-  trace('stop_app');
-  await closeElectron(app);
-  trace('stop_webui');
-  if (webui) await webui.stop();
+  try {
+    trace('stop_app');
+    await closeElectron(app);
+    trace('stop_webui');
+    if (webui) await webui.stop();
+  } finally {
+    // The outer fork audit counts database paths, including Windows junctions.
+    if (sharedDbLink) fs.unlinkSync(sharedDbLink);
+  }
   if (foreign) {
     foreign.closeAllConnections();
     await new Promise((resolve) => foreign.close(resolve));
