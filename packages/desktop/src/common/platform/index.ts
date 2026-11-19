@@ -1,4 +1,7 @@
 import path from 'path';
+import { mkdirSync } from 'node:fs';
+import type { App } from 'electron';
+import { APP_NAME } from '../config/appIdentity';
 import type { IPlatformServices } from './IPlatformServices';
 import { NodePlatformServices } from './NodePlatformServices';
 
@@ -10,7 +13,17 @@ let _services: IPlatformServices | null = null;
  */
 export function getDevAppName(): string {
   const isMultiInstance = process.env.AIONUI_MULTI_INSTANCE === '1';
-  return isMultiInstance ? 'AionUi-Dev-2' : 'AionUi-Dev';
+  return isMultiInstance ? `${APP_NAME}-Dev-2` : `${APP_NAME}-Dev`;
+}
+
+/** Set the profile before storage, Chromium, and Electron's single-instance lock use it. */
+export function configureElectronIdentity(app: Pick<App, 'isPackaged' | 'getPath' | 'setName' | 'setPath'>): void {
+  const sandbox = process.env.AIONUI_E2E_TEST === '1' ? process.env.AIONUI_E2E_USER_DATA_DIR?.trim() : undefined;
+  const profileName = app.isPackaged ? APP_NAME : getDevAppName();
+  app.setName(profileName);
+  const userData = sandbox || path.join(app.getPath('appData'), profileName);
+  if (sandbox) mkdirSync(userData, { recursive: true });
+  app.setPath('userData', userData);
 }
 
 export function registerPlatformServices(services: IPlatformServices): void {
@@ -36,14 +49,8 @@ export function getPlatformServices(): IPlatformServices {
       } else {
         // eslint-disable-next-line @typescript-eslint/no-require-imports
         const { app, net } = require('electron') as typeof import('electron');
-        // Dev isolation: set app name before any getPath('userData') call.
-        // Rollup may load this chunk before configureChromium.ts runs, so we
-        // must apply the dev name here as a safety net.
-        if (!app.isPackaged) {
-          const devAppName = getDevAppName();
-          app.setName(devAppName);
-          app.setPath('userData', path.join(path.dirname(app.getPath('userData')), devAppName));
-        }
+        // Rollup can load storage before configureChromium's side effects.
+        configureElectronIdentity(app);
         // Typed as IPlatformPaths so tsc enforces completeness: any new method
         // added to the interface will cause a compile error here if omitted below.
         const paths: import('./IPlatformServices').IPlatformPaths = {

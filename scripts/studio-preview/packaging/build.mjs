@@ -103,7 +103,7 @@ config.extraResources.push({ from: payload, to: 'studio-preview' });
 config.directories.output = option('--output', path.join(root, '.local/provider-installer/artifacts'));
 config.electronDist = path.join(path.dirname(require.resolve('electron/package.json')), 'dist');
 config.mac = { ...config.mac, identity: '-', notarize: false };
-config.win = { ...config.win, signAndEditExecutable: false };
+config.win = { ...config.win, signExecutable: false };
 config.nsis = {
   ...config.nsis,
   perMachine: false,

@@ -1,12 +1,18 @@
-appId: com.aionui.app
-productName: AionUi
-executableName: AionUi
+appId: ai.aelix.studio
+productName: Aelix Studio
+executableName: Aelix Studio
 copyright: Copyright © 2024 AionUi
 
 protocols:
-  - name: AionUi Protocol
+  - name: Aelix Studio Protocol
     schemes:
-      - aionui
+      - aelix-studio
+
+extraMetadata:
+  name: aelix-studio
+  desktopName: aelix-studio.desktop
+  author:
+    name: Aelix Studio
 
 asar:
   smartUnpack: true
@@ -119,7 +125,7 @@ win:
     - nsis
     #    - msi
   icon: resources/app.ico # Use the checked-in Windows icon resource for executable metadata/icon patching
-  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  artifactName: aelix-studio-${version}-${os}-${arch}.${ext}
 
 nsis:
   include: scripts/studio-preview/packaging/windowsInstaller.nsh
@@ -129,7 +135,7 @@ nsis:
   createStartMenuShortcut: true
   shortcutName: ${productName}
   uninstallDisplayName: ${productName}
-  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  artifactName: aelix-studio-${version}-${os}-${arch}.${ext}
   differentialPackage: false
 
 mac:
@@ -137,7 +143,7 @@ mac:
     - dmg
     - zip
   icon: resources/app.icns
-  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  artifactName: aelix-studio-${version}-${os}-${arch}.${ext}
   category: public.app-category.productivity
   hardenedRuntime: true
   gatekeeperAssess: false
@@ -166,23 +172,28 @@ dmg:
 afterPack: scripts/afterPack.js
 afterSign: scripts/afterSign.js
 
+deb:
+  packageName: aelix-studio
+
 linux:
+  syncDesktopName: true
   target:
     - deb
   icon: resources/app.png
-  artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+  artifactName: aelix-studio-${version}-${os}-${arch}.${ext}
   category: Utility
-  maintainer: aionui
-  vendor: aionui
+  executableName: aelix-studio
+  maintainer: Aelix Studio
+  vendor: Aelix
   synopsis: ${description}
   description: ${description}
   desktop:
     entry:
-      Name: AionUi
+      Name: Aelix Studio
       Comment: ${description}
-      Icon: AionUi
+      Icon: aelix-studio
       Categories: Office;Utility;
-      MimeType: x-scheme-handler/aionui;
+      MimeType: x-scheme-handler/aelix-studio;
 
 npmRebuild: false
 buildDependenciesFromSource: false

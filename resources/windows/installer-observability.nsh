@@ -1,8 +1,8 @@
 !ifndef AIONUI_INSTALLER_OBSERVABILITY_NSH
 !define AIONUI_INSTALLER_OBSERVABILITY_NSH
 
-!define AIONUI_APP_EXECUTABLE_FILENAME "AionUi.exe"
-!define AIONUI_FALLBACK_LOG "aionui-installer-${VERSION}-fallback-log.jsonl"
+!define AIONUI_APP_EXECUTABLE_FILENAME "Aelix Studio.exe"
+!define AIONUI_FALLBACK_LOG "aelix-studio-installer-${VERSION}-fallback-log.jsonl"
 
 !pragma warning disable 6001
 Var /GLOBAL AionUiSessionId
@@ -83,7 +83,7 @@ Var /GLOBAL AionUiSessionLogPath
   ${EndIf}
 
   ${If} $AionUiSessionLogPath == ""
-    nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$id = '$AionUiSessionId'; if (-not $$id) { $$id = [guid]::NewGuid().ToString('N').Substring(0,12) }; $$stamp = Get-Date -Format 'yyyyMMdd'; $$name = 'aionui-installer-${VERSION}-' + $$stamp + '-log.jsonl'; $$log = Join-Path $$env:TEMP $$name; [Console]::Out.Write($$id + '|' + $$log)"`
+    nsExec::ExecToStack `"$SYSDIR\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -Command "$$id = '$AionUiSessionId'; if (-not $$id) { $$id = [guid]::NewGuid().ToString('N').Substring(0,12) }; $$stamp = Get-Date -Format 'yyyyMMdd'; $$name = 'aelix-studio-installer-${VERSION}-' + $$stamp + '-log.jsonl'; $$log = Join-Path $$env:TEMP $$name; [Console]::Out.Write($$id + '|' + $$log)"`
     Pop $AionUiSessionLogResult
     Pop $AionUiSessionLogResult
     StrCpy $AionUiSessionId $AionUiSessionLogResult 12
@@ -106,16 +106,16 @@ Var /GLOBAL AionUiSessionLogPath
 !macroend
 
 !macro AIONUI_LOG_EXTRACT_RESULT _METHOD
-  ${IfNot} ${FileExists} "$INSTDIR\AionUi.exe"
+  ${IfNot} ${FileExists} "$INSTDIR\Aelix Studio.exe"
     !insertmacro AIONUI_FAIL_UX \
       "${AIONUI_E_EXTRACT_FAILED}" \
-      "event=extract result=fail method=${_METHOD} missing=AionUi.exe" \
+      "event=extract result=fail method=${_METHOD} missing=Aelix Studio.exe" \
       "${AIONUI_MSG_EXTRACT_FAILED_ZH}" \
       "${AIONUI_MSG_EXTRACT_FAILED_EN}" \
       "${AIONUI_MSG_EXTRACT_FAILED_ACTION_ZH}" \
       "${AIONUI_MSG_EXTRACT_FAILED_ACTION_EN}" \
-      "extract result=fail method=${_METHOD} missing=AionUi.exe instDir=$INSTDIR" \
-      "extract result=fail method=${_METHOD} missing=AionUi.exe instDir=$INSTDIR"
+      "extract result=fail method=${_METHOD} missing=Aelix Studio.exe instDir=$INSTDIR" \
+      "extract result=fail method=${_METHOD} missing=Aelix Studio.exe instDir=$INSTDIR"
   ${Else}
     !insertmacro AIONUI_SLOG "event=extract result=ok method=${_METHOD} detail=customFiles_${AIONUI_TARGET_ARCH}"
   ${EndIf}

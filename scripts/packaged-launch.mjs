@@ -4,7 +4,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { spawn } from 'node:child_process';
 
-const CLEANUP_PROCESS_NAMES = ['AionUi.exe', 'AionUi', 'electron.exe', 'electron'];
+const CLEANUP_PROCESS_NAMES = ['Aelix Studio.exe', 'Aelix Studio', 'aelix-studio', 'electron.exe', 'electron'];
 
 function parseArgs(argv) {
   const flags = new Set(argv.filter((x) => x.startsWith('--')));
@@ -32,7 +32,7 @@ function resolvePackagedApp(projectRoot) {
 
   if (process.platform === 'win32') {
     for (const dir of ['win-unpacked', 'win-x64-unpacked', 'win-arm64-unpacked']) {
-      const exe = path.join(outDir, dir, 'AionUi.exe');
+      const exe = path.join(outDir, dir, 'Aelix Studio.exe');
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: path.join(outDir, dir) };
     }
   } else if (process.platform === 'darwin') {
@@ -41,14 +41,14 @@ function resolvePackagedApp(projectRoot) {
       if (!fs.existsSync(macDir)) continue;
       const appBundle = fs.readdirSync(macDir).find((f) => f.endsWith('.app'));
       if (!appBundle) continue;
-      const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'AionUi');
+      const exe = path.join(macDir, appBundle, 'Contents', 'MacOS', 'Aelix Studio');
       if (fs.existsSync(exe)) return { executablePath: exe, cwd: macDir };
     }
   } else {
     for (const dir of ['linux-unpacked', 'linux-x64-unpacked', 'linux-arm64-unpacked']) {
       const dirPath = path.join(outDir, dir);
       if (!fs.existsSync(dirPath)) continue;
-      for (const name of ['aionui', 'AionUi']) {
+      for (const name of ['aelix-studio']) {
         const exe = path.join(dirPath, name);
         if (fs.existsSync(exe)) return { executablePath: exe, cwd: dirPath };
       }
@@ -64,7 +64,7 @@ async function main() {
     console.log(`Usage: node scripts/packaged-launch.mjs [--clean] [--no-clean] [--dry-run] [--help]
 
 Default: launch without terminating running processes.
-  --clean     Terminate AionUi/Electron processes by name before launch (opt-in).
+  --clean     Terminate Aelix Studio/Electron processes by name before launch (opt-in).
   --no-clean  Compatibility flag for the default no-cleanup behavior; overrides --clean.
   --dry-run   Show the launch and requested cleanup without terminating or launching processes.
   --help      Show this help.`);

@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
@@ -223,13 +224,15 @@ def assert_windows_install_unused():
                 for index in range(winreg.QueryInfoKey(key)[0]):
                     try:
                         with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
-                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
-                                raise ValueError('Refusing to replace an existing AionUi installation')
+                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().casefold().startswith('aelix studio'):
+                                raise ValueError('Refusing to replace an existing Aelix Studio installation')
                     except OSError:
                         continue
-    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
-    if b'aionui.exe' in processes.lower():
-        raise ValueError('Refusing to interrupt an existing AionUi process')
+    if windows_protocol_command() is not None:
+        raise ValueError('Refusing to replace an existing Studio protocol registration')
+    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq Aelix Studio.exe', '/FO', 'CSV', '/NH'])
+    if b'aelix studio.exe' in processes.lower():
+        raise ValueError('Refusing to interrupt an existing Aelix Studio process')
 
 
 def qualify_windows_copy_failure(artifact, directory, report_path):
@@ -237,7 +240,7 @@ def qualify_windows_copy_failure(artifact, directory, report_path):
     import ctypes
     from ctypes import wintypes
     assert_windows_install_unused()
-    app = directory / 'AionUi'
+    app = directory / 'Aelix Studio'
     relative = ('resources/bundled-aioncore/win32-x64/managed-resources/node/'
                 'node-v24.11.0-win-x64/node_modules/npm/node_modules/'
                 'validate-npm-package-license/node_modules/spdx-expression-parse/package.json')
@@ -285,18 +288,18 @@ def installed(artifact, directory, installer_receipt=None):
         mount.mkdir()
         subprocess.run(['hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', str(mount), str(artifact)],
                        check=True, stdout=subprocess.DEVNULL)
-        app = directory / 'AionUi.app'
+        app = directory / 'Aelix Studio.app'
         try:
-            subprocess.run(['ditto', str(mount / 'AionUi.app'), str(app)], check=True)
+            subprocess.run(['ditto', str(mount / 'Aelix Studio.app'), str(app)], check=True)
         finally:
             subprocess.run(['hdiutil', 'detach', str(mount)], check=True, stdout=subprocess.DEVNULL)
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
-        return app / 'Contents/MacOS/AionUi', app / 'Contents/Resources/studio-preview', app, 'dmg', None
+        return app / 'Contents/MacOS/Aelix Studio', app / 'Contents/Resources/studio-preview', app, 'dmg', None
     if sys.platform == 'win32':
         assert_windows_install_unused()
-        app = directory / 'AionUi'
+        app = directory / 'Aelix Studio'
         windows_installer(artifact, app, installer_receipt or directory / 'installer-progress.json', 'clean-install')
-        return app / 'AionUi.exe', long_path(app / 'resources/studio-preview'), app, 'nsis', None
+        return app / 'Aelix Studio.exe', long_path(app / 'resources/studio-preview'), app, 'nsis', None
     package = subprocess.check_output(['dpkg-deb', '--field', str(artifact), 'Package'], text=True).strip()
     if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]*', package):
         raise ValueError('Invalid Debian package identity')
@@ -311,11 +314,52 @@ def installed(artifact, directory, installer_receipt=None):
         raise ValueError('Installed Debian package has no unique runtime manifest')
     payload = manifests[0].parent
     app = payload.parent.parent
-    executable = app / 'aionui'
-    if not executable.is_file():
-        executable = app / 'AionUi'
+    executable = app / 'aelix-studio'
     return executable, payload, app, 'deb', package
 
+
+def windows_protocol_command():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Classes\aelix-studio\shell\open\command') as key:
+            return winreg.QueryValueEx(key, '')[0]
+    except FileNotFoundError:
+        return None
+
+
+def qualify_installed_identity(executable, app, kind, package):
+    if kind == 'dmg':
+        with (app / 'Contents/Info.plist').open('rb') as stream:
+            info = plistlib.load(stream)
+        schemes = [scheme for entry in info['CFBundleURLTypes'] for scheme in entry['CFBundleURLSchemes']]
+        if (info['CFBundleIdentifier'] != 'ai.aelix.studio' or info['CFBundleExecutable'] != executable.name
+                or info['CFBundleDisplayName'] != 'Aelix Studio' or schemes != ['aelix-studio']):
+            raise ValueError('Unexpected macOS bundle identity')
+        icon = info['CFBundleIconFile']
+        if not icon.endswith('.icns'):
+            icon += '.icns'
+        if not (app / 'Contents/Resources' / icon).is_file():
+            raise ValueError('Studio macOS bundle icon is missing')
+    elif kind == 'nsis':
+        if windows_protocol_command() != f'"{executable}" "%1"':
+            raise ValueError('Unexpected Windows Studio protocol registration')
+        metadata = subprocess.check_output(
+            ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+             '(Get-Item -LiteralPath $env:STUDIO_IDENTITY_EXE).VersionInfo.ProductName'],
+            env=dict(os.environ, STUDIO_IDENTITY_EXE=str(executable)), text=True, timeout=30).strip()
+        if metadata != 'Aelix Studio':
+            raise ValueError('Unexpected Windows executable product name')
+    else:
+        files = subprocess.check_output(['dpkg', '-L', package], text=True).splitlines()
+        entry_path = '/usr/share/applications/aelix-studio.desktop'
+        if package != 'aelix-studio' or entry_path not in files:
+            raise ValueError('Unexpected Studio Debian package identity')
+        entry = Path(entry_path).read_text(encoding='utf-8').splitlines()
+        if not {'Name=Aelix Studio', 'Icon=aelix-studio', 'MimeType=x-scheme-handler/aelix-studio;'}.issubset(entry):
+            raise ValueError('Unexpected Studio Linux desktop metadata')
+        if not any(item.endswith('/apps/aelix-studio.png') for item in files):
+            raise ValueError('Studio Linux desktop icon is missing')
+    return {'productName': 'Aelix Studio', 'protocol': 'aelix-studio'}
 
 def remove_install(app, kind, package):
     if kind == 'nsis':
@@ -364,6 +408,7 @@ def main(args):
         try:
             if not executable.is_file():
                 raise ValueError('Installer did not produce its expected executable')
+            installed_identity = qualify_installed_identity(executable, app, kind, package)
             manifest = json.loads((payload / 'manifest.json').read_text(encoding='utf-8'))
             target = host_target()
             if manifest['target'] != target or manifest['nativePatches']:
@@ -419,6 +464,7 @@ def main(args):
             probe_code = textwrap.dedent("""
     import os,sys,json
     from pathlib import Path
+import plistlib
     import aelix_ai,aelix_coding_agent
     def owned(value):
         value=str(Path(value).resolve())
@@ -507,7 +553,7 @@ def main(args):
                           permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output),
                           auditedSessions=audits.sessions, outboundControls=audits.controls,
                           **audits.recapture_summary(),
-                          artifactKind=kind, artifactSha256=digest(artifact),
+                          installedIdentity=installed_identity, artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
@@ -541,6 +587,8 @@ def main(args):
                     preserve_recapture_failure(output, audits, target)
             finally:
                 remove_install(app, kind, package)
+        if kind == 'nsis' and windows_protocol_command() is not None:
+            raise ValueError('Uninstall left the Studio protocol registered')
         report['ownedTestAppRemoved'] = not app.exists()
         if not report['ownedTestAppRemoved']:
             raise ValueError('Owned installer files remain after cleanup')

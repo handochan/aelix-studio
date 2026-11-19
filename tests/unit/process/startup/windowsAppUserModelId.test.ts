@@ -5,6 +5,7 @@
  */
 
 import { describe, expect, it, vi } from 'vitest';
+import { parseDeepLinkUrl, PROTOCOL_SCHEME } from '@/process/utils/deepLink';
 import fs from 'node:fs';
 import path from 'node:path';
 import { registerWindowsAppUserModelId, WINDOWS_APP_USER_MODEL_ID } from '@/process/startup/windowsAppUserModelId';
@@ -17,7 +18,7 @@ const makeApp = (isPackaged: boolean) => ({
 describe('registerWindowsAppUserModelId', () => {
   it('registers the electron-builder appId on packaged win32 builds', () => {
     const app = makeApp(true);
-    registerWindowsAppUserModelId({ app, platform: 'win32', execPath: 'C:\\app\\AionUi.exe' });
+    registerWindowsAppUserModelId({ app, platform: 'win32', execPath: 'C:\\app\\Aelix Studio.exe' });
     expect(app.setAppUserModelId).toHaveBeenCalledTimes(1);
     expect(app.setAppUserModelId).toHaveBeenCalledWith(WINDOWS_APP_USER_MODEL_ID);
   });
@@ -40,5 +41,20 @@ describe('registerWindowsAppUserModelId', () => {
     const yml = fs.readFileSync(ymlPath, 'utf8');
     const match = yml.match(/^appId:\s*(\S+)\s*$/m);
     expect(match?.[1]).toBe(WINDOWS_APP_USER_MODEL_ID);
+  });
+});
+
+describe('Studio deep links', () => {
+  it('registers the same Studio scheme as the app package', () => {
+    const config = fs.readFileSync(
+      path.resolve(__dirname, '../../../../packages/desktop/electron-builder.yml'),
+      'utf8'
+    );
+    expect(config).toMatch(new RegExp(`^      - ${PROTOCOL_SCHEME}$`, 'm'));
+    expect(parseDeepLinkUrl('aelix-studio://add-provider?base_url=http%3A%2F%2Flocalhost')).not.toBeNull();
+  });
+
+  it('rejects links intended for the upstream app', () => {
+    expect(parseDeepLinkUrl('aionui://add-provider?base_url=http%3A%2F%2Flocalhost')).toBeNull();
   });
 });

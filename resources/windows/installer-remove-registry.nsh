@@ -28,7 +28,7 @@
 !macroend
 
 !macro AIONUI_LOG_REMOVE_FAILURE_JSON _PHASE _FATAL _FAILED_PATH _EXTRA_FIELDS
-  !insertmacro AIONUI_LOG_JSON_EVENT "failure" "$$lockerText = '$AionUiLockerList'; $$processes = @(); if ($$lockerText -and $$lockerText -notlike 'Windows did not identify*' -and $$lockerText -ne 'unknown process') { $$processes = @($$lockerText -split ',\s*' | Where-Object { $$_ } | ForEach-Object { if ($$_ -match '^(.*)\(([0-9]+)\)$$') { [ordered]@{ name = $$Matches[1]; pid = [int]$$Matches[2] } } else { [ordered]@{ name = $$_; pid = $$null } } }) }; $$payload.code = '${AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED}'; $$payload.phase = '${_PHASE}'; $$payload.failedPath = '${_FAILED_PATH}'; $$payload.blockingProcesses = @($$processes); if ($$lockerText -like 'AionUi installer(*)') { $$payload.fallbackReason = 'installer-self-lock'; $$payload.message = 'The installer process is using the install directory as its current output directory.' } elseif ($$processes.Count -eq 0) { $$payload.fallbackReason = 'restart-manager-no-process'; $$payload.message = 'Windows did not identify a specific locking process. Close terminals, editors, and file managers opened in the install folder.' } else { $$payload.fallbackReason = ''; $$payload.message = '' }; $$payload.fatal = ('${_FATAL}' -eq '1'); ${_EXTRA_FIELDS}"
+  !insertmacro AIONUI_LOG_JSON_EVENT "failure" "$$lockerText = '$AionUiLockerList'; $$processes = @(); if ($$lockerText -and $$lockerText -notlike 'Windows did not identify*' -and $$lockerText -ne 'unknown process') { $$processes = @($$lockerText -split ',\s*' | Where-Object { $$_ } | ForEach-Object { if ($$_ -match '^(.*)\(([0-9]+)\)$$') { [ordered]@{ name = $$Matches[1]; pid = [int]$$Matches[2] } } else { [ordered]@{ name = $$_; pid = $$null } } }) }; $$payload.code = '${AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED}'; $$payload.phase = '${_PHASE}'; $$payload.failedPath = '${_FAILED_PATH}'; $$payload.blockingProcesses = @($$processes); if ($$lockerText -like 'Aelix Studio installer(*)') { $$payload.fallbackReason = 'installer-self-lock'; $$payload.message = 'The installer process is using the install directory as its current output directory.' } elseif ($$processes.Count -eq 0) { $$payload.fallbackReason = 'restart-manager-no-process'; $$payload.message = 'Windows did not identify a specific locking process. Close terminals, editors, and file managers opened in the install folder.' } else { $$payload.fallbackReason = ''; $$payload.message = '' }; $$payload.fatal = ('${_FATAL}' -eq '1'); ${_EXTRA_FIELDS}"
 !macroend
 
 !macro AIONUI_REMOVE_INSTALL_DIR
@@ -165,7 +165,7 @@
           !insertmacro AIONUI_FAIL_REPORTABLE_BILINGUAL ${AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED} "event=session-end result=fail code=${AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED} phase=residual-delete-failed userAction=cancel fatal=1 firstFailed=$AionUiRemoveFirstFailedPath lockers=$AionUiLockerList" "${AIONUI_MSG_PREVIOUS_FILE_OPEN_EN}" "${AIONUI_MSG_PREVIOUS_FILE_OPEN_ZH}" "${AIONUI_MSG_CLOSE_SHOWN_FILE_ACTION_EN}" "${AIONUI_MSG_CLOSE_SHOWN_FILE_ACTION_ZH}"
       ${EndIf}
       aionui_continue_after_rm:
-      DetailPrint `AionUi previous installation had locked residual files; continuing after atomic cleanup succeeded: $INSTDIR`
+      DetailPrint `Aelix Studio previous installation had locked residual files; continuing after atomic cleanup succeeded: $INSTDIR`
       !insertmacro AIONUI_LOG_EVENT "code=${AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED} phase=residual-delete-failed degraded=continue fatal=0 residueRoot=$AionUiRemoveResidueRoot failedCount=$AionUiRemoveResidueCount firstFailed=$AionUiRemoveFirstFailedPath removeDirResult=$AionUiRemoveDirResult removeResidueCount=$AionUiRemoveResidueCount atomicFailedPath=$AionUiAtomicFailedPath atomicSucceeded=$AionUiAtomicRemoveSucceeded"
     ${else}
       DetailPrint `Can't safely remove previous installation without atomic cleanup proof: $INSTDIR`
@@ -189,6 +189,7 @@
 !macroend
 
 !macro customUnInstall
+  !insertmacro STUDIO_UNREGISTER_PROTOCOL
   !insertmacro AIONUI_LOG_EVENT "uninstall-section start instDir=$INSTDIR"
 !macroend
 

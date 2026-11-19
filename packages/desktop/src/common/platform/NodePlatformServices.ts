@@ -2,6 +2,7 @@ import { fork as cpFork, type ChildProcess } from 'child_process';
 import { readFileSync } from 'fs';
 import os from 'os';
 import path from 'path';
+import { APP_NAME, APP_SLUG } from '../config/appIdentity';
 import type { IPlatformServices, IWorkerProcess } from './IPlatformServices';
 
 class NodeWorkerProcess implements IWorkerProcess {
@@ -21,28 +22,27 @@ class NodeWorkerProcess implements IWorkerProcess {
   }
 }
 
-// Read name + version from package.json once at module load.
+// Read the version from package.json once at module load.
 const _pkg = (() => {
   try {
     return JSON.parse(readFileSync(path.join(process.cwd(), 'package.json'), 'utf8')) as {
-      name?: string;
       version?: string;
     };
   } catch {
-    return { name: 'aionui', version: '0.0.0' };
+    return { version: '0.0.0' };
   }
 })();
 
 export class NodePlatformServices implements IPlatformServices {
   paths = {
-    getDataDir: () => process.env.DATA_DIR ?? path.join(os.homedir(), '.aionui-server'),
+    getDataDir: () => process.env.DATA_DIR ?? path.join(os.homedir(), `.${APP_SLUG}-server`),
     getTempDir: () => os.tmpdir(),
     getHomeDir: () => os.homedir(),
-    getLogsDir: () => process.env.LOGS_DIR ?? path.join(os.homedir(), '.aionui-server', 'logs'),
+    getLogsDir: () => process.env.LOGS_DIR ?? path.join(os.homedir(), `.${APP_SLUG}-server`, 'logs'),
     getAppPath: (): string | null => process.cwd(),
     isPackaged: () => process.env.IS_PACKAGED === 'true',
     getSystemPath: (_name: 'desktop' | 'home' | 'downloads'): string | null => null,
-    getName: () => _pkg.name ?? 'aionui',
+    getName: () => APP_NAME,
     getVersion: () => _pkg.version ?? '0.0.0',
     needsCliSafeSymlinks: () => false,
   };

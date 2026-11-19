@@ -11,7 +11,7 @@
  *   AIONUI_PORT           : static server port (default 33000)
  *   AIONUI_HOST           : listen host; set to 0.0.0.0 to imply --remote
  *   AIONUI_ALLOW_REMOTE   : "1"/"true" to expose to LAN
- *   AIONUI_DATA_DIR       : override userData path (default Electron-compatible)
+ *   AIONUI_DATA_DIR       : override userData path
  *   AIONUI_LOG_DIR        : override log dir (default <dataDir>/logs)
  *   AIONUI_STATIC_DIR     : override static dir (default out/renderer)
  *   AIONUI_BACKEND_BIN    : absolute path to aioncore binary (else PATH lookup)
@@ -27,6 +27,7 @@ import { fileURLToPath } from 'url';
 import { fetchStudioBackend, startWebHost } from '@aionui/web-host';
 import { verifyDefaultHostBundle } from '../packages/shared-scripts/src/default-host.js';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
+import { getStandaloneWebDataFolder } from '../packages/desktop/src/common/config/appIdentity';
 
 // Aligned with packages/desktop/src/common/config/constants.ts WEBUI_DEFAULT_PORT.
 const DEFAULT_PORT = (() => {
@@ -52,30 +53,30 @@ const getFlag = (name: string): string | undefined => {
  * Resolve the directory where aelix-studio-host persists its SQLite DB.
  *
  * `bun run webui` runs **independently of the Electron desktop app** — it must
- * work on hosts that never installed AionUi.app, and its default work dir must
+ * work on hosts that never installed Aelix Studio.app, and its default work dir must
  * NOT collide with Electron's.
  *
  *   --data-dir <path>       CLI override (highest priority)
  *   $AIONUI_DATA_DIR        env override (same effect)
- *   otherwise               ~/.aionui-web         (production)
- *                           ~/.aionui-web-dev     (dev, default)
- *                           ~/.aionui-web-dev-2   (dev + AIONUI_MULTI_INSTANCE=1)
+ *   otherwise               ~/.aelix-studio-web         (production)
+ *                           ~/.aelix-studio-web-dev     (dev, default)
+ *                           ~/.aelix-studio-web-dev-2   (dev + AIONUI_MULTI_INSTANCE=1)
  *
- * Why a dedicated `-web` name, not the same `~/.aionui[-dev]` that Electron
+ * Why a dedicated `-web` name, not the same `~/.aelix-studio[-dev]` that Electron
  * uses: on macOS, Electron's getDataPath() (packages/desktop/src/process/utils/
- * utils.ts) creates `~/.aionui-dev` as a **symlink** to
- * `~/Library/Application Support/AionUi-Dev/aionui` so CLI tools (claude,
+ * utils.ts) creates `~/.aelix-studio-dev` as a **symlink** to
+ * `~/Library/Application Support/Aelix Studio-Dev/aelix-studio` so CLI tools (claude,
  * gemini, qwen…) don't choke on the literal space in "Application Support".
  * If standalone webui runs first on a clean machine, it would create the
  * symlink location as a **real directory** instead. When Electron is later
  * installed, its `ensureCliSafeSymlink` refuses to overwrite a real dir and
  * falls back to returning the space-containing path — and then every ACP
  * agent inside the desktop app starts failing on CLI commands. Using
- * `.aionui-web` keeps standalone webui's data dir off of the path Electron's
+ * `.aelix-studio-web` keeps standalone webui's data dir off of the path Electron's
  * symlink needs.
  *
  * If the user wants the two to share data they opt-in explicitly via
- *   --data-dir ~/.aionui-dev                     (or equivalent on other OSes)
+ *   --data-dir ~/.aelix-studio-dev                     (or equivalent on other OSes)
  * which is safe because by that point Electron has created the symlink and
  * `bun run webui` just follows it.
  */
@@ -86,9 +87,10 @@ function resolveBackendDataDir(): string {
     fs.mkdirSync(resolved, { recursive: true });
     return resolved;
   }
-  const suffix =
-    process.env.NODE_ENV === 'production' ? '' : process.env.AIONUI_MULTI_INSTANCE === '1' ? '-dev-2' : '-dev';
-  const dir = path.join(os.homedir(), `.aionui-web${suffix}`);
+  const dir = path.join(
+    os.homedir(),
+    getStandaloneWebDataFolder(process.env.NODE_ENV === 'production', process.env.AIONUI_MULTI_INSTANCE === '1')
+  );
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
@@ -202,7 +204,7 @@ async function main(): Promise<void> {
   });
   // One working dir for the whole standalone webui: backend SQLite and chat
   // history live here. Admin credentials live in the backend's users table.
-  // This keeps `bun run webui` fully self-contained on hosts without AionUi.app.
+  // This keeps `bun run webui` fully self-contained on hosts without Aelix Studio.app.
   const workDir = resolveBackendDataDir();
   const staticDir = resolveStaticDir();
   const backendBin = resolveBackendBinary();
@@ -240,7 +242,7 @@ async function main(): Promise<void> {
   });
 
   console.log('');
-  console.log('AionUi WebUI is ready');
+  console.log('Aelix Studio WebUI is ready');
   console.log(`  Local  : ${handle.localUrl}`);
   if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
 
