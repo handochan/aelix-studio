@@ -501,7 +501,9 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                     self.assertEqual(self.audit_traces(traces, scoped=True,
                         on_capture=lambda directory: observe('capture-start', directory)), (0, len(codes)))
                 self.assertEqual(checkpoints, [(name, active, (), ()) for name, active in [*expected, ('summarize', True)]])
-                self.assertEqual([entry['exitCode'] for entry in self.read()['captureAttempts']], codes)
+                result = self.read()
+                self.assertEqual([entry['exitCode'] for entry in result['captureAttempts']], codes)
+                self.assertGreater(result['taskEvidence']['retainedStraceTextBytes'], 0)
                 self.assertEqual(len(trace_reads), len(codes))
 
     def test_final_verdict_fits_shared_ten_mib_capacity_with_or_without_diagnostic_budget(self):

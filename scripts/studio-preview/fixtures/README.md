@@ -619,8 +619,10 @@ the post-analysis boundary before any required report write or recapture.
 A replayed capture's saved verdict carries
 `taskEvidenceStatus=discarded-before-recapture`.
 
-The final capture hands off the already-read strace text, up to 64 MiB of
-retained text, and the kernel facts already parsed for the verdict. A missing
+The final capture hands off the already-read strace text, up to 256 MiB of
+retained text, and the kernel facts already parsed for the verdict. The
+diagnostic summary records the memory held for decoded text as
+`retainedStraceTextBytes`. A missing
 parsed kernel channel can be backed by a read-only copy of up to 4 MiB of
 partial recorder inputs. The copy has its own one-second timer, pauses the
 capture timer, and needs room under supervision for the remaining capture

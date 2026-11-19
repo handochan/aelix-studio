@@ -26,7 +26,7 @@ ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 QUOTED = r'"(?:[^"\\]|\\.)*"'
 REGISTER_ENTRY = '???( <unfinished ...>'
 REGISTER_RESUME = '<... ??? resumed>) = ?'
-TASK_TRACE_MEMORY_LIMIT = 64 * 1024 * 1024
+TASK_TRACE_MEMORY_LIMIT = 256 * 1024 * 1024
 
 
 def is_register_terminal(line, with_kernel):
@@ -781,7 +781,7 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                     unparsedRecordKindsAfterExistingPolicy=dict(item['unparsed_kinds']) if item is not None else None,
                     existingRegisterResolutions=resolved_registers[pid] if network_checked else None,
                     existingCloseResolutions=resolved_closes[pid] if network_checked else None))
-            return {**task_evidence,'stracePositionUnit':'parsed-line-sequence',
+            return {**task_evidence,'stracePositionUnit':'parsed-line-sequence','retainedStraceTextBytes':trace_memory,
                     'globalClassificationIssueIndices':global_indices,'straceTasks':strace_tasks}
         whole_evidence=for_report(whole)
         return (whole_evidence if scoped is whole else for_report(scoped)), whole_evidence
