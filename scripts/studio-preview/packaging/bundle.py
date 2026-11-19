@@ -28,7 +28,11 @@ from pathlib import Path
 _DLL_HANDLES = []
 
 def _configure_native_child():
-    if sys.platform != 'win32' or getattr(sys, 'orig_argv', [])[1:3] != ['-m', 'aelix_coding_agent']:
+    argv = getattr(sys, 'orig_argv', [])[1:]
+    # The pinned native delegates with -P to keep the project off sys.path.
+    if argv[:1] == ['-P']:
+        argv = argv[1:]
+    if sys.platform != 'win32' or argv[:2] != ['-m', 'aelix_coding_agent']:
         return False
     bundle = Path(__file__).resolve().parents[3]
     python = bundle / 'python'
