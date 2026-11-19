@@ -14,7 +14,7 @@ NETWORK_OPCODES = {9:'SENDMSG',10:'RECVMSG',13:'ACCEPT',16:'CONNECT',26:'SEND',2
                    34:'SHUTDOWN',45:'SOCKET',47:'SEND_ZC',48:'SENDMSG_ZC'}
 
 
-def reconcile(capture, calls, all_pids, selected_pids):
+def reconcile(capture, calls, all_pids, selected_pids, *, task_evidence=None):
     """Unknown collection/identity is global; known outside operations are report-only."""
     global_issues=[];by_pid=defaultdict(list);rings={};records=[]
     totals=Counter();selected_totals=Counter()
@@ -59,6 +59,8 @@ def reconcile(capture, calls, all_pids, selected_pids):
                     'sqpollKernelPid':event.get('sqpollKernelPid',0),
                     'fd':event['fd'],'flags':event['flags'],'createdAt':stamp,'opcodeCounts':{},'submissions':[]}
             records.append(record);rings[ctx]=record
+            if task_evidence is not None:
+                task_evidence.note(task_evidence.ring_created, pid)
             if event['flags'] & ~(2|65536):
                 by_pid[pid].append({'reason':'io_uring_setup_mode_unsupported','pid':pid,'ringId':record['ringId']})
             setup_rings[(call['pid'],call.get('sequence'),event['fd'])]=record
@@ -83,6 +85,8 @@ def reconcile(capture, calls, all_pids, selected_pids):
             ring['submissions'].append({'pid':pid,'tgid':event.get('tgid'),'kernelPid':event.get('kernelPid'),
                 'kernelTgid':event.get('kernelTgid'),'attributedPid':attributed,'opcode':opcode,'operation':label,
                 'sqpoll':sqpoll,'failedBeforeSubmission':kind=='failed'})
+            if task_evidence is not None:
+                task_evidence.note(task_evidence.ring_submission, pid if pid in all_pids else None, attributed)
             if opcode not in ALLOWED_OPCODES:
                 by_pid[owner if owner in selected_pids else attributed].append({
                     'reason':'io_uring_opcode_not_allowed','pid':attributed,'opcode':opcode,'operation':label,

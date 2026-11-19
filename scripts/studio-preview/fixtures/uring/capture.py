@@ -274,56 +274,6 @@ def broker(directory,root_pid,namespace_inode):
     return 0 if evidence['complete'] else 87
 
 
-TASK_RECORDING_MEMORY_LIMIT = 4 * 1024 * 1024
-
-
-def read_task_recording(directory):
-    """Retain bounded recorder input for diagnostics after scratch cleanup."""
-    directory = Path(directory)
-
-    def read(name, remaining):
-        with (directory / name).open('rb') as stream:
-            data = stream.read(remaining + 1)
-        if len(data) > remaining:
-            raise ValueError('diagnostic_task_recording_too_large')
-        return data
-
-    try:
-        raw = read('events.raw', TASK_RECORDING_MEMORY_LIMIT)
-    except OSError:
-        return None
-    try:
-        stderr = read('recorder.stderr', TASK_RECORDING_MEMORY_LIMIT - len(raw))
-    except OSError:
-        stderr = None
-    return raw, stderr
-
-
-def diagnostic_task_snapshot(recording, namespace_inode):
-    """Summarize an incomplete recorder channel for reporting only."""
-    if recording is None:
-        return None
-    raw, stderr = recording
-    try:
-        try:
-            stderr = stderr.decode('utf-8') if stderr is not None else None
-        except UnicodeError:
-            stderr = None
-        parsed = parse(raw.decode('utf-8'), stderr or '', -1, namespace_inode)
-    except ValueError:
-        return None
-    return {
-        'network': parsed['network'],
-        'root': parsed['root'],
-        'captureChecks': {**parsed['captureChecks'], 'stderrEmpty': None if stderr is None else not stderr.strip()},
-        'kernelNetworkCount': parsed['kernelCounts'].get('network'),
-        'namespaceInode': parsed['namespaceInode'],
-        'lostEvents': None if stderr is None else parsed['lostEvents'],
-        'rawLostEvents': parsed['lostEvents'] if stderr is None else None,
-        'recordErrorCount': len(parsed['recordErrors']),
-    }
-
-
 class Capture:
     def __init__(self,directory):
         self.directory=directory;self.recorder=None

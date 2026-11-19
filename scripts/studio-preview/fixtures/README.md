@@ -551,88 +551,34 @@ No destination-name/address exemption is used. See
 
 ## Task evidence (Issue #59 A, first PR)
 
-The audit attaches `taskEvidence` after saving the required reports. Its
-schema is `aelix.outbound-task-evidence/1` and its
-purpose is explicitly `diagnostic-only-no-new-resolution`. This first PR does
-not change any parser classification, resolution, UDP exemption, outcome or
-recapture decision. The exact-hole resolver and dependency-preserving validation
-are a separate second PR; conditions 1–5 from #59 are not implemented by these
-new diagnostic fields. Historical artifacts are not rejudged.
+The auditor counts facts as the existing verdict parser and comparisons encounter
+them. The optional `aelix.outbound-task-evidence/1` data grows with the number of
+observed tasks and task lifetimes.
 
-- `source` retains collection/drain/namespace flags, READY/DONE observations,
-  consumed network record counts and the recorder counter when emitted,
-  diagnostics/error counts, and separate
-  retained-program and reported-loss counter summaries. Missing source fields
-  are null, not an assertion of zero loss. The existing capture receipts remain
-  authoritative for attachments, individual program misses and global errors.
-  A failed broker can leave a diagnostic snapshot of available recorder output.
-  `diagnosticSnapshotUsed` marks that path. The loss and parse error counts come
-  from the snapshot, and the original capture and PID namespace status remain
-  authoritative. When recorder stderr is missing or unreadable, `lostEvents`
-  is null and `rawLostEvents` counts loss observed in the readable raw output.
-- `tasks` retains **every** received kernel task lifetime with namespace
-  TID/TGID, kernel TID/TGID, parent identity, tracked-start/final-`do_task_dead`
-  range, last ordinal and worker-birth count. The recorder root's start is its
-  tracking boundary, not its earlier OS birth. PID reuse and ambiguous parent
-  correspondence are explicit. A worker birth record must match one lifetime's
-  kernel TID, parent, start time and inclusive time range. The report counts births
-  without a unique match in `unattributedWorkerBirthRecords`. Recorder-root and
-  private tracer capability-probe tasks can legitimately have no strace row.
-- `assignedRecordCounts` gives P/N/X/H/V counts only for records uniquely matching
-  that lifetime's full identity and interval. `unattributedNetwork` separately
-  retains numeric identities, first/last event times and counts for missing,
-  mismatched or ambiguous lifetimes. Assigned plus unattributed counts account
-  for every consumed record. Missing channels or unusable identities/ranges are
-  null. A zero assigned count is not an absence proof when attribution failed.
-- `structuralUnmatched` counts raw P/N/X pairing differences and H/V records
-  outside unique N/X bounds. These categories can overlap and are **not new
-  errors**: a final pre-entry or a terminal VFS write can already have an existing
-  proof. `existingNetworkCorroboration` and the existing top-level network proof
-  arrays retain that distinction. `matchedOperations` counts operations linked
-  by sequence. `reconciledOperations` counts the linked operations marked
-  `reconciled` by the existing network comparison.
-- Ring creation/submission/issue counts and UDP generation validity/free/send
-  counts are namespace-TID aggregates of the existing reconciliation results.
-  Shared-object sends are object-wide, not attributed task sends. These counts
-  can overlap across actors and must not be added as independent object totals.
-  Network, ring and UDP comparison results are null when that comparison did
-  not run. A completed comparison can report zero activity or issues.
-- `straceTasks` retains observed/fork-only TIDs, expected TGID/parent, source-line
-  position bounds, terminal position, corresponding kernel task indices, current
-  unparsed kinds and existing close/register resolution counts. Its gap records
-  distinguish exact lexical register markers, complete numeric close arguments,
-  other result gaps and unclassified records. Register examples remain bounded
-  as before, with full kind counts and an explicit truncation indicator.
-  `terminalDelimited` records the observed final boundary. `exactStubSyntax`
-  also requires the permitted sequence between entry and exit, including at
-  most one resume. Unknown text retains only a fixed shape, length and sequence.
+- `tasks` contains recorded kernel and namespace TIDs/TGIDs, covered lifetime
+  ranges, parent identities, worker births and P/N/X/H/V counts for the existing
+  network comparison. A reused kernel TID keeps its lifetime rows and leaves
+  record and birth attribution unknown. Unattributed records have a capture-wide
+  count.
+- `straceTasks` contains observed TIDs, fork and exit boundaries, fixed-category
+  gap counts, and separate terminal-boundary and exact-stub flags. It records
+  the existing network issue and unmatched-issue counts, sequence matches,
+  reconciled operations, and existing close/register resolution counts.
+- Ring creation/submission counts and UDP generation/free/send counts come from
+  the existing comparisons. They are grouped by namespace TID. Shared object
+  send counts describe the object across its actors. Skipped comparisons and
+  missing channels use null. Parsed recorder loss and error counts are kept
+  when available.
 
-Kernel ranges are monotonic nanoseconds; strace positions are parsed-line
-sequences, a different coordinate system. Both whole-command and executable
-selection reports retain the capture-wide task context; `inReportScope` identifies
-the strace tasks belonging to the particular report. Classification issue indices
-refer to that report's unchanged `classificationIssues` array. The new evidence
-never copies comm names, executable paths, argv, environment, payloads, raw FD
-annotations or kernel object/file pointers. The existing deadline covers capture,
-required analysis and verdict writes. Every capture deletes its scratch at
-the post-analysis boundary before any required report write or recapture.
-A replayed capture's saved verdict carries
-`taskEvidenceStatus=discarded-before-recapture`.
+Per-record positions, descriptors, issue indices, per-ordinal unmatched
+breakdowns, unattributed identity lists, and snapshots from unparsed recorder
+output are omitted. Applicable verdict fields retain their existing details.
 
-The final capture hands off the already-read strace text, up to 256 MiB of
-retained text, and the kernel facts already parsed for the verdict. The
-diagnostic summary records the memory held for decoded text as
-`retainedStraceTextBytes`. A missing
-parsed kernel channel can be backed by a read-only copy of up to 4 MiB of
-partial recorder inputs. The copy has its own one-second timer, pauses the
-capture timer, and needs room under supervision for the remaining capture
-budget and required history writes. The copy performs no classification or
-aggregation.
-
-Once the final verdict and attempt history are saved, the auditor allows up
-to 30 seconds to summarize the in-memory facts and 10 seconds to attach the
-result. Under supervision, both limits must fit before the deadline with one
-second reserved for cleanup and exit. The final report starts with
-`taskEvidenceStatus=unavailable`. A completed attachment atomically replaces
-the saved JSON and sets the status to `available`. SIGTERM unwinds capture
-scratch and any unfinished diagnostic write.
+Every capture removes its scratch at the base post-analysis boundary, before
+report writes or recapture. The auditor releases the replayed capture's counters.
+The final capture can publish completed counters after all required reports and
+attempt history are saved. This best-effort write has a 10-second limit and uses
+a fixed-size buffer to append the counters to each already-saved verdict
+atomically. Low remaining supervisor time, an aggregation error, or a failed
+publication leaves `taskEvidenceStatus=unavailable`. The audit keeps the
+existing capture and supervisor deadlines.

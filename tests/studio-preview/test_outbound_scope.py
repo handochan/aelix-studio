@@ -37,7 +37,7 @@ def task_capture_fixture():
 
 
 class CaptureStartupFailureTests(unittest.TestCase):
-    def test_failed_start_retains_partial_tasks_without_upgrading_namespace_or_capture(self):
+    def test_failed_start_does_not_read_unparsed_recorder_output(self):
         def factory(directory):
             (directory/'events.raw').write_text('READY\nROOT|1|100|100|123|1\n'
                 'P|2|101|101|124|124|1|1|3|0\n'
@@ -46,6 +46,12 @@ class CaptureStartupFailureTests(unittest.TestCase):
             capture.stop.return_value=dict(status='failed',complete=False,pidNamespaceVerified=False,
                 lostEvents=0,events=[],eventCount=0)
             return capture
+        read_text = Path.read_text
+
+        def reject_raw_read(path, *args, **kwargs):
+            self.assertNotIn(path.name, ('events.raw', 'recorder.stderr'))
+            return read_text(path, *args, **kwargs)
+
         with tempfile.TemporaryDirectory() as directory:
             report=Path(directory)/'report.json';process=Mock(pid=123,returncode=0);process.poll.return_value=0
             with patch.dict(os.environ,{},clear=True),patch.object(audit.sys,'platform','linux'), \
@@ -55,18 +61,17 @@ class CaptureStartupFailureTests(unittest.TestCase):
                  patch.object(audit,'Capture',side_effect=factory), \
                  patch.object(audit,'capture_deadline',return_value=nullcontext()), \
                  patch.object(audit.signal,'setitimer',create=True),patch.object(audit.signal,'ITIMER_REAL',0,create=True), \
-                 patch.object(audit.subprocess,'Popen',return_value=process):
+                 patch.object(audit.subprocess,'Popen',return_value=process), \
+                 patch.object(Path, 'read_text', reject_raw_read):
                 code=audit.audit(['/owned/command'],report)
             result=json.loads(report.read_text())
         self.assertEqual(code,87)
         self.assertFalse(result['ioUring']['capture']['complete'])
         self.assertFalse(result['ioUring']['capture']['pidNamespaceVerified'])
-        self.assertTrue(result['taskEvidence']['source']['diagnosticSnapshotUsed'])
-        self.assertIsNone(result['taskEvidence']['source']['lostEvents'])
-        self.assertEqual(result['taskEvidence']['source']['rawLostEvents'],7)
-        self.assertEqual(result['taskEvidence']['source']['recordErrorCount'],1)
-        self.assertEqual(result['taskEvidence']['tasks'][0]['namespaceTid'],124)
-        self.assertEqual(result['taskEvidence']['networkRecordCounts']['P'],1)
+        task_evidence = result['taskEvidence']
+        self.assertIsNone(task_evidence['source']['lostEvents'])
+        self.assertIsNone(task_evidence['tasks'])
+        self.assertIsNone(task_evidence['networkRecordCounts'])
         self.assertNotIn('PRIVATE_RECORD',json.dumps(result))
         self.assertNotIn('taskRecordingSnapshot',result['ioUring']['capture'])
 
@@ -343,7 +348,7 @@ class CaptureDeadlineTests(unittest.TestCase):
              patch.object(audit,'npm_config_paths',return_value=[]), patch.object(audit,'npm_proxy_configured',return_value=False), \
              patch.object(audit,'Capture',side_effect=make_capture), patch.object(audit.subprocess,'Popen',return_value=process), \
              patch.object(Path,'write_text',observe_write), \
-             patch.object(audit,'measure_processes',side_effect=lambda *a,**k: time.sleep(1)):
+             patch.object(audit,'analyze_processes',side_effect=lambda *a,**k: time.sleep(1)):
             path=Path(directory)/'timeout.json';whole=path.with_name('timeout-whole.json')
             result=audit.capture_once(['/owned/command'],path,capture_timeout=0.2,whole_report_path=whole)
             self.assertEqual(result, (87, None, False))
@@ -365,7 +370,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.whole = self.root / 'whole.json'
 
     def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None,
-                     evidence_deadline=None):
+                     evidence_deadline=None, capture_timeout=1):
         tracer = self.root / 'strace'
         tracer.touch()
         process = Mock(pid=123, returncode=0)
@@ -402,7 +407,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
              patch.object(audit.subprocess, 'Popen', return_value=process), \
              patch.object(audit.subprocess, 'check_output', return_value='strace test\n'), \
              redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
-            code = audit.audit(['/owned/app'], self.report, capture_timeout=1,
+            code = audit.audit(['/owned/app'], self.report, capture_timeout=capture_timeout,
                                scope_executables=('/owned/app',) if scoped else (),
                                whole_report_path=self.whole if scoped else None,
                                task_evidence_deadline=evidence_deadline)
@@ -449,8 +454,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             self.assert_evidence_absent(first, status='discarded-before-recapture')
 
     def test_required_writes_and_replay_follow_base_disk_and_timer_checkpoints(self):
-        from uring import network
-        summarize = network.summarize_tasks
+        publish = audit.write_task_evidence
         write_text, write_bytes, read_text = Path.write_text, Path.write_bytes, Path.read_text
         raw_root = self.root / 'raw'
         raw_root.mkdir()
@@ -467,7 +471,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             ([['??? PORTABLE_UNKNOWN'], []], capture_checkpoints(1) + [('audit.json', False)] + capture_checkpoints(2), [87, 0]),
         ):
             with self.subTest(codes=codes):
-                checkpoints, trace_reads = [], []
+                checkpoints, trace_reads, publication_checks = [], [], []
 
                 def observe(operation, current_capture=None):
                     active = audit.signal.getitimer(audit.signal.ITIMER_REAL)[0] > 0
@@ -487,27 +491,24 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                         trace_reads.append(path)
                     return read_text(path, *args, **kwargs)
 
-                def collect_after_required_writes(*args, **kwargs):
-                    # This hook already has its own timer. The required
-                    # checkpoints must all have been observed by this point.
-                    observe('summarize')
-                    return summarize(*args, **kwargs)
+                def publish_after_required_writes(report, pending, payload):
+                    publication_checks.append(len(checkpoints))
+                    return publish(report, pending, payload)
 
                 with patch.object(tempfile, 'tempdir', str(raw_root)), \
                      patch.object(Path, 'write_text', observe_writer(write_text)), \
                      patch.object(Path, 'write_bytes', observe_writer(write_bytes)), \
                      patch.object(Path, 'read_text', observe_trace_read), \
-                     patch.object(network, 'summarize_tasks', side_effect=collect_after_required_writes):
+                     patch.object(audit, 'write_task_evidence', side_effect=publish_after_required_writes):
                     self.assertEqual(self.audit_traces(traces, scoped=True,
                         on_capture=lambda directory: observe('capture-start', directory)), (0, len(codes)))
-                self.assertEqual(checkpoints, [(name, active, (), ()) for name, active in [*expected, ('summarize', True)]])
+                self.assertEqual(checkpoints, [(name, active, (), ()) for name, active in expected])
                 result = self.read()
                 self.assertEqual([entry['exitCode'] for entry in result['captureAttempts']], codes)
-                self.assertGreater(result['taskEvidence']['retainedStraceTextBytes'], 0)
+                self.assertEqual(publication_checks, [len(expected)] * 4)
                 self.assertEqual(len(trace_reads), len(codes))
 
     def test_final_verdict_fits_shared_ten_mib_capacity_with_or_without_diagnostic_budget(self):
-        from uring import network
         capacity = 10 * 1024 * 1024
         write_text = Path.write_text
         raw_root = self.root / 'raw'
@@ -531,82 +532,39 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         for has_budget in (False, True):
             with self.subTest(has_budget=has_budget), patch.object(tempfile, 'tempdir', str(raw_root)), \
                  patch.object(Path, 'write_text', write_receipt), \
-                 patch.object(network, 'summarize_tasks', wraps=network.summarize_tasks) as summarize:
+                 patch.object(audit, 'write_task_evidence', wraps=audit.write_task_evidence) as publish:
                 deadline = None if has_budget else time.monotonic() + 2
                 self.assertEqual(self.audit_traces([[]], scoped=True, on_start=consume_last_block,
                                                    evidence_deadline=deadline), (0, 1))
-                self.assertEqual(summarize.call_count, int(has_budget))
+                self.assertEqual(publish.call_count, 4 if has_budget else 0)
                 for path in (self.report, self.whole, self.root/'audit.capture-1.json', self.root/'whole.capture-1.json'):
                     report = self.read(path)
                     self.assertEqual((report['externalAttempts'], report['unparsedRecords']), (0, 0))
                     self.assertEqual(report['taskEvidenceStatus'], 'available' if has_budget else 'unavailable')
 
-    def test_partial_input_timeout_does_not_spend_the_required_capture_clock(self):
-        capture = task_capture_fixture()
-        capture.update(status='failed', complete=False, reason='kernel_tracepoint_unavailable')
-        del capture['network']
-        with patch.object(audit, 'read_task_recording', side_effect=lambda directory: time.sleep(1.4)), \
-             patch.object(audit, 'TASK_EVIDENCE_INPUT_TIMEOUT', 1.1):
-            self.assertEqual(self.audit_traces([[]], capture=capture), (87, 1))
-        report = self.read()
-        self.assertEqual(report['outcome'], 'evidence_incomplete')
-        self.assert_evidence_absent(report)
+    def test_evidence_is_published_after_replay_finishes(self):
+        publish = audit.write_task_evidence
+        verdicts_during_publication = []
 
-    def test_partial_input_copy_reserves_required_capture_and_report_time(self):
-        capture = task_capture_fixture()
-        capture.update(status='failed', complete=False, reason='kernel_tracepoint_unavailable')
-        del capture['network']
-        # This window can fit the final summary and write alone, but not the
-        # optional input copy plus the protected receipt allowance.
-        with patch.object(audit, 'read_task_recording') as read:
-            self.assertEqual(self.audit_traces([[]], capture=capture,
-                evidence_deadline=time.monotonic() + 45), (87, 1))
-        read.assert_not_called()
-        self.assert_evidence_absent(self.read())
+        def publish_after_verdict(report, pending, payload):
+            verdicts_during_publication.append([entry['exitCode'] for entry in self.read()['captureAttempts']])
+            return publish(report, pending, payload)
 
-    def test_oversized_trace_buffer_leaves_the_verdict_available(self):
-        import outboundScope
-        with patch.object(outboundScope, 'TASK_TRACE_MEMORY_LIMIT', 1):
-            self.assertEqual(self.audit_traces([[]]), (0, 1))
-        self.assert_evidence_absent(self.read())
-
-    def test_slow_diagnostic_collection_preserves_a_passing_capture(self):
-        from uring import network
-        completed = []
-
-        def delayed(*args, **kwargs):
-            time.sleep(1.3)
-            completed.append(True)
-
-        with patch.object(network, 'summarize_tasks', side_effect=delayed) as summarize, \
-             patch.object(audit, 'TASK_EVIDENCE_COLLECTION_TIMEOUT', 0.15):
-            self.assertEqual(self.audit_traces([[]]), (0, 1))
-        self.assertEqual((summarize.call_count, completed), (1, []))
-        report = self.read()
-        self.assertEqual((report['outcome'], report['recaptures']), ('passed', 0))
-        self.assert_evidence_absent(report)
-
-    def test_final_task_evidence_is_collected_after_replay_finishes(self):
-        from uring import network
-        summarize = network.summarize_tasks
-        verdicts_during_collection = []
-
-        def collect_after_verdict(*args, **kwargs):
-            verdicts_during_collection.append([entry['exitCode'] for entry in self.read()['captureAttempts']])
-            return summarize(*args, **kwargs)
-
-        with patch.object(network, 'summarize_tasks', side_effect=collect_after_verdict):
+        with patch.object(audit, 'write_task_evidence', side_effect=publish_after_verdict):
             self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []]), (0, 2))
-        report = self.read()
-        self.assertEqual(verdicts_during_collection, [[87, 0]])
-        self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, 0])
-        self.assertEqual((report['recaptures'], report['taskEvidenceStatus']), (1, 'available'))
+        self.assertEqual(verdicts_during_publication, [[87, 0], [87, 0]])
         first = self.read(self.root / 'audit.capture-1.json')
         self.assertEqual(first['outcome'], 'evidence_incomplete')
         self.assert_evidence_absent(first, status='discarded-before-recapture')
 
-    def test_summary_exception_preserves_pass_denial_and_second_incomplete_capture(self):
-        from uring import network
+    def test_gap_counter_failure_does_not_abort_capture_or_enable_replay(self):
+        with patch.object(audit.TaskEvidence, 'gap', side_effect=ValueError('PRIVATE_ERROR')):
+            self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []]), (0, 2))
+        first = self.read(self.root / 'audit.capture-1.json')
+        self.assert_evidence_absent(first)
+        self.assertEqual([entry['exitCode'] for entry in self.read()['captureAttempts']], [87, 0])
+
+    def test_aggregate_failure_preserves_pass_denial_and_second_incomplete_capture(self):
         capture = task_capture_fixture()
         capture['network']['events'] = [dict(kind=kind,time=stamp,pid=1,tgid=1,kernelPid=101,kernelTgid=101,
             call=1,ordinal=1,value=3,result=-101 if kind=='X' else 0) for stamp,kind in enumerate('PNX',2)]
@@ -615,24 +573,27 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                  ([[CONNECT]], capture, [86], 'external_attempts'),
                  ([['??? PORTABLE_UNKNOWN']]*2, None, [87, 87], 'evidence_incomplete')]
         for traces, evidence, codes, outcome in cases:
-            with self.subTest(outcome=outcome), patch.object(network, 'summarize_tasks', side_effect=ValueError('PRIVATE_ERROR')):
+            with self.subTest(outcome=outcome), patch.object(audit.TaskEvidence, 'result', side_effect=ValueError('PRIVATE_ERROR')):
                 self.assertEqual(self.audit_traces(traces, capture=evidence), (codes[-1], len(codes)))
                 report = self.read()
                 self.assertEqual(([row['exitCode'] for row in report['captureAttempts']], report['outcome']), (codes, outcome))
                 self.assert_evidence_absent(report)
 
+    def test_capture_alarm_is_not_swallowed_by_an_aggregate_observer(self):
+        with patch.object(audit.TaskEvidence, 'result', side_effect=audit.CaptureInterrupted('capture_timeout')):
+            self.assertEqual(self.audit_traces([[]]), (87, 1))
+        self.assertEqual(self.read()['outcome'], 'capture_timeout')
+        self.assertIsNone(self.read()['externalAttempts'])
+
     def test_partial_diagnostic_write_leaves_scoped_and_whole_verdicts_readable(self):
-        write_text = Path.write_text
         failures = []
 
-        def fail_with_evidence(path, text, *args, **kwargs):
-            if '"taskEvidence"' in text:
-                failures.append(path)
-                write_text(path, '{')
-                raise OSError(28, 'simulated diagnostic storage failure')
-            return write_text(path, text, *args, **kwargs)
+        def fail_with_evidence(report, pending, payload):
+            failures.append(report)
+            pending.write_text('{')
+            raise OSError(errno.ENOSPC, 'simulated diagnostic storage failure')
 
-        with patch.object(Path, 'write_text', fail_with_evidence):
+        with patch.object(audit, 'write_task_evidence', fail_with_evidence):
             self.assertEqual(self.audit_traces([[]], scoped=True), (0, 1))
         self.assertTrue(failures)
         self.assertEqual(self.read()['outcome'], 'passed')
@@ -641,18 +602,25 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             self.assert_evidence_absent(self.read(path))
         self.assertEqual(list(self.root.glob('.task-evidence-*')), [])
 
+    def test_publication_preserves_large_saved_verdicts_with_either_line_ending(self):
+        verdict = dict(taskEvidenceStatus='unavailable', value='x' * 70000)
+        for newline in ('\n', '\r\n'):
+            with self.subTest(newline=newline):
+                encoded = (json.dumps(verdict, indent=2) + '\n').replace('\n', newline).encode('ascii')
+                self.report.write_bytes(encoded)
+                audit.write_task_evidence(self.report, self.whole, b'{"tasks":[]}')
+                self.assertEqual(self.report.read_bytes(), encoded)
+                self.assertEqual(self.read(self.whole), verdict | dict(taskEvidenceStatus='available', taskEvidence={'tasks':[]}))
+
     def test_final_evidence_write_timeout_preserves_replay_receipts(self):
-        write_text = Path.write_text
         writes = []
 
-        def delay_first_write(path, text, *args, **kwargs):
-            if '"taskEvidence"' in text and not writes:
-                writes.append(path)
-                write_text(path, '{')
-                time.sleep(1.3)
-            return write_text(path, text, *args, **kwargs)
+        def delay_write(report, pending, payload):
+            writes.append(report)
+            pending.write_text('{')
+            time.sleep(1.3)
 
-        with patch.object(Path, 'write_text', delay_first_write), \
+        with patch.object(audit, 'write_task_evidence', delay_write), \
              patch.object(audit, 'TASK_EVIDENCE_WRITE_TIMEOUT', 0.15):
             self.assertEqual(self.audit_traces([['??? PORTABLE_UNKNOWN'], []]), (0, 2))
         self.assertEqual(len(writes), 1)
@@ -663,18 +631,17 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, 0])
         self.assert_evidence_absent(report)
 
-    def test_late_unsupported_personality_is_indexed_in_both_reports(self):
+    def test_late_unsupported_personality_is_counted_in_both_reports(self):
         stderr = b'Proper structure decoding for this personality is not supported\n'
         self.assertEqual(self.audit_traces([[]], stderr=stderr, scoped=True), (87, 1))
         for path in (self.report, self.whole):
             report = self.read(path)
-            indices = report['taskEvidence']['globalClassificationIssueIndices']
-            self.assertIn({'reason':'unsupported_strace_personality'}, [report['classificationIssues'][i] for i in indices])
+            self.assertEqual(report['taskEvidence']['source']['unsupportedStracePersonalities'], 1)
+            self.assertIn({'reason':'unsupported_strace_personality'}, report['classificationIssues'])
 
 
-def supervised_audit_fixture(directory, scenario, delay_phase):
+def supervised_audit_fixture(directory, scenario):
     """Stub the tracer inside a real supervised auditor process."""
-    from uring import network
     root = Path(directory)
     case = TaskEvidenceIsolationTests()
     case.root, case.report, case.whole = root, root / 'audit.json', root / 'whole.json'
@@ -686,23 +653,59 @@ def supervised_audit_fixture(directory, scenario, delay_phase):
         with (root / 'captures').open('a') as stream:
             stream.write(directory.name + '\n')
 
-    def block_diagnostic():
+    def slow_write(report, pending, payload):
+        pending.write_text('{')
         (root / 'diagnostic-started').touch()
         time.sleep(8)
 
-    write_text = Path.write_text
-
-    def slow_write(path, text, *args, **kwargs):
-        if '"taskEvidence"' in text:
-            write_text(path, '{')
-            block_diagnostic()
-        return write_text(path, text, *args, **kwargs)
-
-    delay = (patch.object(network, 'summarize_tasks', side_effect=lambda *args, **kwargs: block_diagnostic())
-             if delay_phase == 'collect' else patch.object(Path, 'write_text', slow_write))
-    with delay:
+    with patch.object(audit, 'write_task_evidence', slow_write):
         code, _ = case.audit_traces(traces, scoped=True, on_capture=remember_capture)
     return code
+
+
+def memory_audit_fixture(directory):
+    """The 68.6 MiB single-task trace from the memory-pressure regression."""
+    import resource
+
+    root = Path(directory)
+    case = TaskEvidenceIsolationTests()
+    case.root, case.report, case.whole = root, root / 'audit.json', root / 'whole.json'
+    signal_record = (b'1<app> --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=3, '
+                     b'si_uid=1000, si_status=0, si_utime=0, si_stime=0} ---\n')
+    blocks, tail = divmod(int(68.60 * 1024 * 1024) // len(signal_record), 8000)
+
+    def record(directory):
+        with (directory / 'network.trace').open('wb') as stream:
+            stream.write(b'1<app> execve("/owned/app", [...], 0x1) = 0\n')
+            block = signal_record * 8000
+            for _ in range(blocks):
+                stream.write(block)
+            stream.write(signal_record * tail)
+            stream.write(b'1<app> +++ exited with 0 +++\n')
+
+    code, attempts = case.audit_traces([[]], scoped=True, on_start=record, capture_timeout=40)
+    print(json.dumps(dict(attempts=attempts, peakRssKiB=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)))
+    return code
+
+
+@unittest.skipUnless(sys.platform == 'linux', 'Linux peak RSS accounting required')
+class TaskEvidenceMemoryTests(unittest.TestCase):
+    def test_large_single_task_trace_fits_the_340_mib_reproduction(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            script = 'import runpy,sys; raise SystemExit(runpy.run_path(sys.argv[1])["memory_audit_fixture"](sys.argv[2]))'
+            result = subprocess.run([sys.executable, '-I', '-B', '-c', script, str(Path(__file__).resolve()), directory],
+                                    env=dict(os.environ, TMPDIR=directory), capture_output=True, text=True, timeout=55)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            measurement = json.loads(result.stdout)
+            self.assertEqual(measurement['attempts'], 1)
+            self.assertLess(measurement['peakRssKiB'], 340 * 1024)
+            for name in ('audit', 'whole', 'audit.capture-1', 'whole.capture-1'):
+                report = json.loads((root / f'{name}.json').read_text())
+                self.assertEqual((report['externalAttempts'], report['unparsedRecords']), (0, 0))
+                self.assertEqual(report['taskEvidenceStatus'], 'available')
+                self.assertEqual(len(report['taskEvidence']['straceTasks']), 1)
+            self.assertEqual(list(root.glob('host-outbound-audit-*')), [])
 
 
 class CleanupIdentityTests(unittest.TestCase):
@@ -753,14 +756,14 @@ class CleanupIdentityTests(unittest.TestCase):
 
 @unittest.skipUnless(sys.platform=='linux','Linux subreaper required')
 class SupervisionTests(unittest.TestCase):
-    def audit_fixture(self, root, scenario, delay_phase):
+    def audit_fixture(self, root, scenario):
         raw = root / 'raw'
         raw.mkdir()
         code = 'import runpy,sys; raise SystemExit(runpy.run_path(sys.argv[1])["supervised_audit_fixture"](*sys.argv[2:]))'
         return [sys.executable, '-I', '-B', '-c', code, str(Path(__file__).resolve()),
-                str(root), scenario, delay_phase], {'TMPDIR':str(raw)}
+                str(root), scenario], {'TMPDIR':str(raw)}
 
-    def assert_capture_receipts(self, root, codes):
+    def assert_capture_receipts(self, root, codes, *, collected_first=False):
         report = json.loads((root / 'audit.json').read_text())
         self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], codes)
         self.assertEqual(report['recaptures'], len(codes) - 1)
@@ -769,7 +772,7 @@ class SupervisionTests(unittest.TestCase):
         expected_files.update(f'{name}.capture-{i}.json' for name in ('audit', 'whole') for i in range(1,len(codes)+1))
         self.assertEqual({path.name for path in root.glob('*.json')}, expected_files)
         for path in root.glob('*.json'):
-            status = 'discarded-before-recapture' if len(codes) > 1 and '.capture-1.' in path.name else 'unavailable'
+            status = 'discarded-before-recapture' if collected_first and '.capture-1.' in path.name else 'unavailable'
             self.assertEqual(json.loads(path.read_text())['taskEvidenceStatus'], status, path.name)
         self.assertEqual(list((root / 'raw').iterdir()), [])
         self.assertEqual(list(root.glob('.task-evidence-*')), [])
@@ -778,7 +781,7 @@ class SupervisionTests(unittest.TestCase):
         for scenario, codes in [('pass', [0]), ('recapture', [87, 0])]:
             with self.subTest(scenario=scenario), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
-                command, env = self.audit_fixture(root, scenario, 'collect')
+                command, env = self.audit_fixture(root, scenario)
                 result = audit.run_supervised(command, timeout=2, env=env, capture_output=True)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assert_capture_receipts(root, codes)
@@ -787,7 +790,7 @@ class SupervisionTests(unittest.TestCase):
     def test_supervisor_sigterm_cleans_final_capture_and_partial_diagnostic_write(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            command, env = self.audit_fixture(root, 'recapture', 'write')
+            command, env = self.audit_fixture(root, 'recapture')
             process = subprocess.Popen([sys.executable, '-I', '-B', str(SCRIPT), '--supervise', '60', '--', *command],
                                        env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
             try:
@@ -802,7 +805,7 @@ class SupervisionTests(unittest.TestCase):
                     process.terminate()
                 _, stderr = process.communicate(timeout=10)
             self.assertEqual(process.returncode, 124, stderr)
-            self.assert_capture_receipts(root, [87, 0])
+            self.assert_capture_receipts(root, [87, 0], collected_first=True)
 
     def test_timeout_stops_a_detached_descendant_before_returning(self):
         import time
@@ -1556,8 +1559,9 @@ class TaskEvidenceReportTests(unittest.TestCase):
     def parse(self,lines,capture=None,selected=()):
         with tempfile.TemporaryDirectory() as directory:
             path=Path(directory)/'trace';path.write_text('\n'.join(lines)+'\n')
-            scoped, whole, summarize = audit.measure_processes([path],selected,(),True,capture)
-            scoped['taskEvidence'], whole['taskEvidence'] = summarize()
+            aggregate = audit.TaskEvidence()
+            scoped, whole = audit.analyze_processes([path],selected,(),True,capture,task_evidence=aggregate)
+            scoped['taskEvidence'] = whole['taskEvidence'] = aggregate.measurement
             return scoped, whole
 
     def task(self,report,tid=1):
@@ -1571,10 +1575,9 @@ class TaskEvidenceReportTests(unittest.TestCase):
         _,report=self.parse(lines,self.fixture());row=self.task(report)
         self.assertEqual((report['unparsedRecords'],report['kernelResolvedRecords'],report['kernelMetadataResolvedRecords']),(0,2,1))
         self.assertEqual((row['existingRegisterResolutions'],row['existingCloseResolutions']),(2,1))
-        self.assertEqual(row['positions'],dict(firstSequence=1,lastSequence=5,records=5))
-        self.assertEqual({gap['kind'] for gap in row['gaps']},{'register-sequence','close-return-unavailable'})
-        stub = next(gap for gap in row['gaps'] if gap['kind']=='register-sequence')
-        self.assertTrue(stub['terminalDelimited'] and stub['exactStubSyntax'])
+        self.assertEqual(row['terminalSequence'], 5)
+        self.assertEqual(row['gapCounts'], {'close-return-unavailable': 1, 'register-entry': 1, 'register-resume': 1})
+        self.assertTrue(row['terminalDelimited'] and row['exactStubSyntax'])
         self.assertNotIn('SECRET',json.dumps(report))
         self.assertFalse(report['kernelMetadataResolutions'][0]['fdClosureInferred'])
         self.assertFalse(report['kernelMetadataResolutions'][0]['returnValueKnown'])
@@ -1588,9 +1591,8 @@ class TaskEvidenceReportTests(unittest.TestCase):
         self.assertEqual(report['kernelMetadataResolvedRecords'],0)
         self.assertGreater(report['unparsedRecords'],0)
         row=self.task(report,2)
-        self.assertEqual(row['gaps'],[dict(kind='unclassified-record',records=1,sequence=4,
-            recordLength=len('??? SECRET_TRACE'),recordShape='register_unavailable')])
-        self.assertEqual(report['classificationIssues'][row['classificationIssueIndices'][0]]['reason'],'unknown_record')
+        self.assertEqual(row['gapCounts'], {'unclassified-record': 1})
+        self.assertIn('unknown_record', {issue['reason'] for issue in report['classificationIssues']})
         self.assertNotIn('SECRET',json.dumps(report))
 
     def test_pending_and_inexact_close_syntax_are_distinct_without_accepting_more(self):
@@ -1598,16 +1600,14 @@ class TaskEvidenceReportTests(unittest.TestCase):
                            ('close(7<incomplete <unfinished ...>','other-result-gap')]:
             with self.subTest(text=text):
                 _,report=self.parse(['1<app> '+text,'1<app> +++ exited with 0 +++'],self.fixture())
-                gap=self.task(report)['gaps'][0]
-                self.assertEqual(gap['kind'],shape)
-                self.assertTrue(gap['pendingAtCaptureEnd'])
+                self.assertEqual(self.task(report)['gapCounts'], {shape: 1})
                 if shape=='other-result-gap':
                     self.assertEqual(report['kernelMetadataResolvedRecords'],0)
                     self.assertGreater(report['unparsedRecords'],0)
 
     def test_orphan_register_resume_is_not_described_as_a_terminal_delimited_stub(self):
         _,report=self.parse(['1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++'],self.fixture())
-        self.assertFalse(self.task(report)['gaps'][0]['terminalDelimited'])
+        self.assertFalse(self.task(report)['terminalDelimited'])
         self.assertGreater(report['unparsedRecords'],0)
 
     def test_terminal_boundary_does_not_validate_duplicate_resume_or_intervening_syscall(self):
@@ -1615,10 +1615,20 @@ class TaskEvidenceReportTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 _,report=self.parse(['1<app> ???( <unfinished ...>', '1<app> <... ??? resumed>) = ?',
                     f'1<app> {invalid}', '1<app> +++ exited with 0 +++'],self.fixture())
-                gap=self.task(report)['gaps'][0]
-                self.assertTrue(gap['terminalDelimited'])
-                self.assertFalse(gap['exactStubSyntax'])
+                row=self.task(report)
+                self.assertTrue(row['terminalDelimited'])
+                self.assertFalse(row['exactStubSyntax'])
                 self.assertGreater(report['unparsedRecords'],0)
+
+    def test_many_gaps_for_one_task_add_only_to_fixed_counters(self):
+        sizes = []
+        for records in (1, 2048):
+            _, report = self.parse(['1<app> ??? PRIVATE_CONTENT'] * records + ['1<app> +++ exited with 0 +++'])
+            self.assertEqual(self.task(report)['gapCounts'], {'unclassified-record':records})
+            encoded = json.dumps(report['taskEvidence'])
+            self.assertNotIn('PRIVATE_CONTENT', encoded)
+            sizes.append(len(encoded))
+        self.assertLess(sizes[1] - sizes[0], 16)
 
     def test_kernel_child_without_strace_has_numeric_identity_even_for_global_issue(self):
         for fork_known in (False,True):
@@ -1632,27 +1642,28 @@ class TaskEvidenceReportTests(unittest.TestCase):
                 self.assertEqual((child['kernelTid'],child['parentNamespaceTid']),(103,1))
                 self.assertFalse(child['straceObserved'])
                 self.assertGreater(report['unparsedRecords'],0)
-                if fork_known:self.assertFalse(self.task(report,3)['observed'])
+                self.assertFalse(any(row['tid']==3 for row in report['taskEvidence']['straceTasks']))
 
     def test_unavailable_kernel_never_creates_zero_network_evidence_for_strace_task(self):
         _,report=self.parse(['1<app> ???( <unfinished ...>','1<app> <... ??? resumed>) = ?',
                             '1<app> +++ killed by SIGKILL +++'])
         source=report['taskEvidence']['source']
-        self.assertFalse(source['networkEventsAvailable'])
+        self.assertIsNone(source['networkReconciled'])
         self.assertIsNone(report['taskEvidence']['networkRecordCounts'])
-        self.assertEqual(self.task(report)['kernelTaskIndices'],[])
+        self.assertIsNone(report['taskEvidence']['tasks'])
         self.assertGreater(report['unparsedRecords'],0)
 
-    def test_partial_task_records_show_observations_without_cross_check_counts(self):
+    def test_incomplete_channel_does_not_invent_task_counts_when_comparison_is_skipped(self):
         capture=self.fixture()
         capture.update(status='failed',complete=False,pidNamespaceVerified=False,udpObjects={'complete':False})
         capture['network']['complete']=False
         _,report=self.parse(['1<app> +++ exited with 0 +++'],capture)
         evidence=report['taskEvidence'];source=evidence['source']
-        self.assertEqual(evidence['networkRecordCounts']['P'],0)
+        self.assertIsNone(evidence['networkRecordCounts'])
+        self.assertIsNone(evidence['tasks'])
         for field in ('networkIssueCount','networkReconciled','ringGlobalIssueCount','objectProofVerified','objectIssueCount'):
             self.assertIsNone(source[field], field)
-        task=next(row for row in evidence['tasks'] if row['namespaceTid']==1)
+        task=self.task(report)
         for field in ('networkIssueCount','existingNetworkCorroboration','ringCounts','ringIssueCount','objectCounts','objectIssueCount'):
             self.assertIsNone(task[field], field)
         self.assertIsNone(self.task(report)['existingRegisterResolutions'])
@@ -1665,16 +1676,16 @@ class TaskEvidenceReportTests(unittest.TestCase):
             '1<app> clone(child_stack=NULL, flags=SIGCHLD) = 2',
             '2<host> execve("/owned/aelix-studio-host", [...], 0x1) = 0',
             '2<host> +++ exited with 0 +++','1<app> +++ exited with 0 +++'],capture,(HOST,))
-        self.assertEqual(scoped['taskEvidence']['tasks'],whole['taskEvidence']['tasks'])
-        self.assertFalse(self.task(scoped,1)['inReportScope']);self.assertTrue(self.task(scoped,2)['inReportScope'])
+        self.assertEqual(scoped['taskEvidence'],whole['taskEvidence'])
+        self.assertEqual([row['tid'] for row in scoped['taskEvidence']['straceTasks']], [1, 2])
+        self.assertEqual([row['pid'] for row in scoped['processes']], [2])
         self.assertEqual((scoped['processCount'],whole['processCount']),(1,2))
 
     def test_replacing_diagnostic_payload_cannot_change_any_existing_report_field(self):
-        from uring import network
         lines=['1<app> close(7) = ?','1<app> ???( <unfinished ...>',
                '1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++']
         baseline=self.parse(lines,self.fixture())
-        with patch.object(network,'summarize_tasks',return_value={'tasks':[],'forgedEligibility':True}):
+        with patch.object(audit.TaskEvidence,'result',return_value={'tasks':[],'forgedEligibility':True}):
             replaced=self.parse(lines,self.fixture())
         for before,after in zip(baseline,replaced):
             self.assertEqual({key:value for key,value in before.items() if key!='taskEvidence'},

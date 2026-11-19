@@ -168,23 +168,13 @@ controls above. The recorded 76 connects / zero packets are retained in the stud
 
 ## Task evidence without verdict changes (#59 A, first PR)
 
-`taskEvidence` now preserves task identities/lifetimes, P/N/X/H/V counts,
-structural unmatched counts, existing ring/object outcomes and privacy-safe
-strace gap syntax from in-memory inputs. See the
+`taskEvidence` contains numeric task and lifetime summaries counted by the
+existing verdict parser and comparisons. It covers P/N/X/H/V, existing network
+and ring/UDP results, and strace gap categories. A capture without an observed
+comparison channel reports null for its counts. See the
 [shared task-evidence schema](../studio-preview/fixtures/README.md#task-evidence-issue-59-a-first-pr).
-Unavailable data stays distinguishable from zero; PID reuse, missing userspace
-records and unmatched kernel identities remain visible even in incomplete
-captures. Each `*.capture-N.json` retains its own diagnostic status and any saved
-evidence. The auditor frees each raw recording before required report writes
-and any recapture. A replayed capture carries
-`taskEvidenceStatus=discarded-before-recapture`. Once the final verdict is
-saved, the audit summarizes retained inputs in memory and attaches the result.
-Under supervision, diagnostics run only when their budgets fit in the remaining
-time reserved for work.
 
-This first PR is recording only. Existing resolutions, global unknown-record
-blocking, external/unknown-destination/opcode/functional failures and the narrow
-one-recapture policy are unchanged. Exact close/stub discharge under #59's new
-sufficient conditions and the dependency-preserving gate are reserved for the
-second PR, with their positive and adversarial controls. This evidence does not
-retroactively turn any earlier incomplete artifact into a pass.
+The auditor removes each capture's scratch before required report writes or
+recapture. It publishes completed counters for the final capture after the
+required verdict and attempt history are saved. The existing one-recapture
+policy and audit deadlines apply.

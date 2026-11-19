@@ -11,7 +11,7 @@ import tempfile
 import time
 
 sys.path.insert(0, str(Path(__file__).parents[1] / 'fixtures'))
-from outboundAudit import run_supervised, CAPTURE_CLEANUP, REPORT_HISTORY_RESERVE
+from outboundAudit import run_supervised, CAPTURE_CLEANUP
 
 
 def digest(path):
@@ -47,7 +47,7 @@ class AuditedSessions:
         report = self.directory / ('outbound' + stem + '.json')
         whole_path = self.directory / ('outbound-app' + stem + '.json')
         audited = [sys.executable, '-I', '-B', str(self.auditor), '--capture-timeout', str(timeout)]
-        total_timeout = 2 * (timeout + CAPTURE_CLEANUP) + REPORT_HISTORY_RESERVE
+        total_timeout = 2 * (timeout + CAPTURE_CLEANUP) + 30
         for root in (roots if roots is not None else (self.core, self.native)):
             audited += ['--scope-executable', str(root)]
         for root in required: audited += ['--require-executable', str(root)]

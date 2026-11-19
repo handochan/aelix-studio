@@ -4,10 +4,8 @@ Executable paths are used privately to identify roots. Reports contain PID/comm
 and network metadata, never argv, environment, payloads or executable paths.
 """
 import ipaddress
-from collections import Counter, defaultdict
 from pathlib import Path, PurePosixPath
 import re
-import sys
 
 NETWORK = {'connect', 'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4'}
 UDP_META = {'socket', 'unshare'}
@@ -26,7 +24,9 @@ ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 QUOTED = r'"(?:[^"\\]|\\.)*"'
 REGISTER_ENTRY = '???( <unfinished ...>'
 REGISTER_RESUME = '<... ??? resumed>) = ?'
-TASK_TRACE_MEMORY_LIMIT = 256 * 1024 * 1024
+CLOSE_ARGUMENT = r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
+CLOSE_MISSING_RETURN = re.compile(CLOSE_ARGUMENT + r'\)\s+=\s+\?')
+CLOSE_PENDING = re.compile(CLOSE_ARGUMENT)
 
 
 def is_register_terminal(line, with_kernel):
@@ -61,16 +61,9 @@ def canonical(value):
     return str(Path(value).resolve())
 
 
-def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None):
-    """Return the scoped and whole-command measurements."""
-    scoped, whole, _ = measure_processes(paths, scope_executables, require_executables, require_lifecycle, kernel_capture,
-                                        retain_task_trace=False)
-    return scoped, whole
-
-
-def measure_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None,
-                      *, retain_task_trace=True):
-    """Scope by executable and lineage; defer optional task evidence until after measurement."""
+def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None,
+                      *, task_evidence=None):
+    """Scope by successful exec roots plus all forks/threads, never by address/name."""
     selected = {canonical(path) for path in scope_executables}
     required = {canonical(path) for path in require_executables}
     states, parents, roots, matches = {}, {}, set(), set()
@@ -87,19 +80,15 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
     register_holes, hole_resumes = {}, set()
     result_holes = {}
     invalid_terminal_stops = set()
-    trace_inputs = [] if retain_task_trace else None
-    trace_memory = 0
-
-    def read_trace_lines(path, legacy_pid):
-        nonlocal trace_inputs, trace_memory
-        text = path.read_text()
-        if trace_inputs is not None:
-            trace_memory += sys.getsizeof(text)
-            if trace_memory <= TASK_TRACE_MEMORY_LIMIT:
-                trace_inputs.append((legacy_pid, text))
-            else:
-                trace_inputs = None
-        return text.splitlines()
+    def count_result_gap(pid, call, line, started):
+        kind = 'other-result-gap'
+        if call == 'close':
+            match = CLOSE_MISSING_RETURN.fullmatch(line)
+            pending_match = CLOSE_PENDING.fullmatch(line) if pid in pending and pending[pid][2] == started else None
+            descriptor = match or pending_match
+            if descriptor is not None and -0x80000000 <= int(descriptor[1]) <= 0x7fffffff:
+                kind = 'close-pending-complete-argument' if pending_match else 'close-return-unavailable'
+        task_evidence.gap(pid, kind)
 
     def state(pid, name=None):
         if pid not in states:
@@ -153,6 +142,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
         if not match:
             if line and not line.startswith(('+++', '---')):
                 classification_issue('unknown_record', pid)
+                if task_evidence is not None:
+                    task_evidence.note(task_evidence.gap, pid, 'unclassified-record')
                 # Privacy-safe shape diagnostics: raw traces are intentionally
                 # deleted. Never export arbitrary tokens, paths or payloads.
                 classification_issues[-1].update(
@@ -163,7 +154,10 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
         call = match[1]
         if call in NETWORK | FD_META | UDP_META and not re.search(r'\)\s+=\s+(?:-?\d+|0x[0-9a-f]+)(?:<.*>)?(?:\(deleted\))?(?:\s.*)?$', line):
             unparsed(pid,'result',call=call)
-            if call in NETWORK or call=='close': result_holes[(pid,started)]=call
+            if call in NETWORK or call=='close':
+                result_holes[(pid,started)]=call
+                if task_evidence is not None:
+                    task_evidence.note(count_result_gap, pid, call, line, started)
         if call in UDP_META:
             if call=='unshare' and 'CLONE_FILES' in line:
                 result=re.search(r'\)\s+=\s+(-?\d+)(?:\s.*)?$',line)
@@ -317,7 +311,7 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
 
     for index, path in enumerate(sorted(paths)):
         legacy_pid = int(path.suffix[1:]) if path.suffix[1:].isdigit() else -(index+1)
-        for raw in read_trace_lines(path, legacy_pid):
+        for raw in path.read_text().splitlines():
             sequence += 1
             if not raw: continue
             prefix = PREFIX.match(raw)
@@ -341,6 +335,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                 if pid in terminal_at or not (final_record or unreadable_resume or kernel_capture is not None and signal_record):
                     invalid_terminal_stops.add(pid)
             if line == REGISTER_ENTRY:
+                if task_evidence is not None:
+                    task_evidence.note(task_evidence.gap, pid, 'register-entry')
                 if pid in pending or pid in terminal_stops:
                     invalid_terminal_stops.add(pid)
                 terminal_stops[pid] = sequence
@@ -348,6 +344,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                 terminal_shapes.setdefault(pid,['register-entry'])
                 continue
             if unreadable_resume:
+                if task_evidence is not None:
+                    task_evidence.note(task_evidence.gap, pid, 'register-resume')
                 if pid not in terminal_stops or pid in hole_resumes:
                     classification_issue('unknown_resumed_syscall', pid)
                 else:
@@ -462,7 +460,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
         for call in io_calls:
             call['tgid']=tgid(call['pid'])
             if call['call']=='fork':call['childTgid']=tgid(call['child'])
-        ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states))
+        ring_evidence=reconcile(kernel_capture,io_calls,set(states),included if selected else set(states),
+                                task_evidence=task_evidence)
         classification_issues.extend(ring_evidence['globalIssues'])
 
     from udpLifecycle import analyze as analyze_udp
@@ -493,7 +492,7 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                                              {pid: tgid(pid) for pid in states},parents,
                                              {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
                                              set(event_keys) | {(pid,seq) for pid,seq,call,connects in udp_writes if connects},
-                                             metadata_allowed=metadata_allowed)
+                                             metadata_allowed=metadata_allowed, task_evidence=task_evidence)
         from uring.socketObjects import reconcile as reconcile_objects
         connect_keys={key for key,event in event_keys.items() if event['syscall']=='connect'}
         proven_tcp={(operation['pid'],operation['sequence']) for operation in network_evidence['operationDiagnostics']
@@ -502,7 +501,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
             if re.match(r'^connect\(\d+<UDP(?:v6)?:',line) and (pid,seq) in connect_keys}
         required_udp.difference_update(proven_tcp)
         object_evidence=reconcile_objects(kernel_capture,network_evidence,set(states),
-                                          included if selected else set(states),connect_keys,required_udp)
+                                          included if selected else set(states),connect_keys,required_udp,
+                                          task_evidence=task_evidence)
         if object_evidence['verified']:
             # Complete object proof replaces only UDP descriptor inference.
             # Generic FD/io_uring, syscall decode and network checks remain.
@@ -523,9 +523,10 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                 {pid:tgid(pid) for pid in states},parents,
                 {pid for pid,item in states.items() if item['finished']} if not classification_issues else set(),
                 set(event_keys)|{(pid,seq) for pid,seq,call,connects in udp_writes if connects},
-                metadata_allowed=metadata_allowed)
+                metadata_allowed=metadata_allowed, task_evidence=task_evidence)
             object_evidence=reconcile_objects(kernel_capture,network_evidence,set(states),
-                                              included if selected else set(states),connect_keys,required_udp)
+                                              included if selected else set(states),connect_keys,required_udp,
+                                              task_evidence=task_evidence)
             exempt=object_evidence['exempt']
         udp_issues.extend(object_evidence['issues'])
         for write in object_evidence['writes']:
@@ -549,12 +550,16 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
         for evidence in network_evidence['resolved']:
             unparsed(evidence['pid'],'register_stub',-evidence['records'])
             evidence['straceRecordKinds']=terminal_shapes[evidence['pid']]
+            if task_evidence is not None:
+                task_evidence.note(task_evidence.resolution, evidence['pid'], 'registerResolutions', evidence['records'])
         for evidence in network_evidence['resultFields']:
             key=(evidence['pid'],evidence['sequence'])
             if key in result_holes:
                 unparsed(evidence['pid'],'result',-1,result_holes[key])
         for evidence in network_evidence['metadataFields']:
             unparsed(evidence['pid'],'result',-1,'close')
+            if task_evidence is not None:
+                task_evidence.note(task_evidence.resolution, evidence['pid'], 'closeResolutions', evidence['records'])
 
     elif legacy_exempt:
         udp_issues.extend({'pid':pid,'reason':'udp_socket_evidence_missing'} for pid in sorted({pid for pid,_ in legacy_exempt}))
@@ -583,6 +588,17 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
               'file' if label.startswith('/') else 'other')
         return {'pid':key[0],'sequence':key[1],'fd':int(match[1]) if match else None,
                 'straceSocketKind':kind,'kernel':operation_diagnostics.get(key)}
+
+    def strace_task(pid):
+        kinds = dict(task_evidence.gaps.get(pid, {}))
+        register_records = kinds.get('register-entry', 0) + kinds.get('register-resume', 0)
+        terminal = terminal_at.get(pid)
+        delimited = pid in terminal_stops and terminal is not None and terminal > terminal_stops[pid]
+        task_evidence.strace_tasks.append(dict(tid=pid, tgid=tgid(pid), parentTid=parents.get(pid),
+            forkEntrySequence=fork_at.get(pid), terminalSequence=terminal, gapCounts=kinds,
+            terminalDelimited=delimited if register_records else None,
+            exactStubSyntax=(delimited and pid not in invalid_terminal_stops
+                             and register_records == register_holes[pid]) if register_records else None))
 
     def report(pids, scope):
         events = [event for pid in pids for event in states[pid]['events']]
@@ -620,6 +636,8 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
                         for pid,seq,call,connects in udp_writes if key in connects]})
         for pid in sorted(pids):
             item = states[pid]
+            if scope == 'all' and task_evidence is not None:
+                task_evidence.note(strace_task, pid)
             processes.append({'pid': pid, 'parentPid': parents.get(pid), 'process': item['process'],
                               'inScope': not selected or pid in included, 'root': pid in roots, 'finished': item['finished'],
                               'destinationAttempts': len(item['events']),
@@ -679,111 +697,7 @@ def measure_processes(paths, scope_executables=(), require_executables=(), requi
 
     whole = report(set(states), 'all')
     scoped = report(set(states) & included, 'selected-process-trees') if selected else whole
-    if trace_inputs is None:
-        return scoped, whole, None
-
-    def summarize(snapshot=None):
-        # Use the verdict's input after deleting the on-disk recording. The
-        # verdict parser has no diagnostic bookkeeping in its per-record loop.
-        trace_positions={}
-        register_positions=defaultdict(list)
-        terminal_shape_counts=defaultdict(Counter)
-        seen_entries=set()
-        sequence=0
-        for legacy_pid, text in trace_inputs:
-            for raw in text.splitlines():
-                sequence+=1
-                if not raw: continue
-                prefix=PREFIX.match(raw)
-                pid,line=(int(prefix[1]),prefix[3]) if prefix else (legacy_pid,raw)
-                position=trace_positions.get(pid)
-                if position is None:
-                    trace_positions[pid]=dict(firstSequence=sequence,lastSequence=sequence,records=1)
-                else:
-                    position['lastSequence']=sequence
-                    position['records']+=1
-
-                entry=line==REGISTER_ENTRY
-                resume=line==REGISTER_RESUME
-                if entry or resume:
-                    register_positions[pid].append(dict(sequence=sequence,
-                        kind='exact-register-entry' if entry else 'exact-register-resume'))
-                if entry:
-                    seen_entries.add(pid)
-                if pid in seen_entries:
-                    shape=('register-entry' if entry else 'resume' if resume else
-                           'signal' if line.startswith('--- SIG') else
-                           'exit' if is_register_terminal(line, kernel_capture is not None) else 'other')
-                    terminal_shape_counts[pid][shape]+=1
-
-        from uring.network import summarize_tasks
-        task_evidence=summarize_tasks(kernel_capture,network_evidence,ring_evidence,object_evidence,snapshot=snapshot)
-        kernel_task_indices=defaultdict(list)
-        for task in task_evidence['tasks']:
-            tid=task['namespaceTid']
-            if tid is not None:kernel_task_indices[tid].append(task['taskIndex'])
-            task['straceObserved']=tid in states
-            task['expectedStraceTgid']=tgid(tid) if tid in states or tid in parents else None
-            task['expectedStraceParentTid']=parents.get(tid)
-        grammar_gaps=defaultdict(list)
-        for pid,records in register_positions.items():
-            terminal_delimited = pid in terminal_stops and terminal_at.get(pid,0)>terminal_stops[pid]
-            # register_holes counts the entry and at most one allowed resume.
-            grammar_gaps[pid].append(dict(kind='register-sequence',records=len(records),positions=records,
-                terminalSequence=terminal_at.get(pid),terminalDelimited=terminal_delimited,
-                exactStubSyntax=(terminal_delimited and pid not in invalid_terminal_stops and len(records)==register_holes[pid]),
-                recordKinds=list(terminal_shapes.get(pid,[])),recordKindCounts=dict(terminal_shape_counts[pid]),
-                recordKindsTruncated=sum(terminal_shape_counts[pid].values())>len(terminal_shapes.get(pid,[]))))
-        close_argument=r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
-        for (pid,seq),call in result_holes.items():
-            shape='other-result-gap';fd=None
-            pending_at_end=pid in pending and pending[pid][2]==seq
-            if call=='close':
-                line=raw_records.get((pid,seq),'')
-                complete=re.fullmatch(close_argument+r'\)\s+=\s+\?',line)
-                pending_complete=(re.fullmatch(close_argument,line) if pending_at_end else None)
-                match=complete or pending_complete
-                if match and -0x80000000<=int(match[1])<=0x7fffffff:
-                    fd=int(match[1]);shape='close-pending-complete-argument' if pending_complete else 'close-return-unavailable'
-            grammar_gaps[pid].append(dict(kind=shape,syscall=call,sequence=seq,records=1,fd=fd,
-                pendingAtCaptureEnd=pending_at_end,terminalSequence=terminal_at.get(pid),
-                **({'returnValueKnown':False,'fdClosureInferred':False} if call=='close' else {})))
-        for issue in classification_issues:
-            if issue['reason']=='unknown_record':
-                grammar_gaps[issue['pid']].append(dict(kind='unclassified-record',records=1,
-                    sequence=issue.get('sequence'),recordLength=issue.get('recordLength'),
-                    recordShape=issue.get('recordShape') if issue.get('recordShape') in
-                        ('register_unavailable','resumed','other') else 'other'))
-
-        network_checked=(network_evidence or {}).get('comparisonPerformed') is True
-        resolved_registers=Counter();resolved_closes=Counter()
-        for entry in (network_evidence or {}).get('resolved',[]):resolved_registers[entry['pid']]+=entry['records']
-        for entry in (network_evidence or {}).get('metadataFields',[]):resolved_closes[entry['pid']]+=entry['records']
-
-        def for_report(measurement):
-            pids={process['pid'] for process in measurement['processes']}
-            issues=measurement['classificationIssues']
-            issue_indices=defaultdict(list);global_indices=[]
-            for index,issue in enumerate(issues):
-                if issue.get('pid') is None and issue.get('unattributedPid') is None:global_indices.append(index)
-                else:
-                    for pid in {issue.get('pid'),issue.get('unattributedPid')}-{None}:issue_indices[pid].append(index)
-            strace_tasks=[]
-            for pid in sorted(set(states)|set(parents)):
-                item=states.get(pid)
-                strace_tasks.append(dict(tid=pid,tgid=tgid(pid),parentTid=parents.get(pid),inReportScope=pid in pids,
-                    observed=item is not None,positions=dict(trace_positions[pid]) if pid in trace_positions else None,
-                    kernelTaskIndices=kernel_task_indices[pid],
-                    forkEntrySequence=fork_at.get(pid),terminalSequence=terminal_at.get(pid),
-                    finished=item['finished'] if item is not None else None,
-                    gaps=grammar_gaps.get(pid,[]),classificationIssueIndices=issue_indices[pid],
-                    unparsedRecordsAfterExistingPolicy=item['unparsed'] if item is not None else None,
-                    unparsedRecordKindsAfterExistingPolicy=dict(item['unparsed_kinds']) if item is not None else None,
-                    existingRegisterResolutions=resolved_registers[pid] if network_checked else None,
-                    existingCloseResolutions=resolved_closes[pid] if network_checked else None))
-            return {**task_evidence,'stracePositionUnit':'parsed-line-sequence','retainedStraceTextBytes':trace_memory,
-                    'globalClassificationIssueIndices':global_indices,'straceTasks':strace_tasks}
-        whole_evidence=for_report(whole)
-        return (whole_evidence if scoped is whole else for_report(scoped)), whole_evidence
-
-    return scoped, whole, summarize
+    if task_evidence is not None:
+        task_evidence.measurement = task_evidence.note(task_evidence.result, kernel_capture, states, network_evidence,
+                                                       ring_evidence, object_evidence)
+    return scoped, whole
