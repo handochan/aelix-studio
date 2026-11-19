@@ -328,6 +328,10 @@ export async function launchWithIdentity(
       processTimeline?.checkpoint('first-window-wait', launchNumber);
       let outcome = 'failed';
       try {
+        if (exited(main)) {
+          const reason = main.exitCode !== null ? `code ${main.exitCode}` : `signal ${main.signalCode}`;
+          throw new Error(`Studio launch #${launchNumber}: application exited with ${reason} before the first window`);
+        }
         const remaining = deadline - performance.now();
         if (remaining > 0) await app.firstWindow({ timeout: remaining });
         if (performance.now() >= deadline)
@@ -362,17 +366,21 @@ export async function launchWithIdentity(
         observation.identityRetry = { ...retry, outcome: 'pending' };
         diagnostic();
         const second = await evaluateIdentity(app, protocol);
-        const sameMain =
-          !second.failedAt && !exited(main) && app.process() === main && second.identity?.pid === main.pid;
+        // The same Playwright app uses its original inspector handle.
+        // app.process() can be the Windows launcher, with a different PID.
+        const sameApp = !second.failedAt && !exited(main) && app.process() === main;
+        const pid = second.identity?.pid;
+        const validPid = Number.isSafeInteger(pid) && pid > 0;
         observation.identityRetry = {
           ...retry,
           finishedAt: second.failedAt ?? new Date().toISOString(),
-          outcome: second.failedAt || !sameMain ? 'failed' : 'passed',
+          outcome: sameApp && validPid ? 'passed' : 'failed',
           secondProtocolError: second.protocolError,
         };
         diagnostic();
         if (second.failedAt) throw second.error;
-        if (!sameMain) throw new Error('Studio main changed during identity retry');
+        if (!sameApp) throw new Error('Studio app changed during identity retry');
+        if (!validPid) throw new Error('Studio identity retry returned an invalid PID');
         identity = second.identity;
       }
       observation.identifiedAt = new Date().toISOString();

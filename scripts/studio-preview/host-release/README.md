@@ -81,16 +81,21 @@ recorded as unavailable without changing the smoke result.
 The launch helper waits for the first window within the 60-second budget
 shared with Electron launch. `mainLaunches[].firstWindowWait` records the
 start, completion and outcome. On expiry, the launch fails and closes the app
-through the normal cleanup. After identity, the smoke selects the current first
-window and runs its renderer checks in their established order.
+through the normal cleanup. A launcher that has already exited fails before
+waiting for a window, with its exit code or signal retained. After identity,
+the smoke selects the current first window and runs its renderer checks in their
+established order.
 
 After the first window opens, the launch helper can repeat the read-only
 identity evaluation once on the same live app handle. It requires an exact unredacted CDP `Promise was collected`
 error with code −32000. Each evaluation passes a private one-use token as an
 unused argument. The pinned observer recognizes it in a single
 `Runtime.callFunctionOn` request with both evaluation flags true and matches
-the response by connection, session and request ID. The token is discarded
-from the report. `mainLaunches[].identityRetry` retains the matched first
+the response by connection, session and request ID. The same app handle uses
+its original inspector session for both evaluations. The launcher handle must
+stay live and the result must contain a valid Electron PID. Windows can report
+different PIDs for the launcher and Electron. The token is discarded from the
+report. `mainLaunches[].identityRetry` retains the matched first
 error and the second outcome, and `identityFailedAt`/ `identityProtocol` retain
 the first failure even if the retry succeeds. A failed retry follows the usual
 20-second exit observation and cleanup.

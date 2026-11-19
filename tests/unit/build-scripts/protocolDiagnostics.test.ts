@@ -211,7 +211,7 @@ describe('safe original CDP diagnostics', () => {
     }
   });
 
-  it.each(['different connection', 'different session', 'duplicate tagged request'])(
+  it.each(['different connection', 'different session', 'different request ID', 'duplicate tagged request'])(
     'cannot attribute an identity error with a %s',
     (scenario) => {
       const helper = { debugProtocolLogger: () => vi.fn() };
@@ -244,7 +244,7 @@ describe('safe original CDP diagnostics', () => {
         if (scenario === 'duplicate tagged request') logger('send', { ...send, id: 8 });
         const receive = scenario === 'different connection' ? helper.debugProtocolLogger() : logger;
         receive('receive', {
-          id: 7,
+          id: scenario === 'different request ID' ? 8 : 7,
           sessionId: scenario === 'different session' ? 'other' : 'expected',
           error: { code: -32000, message: 'Promise was collected' },
         });
