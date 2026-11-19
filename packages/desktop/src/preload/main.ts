@@ -6,6 +6,7 @@
 
 import { contextBridge, ipcRenderer, webUtils } from 'electron';
 import { ADAPTER_BRIDGE_EVENT_KEY } from '../common/adapter/constant';
+import { ANALYTICS_PREVIEW_CHANNELS, type AnalyticsPreviewAPI } from '../common/utils/analyticsPreview';
 
 // Dedicated secret-bearing channel: no generic bridge interceptors or request logging.
 contextBridge.exposeInMainWorld('__studioNativeAuth', {
@@ -16,6 +17,12 @@ contextBridge.exposeInMainWorld('__studioNativeAuth', {
  * @description 注入到renderer进程中, 用于与main进程通信
  * */
 contextBridge.exposeInMainWorld('electronAPI', {
+  analyticsPreview: {
+    classify: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.classify, request),
+    open: (request) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.open, request),
+    close: (url) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.close, url),
+    detach: (projectId, peId) => ipcRenderer.invoke(ANALYTICS_PREVIEW_CHANNELS.detach, projectId, peId),
+  } satisfies AnalyticsPreviewAPI,
   emit: (name: string, data: unknown) => {
     return ipcRenderer
       .invoke(

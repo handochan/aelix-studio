@@ -1,0 +1,370 @@
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { constants } from 'node:fs';
+import { lstat, open, realpath, type FileHandle } from 'node:fs/promises';
+import path from 'node:path';
+import type { Stats } from 'node:fs';
+import {
+  analyticsPathSegments,
+  isGeneratedReportBody,
+  originalReportScope,
+  isReportViewPath,
+  type AnalyticsPreviewScope,
+} from '@/common/utils/analyticsPreview';
+
+export const MAX_ANALYTICS_PREVIEW_BYTES = 16 * 1024 * 1024;
+const MAX_MARKER_BYTES = 64 * 1024;
+// Both supported Analytics writers limit a complete record to less than 50 KiB.
+const MAX_JOURNAL_LINE_BYTES = 64 * 1024;
+const JOURNAL_CHUNK_BYTES = 64 * 1024;
+const JOURNAL_PROBE_BYTES = 256 * 1024;
+const MAX_ACTIVE_JOURNAL_PROBES = 2;
+let activeJournalProbes = 0;
+
+const contentTypes = new Map([
+  ['.htm', 'text/html; charset=utf-8'],
+  ['.html', 'text/html; charset=utf-8'],
+  ['.css', 'text/css; charset=utf-8'],
+  ['.js', 'text/javascript; charset=utf-8'],
+  ['.mjs', 'text/javascript; charset=utf-8'],
+  ['.json', 'application/json'],
+  ['.avif', 'image/avif'],
+  ['.gif', 'image/gif'],
+  ['.jpeg', 'image/jpeg'],
+  ['.jpg', 'image/jpeg'],
+  ['.png', 'image/png'],
+  ['.svg', 'image/svg+xml'],
+  ['.webp', 'image/webp'],
+  ['.woff', 'font/woff'],
+  ['.woff2', 'font/woff2'],
+]);
+
+export function previewFileType(scope: AnalyticsPreviewScope, parts: string[]): string | undefined {
+  const contentType = contentTypes.get(path.extname(parts.at(-1) ?? '').toLowerCase());
+  if (!contentType) return;
+  if (scope.kind === 'report') {
+    return parts.length > scope.revision.length && scope.revision.every((part, i) => part === parts[i])
+      ? contentType
+      : undefined;
+  }
+  if (parts[0] === 'workspace' && parts.length > 1) {
+    if (isReportViewPath(parts) && !isGeneratedReportBody(parts)) return;
+    return contentType;
+  }
+  if (parts.length === 4 && parts[0] === 'runs' && parts[2] === 'visualizations' && contentType.startsWith('image/')) {
+    return contentType;
+  }
+}
+
+export type PreviewRoot = { directory: string; identity: Stats };
+
+async function inspectPath(root: PreviewRoot, parts: string[]): Promise<{ filename: string; info: Stats }> {
+  let filename = root.directory;
+  let info = await lstat(filename);
+  if (!info.isDirectory() || !sameFile(info, root.identity)) throw new Error('Preview root changed');
+  for (const part of parts) {
+    if (!info.isDirectory()) throw new Error('Expected a directory');
+    filename = path.join(filename, part);
+    info = await lstat(filename);
+    if (info.isSymbolicLink()) throw new Error('Preview cannot follow links');
+  }
+  if ((await realpath(filename)) !== filename) throw new Error('Preview path changed');
+  return { filename, info };
+}
+
+function sameFile(first: Stats, second: Stats): boolean {
+  return first.dev === second.dev && first.ino === second.ino;
+}
+
+/** An absent document is recoverable only beneath an existing root without a link in the missing path. */
+export async function canonicalPreviewDocument(directory: string, parts: string[]): Promise<string | undefined> {
+  try {
+    return await realpath(path.join(directory, ...parts));
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+  let filename = directory;
+  for (const part of parts) {
+    filename = path.join(filename, part);
+    try {
+      if ((await lstat(filename)).isSymbolicLink()) throw new Error('Analytics preview cannot follow links');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+  }
+  throw new Error('Analytics preview document changed');
+}
+
+async function withStableFile<T>(
+  root: PreviewRoot,
+  parts: string[],
+  read: (file: FileHandle, size: number) => Promise<T>
+): Promise<T | 404> {
+  if (!parts.length || parts.some((part) => part.includes('/') || !analyticsPathSegments(part))) return 404;
+  try {
+    const { filename, info } = await inspectPath(root, parts);
+    if (!info.isFile()) return 404;
+    const file = await open(filename, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+    try {
+      const opened = await file.stat();
+      if (!opened.isFile() || opened.nlink > 1 || !sameFile(info, opened)) return 404;
+      const result = await read(file, opened.size);
+      const named = (await inspectPath(root, parts)).info;
+      if (
+        !sameFile(opened, named) ||
+        named.nlink > 1 ||
+        named.size !== opened.size ||
+        named.mtimeMs !== opened.mtimeMs ||
+        named.ctimeMs !== opened.ctimeMs
+      )
+        return 404;
+      return result;
+    } finally {
+      await file.close();
+    }
+  } catch {
+    return 404;
+  }
+}
+
+/** Read a bounded asset without returning bytes from a changed file. */
+export async function readPreviewFile(
+  root: PreviewRoot,
+  parts: string[],
+  maxBytes = MAX_ANALYTICS_PREVIEW_BYTES
+): Promise<Uint8Array<ArrayBuffer> | 404 | 413> {
+  return withStableFile<Uint8Array<ArrayBuffer> | 404 | 413>(root, parts, async (file, size) => {
+    if (size > maxBytes) return 413;
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    while (offset < bytes.length) {
+      const { bytesRead } = await file.read(bytes, offset, bytes.length - offset, offset);
+      if (!bytesRead) return 404;
+      offset += bytesRead;
+    }
+    return bytes;
+  });
+}
+
+type JournalPrefix = { bytes: number; damaged: boolean };
+
+async function* journalLines(file: FileHandle, size: number, prefix?: JournalPrefix): AsyncGenerator<string> {
+  const strict = prefix === undefined;
+  const endOfScan = prefix?.bytes ?? size;
+  const decoder = new TextDecoder('utf-8', { fatal: strict, ignoreBOM: true });
+  const decode = (bytes: Buffer) => {
+    const line = decoder.decode(bytes);
+    if (prefix && line.includes('\uFFFD')) prefix.damaged = true;
+    return line;
+  };
+  const chunk = Buffer.alloc(JOURNAL_CHUNK_BYTES);
+  let carry = Buffer.alloc(0);
+  let discardLine = false;
+  for (let offset = 0; offset < endOfScan; ) {
+    const { bytesRead } = await file.read(chunk, 0, Math.min(chunk.length, endOfScan - offset), offset);
+    if (!bytesRead) throw new Error('Analytics journal was truncated');
+    offset += bytesRead;
+    const data = carry.length ? Buffer.concat([carry, chunk.subarray(0, bytesRead)]) : chunk.subarray(0, bytesRead);
+    let start = 0;
+    for (let end = data.indexOf(10, start); end !== -1; end = data.indexOf(10, start)) {
+      if (end - start > MAX_JOURNAL_LINE_BYTES) {
+        if (!prefix) throw new Error('Analytics journal record is too large');
+        prefix.damaged = true;
+      } else if (!discardLine) {
+        yield decode(data.subarray(start, end));
+      }
+      discardLine = false;
+      start = end + 1;
+    }
+    if (data.length - start > MAX_JOURNAL_LINE_BYTES) {
+      if (!prefix) throw new Error('Analytics journal record is too large');
+      prefix.damaged = true;
+      discardLine = true;
+    }
+    carry = discardLine ? Buffer.alloc(0) : Buffer.from(data.subarray(start));
+  }
+  if (carry.length && endOfScan === size) yield decode(carry);
+}
+
+/** Scan a single verified journal snapshot without imposing the asset size limit. */
+export async function scanPreviewJournal<T>(
+  root: PreviewRoot,
+  scan: (lines: () => AsyncGenerator<string>) => Promise<T>
+): Promise<T | 404> {
+  return withStableFile(root, ['journal.jsonl'], (file, size) => scan(() => journalLines(file, size)));
+}
+
+type JournalProbe = 'analytics' | 'no-evidence' | 'inconclusive';
+type ProbeBudget = { remaining: number };
+
+async function probeAnalyticsJournal(root: PreviewRoot, budget: ProbeBudget): Promise<JournalProbe> {
+  try {
+    await lstat(path.join(root.directory, 'journal.jsonl'));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'no-evidence' : 'inconclusive';
+  }
+  if (budget.remaining <= 0 || activeJournalProbes >= MAX_ACTIVE_JOURNAL_PROBES) return 'inconclusive';
+
+  activeJournalProbes++;
+  let recognized = false;
+  try {
+    const result = await withStableFile<JournalProbe>(root, ['journal.jsonl'], async (file, size) => {
+      const bytes = Math.min(budget.remaining, size);
+      budget.remaining -= bytes;
+      const prefix = { bytes, damaged: false };
+      for await (const line of journalLines(file, size, prefix)) {
+        if (!line.trim()) continue;
+        try {
+          const entry: unknown = JSON.parse(line);
+          if (
+            entry &&
+            typeof entry === 'object' &&
+            'schema' in entry &&
+            (entry.schema === 'lab.event/1' || entry.schema === 'analytics.event/2')
+          ) {
+            recognized = true;
+            return 'analytics';
+          }
+        } catch {
+          // Recognition only denies fallback. Scan past damage within the prefix.
+          prefix.damaged = true;
+        }
+      }
+      return bytes === size && !prefix.damaged ? 'no-evidence' : 'inconclusive';
+    });
+    // Evidence can only deny ordinary rendering. A concurrent append does not erase it.
+    if (recognized) return 'analytics';
+    return result === 404 ? 'inconclusive' : result;
+  } finally {
+    activeJournalProbes--;
+  }
+}
+
+async function openProjectRoot(directory: string): Promise<PreviewRoot | undefined> {
+  try {
+    const canonical = await realpath(directory);
+    const identity = await lstat(canonical);
+    if (!identity.isDirectory()) throw new Error('Analytics project root is unavailable');
+    return { directory: canonical, identity };
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+    throw error;
+  }
+}
+
+async function projectRootStillCurrent(root: PreviewRoot): Promise<boolean> {
+  const current = await lstat(root.directory).catch((): null => null);
+  return Boolean(
+    current?.isDirectory() &&
+    sameFile(root.identity, current) &&
+    current.ctimeMs === root.identity.ctimeMs &&
+    current.mtimeMs === root.identity.mtimeMs
+  );
+}
+
+async function projectMarker(root: PreviewRoot): Promise<'valid' | 'missing' | 'invalid'> {
+  try {
+    await lstat(path.join(root.directory, 'analytics.json'));
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'missing' : 'invalid';
+  }
+  const marker = await readPreviewFile(root, ['analytics.json'], MAX_MARKER_BYTES);
+  let schema: unknown;
+  if (marker instanceof Uint8Array) {
+    try {
+      const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(marker));
+      if (value && typeof value === 'object' && 'schema' in value) schema = value.schema;
+    } catch {
+      return 'invalid';
+    }
+  }
+  if (schema === 'analytics.project/2') return 'valid';
+  if (typeof schema === 'string' && schema.startsWith('analytics.project/')) {
+    throw new Error('Invalid Analytics project marker');
+  }
+  return 'invalid';
+}
+
+function isPreparedReportPath(parts: string[]): boolean {
+  return parts[0] === 'artifacts' && parts[1] === 'reports' && parts[3] === '.staging';
+}
+
+function isReportContentPath(parts: string[]): boolean {
+  return Boolean(
+    originalReportScope(parts) ||
+    (isPreparedReportPath(parts) && parts[5] === 'content' && parts.length > 6) ||
+    (isReportViewPath(parts) && parts[4] === 'files' && parts.length > 5) ||
+    isGeneratedReportBody(parts)
+  );
+}
+
+async function hasReportRecord(root: PreviewRoot, parts: string[]): Promise<boolean> {
+  const report = originalReportScope(parts);
+  const prepared = isPreparedReportPath(parts) && parts.length > 5;
+  const view = isReportViewPath(parts);
+  if (!report && !prepared && !view) return false;
+  const metadata = prepared
+    ? [...parts.slice(0, 5), 'manifest.json']
+    : [...parts.slice(0, 4), report ? 'manifest.json' : 'view.json'];
+  const bytes = await readPreviewFile(root, metadata);
+  if (typeof bytes === 'number') return false;
+  try {
+    const value: unknown = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+    if (!value || typeof value !== 'object') return false;
+    if (report || prepared) return 'schema' in value && value.schema === 'analytics.report_revision/1';
+    if (!('stamp' in value) || !value.stamp || typeof value.stamp !== 'object') return false;
+    return 'revision_id' in value.stamp && value.stamp.revision_id === parts[3] && 'kit' in value.stamp;
+  } catch {
+    return false;
+  }
+}
+
+/** Missing candidates can be skipped only after the requested document is known to be absent. */
+export async function locateAnalyticsDocument(filename: string, { documentMissing = false } = {}) {
+  const volume = path.parse(filename).root;
+  const segments = path.relative(volume, filename).split(path.sep);
+  const budget = { remaining: JOURNAL_PROBE_BYTES };
+  let workspace;
+  let needsSource = false;
+  for (let index = 0; index < segments.length - 1; index++) {
+    const parts = segments.slice(index);
+    const report = originalReportScope(parts);
+    const prepared = isPreparedReportPath(parts);
+    if (!report && !prepared && parts[0] !== 'workspace') continue;
+    const directory = path.join(volume, ...segments.slice(0, index));
+    const root = await openProjectRoot(directory);
+    if (!root) {
+      if (documentMissing) continue;
+      throw new Error('Analytics project root is unavailable');
+    }
+    const marker = await projectMarker(root);
+    if (marker !== 'valid') {
+      const journal = (await hasReportRecord(root, parts)) ? 'analytics' : await probeAnalyticsJournal(root, budget);
+      if (journal === 'analytics') {
+        throw new Error(
+          marker === 'missing' ? 'Analytics project marker is unavailable' : 'Invalid Analytics project marker'
+        );
+      }
+      if (journal === 'inconclusive') {
+        // A nested marker must not turn ambiguous Report content into executable Workspace HTML.
+        if (isReportContentPath(parts)) return 'source-only' as const;
+        needsSource = true;
+      } else if (!documentMissing && !(await projectRootStillCurrent(root))) {
+        return 'source-only' as const;
+      }
+      continue;
+    }
+    if (prepared) throw new Error('A prepared Report revision cannot be previewed');
+    if (report) return { root, scope: report, parts };
+    const scope: AnalyticsPreviewScope = { kind: 'workspace', project: [] };
+    const location = { root, scope, parts };
+    if (isReportViewPath(parts)) return location;
+    workspace = location;
+    needsSource = false;
+  }
+  return needsSource ? ('source-only' as const) : workspace;
+}

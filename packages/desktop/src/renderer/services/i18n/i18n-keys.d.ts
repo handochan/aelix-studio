@@ -1318,6 +1318,7 @@ export type I18nKey =
   | 'pet.sizeSmall'
   | 'preview.addToChat'
   | 'preview.aiWriting'
+  | 'preview.analyticsUnavailable'
   | 'preview.browser.addressPlaceholder'
   | 'preview.browser.agentActiveTooltip'
   | 'preview.browser.agentFirstUseAction'
