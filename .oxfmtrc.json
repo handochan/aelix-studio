@@ -8,6 +8,7 @@
   "bracketSpacing": true,
   "arrowParens": "always",
   "endOfLine": "lf",
+  "ignorePatterns": ["scripts/studio-preview/host-release/provenance.json"],
   "quoteProps": "as-needed",
   "jsxSingleQuote": true,
   "bracketSameLine": false

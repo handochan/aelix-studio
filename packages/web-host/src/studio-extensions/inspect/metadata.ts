@@ -126,6 +126,21 @@ export function isObjectReference(value: string): boolean {
   return REFERENCE.test(value);
 }
 
+const IDENTIFIER = '[A-Za-z_][\\p{L}\\p{N}_]*';
+const ADAPTER_REFERENCE = new RegExp(
+  `^${IDENTIFIER}(?:\\.${IDENTIFIER})*(?::${IDENTIFIER}(?:\\.${IDENTIFIER})*)?$`,
+  'u'
+);
+
+/**
+ * Whether the conversation adapter accepts a value as a module reference (`extension_reference`
+ * at the ACP pin): dotted identifiers that each start with an ASCII letter or `_`, and an
+ * optional `:attribute` of the same shape. A reference it refuses fails every conversation start.
+ */
+export function isAdapterReference(value: string): boolean {
+  return ADAPTER_REFERENCE.test(value);
+}
+
 const ENTRY_NAME = /^[\p{L}\p{N}_][\p{L}\p{N}_.-]*$/u;
 
 /**

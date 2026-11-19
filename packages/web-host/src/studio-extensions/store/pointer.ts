@@ -1,12 +1,13 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { isObjectReference } from '../inspect/metadata.js';
+import { isAdapterReference, isObjectReference } from '../inspect/metadata.js';
+import type { LaunchForm } from '../launch/form.js';
 import type { ExtensionOrigin } from '../types.js';
 import { isGenerationId, writeAtomic, writeTemporary, type BundleBinding, type Layout } from './layout.js';
 import type { StateWriter } from './lock.js';
 
 const POINTER_SCHEMA = 'aelix.studio.extensions.current/1';
-const GENERATION_SCHEMA = 'aelix.studio.extensions.generation/1';
+const GENERATION_SCHEMA = 'aelix.studio.extensions.generation/2';
 
 /** `current.json`: which generation new conversations use. */
 export type Pointer = {
@@ -20,7 +21,16 @@ export type Pointer = {
 };
 
 export type RecordedDistribution = { version: string; recordSha256: string; origin?: ExtensionOrigin };
-export type RecordedExtension = { reference: string; distribution: string; manifestBound: boolean };
+export type RecordedExtension = {
+  reference: string;
+  distribution: string;
+  /** native's `extension verify` verdict for the installed entry point. */
+  manifestBound: boolean;
+  /** How conversations get it (decision B5): `pack` binds its manifest, `module` loads its code only. */
+  form: 'pack' | 'module';
+  /** The plugin id a conversation reports for a pack; null for a module reference. */
+  plugin: string | null;
+};
 
 /** `generation.json`: what a finished generation holds. Its presence marks the generation complete. */
 export type GenerationRecord = {
@@ -34,6 +44,8 @@ export type GenerationRecord = {
   distributions: Record<string, RecordedDistribution>;
   /** `aelix.extensions` entries by entry name. */
   extensions: Record<string, RecordedExtension>;
+  /** What the launcher passes to conversations; verified by the conversation load check. */
+  launch: LaunchForm;
 };
 
 type Json = Record<string, unknown>;
@@ -84,10 +96,13 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
   }
   if (!isObject(value) || value.schema !== GENERATION_SCHEMA) return undefined;
   const binding = parseBinding(value.binding);
-  const { generation, createdAt, operation, distributions, extensions } = value;
+  const { generation, createdAt, operation, distributions, extensions, launch } = value;
   const parent = optionalGeneration(value.parent);
   if (!binding || !isGenerationId(generation) || parent === undefined) return undefined;
   if (!isText(createdAt) || !isObject(operation) || !isObject(distributions) || !isObject(extensions)) return undefined;
+  if (!isObject(launch) || typeof launch.packs !== 'boolean' || !Array.isArray(launch.modules)) return undefined;
+  const modules = launch.modules.filter((module): module is string => typeof module === 'string');
+  if (modules.length !== launch.modules.length || !modules.every(isAdapterReference)) return undefined;
   const { action, target } = operation;
   if ((action !== 'install' && action !== 'update' && action !== 'remove') || typeof target !== 'string')
     return undefined;
@@ -100,6 +115,7 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
     operation: { action, target },
     distributions: {},
     extensions: {},
+    launch: { packs: launch.packs, modules },
   };
   for (const [name, entry] of Object.entries(distributions)) {
     if (!isObject(entry) || !isText(entry.version) || typeof entry.recordSha256 !== 'string') return undefined;
@@ -113,10 +129,14 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
   for (const [name, entry] of Object.entries(extensions)) {
     if (!isObject(entry) || !isText(entry.reference) || !isObjectReference(entry.reference)) return undefined;
     if (!isText(entry.distribution) || typeof entry.manifestBound !== 'boolean') return undefined;
+    const { form, plugin } = entry;
+    const pack = form === 'pack' && isText(plugin);
+    if (!pack && (form !== 'module' || plugin !== null)) return undefined;
     record.extensions[name] = {
       reference: entry.reference,
       distribution: entry.distribution,
       manifestBound: entry.manifestBound,
+      ...(pack ? { form: 'pack', plugin } : { form: 'module', plugin: null }),
     };
   }
   return record;

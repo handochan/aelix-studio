@@ -15,7 +15,11 @@ import type { ProjectDetailDto, ProjectEntryDto } from '@/common/types/project';
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (k: string) => k }) }));
 
 const openPreview = vi.fn();
-vi.mock('@/renderer/pages/conversation/Preview', () => ({ usePreviewContext: () => ({ openPreview }) }));
+const closeTab = vi.fn();
+let previewTabs: Array<{ id: string; metadata: unknown }> = [];
+vi.mock('@/renderer/pages/conversation/Preview', () => ({
+  usePreviewContext: () => ({ openPreview, tabs: previewTabs, closeTab }),
+}));
 
 const fsRead = vi.fn();
 vi.mock('@/renderer/pages/conversation/explorer/monitorTransport', () => ({
@@ -168,6 +172,8 @@ beforeEach(() => {
   removeFolder.mockReset();
   showOpen.mockReset();
   openPreview.mockReset();
+  closeTab.mockReset();
+  previewTabs = [];
   copyFiles.mockReset().mockResolvedValue({ copied_files: [], failed_files: [] });
   emit.mockReset();
   copyText.mockReset().mockResolvedValue(undefined);
@@ -195,6 +201,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   vi.restoreAllMocks();
 });
 
@@ -273,6 +280,25 @@ describe('ExplorerContainer attach/remove', () => {
     fireEvent.click(screen.getByTestId('do-remove'));
     await waitFor(() => expect(removeFolder).toHaveBeenCalledWith({ project_id: 'p1', pe_id: 'peA' }));
     await waitFor(() => expect(projectGet).toHaveBeenCalledTimes(2));
+  });
+
+  it('uses the desktop revoke-and-detach command and closes only affected Analytics tabs', async () => {
+    const detach = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('electronAPI', { analyticsPreview: { detach } });
+    previewTabs = ['peA', 'peB'].map((pe) => ({
+      id: pe,
+      metadata: {
+        analyticsProjectId: 'p1',
+        fileRef: { kind: 'project', pe_id: pe, relative_path: 'workspace/index.html' },
+      },
+    }));
+    renderIt();
+    await screen.findByTestId('roots');
+    fireEvent.click(screen.getByTestId('do-remove'));
+
+    await waitFor(() => expect(detach).toHaveBeenCalledWith('p1', 'peA'));
+    await waitFor(() => expect(closeTab).toHaveBeenCalledExactlyOnceWith('peA'));
+    expect(removeFolder).not.toHaveBeenCalled();
   });
 
   it('top-bar refresh on the Files tab remounts every root AND revalidates HTTP detail (runtime_status/caution icon)', async () => {
