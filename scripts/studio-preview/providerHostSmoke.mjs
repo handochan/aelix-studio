@@ -6,6 +6,9 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
+import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
+
+const { httpGet, httpPost } = httpBridge;
 
 const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
@@ -173,7 +176,7 @@ try {
   assert.ok(fs.existsSync(path.join(sandbox, 'agent/auth.json')));
   assert.equal(fs.existsSync(path.join(sandbox, 'wrong-root/auth.json')), false);
   const port = await page.evaluate(() => window.__backendPort);
-  const providers = await (await fetch(`http://127.0.0.1:${port}/api/providers`)).json();
+  const providers = await httpGet(page, '/api/providers');
   assert.ok(!JSON.stringify(providers).includes('synthetic-provider-key'));
   // A credential-bearing endpoint is refused before writing native config.
   const badEndpoint = await page.evaluate(async () => {
@@ -219,11 +222,10 @@ try {
       .last()
   ).toBeVisible({ timeout: 30000 });
 
-  // Require a real WebUI cookie even though ordinary backend routes use a local default identity.
-  const reset = await fetch(`http://127.0.0.1:${port}/api/webui/reset-password`, { method: 'POST' });
-  assert.equal(reset.ok, true);
-  const resetBody = await reset.json();
-  const password = resetBody.data?.new_password ?? resetBody.new_password;
+  // Operator setup uses the authenticated Electron renderer. The WebUI
+  // below must obtain its own browser session before accessing native auth.
+  const reset = await httpPost(page, '/api/webui/reset-password');
+  const password = reset.new_password;
   assert.equal(typeof password, 'string');
   webui = await startStaticServer({
     staticDir: path.resolve('out/renderer'),
