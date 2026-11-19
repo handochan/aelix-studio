@@ -1,4 +1,5 @@
 {
+  "appName": "Aelix Studio",
   "send": "发送",
   "cancel": "取消",
   "save": "保存",
@@ -65,10 +66,10 @@
   "more": "更多",
   "refresh": "刷新",
   "readOnly": "只读",
-  "tray.showWindow": "显示 AionUi",
+  "tray.showWindow": "显示 Aelix Studio",
   "tray.newChat": "新建对话",
   "tray.closeToTray": "隐藏到托盘",
-  "tray.about": "关于 AionUi",
+  "tray.about": "关于 Aelix Studio",
   "tray.restart": "重启应用",
   "tray.quit": "退出",
   "tray.runningTasks": "运行中的任务",
@@ -79,22 +80,22 @@
   "backendStartup": {
     "incompatibleRuntime": {
       "title": "当前系统不支持内置后端",
-      "description": "AionUi 已打开，但本地 AionCore 后端无法在当前 Linux 版本上运行。请升级到受支持的 Linux 发行版后重启 AionUi。",
+      "description": "Aelix Studio 已打开，但本地 AionCore 后端无法在当前 Linux 版本上运行。请升级到受支持的 Linux 发行版后重启 Aelix Studio。",
       "requiredVersions": "需要的运行时符号：{{versions}}"
     },
     "incompleteInstallation": {
-      "title": "AionUi 安装不完整",
-      "description": "当前安装缺少必要的本地资源，AionCore 无法启动。请下载并重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionCore。",
+      "title": "Aelix Studio 安装不完整",
+      "description": "当前安装缺少必要的本地资源，AionCore 无法启动。请下载并重新安装最新版 Aelix Studio；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionCore。",
       "downloadLatest": "下载最新版",
       "sendDiagnostics": "将报告保存到本地",
       "diagnosticsSent": "已在本地生成报告，未发送任何信息。",
       "diagnosticsReportSuccess": "已在本地生成报告，未发送任何信息。",
       "diagnosticsReportFailed": "无法生成报告，请重试。",
-      "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 AionUi；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 AionUi 组件。"
+      "runtimeComponentDescription": "当前安装缺少必要的内置运行组件，{{resource}} 无法启动。请重新安装最新版 Aelix Studio；如果重新安装后仍然出现，请检查系统安全软件或杀毒软件是否隔离了 Aelix Studio 组件。"
     },
     "packageArchitectureMismatch": {
-      "title": "AionUi 安装包架构不匹配",
-      "description": "当前 AionUi 安装包是 {{packageArch}}，但这台 Mac 是 {{deviceArch}}。你可能下载了错误的安装包，请重新下载并安装 {{expectedArch}} 版本。"
+      "title": "Aelix Studio 安装包架构不匹配",
+      "description": "当前 Aelix Studio 安装包是 {{packageArch}}，但这台 Mac 是 {{deviceArch}}。你可能下载了错误的安装包，请重新下载并安装 {{expectedArch}} 版本。"
     },
     "dataMigration": {
       "title": "本地数据迁移失败",
@@ -105,9 +106,9 @@
       "diagnosticsReportFailed": "无法生成报告，请重试。"
     },
     "databaseNewerThanApp": {
-      "title": "需要更新 AionUi",
-      "description": "本地数据由更高版本的 AionUi 创建，当前版本无法打开。请将 AionUi 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。",
-      "descriptionWithVersion": "本地数据由比当前版本 v{{currentVersion}} 更新的 AionUi 创建，当前版本无法打开。请将 AionUi 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。"
+      "title": "需要更新 Aelix Studio",
+      "description": "本地数据由更高版本的 Aelix Studio 创建，当前版本无法打开。请将 Aelix Studio 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。",
+      "descriptionWithVersion": "本地数据由比当前版本 v{{currentVersion}} 更新的 Aelix Studio 创建，当前版本无法打开。请将 Aelix Studio 更新到最新版本即可继续使用，数据完好无损，无需重装或重置数据。"
     },
     "localDataRepair": {
       "title": "本地数据修复失败",
@@ -119,7 +120,7 @@
     },
     "startupDirectory": {
       "title": "启动目录不可用",
-      "description": "AionUi 已打开，但由于配置的工作目录或日志目录不存在、不可访问或权限受限，AionCore 无法启动。请确认这些目录存在且可写，然后重启 AionUi。",
+      "description": "Aelix Studio 已打开，但由于配置的工作目录或日志目录不存在、不可访问或权限受限，AionCore 无法启动。请确认这些目录存在且可写，然后重启 Aelix Studio。",
       "sendDiagnostics": "将报告保存到本地",
       "diagnosticsSent": "已在本地生成报告，未发送任何信息。",
       "diagnosticsReportSuccess": "已在本地生成报告，未发送任何信息。",
@@ -127,7 +128,7 @@
     },
     "recoverableDatabaseCorruption": {
       "title": "本地数据已损坏",
-      "description": "检测到本地数据库损坏，AionUi 无法继续启动。确认后将备份旧数据库，并创建新的本地数据库继续启动。历史会话将不再显示，旧数据库会保留为备份文件。",
+      "description": "检测到本地数据库损坏，Aelix Studio 无法继续启动。确认后将备份旧数据库，并创建新的本地数据库继续启动。历史会话将不再显示，旧数据库会保留为备份文件。",
       "confirmRebuild": "备份旧库并重建新库",
       "sendDiagnostics": "将报告保存到本地",
       "diagnosticsHint": "报告包含最近的日志和诊断信息。分享前请检查本地文件，不会自动发送。",
@@ -143,8 +144,8 @@
       }
     },
     "transientConcurrentStartup": {
-      "title": "AionUi 正在启动",
-      "description": "此窗口打开时，另一个 AionUi 启动进程仍在使用本地数据。这是暂时的，您的数据是安全的——无需重新安装。请稍候片刻后重试，或重启 AionUi。",
+      "title": "Aelix Studio 正在启动",
+      "description": "此窗口打开时，另一个 Aelix Studio 启动进程仍在使用本地数据。这是暂时的，您的数据是安全的——无需重新安装。请稍候片刻后重试，或重启 Aelix Studio。",
       "sendDiagnostics": "将报告保存到本地",
       "diagnosticsSent": "已在本地生成报告，未发送任何信息。",
       "diagnosticsReportSuccess": "已在本地生成报告，未发送任何信息。",

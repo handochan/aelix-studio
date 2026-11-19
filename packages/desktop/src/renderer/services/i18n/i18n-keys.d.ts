@@ -215,6 +215,7 @@ export type I18nKey =
   | 'common.added'
   | 'common.agentMode'
   | 'common.aiAssistant'
+  | 'common.appName'
   | 'common.back'
   | 'common.backendStartup.dataMigration.description'
   | 'common.backendStartup.dataMigration.diagnosticsReportFailed'
