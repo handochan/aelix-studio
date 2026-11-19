@@ -9,6 +9,7 @@ import { createElement, type PropsWithChildren } from 'react';
 import { SWRConfig } from 'swr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 import type { AcpConfigOptionDto, AcpModelInfo } from '@/common/types/platform/acpTypes';
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { resetEnsureConversationRuntimeStateForTests } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
@@ -71,6 +72,32 @@ const buildLegacyModelInfo = (overrides: Partial<AcpModelInfo> = {}): AcpModelIn
   ],
   ...overrides,
 });
+
+const nativeSelectorOptions = (model: 'reasoner' | 'plain'): AcpConfigOptionDto[] => [
+  {
+    id: 'model',
+    category: 'model',
+    option_type: 'select',
+    current_value: `fixture/${model}`,
+    options: [
+      { value: 'fixture/reasoner', name: 'Fixture Reasoner', description: 'fixture' },
+      { value: 'fixture/plain', name: 'Fixture Plain', description: 'fixture' },
+    ],
+  },
+  {
+    id: 'thinking_level',
+    category: 'thought_level',
+    option_type: 'select',
+    current_value: model === 'reasoner' ? 'high' : 'off',
+    options:
+      model === 'reasoner'
+        ? [
+            { value: 'off', name: 'Off' },
+            { value: 'high', name: 'High' },
+          ]
+        : [{ value: 'off', name: 'Off' }],
+  },
+];
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -146,6 +173,45 @@ describe('useAcpModelInfo', () => {
     expect(result.current.model_info?.available_models.map((model) => model.id)).toEqual(['sonnet-4', 'opus-4']);
     expect(result.current.canSwitch).toBe(true);
     expect(ensureRuntimeInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1' });
+  });
+
+  it('updates the native model and its supported thinking levels from the same observed switch', async () => {
+    ensureRuntimeInvokeMock.mockResolvedValue({ config_options: nativeSelectorOptions('reasoner'), runtime: null });
+    setConfigOptionInvokeMock.mockResolvedValue({
+      confirmation: 'observed',
+      config_options: nativeSelectorOptions('plain'),
+    });
+    const { result } = renderUseAcpModelInfo({ conversation_id: 'native-model' });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+    expect(result.current.thoughtLevel).toMatchObject({
+      id: 'thinking_level',
+      currentValue: 'off',
+      options: [{ value: 'off' }],
+    });
+  });
+
+  it('keeps the observed native model and thinking level after a busy rejection', async () => {
+    const busy = new BackendHttpError({
+      method: 'PUT',
+      path: '/api/conversations/native-busy/config-options/model',
+      status: 502,
+      body: { success: false, error: 'The Agent is busy or has reached its session limit', code: 'USER_AGENT_BUSY' },
+    });
+    ensureRuntimeInvokeMock.mockResolvedValue({ config_options: nativeSelectorOptions('reasoner'), runtime: null });
+    setConfigOptionInvokeMock.mockRejectedValue(busy);
+    const onSelectModelFailed = vi.fn();
+    const { result } = renderUseAcpModelInfo({ conversation_id: 'native-busy', onSelectModelFailed });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(onSelectModelFailed).toHaveBeenCalledWith('fixture/plain', busy));
+    expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+    expect(result.current.thoughtLevel?.currentValue).toBe('high');
   });
 
   it('uses an injected config option loader without starting standalone runtime', async () => {

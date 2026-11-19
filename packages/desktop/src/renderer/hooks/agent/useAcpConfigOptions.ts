@@ -98,12 +98,11 @@ export function classifyConfigSetError(error: unknown): AcpConfigSetErrorKind {
   }
   if (isBackendHttpError(error)) {
     if (error.code === 'confirmation_timeout') return 'confirmation_timeout';
-    // All three mean "the runtime cannot take this change yet, try again":
-    // a config update already in flight, a member runtime still starting, or a
-    // runtime mid-restart. Matched by CODE only — never by message text, which
-    // is free to be reworded or localized.
+    // These codes mean the runtime cannot take this change yet: an update in
+    // flight, a busy agent, or a member runtime starting or restarting.
     if (
       error.code === 'config_update_in_progress' ||
+      error.code === 'USER_AGENT_BUSY' ||
       error.code === 'TEAM_MEMBER_RUNTIME_STARTING' ||
       error.code === 'runtime_restarting'
     ) {
