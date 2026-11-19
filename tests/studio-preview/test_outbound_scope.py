@@ -362,12 +362,45 @@ class CaptureDeadlineTests(unittest.TestCase):
             with audit.capture_deadline(0.02): time.sleep(1)
 
 
+class AuditClock:
+    """Drive the audit's monotonic clock and one-shot POSIX timer together."""
+
+    def __init__(self):
+        self.now = 0.0
+        self.deadline = None
+
+    def monotonic(self):
+        return self.now
+
+    def getitimer(self, which):
+        assert which == audit.signal.ITIMER_REAL
+        remaining = 0.0 if self.deadline is None else self.deadline - self.now
+        return max(0.0, remaining), 0.0
+
+    def setitimer(self, which, seconds, interval=0.0):
+        assert interval == 0.0
+        previous = self.getitimer(which)
+        self.deadline = self.now + seconds if seconds else None
+        return previous
+
+    def advance(self, seconds):
+        self.now += seconds
+        if self.deadline is not None and self.now >= self.deadline:
+            self.deadline = None
+            handler = audit.signal.getsignal(audit.signal.SIGALRM)
+            handler(audit.signal.SIGALRM, None)
+
+
 @unittest.skipUnless(hasattr(audit.signal,'setitimer'),'POSIX capture deadline required')
 class TaskEvidenceIsolationTests(unittest.TestCase):
     def setUp(self):
         self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
         self.report = self.root / 'audit.json'
         self.whole = self.root / 'whole.json'
+        self.clock = AuditClock()
+        self.enterContext(patch.object(time, 'monotonic', self.clock.monotonic))
+        self.enterContext(patch.object(audit.signal, 'getitimer', self.clock.getitimer))
+        self.enterContext(patch.object(audit.signal, 'setitimer', self.clock.setitimer))
 
     def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None,
                      evidence_deadline=None, capture_timeout=1):
@@ -533,7 +566,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             with self.subTest(has_budget=has_budget), patch.object(tempfile, 'tempdir', str(raw_root)), \
                  patch.object(Path, 'write_text', write_receipt), \
                  patch.object(audit, 'write_task_evidence', wraps=audit.write_task_evidence) as publish:
-                deadline = None if has_budget else time.monotonic() + 2
+                deadline = None if has_budget else self.clock.monotonic() + 2
                 self.assertEqual(self.audit_traces([[]], scoped=True, on_start=consume_last_block,
                                                    evidence_deadline=deadline), (0, 1))
                 self.assertEqual(publish.call_count, 4 if has_budget else 0)
@@ -596,7 +629,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             return {key: value for key, value in self.read(path).items() if not key.startswith('taskEvidence')}
 
         self.assertEqual(self.audit_traces([lines], capture=capture, scoped=True,
-                                           evidence_deadline=time.monotonic() + 2), (0, 1))
+                                           evidence_deadline=self.clock.monotonic() + 2), (0, 1))
         baseline = [verdict(path) for path in paths]
         observe = audit.TaskEvidence.network_record
         calls = 0
@@ -604,7 +637,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         def small_delay(evidence, *args):
             nonlocal calls
             calls += 1
-            time.sleep(0.004)
+            self.clock.advance(0.004)
             return observe(evidence, *args)
 
         # The whole phase would spend more than one second in the observer.
@@ -618,7 +651,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
             report = self.read(path)
             self.assert_evidence_absent(report)
             self.assertEqual(report['taskEvidenceUnavailableReason'], 'capture_time_reserve')
-            self.assertGreaterEqual(report['taskEvidenceAggregationSeconds'], calls * 0.004 - 0.000001)
+            self.assertAlmostEqual(report['taskEvidenceAggregationSeconds'], calls * 0.004, places=6)
             self.assertLess(report['taskEvidenceAggregationSeconds'], 1)
 
     def test_capture_alarm_is_not_swallowed_by_an_aggregate_observer(self):
@@ -661,7 +694,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         def delay_write(report, pending, payload):
             writes.append(report)
             pending.write_text('{')
-            time.sleep(1.3)
+            self.clock.advance(1.3)
 
         with patch.object(audit, 'write_task_evidence', delay_write), \
              patch.object(audit, 'TASK_EVIDENCE_WRITE_TIMEOUT', 0.15):
