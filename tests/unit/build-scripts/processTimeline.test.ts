@@ -175,6 +175,25 @@ describe('owned process observation', () => {
     expect(snapshot).toHaveBeenCalledTimes(3);
   });
 
+  it('seals a stopped timeline against a pending snapshot and a late checkpoint', async () => {
+    vi.useFakeTimers();
+    const record = vi.fn();
+    let complete!: (value: object) => void;
+    const timeline = createProcessTimeline({
+      record,
+      snapshot: () => new Promise((resolve) => (complete = resolve)),
+    });
+    timeline.start();
+    await vi.advanceTimersByTimeAsync(0);
+    timeline.stop();
+    record.mockClear();
+
+    complete({ status: 'observed', rows: [{ ...row(10, 1, 'host'), sandboxMatched: true }] });
+    timeline.checkpoint('after-close', 1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(record).not.toHaveBeenCalled();
+  });
+
   it('defers an already queued batch and timer samples until identity finishes', async () => {
     vi.useFakeTimers();
     const snapshot = vi.fn(() => ({ status: 'observed', rows: [] }));

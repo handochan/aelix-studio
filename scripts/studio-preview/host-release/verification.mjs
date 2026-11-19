@@ -155,10 +155,11 @@ async function waitForExit(main, state, phase) {
 }
 
 /** Close the old main process before reusing its user root, including disconnect paths. */
-export async function closeElectron(app, { phase = 'cleanup-main-exit' } = {}) {
+export async function closeElectron(app, { phase = 'cleanup-main-exit', backgroundAfterExit = false } = {}) {
   if (!app) return;
   const main = app.process();
   const state = observations.get(app);
+  const background = backgroundAfterExit && exited(main);
   if (state) {
     state.observeExit();
     state.observation.closeRequestedAt ??= new Date().toISOString();
@@ -166,10 +167,22 @@ export async function closeElectron(app, { phase = 'cleanup-main-exit' } = {}) {
     state.processTimeline?.checkpoint('close-requested', state.observation.launch);
   }
   try {
+    if (background) {
+      // Finalize the known OS exit while this launch still owns the timeline.
+      // Deferred Playwright cleanup can outlive both the launch and its evidence.
+      await waitForExit(main, state, phase);
+      void Promise.resolve()
+        .then(() => app.close())
+        .catch(() =>
+          console.error(`Studio launch #${state?.observation.launch}: Playwright cleanup failed after OS exit`)
+        );
+      return;
+    }
     await app.close();
     await waitForExit(main, state, phase);
     state?.processTimeline?.checkpoint('after-close', state.observation.launch);
   } finally {
+    if (background) state?.retireEvidence();
     state?.protocol.dispose();
   }
 }
@@ -259,7 +272,9 @@ export async function launchWithIdentity(
 ) {
   const write = record;
   let lastStatus = 'launching';
+  let recording = true;
   record = (value) => {
+    if (!recording) return;
     lastStatus = value.status ?? lastStatus;
     try {
       return write(value);
@@ -315,7 +330,17 @@ export async function launchWithIdentity(
           observation.naturalExit = observation.closeRequestedAt === null;
         }
       };
-      observations.set(app, { observation, record, observeExit, protocol, diagnostic, processTimeline });
+      observations.set(app, {
+        observation,
+        record,
+        observeExit,
+        protocol,
+        diagnostic,
+        processTimeline,
+        retireEvidence: () => {
+          recording = false;
+        },
+      });
       processTimeline?.addMain(main.pid, launchNumber);
       main.on('exit', () => {
         observeExit();
@@ -408,19 +433,10 @@ export async function launchWithIdentity(
       if (!windowFailed)
         await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
       recordLaunchFailure(app, error);
-      const windowFailedAfterExit = windowFailed && observation.exitObservedAt !== null;
-      const cleanup = closeElectron(app, {
+      await closeElectron(app, {
         phase: windowFailed ? 'first-window-failure-cleanup' : 'identity-failure-cleanup',
+        backgroundAfterExit: windowFailed,
       });
-      if (windowFailedAfterExit) {
-        // The already observed OS exit determines the failure. Let Playwright finish
-        // closing its own resources without making the error wait on its pipes.
-        void cleanup.catch(() =>
-          console.error(`Studio launch #${launchNumber}: Playwright cleanup failed after OS exit`)
-        );
-      } else {
-        await cleanup;
-      }
     } else {
       record({ ...observation, status: 'failed', error: String(error) });
       console.error(`Studio launch #${launchNumber} FAILED before process handle: ${error}`);

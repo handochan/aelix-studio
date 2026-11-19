@@ -366,6 +366,86 @@ describe('Electron launch evidence and identity retry', () => {
     }
   });
 
+  it.each(['next launch running', 'timeline stopped'])(
+    'isolates a delayed first-window cleanup with %s',
+    async (scenario) => {
+      vi.useFakeTimers();
+      vi.spyOn(console, 'error').mockImplementation(() => {});
+      vi.spyOn(console, 'log').mockImplementation(() => {});
+      const first = application();
+      const second = application();
+      second.main.pid = 456;
+      const stdout = new EventEmitter();
+      Object.assign(first.main, { stdout });
+      let finishClose!: () => void;
+      const closing = new Promise<void>((resolve) => (finishClose = resolve));
+      first.app.close.mockImplementation(() => closing);
+      first.app.firstWindow.mockImplementation(() => {
+        first.main.exitCode = 17;
+        first.main.emit('exit', 17, null);
+        return new Promise(() => {});
+      });
+
+      let secondRunning = false;
+      const timelineRecord = vi.fn();
+      const processTimeline = createProcessTimeline({
+        record: timelineRecord,
+        publishIntervalMs: 0,
+        snapshot: () => ({
+          status: 'observed',
+          rows: secondRunning
+            ? [{ pid: second.main.pid, parentPid: 1, birth: 'second', role: 'other', state: 'live' }]
+            : [],
+        }),
+      });
+      const record = vi.fn();
+      try {
+        processTimeline.start();
+        processTimeline.checkpoint('before-launch', 1);
+        await expect(
+          launchWithIdentity(async () => first.app, { ...options(record), launchNumber: 1, processTimeline })
+        ).rejects.toThrow('application exited with code 17 before the first window');
+        expect(first.app.close).toHaveBeenCalledTimes(1);
+        expect.soft(record.mock.calls.at(-1)?.[0]).toMatchObject({
+          launch: 1,
+          exitCode: 17,
+          waits: [{ phase: 'first-window-failure-cleanup', alreadyExited: true }],
+        });
+
+        if (scenario === 'next launch running') {
+          secondRunning = true;
+          processTimeline.checkpoint('before-launch', 2);
+          await launchWithIdentity(async () => second.app, { ...options(record), launchNumber: 2, processTimeline });
+        } else {
+          processTimeline.checkpoint('cleanup-complete', 1);
+          processTimeline.stop();
+        }
+        await vi.advanceTimersByTimeAsync(0);
+        const previousTimelineWrites = timelineRecord.mock.calls.length;
+        const previousLaunchWrites = record.mock.calls.length;
+
+        finishClose();
+        stdout.emit('data', Buffer.from('delayed output from the old launch'));
+        await vi.advanceTimersByTimeAsync(1001);
+
+        expect.soft(record.mock.calls.length).toBe(previousLaunchWrites);
+        const writes = timelineRecord.mock.calls.slice(previousTimelineWrites);
+        if (secondRunning) {
+          expect(writes.length).toBeGreaterThan(0);
+          expect(writes.every(([, event]) => !event || event.launch === 2)).toBe(true);
+          expect(writes.at(-1)?.[0].processes).toContainEqual(
+            expect.objectContaining({ pid: second.main.pid, launchAtStart: 2, launchAtCompletion: 2 })
+          );
+        } else {
+          expect(writes).toEqual([]);
+        }
+      } finally {
+        finishClose();
+        processTimeline.stop();
+      }
+    }
+  );
+
   it.each(['launch deadline already elapsed', 'window arrives after deadline'])('rejects if %s', async (scenario) => {
     vi.useFakeTimers();
     vi.spyOn(console, 'error').mockImplementation(() => {});
