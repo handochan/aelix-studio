@@ -1,5 +1,7 @@
 """Tracepoint preflight requires complete kernel event schemas, never empty success."""
 import importlib.util
+import copy
+import json
 from pathlib import Path
 import tempfile
 import unittest
@@ -116,6 +118,17 @@ class OperationPolicyTests(unittest.TestCase):
         self.assertEqual(r['globalIssues'],[])
         self.assertEqual(r['rings'][0]['submissions'][0]['attributedPid'],10)
         self.assertTrue(r['issuesByPid'][10])
+
+    def test_ring_aggregation_attributes_sqpoll_only_to_the_known_owner(self):
+        capture, calls = self.fixture(16, sqpoll=True, issuer=999)
+        evidence = network.TaskEvidence()
+        checked = ops.reconcile(capture, calls, {10}, {10}, task_evidence=evidence)
+        evidence.strace_tasks.append({'tid':10})
+        summary = evidence.note(evidence.result, capture, {10}, None, checked, None)
+        task = summary['straceTasks'][0]
+        self.assertEqual(task['ringCounts'], {'creations':1, 'submissions':1})
+        self.assertEqual(task['ringIssueCount'], len(checked['issuesByPid'][10]))
+        self.assertNotIn(999, evidence.rings)
 
     def test_lost_missing_or_incomplete_capture_is_never_zero(self):
         for patch in [{'lostEvents':1},{'status':'failed'},{'complete':False},{'pidNamespaceVerified':False}]:
@@ -577,3 +590,185 @@ class RingDescriptorTests(unittest.TestCase):
             s.extend(extra+[{'call':'io_uring_enter','pid':10,'tgid':10,'fd':5,'result':1,
                              'registeredRing':not bool(extra),'sequence':2}])
             self.assertTrue(ops.reconcile(c,s,{10},{10})['issuesByPid'][10])
+
+
+class KernelTaskEvidenceTests(unittest.TestCase):
+    """Report partial evidence without authorizing any new parser discharge."""
+    def fixture(self):
+        return dict(complete=True,drained=True,pidNamespaceVerified=True,namespaceInode=7,lostEvents=0,
+            recorderExitCode=0,root={'kernelPid':99},diagnostics=[],recordErrors=[],
+            captureChecks={'ready':True,'done':True,'stderrEmpty':True},
+            attachmentReadiness='reviewed-bpftrace-printf-drained-after-all-attachments',
+            udpProbeLoss={'programs':[{'prog_id':1,'recursion_misses':0}]},
+            network={'complete':True,'eventCount':0,'events':[],'workers':[],
+                'tasks':[dict(pid=99,tgid=99,kernelPid=99,kernelTgid=99,parentKernelPid=0,
+                              start=1,end=200,lastOrdinal=0,kernelThread=False,ioWorker=False),
+                         dict(pid=10,tgid=10,kernelPid=110,kernelTgid=110,parentKernelPid=99,
+                              start=2,end=100,lastOrdinal=10,kernelThread=False,ioWorker=False)]})
+
+    def event(self,kind='P',**fields):
+        return dict(kind=kind,time=3,pid=10,tgid=10,kernelPid=110,kernelTgid=110,
+                    call=5,ordinal=1,value=3,result=0) | fields
+
+    def add(self,capture,*events):
+        capture['network']['events'].extend(events)
+        capture['network']['eventCount']=len(capture['network']['events'])
+
+    def aggregate(self, capture, records=(), states=None, holes=None, *, passes=1):
+        states = {10} if states is None else states
+        evidence = network.TaskEvidence()
+        checked = None
+        for _ in range(passes):
+            if capture is not None:
+                checked = network.reconcile(capture, records, holes or {}, states, None, task_evidence=evidence)
+        evidence.strace_tasks.extend(dict(tid=pid) for pid in sorted(states))
+        return checked, evidence.note(evidence.result, capture, states, checked, None, None)
+
+    def task(self, result, tid=10):
+        return next(row for row in result['tasks'] if row['namespaceTid'] == tid)
+
+    def strace(self, result, tid=10):
+        return next(row for row in result['straceTasks'] if row['tid'] == tid)
+
+    def test_balanced_counts_keep_namespace_identity_parent_and_inclusive_range(self):
+        capture = self.fixture()
+        self.add(capture, self.event(time=2), self.event('N', time=4),
+                 self.event('V', time=5, value=1, result=0x8000, file=0x12345678), self.event('X', time=100))
+        checked, result = self.aggregate(capture)
+        row = self.task(result)
+        self.assertEqual({key: row[key] for key in ('namespaceTid', 'namespaceTgid', 'kernelTid', 'kernelTgid',
+            'parentKernelTid', 'parentNamespaceTid', 'rangeStart', 'rangeEnd')},
+            dict(namespaceTid=10, namespaceTgid=10, kernelTid=110, kernelTgid=110,
+                 parentKernelTid=99, parentNamespaceTid=99, rangeStart=2, rangeEnd=100))
+        self.assertEqual(row['assignedRecordCounts'], dict(P=1, N=1, X=1, H=0, V=1, other=0))
+        self.assertEqual((result['assignedNetworkRecords'], result['unattributedNetworkRecords']), (4, 0))
+        self.assertEqual(checked['issues'], [])
+        self.assertNotIn('file', row)
+
+    def test_skipped_or_unobserved_channels_remain_null(self):
+        capture = self.fixture()
+        capture['network'].pop('events')
+        for value in (None, capture, {'complete':False, 'lostEvents':0}):
+            with self.subTest(value=value):
+                _, result = self.aggregate(value)
+                self.assertIsNone(result['networkRecordCounts'])
+                self.assertIsNone(result['tasks'])
+        self.assertIsNone(self.aggregate({'complete':False, 'lostEvents':0})[1]['source']['lostEvents'])
+
+    def test_preserves_parsed_loss_and_errors_without_reparsing_incomplete_recording(self):
+        capture = self.fixture()
+        capture.update(complete=False, drained=False, lostEvents=7, recordErrors=[{'sample':'PRIVATE'}])
+        capture['network']['complete'] = False
+        self.add(capture, self.event('H', value=1, result=2))
+        checked, result = self.aggregate(capture)
+        self.assertIn('kernel_network_capture_incomplete', {issue['reason'] for issue in checked['issues']})
+        self.assertEqual((result['source']['lostEvents'], result['source']['recordErrorCount']), (7, 1))
+        self.assertIsNone(result['networkRecordCounts'])
+        self.assertIsNone(self.strace(result)['unmatchedNetworkIssueCount'])
+        self.assertNotIn('PRIVATE', json.dumps(result))
+
+    def test_hidden_failed_connect_is_counted_as_an_existing_unmatched_issue(self):
+        capture = self.fixture()
+        self.add(capture, self.event(call=1), self.event('N', call=1, time=4),
+                 self.event('X', call=1, time=5, result=-9))
+        checked, result = self.aggregate(capture, holes={10:2})
+        self.assertTrue(checked['issues'])
+        self.assertEqual(checked['resolved'], [])
+        self.assertEqual(self.task(result)['assignedRecordCounts'], dict(P=1, N=1, X=1, H=0, V=0, other=0))
+        self.assertEqual(self.strace(result)['unmatchedNetworkIssueCount'], 1)
+
+    def test_identity_and_range_mismatches_only_increase_unattributed_total(self):
+        for change in ({'pid':11}, {'tgid':11}, {'kernelTgid':111}, {'time':101}, {'kernelPid':111}):
+            with self.subTest(change=change):
+                capture = self.fixture()
+                self.add(capture, self.event(**change))
+                _, result = self.aggregate(capture)
+                self.assertEqual((result['assignedNetworkRecords'], result['unattributedNetworkRecords']), (0, 1))
+                self.assertEqual(result['networkRecordCounts']['P'], 1)
+
+    def test_reused_kernel_id_keeps_lifetimes_without_guessing_event_or_birth_ownership(self):
+        capture = self.fixture()
+        first = capture['network']['tasks'][1]
+        first.update(ioWorker=True)
+        capture['network']['tasks'].append(first | dict(start=101, end=150))
+        capture['network']['workers'] = [dict(kernelPid=110, parentKernelPid=99, start=101, time=102, flags=0x4010)]
+        self.add(capture, self.event(time=102))
+        _, result = self.aggregate(capture)
+        rows = [row for row in result['tasks'] if row['namespaceTid'] == 10]
+        self.assertEqual([(row['rangeStart'], row['rangeEnd']) for row in rows], [(2, 100), (101, 150)])
+        self.assertTrue(all(row['kernelTidReused'] for row in rows))
+        self.assertEqual([row['workerBirthRecords'] for row in rows], [None, None])
+        self.assertEqual(result['unattributedNetworkRecords'], 1)
+
+    def test_worker_birth_is_counted_only_for_its_verified_lifetime(self):
+        capture = self.fixture()
+        capture['network']['tasks'].append(dict(pid=11, tgid=10, kernelPid=111, kernelTgid=110,
+            parentKernelPid=110, start=4, end=50, lastOrdinal=0, kernelThread=False, ioWorker=True))
+        birth = dict(kernelPid=111, parentKernelPid=110, start=4, time=5, flags=0x4010)
+        capture['network']['workers'] = [birth, birth | {'time':52}, birth | {'parentKernelPid':99}]
+        _, result = self.aggregate(capture)
+        row = self.task(result, 11)
+        self.assertEqual((row['namespaceTgid'], row['kernelTgid'], row['parentNamespaceTid']), (10, 110, 10))
+        self.assertTrue(row['ioWorker'])
+        self.assertEqual(row['workerBirthRecords'], 1)
+
+    def test_duplicate_lifetime_records_do_not_allocate_additional_task_rows(self):
+        capture = self.fixture()
+        first = capture['network']['tasks'][1]
+        capture['network']['tasks'].extend([first.copy() for _ in range(2048)])
+        checked, result = self.aggregate(capture)
+        self.assertTrue(checked['issues'])
+        self.assertEqual(len(result['tasks']), 2)
+        self.assertTrue(self.task(result)['kernelTidReused'])
+
+    def test_match_counts_are_distinct_and_do_not_double_on_a_second_comparison(self):
+        capture = self.fixture()
+        self.add(capture, self.event(call=1), self.event('N', call=1, time=4),
+                 self.event('X', call=1, time=5, result=-1))
+        records = [(10, 'connect(3, {sa_family=AF_INET}, 16) = -1 ENETUNREACH', 1, 1)]
+        for states, expected in (({10,98}, (1,0,False)), ({10}, (1,1,True))):
+            with self.subTest(states=states):
+                _, result = self.aggregate(capture, records, states, passes=2)
+                info = self.strace(result)['existingNetworkCorroboration']
+                self.assertEqual((info['matchedOperations'], info['reconciledOperations'],
+                                  result['source']['networkReconciled']), expected)
+                self.assertEqual(result['networkRecordCounts']['P'], 1)
+
+    def test_distinct_unknown_actor_labels_do_not_grow_task_evidence(self):
+        sizes = []
+        for count in (1, 2048):
+            capture = self.fixture()
+            self.add(capture, *(self.event(pid=pid) for pid in range(500, 500 + count)))
+            _, result = self.aggregate(capture)
+            self.assertEqual(result['unattributedNetworkRecords'], count)
+            self.assertEqual(len(result['tasks']), 2)
+            self.assertEqual(len(result['straceTasks']), 1)
+            sizes.append(len(json.dumps(result)))
+        self.assertLess(sizes[1] - sizes[0], 32)
+
+    def test_optional_task_identity_failure_cannot_export_non_numeric_values(self):
+        evidence = network.TaskEvidence()
+        task = self.fixture()['network']['tasks'][1] | {'parentKernelPid':'PRIVATE'}
+        evidence.note(evidence.kernel_task, task)
+        self.assertFalse(evidence.available)
+        self.assertEqual(evidence.tasks, [])
+
+    def test_periodic_check_reserves_supervisor_time_and_measures_only_aggregation(self):
+        evidence = network.TaskEvidence(supervisor_cutoff=20.25)
+        evidence.capture_deadline = 25
+        now = 20
+        calls = 0
+
+        def observe():
+            nonlocal calls, now
+            calls += 1
+            now += 0.01
+
+        with patch.object(network.time, 'monotonic', side_effect=lambda: now):
+            self.assertTrue(evidence.checkpoint(force=True))
+            for _ in range(96):
+                evidence.note(observe)
+                now += 0.001  # existing verdict work between observations
+        self.assertEqual(evidence.unavailable_reason, 'supervisor_time_reserve')
+        self.assertEqual(calls, network.TASK_EVIDENCE_CHECK_INTERVAL - 1)
+        self.assertAlmostEqual(evidence.aggregation_seconds, calls * 0.01)

@@ -37,6 +37,13 @@ export type Layout = {
 /** Directory name under the Studio user data directory. */
 export const STATE_DIRECTORY = 'aelix-runtime';
 
+/**
+ * The environment variable that tells the bundled launcher (`launch.py`) where the state
+ * directory is. When the process that starts conversations has it, new conversations get the
+ * extensions of the current generation; without it they start with the bundle alone.
+ */
+export const STATE_ENVIRONMENT = 'AELIX_STUDIO_EXTENSION_STATE';
+
 /** The paths of the helper's state under `root`. Nothing is created. */
 export function layoutOf(root: string): Layout {
   return {
