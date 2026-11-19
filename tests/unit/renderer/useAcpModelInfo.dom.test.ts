@@ -9,7 +9,9 @@ import { createElement, type PropsWithChildren } from 'react';
 import { SWRConfig } from 'swr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 import type { AcpConfigOptionDto, AcpModelInfo } from '@/common/types/platform/acpTypes';
+import { classifyConfigSetError } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { resetEnsureConversationRuntimeStateForTests } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 
@@ -72,6 +74,32 @@ const buildLegacyModelInfo = (overrides: Partial<AcpModelInfo> = {}): AcpModelIn
   ...overrides,
 });
 
+const nativeSelectorOptions = (model: 'reasoner' | 'plain'): AcpConfigOptionDto[] => [
+  {
+    id: 'model',
+    category: 'model',
+    option_type: 'select',
+    current_value: `fixture/${model}`,
+    options: [
+      { value: 'fixture/reasoner', name: 'Fixture Reasoner', description: 'fixture' },
+      { value: 'fixture/plain', name: 'Fixture Plain', description: 'fixture' },
+    ],
+  },
+  {
+    id: 'thinking_level',
+    category: 'thought_level',
+    option_type: 'select',
+    current_value: model === 'reasoner' ? 'high' : 'off',
+    options:
+      model === 'reasoner'
+        ? [
+            { value: 'off', name: 'Off' },
+            { value: 'high', name: 'High' },
+          ]
+        : [{ value: 'off', name: 'Off' }],
+  },
+];
+
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
   let reject!: (reason?: unknown) => void;
@@ -88,7 +116,7 @@ const emitStream = (message: IResponseMessage) => {
   }
 };
 
-const createSwrWrapper = () => {
+const createSwrWrapper = ({ revalidateIfStale = true }: { revalidateIfStale?: boolean } = {}) => {
   const cache = new Map();
 
   return function SwrTestWrapper({ children }: PropsWithChildren) {
@@ -98,6 +126,7 @@ const createSwrWrapper = () => {
         value: {
           provider: () => cache,
           dedupingInterval: 0,
+          revalidateIfStale,
           revalidateOnFocus: false,
           revalidateOnReconnect: false,
         },
@@ -147,6 +176,156 @@ describe('useAcpModelInfo', () => {
     expect(result.current.canSwitch).toBe(true);
     expect(ensureRuntimeInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1' });
   });
+
+  it('updates the native model and its supported thinking levels from the same observed switch', async () => {
+    ensureRuntimeInvokeMock.mockResolvedValue({ config_options: nativeSelectorOptions('reasoner'), runtime: null });
+    setConfigOptionInvokeMock.mockResolvedValue({
+      confirmation: 'observed',
+      config_options: nativeSelectorOptions('plain'),
+    });
+    const { result } = renderUseAcpModelInfo({ conversation_id: 'native-model' });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+    expect(result.current.thoughtLevel).toMatchObject({
+      id: 'thinking_level',
+      currentValue: 'off',
+      options: [{ value: 'off' }],
+    });
+  });
+
+  it('keeps the observed native model and thinking level after a busy rejection', async () => {
+    const busy = new BackendHttpError({
+      method: 'PUT',
+      path: '/api/conversations/native-busy/config-options/model',
+      status: 502,
+      body: { success: false, error: 'The Agent is busy or has reached its session limit', code: 'USER_AGENT_BUSY' },
+    });
+    ensureRuntimeInvokeMock.mockResolvedValue({ config_options: nativeSelectorOptions('reasoner'), runtime: null });
+    setConfigOptionInvokeMock.mockRejectedValue(busy);
+    const onSelectModelFailed = vi.fn();
+    const { result } = renderUseAcpModelInfo({ conversation_id: 'native-busy', onSelectModelFailed });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(onSelectModelFailed).toHaveBeenCalledWith('fixture/plain', busy));
+    expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+    expect(result.current.thoughtLevel?.currentValue).toBe('high');
+  });
+
+  it('shows the native values and reports a separate error when a model hook fails after applying a change', async () => {
+    let options = nativeSelectorOptions('reasoner');
+    const hookError = new BackendHttpError({
+      method: 'PUT',
+      path: '/api/conversations/native-hook/config-options/model',
+      status: 502,
+      body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+    });
+    ensureRuntimeInvokeMock.mockImplementation(async () => ({ config_options: options, runtime: null }));
+    setConfigOptionInvokeMock.mockImplementation(async () => {
+      options = nativeSelectorOptions('plain');
+      throw hookError;
+    });
+    const onSelectModelFailed = vi.fn((_modelId: string, error: unknown) => classifyConfigSetError(error));
+    const onSelectModelSuccess = vi.fn();
+    const { result } = renderUseAcpModelInfo({
+      conversation_id: 'native-hook',
+      onSelectModelFailed,
+      onSelectModelSuccess,
+    });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+    expect(result.current.thoughtLevel?.currentValue).toBe('off');
+    expect(onSelectModelFailed.mock.results[0]?.value).toBe('model_change_observed_with_error');
+    expect(onSelectModelSuccess).not.toHaveBeenCalled();
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['unchanged', 'read failed'] as const)(
+    'preserves the original error and last observed values when the post-error observation is %s',
+    async (observation) => {
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: '/api/conversations/native-failed/config-options/model',
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      const onSelectModelFailed = vi.fn();
+      const before = { config_options: nativeSelectorOptions('reasoner'), runtime: null };
+      ensureRuntimeInvokeMock.mockResolvedValueOnce(before).mockResolvedValueOnce(before);
+      if (observation === 'read failed') ensureRuntimeInvokeMock.mockRejectedValue(new Error('runtime unavailable'));
+      else ensureRuntimeInvokeMock.mockResolvedValue(before);
+      setConfigOptionInvokeMock.mockRejectedValue(hookError);
+      const { result } = renderUseAcpModelInfo({ conversation_id: 'native-failed', onSelectModelFailed });
+
+      await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+      act(() => result.current.selectModel('fixture/plain'));
+
+      await waitFor(() => expect(onSelectModelFailed).toHaveBeenCalledWith('fixture/plain', hookError));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+      expect(result.current.thoughtLevel?.currentValue).toBe('high');
+    }
+  );
+
+  it.each(['a reload started before the error', 'a read started after the error'] as const)(
+    'keeps a newer native event when %s returns the previous selection',
+    async (readOrder) => {
+      const reloadIsOlder = readOrder === 'a reload started before the error';
+      const conversation_id = reloadIsOlder ? 'native-hook-older-reload' : 'native-hook-fresh-read';
+      const before = { config_options: nativeSelectorOptions('reasoner'), runtime: null };
+      const observed = nativeSelectorOptions('plain');
+      const staleRead = deferred<typeof before>();
+      const freshRead = deferred<typeof before>();
+      const pendingSet = deferred<never>();
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: `/api/conversations/${conversation_id}/config-options/model`,
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      ensureRuntimeInvokeMock.mockResolvedValue(before);
+      setConfigOptionInvokeMock.mockReturnValue(pendingSet.promise);
+      const onSelectModelFailed = vi.fn((_modelId: string, error: unknown) => classifyConfigSetError(error));
+      const { result } = renderUseAcpModelInfo({ conversation_id, onSelectModelFailed });
+
+      await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+      act(() => result.current.selectModel('fixture/plain'));
+      await waitFor(() => expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1));
+      ensureRuntimeInvokeMock.mockReturnValueOnce(staleRead.promise);
+      if (reloadIsOlder) {
+        act(() => emitStream({ conversation_id, type: 'agent_status', data: { status: 'session_active' } }));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(3));
+        ensureRuntimeInvokeMock.mockReturnValueOnce(freshRead.promise);
+      } else {
+        act(() => pendingSet.reject(hookError));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(3));
+      }
+
+      act(() => emitStream({ conversation_id: 'unrelated', type: 'acp_config_option', data: observed }));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+      act(() => emitStream({ conversation_id, type: 'acp_config_option', data: { config_options: observed } }));
+      await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+      if (reloadIsOlder) {
+        act(() => pendingSet.reject(hookError));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(4));
+      }
+      await act(async () => staleRead.resolve(before));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
+      if (reloadIsOlder) {
+        await act(async () => freshRead.resolve({ config_options: observed, runtime: null }));
+      }
+
+      await waitFor(() => expect(onSelectModelFailed.mock.results[0]?.value).toBe('model_change_observed_with_error'));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
+      expect(result.current.thoughtLevel?.currentValue).toBe('off');
+    }
+  );
 
   it('uses an injected config option loader without starting standalone runtime', async () => {
     const prepareRuntime = vi.fn().mockResolvedValue(undefined);
@@ -310,6 +489,41 @@ describe('useAcpModelInfo', () => {
       await secondLoad.promise;
     });
     await waitFor(() => expect(result.current.isRuntimeReady).toBe(true));
+  });
+
+  it('keeps the reactivated selector unready until it observes options for that activation', async () => {
+    const conversation_id = 'reactivated-model-selector';
+    const reactivation = deferred<AcpConfigOptionDto[] | null>();
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(nativeSelectorOptions('reasoner'))
+      .mockReturnValueOnce(reactivation.promise);
+    const configOptionsPort = { load };
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useAcpModelInfo({ conversation_id, configOptionsPort, enabled }),
+      { initialProps: { enabled: true }, wrapper: createSwrWrapper({ revalidateIfStale: false }) }
+    );
+
+    await waitFor(() => expect(result.current.isRuntimeReady).toBe(true));
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await act(async () => reactivation.resolve(null));
+
+    expect(result.current.isRuntimeReady).toBe(false);
+    expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+    act(() =>
+      emitStream({
+        conversation_id: 'another-conversation',
+        type: 'acp_config_option',
+        data: nativeSelectorOptions('plain'),
+      })
+    );
+    expect(result.current.isRuntimeReady).toBe(false);
+    act(() => emitStream({ conversation_id, type: 'acp_config_option', data: nativeSelectorOptions('plain') }));
+
+    expect(result.current.isRuntimeReady).toBe(true);
+    expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
   });
 
   it('preserves model option descriptions from config options', async () => {

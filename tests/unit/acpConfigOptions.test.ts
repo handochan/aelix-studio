@@ -94,4 +94,15 @@ describe('ACP config option derivation', () => {
 
     expect(classifyConfigSetError(error)).toBe('config_update_in_progress');
   });
+
+  it('classifies the Aelix ACP busy response by its backend code', () => {
+    const error = new BackendHttpError({
+      method: 'PUT',
+      path: '/api/conversations/conv-1/config-options/model',
+      status: 502,
+      body: { success: false, error: 'The Agent is busy or has reached its session limit', code: 'USER_AGENT_BUSY' },
+    });
+
+    expect(classifyConfigSetError(error)).toBe('config_update_in_progress');
+  });
 });
