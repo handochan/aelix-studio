@@ -154,6 +154,8 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
 export type HttpRequestOptions = {
   silentStatuses?: number[];
   keepalive?: boolean;
+  /** One bounded request, without a separate authentication refresh or replay. */
+  timeoutMs?: number;
   /** Extra request headers merged on top of the default `Content-Type`. */
   headers?: Record<string, string>;
 };
@@ -210,14 +212,16 @@ function sendHttpRequest(
   path: string,
   headers: Record<string, string>,
   body?: unknown,
-  keepalive?: boolean
+  options?: Pick<HttpRequestOptions, 'keepalive'>,
+  signal?: AbortSignal
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
   return fetchFromDesktopOrBrowser(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
-    ...(keepalive ? { keepalive } : {}),
+    ...(options?.keepalive ? { keepalive: true } : {}),
+    ...(signal ? { signal } : {}),
   });
 }
 
@@ -242,18 +246,19 @@ export async function httpRequest<T>(
     body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
   );
 
-  let response = await sendHttpRequest(method, path, headers, body, options?.keepalive);
+  const signal = options?.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
+  let response = await sendHttpRequest(method, path, headers, body, options, signal);
 
   // Expired access cookie → 401. Attempt one silent session refresh, then replay
   // the original request — the WebUI half of the #4124 fix. refreshSession() is a
   // no-op outside browser mode and single-flights concurrent 401s into one POST.
   // The auth endpoints themselves are skipped to avoid recursion.
-  if (response.status === 401 && !isAuthEndpoint(path)) {
+  if (response.status === 401 && !signal && !isAuthEndpoint(path)) {
     console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
     const refreshed = await refreshSession();
     if (refreshed) {
       console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
-      response = await sendHttpRequest(method, path, headers, body, options?.keepalive);
+      response = await sendHttpRequest(method, path, headers, body, options);
     }
   }
 

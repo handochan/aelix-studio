@@ -32,7 +32,8 @@ vi.mock('@/renderer/pages/conversation/utils/ensureConversationRuntime', () => (
 }));
 
 vi.mock('@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionLockView', () => ({
-  useSessionLockView: vi.fn(),
+  useSessionLockView: (conversationId: string) =>
+    React.useCallback(() => mocks.ensure(conversationId), [conversationId]),
 }));
 
 vi.mock('react-i18next', () => ({

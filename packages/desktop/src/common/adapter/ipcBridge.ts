@@ -339,8 +339,11 @@ export const conversation = {
     ),
     fromApiConversation
   ),
-  ensureRuntime: httpPost<EnsureConversationRuntimeResponse, { conversation_id: string }>(
-    (p) => `/api/conversations/${p.conversation_id}/runtime/ensure`,
+  ensureRuntime: httpPost<EnsureConversationRuntimeResponse, { conversation_id: string; view_id?: string }>(
+    (p) => {
+      const path = `/api/conversations/${p.conversation_id}/runtime/ensure`;
+      return p.view_id ? `${path}?${new URLSearchParams({ view_id: p.view_id })}` : path;
+    },
     () => undefined
   ),
   /**
@@ -354,17 +357,22 @@ export const conversation = {
     (p) => `/api/conversations/${p.conversation_id}/runtime/restart`,
     () => undefined
   ),
-  activeLease: httpPost<void, { conversation_id: string; view_id?: string }>(
+  activeLease: httpPost<void, { conversation_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/active-lease`,
-    (p) => (p.view_id ? { view_id: p.view_id } : undefined)
+    () => undefined
+  ),
+  renewViewLease: httpPost<void, { conversation_id: string; view_id: string }>(
+    (p) => `/api/conversations/${p.conversation_id}/active-lease`,
+    (p) => ({ view_id: p.view_id }),
+    { timeoutMs: 5_000, silentStatuses: [409] }
   ),
   releaseRuntime: httpPost<
-    { outcome: 'released' | 'inactive' | 'view_active' | 'busy' },
+    { outcome: 'released' | 'inactive' | 'view_active' | 'deferred' },
     { conversation_id: string; view_id: string }
   >(
     (p) => `/api/conversations/${p.conversation_id}/runtime/release`,
     (p) => ({ view_id: p.view_id }),
-    { keepalive: true, silentStatuses: [404, 405] }
+    { keepalive: true, timeoutMs: 8_000, silentStatuses: [404, 405] }
   ),
   stop: httpPost<{ runtime: TConversationRuntimeSummary }, { conversation_id: string; turn_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/cancel`,

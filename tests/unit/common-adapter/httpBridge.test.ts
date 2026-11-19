@@ -150,6 +150,30 @@ describe('httpBridge', () => {
   });
 
   describe('httpPost', () => {
+    it('aborts a stalled keepalive POST after the request deadline', async () => {
+      const fetchSpy = vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () => reject(init.signal?.reason), { once: true });
+          })
+      );
+      vi.stubGlobal('fetch', fetchSpy);
+      const call = httpPost('/api/lifecycle', () => ({ view_id: 'view' }), { keepalive: true, timeoutMs: 10 });
+      await expect(call.invoke()).rejects.toMatchObject({ name: 'TimeoutError' });
+      expect(fetchSpy.mock.calls[0][1].keepalive).toBe(true);
+    });
+
+    it('does not start a separate authentication refresh for a bounded POST', async () => {
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      vi.stubGlobal('window', {});
+      vi.stubGlobal('document', {});
+      await expect(httpPost('/api/lifecycle', undefined, { timeoutMs: 50 }).invoke()).rejects.toMatchObject({
+        status: 401,
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
     it('invoke serializes body and sends content-type header', async () => {
       const fetchSpy = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ data: { created: true } }), {

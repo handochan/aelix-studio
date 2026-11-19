@@ -4,71 +4,67 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { uuid } from '@/common/utils/utils';
 import { ACTIVE_LEASE_RENEW_INTERVAL_MS } from '@/renderer/pages/conversation/hooks/useActiveLease';
-import { afterConversationRuntimeEnsure } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
+import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 
-const RELEASE_RETRY_MS = 2_000;
-const openViews = new Map<string, Set<string>>();
-
-/** Hold a foreground lease while this view is open and release it on departure. */
-export function useSessionLockView(conversationId: string): void {
-  const [viewId] = useState(() => uuid(36));
+/** Bind runtime ensure, heartbeat and departure to one mounted view. */
+export function useSessionLockView(conversationId: string): () => ReturnType<typeof ensureConversationRuntime> {
+  const current = useRef<{ conversation_id: string; view_id: string } | undefined>(undefined);
+  const ensure = useCallback(() => {
+    const view = current.current;
+    return ensureConversationRuntime(conversationId, { viewId: view?.view_id });
+  }, [conversationId]);
 
   useEffect(() => {
-    const params = { conversation_id: conversationId, view_id: viewId };
-    const shown = openViews.get(conversationId) ?? new Set<string>();
-    shown.add(viewId);
-    openViews.set(conversationId, shown);
+    const params = { conversation_id: conversationId, view_id: uuid(36) };
+    current.current = params;
 
-    let renewal: Promise<void> | undefined;
-    const renew = () => {
-      if (document.visibilityState === 'hidden' || renewal) return;
-      renewal = ipcBridge.conversation.activeLease
-        .invoke(params)
-        .catch((): void => undefined)
-        .finally(() => {
-          renewal = undefined;
-        });
+    let departed = false;
+    let renewing = false;
+    const renew = async () => {
+      if (departed || renewing || document.visibilityState === 'hidden') return;
+      renewing = true;
+      try {
+        await ipcBridge.conversation.renewViewLease.invoke(params);
+      } catch (error) {
+        // A background tab may have outlived the host's lease. Re-register only
+        // the view which is still mounted, using the same fenced ensure path.
+        if (!departed && isBackendHttpError(error) && error.status === 409) {
+          void ensure().catch(() => {});
+        }
+      } finally {
+        renewing = false;
+      }
     };
-    renew();
-    const heartbeat = setInterval(renew, ACTIVE_LEASE_RENEW_INTERVAL_MS);
-    document.addEventListener('visibilitychange', renew);
+    const heartbeat = setInterval(() => void renew(), ACTIVE_LEASE_RENEW_INTERVAL_MS);
+    const visible = (): void => {
+      void renew();
+    };
+    document.addEventListener('visibilitychange', visible);
 
-    let pageClosed = false;
-    const closePage = (event: PageTransitionEvent) => {
-      if (event.persisted) return;
-      pageClosed = true;
+    const depart = () => {
+      if (departed) return;
+      departed = true;
+      clearInterval(heartbeat);
+      document.removeEventListener('visibilitychange', visible);
+      // The host schedules the release even if this page cannot receive a reply.
       void ipcBridge.conversation.releaseRuntime.invoke(params).catch(() => {});
+    };
+    const closePage = (event: PageTransitionEvent) => {
+      if (!event.persisted) depart();
     };
     window.addEventListener('pagehide', closePage);
 
-    const wasReopened = () => openViews.get(conversationId)?.has(viewId) ?? false;
-    const release = async (retry: boolean) => {
-      if (retry && openViews.has(conversationId)) return;
-      try {
-        const result = await afterConversationRuntimeEnsure(conversationId, async () => {
-          await renewal;
-          if (wasReopened() || (retry && openViews.has(conversationId))) return;
-          return ipcBridge.conversation.releaseRuntime.invoke(params);
-        });
-        if (result?.outcome === 'busy' && !openViews.has(conversationId)) {
-          setTimeout(() => void release(true), RELEASE_RETRY_MS);
-        }
-      } catch {
-        // Older hosts and transport failures fall back to host idle cleanup.
-      }
-    };
-
     return () => {
-      clearInterval(heartbeat);
-      document.removeEventListener('visibilitychange', renew);
       window.removeEventListener('pagehide', closePage);
-      shown.delete(viewId);
-      if (!shown.size) openViews.delete(conversationId);
-      if (!pageClosed) void release(false);
+      if (current.current === params) current.current = undefined;
+      depart();
     };
-  }, [conversationId, viewId]);
+  }, [conversationId, ensure]);
+
+  return ensure;
 }

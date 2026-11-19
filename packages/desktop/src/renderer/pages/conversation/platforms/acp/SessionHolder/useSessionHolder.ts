@@ -5,7 +5,6 @@
  */
 
 import { ipcBridge } from '@/common';
-import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyCheckFailure, type CheckFailure } from './checkFailure';
 import { useSessionLockView } from './useSessionLockView';
@@ -74,10 +73,9 @@ const withoutResult = (current: State, error: unknown): State => ({
  * the stored first message, and the Draft Box blocked and saved until a check succeeds.
  */
 export const useSessionHolder = (conversationId: string, onWritable?: () => void): SessionHolderState => {
-  useSessionLockView(conversationId);
+  const ensureViewRuntime = useSessionLockView(conversationId);
   const [state, setState] = useState<State>(() => initialState(conversationId));
-  const activeIdRef = useRef(conversationId);
-  activeIdRef.current = conversationId;
+  const activeCheck = useRef<symbol | null>(null);
   const onWritableRef = useRef(onWritable);
   onWritableRef.current = onWritable;
 
@@ -91,21 +89,22 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
 
   useEffect(() => {
     setState(initialState(conversationId));
-    let cancelled = false;
-    ensureConversationRuntime(conversationId).then(
+    const check = Symbol();
+    activeCheck.current = check;
+    ensureViewRuntime().then(
       () => {
-        if (cancelled) return;
+        if (activeCheck.current !== check) return;
         knownHolders.delete(conversationId);
         setState(WRITABLE);
       },
       (error: unknown) => {
-        if (!cancelled) settle(conversationId, error, false);
+        if (activeCheck.current === check) settle(conversationId, error, false);
       }
     );
     return () => {
-      cancelled = true;
+      activeCheck.current = null;
     };
-  }, [conversationId, settle]);
+  }, [conversationId, ensureViewRuntime, settle]);
 
   useEffect(
     () =>
@@ -121,19 +120,20 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
 
   const recheck = useCallback(() => {
     const requestedId = conversationId;
+    const check = activeCheck.current;
     setState((current) => ({ ...current, recheckState: 'checking' }));
-    ensureConversationRuntime(requestedId).then(
+    ensureViewRuntime().then(
       () => {
-        if (activeIdRef.current !== requestedId) return;
+        if (activeCheck.current !== check) return;
         knownHolders.delete(requestedId);
         setState(WRITABLE);
         onWritableRef.current?.();
       },
       (error: unknown) => {
-        if (activeIdRef.current === requestedId) settle(requestedId, error, true);
+        if (activeCheck.current === check) settle(requestedId, error, true);
       }
     );
-  }, [conversationId, settle]);
+  }, [conversationId, ensureViewRuntime, settle]);
 
   return { ...state, recheck };
 };
