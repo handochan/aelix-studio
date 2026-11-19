@@ -3,14 +3,19 @@ import type { EnsureConversationRuntimeResponse } from '@/common/types/platform/
 
 const ensureRuntimeByConversation = new Map<string, Promise<EnsureConversationRuntimeResponse>>();
 
-export function ensureConversationRuntime(conversation_id: string): Promise<EnsureConversationRuntimeResponse> {
+export function ensureConversationRuntime(
+  conversation_id: string,
+  { fresh = false }: { fresh?: boolean } = {}
+): Promise<EnsureConversationRuntimeResponse> {
   const existing = ensureRuntimeByConversation.get(conversation_id);
-  if (existing) {
+  if (existing && !fresh) {
     return existing;
   }
 
   const promise = ipcBridge.conversation.ensureRuntime.invoke({ conversation_id }).finally(() => {
-    ensureRuntimeByConversation.delete(conversation_id);
+    if (ensureRuntimeByConversation.get(conversation_id) === promise) {
+      ensureRuntimeByConversation.delete(conversation_id);
+    }
   });
   ensureRuntimeByConversation.set(conversation_id, promise);
   return promise;

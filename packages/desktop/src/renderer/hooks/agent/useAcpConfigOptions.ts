@@ -241,19 +241,42 @@ const conversationConfigOptionsPort: AcpConfigOptionsPort = {
   load: async (conversation_id: string) => (await ensureConversationRuntime(conversation_id)).config_options,
 };
 
-const configOptionsInFlight = new Map<string, Promise<AcpConfigOptionDto[] | null>>();
+type ConfigOptionsRead = { epoch: number; options: AcpConfigOptionDto[] | null };
+
+const configOptionsInFlight = new Map<string, Promise<ConfigOptionsRead>>();
+// Record request start and observation order per conversation, including reads
+// joined by a different selector while the original request is still running.
+const configOptionsEpochs = new Map<string, number>();
+
+function advanceConfigOptionsEpoch(conversation_id: string): number {
+  const epoch = (configOptionsEpochs.get(conversation_id) ?? 0) + 1;
+  configOptionsEpochs.set(conversation_id, epoch);
+  return epoch;
+}
+
+function isCurrentConfigOptionsRead(
+  conversation_id: string,
+  read: ConfigOptionsRead | null
+): read is ConfigOptionsRead {
+  return read !== null && configOptionsEpochs.get(conversation_id) === read.epoch;
+}
 
 function fetchConfigOptionsOnce(
   key: AcpConfigOptionsKey,
-  port: AcpConfigOptionsPort
-): Promise<AcpConfigOptionDto[] | null> {
+  port: AcpConfigOptionsPort,
+  { fresh = false }: { fresh?: boolean } = {}
+): Promise<ConfigOptionsRead> {
   const [, conversation_id] = key;
   const existing = configOptionsInFlight.get(conversation_id);
-  if (existing) return existing;
+  if (existing && !fresh) return existing;
 
-  const promise = port
-    .load(conversation_id)
-    .then((options) => options ?? null)
+  const epoch = advanceConfigOptionsEpoch(conversation_id);
+  const load =
+    fresh && port === conversationConfigOptionsPort
+      ? ensureConversationRuntime(conversation_id, { fresh }).then((response) => response.config_options)
+      : port.load(conversation_id);
+  const promise = load
+    .then((options) => ({ epoch, options: options ?? null }))
     .finally(() => {
       if (configOptionsInFlight.get(conversation_id) === promise) {
         configOptionsInFlight.delete(conversation_id);
@@ -301,7 +324,12 @@ export function useAcpConfigOptions({
     isLoading,
   } = useSWR<AcpConfigOptionDto[] | null, unknown, AcpConfigOptionsKey | null>(
     enabled ? key : null,
-    (runtimeKey) => fetchConfigOptionsOnce(runtimeKey, configOptionsPort),
+    async (runtimeKey) => {
+      const runtimeGeneration = runtimeGenerationRef.current;
+      const read = await fetchConfigOptionsOnce(runtimeKey, configOptionsPort);
+      if (isCurrentConfigOptionsRead(runtimeKey[1], read)) return read.options;
+      return runtimeGenerationRef.current === runtimeGeneration ? optionsRef.current : null;
+    },
     {
       revalidateOnMount: false,
     }
@@ -346,10 +374,11 @@ export function useAcpConfigOptions({
     setIsReloading(true);
     try {
       await prepareRuntime?.();
-      const next = await fetchConfigOptionsOnce(key, configOptionsPort);
-      if (next) {
-        replaceSnapshot(next);
-        if (runtimeGenerationRef.current === runtimeGeneration) {
+      const read = await fetchConfigOptionsOnce(key, configOptionsPort);
+      const next = isCurrentConfigOptionsRead(conversation_id, read) ? read.options : null;
+      if (runtimeGenerationRef.current === runtimeGeneration) {
+        if (next) replaceSnapshot(next);
+        if (optionsRef.current) {
           setLoadedRuntimeGeneration(runtimeGeneration);
         }
       }
@@ -359,7 +388,7 @@ export function useAcpConfigOptions({
       setIsReloading(false);
       throw error;
     }
-  }, [key, configOptionsPort, prepareRuntime, replaceSnapshot]);
+  }, [conversation_id, key, configOptionsPort, prepareRuntime, replaceSnapshot]);
 
   const setConfigOptionWithConfirmation = useCallback(
     async (optionId: string, value: string) => {
@@ -371,8 +400,9 @@ export function useAcpConfigOptions({
       try {
         await (prepareSetRuntime ?? prepareRuntime)?.();
         if (isConfigOptionBlocked(optionId)) throw new Error('config_update_in_progress');
-        const beforeSet = await fetchConfigOptionsOnce(key, configOptionsPort);
-        if (beforeSet) replaceSnapshot(beforeSet);
+        const readBeforeSet = await fetchConfigOptionsOnce(key, configOptionsPort);
+        const beforeSet = isCurrentConfigOptionsRead(conversation_id, readBeforeSet) ? readBeforeSet.options : null;
+        if (beforeSet && runtimeGenerationRef.current === runtimeGeneration) replaceSnapshot(beforeSet);
         if (isConfigOptionBlocked(optionId)) throw new Error('config_update_in_progress');
         const previousModel = findConfigOption(beforeSet ?? optionsRef.current, 'model', ['model']);
         let response: SetConfigOptionResponse;
@@ -394,12 +424,15 @@ export function useAcpConfigOptions({
             error.code === 'BAD_GATEWAY' &&
             runtimeGenerationRef.current === runtimeGeneration
           ) {
-            const observed = await fetchConfigOptionsOnce(key, configOptionsPort).catch((): null => null);
-            const currentModel = observed?.find((option) => option.id === optionId);
-            if (observed && currentModel?.current_value && runtimeGenerationRef.current === runtimeGeneration) {
-              resolvePendingFromSnapshot(conversation_id, observed);
-              replaceSnapshot(observed);
-              if (currentModel.current_value !== previousModel.current_value) {
+            const read = await fetchConfigOptionsOnce(key, configOptionsPort, { fresh: true }).catch((): null => null);
+            if (runtimeGenerationRef.current === runtimeGeneration) {
+              const observed = isCurrentConfigOptionsRead(conversation_id, read) ? read.options : null;
+              if (observed?.some((option) => option.id === optionId && option.current_value)) {
+                resolvePendingFromSnapshot(conversation_id, observed);
+                replaceSnapshot(observed);
+              }
+              const currentModel = optionsRef.current?.find((option) => option.id === optionId);
+              if (currentModel?.current_value && currentModel.current_value !== previousModel.current_value) {
                 throw new AcpModelChangeObservedError('The model changed before the agent reported an error', {
                   cause: error,
                 });
@@ -426,6 +459,7 @@ export function useAcpConfigOptions({
           throw new Error(confirmation === 'command_ack' ? 'command_ack' : 'config_not_observed');
         }
         // A switch that landed supersedes any pending entry for the same option.
+        advanceConfigOptionsEpoch(conversation_id);
         resolvePendingFromSnapshot(conversation_id, response.config_options);
         replaceSnapshot(response.config_options);
         return response;
@@ -466,6 +500,7 @@ export function useAcpConfigOptions({
           // This frame is the agent's own confirmation (the pump re-projects the whole
           // snapshot when it sees `ConfigChanged`), so anything it now reports as current
           // is no longer pending.
+          advanceConfigOptionsEpoch(conversation_id);
           resolvePendingFromSnapshot(conversation_id, next);
           replaceSnapshot(next);
         }

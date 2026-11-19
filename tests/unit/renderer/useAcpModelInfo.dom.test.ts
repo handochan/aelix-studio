@@ -272,6 +272,60 @@ describe('useAcpModelInfo', () => {
     }
   );
 
+  it.each(['a reload started before the error', 'a read started after the error'] as const)(
+    'keeps a newer native event when %s returns the previous selection',
+    async (readOrder) => {
+      const reloadIsOlder = readOrder === 'a reload started before the error';
+      const conversation_id = reloadIsOlder ? 'native-hook-older-reload' : 'native-hook-fresh-read';
+      const before = { config_options: nativeSelectorOptions('reasoner'), runtime: null };
+      const observed = nativeSelectorOptions('plain');
+      const staleRead = deferred<typeof before>();
+      const freshRead = deferred<typeof before>();
+      const pendingSet = deferred<never>();
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: `/api/conversations/${conversation_id}/config-options/model`,
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      ensureRuntimeInvokeMock.mockResolvedValue(before);
+      setConfigOptionInvokeMock.mockReturnValue(pendingSet.promise);
+      const onSelectModelFailed = vi.fn((_modelId: string, error: unknown) => classifyConfigSetError(error));
+      const { result } = renderUseAcpModelInfo({ conversation_id, onSelectModelFailed });
+
+      await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+      act(() => result.current.selectModel('fixture/plain'));
+      await waitFor(() => expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1));
+      ensureRuntimeInvokeMock.mockReturnValueOnce(staleRead.promise);
+      if (reloadIsOlder) {
+        act(() => emitStream({ conversation_id, type: 'agent_status', data: { status: 'session_active' } }));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(3));
+        ensureRuntimeInvokeMock.mockReturnValueOnce(freshRead.promise);
+      } else {
+        act(() => pendingSet.reject(hookError));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(3));
+      }
+
+      act(() => emitStream({ conversation_id: 'unrelated', type: 'acp_config_option', data: observed }));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+      act(() => emitStream({ conversation_id, type: 'acp_config_option', data: { config_options: observed } }));
+      await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+      if (reloadIsOlder) {
+        act(() => pendingSet.reject(hookError));
+        await waitFor(() => expect(ensureRuntimeInvokeMock).toHaveBeenCalledTimes(4));
+      }
+      await act(async () => staleRead.resolve(before));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
+      if (reloadIsOlder) {
+        await act(async () => freshRead.resolve({ config_options: observed, runtime: null }));
+      }
+
+      await waitFor(() => expect(onSelectModelFailed.mock.results[0]?.value).toBe('model_change_observed_with_error'));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
+      expect(result.current.thoughtLevel?.currentValue).toBe('off');
+    }
+  );
+
   it('uses an injected config option loader without starting standalone runtime', async () => {
     const prepareRuntime = vi.fn().mockResolvedValue(undefined);
     const load = vi.fn().mockResolvedValue(buildConfigOptions('opus-4'));
