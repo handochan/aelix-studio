@@ -222,6 +222,10 @@ async function carryOver(
       const stats = await lstat(source);
       return stats.isDirectory() || stats.isFile();
     },
+  }).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+      throw new ExtensionFailure('GENERATION_MODIFIED', ['the current generation agent data is missing']);
+    throw error;
   });
 }
 

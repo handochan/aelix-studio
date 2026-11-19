@@ -534,14 +534,15 @@ export async function mutate(
     const management = { agentDirectory: candidate.paths.agent, nativeSite: bundle.nativeSite, constraintsUrl };
     // native treats an existing relative path as a local install, even when it looks like a package name.
     const cwd = source ? path.join(candidate.paths.directory, 'install-work') : candidate.paths.directory;
-    if (source) await mkdir(cwd);
+    const home = path.join(candidate.paths.directory, 'install-home');
+    if (source) await Promise.all([mkdir(cwd), mkdir(home, { mode: 0o700 })]);
     const installer = await runManagement(
       guarded,
       candidate,
       managementEnvironment(guarded.base, platform, {
         ...management,
         ...(prepared.importSet ? { offlineLinksUrl: pathToFileURL(prepared.importSet.directory).href } : {}),
-        ...(source ? { onlineIndexUrl: onlineIndex(source) } : {}),
+        ...(source ? { online: { indexUrl: onlineIndex(source), home, work: cwd } } : {}),
       }),
       prepared.native,
       guarded.timeouts.installerMs,

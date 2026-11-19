@@ -899,6 +899,31 @@ describe('changing what is installed', () => {
       expect(await generations()).toHaveLength(2);
     });
 
+    it.each([true, false])(
+      'tries stored wheels when the old agent directory is missing (installer succeeds: %s)',
+      async (succeeds) => {
+        const request = await source({ name: 'demo-one' });
+        const original = await mutate(helper.context, { action: 'install', source: request }, hooks);
+        const agent = path.join(helper.context.layout.generations, original.generation, 'agent');
+        await rm(agent, { recursive: true });
+        await rm(request.path);
+        await replaceBundle();
+        let replays = 0;
+        helper.runtime.install = async (venv, stored) => {
+          replays += 1;
+          if (!succeeds) return 1;
+          await installWheel(venv, stored);
+          return 0;
+        };
+        const listing = await reconcileBundle(helper.context);
+        expect(replays).toBe(1);
+        expect(listing.extensions[0].status).toBe(succeeds ? 'ready' : 'reinstall_needed');
+        expect(listing.revision).toBe(succeeds ? 2 : 1);
+        expect(await generations()).toHaveLength(succeeds ? 2 : 1);
+        expect(await generations()).toContain(original.generation);
+      }
+    );
+
     it('marks extensions for reinstall and preserves both old generations when validation fails after a bundle change', async () => {
       await install({ name: 'demo-one' });
       await install({ name: 'demo-two' });

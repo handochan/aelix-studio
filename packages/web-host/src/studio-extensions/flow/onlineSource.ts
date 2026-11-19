@@ -18,9 +18,38 @@ function address(value: unknown, schemes: string[]): URL | undefined {
   if (!url || !schemes.includes(url.protocol) || url.password || (url.username && url.protocol !== 'ssh:'))
     return undefined;
   if (url.protocol === 'file:') return url.hostname ? undefined : url;
-  if (!url.hostname) return undefined;
+  if (!url.hostname || url.hostname.startsWith('-')) return undefined;
   if (url.protocol === 'ssh:' && url.username && !/^[a-z0-9_][a-z0-9_.-]*$/i.test(url.username)) return undefined;
   return url;
+}
+
+/** pip unquotes the revision before passing it to Git as a positional argument. */
+function safeGitRevision(pathname: string): boolean {
+  const at = pathname.lastIndexOf('@');
+  if (at < 0) return true;
+  let revision: string;
+  try {
+    revision = decodeURIComponent(pathname.slice(at + 1));
+  } catch {
+    return false;
+  }
+  return (
+    /^[a-z0-9_][a-z0-9._/-]*$/i.test(revision) &&
+    !revision.includes('..') &&
+    !revision.endsWith('.') &&
+    revision.split('/').every((part) => part && !part.startsWith('.') && !part.endsWith('.lock'))
+  );
+}
+
+/** pip decodes file URLs before parsing the revision again. Keep escapes from changing delimiters. */
+function safeFileGitPath(pathname: string): boolean {
+  try {
+    const decoded = decodeURIComponent(pathname);
+    // oxlint-disable-next-line no-control-regex -- urllib may discard controls while re-parsing.
+    return !/[?#%\\\x00-\x1f\x7f]/.test(decoded) && decoded.split('@').length === pathname.split('@').length;
+  } catch {
+    return false;
+  }
 }
 
 /** Parse only the documented package-name and git install forms. A request cannot supply extra indexes or flags. */
@@ -39,10 +68,14 @@ export function parseOnlineSource(source: Record<string, unknown>): OnlineExtens
       indexUrl: index.href,
     };
   }
-  if (source.kind !== 'git' || typeof source.url !== 'string') return undefined;
-  const url = address(source.url.replace(/^git\+/, ''), ['https:', 'ssh:', 'git:', 'file:']);
-  if (!url || url.pathname === '/' || url.search) return undefined;
-  if (url.hash && !/^#subdirectory=[^&]+$/.test(url.hash)) return undefined;
+  if (source.kind !== 'git' || typeof source.url !== 'string' || source.url.includes('#')) return undefined;
+  const target = source.url.replace(/^git\+/, '');
+  const url = address(target, ['https:', 'ssh:', 'git:', 'file:']);
+  if (!url || url.pathname === '/' || target.includes('?')) return undefined;
+  // Check the spelling before URL normalization can remove dot segments from a ref.
+  const pathname = target.slice(target.indexOf('/', target.indexOf('://') + 3));
+  // pip owns the checkout. Even a plain relative subdirectory can be a symlink in it.
+  if (!safeGitRevision(pathname) || (url.protocol === 'file:' && !safeFileGitPath(pathname))) return undefined;
   return { kind: 'git', url: 'git+' + url.href, indexUrl: index.href };
 }
 
@@ -55,10 +88,9 @@ export async function installedGitOrigin(
 ): Promise<{ distribution: string; origin: ExtensionOrigin }> {
   const requested = new URL(source.url.slice(4));
   const at = requested.pathname.lastIndexOf('@');
-  const revision = at < 0 ? undefined : requested.pathname.slice(at + 1);
+  const commitPin = at < 0 ? '' : decodeURIComponent(requested.pathname.slice(at + 1)).toLowerCase();
   if (at >= 0) requested.pathname = requested.pathname.slice(0, at);
-  const subdirectory = new URLSearchParams(requested.hash.slice(1)).get('subdirectory') ?? undefined;
-  requested.hash = '';
+  requested.username = '';
   const matches = [];
   for (const name of new Set([...after.extensions.values()].map((entry) => entry.distribution))) {
     const installed = after.distributions.get(name);
@@ -74,17 +106,15 @@ export async function installedGitOrigin(
     }
     const url = typeof direct?.url === 'string' ? URL.parse(direct.url) : null;
     // pip removes credentials (including the optional SSH username) from its saved URL.
-    const comparable = new URL(requested);
-    comparable.username = '';
     if (url) url.username = '';
     const commit = direct?.vcs_info?.commit_id;
     if (
-      url?.href === comparable.href &&
-      direct?.subdirectory === subdirectory &&
+      url?.href === requested.href &&
+      direct?.subdirectory === undefined &&
       direct?.vcs_info?.vcs === 'git' &&
       typeof commit === 'string' &&
       COMMIT.test(commit) &&
-      (!revision || !COMMIT.test(revision) || revision === commit)
+      (!COMMIT.test(commitPin) || commitPin === commit)
     )
       matches.push({ distribution: name, commit });
   }

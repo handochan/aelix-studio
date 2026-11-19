@@ -105,6 +105,32 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect(spawn.calls).toEqual([]);
   });
 
+  it.each([
+    'git+https://git.invalid/demo.git@--upload-pack=other',
+    'git+https://git.invalid/demo.git@%2Doption',
+    'git+https://git.invalid/demo.git@%00',
+    'git+https://git.invalid/demo.git@',
+    'git+https://git.invalid/demo.git@heads//stable',
+    'git+https://git.invalid/demo.git@branch/%2e%2e/stable',
+    'git+file:///local/repo%40%2Doption',
+    'git+file:///local/repo@%252Doption',
+    'git+file:///local/repo%23subdirectory=outside',
+    'git+file:///local/repo%00',
+    'git+file:///local/repo%5cother',
+    'git+https://git.invalid/demo.git#subdirectory=../outside',
+    'git+https://git.invalid/demo.git#subdirectory=%2e%2e%2foutside',
+    'git+https://git.invalid/demo.git#subdirectory=/outside',
+    'git+https://git.invalid/demo.git#subdirectory=C:%5coutside',
+    'git+https://git.invalid/demo.git#subdirectory=possible-link',
+  ])('refuses an unsafe Git URL before spawning anything (%s)', async (url) => {
+    const source = { kind: 'git', url };
+    expect(await service.request('window:1', { action: 'install', source })).toEqual({
+      ok: false,
+      code: 'INVALID_INPUT',
+    });
+    expect(spawn.calls).toEqual([]);
+  });
+
   it('refuses both online sources before spawning anything when Studio settings turn them off', async () => {
     let enabled = false;
     service = new ExtensionService({
@@ -194,14 +220,24 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect((await listing()).extensions[0].origin).toEqual({ ...source, commit });
   });
 
-  it('keeps the old generation when an unrelated extension is the only change after a git install', async () => {
+  it.each([
+    { scenario: 'no provenance' },
+    { scenario: 'wrong repository URL', recordedUrl: 'https://git.invalid/owner/another.git' },
+    { scenario: 'wrong commit', recordedUrl: 'https://git.invalid/owner/demo.git', requestedRef: '@' + 'A'.repeat(40) },
+  ])('keeps the old generation if Git provenance differs ($scenario)', async ({ recordedUrl, requestedRef }) => {
     const before = await settle(await service.request('window:1', await installRequest({ name: 'kept' })));
     const unrelated = await wheel({ name: 'other' });
     runtime.install = async (venv) => {
       await installWheel(venv, unrelated);
+      if (recordedUrl)
+        await writeFile(
+          path.join(venv.site, 'other-0.1.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url: recordedUrl, vcs_info: { vcs: 'git', commit_id: '2'.repeat(40) } })
+        );
       return 0;
     };
-    const request = { action: 'install', source: { kind: 'git', url: 'git+https://git.invalid/owner/demo.git' } };
+    const url = 'git+https://git.invalid/owner/demo.git' + (requestedRef ?? '');
+    const request = { action: 'install', source: { kind: 'git', url } };
     expect(await settle(await service.request('window:1', request))).toMatchObject({
       phase: 'failed',
       code: 'REQUEST_MISMATCH',
