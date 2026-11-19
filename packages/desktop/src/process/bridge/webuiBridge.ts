@@ -14,6 +14,7 @@
  * has no way to start a WebUI wrapper around itself.
  */
 
+import { fetchStudioBackend } from '@aionui/web-host';
 import { ipcBridge } from '@/common';
 import {
   startDesktopWebUI,
@@ -32,7 +33,7 @@ async function fetchAdminUsername(): Promise<string> {
   const port = getBackendPort();
   if (!port) return 'admin';
   try {
-    const res = await fetch(`http://127.0.0.1:${port}/api/auth/internal/users/system`);
+    const res = await fetchStudioBackend(`http://127.0.0.1:${port}/api/auth/internal/users/system`);
     if (!res.ok) return 'admin';
     const json = (await res.json()) as { data?: AdminUsernameResult | null };
     return json.data?.username ?? 'admin';
@@ -54,7 +55,7 @@ async function maybeSeedInitialPassword(): Promise<void> {
   if (!port) {
     throw new Error('[WebUI] Cannot start: aioncore is not running (globalThis.__backendPort unset)');
   }
-  const statusRes = await fetch(`http://127.0.0.1:${port}/api/auth/status`);
+  const statusRes = await fetchStudioBackend(`http://127.0.0.1:${port}/api/auth/status`);
   if (!statusRes.ok) {
     throw new Error(`[WebUI] /api/auth/status returned ${statusRes.status}`);
   }
@@ -64,7 +65,7 @@ async function maybeSeedInitialPassword(): Promise<void> {
     setDesktopWebUIInitialPassword(undefined);
     return;
   }
-  const resetRes = await fetch(`http://127.0.0.1:${port}/api/webui/reset-password`, { method: 'POST' });
+  const resetRes = await fetchStudioBackend(`http://127.0.0.1:${port}/api/webui/reset-password`, { method: 'POST' });
   if (!resetRes.ok) {
     throw new Error(`[WebUI] /api/webui/reset-password returned ${resetRes.status}`);
   }

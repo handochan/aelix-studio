@@ -231,11 +231,16 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
     const response = await fetch(handle.localUrl + '/api/anything', {
-      headers: { 'x-forwarded-for': '192.0.2.1', 'x-aionui-internal': '1' },
+      headers: {
+        'x-forwarded-for': '192.0.2.1',
+        'x-aionui-internal': '1',
+        'x-aionui-studio-auth': 'synthetic-credential',
+      },
     });
     const headers = (await response.json()) as Record<string, unknown>;
     expect(headers['x-forwarded-for']).toBeUndefined();
     expect(headers['x-aionui-internal']).toBeUndefined();
+    expect(headers['x-aionui-studio-auth']).toBeUndefined();
     expect(response.headers.get('access-control-allow-origin')).toBeNull();
   });
 
@@ -403,13 +408,16 @@ describe('static-server', () => {
     }
 
     let backendUpgrades = 0;
+    let upgradeCredential: string | string[] | undefined;
 
     beforeEach(async () => {
       backendUpgrades = 0;
+      upgradeCredential = undefined;
       const server = http.createServer();
       const upstreamSockets = new Set<Duplex>();
-      server.on('upgrade', (_req, socket) => {
+      server.on('upgrade', (req, socket) => {
         backendUpgrades += 1;
+        upgradeCredential = req.headers['x-aionui-studio-auth'];
         upstreamSockets.add(socket);
         socket.once('close', () => upstreamSockets.delete(socket));
         socket.once('error', () => socket.destroy());
@@ -431,6 +439,18 @@ describe('static-server', () => {
         port: 0,
         allowRemote: true,
       });
+    });
+
+    it.each(paths)('does not forward internal credentials over %s', async (path) => {
+      expect(
+        await upgrade(path, {
+          Host: new URL(handle!.localUrl).host,
+          Origin: handle!.localUrl,
+          'X-AionUI-Studio-Auth': 'synthetic-launch-credential',
+        })
+      ).toContain(' 101 ');
+      expect(backendUpgrades).toBe(1);
+      expect(upgradeCredential).toBeUndefined();
     });
 
     it.each(paths)('relays the first server frame and a round trip for %s', async (path) => {

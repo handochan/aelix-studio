@@ -7,7 +7,10 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
-import { closeElectron } from './host-release/verification.mjs';
+import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
+import { boundedWait, closeElectron } from './host-release/verification.mjs';
+
+const { httpGet, httpPost } = httpBridge;
 
 const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
@@ -66,17 +69,11 @@ function readForkIdentity(parentId, childId) {
   assert.equal(result.status, 0, `Could not read the native fork identity: ${result.error ?? result.stderr}`);
   return JSON.parse(result.stdout);
 }
-async function conversationDetail(route) {
-  const response = await fetch(route, { signal: AbortSignal.timeout(5000) });
-  assert.equal(response.ok, true);
-  const result = await response.json();
-  return result.data ?? result;
-}
-async function waitForIdle(route) {
+async function waitForIdle(page, route) {
   await expect
     .poll(
       async () => {
-        const runtime = (await conversationDetail(route)).runtime;
+        const { runtime } = await httpGet(page, route);
         return runtime?.state === 'idle' && !runtime.is_processing && runtime.turn_id == null;
       },
       { timeout: 30000 }
@@ -211,7 +208,7 @@ try {
   assert.ok(fs.existsSync(path.join(sandbox, 'agent/auth.json')));
   assert.equal(fs.existsSync(path.join(sandbox, 'wrong-root/auth.json')), false);
   let port = await page.evaluate(() => window.__backendPort);
-  const providers = await (await fetch(`http://127.0.0.1:${port}/api/providers`)).json();
+  const providers = await httpGet(page, '/api/providers');
   assert.ok(!JSON.stringify(providers).includes('synthetic-provider-key'));
   // A credential-bearing endpoint is refused before writing native config.
   const badEndpoint = await page.evaluate(async () => {
@@ -232,11 +229,14 @@ try {
   trace('native_head_fork');
   const parentId = await page.evaluate(() => /^#\/conversation\/([^/]+)$/.exec(window.location.hash)?.[1]);
   assert.ok(parentId, 'The Provider conversation must be open before fork');
-  const parentRoute = `http://127.0.0.1:${port}/api/conversations/${parentId}`;
-  const capability = (await conversationDetail(parentRoute)).fork_capability;
+  const parentRoute = `/api/conversations/${parentId}`;
+  const anonymous = await fetch(`http://127.0.0.1:${port}${parentRoute}`, { signal: AbortSignal.timeout(5000) });
+  assert.equal(anonymous.status, 401);
+  assert.equal((await anonymous.json()).code, 'AUTH_REQUIRED');
+  const capability = (await httpGet(page, parentRoute)).fork_capability;
   assert.equal(capability?.at_turn, false);
   assert.equal(capability?.requires_native_head, true, 'The pinned host must guard native HEAD');
-  await waitForIdle(parentRoute);
+  await waitForIdle(page, parentRoute);
   await marker(providerReply).hover();
   const fork = page.getByTestId('message-fork-button');
   await expect(fork).toHaveCount(1);
@@ -254,7 +254,8 @@ try {
   await input.fill(childMarker);
   await page.getByTestId('sendbox-send-btn').click();
   await expect(marker(providerReply)).toHaveCount(2, { timeout: 30000 });
-  await waitForIdle(`http://127.0.0.1:${port}/api/conversations/${childId}`);
+  const childEndpoint = `/api/conversations/${childId}`;
+  await waitForIdle(page, childEndpoint);
   const beforeRestart = readForkIdentity(parentId, childId);
 
   trace('native_head_fork_restart');
@@ -286,10 +287,8 @@ try {
   await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
   await page.locator(`[id="c-${childId}"]`).click();
   await expect.poll(() => page.evaluate(() => window.location.hash)).toBe(`#/conversation/${childId}`);
-  const resumedRoute = `http://127.0.0.1:${port}/api/conversations/${childId}`;
-  const resumed = await fetch(`${resumedRoute}/runtime/ensure`, { method: 'POST', signal: AbortSignal.timeout(30000) });
-  assert.equal(resumed.ok, true);
-  await waitForIdle(resumedRoute);
+  await boundedWait(httpPost(page, `${childEndpoint}/runtime/ensure`), 'fork-runtime-resume', { timeoutMs: 30000 });
+  await waitForIdle(page, childEndpoint);
   assert.deepEqual(readForkIdentity(parentId, childId), beforeRestart);
   await expect(marker(parentMarker)).toHaveCount(1, { timeout: 30000 });
   await expect(marker(childMarker)).toHaveCount(1);
@@ -301,7 +300,7 @@ try {
   await expect(marker(providerReply)).toHaveCount(3, { timeout: 30000 });
   await expect(marker(parentMarker)).toHaveCount(1);
   await expect(marker(childMarker)).toHaveCount(1);
-  await waitForIdle(resumedRoute);
+  await waitForIdle(page, childEndpoint);
 
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
@@ -331,11 +330,10 @@ try {
       .last()
   ).toBeVisible({ timeout: 30000 });
 
-  // Require a real WebUI cookie even though ordinary backend routes use a local default identity.
-  const reset = await fetch(`http://127.0.0.1:${port}/api/webui/reset-password`, { method: 'POST' });
-  assert.equal(reset.ok, true);
-  const resetBody = await reset.json();
-  const password = resetBody.data?.new_password ?? resetBody.new_password;
+  // Operator setup uses the authenticated Electron renderer. The WebUI
+  // below must obtain its own browser session before accessing native auth.
+  const reset = await httpPost(page, '/api/webui/reset-password');
+  const password = reset.new_password;
   assert.equal(typeof password, 'string');
   webui = await startStaticServer({
     staticDir: path.resolve('out/renderer'),
@@ -512,6 +510,7 @@ try {
           'wrong_key_rejected',
           'key_update_new_conversation',
           'first_response',
+          'native_head_fork_desktop_authentication',
           'native_head_fork_ui_and_full_app_host_restart',
           'explicit_cli_root',
           'aion_provider_db_separate',

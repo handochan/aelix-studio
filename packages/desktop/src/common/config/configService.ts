@@ -1,22 +1,8 @@
+import { fetchFromDesktopOrBrowser } from '../adapter/desktopBackendFetch';
+import { getBaseUrl } from '../adapter/httpBridge';
 import type { ConfigKey, ConfigKeyMap } from './configKeys';
 
 type Subscriber = (value: unknown) => void;
-
-declare global {
-  interface Window {
-    __backendPort?: number;
-  }
-}
-
-function getBaseUrl(): string {
-  // WebUI browser mode: no preload, fetch same-origin so web-host's
-  // static-server reverse-proxies /api/* to the backend.
-  if (typeof window !== 'undefined' && typeof document !== 'undefined' && !(window as Window).__backendPort) {
-    return '';
-  }
-  const port = typeof window !== 'undefined' ? (window as Window).__backendPort || 13400 : 13400;
-  return `http://127.0.0.1:${port}`;
-}
 
 async function fetchJson<T>(method: string, path: string, body?: unknown): Promise<T> {
   const url = `${getBaseUrl()}${path}`;
@@ -24,7 +10,7 @@ async function fetchJson<T>(method: string, path: string, body?: unknown): Promi
   if (body !== undefined) {
     headers['Content-Type'] = 'application/json';
   }
-  const response = await fetch(url, {
+  const response = await fetchFromDesktopOrBrowser(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,

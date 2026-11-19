@@ -83,7 +83,9 @@ export function proxyWebSocket(
   }
 
   client.pause();
-  const headers: OutgoingHttpHeaders = { ...upgrade.headers, connection: 'Upgrade' };
+  const host = '127.0.0.1:' + backendPort;
+  const headers: OutgoingHttpHeaders = { ...upgrade.headers, host, origin: 'http://' + host, connection: 'Upgrade' };
+
   const proxy = http.request({ hostname: '127.0.0.1', port: backendPort, path: upgrade.path, headers });
   const closeProxy = () => proxy.destroy();
   client.once('close', closeProxy);

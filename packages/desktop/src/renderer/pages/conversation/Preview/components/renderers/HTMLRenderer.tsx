@@ -755,7 +755,7 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
             width: '100%',
             height: '100%',
           }}
-          sandbox='allow-scripts allow-same-origin allow-forms allow-popups allow-modals'
+          sandbox='allow-scripts allow-forms allow-popups allow-modals'
         />
       )}
     </div>

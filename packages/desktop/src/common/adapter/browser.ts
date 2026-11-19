@@ -159,7 +159,9 @@ if (win.electronAPI) {
     // could wipe the reference to a NEWLY created replacement socket.
     const currentSocket = socket;
 
+    let opened = false;
     currentSocket.addEventListener('open', () => {
+      opened = true;
       connectedAt = Date.now();
       flushQueue();
     });
@@ -247,6 +249,9 @@ if (win.electronAPI) {
     });
 
     currentSocket.addEventListener('error', () => {
+      // The host can reject an expired session before the HTTP upgrade, in
+      // which case the browser delivers an error without a WebSocket frame.
+      if (!opened && !window.location.hash.includes('/login')) void refreshSession();
       currentSocket.close();
     });
   };

@@ -1,3 +1,5 @@
+import { startBackend } from './backend-launcher.js';
+import { startStaticServer } from './static-server.js';
 import type { WebHostOptions, WebHostHandle } from './types.js';
 
 export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle } from './types.js';
@@ -29,6 +31,9 @@ export type {
 export {
   BackendStartupCancelledError,
   BackendLifecycleManager,
+  STUDIO_CREDENTIAL_HEADER,
+  fetchStudioBackend,
+  studioBackendCredential,
   buildSpawnArgs,
   buildSpawnEnv,
   findAvailablePort,
@@ -46,9 +51,6 @@ export type { BackendDirConfig, BackendLaunchOptions, BackendHandle, BackendStar
  * of truth (Electron ProcessConfig, CLI flags, env vars).
  */
 export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle> {
-  const { startBackend } = await import('./backend-launcher.js');
-  const { startStaticServer } = await import('./static-server.js');
-
   // 1. Start backend (M4)
   let backendHandle;
   if (opts.backend.kind === 'ownBackend') {
