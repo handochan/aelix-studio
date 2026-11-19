@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import SessionHolderBar from './SessionHolderBar';
 import { useSessionHolder, type SessionHolderState } from './useSessionHolder';
@@ -14,8 +14,9 @@ type SessionHolderGateProps = {
   /** Called after a recheck finds the session writable again. */
   onWritable?: () => void;
   /**
-   * Renders the send box. `sendBlocked` stays true until the first lock check settles,
-   * so neither the user nor an automatic first message can send before the holder is known.
+   * Renders the send box. `sendBlocked` is true until the first lock check confirms the
+   * session is writable and stays true while it is held, so neither the user nor an
+   * automatic send (stored first message, Draft Box queue) can reach a held session.
    */
   children: (sendBlocked: boolean) => React.ReactNode;
 };
@@ -40,17 +41,30 @@ const SessionHolderGate: React.FC<SessionHolderGateProps> = ({ conversationId, o
   const state = useSessionHolder(conversationId, onWritable);
   const announcement = useAnnouncement(state);
   const { status, holder, recheckState, recheck } = state;
+  const sendBoxRef = useRef<HTMLDivElement>(null);
+  const previousStatusRef = useRef(status);
+
+  // A successful recheck removes the focused recheck button; hand focus to the composer.
+  useEffect(() => {
+    if (previousStatusRef.current === 'held' && status === 'writable') {
+      sendBoxRef.current?.querySelector('textarea')?.focus();
+    }
+    previousStatusRef.current = status;
+  }, [status]);
 
   return (
     <>
       <span role='status' aria-live='polite' aria-atomic='true' className='sr-only' data-testid='session-holder-status'>
         {announcement}
       </span>
-      {status === 'held' && holder ? (
+      {status === 'held' && holder && (
         <SessionHolderBar holder={holder} recheckState={recheckState} onRecheck={recheck} />
-      ) : (
-        children(status === 'checking')
       )}
+      {/* The send box stays mounted but hidden while held: unmounting it would hand its
+          queued Draft Box items to the background runner, which sends without this gate. */}
+      <div ref={sendBoxRef} className={status === 'held' ? 'hidden' : 'contents'} data-testid='session-holder-send-box'>
+        {children(status !== 'writable')}
+      </div>
     </>
   );
 };

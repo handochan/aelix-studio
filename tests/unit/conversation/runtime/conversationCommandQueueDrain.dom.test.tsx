@@ -200,6 +200,33 @@ describe('useConversationCommandQueue drain', () => {
     expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'queued follow-up' }));
   });
 
+  it('keeps an auto-mode command queued while the gate is not hydrated, then drains it', async () => {
+    // AcpSendBox reports an unhydrated gate while the session holder check blocks sending.
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    const { result, rerender } = renderQueue({
+      conversation_id: 'conv-holder-check',
+      runtimeGate: { ...idleGate, hydrated: false },
+      onExecute,
+    });
+
+    act(() => {
+      result.current.toggleMode();
+    });
+    await waitFor(() => expect(result.current.mode).toBe('auto'));
+    act(() => {
+      result.current.enqueue({ input: 'saved draft', files: [] });
+    });
+    await waitFor(() => expect(result.current.items).toHaveLength(1));
+    await act(async () => {});
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(result.current.items).toHaveLength(1);
+
+    rerender({ gate: idleGate, busy: false });
+
+    await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
+    expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'saved draft' }));
+  });
+
   it('ignores legacy persisted team-upgrade handoff state and drains normally', async () => {
     const onExecute = vi.fn().mockResolvedValue(undefined);
     const legacyHandoffKey = ['deferred', 'AfterTeamUpgrade'].join('');

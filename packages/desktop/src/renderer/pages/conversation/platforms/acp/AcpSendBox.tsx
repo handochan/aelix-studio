@@ -279,11 +279,14 @@ const AcpSendBox: React.FC<{
     setAtPath,
     setUploadFile,
   });
-  const commandQueueRuntimeGate = teamRuntime?.runtimeGate ?? {
+  const runtimeGate = teamRuntime?.runtimeGate ?? {
     hydrated: runtimeView.hydrated,
     canSendMessage: runtimeView.canSendMessage,
     isProcessing: runtimeView.isProcessing,
   };
+  // While sending is blocked, report the gate as not hydrated: the Draft Box keeps its
+  // items and waits instead of auto-sending them.
+  const commandQueueRuntimeGate = sendBlocked ? { ...runtimeGate, hydrated: false } : runtimeGate;
   const isCancelling = runtimeView.state === 'cancelling';
   const isBusy = isCancelling || commandQueueRuntimeGate.isProcessing || !commandQueueRuntimeGate.canSendMessage;
 
@@ -793,7 +796,7 @@ Please check your local CLI tool authentication status`,
   };
   const handleSendNowQueued = useCallback(
     async (item: ConversationCommandQueueItem) => {
-      if (compactionStopGuardRef.current()) return;
+      if (sendBlocked || compactionStopGuardRef.current()) return;
       if (supportsMidturnDelivery) {
         // Supporting agents can deliver directly into the running turn — no
         // need to stop/restart. Remove the item BEFORE executing (rather than
@@ -826,7 +829,16 @@ Please check your local CLI tool authentication status`,
       await effectiveHandleStop();
       prioritize(item.id);
     },
-    [compactionStopGuardRef, effectiveHandleStop, enqueue, executeCommand, prioritize, remove, supportsMidturnDelivery]
+    [
+      compactionStopGuardRef,
+      effectiveHandleStop,
+      enqueue,
+      executeCommand,
+      prioritize,
+      remove,
+      sendBlocked,
+      supportsMidturnDelivery,
+    ]
   );
   const sendBoxWidthClass = getChatSurfaceWidthClass();
 

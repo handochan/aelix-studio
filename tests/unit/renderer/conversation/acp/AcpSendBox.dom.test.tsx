@@ -1136,6 +1136,23 @@ describe('AcpSendBox', () => {
       return props.onSendNow;
     };
 
+    it('holds the Draft Box queue and its send-now while the session holder check blocks sending', async () => {
+      const queueGate = () =>
+        (useConversationCommandQueueSpy.mock.calls.at(-1)?.[0] as { runtimeGate?: { hydrated: boolean } } | undefined)
+          ?.runtimeGate;
+      const { rerender } = render(
+        <AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} sendBlocked />
+      );
+      expect(queueGate()?.hydrated).toBe(false);
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+
+      rerender(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      expect(queueGate()?.hydrated).toBe(true);
+    });
+
     it('keeps a queued command from stopping a manual compaction', async () => {
       runtimeViewMock.activeTurnId = 'turn-compact';
       render(

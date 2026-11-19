@@ -68,7 +68,9 @@ const emit = (message: Partial<IResponseMessage>) =>
 
 const flush = () => act(async () => {});
 
-const sendBox = (sendBlocked: boolean) => <div data-testid='send-box' data-blocked={String(sendBlocked)} />;
+const sendBox = (sendBlocked: boolean) => (
+  <textarea data-testid='send-box' data-blocked={String(sendBlocked)} disabled={sendBlocked} />
+);
 
 const renderGate = (onWritable = vi.fn()) => {
   const view = render(
@@ -80,6 +82,11 @@ const renderGate = (onWritable = vi.fn()) => {
 };
 
 const statusText = () => screen.getByTestId('session-holder-status').textContent;
+/** While held, the send box stays mounted (so its Draft Box never detaches) but is hidden and blocked. */
+const expectHeldSendBox = () => {
+  expect(screen.getByTestId('session-holder-send-box').className).toBe('hidden');
+  expect(screen.getByTestId('send-box').dataset.blocked).toBe('true');
+};
 const recheckButton = () => screen.getByRole('button', { name: 'conversation.sessionHolder.recheck' });
 
 beforeEach(() => {
@@ -109,7 +116,7 @@ describe('SessionHolderGate', () => {
     expect(status.textContent).toBe('');
 
     await act(async () => first.reject(lockError('native')));
-    expect(screen.queryByTestId('send-box')).toBeNull();
+    expectHeldSendBox();
     expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
     expect(screen.getByText('conversation.sessionHolder.native.title')).toBeTruthy();
     expect(screen.getByText('conversation.sessionHolder.readOnly')).toBeTruthy();
@@ -153,6 +160,7 @@ describe('SessionHolderGate', () => {
       },
     });
     expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
+    expectHeldSendBox();
   });
 
   it('reports a session that is still held after a recheck', async () => {
@@ -175,7 +183,7 @@ describe('SessionHolderGate', () => {
     await flush();
     fireEvent.click(recheckButton());
     await flush();
-    expect(screen.queryByTestId('send-box')).toBeNull();
+    expectHeldSendBox();
     expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
     expect(
       within(screen.getByTestId('session-holder-bar')).getByText('conversation.sessionHolder.checkFailed')
@@ -191,6 +199,8 @@ describe('SessionHolderGate', () => {
     fireEvent.click(recheckButton());
     await flush();
     expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
+    expect(screen.getByTestId('session-holder-send-box').className).toBe('contents');
+    expect(document.activeElement).toBe(screen.getByTestId('send-box'));
     expect(statusText()).toBe('');
     expect(onWritable).toHaveBeenCalledTimes(1);
   });
