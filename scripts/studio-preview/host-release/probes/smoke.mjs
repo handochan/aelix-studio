@@ -79,12 +79,12 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   processTimeline.checkpoint('before-launch', mainLaunches.length + 1);
   checkConfig('before-launch', mainLaunches.length + 1);
   const result = await launchWithIdentity(
-    () =>
+    (timeout) =>
       electron.launch({
         ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
         cwd: executablePath ? sandbox : process.cwd(),
         env: appEnv,
-        timeout: 60000,
+        timeout,
       }),
     {
       launchNumber: mainLaunches.length + 1,

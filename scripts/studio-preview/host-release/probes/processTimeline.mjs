@@ -172,6 +172,7 @@ export function createProcessTimeline({
     }
   };
   const observe = (value, at = new Date().toISOString(), context) => {
+    if (stopped) return;
     if (!context) {
       context = { phase, launch, startedAt: at, checkpoint: forcePublish };
       forcePublish = false;
@@ -307,7 +308,7 @@ export function createProcessTimeline({
           refresh = true;
           return;
         }
-        if (!(stopped && value.reason === 'cim-reader-stopped')) observe(value, new Date().toISOString(), context);
+        observe(value, new Date().toISOString(), context);
       })
       .catch(() => {
         if (!identityPending) observe({ status: 'unavailable' }, new Date().toISOString(), context);
@@ -319,6 +320,7 @@ export function createProcessTimeline({
       });
   };
   const checkpoint = (nextPhase, number) => {
+    if (stopped) return;
     phase = nextPhase;
     launch = number;
     refresh = true;
@@ -352,11 +354,13 @@ export function createProcessTimeline({
     },
     checkpoint,
     start() {
+      if (stopped || timer) return;
       timer = setInterval(sample, intervalMs);
       timer.unref();
       sample();
     },
     stop() {
+      if (stopped) return;
       stopped = true;
       clearInterval(timer);
       windowsReader?.stop();
