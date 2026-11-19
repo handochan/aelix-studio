@@ -302,6 +302,11 @@ export async function launchWithIdentity(
       protocol.restore();
       const main = app.process();
       observation.pid = main.pid;
+      let rejectFirstWindowOnExit;
+      const firstWindowExitError = () => {
+        const reason = main.exitCode !== null ? `code ${main.exitCode}` : `signal ${main.signalCode}`;
+        return new Error(`Studio launch #${launchNumber}: application exited with ${reason} before the first window`);
+      };
       const observeExit = () => {
         if (exited(main) && !observation.exitObservedAt) {
           observation.exitCode = main.exitCode;
@@ -314,6 +319,7 @@ export async function launchWithIdentity(
       processTimeline?.addMain(main.pid, launchNumber);
       main.on('exit', () => {
         observeExit();
+        rejectFirstWindowOnExit?.(firstWindowExitError());
         processTimeline?.mainExit(main.pid);
         record({ ...observation, status: 'exited' });
       });
@@ -328,18 +334,23 @@ export async function launchWithIdentity(
       processTimeline?.checkpoint('first-window-wait', launchNumber);
       let outcome = 'failed';
       try {
-        if (exited(main)) {
-          const reason = main.exitCode !== null ? `code ${main.exitCode}` : `signal ${main.signalCode}`;
-          throw new Error(`Studio launch #${launchNumber}: application exited with ${reason} before the first window`);
-        }
+        if (exited(main)) throw firstWindowExitError();
         const remaining = deadline - performance.now();
-        if (remaining > 0) await app.firstWindow({ timeout: remaining });
+        if (remaining > 0) {
+          // Playwright's close event can wait for descendants to release inherited pipes.
+          const osExit = new Promise((_, reject) => {
+            rejectFirstWindowOnExit = reject;
+          });
+          await Promise.race([osExit, app.firstWindow({ timeout: remaining })]);
+        }
+        if (exited(main)) throw firstWindowExitError();
         if (performance.now() >= deadline)
           throw new Error(
             `Studio launch #${launchNumber}: first window exceeded the ${launchTimeoutMs}ms launch timeout`
           );
         outcome = 'passed';
       } finally {
+        rejectFirstWindowOnExit = undefined;
         observation.firstWindowWait = { startedAt, finishedAt: new Date().toISOString(), outcome };
         diagnostic();
       }
@@ -397,7 +408,19 @@ export async function launchWithIdentity(
       if (!windowFailed)
         await waitForExit(app.process(), observations.get(app), 'identity-failure-exit-observation').catch(() => {});
       recordLaunchFailure(app, error);
-      await closeElectron(app, { phase: windowFailed ? 'first-window-failure-cleanup' : 'identity-failure-cleanup' });
+      const windowFailedAfterExit = windowFailed && observation.exitObservedAt !== null;
+      const cleanup = closeElectron(app, {
+        phase: windowFailed ? 'first-window-failure-cleanup' : 'identity-failure-cleanup',
+      });
+      if (windowFailedAfterExit) {
+        // The already observed OS exit determines the failure. Let Playwright finish
+        // closing its own resources without making the error wait on its pipes.
+        void cleanup.catch(() =>
+          console.error(`Studio launch #${launchNumber}: Playwright cleanup failed after OS exit`)
+        );
+      } else {
+        await cleanup;
+      }
     } else {
       record({ ...observation, status: 'failed', error: String(error) });
       console.error(`Studio launch #${launchNumber} FAILED before process handle: ${error}`);

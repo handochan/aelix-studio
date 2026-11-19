@@ -1,4 +1,5 @@
-import { EventEmitter } from 'node:events';
+import { spawn } from 'node:child_process';
+import { EventEmitter, once } from 'node:events';
 import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import { createRequire } from 'node:module';
@@ -292,6 +293,67 @@ describe('Electron launch evidence and identity retry', () => {
     });
   });
 
+  it('fails on OS exit while a descendant still holds the launcher output pipes open', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-window-exit-'));
+    const release = path.join(root, 'release-pipes');
+    const keeper = `
+      const { existsSync } = require('node:fs');
+      setTimeout(() => process.exit(0), 8000).unref();
+      setInterval(() => { if (existsSync(process.argv[1])) process.exit(0); }, 20);
+    `;
+    const launcher = `
+      const { spawn } = require('node:child_process');
+      process.once('message', () => process.exit(17));
+      spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], { stdio: 'inherit' }).unref();
+      process.send('ready');
+    `;
+    const main = spawn(process.execPath, ['-e', launcher, keeper, release], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
+    let pipesClosed = false;
+    const closed = once(main, 'close').then(() => {
+      pipesClosed = true;
+    });
+    const { app: fixture } = application();
+    const app = {
+      ...fixture,
+      process: () => main,
+      // Match Playwright's wait and cleanup dependency on ChildProcess 'close'.
+      firstWindow: vi.fn(({ timeout }: { timeout: number }) => {
+        main.send('exit');
+        return new Promise((_resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error('firstWindow: timeout')), timeout);
+          void closed.then(() => {
+            clearTimeout(timer);
+            reject(new Error('Playwright close'));
+          });
+        });
+      }),
+      close: vi.fn(async () => closed),
+    };
+    const record = vi.fn();
+    try {
+      await once(main, 'message');
+      const result = launchWithIdentity(async () => app, { ...options(record), launchTimeoutMs: 1500 });
+      await expect(boundedWait(result, 'OS exit fixture', { timeoutMs: 3000, log: () => {} })).rejects.toThrow(
+        'application exited with code 17 before the first window'
+      );
+      expect(pipesClosed).toBe(false);
+      expect(app.evaluate).not.toHaveBeenCalled();
+      expect(app.close).toHaveBeenCalledTimes(1);
+      expect(record.mock.calls.find(([row]) => row.status === 'failed')?.[0]).toMatchObject({
+        exitCode: 17,
+        signal: null,
+        naturalExit: true,
+        firstWindowWait: { outcome: 'failed' },
+      });
+    } finally {
+      await fs.writeFile(release, '');
+      await closed;
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   it.each(['launch deadline already elapsed', 'window arrives after deadline'])('rejects if %s', async (scenario) => {
     vi.useFakeTimers();
     vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -501,6 +563,56 @@ describe('Electron launch evidence and identity retry', () => {
     expect(launch).toHaveBeenCalledTimes(1);
     expect(app.evaluate).toHaveBeenCalledTimes(2);
     expect(app.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start a retry if the launcher handle changed even with the same numeric PID', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const { main: replacement } = application();
+    replacement.pid = main.pid;
+    replacement.exitCode = 0;
+    await expect(
+      launchWithIdentity(async () => {
+        await launch();
+        const evaluate = app.evaluate.getMockImplementation()!;
+        app.evaluate.mockImplementationOnce(async (fn, token) => {
+          try {
+            return await evaluate(fn, token);
+          } finally {
+            app.process = () => replacement;
+          }
+        });
+        return app;
+      }, options())
+    ).rejects.toThrow(destroyed.message);
+    expect(app.evaluate).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a valid identity reply if the original launcher exited during the retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const record = vi.fn();
+    await expect(
+      launchWithIdentity(async () => {
+        await launch();
+        const evaluate = app.evaluate.getMockImplementation()!;
+        app.evaluate.mockImplementation(async (fn, token) => {
+          const identity = await evaluate(fn, token);
+          main.signalCode = 'SIGTERM';
+          main.emit('exit', null, 'SIGTERM');
+          return identity;
+        });
+        return app;
+      }, options(record))
+    ).rejects.toThrow('Studio app changed during identity retry');
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      signal: 'SIGTERM',
+      naturalExit: true,
+      identityRetry: { outcome: 'failed' },
+    });
   });
 
   it('rejects a retry that returns an invalid Electron PID', async () => {

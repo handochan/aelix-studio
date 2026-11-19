@@ -81,8 +81,9 @@ recorded as unavailable without changing the smoke result.
 The launch helper waits for the first window within the 60-second budget
 shared with Electron launch. `mainLaunches[].firstWindowWait` records the
 start, completion and outcome. On expiry, the launch fails and closes the app
-through the normal cleanup. A launcher that has already exited fails before
-waiting for a window, with its exit code or signal retained. After identity,
+through the normal cleanup. An OS exit before or during the window wait fails
+the launch immediately and retains the exit code or signal. Playwright cleanup
+can finish separately if inherited output pipes are still open. After identity,
 the smoke selects the current first window and runs its renderer checks in their
 established order.
 
