@@ -1767,6 +1767,7 @@ const SendBox: React.FC<{
       type='secondary'
       className='bg-animate sendbox-stop-button'
       icon={<div className='mx-auto size-12px bg-6'></div>}
+      disabled={!onStop}
       onClick={stopHandler}
     ></Button>
   );

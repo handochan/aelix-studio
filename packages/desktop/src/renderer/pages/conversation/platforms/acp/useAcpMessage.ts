@@ -12,6 +12,7 @@ import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import type { TokenUsageBreakdown, TokenUsageData } from '@/common/config/storage';
 import { useMergeLiveMessage } from '@/renderer/pages/conversation/Messages/hooks';
+import { readAcpCompaction } from '@/renderer/pages/conversation/Messages/acp/compaction';
 import { logStreamTerminalObserved } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
 import { isConversationProcessing } from '@/renderer/pages/conversation/utils/conversationRuntime';
@@ -37,6 +38,7 @@ export type UseAcpMessageReturn = {
   resetState: () => void;
   tokenUsage: TokenUsageData | null;
   context_limit: number;
+  manualCompactionRunning: boolean;
   hasThinkingMessage: boolean;
   slashCommands: SlashCommandItem[];
   fetchSlashCommands: () => void;
@@ -50,16 +52,21 @@ const BREAKDOWN_KEYS = [
   'cached_write_tokens',
 ] as const;
 
+type AcpUsage = {
+  used: number;
+  size?: number;
+  cost?: { amount: number; currency: string };
+  _meta?: Record<string, unknown>;
+};
+
+const isUnknownContext = (data: AcpUsage) => data._meta?.['aelix/contextUnknown'] === true;
+
 /**
  * Convert an ACP UsageUpdate payload (live acp_context_usage frame or
  * GET /usage snapshot — same shape) into TokenUsageData. Per-turn counters
  * ride under `_meta`; cost is the agent's cumulative session cost.
  */
-export function tokenUsageFromAcpUsage(data: {
-  used: number;
-  cost?: { amount: number; currency: string };
-  _meta?: Record<string, unknown>;
-}): TokenUsageData {
+export function tokenUsageFromAcpUsage(data: AcpUsage): TokenUsageData {
   const usage: TokenUsageData = { total_tokens: data.used };
   if (data.cost && typeof data.cost.amount === 'number' && data.cost.amount > 0) {
     usage.cost = { amount: data.cost.amount, currency: data.cost.currency || 'USD' };
@@ -120,6 +127,8 @@ export const useAcpMessage = (
   const [turnStartedAtMs, setTurnStartedAtMs] = useState<number | null>(null);
   const [tokenUsage, setTokenUsage] = useState<TokenUsageData | null>(null);
   const [context_limit, setContextLimit] = useState<number>(0);
+  const usageSourceRef = useRef<'initial' | 'snapshot' | 'live' | 'liveUnknown'>('initial');
+  const [manualCompactionRunning, setManualCompactionRunning] = useState(false);
   const [slashCommands, setSlashCommands] = useState<SlashCommandItem[]>([]);
 
   // Use refs to sync state for immediate access in event handlers
@@ -232,6 +241,7 @@ export const useAcpMessage = (
   const markTurnEnded = useCallback(() => {
     endConversationTurn(conversation_id);
     setTurnStartedAtMs(null);
+    setManualCompactionRunning(false);
   }, [conversation_id]);
 
   // Exported setter: the send box flips this on send / send-failure, so track
@@ -484,14 +494,28 @@ export const useAcpMessage = (
           // must not re-light turn state like the default arm does.
           mergeLiveMessage(transformedMessage);
           break;
+        case 'acp_tool_call': {
+          const meta = transformedMessage?.type === 'acp_tool_call' ? transformedMessage.content?._meta : undefined;
+          if (readAcpCompaction(meta)?.reason === 'manual' && !turnFinishedRef.current) {
+            setManualCompactionRunning(true);
+          }
+          if (!runningRef.current && !turnFinishedRef.current) {
+            setRunning(true);
+            runningRef.current = true;
+          }
+          mergeLiveMessage(transformedMessage);
+          break;
+        }
         case 'acp_context_usage': {
-          const usageData = message.data as {
-            used: number;
-            size: number;
-            cost?: { amount: number; currency: string };
-            _meta?: Record<string, unknown>;
-          };
+          const usageData = message.data as AcpUsage;
           if (usageData && typeof usageData.used === 'number') {
+            usageSourceRef.current = 'live';
+            if (isUnknownContext(usageData)) {
+              usageSourceRef.current = 'liveUnknown';
+              setTokenUsage(null);
+              setContextLimit(0);
+              break;
+            }
             setTokenUsage((prev) => {
               const next = tokenUsageFromAcpUsage(usageData);
               // Mid-turn UsageUpdate notifications carry no per-turn
@@ -500,7 +524,7 @@ export const useAcpMessage = (
               if (!next.cost && prev?.cost) next.cost = prev.cost;
               return next;
             });
-            if (usageData.size > 0) {
+            if (usageData.size && usageData.size > 0) {
               setContextLimit(usageData.size);
             }
           }
@@ -592,6 +616,8 @@ export const useAcpMessage = (
     setAcpStatus(null);
     setTokenUsage(null);
     setContextLimit(0);
+    usageSourceRef.current = 'initial';
+    setManualCompactionRunning(false);
     setSlashCommands([]);
     hasContentInTurnRef.current = false;
     turnFinishedRef.current = false;
@@ -646,7 +672,11 @@ export const useAcpMessage = (
         // Restore persisted context usage data
         // Antigravity persists the same usage fields through this surface, so
         // gating on `acp` alone loses its context meter on reload.
-        if ((res.type === 'acp' || res.type === 'antigravity') && res.extra?.last_token_usage) {
+        if (
+          usageSourceRef.current === 'initial' &&
+          (res.type === 'acp' || res.type === 'antigravity') &&
+          res.extra?.last_token_usage
+        ) {
           const { last_token_usage, last_context_limit } = res.extra;
           if (last_token_usage.total_tokens > 0) {
             setTokenUsage(last_token_usage);
@@ -696,16 +726,26 @@ export const useAcpMessage = (
         setSlashCommands(commands);
       })
       .catch(() => {});
-    // Hydrate the context-usage indicator from the backend snapshot. Live
-    // acp_context_usage stream events may land first, so never overwrite a
-    // value that is already set.
+    // A live invalidation must win over an older in-flight HTTP snapshot.
     void runtimeReady
       .then(() => ipcBridge.conversation.getUsage.invoke({ conversation_id }))
       .then((usage) => {
-        if (cancelled || !usage || typeof usage.used !== 'number' || usage.used <= 0) return;
-        setTokenUsage((prev) => prev ?? tokenUsageFromAcpUsage(usage));
+        if (cancelled || usageSourceRef.current === 'liveUnknown' || !usage || typeof usage.used !== 'number') return;
+        if (usageSourceRef.current === 'live') {
+          if (!isUnknownContext(usage) && usage.size > 0) setContextLimit((previous) => previous || usage.size);
+          return;
+        }
+        if (isUnknownContext(usage)) {
+          usageSourceRef.current = 'snapshot';
+          setTokenUsage(null);
+          setContextLimit(0);
+          return;
+        }
+        if (usage.used < 0 || (usage.used === 0 && usage.size <= 0)) return;
+        usageSourceRef.current = 'snapshot';
+        setTokenUsage(tokenUsageFromAcpUsage(usage));
         if (usage.size > 0) {
-          setContextLimit((prev) => (prev > 0 ? prev : usage.size));
+          setContextLimit(usage.size);
         }
       })
       .catch(() => {});
@@ -751,6 +791,7 @@ export const useAcpMessage = (
     resetState,
     tokenUsage,
     context_limit,
+    manualCompactionRunning,
     hasThinkingMessage,
     slashCommands,
     fetchSlashCommands,

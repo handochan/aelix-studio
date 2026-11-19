@@ -29,6 +29,17 @@
     "reasoning_effort": "Reasoning Effort",
     "default": "Default"
   },
+  "compaction": {
+    "unknown": "Outcome unknown",
+    "manual": "Context compaction",
+    "automatic": "Automatic context compaction",
+    "running": "Compacting…",
+    "runningManual": "Compacting… Stop is unavailable during manual compaction.",
+    "completed": "Completed",
+    "completedWithTokens": "Completed. Tokens before compaction: {{tokens}}",
+    "failed": "Failed",
+    "aborted": "Cancelled"
+  },
   "subagents": {
     "title": "Subagents",
     "child": "{{profile}} · {{index}}",

@@ -29,6 +29,17 @@
     "reasoning_effort": "推理深度",
     "default": "預設"
   },
+  "compaction": {
+    "unknown": "結果未確認",
+    "manual": "上下文壓縮",
+    "automatic": "自動上下文壓縮",
+    "running": "正在壓縮…",
+    "runningManual": "正在壓縮…手動壓縮期間無法停止。",
+    "completed": "已完成",
+    "completedWithTokens": "已完成。壓縮前的詞元數：{{tokens}}",
+    "failed": "失敗",
+    "aborted": "已取消"
+  },
   "subagents": {
     "title": "子代理",
     "child": "{{profile}} · {{index}}",

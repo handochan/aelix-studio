@@ -29,6 +29,17 @@
     "reasoning_effort": "Зусилля міркування",
     "default": "За замовчуванням"
   },
+  "compaction": {
+    "unknown": "Результат невідомий",
+    "manual": "Стиснення контексту",
+    "automatic": "Автоматичне стиснення контексту",
+    "running": "Стиснення…",
+    "runningManual": "Стиснення… Зупинка недоступна під час ручного стиснення.",
+    "completed": "Завершено",
+    "completedWithTokens": "Завершено. Токенів до стиснення: {{tokens}}",
+    "failed": "Помилка",
+    "aborted": "Скасовано"
+  },
   "subagents": {
     "title": "Субагенти",
     "child": "{{profile}} · {{index}}",

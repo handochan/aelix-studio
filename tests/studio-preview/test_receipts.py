@@ -1,8 +1,10 @@
 """Receipt drift and failed-rerun regressions for Preview host qualification."""
 import ast
 import asyncio
+import contextlib
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import shutil
@@ -20,6 +22,11 @@ from test_preparation import ROOT, prepare
 spec = importlib.util.spec_from_file_location('installer_acceptance', ROOT / 'scripts/studio-preview/packaging/acceptance.py')
 acceptance = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(acceptance)
+
+compact_probe_spec = importlib.util.spec_from_file_location(
+    'compact_before_rules', ROOT / 'tests/manual/aelixCompactBeforeRules.py')
+compact_probe = importlib.util.module_from_spec(compact_probe_spec)
+compact_probe_spec.loader.exec_module(compact_probe)
 
 
 def macho_fixture(vm_size=4096, payload=b'unchanged-code!!'):
@@ -42,6 +49,29 @@ def signed_macho_fixture():
 
 
 class ReceiptTests(unittest.TestCase):
+    def test_compact_probe_reports_a_separately_supplied_checkout_without_attesting_the_binary(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            runtime = Path(temporary)
+            stale_host = runtime / 'previous-build'
+            stale_host.write_bytes(b'bytes from a previous build')
+            baseline = json.loads((ROOT / 'scripts/studio-preview/baseline.json').read_text())
+            (runtime / 'receipt.json').write_text(json.dumps({'native': baseline['native']}))
+            args = ['probe', '--host', str(stale_host), '--host-source', str(runtime / 'next-checkout'),
+                    '--runtime', str(runtime), '--acp-source', str(runtime / 'acp')]
+            output = io.StringIO()
+            with (patch.object(sys, 'argv', args),
+                  patch.object(compact_probe, 'checkout_head', side_effect=['next-commit', 'acp-commit']),
+                  patch.object(compact_probe, 'loopback_provider', return_value=contextlib.nullcontext((0, []))),
+                  patch.object(compact_probe, 'start_host', return_value=contextlib.nullcontext()) as start,
+                  patch.object(compact_probe, 'verify_cases'), contextlib.redirect_stdout(output)):
+                compact_probe.main()
+            evidence = json.loads(output.getvalue())
+            self.assertEqual(start.call_args.args[0], stale_host.resolve())
+            self.assertEqual(evidence['providedHostCheckoutSha'], 'next-commit')
+            self.assertEqual(evidence['hostBinarySha256'], hashlib.sha256(stale_host.read_bytes()).hexdigest())
+            self.assertEqual(evidence['hostBinaryBuildProvenance'], 'unverified')
+            self.assertNotIn('host', evidence)
+
     @unittest.skipUnless(shutil.which('node'), 'Node driver is required')
     def test_inventory_diagnostic_omits_extra_names_and_raw_resource_values(self):
         with tempfile.TemporaryDirectory() as temporary:
