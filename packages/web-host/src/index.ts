@@ -15,6 +15,8 @@ export type {
 } from './studio-auth/types.js';
 export {
   ExtensionService,
+  locateStudioExtensionLayout,
+  resolveStandaloneStudioUserDataPath,
   STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY,
   STATE_ENVIRONMENT as EXTENSION_STATE_ENVIRONMENT,
 } from './studio-extensions/index.js';

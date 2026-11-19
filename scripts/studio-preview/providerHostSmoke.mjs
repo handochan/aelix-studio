@@ -6,8 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
-import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
-import { STATE_DIRECTORY, STATE_ENVIRONMENT } from '../../packages/web-host/src/studio-extensions/store/layout.ts';
+import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../packages/web-host/src/index.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
 import { boundedWait, closeElectron } from './host-release/verification.mjs';
 
@@ -178,13 +177,13 @@ try {
     timeout: 15000,
   });
   const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
-  const expectedExtensionState = path.join(userDataPath, STATE_DIRECTORY);
+  const expectedExtensionState = path.join(fs.realpathSync(userDataPath), 'aelix-runtime');
   const registration = page.waitForRequest(
     (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/agents/custom'
   );
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
   assert.equal(
-    (await registration).postDataJSON().env?.find(({ name }) => name === STATE_ENVIRONMENT)?.value,
+    (await registration).postDataJSON().env?.find(({ name }) => name === 'AELIX_STUDIO_EXTENSION_STATE')?.value,
     expectedExtensionState,
     'The managed command must send the original Studio data path to the host as an environment value'
   );
@@ -346,10 +345,18 @@ try {
   const reset = await httpPost(page, '/api/webui/reset-password');
   const password = reset.new_password;
   assert.equal(typeof password, 'string');
-  webui = await startStaticServer({
+  const sharedDb = path.join(sandbox, '.aionui-dev');
+  fs.symlinkSync(path.join(userDataPath, 'aionui'), sharedDb, 'junction');
+  webui = await startWebHost({
+    app: {
+      version: '0.0.0',
+      isPackaged: false,
+      resourcesPath: process.cwd(),
+      userDataPath: await resolveStandaloneStudioUserDataPath(sharedDb),
+    },
     staticDir: path.resolve('out/renderer'),
-    backendPort: port,
-    userDataPath,
+    dataDir: sharedDb,
+    backend: { kind: 'useExistingBackend', port },
     port: 0,
     allowRemote: true,
   });
@@ -383,7 +390,7 @@ try {
   });
   const selectedLaunch = await selected.json();
   assert.equal(
-    selectedLaunch.data?.env?.find(({ name }) => name === STATE_ENVIRONMENT)?.value,
+    selectedLaunch.data?.env?.find(({ name }) => name === 'AELIX_STUDIO_EXTENSION_STATE')?.value,
     expectedExtensionState,
     'The WebUI must use the same Studio data path as the desktop'
   );
@@ -532,6 +539,7 @@ try {
           'ui_key_registration',
           'wrong_key_rejected',
           'key_update_new_conversation',
+          'desktop_managed_command_extension_state',
           'first_response',
           'native_head_fork_desktop_authentication',
           'native_head_fork_ui_and_full_app_host_restart',
@@ -541,6 +549,7 @@ try {
           'unreachable_endpoint_reported',
           'untrusted_navigation_cannot_manage_credentials',
           'actual_webui_cookie_origin_and_secret_boundary',
+          'standalone_webui_shared_database_extension_state',
           'lan_http_insecure_context_without_web_locks_sends_and_receives',
         ],
         realProvider: false,

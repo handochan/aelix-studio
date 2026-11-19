@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { STATE_DIRECTORY, STATE_ENVIRONMENT } from '../studio-extensions/store/layout.js';
+import { locateStudioExtensionLayout, STATE_ENVIRONMENT } from '../studio-extensions/store/layout.js';
 import { NATIVE_AUTH_HELPER } from './helperSource.js';
 import { resolveNativeRuntime, type NativeRuntime } from './runtime.js';
 import type { NativeAuthCommand, NativeAuthData, NativeAuthOperation, NativeAuthReply } from './types.js';
@@ -100,7 +100,8 @@ export class NativeAuthService {
           const env = [{ name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root }];
           if (userDataPath) {
             // The host applies the command environment after the login shell environment.
-            env.push({ name: STATE_ENVIRONMENT, value: path.resolve(userDataPath, STATE_DIRECTORY) });
+            const { root } = await locateStudioExtensionLayout(userDataPath);
+            env.push({ name: STATE_ENVIRONMENT, value: root });
           }
           return {
             ok: true,
