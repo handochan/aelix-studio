@@ -189,5 +189,8 @@
       "idle_notification": "閒置通知",
       "shutdown_request": "關閉請求"
     }
+  },
+  "pendingApproval": {
+    "label": "{{name}} 正在等待審批（{{pending}} 項待處理）"
   }
 }
