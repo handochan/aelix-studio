@@ -38,6 +38,7 @@
     "commandAck": "命令已发送，但状态尚未确认，请稍后刷新或重试",
     "timeout": "设置确认超时，界面已保留原状态",
     "busy": "已有设置正在应用，请稍后再试",
+    "modelChangeObservedWithError": "智能体在更改模型时报告了错误。选择器显示当前模型和思考级别。",
     "failed": "设置失败，界面已保留原状态"
   },
   "thoughtLevel": {

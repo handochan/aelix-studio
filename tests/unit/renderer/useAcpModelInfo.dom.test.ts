@@ -11,6 +11,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import type { AcpConfigOptionDto, AcpModelInfo } from '@/common/types/platform/acpTypes';
+import { classifyConfigSetError } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { resetEnsureConversationRuntimeStateForTests } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 
@@ -213,6 +214,63 @@ describe('useAcpModelInfo', () => {
     expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
     expect(result.current.thoughtLevel?.currentValue).toBe('high');
   });
+
+  it('shows the native values and reports a separate error when a model hook fails after applying a change', async () => {
+    let options = nativeSelectorOptions('reasoner');
+    const hookError = new BackendHttpError({
+      method: 'PUT',
+      path: '/api/conversations/native-hook/config-options/model',
+      status: 502,
+      body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+    });
+    ensureRuntimeInvokeMock.mockImplementation(async () => ({ config_options: options, runtime: null }));
+    setConfigOptionInvokeMock.mockImplementation(async () => {
+      options = nativeSelectorOptions('plain');
+      throw hookError;
+    });
+    const onSelectModelFailed = vi.fn((_modelId: string, error: unknown) => classifyConfigSetError(error));
+    const onSelectModelSuccess = vi.fn();
+    const { result } = renderUseAcpModelInfo({
+      conversation_id: 'native-hook',
+      onSelectModelFailed,
+      onSelectModelSuccess,
+    });
+
+    await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+    act(() => result.current.selectModel('fixture/plain'));
+
+    await waitFor(() => expect(result.current.model_info?.current_model_id).toBe('fixture/plain'));
+    expect(result.current.thoughtLevel?.currentValue).toBe('off');
+    expect(onSelectModelFailed.mock.results[0]?.value).toBe('model_change_observed_with_error');
+    expect(onSelectModelSuccess).not.toHaveBeenCalled();
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(['unchanged', 'read failed'] as const)(
+    'preserves the original error and last observed values when the post-error observation is %s',
+    async (observation) => {
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: '/api/conversations/native-failed/config-options/model',
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      const onSelectModelFailed = vi.fn();
+      const before = { config_options: nativeSelectorOptions('reasoner'), runtime: null };
+      ensureRuntimeInvokeMock.mockResolvedValueOnce(before).mockResolvedValueOnce(before);
+      if (observation === 'read failed') ensureRuntimeInvokeMock.mockRejectedValue(new Error('runtime unavailable'));
+      else ensureRuntimeInvokeMock.mockResolvedValue(before);
+      setConfigOptionInvokeMock.mockRejectedValue(hookError);
+      const { result } = renderUseAcpModelInfo({ conversation_id: 'native-failed', onSelectModelFailed });
+
+      await waitFor(() => expect(result.current.thoughtLevel?.currentValue).toBe('high'));
+      act(() => result.current.selectModel('fixture/plain'));
+
+      await waitFor(() => expect(onSelectModelFailed).toHaveBeenCalledWith('fixture/plain', hookError));
+      expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+      expect(result.current.thoughtLevel?.currentValue).toBe('high');
+    }
+  );
 
   it('uses an injected config option loader without starting standalone runtime', async () => {
     const prepareRuntime = vi.fn().mockResolvedValue(undefined);

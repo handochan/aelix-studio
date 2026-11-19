@@ -52,6 +52,7 @@ export type I18nKey =
   | 'agent.config.busy'
   | 'agent.config.commandAck'
   | 'agent.config.failed'
+  | 'agent.config.modelChangeObservedWithError'
   | 'agent.config.setting'
   | 'agent.config.timeout'
   | 'agent.health.autoSwitching'

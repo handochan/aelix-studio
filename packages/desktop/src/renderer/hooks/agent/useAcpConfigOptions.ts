@@ -40,7 +40,10 @@ export type AcpConfigSetErrorKind =
   | 'confirmation_timeout'
   | 'config_update_in_progress'
   | 'config_not_observed'
+  | 'model_change_observed_with_error'
   | 'unknown';
+
+class AcpModelChangeObservedError extends Error {}
 
 const optionLabel = (option: AcpConfigSelectOptionDto): string => option.name || option.label || option.value;
 
@@ -91,6 +94,7 @@ export function hasObservedValue(
 }
 
 export function classifyConfigSetError(error: unknown): AcpConfigSetErrorKind {
+  if (error instanceof AcpModelChangeObservedError) return 'model_change_observed_with_error';
   if (error instanceof Error) {
     if (error.message.includes('command_ack')) return 'command_ack';
     if (error.message.includes('config_update_in_progress')) return 'config_update_in_progress';
@@ -362,6 +366,7 @@ export function useAcpConfigOptions({
       if (getConversationSetStatus(conversation_id).state === 'setting' || isConfigOptionBlocked(optionId)) {
         throw new Error('config_update_in_progress');
       }
+      const runtimeGeneration = runtimeGenerationRef.current;
       setConversationSetStatus(conversation_id, { state: 'setting', optionId, requestedValue: value });
       try {
         await (prepareSetRuntime ?? prepareRuntime)?.();
@@ -369,13 +374,40 @@ export function useAcpConfigOptions({
         const beforeSet = await fetchConfigOptionsOnce(key, configOptionsPort);
         if (beforeSet) replaceSnapshot(beforeSet);
         if (isConfigOptionBlocked(optionId)) throw new Error('config_update_in_progress');
-        const response = configOptionsPort.setConfigOption
-          ? await configOptionsPort.setConfigOption(conversation_id, optionId, value)
-          : await ipcBridge.acpConversation.setConfigOption.invoke({
-              conversation_id,
-              option_id: optionId,
-              value,
-            });
+        const previousModel = findConfigOption(beforeSet ?? optionsRef.current, 'model', ['model']);
+        let response: SetConfigOptionResponse;
+        try {
+          response = configOptionsPort.setConfigOption
+            ? await configOptionsPort.setConfigOption(conversation_id, optionId, value)
+            : await ipcBridge.acpConversation.setConfigOption.invoke({
+                conversation_id,
+                option_id: optionId,
+                value,
+              });
+        } catch (error) {
+          // The pinned Host returns BAD_GATEWAY for a native model hook error,
+          // which can arrive after the model has already changed.
+          if (
+            previousModel?.id === optionId &&
+            previousModel.current_value &&
+            isBackendHttpError(error) &&
+            error.code === 'BAD_GATEWAY' &&
+            runtimeGenerationRef.current === runtimeGeneration
+          ) {
+            const observed = await fetchConfigOptionsOnce(key, configOptionsPort).catch((): null => null);
+            const currentModel = observed?.find((option) => option.id === optionId);
+            if (observed && currentModel?.current_value && runtimeGenerationRef.current === runtimeGeneration) {
+              resolvePendingFromSnapshot(conversation_id, observed);
+              replaceSnapshot(observed);
+              if (currentModel.current_value !== previousModel.current_value) {
+                throw new AcpModelChangeObservedError('The model changed before the agent reported an error', {
+                  cause: error,
+                });
+              }
+            }
+          }
+          throw error;
+        }
         const confirmation = response.confirmation;
         if (confirmation === 'pending_next_turn') {
           // Older hosts can report this before Codex answers. Require explicit

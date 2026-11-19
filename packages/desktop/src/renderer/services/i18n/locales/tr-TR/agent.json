@@ -38,6 +38,7 @@
     "commandAck": "Komut gönderildi, ancak durum doğrulanmadı. Daha sonra yenileyin veya yeniden deneyin.",
     "timeout": "Ayar doğrulaması zaman aşımına uğradı. Önceki durum gösterilmeye devam ediyor.",
     "busy": "Başka bir ayar uygulanıyor. Daha sonra tekrar deneyin.",
+    "modelChangeObservedWithError": "Ajan, model değiştirilirken bir hata bildirdi. Seçici, geçerli modeli ve düşünme düzeyini gösteriyor.",
     "failed": "Ayar uygulanamadı. Önceki durum gösterilmeye devam ediyor."
   },
   "thoughtLevel": {
