@@ -37,6 +37,7 @@ vi.mock('react-i18next', () => ({
 
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import SessionHolderGate from '@/renderer/pages/conversation/platforms/acp/SessionHolder';
+import { resetSessionHolderMemoryForTests } from '@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionHolder';
 
 const lockError = (lockedBy = 'native') =>
   new BackendHttpError({
@@ -92,6 +93,7 @@ const recheckButton = () => screen.getByRole('button', { name: 'conversation.ses
 beforeEach(() => {
   mocks.ensure.mockReset();
   mocks.listeners.clear();
+  resetSessionHolderMemoryForTests();
 });
 
 describe('SessionHolderGate', () => {
@@ -134,11 +136,50 @@ describe('SessionHolderGate', () => {
     expect(screen.getByText('conversation.sessionHolder.other.title')).toBeTruthy();
   });
 
-  it('stays writable when the first check fails for a reason other than the lock', async () => {
-    mocks.ensure.mockRejectedValue(new Error('spawn failed'));
-    renderGate();
+  it('keeps sending blocked when the first check fails without a lock result', async () => {
+    mocks.ensure.mockRejectedValueOnce(new Error('spawn failed')).mockResolvedValueOnce({});
+    const { onWritable } = renderGate();
+    await flush();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('unconfirmed');
+    expect(within(screen.getByTestId('session-holder-bar')).getByText('spawn failed')).toBeTruthy();
+    expect(statusText()).toBe(
+      'conversation.sessionHolder.unconfirmed.title. conversation.sessionHolder.unconfirmed.body'
+    );
+    expectHeldSendBox();
+
+    fireEvent.click(recheckButton());
     await flush();
     expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
+    expect(onWritable).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays read-only when returning to a locked conversation and the check fails to connect', async () => {
+    mocks.ensure.mockRejectedValueOnce(lockError('native'));
+    const first = renderGate();
+    await flush();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
+    first.unmount();
+
+    // Return while the CLI still holds the lock; the check on return cannot connect.
+    const onReturn = deferred();
+    mocks.ensure.mockReturnValueOnce(onReturn.promise).mockResolvedValueOnce({});
+    const { onWritable } = renderGate();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
+    expectHeldSendBox();
+    await act(async () => onReturn.reject(new TypeError('Failed to fetch')));
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
+    expect(
+      within(screen.getByTestId('session-holder-bar')).getByText('conversation.sessionHolder.checkFailed')
+    ).toBeTruthy();
+    expectHeldSendBox();
+    expect(onWritable).not.toHaveBeenCalled();
+
+    // Only a confirmed lock-free recheck unblocks sending.
+    fireEvent.click(recheckButton());
+    await flush();
+    expect(screen.getByTestId('session-holder-send-box').className).toBe('contents');
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
+    expect(onWritable).toHaveBeenCalledTimes(1);
   });
 
   it('becomes read-only when a send reports the lock on the stream', async () => {
@@ -188,7 +229,9 @@ describe('SessionHolderGate', () => {
     expect(
       within(screen.getByTestId('session-holder-bar')).getByText('conversation.sessionHolder.checkFailed')
     ).toBeTruthy();
-    expect(statusText()).toBe('conversation.sessionHolder.checkFailed');
+    expect(statusText()).toBe(
+      'conversation.sessionHolder.native.title. conversation.sessionHolder.native.body conversation.sessionHolder.checkFailed'
+    );
     expect(onWritable).not.toHaveBeenCalled();
   });
 

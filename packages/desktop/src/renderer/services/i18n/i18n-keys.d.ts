@@ -845,6 +845,8 @@ export type I18nKey =
   | 'conversation.sessionHolder.readOnly'
   | 'conversation.sessionHolder.recheck'
   | 'conversation.sessionHolder.stillHeld'
+  | 'conversation.sessionHolder.unconfirmed.body'
+  | 'conversation.sessionHolder.unconfirmed.title'
   | 'conversation.sideQuestion.alreadyRunning'
   | 'conversation.sideQuestion.answered'
   | 'conversation.sideQuestion.attachmentsNotAllowed'

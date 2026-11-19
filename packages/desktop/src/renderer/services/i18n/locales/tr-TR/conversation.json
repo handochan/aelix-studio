@@ -825,6 +825,10 @@
     "recheck": "Yeniden denetle",
     "stillHeld": "Hâlâ kullanımda. Oturumu orada kapatın, ardından yeniden denetleyin.",
     "checking": "Bu oturumun başka bir yerde açık olup olmadığı denetleniyor…",
-    "checkFailed": "Oturum denetlenemedi. Yeniden deneyin."
+    "checkFailed": "Oturum denetlenemedi. Yeniden deneyin.",
+    "unconfirmed": {
+      "title": "Bu oturum denetlenemedi",
+      "body": "Studio bu oturumu başka bir işlemin kullanmadığını doğrulayamadı; gönderme ve taslak kutusu duraklatıldı. Devam etmek için yeniden denetleyin."
+    }
   }
 }

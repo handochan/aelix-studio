@@ -824,6 +824,10 @@
     "recheck": "Erneut prüfen",
     "stillHeld": "Noch in Verwendung. Schließen Sie die Sitzung dort und prüfen Sie dann erneut.",
     "checking": "Prüfe, ob diese Sitzung anderswo geöffnet ist…",
-    "checkFailed": "Die Sitzung konnte nicht geprüft werden. Versuchen Sie es erneut."
+    "checkFailed": "Die Sitzung konnte nicht geprüft werden. Versuchen Sie es erneut.",
+    "unconfirmed": {
+      "title": "Sitzung konnte nicht geprüft werden",
+      "body": "Studio konnte nicht bestätigen, dass kein anderer Prozess diese Sitzung verwendet. Senden und Entwurfsbox sind pausiert. Prüfen Sie erneut, um fortzufahren."
+    }
   }
 }

@@ -824,6 +824,10 @@
     "recheck": "Comprobar de nuevo",
     "stillHeld": "Sigue en uso. Cierre la sesión allí y vuelva a comprobar.",
     "checking": "Comprobando si esta sesión está abierta en otro lugar…",
-    "checkFailed": "No se pudo comprobar la sesión. Inténtelo de nuevo."
+    "checkFailed": "No se pudo comprobar la sesión. Inténtelo de nuevo.",
+    "unconfirmed": {
+      "title": "No se pudo comprobar esta sesión",
+      "body": "Studio no pudo confirmar que ningún otro proceso use esta sesión, así que el envío y la bandeja de borradores están en pausa. Compruebe de nuevo para continuar."
+    }
   }
 }

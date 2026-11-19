@@ -829,6 +829,10 @@
     "recheck": "Verificar novamente",
     "stillHeld": "Ainda em uso. Feche a sessão lá e verifique novamente.",
     "checking": "Verificando se esta sessão está aberta em outro lugar…",
-    "checkFailed": "Não foi possível verificar a sessão. Tente novamente."
+    "checkFailed": "Não foi possível verificar a sessão. Tente novamente.",
+    "unconfirmed": {
+      "title": "Não foi possível verificar esta sessão",
+      "body": "O Studio não conseguiu confirmar que nenhum outro processo está usando esta sessão, então o envio e a caixa de rascunhos estão pausados. Verifique novamente para continuar."
+    }
   }
 }

@@ -823,6 +823,10 @@
     "recheck": "Check again",
     "stillHeld": "Still in use. Close the session there, then check again.",
     "checking": "Checking whether this session is open elsewhere…",
-    "checkFailed": "Couldn't check the session. Try again."
+    "checkFailed": "Couldn't check the session. Try again.",
+    "unconfirmed": {
+      "title": "Couldn't check this session",
+      "body": "Studio couldn't confirm that no other process is using this session, so sending and the Draft Box are paused. Check again to continue."
+    }
   }
 }
