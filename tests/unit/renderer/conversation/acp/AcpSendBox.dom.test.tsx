@@ -501,6 +501,16 @@ describe('AcpSendBox', () => {
     expect(resetStateMock).not.toHaveBeenCalled();
   });
 
+  it('disables the send box while the session holder check blocks sending', () => {
+    const { rerender } = render(
+      <AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} sendBlocked />
+    );
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ disabled: true });
+
+    rerender(<AcpSendBox conversation_id='conv-1' backend='codex' messageState={makeMessageState()} />);
+    expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ disabled: false });
+  });
+
   it('uses container-responsive fluid width instead of a fixed max width', () => {
     render(
       <AcpSendBox

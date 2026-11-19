@@ -73,7 +73,7 @@ const AcpChat: React.FC<{
     prepareRuntime: teamPermission?.warmupSession,
   });
 
-  const sendBox = (
+  const renderSendBox = (sendBlocked = false) => (
     <AcpSendBox
       conversation_id={conversation_id}
       backend={backend}
@@ -82,6 +82,7 @@ const AcpChat: React.FC<{
       messageState={messageState}
       teamSendMessage={teamSendMessage}
       teamRuntime={teamRuntime}
+      sendBlocked={sendBlocked}
     ></AcpSendBox>
   );
 
@@ -111,10 +112,10 @@ const AcpChat: React.FC<{
           {/* Team chats prepare their runtime through the team, so the holder probe stays out of them. */}
           {!hideSendBox &&
             (teamPermission ? (
-              sendBox
+              renderSendBox()
             ) : (
               <SessionHolderGate conversationId={conversation_id} onWritable={messageState.fetchSlashCommands}>
-                {sendBox}
+                {renderSendBox}
               </SessionHolderGate>
             ))}
         </div>

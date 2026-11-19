@@ -114,7 +114,18 @@ const AcpSendBox: React.FC<{
   messageState: UseAcpMessageReturn;
   teamSendMessage?: (payload: { input: string; files: ChatFileRef[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
-}> = ({ conversation_id, backend, session_mode, agent_name, messageState, teamSendMessage, teamRuntime }) => {
+  /** Blocks typing, sending, and the stored first message (e.g. while the session holder is unknown). */
+  sendBlocked?: boolean;
+}> = ({
+  conversation_id,
+  backend,
+  session_mode,
+  agent_name,
+  messageState,
+  teamSendMessage,
+  teamRuntime,
+  sendBlocked = false,
+}) => {
   const {
     aiProcessing,
     setAiProcessing,
@@ -299,6 +310,7 @@ const AcpSendBox: React.FC<{
   // Check for and send initial message from guid page
   useAcpInitialMessage({
     conversation_id: conversation_id,
+    blocked: sendBlocked,
     backend,
     setAiProcessing,
     resetState,
@@ -859,7 +871,7 @@ Please check your local CLI tool authentication status`,
         loading={teamRuntime?.loading ?? isBusy}
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
-        disabled={false}
+        disabled={sendBlocked}
         sendDisabled={!supportsMidturnDelivery && isBusy}
         sendDisabledTooltip={
           !supportsMidturnDelivery && isBusy
@@ -869,10 +881,14 @@ Please check your local CLI tool authentication status`,
               })
             : undefined
         }
-        placeholder={t('acp.sendbox.placeholder', {
-          backend: agent_name || backend,
-          defaultValue: `Send message to {{backend}}...`,
-        })}
+        placeholder={
+          sendBlocked
+            ? t('conversation.sessionHolder.checking')
+            : t('acp.sendbox.placeholder', {
+                backend: agent_name || backend,
+                defaultValue: `Send message to {{backend}}...`,
+              })
+        }
         onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
         className='z-10'
         onFilesAdded={handleFilesAdded}

@@ -815,16 +815,14 @@
       "title": "Running in the CLI",
       "body": "This session is open in the Aelix CLI or another Aelix process. Studio keeps it read-only until that process closes the session."
     },
-    "acp": {
-      "title": "Open in another Studio window",
-      "body": "This session is open in another Studio window. This view stays read-only until that window releases it."
-    },
-    "unknown": {
-      "title": "Session in use",
-      "body": "Another process is writing to this session. This view stays read-only until that process releases it."
+    "other": {
+      "title": "In use by another process",
+      "body": "Another Aelix process is using this session. This view stays read-only until that process releases it."
     },
     "readOnly": "Read only",
     "recheck": "Check again",
-    "stillHeld": "Still in use. Close the session there, then check again."
+    "stillHeld": "Still in use. Close the session there, then check again.",
+    "checking": "Checking whether this session is open elsewhere…",
+    "checkFailed": "Couldn't check the session. Try again."
   }
 }

@@ -19,6 +19,8 @@ import { buildSendFailureError } from './buildSendFailureError';
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
+  /** Holds the stored message until sending is allowed (e.g. the session holder check). */
+  blocked?: boolean;
   backend: string;
   setAiProcessing: (value: boolean) => void;
   resetState: () => void;
@@ -36,6 +38,7 @@ type UseAcpInitialMessageParams = {
  */
 export const useAcpInitialMessage = ({
   conversation_id,
+  blocked = false,
   backend,
   setAiProcessing,
   resetState,
@@ -49,6 +52,7 @@ export const useAcpInitialMessage = ({
   const { t } = useTranslation();
 
   useEffect(() => {
+    if (blocked) return;
     const storageKey = `acp_initial_message_${conversation_id}`;
     const storedMessage = sessionStorage.getItem(storageKey);
 
@@ -144,6 +148,7 @@ export const useAcpInitialMessage = ({
     addOrUpdateMessage,
     backend,
     beginCompactionSubmission,
+    blocked,
     checkAndUpdateTitle,
     conversation_id,
     markSendAccepted,

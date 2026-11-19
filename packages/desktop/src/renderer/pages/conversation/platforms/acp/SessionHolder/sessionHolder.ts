@@ -11,12 +11,13 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 export const SESSION_LOCKED_CODE = 'USER_AGENT_SESSION_LOCKED';
 
 /**
- * Who holds the session, as reported by `data.lockedBy`:
+ * Who holds the session, as far as `data.lockedBy` can tell:
  * - `native`: the native writer lock (the CLI or another Aelix process)
- * - `acp`: the ACP lease (another Studio window)
- * - `unknown`: a lock error without a recognized holder kind
+ * - `other`: any other holder. `lockedBy: 'acp'` means another client holds the ACP
+ *   lease, which can be another Studio window or a separate adapter process, so it
+ *   gets neutral wording until the holder can be identified (request R7).
  */
-export type SessionHolderKind = 'native' | 'acp' | 'unknown';
+export type SessionHolderKind = 'native' | 'other';
 
 export type SessionHolder = {
   kind: SessionHolderKind;
@@ -29,9 +30,8 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 const holderFromLockData = (data: unknown): SessionHolder => {
   const record = isRecord(data) ? data : {};
-  const lockedBy = record.lockedBy;
   return {
-    kind: lockedBy === 'native' || lockedBy === 'acp' ? lockedBy : 'unknown',
+    kind: record.lockedBy === 'native' ? 'native' : 'other',
     holder: record.holder ?? null,
   };
 };

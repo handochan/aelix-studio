@@ -9,46 +9,63 @@ import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/e
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { sessionHolderFromError, sessionHolderFromStreamMessage, type SessionHolder } from './sessionHolder';
 
-export type SessionHolderState = {
-  /** Set while another writer holds the native session; the view is read-only. */
-  holder: SessionHolder | null;
-  /** A user-requested recheck is in flight. */
-  checking: boolean;
-  /** The last recheck found the session still held. */
-  stillHeld: boolean;
-  recheck: () => void;
-};
+/**
+ * - `checking`: the first lock check is still running; sending stays blocked.
+ * - `writable`: the host did not report a lock; the send box is usable.
+ * - `held`: the host reported that another writer holds the session; read-only.
+ */
+export type SessionHolderStatus = 'checking' | 'writable' | 'held';
+
+/** Outcome of the last user-requested recheck while held. */
+export type SessionRecheckState = 'idle' | 'checking' | 'stillHeld' | 'failed';
+
+type State = { status: SessionHolderStatus; holder: SessionHolder | null; recheckState: SessionRecheckState };
+
+export type SessionHolderState = State & { recheck: () => void };
+
+const CHECKING: State = { status: 'checking', holder: null, recheckState: 'idle' };
+const WRITABLE: State = { status: 'writable', holder: null, recheckState: 'idle' };
+const held = (holder: SessionHolder, recheckState: SessionRecheckState = 'idle'): State => ({
+  status: 'held',
+  holder,
+  recheckState,
+});
 
 /**
- * Tracks whether another writer (the CLI, another Aelix process, or another Studio
- * window) holds this conversation's native session.
+ * Tracks whether another writer (the CLI or another Aelix process) holds this
+ * conversation's native session.
  *
  * It only observes outcomes the host already reports: the `runtime/ensure` call the
  * conversation makes on open (deduplicated with the existing warmup), and lock errors
  * on the response stream. It never takes, releases, or polls the lock on its own;
  * `recheck` repeats the same ensure call that reopening the conversation would make.
- * Only a positive lock report makes the view read-only. Other failures leave the
- * send box in place so the existing error surfaces handle them.
+ *
+ * Sending stays blocked until the first check settles. A first check that fails for a
+ * reason other than the lock leaves the conversation writable, so the existing error
+ * surfaces explain that failure; the host still refuses a locked send. Once a lock is
+ * confirmed, only a successful recheck makes the conversation writable again.
  */
 export const useSessionHolder = (conversationId: string, onWritable?: () => void): SessionHolderState => {
-  const [holder, setHolder] = useState<SessionHolder | null>(null);
-  const [checking, setChecking] = useState(false);
-  const [stillHeld, setStillHeld] = useState(false);
+  const [state, setState] = useState<State>(CHECKING);
   const activeIdRef = useRef(conversationId);
   activeIdRef.current = conversationId;
   const onWritableRef = useRef(onWritable);
   onWritableRef.current = onWritable;
 
   useEffect(() => {
-    setHolder(null);
-    setChecking(false);
-    setStillHeld(false);
+    setState(CHECKING);
     let cancelled = false;
-    ensureConversationRuntime(conversationId).catch((error: unknown) => {
-      if (cancelled) return;
-      const next = sessionHolderFromError(error);
-      if (next) setHolder(next);
-    });
+    ensureConversationRuntime(conversationId).then(
+      () => {
+        if (cancelled) return;
+        setState((current) => (current.status === 'checking' ? WRITABLE : current));
+      },
+      (error: unknown) => {
+        if (cancelled) return;
+        const holder = sessionHolderFromError(error);
+        setState((current) => (holder ? held(holder) : current.status === 'checking' ? WRITABLE : current));
+      }
+    );
     return () => {
       cancelled = true;
     };
@@ -58,32 +75,29 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
     () =>
       ipcBridge.acpConversation.responseStream.on((message) => {
         if (message.conversation_id !== conversationId) return;
-        const next = sessionHolderFromStreamMessage(message);
-        if (next) setHolder(next);
+        const holder = sessionHolderFromStreamMessage(message);
+        if (holder) setState(held(holder));
       }),
     [conversationId]
   );
 
   const recheck = useCallback(() => {
     const requestedId = conversationId;
-    setChecking(true);
-    setStillHeld(false);
+    setState((current) => ({ ...current, recheckState: 'checking' }));
     ensureConversationRuntime(requestedId).then(
       () => {
         if (activeIdRef.current !== requestedId) return;
-        setChecking(false);
-        setHolder(null);
+        setState(WRITABLE);
         onWritableRef.current?.();
       },
       (error: unknown) => {
         if (activeIdRef.current !== requestedId) return;
-        setChecking(false);
-        const next = sessionHolderFromError(error);
-        setHolder(next);
-        setStillHeld(!!next);
+        const holder = sessionHolderFromError(error);
+        // A transport or host failure is not a confirmed release: stay read-only.
+        setState((current) => (holder ? held(holder, 'stillHeld') : { ...current, recheckState: 'failed' }));
       }
     );
   }, [conversationId]);
 
-  return { holder, checking, stillHeld, recheck };
+  return { ...state, recheck };
 };

@@ -10,27 +10,26 @@ import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/ch
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { SessionHolder } from './sessionHolder';
+import type { SessionRecheckState } from './useSessionHolder';
 
 type SessionHolderBarProps = {
   holder: SessionHolder;
-  checking: boolean;
-  stillHeld: boolean;
+  recheckState: SessionRecheckState;
   onRecheck: () => void;
 };
 
 /**
  * Read-only notice shown in place of the send box while another writer holds the
- * session. It names the holder and offers a manual recheck.
+ * session. It names the holder and offers a manual recheck. Announcements come from
+ * the gate's persistent status region, so this notice has no live role of its own.
  */
-const SessionHolderBar: React.FC<SessionHolderBarProps> = ({ holder, checking, stillHeld, onRecheck }) => {
+const SessionHolderBar: React.FC<SessionHolderBarProps> = ({ holder, recheckState, onRecheck }) => {
   const { t } = useTranslation();
   const HolderIcon = holder.kind === 'native' ? Terminal : Lock;
 
   return (
     <div className={`${getChatSurfaceWidthClass()} flex flex-col mt-auto mb-16px`}>
       <div
-        role='status'
-        aria-live='polite'
         data-testid='session-holder-bar'
         data-holder-kind={holder.kind}
         className='flex flex-wrap items-center gap-12px p-16px b b-solid border-3 rd-20px bg-dialog-fill-0'
@@ -48,11 +47,14 @@ const SessionHolderBar: React.FC<SessionHolderBarProps> = ({ holder, checking, s
           <span className='text-13px leading-20px text-t-secondary'>
             {t(`conversation.sessionHolder.${holder.kind}.body`)}
           </span>
-          {stillHeld && (
+          {recheckState === 'stillHeld' && (
             <span className='text-12px leading-18px text-t-secondary'>{t('conversation.sessionHolder.stillHeld')}</span>
           )}
+          {recheckState === 'failed' && (
+            <span className='text-12px leading-18px text-danger'>{t('conversation.sessionHolder.checkFailed')}</span>
+          )}
         </div>
-        <Button size='small' className='ml-auto' loading={checking} onClick={onRecheck}>
+        <Button size='small' className='ml-auto' loading={recheckState === 'checking'} onClick={onRecheck}>
           {t('conversation.sessionHolder.recheck')}
         </Button>
       </div>

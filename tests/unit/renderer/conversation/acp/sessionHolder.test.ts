@@ -32,8 +32,9 @@ const streamMessage = (type: string, data: unknown): IResponseMessage =>
 describe('sessionHolderFromError', () => {
   it.each([
     ['native', 'native'],
-    ['acp', 'acp'],
-    ['someone-else', 'unknown'],
+    // An ACP lease can belong to another Studio window or a separate adapter process.
+    ['acp', 'other'],
+    ['someone-else', 'other'],
   ])('maps lockedBy=%s from the ensure 502 to %s', (lockedBy, kind) => {
     expect(sessionHolderFromError(ensureError('USER_AGENT_SESSION_LOCKED', lockDetails(lockedBy)))).toEqual({
       kind,
@@ -48,8 +49,8 @@ describe('sessionHolderFromError', () => {
     });
   });
 
-  it('treats a lock error without details as an unknown holder', () => {
-    expect(sessionHolderFromError(ensureError('USER_AGENT_SESSION_LOCKED'))).toEqual({ kind: 'unknown', holder: null });
+  it('treats a lock error without details as another holder', () => {
+    expect(sessionHolderFromError(ensureError('USER_AGENT_SESSION_LOCKED'))).toEqual({ kind: 'other', holder: null });
   });
 
   it.each([
@@ -74,7 +75,7 @@ describe('sessionHolderFromStreamMessage', () => {
         data: lockDetails('acp').data,
       },
     });
-    expect(sessionHolderFromStreamMessage(tip)).toEqual({ kind: 'acp', holder: null });
+    expect(sessionHolderFromStreamMessage(tip)).toEqual({ kind: 'other', holder: null });
   });
 
   it('reads the lock payload from a raw error event', () => {

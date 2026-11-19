@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 
@@ -50,6 +50,15 @@ const lockError = (lockedBy = 'native') =>
     },
   });
 
+const deferred = () => {
+  const handlers: { resolve: (value: unknown) => void; reject: (error: unknown) => void } = {
+    resolve: () => {},
+    reject: () => {},
+  };
+  const promise = new Promise<unknown>((resolve, reject) => Object.assign(handlers, { resolve, reject }));
+  return { promise, ...handlers };
+};
+
 const emit = (message: Partial<IResponseMessage>) =>
   act(() => {
     mocks.listeners.forEach((listener) =>
@@ -59,14 +68,19 @@ const emit = (message: Partial<IResponseMessage>) =>
 
 const flush = () => act(async () => {});
 
+const sendBox = (sendBlocked: boolean) => <div data-testid='send-box' data-blocked={String(sendBlocked)} />;
+
 const renderGate = (onWritable = vi.fn()) => {
   const view = render(
     <SessionHolderGate conversationId='c1' onWritable={onWritable}>
-      <div data-testid='send-box' />
+      {sendBox}
     </SessionHolderGate>
   );
   return { ...view, onWritable };
 };
+
+const statusText = () => screen.getByTestId('session-holder-status').textContent;
+const recheckButton = () => screen.getByRole('button', { name: 'conversation.sessionHolder.recheck' });
 
 beforeEach(() => {
   mocks.ensure.mockReset();
@@ -74,32 +88,50 @@ beforeEach(() => {
 });
 
 describe('SessionHolderGate', () => {
-  it('keeps the send box when the runtime opens normally', async () => {
-    mocks.ensure.mockResolvedValue({});
+  it('blocks sending until the first check settles, then unblocks a writable session', async () => {
+    const first = deferred();
+    mocks.ensure.mockReturnValueOnce(first.promise);
     renderGate();
-    await flush();
     expect(mocks.ensure).toHaveBeenCalledWith('c1');
-    expect(screen.getByTestId('send-box')).toBeTruthy();
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('true');
+
+    await act(async () => first.resolve({}));
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
     expect(screen.queryByTestId('session-holder-bar')).toBeNull();
   });
 
-  it('replaces the send box with the CLI holder notice when the host reports a native lock', async () => {
-    mocks.ensure.mockRejectedValue(lockError('native'));
+  it('never unblocks the send box when a delayed first check reports a CLI lock', async () => {
+    const first = deferred();
+    mocks.ensure.mockReturnValueOnce(first.promise);
     renderGate();
-    await flush();
-    const bar = screen.getByTestId('session-holder-bar');
-    expect(bar.getAttribute('data-holder-kind')).toBe('native');
-    expect(bar.getAttribute('role')).toBe('status');
+    const status = screen.getByTestId('session-holder-status');
+    expect(status.getAttribute('role')).toBe('status');
+    expect(status.textContent).toBe('');
+
+    await act(async () => first.reject(lockError('native')));
+    expect(screen.queryByTestId('send-box')).toBeNull();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
     expect(screen.getByText('conversation.sessionHolder.native.title')).toBeTruthy();
     expect(screen.getByText('conversation.sessionHolder.readOnly')).toBeTruthy();
-    expect(screen.queryByTestId('send-box')).toBeNull();
+    // The status region mounted before the result now carries the announcement.
+    expect(screen.getByTestId('session-holder-status')).toBe(status);
+    expect(status.getAttribute('aria-live')).toBe('polite');
+    expect(status.textContent).toBe('conversation.sessionHolder.native.title. conversation.sessionHolder.native.body');
   });
 
-  it('stays writable when the runtime fails for a reason other than the lock', async () => {
+  it('uses neutral wording for an ACP lease holder', async () => {
+    mocks.ensure.mockRejectedValue(lockError('acp'));
+    renderGate();
+    await flush();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('other');
+    expect(screen.getByText('conversation.sessionHolder.other.title')).toBeTruthy();
+  });
+
+  it('stays writable when the first check fails for a reason other than the lock', async () => {
     mocks.ensure.mockRejectedValue(new Error('spawn failed'));
     renderGate();
     await flush();
-    expect(screen.getByTestId('send-box')).toBeTruthy();
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
   });
 
   it('becomes read-only when a send reports the lock on the stream', async () => {
@@ -117,20 +149,38 @@ describe('SessionHolderGate', () => {
       data: {
         type: 'error',
         content: 'locked',
-        error: { code: 'USER_AGENT_SESSION_LOCKED', data: { lockedBy: 'acp' } },
+        error: { code: 'USER_AGENT_SESSION_LOCKED', data: { lockedBy: 'native' } },
       },
     });
-    expect(screen.getByTestId('session-holder-bar').getAttribute('data-holder-kind')).toBe('acp');
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
   });
 
   it('reports a session that is still held after a recheck', async () => {
     mocks.ensure.mockRejectedValue(lockError());
     const { onWritable } = renderGate();
     await flush();
-    fireEvent.click(screen.getByText('conversation.sessionHolder.recheck'));
+    fireEvent.click(recheckButton());
     await flush();
     expect(mocks.ensure).toHaveBeenCalledTimes(2);
-    expect(screen.getByText('conversation.sessionHolder.stillHeld')).toBeTruthy();
+    expect(
+      within(screen.getByTestId('session-holder-bar')).getByText('conversation.sessionHolder.stillHeld')
+    ).toBeTruthy();
+    expect(statusText()).toBe('conversation.sessionHolder.stillHeld');
+    expect(onWritable).not.toHaveBeenCalled();
+  });
+
+  it('stays read-only when a recheck fails without a confirmed result', async () => {
+    mocks.ensure.mockRejectedValueOnce(lockError()).mockRejectedValueOnce(new TypeError('Failed to fetch'));
+    const { onWritable } = renderGate();
+    await flush();
+    fireEvent.click(recheckButton());
+    await flush();
+    expect(screen.queryByTestId('send-box')).toBeNull();
+    expect(screen.getByTestId('session-holder-bar').dataset.holderKind).toBe('native');
+    expect(
+      within(screen.getByTestId('session-holder-bar')).getByText('conversation.sessionHolder.checkFailed')
+    ).toBeTruthy();
+    expect(statusText()).toBe('conversation.sessionHolder.checkFailed');
     expect(onWritable).not.toHaveBeenCalled();
   });
 
@@ -138,23 +188,19 @@ describe('SessionHolderGate', () => {
     mocks.ensure.mockRejectedValueOnce(lockError()).mockResolvedValueOnce({});
     const { onWritable } = renderGate();
     await flush();
-    fireEvent.click(screen.getByText('conversation.sessionHolder.recheck'));
+    fireEvent.click(recheckButton());
     await flush();
-    expect(screen.getByTestId('send-box')).toBeTruthy();
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
+    expect(statusText()).toBe('');
     expect(onWritable).toHaveBeenCalledTimes(1);
   });
 
   it('ignores a lock report that arrives after switching conversations', async () => {
-    let rejectFirst: ((error: unknown) => void) | undefined;
-    mocks.ensure.mockImplementationOnce(() => new Promise((_resolve, reject) => (rejectFirst = reject)));
-    mocks.ensure.mockResolvedValueOnce({});
+    const first = deferred();
+    mocks.ensure.mockReturnValueOnce(first.promise).mockResolvedValueOnce({});
     const { rerender } = renderGate();
-    rerender(
-      <SessionHolderGate conversationId='c2'>
-        <div data-testid='send-box' />
-      </SessionHolderGate>
-    );
-    await act(async () => rejectFirst?.(lockError()));
-    expect(screen.getByTestId('send-box')).toBeTruthy();
+    rerender(<SessionHolderGate conversationId='c2'>{sendBox}</SessionHolderGate>);
+    await act(async () => first.reject(lockError()));
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
   });
 });
