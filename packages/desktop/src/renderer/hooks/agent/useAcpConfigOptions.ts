@@ -376,11 +376,9 @@ export function useAcpConfigOptions({
       await prepareRuntime?.();
       const read = await fetchConfigOptionsOnce(key, configOptionsPort);
       const next = isCurrentConfigOptionsRead(conversation_id, read) ? read.options : null;
-      if (runtimeGenerationRef.current === runtimeGeneration) {
-        if (next) replaceSnapshot(next);
-        if (optionsRef.current) {
-          setLoadedRuntimeGeneration(runtimeGeneration);
-        }
+      if (next && runtimeGenerationRef.current === runtimeGeneration) {
+        replaceSnapshot(next);
+        setLoadedRuntimeGeneration(runtimeGeneration);
       }
       setIsReloading(false);
       return next;
@@ -491,8 +489,9 @@ export function useAcpConfigOptions({
 
   useEffect(() => {
     if (!enabled) return;
+    const runtimeGeneration = runtimeGenerationRef.current;
     const handler = (message: IResponseMessage) => {
-      if (message.conversation_id !== conversation_id) return;
+      if (message.conversation_id !== conversation_id || runtimeGenerationRef.current !== runtimeGeneration) return;
       if (message.type === 'acp_config_option' && message.data) {
         const optionPayload = message.data as { config_options?: AcpConfigOptionDto[] } | AcpConfigOptionDto[];
         const next = Array.isArray(optionPayload) ? optionPayload : optionPayload.config_options;
@@ -503,6 +502,7 @@ export function useAcpConfigOptions({
           advanceConfigOptionsEpoch(conversation_id);
           resolvePendingFromSnapshot(conversation_id, next);
           replaceSnapshot(next);
+          setLoadedRuntimeGeneration(runtimeGeneration);
         }
       }
       if (message.type === 'agent_status') {

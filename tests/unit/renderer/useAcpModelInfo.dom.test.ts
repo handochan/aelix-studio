@@ -116,7 +116,7 @@ const emitStream = (message: IResponseMessage) => {
   }
 };
 
-const createSwrWrapper = () => {
+const createSwrWrapper = ({ revalidateIfStale = true }: { revalidateIfStale?: boolean } = {}) => {
   const cache = new Map();
 
   return function SwrTestWrapper({ children }: PropsWithChildren) {
@@ -126,6 +126,7 @@ const createSwrWrapper = () => {
         value: {
           provider: () => cache,
           dedupingInterval: 0,
+          revalidateIfStale,
           revalidateOnFocus: false,
           revalidateOnReconnect: false,
         },
@@ -488,6 +489,41 @@ describe('useAcpModelInfo', () => {
       await secondLoad.promise;
     });
     await waitFor(() => expect(result.current.isRuntimeReady).toBe(true));
+  });
+
+  it('keeps the reactivated selector unready until it observes options for that activation', async () => {
+    const conversation_id = 'reactivated-model-selector';
+    const reactivation = deferred<AcpConfigOptionDto[] | null>();
+    const load = vi
+      .fn()
+      .mockResolvedValueOnce(nativeSelectorOptions('reasoner'))
+      .mockReturnValueOnce(reactivation.promise);
+    const configOptionsPort = { load };
+    const { result, rerender } = renderHook(
+      ({ enabled }) => useAcpModelInfo({ conversation_id, configOptionsPort, enabled }),
+      { initialProps: { enabled: true }, wrapper: createSwrWrapper({ revalidateIfStale: false }) }
+    );
+
+    await waitFor(() => expect(result.current.isRuntimeReady).toBe(true));
+    rerender({ enabled: false });
+    rerender({ enabled: true });
+    await waitFor(() => expect(load).toHaveBeenCalledTimes(2));
+    await act(async () => reactivation.resolve(null));
+
+    expect(result.current.isRuntimeReady).toBe(false);
+    expect(result.current.model_info?.current_model_id).toBe('fixture/reasoner');
+    act(() =>
+      emitStream({
+        conversation_id: 'another-conversation',
+        type: 'acp_config_option',
+        data: nativeSelectorOptions('plain'),
+      })
+    );
+    expect(result.current.isRuntimeReady).toBe(false);
+    act(() => emitStream({ conversation_id, type: 'acp_config_option', data: nativeSelectorOptions('plain') }));
+
+    expect(result.current.isRuntimeReady).toBe(true);
+    expect(result.current.model_info?.current_model_id).toBe('fixture/plain');
   });
 
   it('preserves model option descriptions from config options', async () => {
