@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalName,
+  isAdapterReference,
   isEntryName,
   isObjectReference,
   nativeName,
@@ -100,6 +101,18 @@ describe('extension entry points', () => {
     expect(['', '-e', '--flag', 'a b', 'demo:', 'a:b:c', 'demo/pack'].map(isObjectReference)).toEqual(
       Array(7).fill(false)
     );
+  });
+
+  // The adapter refuses any other module reference, and a refusal ends every conversation start.
+  it('accepts as an adapter reference what the adapter takes: identifiers starting with an ASCII letter or _', () => {
+    expect(['demo', 'demo.pack:setup', '_demo:set_up', 'demo2.xé:x', 'A.b.c:d.e'].map(isAdapterReference)).toEqual(
+      Array(5).fill(true)
+    );
+    expect(
+      ['확장:설정', 'éclair:setup', 'demo.é', '1demo', 'demo.1x', 'demo:', 'demo:a:b', './demo', 'de-mo', ''].map(
+        isAdapterReference
+      )
+    ).toEqual(Array(10).fill(false));
   });
 
   it('accepts entry names native can take as an argument and none that reads as an option', () => {

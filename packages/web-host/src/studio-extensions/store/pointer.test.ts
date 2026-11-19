@@ -42,7 +42,11 @@ const record = (generation: string, parent: string | null = null): GenerationRec
       },
       lib: { version: '2.0', recordSha256: 'other' },
     },
-    extensions: { demo: { reference: 'demo:setup', distribution: 'demo', manifestBound: true } },
+    extensions: {
+      demo: { reference: 'demo:setup', distribution: 'demo', manifestBound: true, form: 'pack', plugin: 'demo' },
+      legacy: { reference: 'legacy:setup', distribution: 'lib', manifestBound: false, form: 'module', plugin: null },
+    },
+    launch: { packs: true, modules: ['legacy:setup'] },
   });
 
 describe('pointer and generation records read from disk', () => {
@@ -92,6 +96,26 @@ describe('pointer and generation records read from disk', () => {
       'an extension without a binding verdict',
       (value) => (value.extensions = { demo: { reference: 'demo:setup', distribution: 'demo' } }),
     ],
+    ...(
+      [
+        ['a pack without its plugin id', { form: 'pack', plugin: null }],
+        ['a module reference with a plugin id', { form: 'module', plugin: 'demo' }],
+        ['an unknown form', { form: 'path', plugin: null }],
+        ['no form', {}],
+      ] as const
+    ).map(([what, fields]): [string, (value: Record<string, unknown>) => void] => [
+      what,
+      (value) =>
+        (value.extensions = {
+          demo: { reference: 'demo:setup', distribution: 'demo', manifestBound: true, ...fields },
+        }),
+    ]),
+    // The launcher hands these to the adapter, which refuses what it would not take as a reference.
+    ['no launch form', (value) => delete value.launch],
+    ['a launch form without packs', (value) => (value.launch = { modules: [] })],
+    ['a module the adapter would not take', (value) => (value.launch = { packs: false, modules: ['./demo.py'] })],
+    ['a module with a leading digit', (value) => (value.launch = { packs: false, modules: ['1demo:setup'] })],
+    ['a module that is not text', (value) => (value.launch = { packs: false, modules: [7] })],
   ])('does not accept a generation record with %s', (_what, edit) => {
     expect(parseGenerationRecord(change(JSON.stringify(record(G1)), edit))).toBeUndefined();
   });

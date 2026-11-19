@@ -2,6 +2,7 @@
 import importlib.util
 import os
 import json
+import shutil
 import sys
 import subprocess
 from pathlib import Path
@@ -226,3 +227,281 @@ class OutboundAuditTests(unittest.TestCase):
                               'connect(4,  <unfinished ...>\n')
         self.assertEqual(result['externalAttempts'], 0)
         self.assertEqual(result['unparsedRecords'], 1)
+
+
+@unittest.skipIf(os.name == 'nt', 'extension generations are not offered on Windows yet (Studio #32, stage 1a\')')
+class ExtensionGenerationLaunchTests(unittest.TestCase):
+    """The bundled launcher adds the current extension generation to new conversations (Studio #32)."""
+
+    GENERATION = 'g00000002-abcd'
+    PREVIOUS = 'g00000001-ef01'
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix='studio-launch-')
+        base = Path(os.path.realpath(self.temporary.name))
+        self.bundle = base / 'bundle'
+        adapter = self.bundle / 'adapter-site' / 'aelix_acp'
+        adapter.mkdir(parents=True)
+        (adapter / '__init__.py').write_text('')
+        # Stands in for the adapter: reports what it was started with, then waits when asked to.
+        (adapter / 'server.py').write_text(
+            'import json, os, sys\n'
+            'def main():\n'
+            '    print(json.dumps({"argv": sys.argv[1:], "state": os.environ.get("AELIX_STUDIO_EXTENSION_STATE")}), flush=True)\n'
+            '    if os.environ.get("STUDIO_TEST_HOLD"):\n'
+            '        sys.stdin.readline()\n')
+        native = self.bundle / 'native-site' / 'aelix_coding_agent' / 'cli'
+        native.mkdir(parents=True)
+        for directory in (native.parent, native):
+            (directory / '__init__.py').write_text('')
+        (native / 'entry.py').write_text(
+            'import json, sys\n'
+            'def main_sync():\n'
+            '    print(json.dumps({"argv": sys.argv, "last": sys.path[-1], "first": sys.path[0]}))\n')
+        (self.bundle / 'launch.py').write_bytes((ROOT / 'scripts/studio-preview/packaging/launch.py').read_bytes())
+        self.manifest = {'schema': 'aelix.studio-preview.runtime/1', 'target': 'test-target', 'python': '3.12.15',
+                         'dependencyLockSha256': 'a' * 64, 'native': {'sourceTag': {'commit': 'c' * 40}}}
+        (self.bundle / 'manifest.json').write_text(json.dumps(self.manifest))
+        self.state = base / 'user data' / 'aelix-runtime'
+        for name in ('generations', 'leases', 'artifacts'):
+            (self.state / name).mkdir(parents=True)
+        self.binding = {'bundle': str(self.bundle), 'target': 'test-target', 'pythonMinor': '3.12',
+                        'dependencyLockSha256': 'a' * 64, 'nativeCommit': 'c' * 40}
+        self.generation(self.PREVIOUS, packs=False, modules=['older_pack:setup'])
+        self.generation(self.GENERATION, packs=True, modules=['legacy_pack.entry:setup'])
+        self.point(self.GENERATION, self.PREVIOUS, 2)
+        self.point(self.PREVIOUS, None, 1, name='current.previous.json')
+
+    def tearDown(self):
+        self.temporary.cleanup()
+
+    def fresh(self):
+        """Start a sub-test from the same state as a test."""
+        self.tearDown()
+        self.setUp()
+
+    def generation(self, generation, packs, modules, binding=None):
+        directory = self.state / 'generations' / generation
+        (directory / 'venv' / 'lib' / 'python3.12' / 'site-packages').mkdir(parents=True)
+        if packs:
+            (directory / 'packs').mkdir()
+        record = {'schema': 'aelix.studio.extensions.generation/2', 'generation': generation, 'parent': None,
+                  'createdAt': '2026-11-18T00:00:00.000Z', 'binding': binding or self.binding,
+                  'operation': {'action': 'install', 'target': 'demo'}, 'distributions': {}, 'extensions': {},
+                  'launch': {'packs': packs, 'modules': modules}}
+        (directory / 'generation.json').write_text(json.dumps(record))
+
+    def point(self, generation, previous, revision, name='current.json'):
+        (self.state / name).write_text(json.dumps({'schema': 'aelix.studio.extensions.current/1', 'generation': generation,
+                                                    'previous': previous, 'revision': revision, 'binding': self.binding}))
+
+    def start(self, *arguments, state=True, hold=False, mode='acp'):
+        environment = dict(os.environ)
+        environment.pop('AELIX_STUDIO_EXTENSION_STATE', None)
+        if state:
+            environment['AELIX_STUDIO_EXTENSION_STATE'] = str(self.state)
+        if hold:
+            environment['STUDIO_TEST_HOLD'] = '1'
+        return subprocess.Popen([sys.executable, '-I', '-S', '-B', str(self.bundle / 'launch.py'), mode, *arguments],
+                                env=environment, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                text=True)
+
+    def started(self, *arguments, **options):
+        process = self.start(*arguments, **options)
+        output, errors = process.communicate(timeout=30)
+        self.assertEqual(process.returncode, 0, errors)
+        return json.loads(output), errors
+
+    def legacy(self, *arguments):
+        return ['--aelix', sys.executable, '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B', '--aelix-arg=-Xutf8',
+                '--aelix-arg=' + str(self.bundle / 'launch.py'), '--aelix-arg=native', *arguments]
+
+    def extended(self, generation, extensions, *arguments):
+        site = self.state / 'generations' / generation / 'venv' / 'lib' / 'python3.12' / 'site-packages'
+        prefix = self.legacy()[:-1] + ['--aelix-arg=native-generation', '--aelix-arg=' + str(site)]
+        for extension in extensions:
+            prefix += ['--extension', extension]
+        return prefix + list(arguments)
+
+    def test_without_a_state_directory_the_adapter_starts_with_exactly_the_arguments_of_before(self):
+        reply, _ = self.started('--profile', 'coding', state=False)
+        self.assertEqual(reply['argv'], self.legacy('--profile', 'coding'))
+
+    def test_adds_the_current_generation_and_its_extensions_and_hides_the_state_from_the_adapter(self):
+        reply, errors = self.started('--profile', 'coding')
+        packs = str(self.state / 'generations' / self.GENERATION / 'packs')
+        self.assertEqual(reply['argv'], self.extended(self.GENERATION, [packs, 'legacy_pack.entry:setup'],
+                                                      '--profile', 'coding'))
+        self.assertIsNone(reply['state'])
+        self.assertEqual(errors, '')
+
+    def test_holds_a_lease_on_the_generation_for_as_long_as_the_adapter_runs(self):
+        import fcntl
+        process = self.start('--profile', 'coding', hold=True)
+        try:
+            json.loads(process.stdout.readline())
+            (lease,) = list((self.state / 'leases').iterdir())
+            self.assertTrue(lease.name.startswith(self.GENERATION + '.'))
+            with open(lease, 'rb') as handle:
+                with self.assertRaises(OSError):
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            # The mutation lock itself was given back once the lease was held.
+            with open(self.state / 'lock', 'rb') as handle:
+                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        finally:
+            process.communicate(input='\n', timeout=30)
+        # An adapter that ends normally takes its lease away instead of leaving it for clean-up.
+        self.assertEqual(list((self.state / 'leases').iterdir()), [])
+
+    def in_process(self, flock):
+        """Run the launcher's generation choice in this process, with ``fcntl.flock`` replaced."""
+        import fcntl
+        import types
+        source = (self.bundle / 'launch.py').read_text()
+        namespace = {'os': os, 'sys': sys, 'Path': Path, '_LEASES': []}
+        exec(compile(source[source.index('def _studio_generation'):source.index('\nroot = Path(__file__)')],
+                     'launch.py', 'exec'), namespace)
+        fake = types.ModuleType('fcntl')
+        for name in dir(fcntl):
+            setattr(fake, name, getattr(fcntl, name))
+        fake.flock = flock
+        with patch.dict(sys.modules, {'fcntl': fake}):
+            result = namespace['_studio_generation'](self.bundle, str(self.state))
+        return result, namespace['_LEASES']
+
+    def clean_up_leases(self, flock):
+        """What the helper's clean-up does to leases: remove every lease file nobody holds locked."""
+        import fcntl
+        for lease in (self.state / 'leases').iterdir():
+            with open(lease, 'rb') as handle:
+                try:
+                    flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except OSError:
+                    continue
+            lease.unlink()
+
+    def test_a_lease_clean_up_finds_unlocked_never_carries_the_name_of_a_generation(self):
+        import fcntl
+        lock = self.state / 'lock'
+        real = fcntl.flock
+        calls = []
+
+        def flock(handle, operation):
+            # Between creating the lease file and locking it, a change's clean-up runs (review of
+            # the launcher piece, should-fix 1). The mutation lock is left alone.
+            if os.fstat(handle).st_ino != os.stat(lock).st_ino and not calls:
+                calls.append('clean-up')
+                self.clean_up_leases(real)
+            return real(handle, operation)
+
+        result, leases = self.in_process(flock)
+        try:
+            self.assertEqual(calls, ['clean-up'])
+            self.assertIsNotNone(result)
+            # The generation it chose has a lease under its name that clean-up finds locked, so
+            # the next clean-up keeps it, and with it the generation the conversation uses.
+            names = [file.name for file in (self.state / 'leases').iterdir()]
+            self.assertEqual(len(names), 1, names)
+            self.assertTrue(names[0].startswith(self.GENERATION + '.'), names)
+            self.clean_up_leases(real)
+            self.assertEqual([file.name for file in (self.state / 'leases').iterdir()], names)
+        finally:
+            for held in leases:
+                os.close(held[1] if isinstance(held, tuple) else held)
+
+    def test_waits_out_the_instant_the_lease_probe_holds_a_new_lease(self):
+        import errno
+        import fcntl
+        lock = self.state / 'lock'
+        refused = []
+
+        def flock(handle, operation):
+            if os.fstat(handle).st_ino != os.stat(lock).st_ino and len(refused) < 2:
+                refused.append(handle)
+                raise OSError(errno.EWOULDBLOCK, 'held by the probe')
+            return fcntl.flock(handle, operation)
+
+        result, leases = self.in_process(flock)
+        try:
+            self.assertIsNotNone(result)
+            self.assertEqual(len(leases), 1)
+            self.assertEqual(len(refused), 2)
+        finally:
+            for held in leases:
+                os.close(held[1] if isinstance(held, tuple) else held)
+
+    def test_waits_only_briefly_for_a_change_that_holds_the_lock_and_still_adds_the_generation(self):
+        import fcntl
+        with open(self.state / 'lock', 'wb') as handle:
+            fcntl.flock(handle, fcntl.LOCK_EX)
+            reply, _ = self.started()
+        packs = str(self.state / 'generations' / self.GENERATION / 'packs')
+        self.assertEqual(reply['argv'], self.extended(self.GENERATION, [packs, 'legacy_pack.entry:setup']))
+
+    def test_falls_back_to_the_pointer_before_the_last_switch(self):
+        cases = {
+            'a cut pointer': lambda: (self.state / 'current.json').write_text('{"schema": "aelix.stud'),
+            'a pointer to a removed generation': lambda: shutil.rmtree(self.state / 'generations' / self.GENERATION),
+            'a pointer to an unfinished generation':
+                lambda: (self.state / 'generations' / self.GENERATION / 'generation.json').unlink(),
+            # What the helper would not read either, so both agree on the generation in effect.
+            'a record of an older schema': lambda: self.edit_record(self.GENERATION, lambda value: value.update(
+                schema='aelix.studio.extensions.generation/1')),
+            'a module the adapter would refuse': lambda: self.edit_record(self.GENERATION, lambda value: value[
+                'launch'].update(modules=['./x.py'])),
+        }
+        for what, damage in cases.items():
+            with self.subTest(what):
+                self.fresh()
+                damage()
+                reply, _ = self.started()
+                self.assertEqual(reply['argv'], self.extended(self.PREVIOUS, ['older_pack:setup']))
+
+    def edit_record(self, generation, edit):
+        file = self.state / 'generations' / generation / 'generation.json'
+        value = json.loads(file.read_text())
+        edit(value)
+        file.write_text(json.dumps(value))
+
+    def test_starts_with_the_bundle_alone_when_nothing_usable_is_there(self):
+        def generation_record(edit):
+            for generation in (self.GENERATION, self.PREVIOUS):
+                self.edit_record(generation, edit)
+        cases = {
+            'no pointer at all': lambda: [(self.state / name).unlink() for name in ('current.json', 'current.previous.json')],
+            'both pointers damaged': lambda: [(self.state / name).write_text('[]') for name in ('current.json', 'current.previous.json')],
+            'another bundle': lambda: (self.bundle / 'manifest.json').write_text(json.dumps(dict(self.manifest, dependencyLockSha256='b' * 64))),
+            'an older record schema': lambda: generation_record(lambda value: value.update(schema='aelix.studio.extensions.generation/1')),
+            'no extension to load': lambda: generation_record(lambda value: value.update(launch={'packs': False, 'modules': []})),
+            'a missing links directory': lambda: os.rmdir(self.state / 'generations' / self.GENERATION / 'packs'),
+            'generations behind a link': lambda: (shutil.move(self.state / 'generations', self.state.parent / 'moved'),
+                                                  os.symlink(self.state.parent / 'moved', self.state / 'generations')),
+            'a relative state directory': lambda: None,
+        }
+        for what, damage in cases.items():
+            with self.subTest(what):
+                self.fresh()
+                damage()
+                state = 'user data/aelix-runtime' if what == 'a relative state directory' else str(self.state)
+                environment = dict(os.environ, AELIX_STUDIO_EXTENSION_STATE=state)
+                process = subprocess.run([sys.executable, '-I', '-S', '-B', str(self.bundle / 'launch.py'), 'acp'],
+                                         env=environment, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(json.loads(process.stdout)['argv'], self.legacy())
+                leases = self.state / 'leases'
+                self.assertEqual(list(leases.iterdir()) if leases.is_dir() else [], [])
+
+    def test_a_custom_native_executable_gets_neither_the_generation_nor_its_extensions(self):
+        reply, _ = self.started('--aelix', '/elsewhere/aelix')
+        self.assertEqual(reply['argv'], ['--aelix', '/elsewhere/aelix'])
+        self.assertEqual(list((self.state / 'leases').iterdir()), [])
+
+    def test_the_worker_form_puts_the_generation_last_on_the_import_path(self):
+        site = str(self.state / 'generations' / self.GENERATION / 'venv' / 'lib' / 'python3.12' / 'site-packages')
+        reply, _ = self.started(site, '--mode', 'rpc', mode='native-generation')
+        self.assertEqual(reply['argv'], ['aelix', '--mode', 'rpc'])
+        self.assertEqual(reply['last'], site)
+        self.assertEqual(reply['first'], str(self.bundle / 'native-site'))
+        refused = subprocess.run([sys.executable, '-I', '-S', '-B', str(self.bundle / 'launch.py'), 'native-generation',
+                                  'relative/site', '--mode', 'rpc'], capture_output=True, text=True, timeout=30)
+        self.assertNotEqual(refused.returncode, 0)

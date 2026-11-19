@@ -8,16 +8,21 @@ from collections import defaultdict
 import hashlib
 
 
-def reconcile(capture, network, states, selected, connect_keys, required_udp=()):
+def reconcile(capture, network, states, selected, connect_keys, required_udp=(), *, task_evidence=None):
     channel = (capture or {}).get('udpObjects')
-    empty = dict(verified=False, exempt=set(), writes=[], issues=[], objects=[])
+    empty = dict(comparisonPerformed=False, verified=False, exempt=set(), writes=[], issues=[], objects=[])
     if not isinstance(channel, dict):
         return empty
+    if task_evidence is not None:
+        task_evidence.note(task_evidence.start_objects, force_check=True)
     issues = []
     def error(reason, pid=None, **metadata):
         item = dict(reason=reason, **metadata)
         if pid in states: item['pid'] = pid
-        if item not in issues: issues.append(item)
+        if item not in issues:
+            issues.append(item)
+            if task_evidence is not None:
+                task_evidence.note(task_evidence.object_issue, item.get('pid'))
     from uring.socketProgram import definitions
     from uring.rawTrace import coverage
     loss=capture.get('udpProbeLoss') or {};hooks=loss.get('hooks') or {};programs=loss.get('programs') or []
@@ -152,11 +157,13 @@ def reconcile(capture, network, states, selected, connect_keys, required_udp=())
             writes.append(dict(**send, connects=[(item['pid'], item['sequence']) for item in obj['connects']],
                                objectId=obj['id']))
         proofs.append({name: value for name, value in obj.items() if name != 'actors'} | {'actorPids': sorted(owners)})
+        if task_evidence is not None:
+            task_evidence.note(task_evidence.object_generation, owners, obj['valid'], 'freedAt' in obj, len(obj['sends']))
     # A single incomplete object channel or unreconciled kernel operation must
     # never authorize an exemption for a different socket in the same trace.
     verified = not orphan and not issues
     if not verified or (network or {}).get('issues'): exempt.clear()
-    return dict(verified=verified, exempt=exempt, writes=writes, issues=issues, objects=proofs)
+    return dict(comparisonPerformed=True, verified=verified, exempt=exempt, writes=writes, issues=issues, objects=proofs)
 
 
 RETENTION_MODES = ('object-preexisting', 'object-unreleased')

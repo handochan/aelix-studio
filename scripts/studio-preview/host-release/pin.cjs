@@ -28,7 +28,7 @@ function releasePolicy(tag, release, provenanceBytes, checksums, commit) {
       .trim()
       .split(/\r?\n/)
       .map((line) => {
-        const match = /^([a-f0-9]{64})  ([\w.-]+)$/.exec(line);
+        const match = /^([a-f0-9]{64})  ([\w.+-]+)$/.exec(line);
         if (!match) throw new Error('Malformed release checksum');
         return [match[2], match[1]];
       })

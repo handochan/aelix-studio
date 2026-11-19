@@ -4,9 +4,11 @@ Only complete, uniquely attributable task lifetimes may discharge terminal
 strace register-read failures. Pre-ptrace invocations prevent an emulated
 seccomp result from substituting for a different, hidden executed invocation.
 """
-from collections import defaultdict, deque
+from collections import Counter, defaultdict, deque
+from math import inf
 import re
 import platform
+import time
 
 CALLS = ('connect', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev', 'accept', 'accept4')
 SOCKET_ARGUMENTS = {'kernel_connect':'socket','sock_write_iter':'kiocb',
@@ -193,8 +195,256 @@ def parse(fields):
                 file=int(fields[10]) if fields[0]=='V' else None)
 
 
-def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None, known_destinations=None, metadata_allowed=()):
+RECORD_KINDS = ('P', 'N', 'X', 'H', 'V', 'other')
+TASK_EVIDENCE_CHECK_INTERVAL = 32
+TASK_EVIDENCE_CAPTURE_RESERVE = 0.25
+UNMATCHED_NETWORK_ISSUES = frozenset({
+    'kernel_network_event_unattributed', 'kernel_network_pre_entry_missing',
+    'kernel_network_return_unmatched', 'kernel_network_return_missing',
+    'kernel_network_strace_entry_missing', 'kernel_network_invocation_mismatch',
+    'kernel_strace_pre_entry_missing', 'kernel_partial_call_execution_unproven',
+    'kernel_socket_operation_strace_missing', 'kernel_socket_destination_unparsed',
+})
+
+
+class TaskEvidence:
+    """Optional numeric counters fed by the existing audit loops."""
+
+    def __init__(self, interrupt=(), unsupported=0, *, supervisor_cutoff=inf):
+        self.interrupt = interrupt
+        self.unsupported = unsupported
+        self.capture_deadline = inf
+        self.supervisor_cutoff = supervisor_cutoff
+        self.available = True
+        self.measurement = None
+        self.unavailable_reason = None
+        self.aggregation_seconds = 0.0
+        self.checks_until_due = 1
+        self.tasks = []
+        self.kernel_tasks = {}
+        self.lifetimes = set()
+        self.strace_tasks = []
+        self.gaps = defaultdict(Counter)
+        self.network_counts = None
+        self.worker_channel = False
+        self.unattributed = 0
+        self.network = defaultdict(Counter)
+        self.global_network_issues = 0
+        self.rings = defaultdict(Counter)
+        self.objects = defaultdict(Counter)
+        self.global_object_issues = 0
+
+    def stop(self, reason):
+        self.available = False
+        self.unavailable_reason = reason
+        self.measurement = None
+
+    def checkpoint(self, *, force=False, now=None):
+        if not self.available:
+            return False
+        self.checks_until_due -= 1
+        if not force and self.checks_until_due > 0:
+            return True
+        self.checks_until_due = TASK_EVIDENCE_CHECK_INTERVAL
+        current = time.monotonic() if now is None else now
+        if self.capture_deadline - current < TASK_EVIDENCE_CAPTURE_RESERVE:
+            self.stop('capture_time_reserve')
+        elif current > self.supervisor_cutoff:
+            self.stop('supervisor_time_reserve')
+        return self.available
+
+    def note(self, operation, *args, force_check=False):
+        if not self.available:
+            return None
+        started = time.monotonic()
+        try:
+            if self.checkpoint(force=force_check, now=started):
+                return operation(*args)
+        except self.interrupt:
+            raise
+        except Exception:
+            self.stop('aggregation_error')
+        finally:
+            self.aggregation_seconds += time.monotonic() - started
+        return None
+
+    def start_network(self, has_records, has_workers):
+        # UDP proof can trigger a second comparison of the same recording.
+        # Retain its comparison counts and count the input recording once.
+        self.network.clear()
+        self.global_network_issues = 0
+        if has_records and self.network_counts is None:
+            self.network_counts = dict.fromkeys(RECORD_KINDS, 0)
+            self.worker_channel = has_workers
+            return True
+        return False
+
+    def kernel_task(self, task):
+        tid = task['kernelPid']
+        identity = (tid, task['pid'], task['tgid'], task['kernelTgid'], task['parentKernelPid'],
+                    task['start'], task['end'], task['lastOrdinal'])
+        if any(type(value) is not int for value in identity):
+            raise ValueError('invalid diagnostic task identity')
+        lifetime = (tid, task['start'])
+        if lifetime in self.lifetimes:
+            self.kernel_tasks[tid] = None
+            return
+        self.lifetimes.add(lifetime)
+        reused = tid in self.kernel_tasks
+        row = dict(taskIndex=len(self.tasks) + 1, namespaceTid=task['pid'], namespaceTgid=task['tgid'],
+                   kernelTid=tid, kernelTgid=task['kernelTgid'], parentKernelTid=task['parentKernelPid'],
+                   rangeStart=task['start'], rangeEnd=task['end'], lastOrdinal=task['lastOrdinal'],
+                   kernelThread=task.get('kernelThread') is True, ioWorker=task.get('ioWorker') is True,
+                   assignedRecordCounts=dict.fromkeys(RECORD_KINDS, 0),
+                   workerBirthRecords=0 if self.worker_channel else None)
+        self.tasks.append(row)
+        self.kernel_tasks[tid] = None if reused else row
+
+    def worker_birth(self, kernel_tid):
+        task = self.kernel_tasks.get(kernel_tid)
+        if task is not None:
+            task['workerBirthRecords'] += 1
+
+    def network_record(self, kind, kernel_tid, attributed):
+        kind = kind if kind in self.network_counts else 'other'
+        self.network_counts[kind] += 1
+        task = self.kernel_tasks.get(kernel_tid) if attributed else None
+        if task is None or not 0 < task['rangeStart'] <= task['rangeEnd']:
+            self.unattributed += 1
+        else:
+            task['assignedRecordCounts'][kind] += 1
+
+    def network_issue(self, reason, pid):
+        if pid is None:
+            self.global_network_issues += 1
+        else:
+            counts = self.network[pid]
+            counts['issues'] += 1
+            if reason in UNMATCHED_NETWORK_ISSUES:
+                counts['unmatchedIssues'] += 1
+
+    def match(self, pid):
+        self.network[pid]['matchedOperations'] += 1
+
+    def resolution(self, pid, kind, records):
+        self.network[pid][kind] += records
+
+    def gap(self, pid, kind):
+        self.gaps[pid][kind] += 1
+
+    def ring_created(self, pid):
+        self.rings[pid]['creations'] += 1
+
+    def ring_submission(self, pid, owner):
+        if pid is not None:
+            self.rings[pid]['submissions'] += 1
+        if owner is not None and owner != pid:
+            self.rings[owner]['submissions'] += 1
+
+    def start_objects(self):
+        self.objects.clear()
+        self.global_object_issues = 0
+
+    def object_issue(self, pid):
+        if pid is None:
+            self.global_object_issues += 1
+        else:
+            self.objects[pid]['issues'] += 1
+
+    def object_generation(self, owners, valid, freed, sends):
+        for pid in owners:
+            if not self.checkpoint():
+                return
+            counts = self.objects[pid]
+            counts['generations'] += 1
+            counts['validGenerations'] += int(valid)
+            counts['unfreedGenerations'] += int(not freed)
+            counts['sharedObjectSendRecords'] += sends
+
+    def result(self, capture, states, network, rings, objects):
+        capture = capture or {}
+        channel = capture.get('network')
+        checks = capture.get('captureChecks') or {}
+        record_errors = capture.get('recordErrors')
+        network_checked = (network or {}).get('comparisonPerformed') is True
+        ring_checked = (rings or {}).get('comparisonPerformed') is True
+        object_checked = (objects or {}).get('comparisonPerformed') is True
+        network_ok = not network['issues'] if network_checked else None
+        observed = network_checked and self.network_counts is not None
+        total = sum(self.network_counts.values()) if observed else None
+
+        def number(value):
+            return value if type(value) is int else None
+
+        def flag(value):
+            return value if type(value) is bool else None
+
+        for row in self.tasks:
+            if not self.checkpoint():
+                return None
+            reused = self.kernel_tasks[row['kernelTid']] is None
+            parent = self.kernel_tasks.get(row['parentKernelTid'])
+            born = row['rangeStart']
+            row['kernelTidReused'] = reused
+            row['parentNamespaceTid'] = (parent['namespaceTid'] if parent is not None
+                                         and parent['rangeStart'] <= born <= parent['rangeEnd'] else None)
+            row['straceObserved'] = row['namespaceTid'] in states
+            if reused or not 0 < born <= row['rangeEnd']:
+                row['assignedRecordCounts'] = row['workerBirthRecords'] = None
+
+        if not self.checkpoint(force=True):
+            return None
+        for row in self.strace_tasks:
+            if not self.checkpoint():
+                return None
+            pid = row['tid']
+            if network_checked:
+                counts = self.network.get(pid, {})
+                matched = counts.get('matchedOperations', 0)
+                row['existingNetworkCorroboration'] = dict(matchedOperations=matched,
+                    reconciledOperations=matched if network_ok else 0)
+                row['networkIssueCount'] = counts.get('issues', 0)
+                row['unmatchedNetworkIssueCount'] = counts.get('unmatchedIssues', 0)
+                row['existingRegisterResolutions'] = counts.get('registerResolutions', 0)
+                row['existingCloseResolutions'] = counts.get('closeResolutions', 0)
+            else:
+                row['existingNetworkCorroboration'] = row['networkIssueCount'] = row['unmatchedNetworkIssueCount'] = None
+                row['existingRegisterResolutions'] = row['existingCloseResolutions'] = None
+            row['ringCounts'] = (dict(creations=0, submissions=0) | self.rings.get(pid, {})) if ring_checked else None
+            row['ringIssueCount'] = len(rings['issuesByPid'].get(pid, ())) if ring_checked else None
+            if object_checked:
+                counts = self.objects.get(pid, {})
+                row['objectCounts'] = {key: counts.get(key, 0) for key in
+                    ('generations', 'validGenerations', 'unfreedGenerations', 'sharedObjectSendRecords')}
+                row['objectIssueCount'] = counts.get('issues', 0)
+            else:
+                row['objectCounts'] = row['objectIssueCount'] = None
+        return dict(schema='aelix.outbound-task-evidence/1', purpose='diagnostic-only-no-new-resolution',
+            kernelTimeUnit='monotonic-nanoseconds', referenceScope='capture-wide',
+            source=dict(complete=flag(capture.get('complete')), drained=flag(capture.get('drained')),
+                pidNamespaceVerified=flag(capture.get('pidNamespaceVerified')), namespaceInode=number(capture.get('namespaceInode')),
+                lostEvents=number(capture.get('lostEvents')) if isinstance(channel, dict) else None,
+                recordErrorCount=len(record_errors) if isinstance(record_errors, list) else None,
+                ready=flag(checks.get('ready')), done=flag(checks.get('done')), stderrEmpty=flag(checks.get('stderrEmpty')),
+                kernelNetworkCount=number((capture.get('kernelCounts') or {}).get('network')),
+                networkReconciled=network_ok, networkIssueCount=len(network['issues']) if network_checked else None,
+                globalNetworkIssueCount=self.global_network_issues if network_checked else None,
+                ringGlobalIssueCount=len(rings['globalIssues']) if ring_checked else None,
+                objectProofVerified=objects['verified'] if object_checked else None,
+                objectIssueCount=len(objects['issues']) if object_checked else None,
+                globalObjectIssueCount=self.global_object_issues if object_checked else None,
+                unsupportedStracePersonalities=self.unsupported),
+            tasks=self.tasks if observed else None, straceTasks=self.strace_tasks,
+            networkRecordCounts=self.network_counts if observed else None,
+            assignedNetworkRecords=total - self.unattributed if observed else None,
+            unattributedNetworkRecords=self.unattributed if observed else None)
+
+
+def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=None, expected_parents=None, terminal_pids=None,
+              known_destinations=None, metadata_allowed=(), *, task_evidence=None):
     """Cross-check all kernel activity, even when strace has no decode failure."""
+    if task_evidence is not None:
+        task_evidence.checkpoint(force=True)
     issues = []; resolved = []; entries = defaultdict(list); tasks = {}; mapping = {}
     def error(reason, pid=None, **metadata):
         issue = {'reason': reason}
@@ -202,12 +452,16 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
         elif pid is not None: issue['unattributedPid'] = pid
         issue.update(metadata)
         issues.append(issue)
+        if task_evidence is not None:
+            task_evidence.note(task_evidence.network_issue, reason, issue.get('pid'))
     network = capture.get('network')
     if (not capture.get('complete') or capture.get('lostEvents') != 0 or
             not capture.get('pidNamespaceVerified') or not isinstance(network, dict) or
             not network.get('complete')):
         error('kernel_network_capture_incomplete')
-        return dict(issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], operationDiagnostics=[], eventCount=0)
+        return dict(comparisonPerformed=False, issues=issues, resolved=resolved, notExecuted=[], nonNetworkWrites=[], resultFields=[], metadataFields=[], operationDiagnostics=[], eventCount=0)
+    tally_recording = task_evidence is not None and task_evidence.note(task_evidence.start_network,
+        isinstance(network.get('events'), list), isinstance(network.get('workers'), list))
     for task in network.get('tasks', []):
         pid = task['pid']
         if task['start'] <= 0 or task['start'] > task['end']:
@@ -216,6 +470,8 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             error('kernel_network_task_identity_reused', pid)
         if pid > 0: tasks[pid] = task
         mapping[task['kernelPid']] = task
+        if tally_recording:
+            task_evidence.note(task_evidence.kernel_task, task)
     worker_births={}
     for event in network.get('workers', []):
         task=mapping.get(event['kernelPid'])
@@ -223,6 +479,8 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
                 (event['flags']&0x4010)!=0x4010 or event['parentKernelPid']!=task.get('parentKernelPid') or
                 event['start']!=task['start'] or not task['start']<=event['time']<=task['end']):
             error('kernel_io_worker_birth_unattributed')
+        elif tally_recording:
+            task_evidence.note(task_evidence.worker_birth, event['kernelPid'])
         worker_births[event['kernelPid']]=event
     for task in mapping.values():
         pid=task['pid']; kernel_pid=task['kernelPid']
@@ -267,9 +525,12 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
     calls = {}; returns = {}; hooks = []; files=defaultdict(list); pre = defaultdict(list); pre_keys = {}
     for event in sorted(events, key=lambda item: item['time']):
         pid = event['pid']; task = mapping.get(event['kernelPid'])
-        if (not task or task['kernelPid'] != event['kernelPid'] or
+        unattributed = (not task or task['kernelPid'] != event['kernelPid'] or
                 task['pid'] != pid or task['tgid'] != event['tgid'] or task['kernelTgid'] != event['kernelTgid'] or
-                not task['start'] <= event['time'] <= task['end']):
+                not task['start'] <= event['time'] <= task['end'])
+        if tally_recording:
+            task_evidence.note(task_evidence.network_record, event['kind'], event['kernelPid'], not unattributed)
+        if unattributed:
             error('kernel_network_event_unattributed', pid); continue
         if pid not in states and event['kind'] != 'H':
             error('kernel_network_task_strace_missing'); continue
@@ -452,6 +713,8 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
     for event in hooks:hooks_by_invocation[(event['pid'],event['ordinal'])].append(event)
     for key,sequence in matched_sequences.items():
         entry=calls[key];observed=hooks_by_invocation[key]
+        if task_evidence is not None:
+            task_evidence.note(task_evidence.match, key[0])
         diagnostics.append(dict(pid=key[0],sequence=sequence,fd=entry['value'],
             kernelPid=entry['kernelPid'],kernelTgid=entry['kernelTgid'],tgid=entry['tgid'],
             ordinal=key[1],call=entry['call'],entryTime=entry['time'],
@@ -459,6 +722,6 @@ def reconcile(capture, records, holes, states, ring_evidence, expected_tgids=Non
             socketHooks=sorted({SOCKET_HOOKS[event['value']-1] for event in observed if 1<=event['value']<=len(SOCKET_HOOKS)}),
             socketFamilies=sorted({event['result'] for event in observed}),
             fileModes=sorted({event['result'] for event in files[key]}),reconciled=not issues))
-    return dict(issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
+    return dict(comparisonPerformed=True, issues=issues, resolved=resolved, notExecuted=nonexecution if not issues else [],
                 nonNetworkWrites=nonnetwork if not issues else [],resultFields=result_fields if not issues else [],
                 metadataFields=metadata,operationDiagnostics=diagnostics,eventCount=len(events))

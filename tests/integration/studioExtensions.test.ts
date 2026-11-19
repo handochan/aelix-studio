@@ -3,15 +3,15 @@
  *
  * Skipped unless AELIX_STUDIO_EXTENSION_BUNDLE names a COPY of a bundled runtime (the
  * directory with manifest.json). Everything is written under AELIX_STUDIO_EXTENSION_SCRATCH
- * (default: the system temporary directory); the bundle copy must come out unchanged.
+ * (default: the system temporary directory). The copy gets this branch's launch.py; apart
+ * from that it must come out exactly as its checksums.json says.
  * It assumes the POSIX layout of a bundle and a venv; Windows is checked in stage 1a'.
  *
  *   AELIX_STUDIO_EXTENSION_BUNDLE=<bundle copy> AELIX_STUDIO_EXTENSION_SCRATCH=<dir> \
  *     bunx vitest run tests/integration/studioExtensions.test.ts
  */
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readdir, readFile, readlink, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -28,34 +28,12 @@ import { baseEnvironment } from '../../packages/web-host/src/studio-extensions/f
 import { spawnChild } from '../../packages/web-host/src/studio-extensions/process';
 import { locateLayout, resolveBundle } from '../../packages/web-host/src/studio-extensions/store/layout';
 import { acquireMutationLock } from '../../packages/web-host/src/studio-extensions/store/lock';
+import { bundleDifferences, useBranchLauncher } from '../../packages/web-host/tests/fixtures/bundleCopy';
 import { writeWheel, type WheelSpec } from '../../packages/web-host/tests/fixtures/extensionWheels';
 
 const BUNDLE = process.env.AELIX_STUDIO_EXTENSION_BUNDLE;
 const run = promisify(execFile);
 const OWNER = 'integration';
-
-/** Compare every file of the bundle with its own checksums.json. */
-async function bundleDifferences(root: string): Promise<string[]> {
-  const expected = JSON.parse(await readFile(path.join(root, 'checksums.json'), 'utf8')) as Record<string, string>;
-  const actual: Record<string, string> = {};
-  const walk = async (directory: string): Promise<void> => {
-    for (const entry of await readdir(directory, { withFileTypes: true })) {
-      const file = path.join(directory, entry.name);
-      const key = path.relative(root, file).split(path.sep).join('/');
-      if (entry.isSymbolicLink()) actual[key] = `symlink:${await readlink(file)}`;
-      else if (entry.isDirectory()) await walk(file);
-      else if (key !== 'checksums.json')
-        actual[key] = createHash('sha256')
-          .update(await readFile(file))
-          .digest('hex');
-    }
-  };
-  await walk(root);
-  delete expected['checksums.json'];
-  return [...new Set([...Object.keys(expected), ...Object.keys(actual)])].filter(
-    (key) => expected[key] !== actual[key]
-  );
-}
 
 describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helper against a bundled runtime', () => {
   const bundle = BUNDLE ?? '';
@@ -63,6 +41,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
   let root = '';
   let wheels = '';
   let outside = '';
+  let replaced: Record<string, string> = {};
   let service: ExtensionService;
   let environment: NodeJS.ProcessEnv;
 
@@ -100,6 +79,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
   };
 
   beforeAll(async () => {
+    replaced = await useBranchLauncher(bundle);
     const scratch = process.env.AELIX_STUDIO_EXTENSION_SCRATCH ?? os.tmpdir();
     await mkdir(scratch, { recursive: true });
     sandbox = await mkdtemp(path.join(scratch, 'studio-extensions-'));
@@ -166,7 +146,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
         distribution: 'fixture-good',
         version: '0.1.0',
         reference: 'fixture_good:setup',
-        status: 'load_verified',
+        status: 'ready',
         origin: expect.objectContaining({ kind: 'file', wheel: 'fixture_good-0.1.0-py3-none-any.whl' }),
       }),
     ]);
@@ -236,7 +216,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     expect(legacy).toMatchObject({ phase: 'switched', action: 'install' });
     const listing = await list();
     expect(listing.extensions.map((extension) => [extension.name, extension.status])).toEqual([
-      ['fixture-good', 'load_verified'],
+      ['fixture-good', 'ready'],
       ['fixture-legacy', 'manifest_unbound'],
     ]);
     const directories = await generations();
@@ -433,7 +413,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
       isolated
     );
     expect(dependent).toMatchObject({ phase: 'failed', code: 'GENERATION_MODIFIED' });
-    expect(await bundleDifferences(bundle)).toEqual([]);
+    expect(await bundleDifferences(bundle, replaced)).toEqual([]);
 
     // A generation that already holds such a file, as one written before this was checked.
     const base = await install(await wheel({ name: 'fixture-base' }), undefined, isolated);
@@ -447,7 +427,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     });
     const next = await install(await wheel({ name: 'fixture-next' }), undefined, isolated);
     expect(next).toMatchObject({ phase: 'failed', code: 'GENERATION_MODIFIED' });
-    expect(await bundleDifferences(bundle)).toEqual([]);
+    expect(await bundleDifferences(bundle, replaced)).toEqual([]);
     await isolated.dispose();
   }, 240_000);
 
@@ -510,7 +490,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     for (const generation of await readdir(generationsOf))
       expect((await readdir(site(generation))).filter((entry) => entry.startsWith('fixture_hidden'))).toEqual([]);
     expect(await list(isolated)).toMatchObject({ current: base.generation });
-    expect(await bundleDifferences(bundle)).toEqual([]);
+    expect(await bundleDifferences(bundle, replaced)).toEqual([]);
     await isolated.dispose();
   }, 240_000);
 
@@ -548,7 +528,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
       'switched',
     ]);
     expect(names(await list(isolated))).toEqual(['fixture-casenext', 'fixture-upper']);
-    expect(await bundleDifferences(bundle)).toEqual([]);
+    expect(await bundleDifferences(bundle, replaced)).toEqual([]);
     await isolated.dispose();
   }, 300_000);
 
@@ -615,6 +595,6 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     for (const name of ['target', 'site']) expect(await readdir(path.join(outside, name))).toEqual([]);
     expect((await readdir(outside)).toSorted()).toEqual(['pip.conf', 'site', 'target']);
     expect(await readdir(path.join(sandbox, 'home'))).toEqual([]);
-    expect(await bundleDifferences(bundle)).toEqual([]);
+    expect(await bundleDifferences(bundle, replaced)).toEqual([]);
   }, 120_000);
 });

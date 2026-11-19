@@ -1,4 +1,6 @@
+import os from 'node:os';
 import { pathToFileURL } from 'node:url';
+import { isAdapterReference } from '../inspect/metadata.js';
 import { contentDistributions, readSite, type SiteSnapshot } from '../inspect/site.js';
 import type { WheelFacts } from '../inspect/wheel.js';
 import { runToExit, type RunResult } from '../process.js';
@@ -35,15 +37,27 @@ import {
   type ExtensionRollback,
   type ExtensionSource,
 } from '../types.js';
+import {
+  chooseForms,
+  conversationReference,
+  launchArguments,
+  launchFormOf,
+  loadedNames,
+  writePacks,
+  type ExtensionForm,
+  type LaunchForm,
+} from '../launch/form.js';
 import { createCandidate, scanGeneration, type Candidate, type FlowContext } from './candidate.js';
 import { managementEnvironment } from './environment.js';
 import {
   compareRequest,
   nativeHandle,
+  redactPaths,
   resolveDistribution,
   runLoadCheck,
   type ChangeRequest,
   type ExpectedExtensions,
+  type LoadExpectation,
 } from './gate.js';
 import { checkImport } from './importCheck.js';
 
@@ -217,6 +231,8 @@ function describeCandidate(
   preparation: Preparation,
   snapshot: SiteSnapshot,
   bound: Map<string, boolean>,
+  forms: Map<string, ExtensionForm>,
+  launch: LaunchForm,
   createdAt: Date
 ): GenerationRecord {
   const imported = (name: string, version: string): ExtensionOrigin | undefined => {
@@ -245,15 +261,21 @@ function describeCandidate(
     },
     distributions,
     extensions: Object.fromEntries(
-      [...snapshot.extensions].map(([name, extension]) => [
-        name,
-        {
-          reference: extension.reference,
-          distribution: extension.distribution,
-          manifestBound: bound.get(name) ?? false,
-        },
-      ])
+      [...snapshot.extensions].map(([name, extension]) => {
+        const form = forms.get(name);
+        return [
+          name,
+          {
+            reference: extension.reference,
+            distribution: extension.distribution,
+            manifestBound: bound.get(name) ?? false,
+            form: form?.form ?? 'module',
+            plugin: form?.form === 'pack' ? form.plugin : null,
+          },
+        ];
+      })
     ),
+    launch,
   });
 }
 
@@ -299,6 +321,39 @@ async function tidy(context: FlowContext, lock: MutationLock): Promise<void> {
   } catch {
     // Left for the next change to clean up.
   }
+}
+
+/**
+ * Run a load check and end the change unless everything expected loaded. Reasons are native's
+ * own words, cut to length, with the locations of this machine replaced by labels.
+ */
+async function loadOrRefuse(
+  context: FlowContext,
+  candidate: Candidate,
+  sources: string[],
+  expected: LoadExpectation
+): Promise<void> {
+  const load = await runLoadCheck(context, candidate, sources, expected);
+  if (load.cancelled) throw new ExtensionFailure('CANCELLED');
+  if (load.timedOut) throw new ExtensionFailure('TIMEOUT', ['the load check took too long']);
+  const locations: [string, string][] = [
+    [candidate.paths.directory, '<generation>'],
+    [context.layout.root, '<extensions>'],
+    [context.bundle.root, '<runtime>'],
+    [os.homedir(), '~'],
+  ];
+  const reasons = load.problems.map((problem) => redactPaths(problem, locations).slice(0, REASON_LIMIT));
+  if (!load.answered) throw new ExtensionFailure('VERIFICATION_FAILED', reasons);
+  if (reasons.length > 0) throw new ExtensionFailure('LOAD_ERROR', reasons);
+}
+
+/** Whether the pointer in effect names a generation as current or previous: then clean-up keeps it. */
+async function inEffect(layout: FlowContext['layout'], generation: string): Promise<boolean> {
+  const pointer = await readPointer(layout).then(
+    (state) => state.pointer,
+    (): null => null
+  );
+  return pointer?.generation === generation || pointer?.previous === generation;
 }
 
 /** What ended a change under a lock: the loss of the lock outranks whatever it caused. */
@@ -393,12 +448,30 @@ export async function mutate(
     if (installer.code === INSTALLED_NOT_BOUND && [...bound.values()].every(Boolean))
       for (const [name, extension] of scan.snapshot.extensions)
         if (extension.distribution === preparation.change.distribution) bound.set(name, false);
-    const load = await runLoadCheck(guarded, candidate, gate.expected);
-    if (load.cancelled) throw new ExtensionFailure('CANCELLED');
-    if (load.timedOut) throw new ExtensionFailure('TIMEOUT', ['the load check took too long']);
-    const reasons = load.problems.map((problem) => problem.slice(0, REASON_LIMIT));
-    if (!load.answered) throw new ExtensionFailure('VERIFICATION_FAILED', reasons);
-    if (reasons.length > 0) throw new ExtensionFailure('LOAD_ERROR', reasons);
+    const forms = await chooseForms(guarded, candidate, scan.snapshot, gate.expected, bound);
+    const launch = launchFormOf(gate.expected, forms);
+    const unsupported = launch.modules.filter((reference) => !isAdapterReference(reference));
+    if (unsupported.length > 0)
+      throw new ExtensionFailure(
+        'LOAD_ERROR',
+        unsupported.map((reference) => `${reference} cannot be passed to a conversation by module reference`)
+      );
+    await writePacks(candidate, forms);
+    // Every extension by reference, in the order conversations get them: imports each and runs
+    // its setup() now, lazy pack or not. Without packs this is exactly what conversations get.
+    const byReference = new Map(
+      [...gate.expected].map(([name, reference]): [string, string] => [name, conversationReference(reference)])
+    );
+    const references = [...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? '');
+    await loadOrRefuse(guarded, candidate, references, byReference);
+    // Then exactly the way new conversations get them, which binds the manifests of the packs.
+    if (launch.packs)
+      await loadOrRefuse(
+        guarded,
+        candidate,
+        launchArguments(candidate.paths.directory, launch),
+        loadedNames(gate.expected, forms)
+      );
 
     const record = describeCandidate(
       guarded,
@@ -408,6 +481,8 @@ export async function mutate(
       preparation,
       scan.snapshot,
       bound,
+      forms,
+      launch,
       hooks.now()
     );
     await writeGenerationRecord(layout, record);
@@ -430,7 +505,10 @@ export async function mutate(
     return { generation: candidate.id, revision: revision + 1 };
   } catch (error) {
     // Without the lock nothing is removed; the next change under a lock removes what is left.
-    if (unfinished !== undefined) await lock.remove(`generations/${unfinished}`).catch(() => {});
+    // A switch can fail after its rename took effect (flushing the directory, say): then the
+    // candidate is in effect, and a launcher may already use it. It stays.
+    if (unfinished !== undefined && !(await inEffect(context.layout, unfinished)))
+      await lock.remove(`generations/${unfinished}`).catch(() => {});
     throw outcome(error, lock);
   } finally {
     // Clean-up runs after a failure too: a refused import must not leave its wheels in the
@@ -470,10 +548,9 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
  * What is installed, read from files only (ADR 5.10): no process is started and nothing
  * is contacted. Safe to call while a change is running; it shows the state before it.
  *
- * `load_verified` means what the helper checked and no more: the extension was imported and
- * its `setup()` ran when native was started the way a conversation starts it. Whether the
- * things its manifest declares are active in a conversation depends on how the launcher
- * passes the extension, which is decided and verified together with the launcher.
+ * `ready` is reported only for an extension that passed the load check in the form new
+ * conversations get it with its manifest bound (a pack, decision B5); one passed by module
+ * reference loads but is `manifest_unbound`.
  */
 export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>): Promise<ExtensionListing> {
   await verifyLayout(context.layout);
@@ -504,8 +581,8 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
         origin: record.distributions[extension.distribution]?.origin ?? null,
         status: !usable
           ? ('reinstall_needed' as const)
-          : extension.manifestBound
-            ? ('load_verified' as const)
+          : extension.form === 'pack'
+            ? ('ready' as const)
             : ('manifest_unbound' as const),
       }))
       .toSorted((left, right) => (left.name < right.name ? -1 : 1)),
