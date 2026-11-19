@@ -120,7 +120,9 @@ const readFromStorage = (storageKey: string): PendingConfirmationIds => {
 export function useTeamPendingPermissions(team_id: string, conversation_ids: string[]) {
   const storageKey = `${STORAGE_KEY_PREFIX}${team_id}`;
   const [pendingIds, setPendingIds] = useState<PendingConfirmationIds>(() => readFromStorage(storageKey));
-  const journalsRef = useRef(new Map<string, PendingSeedJournal>());
+  // Every in-flight `confirmation.list` request per conversation keeps its own journal, so a newer
+  // request never erases the clear records an older one still needs if the newer one fails.
+  const journalsRef = useRef(new Map<string, Set<PendingSeedJournal>>());
   const aliasesRef = useRef(new Map<string, string>());
   const idsSignature = conversation_ids.join(',');
 
@@ -146,7 +148,11 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
     const idSet = new Set(conversation_ids);
     const journals = journalsRef.current;
     const aliases = aliasesRef.current;
+    const appliedGeneration = new Map<string, number>();
+    let nextGeneration = 0;
     let disposed = false;
+
+    const journalsFor = (cid: string): ReadonlySet<PendingSeedJournal> => journals.get(cid) ?? new Set();
 
     const updateIds = (cid: string, apply: (current: Set<string>) => void) => {
       setPendingIds((prev) => {
@@ -163,19 +169,21 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
 
     const mark = (cid: string, ref: ConfirmationRef) => {
       remember(ref);
-      const journal = journals.get(cid);
-      journal?.marked.add(ref.key);
-      journal?.removed.delete(ref.key);
+      for (const journal of journalsFor(cid)) {
+        journal.marked.add(ref.key);
+        journal.removed.delete(ref.key);
+      }
       updateIds(cid, (current) => {
         current.add(ref.key);
       });
     };
 
     const unmark = (cid: string, keys: string[]) => {
-      const journal = journals.get(cid);
-      for (const key of keys) {
-        journal?.removed.add(key);
-        journal?.marked.delete(key);
+      for (const journal of journalsFor(cid)) {
+        for (const key of keys) {
+          journal.removed.add(key);
+          journal.marked.delete(key);
+        }
       }
       updateIds(cid, (current) => {
         for (const key of keys) current.delete(key);
@@ -183,8 +191,7 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
     };
 
     const clear = (cid: string) => {
-      const journal = journals.get(cid);
-      if (journal) {
+      for (const journal of journalsFor(cid)) {
         journal.cleared = true;
         journal.marked.clear();
       }
@@ -192,8 +199,11 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
     };
 
     const seed = async (cid: string) => {
+      const generation = ++nextGeneration;
       const journal = createSeedJournal();
-      journals.set(cid, journal);
+      const inFlight = journals.get(cid) ?? new Set<PendingSeedJournal>();
+      inFlight.add(journal);
+      journals.set(cid, inFlight);
       let snapshot: ConfirmationRef[];
       try {
         const confirmations = await ipcBridge.conversation.confirmation.list.invoke({ conversation_id: cid });
@@ -205,12 +215,15 @@ export function useTeamPendingPermissions(team_id: string, conversation_ids: str
           snapshot.push(ref);
         }
       } catch {
-        // Keep the live state; the next turn completion or reconnect reseeds.
-        if (journals.get(cid) === journal) journals.delete(cid);
+        // Keep the live state; an older in-flight request, turn completion or reconnect reseeds.
+        inFlight.delete(journal);
         return;
       }
-      if (disposed || journals.get(cid) !== journal) return;
-      journals.delete(cid);
+      inFlight.delete(journal);
+      // Apply a snapshot only when no newer one has landed; an older one still applies if a newer
+      // request failed, merged with every event recorded since it started.
+      if (disposed || generation <= (appliedGeneration.get(cid) ?? 0)) return;
+      appliedGeneration.set(cid, generation);
       const merged = mergeSeedSnapshot(snapshot, journal);
       setPendingIds((prev) => replaceIds(prev, cid, merged));
     };

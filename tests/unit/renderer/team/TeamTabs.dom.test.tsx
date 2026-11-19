@@ -322,6 +322,25 @@ describe('TeamTabs live approval badge', () => {
 
     expect(workerBadge()).not.toBeInTheDocument();
   });
+
+  it('keeps clear records for the first snapshot when the refetch after a restore fails', async () => {
+    localStorage.setItem('team-pending-permissions-team-1', JSON.stringify({ 'worker-conv': ['call-1'] }));
+    const firstSnapshot = deferred();
+    ipcMocks.list.mockImplementation(({ conversation_id }: { conversation_id: string }) =>
+      conversation_id === 'worker-conv' ? firstSnapshot.promise : Promise.resolve([])
+    );
+    await renderLive();
+    expect(workerBadge()).toBeInTheDocument();
+
+    ipcMocks.list.mockRejectedValue(new Error('backend unavailable'));
+    await emit('remove', { conversation_id: 'worker-conv', id: 'conf-1' });
+    await act(async () => {
+      firstSnapshot.resolve([{ id: 'conf-1', call_id: 'call-1' }]);
+    });
+
+    expect(ipcMocks.list).toHaveBeenCalledTimes(3);
+    expect(workerBadge()).not.toBeInTheDocument();
+  });
 });
 
 describe('mergeSeedSnapshot', () => {
