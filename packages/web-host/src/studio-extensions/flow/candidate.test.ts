@@ -84,6 +84,7 @@ describe('building and scanning a candidate generation', () => {
       operation: { action: 'install', target: 'demo' },
       distributions: {},
       extensions: {},
+      launch: { packs: false, modules: [] },
     });
     await writeGenerationRecord(helper.context.layout, record);
     return record;

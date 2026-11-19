@@ -9,6 +9,7 @@ import {
   installWheel,
   scriptedSpawn,
   type FakeHelper,
+  type ScriptedChild,
 } from '../../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
 import { generationPaths, resolveBundle } from '../store/layout';
@@ -282,16 +283,114 @@ describe('changing what is installed', () => {
       expect(await readdir(helper.context.layout.artifacts)).toEqual(stored);
     });
 
-    it('loads every extension of the candidate, not only the new one', async () => {
+    it('loads every extension of the candidate by reference, then the way conversations get them', async () => {
       await install({ name: 'demo-one' });
       await install({ name: 'demo-two' });
-      const load = helper.spawn.calls.findLast((call) => call.args.includes('--no-extensions'));
-      expect(load?.args.slice(load.args.indexOf('--no-extensions') + 1)).toEqual([
-        '-e',
-        'demo_one:setup',
-        '-e',
-        'demo_two:setup',
-      ]);
+      const [byReference, asLaunched] = helper.spawn.calls
+        .filter((call) => call.args.includes('--no-extensions'))
+        .slice(-2)
+        .map((call) => call.args.slice(call.args.indexOf('--no-extensions') + 1));
+      expect(byReference).toEqual(['-e', 'demo_one:setup', '-e', 'demo_two:setup']);
+      expect(asLaunched).toEqual(['-e', path.join(helper.context.layout.generations, 'g00000002-0002', 'packs')]);
+    });
+
+    describe('in the form conversations get it (decision B5)', () => {
+      const record = (id: string) => readGenerationRecord(helper.context.layout, id);
+      const statuses = async (): Promise<[string, string][]> =>
+        (await describeInstalled(helper.context)).extensions.map((extension) => [extension.name, extension.status]);
+
+      it('passes a pack whose manifest names its entry point through a link, and lists it as ready', async () => {
+        await install({ name: 'demo-one' });
+        const generation = path.join(helper.context.layout.generations, 'g00000001-0001');
+        expect(await readdir(path.join(generation, 'packs'))).toEqual(['000-demo-one']);
+        expect(await realpath(path.join(generation, 'packs', '000-demo-one'))).toBe(
+          path.join(generationPaths(helper.context.layout, 'g00000001-0001', '3.12').site, 'demo_one')
+        );
+        expect(await record('g00000001-0001')).toMatchObject({
+          extensions: { 'demo-one': { form: 'pack', plugin: 'demo-one', manifestBound: true } },
+          launch: { packs: true, modules: [] },
+        });
+        expect(await statuses()).toEqual([['demo-one', 'ready']]);
+      });
+
+      it.each<[string, WheelSpec, string[]?]>([
+        ['without a manifest', { name: 'demo-one', manifest: false }],
+        [
+          'whose manifest names another entry',
+          {
+            name: 'demo-one',
+            manifest: false,
+            files: {
+              'demo_one/aelix-plugin.toml': '[plugin]\nid = "demo-one"\n[plugin.entry]\npython = "demo_one:other"\n',
+            },
+          },
+        ],
+        ['that native does not bind', { name: 'demo-one' }, ['demo-one']],
+      ])('passes a pack %s by reference and lists it as manifest_unbound', async (_what, spec, unbound) => {
+        helper.runtime.unbound = unbound;
+        await install(spec);
+        expect(await record('g00000001-0001')).toMatchObject({
+          extensions: { 'demo-one': { form: 'module', plugin: null } },
+          launch: { packs: false, modules: ['demo_one:setup'] },
+        });
+        await expect(
+          readdir(path.join(helper.context.layout.generations, 'g00000001-0001', 'packs'))
+        ).rejects.toThrow();
+        expect(await statuses()).toEqual([['demo-one', 'manifest_unbound']]);
+        // Nothing to bind: one load check covers the form conversations get.
+        expect(helper.spawn.calls.filter((call) => call.args.includes('--no-extensions'))).toHaveLength(1);
+      });
+
+      it('passes two packs that claim one plugin id by reference', async () => {
+        const claim = (module: string) => ({
+          [`${module}/aelix-plugin.toml`]: `[plugin]\nid = "shared"\n[plugin.entry]\npython = "${module}:setup"\n`,
+        });
+        await install({ name: 'demo-one', manifest: false, files: claim('demo_one') });
+        await install({ name: 'demo-two', manifest: false, files: claim('demo_two') });
+        expect((await record('g00000002-0002'))?.launch).toEqual({
+          packs: false,
+          modules: ['demo_one:setup', 'demo_two:setup'],
+        });
+      });
+
+      it('refuses a pack that loads by reference but not as conversations get it', async () => {
+        await install({ name: 'demo-one' });
+        const [pointer, directories] = [await current(), await generations()];
+        // The plugin id is what only the links directory reports.
+        helper.runtime.loadErrors = { 'demo-two': 'a class entry is called as Cls(api) here' };
+        const error = await failure(install({ name: 'demo-two' }));
+        expect([error.code, error.detail]).toEqual([
+          'LOAD_ERROR',
+          ['load error demo-two: a class entry is called as Cls(api) here'],
+        ]);
+        await expectUntouched(pointer, directories);
+      });
+
+      it('loads and records a bare module entry as that module setup', async () => {
+        await install({ name: 'demo-one', reference: 'demo_one', manifest: false });
+        expect(await record('g00000001-0001')).toMatchObject({
+          extensions: { 'demo-one': { reference: 'demo_one', form: 'module' } },
+          launch: { packs: false, modules: ['demo_one:setup'] },
+        });
+        const load = helper.spawn.calls.findLast((call) => call.args.includes('--no-extensions'));
+        expect(load?.args.slice(load.args.indexOf('--no-extensions') + 1)).toEqual(['-e', 'demo_one:setup']);
+      });
+
+      it('refuses an extension the adapter would not take as a module reference', async () => {
+        const error = await failure(install({ name: 'demo-one', module: 'éclair', manifest: false }));
+        expect([error.code, error.detail]).toEqual([
+          'LOAD_ERROR',
+          ['éclair:setup cannot be passed to a conversation by module reference'],
+        ]);
+        await expectUntouched(null, []);
+      });
+
+      it('names no location of this machine in a load error', async () => {
+        const generation = path.join(helper.context.layout.generations, 'g00000001-0001');
+        helper.runtime.loadErrors = { 'demo_one:setup': `cannot read ${generation}/packs/x in ${os.homedir()}` };
+        const error = await failure(install({ name: 'demo-one' }));
+        expect(error.detail).toEqual(['load error demo_one:setup: cannot read <generation>/packs/x in ~']);
+      });
     });
 
     it('fails verification when native does not answer the load check', async () => {
@@ -338,7 +437,7 @@ describe('changing what is installed', () => {
         expect(outcome).toEqual({ generation: 'g00000002-0002', revision: 2 });
         expect(await statuses()).toEqual([
           ['demo-legacy', 'manifest_unbound'],
-          ['demo-one', 'load_verified'],
+          ['demo-one', 'ready'],
         ]);
       });
 
@@ -348,7 +447,7 @@ describe('changing what is installed', () => {
         await install({ name: 'demo-legacy', manifest: false });
         expect(await statuses()).toEqual([
           ['demo-legacy', 'manifest_unbound'],
-          ['demo-one', 'load_verified'],
+          ['demo-one', 'ready'],
         ]);
       });
 
@@ -449,6 +548,41 @@ describe('changing what is installed', () => {
       expect((await failure(install({ name: 'demo-two' }))).code).toBe('CONFLICT');
       expect(await current()).toEqual(pointer);
       expect(JSON.parse(await readFile(helper.context.layout.pointer, 'utf8'))).toMatchObject({ revision: 1 });
+    });
+
+    // Review of the launcher piece (nit 5): the rename of current.json took effect, then the holder
+    // reported a failure (flushing the directory). The candidate is in effect and must stay.
+    it('keeps a candidate the pointer already names when the switch reports a failure after its rename', async () => {
+      await install({ name: 'demo-one' });
+      const real = helper.context.spawn;
+      helper.context.spawn = (spec) => {
+        const child = real(spec);
+        if (!spec.args.includes('hold')) return child;
+        const writer = directWriter(helper.context.layout.root);
+        return {
+          ...child,
+          onStdout: (listener) => child.onStdout(listener),
+          onStderr: (listener) => child.onStderr(listener),
+          end: () => child.end(),
+          kill: (signal) => child.kill(signal),
+          exited: child.exited,
+          write: (text) => {
+            const request = JSON.parse(text) as { op: string; from: string; to: string };
+            if (request.op !== 'replace' || request.to !== 'current.json') return child.write(text);
+            void writer
+              .replace(request.from, request.to)
+              .then(() => (child as ScriptedChild).print('{"ok": false, "error": "OSError"}\n'));
+          },
+        };
+      };
+      const error = await install({ name: 'demo-two' }).catch((caught: unknown) => caught);
+      expect(error).toBeInstanceOf(Error);
+      expect(await current()).toMatchObject({ generation: 'g00000002-0002', previous: 'g00000001-0001' });
+      expect(await generations()).toEqual(['g00000001-0001', 'g00000002-0002']);
+      expect(await extensionNames()).toEqual(['demo-one', 'demo-two']);
+      helper.context.spawn = real;
+      await install({ name: 'demo-three' });
+      expect(await extensionNames()).toEqual(['demo-one', 'demo-three', 'demo-two']);
     });
 
     it('removes what was built when the candidate cannot be created', async () => {
