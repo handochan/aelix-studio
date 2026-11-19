@@ -142,7 +142,8 @@ const AionrsSendBox: React.FC<{
   const { checkAndUpdateTitle } = useAutoTitle();
   const { current_model } = modelSelection;
   const teamPermission = useTeamPermission();
-  const propagateMode = teamPermission?.propagateMode;
+  const propagateMode =
+    conversation_id === teamPermission?.leaderConversationId ? teamPermission?.propagateMode : undefined;
 
   const { thought, running, turnStartedAtMs, setActiveMsgId, setWaitingResponse, resetState } = useAionrsMessage(
     conversation_id,
@@ -486,12 +487,24 @@ const AionrsSendBox: React.FC<{
 
   const handleSheetModeChange = useCallback(
     async (mode: string) => {
-      if (!runtimeMode || mode === runtimeMode.currentValue) return;
+      if (!runtimeMode) return;
+      const reapply = mode === runtimeMode.currentValue;
+      if (reapply && !propagateMode) return;
+
       try {
-        await runtimeConfig.setConfigOption(runtimeMode.id, mode);
-        setCurrentMode(mode);
-        propagateMode?.(mode);
-        Message.success(t('agentMode.switchSuccess'));
+        let deferred = reapply && runtimeConfig.pendingValues?.[runtimeMode.id] === mode;
+        if (!reapply) {
+          const result = await runtimeConfig.setConfigOptionWithConfirmation(runtimeMode.id, mode);
+          deferred = result.confirmation === 'pending_next_turn';
+          if (!deferred) setCurrentMode(mode);
+        }
+        // A resolved deferred selection still authorizes the Team change.
+        await propagateMode?.(mode);
+        if (deferred) {
+          Message.info(t('agentMode.switchPendingNextTurn'));
+        } else {
+          Message.success(t('agentMode.switchSuccess'));
+        }
       } catch (error) {
         console.error('[AionrsSendBox] Failed to switch mode via sheet:', error);
         Message.error(t(configErrorMessageKey(error)));

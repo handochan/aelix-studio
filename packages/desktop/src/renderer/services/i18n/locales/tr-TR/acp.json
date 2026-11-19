@@ -29,6 +29,17 @@
     "reasoning_effort": "Akıl Yürütme Çabası",
     "default": "Varsayılan"
   },
+  "compaction": {
+    "unknown": "Sonuç bilinmiyor",
+    "manual": "Bağlam sıkıştırma",
+    "automatic": "Otomatik bağlam sıkıştırma",
+    "running": "Sıkıştırılıyor…",
+    "runningManual": "Sıkıştırılıyor… El ile sıkıştırma sırasında durdurma kullanılamaz.",
+    "completed": "Tamamlandı",
+    "completedWithTokens": "Tamamlandı. Sıkıştırma öncesi belirteç sayısı: {{tokens}}",
+    "failed": "Başarısız",
+    "aborted": "İptal edildi"
+  },
   "subagents": {
     "title": "Alt aracılar",
     "child": "{{profile}} · {{index}}",

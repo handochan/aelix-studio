@@ -29,6 +29,17 @@
     "reasoning_effort": "Denkaufwand",
     "default": "Standard"
   },
+  "compaction": {
+    "unknown": "Ergebnis unbekannt",
+    "manual": "Kontextkomprimierung",
+    "automatic": "Automatische Kontextkomprimierung",
+    "running": "Wird komprimiert…",
+    "runningManual": "Wird komprimiert… Die manuelle Komprimierung kann nicht angehalten werden.",
+    "completed": "Abgeschlossen",
+    "completedWithTokens": "Abgeschlossen. Tokens vor der Komprimierung: {{tokens}}",
+    "failed": "Fehlgeschlagen",
+    "aborted": "Abgebrochen"
+  },
   "subagents": {
     "title": "Unteragenten",
     "child": "{{profile}} · {{index}}",

@@ -25,6 +25,7 @@ type UseAcpInitialMessageParams = {
   markSendStarted?: () => void;
   markSendAccepted?: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
   markSendFailed?: (failure: ConversationRuntimeSendFailure) => void;
+  beginCompactionSubmission?: (input: string) => (() => void) | undefined;
   checkAndUpdateTitle: (conversation_id: string, input: string) => void;
   addOrUpdateMessage: (message: TMessage, prepend?: boolean) => void;
 };
@@ -41,6 +42,7 @@ export const useAcpInitialMessage = ({
   markSendStarted,
   markSendAccepted,
   markSendFailed,
+  beginCompactionSubmission,
   checkAndUpdateTitle,
   addOrUpdateMessage,
 }: UseAcpInitialMessageParams): void => {
@@ -56,9 +58,11 @@ export const useAcpInitialMessage = ({
     sessionStorage.removeItem(storageKey);
 
     const sendInitialMessage = async () => {
+      let finishCompactionSubmission: (() => void) | undefined;
       try {
         const initialMessage = JSON.parse(storedMessage);
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
+        finishCompactionSubmission = beginCompactionSubmission?.(input);
         // Guid-page initial files are source-tagged ChatFileRefs (`local` for
         // backend-machine picks, `upload` for device uploads). Body stays plain
         // text; the backend resolves each ref and injects the [[AION_FILES]]
@@ -128,6 +132,8 @@ export const useAcpInitialMessage = ({
         addOrUpdateMessage(errorMessage, true);
         resetState();
         setAiProcessing(false); // Keep the prop-setter in sync with the hook reset
+      } finally {
+        finishCompactionSubmission?.();
       }
     };
 
@@ -137,6 +143,7 @@ export const useAcpInitialMessage = ({
   }, [
     addOrUpdateMessage,
     backend,
+    beginCompactionSubmission,
     checkAndUpdateTitle,
     conversation_id,
     markSendAccepted,

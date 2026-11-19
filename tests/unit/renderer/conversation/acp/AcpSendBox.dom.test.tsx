@@ -7,9 +7,14 @@
 import { act, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
+import { Message } from '@arco-design/web-react';
+import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import type { AcpConfigOptionDto } from '@/common/types/platform/acpTypes';
+import { TeamPermissionProvider } from '@/renderer/pages/team/hooks/TeamPermissionContext';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import AcpSendBox from '@/renderer/pages/conversation/platforms/acp/AcpSendBox';
 import type { UseAcpMessageReturn } from '@/renderer/pages/conversation/platforms/acp/useAcpMessage';
+import type { MobileActionSheetEntry } from '@/renderer/components/chat/MobileActionSheet/types';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
 
 const {
@@ -20,6 +25,10 @@ const {
   setSendBoxHandlerMock,
   useAcpConfigOptionsMock,
   useTeamPermissionMock,
+  teamGetConfigMock,
+  teamSetConfigMock,
+  teamSetModeMock,
+  responseListeners,
   isMobileMock,
   mobileActionSheetEntries,
   sendBoxPropsSpy,
@@ -34,6 +43,8 @@ const {
   draftContentRef,
   messageWarningMock,
   stopInvokeMock,
+  getMessagesInvokeMock,
+  getConversationOrNullMock,
 } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
   addOrUpdateMessageMock: vi.fn(),
@@ -42,19 +53,18 @@ const {
   setSendBoxHandlerMock: vi.fn(),
   useAcpConfigOptionsMock: vi.fn(),
   useTeamPermissionMock: vi.fn(),
+  teamGetConfigMock: vi.fn(),
+  teamSetConfigMock: vi.fn(),
+  teamSetModeMock: vi.fn(),
+  responseListeners: new Set<(message: IResponseMessage) => void>(),
   sendBoxPropsSpy: vi.fn(),
   isMobileMock: { current: false },
   mobileActionSheetEntries: {
-    current: [] as Array<{
-      key: string;
-      submenu?: {
-        onSelect?: (value: string) => void;
-      };
-    }>,
+    current: [] as MobileActionSheetEntry[],
   },
   runtimeViewMock: {
     hydrated: true,
-    state: 'idle' as const,
+    state: 'idle' as 'idle' | 'running' | 'starting',
     isProcessing: false,
     canSendMessage: true,
     activeTurnId: null as string | null,
@@ -76,11 +86,25 @@ const {
   draftContentRef: { current: '' },
   messageWarningMock: vi.fn(),
   stopInvokeMock: vi.fn().mockResolvedValue(undefined),
+  getMessagesInvokeMock: vi.fn(),
+  getConversationOrNullMock: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    team: {
+      getConfigOptions: { invoke: teamGetConfigMock },
+      setConfigOption: { invoke: teamSetConfigMock },
+      setSessionMode: { invoke: teamSetModeMock },
+      ensureSession: { invoke: vi.fn().mockResolvedValue(undefined) },
+    },
     acpConversation: {
+      responseStream: {
+        on: (listener: (message: IResponseMessage) => void) => {
+          responseListeners.add(listener);
+          return () => responseListeners.delete(listener);
+        },
+      },
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
@@ -90,6 +114,7 @@ vi.mock('@/common', () => ({
         invoke: stopInvokeMock,
       },
     },
+    database: { getConversationMessages: { invoke: getMessagesInvokeMock } },
   },
 }));
 
@@ -97,6 +122,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
   default: ({
     onSend,
     onChange,
+    onStop,
     rightTools,
     sendButtonPrefix,
     topRightOverlay,
@@ -112,6 +138,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     isTeamConversation,
   }: {
     onSend: (message: string) => Promise<void>;
+    onStop?: () => Promise<void>;
     onChange?: (value: string) => void;
     rightTools?: React.ReactNode;
     sendButtonPrefix?: React.ReactNode;
@@ -128,6 +155,8 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     isTeamConversation?: boolean;
   }) => {
     sendBoxPropsSpy({
+      onSend,
+      onStop,
       active,
       onFocused,
       disabled,
@@ -178,16 +207,7 @@ vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({
   },
 }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: ({
-    entries,
-  }: {
-    entries?: Array<{
-      key: string;
-      submenu?: {
-        onSelect?: (value: string) => void;
-      };
-    }>;
-  }) => {
+  default: ({ entries }: { entries?: MobileActionSheetEntry[] }) => {
     mobileActionSheetEntries.current = entries ?? [];
     return null;
   },
@@ -274,14 +294,24 @@ vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', (
 vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
   useConversationRuntimeView: () => runtimeViewMock,
 }));
+vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
+  getConversationOrNull: getConversationOrNullMock,
+}));
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({
     setSendBoxHandler: setSendBoxHandlerMock,
   }),
 }));
-vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', () => ({
-  useTeamPermission: useTeamPermissionMock,
-}));
+vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/renderer/pages/team/hooks/TeamPermissionContext')>();
+  return {
+    ...actual,
+    useTeamPermission: () => {
+      const context = actual.useTeamPermission();
+      return useTeamPermissionMock() ?? context;
+    },
+  };
+});
 vi.mock('@/renderer/services/FileService', () => ({
   allSupportedExts: [],
 }));
@@ -306,6 +336,7 @@ vi.mock('@arco-design/web-react', () => ({
     success: vi.fn(),
     error: vi.fn(),
     warning: messageWarningMock,
+    info: vi.fn(),
   },
   Tag: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
   Popover: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
@@ -325,6 +356,7 @@ vi.mock('@arco-design/web-react', () => ({
 }));
 
 const makeMessageState = (): UseAcpMessageReturn => ({
+  manualCompactionRunning: false,
   thought: { subject: '', description: '' },
   setThought: vi.fn(),
   running: true,
@@ -348,6 +380,8 @@ describe('AcpSendBox', () => {
     runtimeViewMock.hydrated = true;
     runtimeViewMock.state = 'idle';
     runtimeViewMock.isProcessing = false;
+    getMessagesInvokeMock.mockResolvedValue({ items: [] });
+    getConversationOrNullMock.mockResolvedValue(null);
     runtimeViewMock.canSendMessage = true;
     runtimeViewMock.activeTurnId = null;
     runtimeViewMock.supportsMidturnDelivery = false;
@@ -626,6 +660,204 @@ describe('AcpSendBox', () => {
     expect(screen.queryByTestId('mock-thought-selector')).not.toBeInTheDocument();
   });
 
+  it.each([
+    { backend: 'antigravity', backend_accepted: undefined, snapshotMode: 'yolo' },
+    { backend: 'codex', backend_accepted: true, snapshotMode: 'yolo' },
+    { backend: 'codex', backend_accepted: true, snapshotMode: 'default' },
+  ])(
+    'propagates an accepted next-turn Ask from $backend and shows pending with snapshot mode $snapshotMode',
+    async ({ backend, backend_accepted, snapshotMode }) => {
+      const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
+        '@/renderer/hooks/agent/useAcpConfigOptions'
+      );
+      useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
+      isMobileMock.current = true;
+      const leaderId = `deferred-mixed-team-leader-${backend}-${snapshotMode}`;
+      const modeOption = (current_value: string): AcpConfigOptionDto => ({
+        id: 'mode',
+        category: 'mode',
+        type: 'select',
+        current_value,
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      });
+
+      let teammateMode = 'yolo';
+      teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('yolo')] });
+      teamSetConfigMock
+        .mockReset()
+        .mockResolvedValueOnce({
+          confirmation: 'pending_next_turn',
+          backend_accepted,
+          config_options: [modeOption(snapshotMode)],
+        })
+        .mockResolvedValueOnce({
+          confirmation: backend === 'antigravity' ? 'pending_next_turn' : 'command_ack',
+          backend_accepted: false,
+          config_options: [modeOption('default')],
+        });
+      teamSetModeMock.mockImplementation(async ({ session_mode }: { session_mode: string }) => {
+        teammateMode = session_mode;
+      });
+
+      render(
+        <TeamPermissionProvider
+          team_id='mixed-team'
+          isLeaderAgent
+          leaderConversationId={leaderId}
+          allConversationIds={[leaderId, 'aelix-teammate']}
+          runtimeStartingConversationIds={new Set()}
+        >
+          <AcpSendBox
+            conversation_id={leaderId}
+            backend={backend}
+            workspacePath='/tmp/workspace'
+            messageState={makeMessageState()}
+          />
+        </TeamPermissionProvider>
+      );
+
+      const permission = () => mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+      const activeMode = () => permission()?.submenu?.options.find((option) => option.active)?.key;
+      await waitFor(() => expect(activeMode()).toBe('yolo'));
+      await act(async () => permission()?.submenu?.onSelect('default'));
+      expect(teamSetModeMock).toHaveBeenCalledWith({ team_id: 'mixed-team', session_mode: 'default' });
+      expect(teammateMode).toBe('default');
+      expect(activeMode()).toBe(snapshotMode);
+      expect(Message.info).toHaveBeenCalledWith('agentMode.switchPendingNextTurn');
+      expect(Message.success).not.toHaveBeenCalled();
+
+      if (snapshotMode === 'default') {
+        // The HTTP snapshot can already match while the request is pending.
+        // A same-mode retry should still report pending and only retry the Team write.
+        await act(async () => permission()?.submenu?.onSelect('default'));
+        expect(teamSetConfigMock).toHaveBeenCalledOnce();
+        expect(Message.info).toHaveBeenCalledTimes(2);
+        expect(Message.success).not.toHaveBeenCalled();
+      }
+      const propagationCount = snapshotMode === 'default' ? 2 : 1;
+
+      teamGetConfigMock.mockResolvedValue({ config_options: [modeOption('default')] });
+      await act(async () => {
+        for (const listener of responseListeners) {
+          listener({
+            conversation_id: leaderId,
+            msg_id: 'observed-ask',
+            type: 'acp_config_option',
+            data: { config_options: [modeOption('default')] },
+          });
+        }
+      });
+      await waitFor(() => expect(activeMode()).toBe('default'));
+      expect(teamSetModeMock).toHaveBeenCalledTimes(propagationCount);
+
+      // An unconfirmed or explicitly unaccepted command cannot elevate the teammate.
+      await act(async () => permission()?.submenu?.onSelect('yolo'));
+      expect(Message.error).toHaveBeenCalled();
+      expect(teamSetModeMock).toHaveBeenCalledTimes(propagationCount);
+      expect(teammateMode).toBe('default');
+    }
+  );
+
+  it('keeps the Team on Ask when a legacy Codex mode selection is only dispatched and later rejected', async () => {
+    const actual = await vi.importActual<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>(
+      '@/renderer/hooks/agent/useAcpConfigOptions'
+    );
+    useAcpConfigOptionsMock.mockImplementation(actual.useAcpConfigOptions);
+    isMobileMock.current = true;
+    const leaderId = 'unconfirmed-codex-team-leader';
+    const ask: AcpConfigOptionDto = {
+      id: 'mode',
+      category: 'mode',
+      type: 'select',
+      current_value: ':workspace',
+      options: [
+        { value: ':workspace', label: 'Ask' },
+        { value: ':danger-full-access', label: 'Full Access' },
+      ],
+    };
+    teamGetConfigMock.mockResolvedValue({ config_options: [ask] });
+    // Even if the legacy response contains the requested value, its confirmation
+    // is only the command write. A later rejection must leave this scope untouched.
+    teamSetConfigMock.mockReset().mockResolvedValueOnce({
+      confirmation: 'pending_next_turn',
+      config_options: [{ ...ask, current_value: ':danger-full-access' }],
+    });
+
+    render(
+      <TeamPermissionProvider
+        team_id='codex-with-aelix-team'
+        isLeaderAgent
+        leaderConversationId={leaderId}
+        allConversationIds={[leaderId, 'aelix-teammate']}
+        runtimeStartingConversationIds={new Set()}
+      >
+        <AcpSendBox
+          conversation_id={leaderId}
+          backend='codex'
+          workspacePath='/tmp/workspace'
+          messageState={makeMessageState()}
+        />
+      </TeamPermissionProvider>
+    );
+
+    const permission = () => mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+    const activeMode = () => permission()?.submenu?.options.find((option) => option.active)?.key;
+    await waitFor(() => expect(activeMode()).toBe(':workspace'));
+    await act(async () => permission()?.submenu?.onSelect(':danger-full-access'));
+    expect(teamSetConfigMock).toHaveBeenCalledOnce();
+    expect(teamSetModeMock).not.toHaveBeenCalled();
+    expect(Message.error).toHaveBeenCalled();
+    expect(Message.success).not.toHaveBeenCalled();
+
+    await act(async () => {
+      for (const listener of responseListeners) {
+        listener({
+          conversation_id: leaderId,
+          msg_id: 'refresh-after-rejection',
+          type: 'acp_config_option',
+          data: { config_options: [ask] },
+        });
+      }
+    });
+    expect(activeMode()).toBe(':workspace');
+    expect(teamSetModeMock).not.toHaveBeenCalled();
+  });
+
+  it('labels the effective Aelix Ask mode in the mobile sheet', () => {
+    isMobileMock.current = true;
+    useAcpConfigOptionsMock.mockReturnValue({
+      mode: {
+        id: 'permission_mode',
+        category: 'mode',
+        currentValue: 'default',
+        options: [
+          { value: 'default', label: 'Ask' },
+          { value: 'yolo', label: 'Yolo' },
+        ],
+      },
+      setStatus: { state: 'idle' },
+    });
+
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='acp'
+        workspacePath='/tmp/workspace'
+        messageState={makeMessageState()}
+      />
+    );
+
+    const permission = mobileActionSheetEntries.current.find((entry) => entry.key === 'permission');
+    expect(permission?.meta).toBe('agentMode.ask');
+    expect(permission?.submenu?.options.find((option) => option.key === 'default')).toMatchObject({
+      label: 'agentMode.ask',
+      active: true,
+    });
+  });
+
   it('applies runtime thought level from the mobile action sheet without persisting a global preference', async () => {
     isMobileMock.current = true;
     const setConfigOption = vi.fn().mockResolvedValue([]);
@@ -893,6 +1125,118 @@ describe('AcpSendBox', () => {
       };
       return props.onSendNow;
     };
+
+    it('keeps a queued command from stopping a manual compaction', async () => {
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      render(
+        <AcpSendBox
+          conversation_id='conv-1'
+          backend='aelix'
+          messageState={{ ...makeMessageState(), manualCompactionRunning: true }}
+        />
+      );
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('blocks Stop and queued send-now while /compact submission awaits the first frame', async () => {
+      let finishSend!: (value: unknown) => void;
+      sendMessageInvokeMock.mockReturnValue(new Promise((resolve) => (finishSend = resolve)));
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      const original = sendBoxPropsSpy.mock.calls.at(-1)?.[0];
+      let submitted: Promise<void>;
+      act(() => {
+        submitted = original.onSend('/compact keep decisions');
+      });
+      await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalled());
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await act(async () => {
+        await original.onStop();
+        await getOnSendNow()(queuedItem);
+        finishSend({ turn_id: 'turn-compact', runtime: null, msg_id: 'msg-1' });
+        await submitted;
+      });
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+      expect(removeMock).not.toHaveBeenCalled();
+    });
+
+    it('keeps Stop unavailable after reopening an active manual compaction without a stream frame', async () => {
+      let finishHistory!: (value: unknown) => void;
+      getMessagesInvokeMock.mockReturnValue(new Promise((resolve) => (finishHistory = resolve)));
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(getMessagesInvokeMock).toHaveBeenCalled());
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await act(async () => {
+        finishHistory({
+          items: [{ type: 'text', position: 'right', content: { content: '/compact keep decisions' } }],
+        });
+        await getOnSendNow()(queuedItem);
+      });
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('does not use the previous user message while the host is still persisting the new turn', async () => {
+      runtimeViewMock.activeTurnId = 'turn-compact';
+      runtimeViewMock.state = 'starting';
+      runtimeViewMock.isProcessing = true;
+      getConversationOrNullMock.mockResolvedValue({ runtime: { turn_id: 'turn-compact', state: 'starting' } });
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Previous ordinary message' } }],
+      });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(getConversationOrNullMock).toHaveBeenCalled());
+      expect(getMessagesInvokeMock).not.toHaveBeenCalled();
+      await act(async () => getOnSendNow()(queuedItem));
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('restores Stop for ordinary active turns after checking persisted input', async () => {
+      runtimeViewMock.activeTurnId = 'turn-ordinary';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Keep working' } }],
+      });
+      stopInvokeMock.mockResolvedValue({ runtime: null });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-ordinary' });
+    });
+
+    it('recovers ordinary Stop when the current input is older than the latest 50 rows', async () => {
+      runtimeViewMock.activeTurnId = 'turn-long';
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.isProcessing = true;
+      getMessagesInvokeMock
+        .mockResolvedValueOnce({
+          items: Array.from({ length: 50 }, (_, index) => ({ id: `tool-${index}`, type: 'acp_tool_call' })),
+          has_more_before: true,
+          oldest_cursor: 'more-history',
+        })
+        .mockResolvedValueOnce({
+          items: [{ type: 'text', position: 'right', content: { content: 'Ordinary turn still running' } }],
+          has_more_before: false,
+        });
+      stopInvokeMock.mockResolvedValue({ runtime: null });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+
+      expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      expect(getMessagesInvokeMock).toHaveBeenNthCalledWith(2, {
+        conversation_id: 'conv-1',
+        limit: 50,
+        before: 'more-history',
+      });
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-long' });
+    });
 
     it('delivers mid-turn for a supporting agent instead of stopping the turn', async () => {
       runtimeViewMock.supportsMidturnDelivery = true;

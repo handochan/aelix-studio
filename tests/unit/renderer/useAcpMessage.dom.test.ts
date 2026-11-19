@@ -11,6 +11,7 @@ import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conve
 import { resetConversationTurnClockForTests } from '@/renderer/pages/conversation/utils/conversationTurnClock';
 import { resetEnsureConversationRuntimeStateForTests } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 import type { IResponseMessage } from '@/common/adapter/ipcBridge';
+import contextControls from '../../fixtures/aelix-context-controls.json';
 
 const {
   addOrUpdateMessageMock,
@@ -509,6 +510,66 @@ describe('useAcpMessage', () => {
     });
     expect(result.current.tokenUsage).toBeNull();
     expect(result.current.context_limit).toBe(0);
+  });
+
+  it('clears pre-compaction usage and ignores an older in-flight snapshot', async () => {
+    vi.mocked(getConversationOrNull).mockResolvedValue(null);
+    const snapshot = deferred<{ used: number; size: number }>();
+    getUsageInvokeMock.mockReturnValue(snapshot.promise);
+    const { result } = renderHook(() => useAcpMessage('conv-1'));
+    await waitFor(() => expect(getUsageInvokeMock).toHaveBeenCalledTimes(1));
+    const notify = (data: unknown) =>
+      act(() =>
+        responseStreamHandlerRef.current?.({
+          type: 'acp_context_usage',
+          data,
+          msg_id: 'usage',
+          conversation_id: 'conv-1',
+        })
+      );
+
+    notify(contextControls.knownUsage);
+    expect(result.current.tokenUsage?.total_tokens).toBe(18_432);
+    notify(contextControls.unknownUsage);
+    await act(async () => snapshot.resolve(contextControls.knownUsage));
+    expect(result.current.tokenUsage).toBeNull();
+    expect(result.current.context_limit).toBe(0);
+
+    notify({ ...contextControls.knownUsage, used: 897 });
+    expect(result.current.tokenUsage?.total_tokens).toBe(897);
+  });
+
+  it('suppresses historical usage carried in an unknown snapshot on reload', async () => {
+    vi.mocked(getConversationOrNull).mockResolvedValue(null);
+    getUsageInvokeMock.mockResolvedValue(contextControls.unknownUsage);
+    const { result } = renderHook(() => useAcpMessage('conv-1'));
+    await waitFor(() => expect(getUsageInvokeMock).toHaveBeenCalledTimes(1));
+    expect(result.current.tokenUsage).toBeNull();
+  });
+
+  it('keeps Stop unavailable from manual compaction progress until the turn ends', async () => {
+    vi.mocked(getConversationOrNull).mockResolvedValue(null);
+    const { result } = renderHook(() => useAcpMessage('conv-1'));
+    await waitFor(() => expect(result.current.hasHydratedRunningState).toBe(true));
+    act(() =>
+      responseStreamHandlerRef.current?.({
+        type: 'acp_tool_call',
+        data: { _meta: contextControls.manualCompactionStarted._meta },
+        msg_id: 'compact',
+        conversation_id: 'conv-1',
+      })
+    );
+    expect(result.current.manualCompactionRunning).toBe(true);
+
+    act(() =>
+      responseStreamHandlerRef.current?.({
+        type: 'finish',
+        data: {},
+        msg_id: 'compact',
+        conversation_id: 'conv-1',
+      })
+    );
+    expect(result.current.manualCompactionRunning).toBe(false);
   });
 
   it('preserves the turn start timestamp when switching away and back to a running conversation', async () => {

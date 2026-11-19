@@ -11,6 +11,7 @@ import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
 import SubagentProgressPanel, { presentSubagentTool, type SubagentPresentation } from '../acp/SubagentProgress';
+import { readAcpCompaction, type AcpCompaction } from '../acp/compaction';
 import './MessageToolGroupSummary.css';
 
 const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
@@ -29,11 +30,12 @@ const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
   }
 };
 
-const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: SubagentPresentation | null }> = ({
-  item,
-  subagents,
-}) => {
-  const { t } = useTranslation();
+const ToolItemDetail: React.FC<{
+  item: NormalizedToolCall;
+  subagents?: SubagentPresentation | null;
+  compaction?: AcpCompaction | null;
+}> = ({ item, subagents, compaction }) => {
+  const { t, i18n } = useTranslation();
   const interrupted = subagents?.interrupted ?? false;
   const [expanded, setExpanded] = useState(interrupted);
   useEffect(() => {
@@ -86,6 +88,27 @@ const ToolItemDetail: React.FC<{ item: NormalizedToolCall; subagents?: SubagentP
     setExpanded(nextExpanded);
     if (nextExpanded) void loadFullItem();
   };
+
+  if (compaction) {
+    const { reason, state, tokensBefore } = compaction;
+    const title = t(reason === 'manual' ? 'acp.compaction.manual' : 'acp.compaction.automatic');
+    const detail =
+      state === 'running' && reason === 'manual'
+        ? t('acp.compaction.runningManual')
+        : state === 'completed' && tokensBefore !== undefined
+          ? t('acp.compaction.completedWithTokens', {
+              tokens: new Intl.NumberFormat(i18n?.resolvedLanguage).format(tokensBefore),
+            })
+          : t(`acp.compaction.${state}`);
+    return (
+      <div className='flex items-center gap-12px text-t-secondary' role='status' data-tool-call-id={item.key}>
+        <Badge status={statusToBadge(state === 'aborted' || state === 'unknown' ? 'canceled' : item.status)} />
+        <span className='text-13px'>
+          <span className='font-medium'>{title}</span> {detail}
+        </span>
+      </div>
+    );
+  }
 
   return (
     <div className='flex flex-col' data-tool-call-id={subagents ? item.key : undefined}>
@@ -172,19 +195,20 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messag
       normalized.map((item) => {
         const extension = extensionsByCall.get(item.key);
         const subagents = extension ? presentSubagentTool(extension, item.status) : null;
-        return { item: subagents ? { ...item, status: subagents.parentStatus } : item, subagents };
+        const compaction = readAcpCompaction(extension);
+        return { item: subagents ? { ...item, status: subagents.parentStatus } : item, subagents, compaction };
       }),
     [normalized, extensionsByCall]
   );
   const tools = presented.map(({ item }) => item);
-  const hasSubagents = presented.some(({ subagents }) => subagents !== null);
+  const hasProgressDetails = presented.some(({ subagents, compaction }) => subagents !== null || compaction !== null);
   const hasRunning = tools.some((item) => item.status === 'running');
-  const [showMore, setShowMore] = useState(hasRunning || hasSubagents);
+  const [showMore, setShowMore] = useState(hasRunning || hasProgressDetails);
   const userToggled = useRef(false);
 
   useEffect(() => {
-    if ((hasRunning || hasSubagents) && (!hasSubagents || !userToggled.current)) setShowMore(true);
-  }, [hasRunning, hasSubagents]);
+    if ((hasRunning || hasProgressDetails) && (!hasProgressDetails || !userToggled.current)) setShowMore(true);
+  }, [hasRunning, hasProgressDetails]);
 
   return (
     <div className='tool-group-summary'>
@@ -205,8 +229,8 @@ const MessageToolGroupSummary: React.FC<{ messages: ToolMessage[] }> = ({ messag
       </div>
       {showMore && (
         <div className='tool-group-summary__body'>
-          {presented.map(({ item, subagents }) => (
-            <ToolItemDetail key={item.key} item={item} subagents={subagents} />
+          {presented.map(({ item, subagents, compaction }) => (
+            <ToolItemDetail key={item.key} item={item} subagents={subagents} compaction={compaction} />
           ))}
         </div>
       )}

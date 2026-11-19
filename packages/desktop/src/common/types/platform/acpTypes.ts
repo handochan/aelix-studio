@@ -15,7 +15,7 @@ import type { TConversationRuntimeSummary } from '@/common/config/storage';
 export interface CustomAgentAdvancedOverrides {
   yolo_id?: string;
   native_skills_dirs?: string[];
-  behavior_policy?: { supports_side_question?: boolean };
+  behavior_policy?: { supports_side_question?: boolean; supports_team?: boolean };
   description?: string;
 }
 
@@ -195,9 +195,8 @@ export type AcpConfigOptionType = 'select' | 'boolean' | 'string';
 
 /**
  * - `observed` — the agent applied it; the next tool approval already uses it.
- * - `pending_next_turn` — accepted, but the agent applies it only from the NEXT turn
- *   (codex always; claude/agy when raised mid-turn). NOT a failure: the picker shows it
- *   as pending and the real confirmation arrives later on an `acp_config_option` frame.
+ * - `pending_next_turn` — the effective mode is still unchanged. Use
+ *   `backend_accepted` to distinguish acceptance from dispatch on older hosts.
  * - `command_ack` — accepted, but nothing could be confirmed either way.
  */
 export type AcpConfigOptionConfirmation = 'observed' | 'pending_next_turn' | 'command_ack';
@@ -237,6 +236,7 @@ export type SetConfigOptionRequest = {
 
 export type SetConfigOptionResponse = {
   confirmation: AcpConfigOptionConfirmation;
+  backend_accepted?: boolean;
   config_options: AcpConfigOptionDto[] | null;
 };
 
