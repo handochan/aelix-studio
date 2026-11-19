@@ -13,6 +13,41 @@ EXTENSION_STATE = 'AELIX_STUDIO_EXTENSION_STATE'
 _LEASES = []
 
 
+def _path_key(value):
+    """Node and Python can spell the same Windows path with different case or a long-path prefix."""
+    key = os.path.normcase(str(value))
+    if os.name == 'nt':
+        if key.startswith('\\\\?\\unc\\'):
+            return '\\\\' + key[8:]
+        if key.startswith('\\\\?\\'):
+            return key[4:]
+    return key
+
+
+def _lease_file(file, flags):
+    if os.name != 'nt':
+        return os.open(file, flags, 0o600)
+    # Windows' CRT open cannot share deletion, which would prevent publishing the
+    # lock-held pending file by rename. CREATE_NEW still refuses any existing path.
+    import ctypes
+    from ctypes import wintypes
+    import msvcrt
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    create = kernel.CreateFileW
+    create.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+                       wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    create.restype = wintypes.HANDLE
+    handle = create(str(file), 0xC0000000, 7, None, 1, 0x80, None)  # RW, share R/W/delete, CREATE_NEW, NORMAL
+    if handle == wintypes.HANDLE(-1).value:
+        raise ctypes.WinError(ctypes.get_last_error())
+    try:
+        return msvcrt.open_osfhandle(handle, os.O_RDWR | os.O_BINARY)
+    except OSError:
+        kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+        kernel.CloseHandle(handle)
+        raise
+
+
 def _studio_generation(bundle, state):
     """Site directory and ``--extension`` values of the current generation, or None.
 
@@ -28,13 +63,11 @@ def _studio_generation(bundle, state):
     there, locked, then renamed. Clean-up removes only lease files it found unlocked, so a
     lease under its generation's name is never one it took for stale; if clean-up removed the
     pending file first, the rename fails and the lease is taken again. Anything unusable means
-    the bundle alone, exactly as before extensions existed. Windows is not offered generations
-    yet (Studio #32, stage 1a').
+    the bundle alone, exactly as before extensions existed.
     """
-    if os.name == 'nt' or not state or not os.path.isabs(state):
+    if not state or not os.path.isabs(state):
         return None
     import errno
-    import fcntl
     import json
     import re
     import secrets
@@ -46,7 +79,7 @@ def _studio_generation(bundle, state):
     nofollow = getattr(os, 'O_NOFOLLOW', 0)
 
     def own(path):
-        return path.is_dir() and not path.is_symlink() and os.path.realpath(path) == str(path)
+        return path.is_dir() and not path.is_symlink() and not (os.name == 'nt' and path.is_junction()) and _path_key(os.path.realpath(path)) == _path_key(path)
 
     def read_json(path):
         try:
@@ -60,7 +93,7 @@ def _studio_generation(bundle, state):
     version = str(manifest.get('python') or '')
     source = (manifest.get('native') or {}).get('sourceTag') or {}
     binding = {
-        'bundle': str(bundle),
+        'bundle': _path_key(bundle),
         'target': manifest.get('target'),
         'pythonMinor': '.'.join(version.split('.')[:2]),
         'dependencyLockSha256': manifest.get('dependencyLockSha256'),
@@ -104,7 +137,13 @@ def _studio_generation(bundle, state):
         deadline = time.monotonic() + wait
         while True:
             try:
-                fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                if os.name == 'nt':
+                    import msvcrt
+                    os.lseek(handle, 0, os.SEEK_SET)
+                    msvcrt.locking(handle, msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 return True
             except OSError as error:
                 if error.errno not in (errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES) or time.monotonic() >= deadline:
@@ -113,6 +152,8 @@ def _studio_generation(bundle, state):
 
     def lock(path, wait):
         try:
+            if path.is_symlink():
+                return None
             handle = os.open(path, os.O_RDWR | os.O_CREAT | nofollow, 0o600)
         except OSError:
             return None
@@ -125,7 +166,7 @@ def _studio_generation(bundle, state):
         token = f'{os.getpid()}-{secrets.token_hex(4)}'
         # A name clean-up maps to no generation; it is renamed only once it is locked.
         pending = leases / f'.pending.{token}'
-        handle = os.open(pending, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow, 0o600)
+        handle = _lease_file(pending, os.O_RDWR | os.O_CREAT | os.O_EXCL | nofollow)
         try:
             # The lease probe holds a lease it tests for an instant; wait that out.
             if acquire(handle, 1.0):
@@ -153,7 +194,8 @@ def _studio_generation(bundle, state):
 
     def arguments_of(root, generation, found):
         directory = root / 'generations' / generation
-        site = directory / 'venv' / 'lib' / f"python{binding['pythonMinor']}" / 'site-packages'
+        lib = ('Lib',) if os.name == 'nt' else ('lib', f"python{binding['pythonMinor']}")
+        site = directory.joinpath('venv', *lib, 'site-packages')
         packs, modules = found['launch']['packs'], found['launch']['modules']
         if not own(site) or (packs and not own(directory / 'packs')):
             return None
@@ -173,7 +215,8 @@ def _studio_generation(bundle, state):
             chosen = pointer_in_effect(root)
             # A mismatched current generation stays on disk for reconciliation or reinstall.
             # It must not lend its paths or extension arguments to this adapter.
-            if not chosen or chosen[2].get('binding') != binding:
+            saved = chosen[2].get('binding') if chosen else None
+            if not isinstance(saved, dict) or dict(saved, bundle=_path_key(saved.get('bundle'))) != binding:
                 return None
             held = lease(root / 'leases', chosen[0])
             if not held:
@@ -219,7 +262,27 @@ if sys.platform == 'win32' and mode != 'acp':
     sys.path[:0] = [str(site / name) for name in ('win32', 'win32/lib', 'Pythonwin')]
     _dll_handles.append(os.add_dll_directory(str(site / 'pywin32_system32')))
     import pywin32_bootstrap
-if mode == 'helper':
+if mode == 'windows-child' and sys.platform == 'win32':
+    import subprocess
+    import win32api
+    import win32job
+
+    # Join before creating the child: pip and descendants inherit the job at birth,
+    # including when Node terminates this supervisor during process creation.
+    job = win32job.CreateJobObject(None, None)
+    info_class = win32job.JobObjectExtendedLimitInformation
+    limits = win32job.QueryInformationJobObject(job, info_class)
+    limits['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+    win32job.SetInformationJobObject(job, info_class, limits)
+    win32job.AssignProcessToJobObject(job, win32api.GetCurrentProcess())
+    try:
+        result = subprocess.call(arguments, stdin=sys.stdin, stdout=sys.stdout, stderr=sys.stderr)
+    except OSError as error:
+        print(f'[studio] could not start the helper child: {error}', file=sys.stderr, flush=True)
+        result = 1
+    # Keep the handle alive until process exit, including on the successful path.
+    os._exit(result)
+elif mode == 'helper':
     arguments = [arg for arg in arguments if arg not in ('-I', '-B')]
     if len(arguments) != 2 or arguments[0] != '-c':
         raise SystemExit('Unsupported helper invocation')

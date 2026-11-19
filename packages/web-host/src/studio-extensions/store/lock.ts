@@ -53,7 +53,7 @@ def plain(name):
     return name not in ('', '.', '..') and not any(mark in name for mark in marks)
 
 def own(directory):
-    return not os.path.islink(directory) and os.path.realpath(directory) == directory
+    return not os.path.islink(directory) and os.path.normcase(os.path.realpath(directory)) == os.path.normcase(directory)
 
 def confined(root, relative):
     parts = relative.split('/')
@@ -91,6 +91,8 @@ mode, target = sys.argv[1], sys.argv[2]
 if mode == 'hold':
     deadline = time.monotonic() + float(sys.argv[3])
     try:
+        if os.path.islink(target):
+            raise OSError(errno.ELOOP, 'lock is a link')
         fd = os.open(target, os.O_RDWR | os.O_CREAT | NOFOLLOW, 0o600)
     except OSError as error:
         if error.errno != errno.ELOOP:

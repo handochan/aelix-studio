@@ -302,7 +302,7 @@ class OutboundAuditTests(unittest.TestCase):
         self.assertEqual(result['unparsedRecords'], 1)
 
 
-@unittest.skipIf(os.name == 'nt', 'extension generations are not offered on Windows yet (Studio #32, stage 1a\')')
+@unittest.skipIf(os.name == 'nt', 'the synthetic launcher fixture uses POSIX flock, symlinks and venv paths')
 class ExtensionGenerationLaunchTests(unittest.TestCase):
     """The bundled launcher adds the current extension generation to new conversations (Studio #32)."""
 
@@ -432,7 +432,7 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
         import types
         source = (self.bundle / 'launch.py').read_text()
         namespace = {'os': os, 'sys': sys, 'Path': Path, '_LEASES': []}
-        exec(compile(source[source.index('def _studio_generation'):source.index('\nroot = Path(__file__)')],
+        exec(compile(source[source.index('def _path_key'):source.index('\nroot = Path(__file__)')],
                      'launch.py', 'exec'), namespace)
         fake = types.ModuleType('fcntl')
         for name in dir(fcntl):

@@ -209,6 +209,38 @@ def long_path(path):
     return path
 
 
+def runtime_inventory(payload):
+    import stat
+    inventory = {'.': (payload.lstat().st_mode, None)}
+    for file in payload.rglob('*'):
+        mode = file.lstat().st_mode
+        content = os.readlink(file) if stat.S_ISLNK(mode) else digest(file) if stat.S_ISREG(mode) else None
+        inventory[str(file.relative_to(payload))] = (mode, content)
+    return inventory
+
+
+def qualify_extensions(audits, env, payload, app, kind, installed_python, report_path):
+    before = runtime_inventory(payload)
+    try:
+        audits.run('extensions', [
+            'node', '--import', 'tsx', str(ROOT / 'packages/web-host/tests/extensionInstallerQualification.ts'),
+            str(payload), str(report_path),
+        ], env=env, timeout=300, roots=(installed_python,), required=(installed_python,))
+        if audits.enabled:
+            audit = audits.sessions[-1]
+            if any(audit[field] for field in ('wholeAppExternalAttempts', 'wholeAppUnparsedRecords',
+                                              'wholeAppClassificationErrors')):
+                raise RuntimeError('Extension qualification emitted external or unclassified network activity')
+    finally:
+        if runtime_inventory(payload) != before:
+            raise RuntimeError('Extension qualification changed the installed runtime')
+        if kind == 'dmg':
+            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(installedRuntimeUnchanged=True, adHocSignatureVerifiedAfter=kind == 'dmg')
+    report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+
+
 def assert_windows_install_unused():
     # Refuse an existing real installation or running desktop before NSIS
     # can change its per-user registration or request another app's exit.
@@ -498,6 +530,8 @@ def main(args):
             # audit. The final receipt and process still fail if any audit fails.
             audits.run('permission', permission_command, required=(core, installed_python), env=environment,
                        timeout=480, defer_failure=True)
+            extension_output = output.with_name('extensions-qualification.json')
+            qualify_extensions(audits, environment, payload, app, kind, installed_python, extension_output)
             if sys.platform == 'linux':
                 audits.positive_controls(environment, defer_failure=True)
             permission = json.loads(permission_output.read_text(encoding='utf-8'))
@@ -522,6 +556,7 @@ def main(args):
                           installerCopyFailureRecovery=(json.loads(copy_failure_report.read_text()) if sys.platform == 'win32' else None),
                           installerCopyHookSha256=(digest(Path(__file__).with_name('windowsInstaller.nsh')) if sys.platform == 'win32' else None),
                           windowsInstaller=(json.loads(installer_receipt.read_text(encoding='utf-8')) if sys.platform == 'win32' else None),
+                          extensionsQualificationSha256=digest(extension_output),
                           cleanOSAccount=False, crossVersionUpgrade=False)
             if sys.platform == 'linux':
                 report.update(outboundScope='host-and-installed-native-process-trees',
