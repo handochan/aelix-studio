@@ -463,6 +463,18 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
         edit(value)
         file.write_text(json.dumps(value))
 
+    def test_bundle_replacement_leaves_the_pointer_and_starts_without_the_stale_generation(self):
+        pointer = self.state / 'current.json'
+        record = self.state / 'generations' / self.GENERATION / 'generation.json'
+        before = pointer.read_bytes(), record.read_bytes()
+        changed = dict(self.manifest, dependencyLockSha256='b' * 64)
+        (self.bundle / 'manifest.json').write_text(json.dumps(changed))
+
+        reply, _ = self.started('--profile', 'coding')
+        self.assertEqual(reply['argv'], self.legacy('--profile', 'coding'))
+        self.assertEqual((pointer.read_bytes(), record.read_bytes()), before)
+        self.assertEqual(list((self.state / 'leases').iterdir()), [])
+
     def test_starts_with_the_bundle_alone_when_nothing_usable_is_there(self):
         def generation_record(edit):
             for generation in (self.GENERATION, self.PREVIOUS):
@@ -470,7 +482,6 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
         cases = {
             'no pointer at all': lambda: [(self.state / name).unlink() for name in ('current.json', 'current.previous.json')],
             'both pointers damaged': lambda: [(self.state / name).write_text('[]') for name in ('current.json', 'current.previous.json')],
-            'another bundle': lambda: (self.bundle / 'manifest.json').write_text(json.dumps(dict(self.manifest, dependencyLockSha256='b' * 64))),
             'an older record schema': lambda: generation_record(lambda value: value.update(schema='aelix.studio.extensions.generation/1')),
             'no extension to load': lambda: generation_record(lambda value: value.update(launch={'packs': False, 'modules': []})),
             'a missing links directory': lambda: os.rmdir(self.state / 'generations' / self.GENERATION / 'packs'),

@@ -14,8 +14,8 @@ import {
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
 import { generationPaths, resolveBundle } from '../store/layout';
 import { newPointer, readGenerationRecord, readPointer, switchPointer } from '../store/pointer';
-import { ExtensionFailure, type ExtensionSource } from '../types';
-import { describe as describeInstalled, mutate, rollback, type MutationHooks } from './mutate';
+import { ExtensionFailure, type FileExtensionSource } from '../types';
+import { describe as describeInstalled, mutate, reconcileBundle, rollback, type MutationHooks } from './mutate';
 
 describe('changing what is installed', () => {
   let scratch = '';
@@ -35,7 +35,7 @@ describe('changing what is installed', () => {
   });
   afterEach(() => rm(scratch, { recursive: true, force: true }));
 
-  const source = async (spec: WheelSpec, folder = 'wheels'): Promise<ExtensionSource> => ({
+  const source = async (spec: WheelSpec, folder = 'wheels'): Promise<FileExtensionSource> => ({
     kind: 'file',
     path: await writeWheel(path.join(scratch, folder), spec),
   });
@@ -858,21 +858,89 @@ describe('changing what is installed', () => {
       });
     });
 
-    it('marks extensions for reinstall and refuses changes when the bundle is another one', async () => {
-      await install({ name: 'demo-one' });
-      await install({ name: 'demo-two' });
+    const replaceBundle = async (): Promise<void> => {
       const manifest = path.join(helper.context.bundle.root, 'manifest.json');
       await writeFile(manifest, (await readFile(manifest, 'utf8')).replace('a'.repeat(64), 'b'.repeat(64)));
       const updated = await resolveBundle(helper.context.bundle.root);
       if (!updated) throw new Error('the changed bundle did not resolve');
       helper.context.bundle = updated;
-      const listing = await describeInstalled(helper.context);
-      expect(listing.extensions.map((extension) => extension.status)).toEqual(['reinstall_needed', 'reinstall_needed']);
-      expect(listing.rollbackAvailable).toBe(false);
+    };
+
+    it('moves a compatible generation into the new bundle after validating it', async () => {
+      await install({ name: 'demo-one' });
+      const old = await current();
+      await replaceBundle();
+      const installs = helper.nativeRuns().filter((args) => args.includes('install')).length;
+      expect((await describeInstalled(helper.context)).extensions[0].status).toBe('reinstall_needed');
+      const listing = await reconcileBundle(helper.context);
+      expect(listing).toMatchObject({
+        previous: old?.generation,
+        revision: 2,
+        extensions: [{ name: 'demo-one', status: 'ready' }],
+      });
+      expect((await current())?.binding).toEqual(helper.context.bundle.binding);
+      expect(helper.nativeRuns().filter((args) => args.includes('install'))).toHaveLength(installs);
+      expect(await generations()).toContain(old?.generation);
+    });
+
+    it('replays preserved wheel bytes offline if the copied generation fails dependency validation', async () => {
+      const request = await source({ name: 'demo-one' });
+      await mutate(helper.context, { action: 'install', source: request }, hooks);
+      await rm(request.path);
+      await replaceBundle();
+      let checks = 0;
+      helper.runtime.checkDependencies = () => (++checks === 1 ? 1 : 0);
+      const listing = await reconcileBundle(helper.context);
+      expect(listing).toMatchObject({ revision: 2, extensions: [{ name: 'demo-one', status: 'ready' }] });
+      const installer = helper.spawn.calls.findLast((call) => call.args.includes('install'));
+      expect(installer?.args).toContain('--offline');
+      expect(installer?.env).toMatchObject({ PIP_NO_INDEX: '1' });
+      expect(installer?.env).not.toHaveProperty('PIP_INDEX_URL');
+      expect(await generations()).toHaveLength(2);
+    });
+
+    it('marks extensions for reinstall and preserves both old generations when validation fails after a bundle change', async () => {
+      await install({ name: 'demo-one' });
+      await install({ name: 'demo-two' });
+      await replaceBundle();
+      helper.runtime.loadErrors = { 'demo_one:setup': 'incompatible with the new bundle' };
       const [pointer, directories] = [await current(), await generations()];
+      const listing = await reconcileBundle(helper.context);
+      expect(listing.extensions.map((extension) => extension.status)).toEqual(['reinstall_needed', 'reinstall_needed']);
+      expect(listing.rollbackAvailable).toBe(true);
       expect((await failure(install({ name: 'demo-three' }))).code).toBe('BUNDLE_CHANGED');
       expect((await failure(rollback(helper.context))).code).toBe('BUNDLE_CHANGED');
       await expectUntouched(pointer, directories);
+    });
+
+    it('allows a confirmed reinstall after a failed bundle move without editing the old generation', async () => {
+      await install({ name: 'demo-one' });
+      await replaceBundle();
+      const old = await current();
+      const sourceToReinstall = await source({ name: 'demo-one', version: '0.2.0' });
+      const reinstall = { action: 'install', source: sourceToReinstall, replaceIncompatible: true } as const;
+      helper.runtime.loadErrors = { 'demo_one:setup': 'cannot load' };
+      expect((await failure(mutate(helper.context, reinstall, hooks))).code).toBe('LOAD_ERROR');
+      await expectUntouched(old, [old?.generation ?? 'missing']);
+      helper.runtime.loadErrors = {};
+      const reinstalled = await mutate(helper.context, reinstall, hooks);
+      expect(await current()).toMatchObject({ generation: reinstalled.generation, previous: old?.generation });
+      expect(await generations()).toContain(old?.generation);
+    });
+
+    it('does not fetch an online source to rebuild an incompatible generation', async () => {
+      const artifact = await writeWheel(path.join(scratch, 'wheels'), { name: 'demo-one' });
+      helper.runtime.install = async (venv) => {
+        await installWheel(venv, artifact);
+        return 0;
+      };
+      await mutate(helper.context, { action: 'install', source: { kind: 'index', name: 'demo-one' } }, hooks);
+      await replaceBundle();
+      helper.runtime.checkDependencies = () => 1;
+      const installs = helper.nativeRuns().filter((args) => args.includes('install')).length;
+      expect((await reconcileBundle(helper.context)).extensions[0].status).toBe('reinstall_needed');
+      expect(helper.nativeRuns().filter((args) => args.includes('install'))).toHaveLength(installs);
+      expect(await generations()).toHaveLength(1);
     });
 
     it('lists the binding verdict and the origin of each extension', async () => {

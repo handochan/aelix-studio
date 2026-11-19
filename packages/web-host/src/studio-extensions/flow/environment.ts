@@ -69,6 +69,8 @@ export type ManagementEnvironment = {
   constraintsUrl: string;
   /** Set for a file import: `file://` address of the stored wheel set, the only place pip may look. */
   offlineLinksUrl?: string;
+  /** The only index configured by Studio, including for git build requirements. */
+  onlineIndexUrl?: string;
 };
 
 /**
@@ -105,6 +107,15 @@ export function managementEnvironment(
       https_proxy: DEAD_PROXY,
       all_proxy: DEAD_PROXY,
       no_proxy: '',
+    });
+  }
+  if (options.onlineIndexUrl !== undefined) {
+    Object.assign(environment, {
+      PIP_INDEX_URL: options.onlineIndexUrl,
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: nullDevice(platform),
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_SSH_COMMAND: 'ssh -F /dev/null -o BatchMode=yes',
     });
   }
   return environment;

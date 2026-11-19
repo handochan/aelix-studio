@@ -64,9 +64,19 @@ function parseBinding(value: unknown): BundleBinding | undefined {
 }
 
 function parseOrigin(value: unknown): ExtensionOrigin | undefined {
-  if (!isObject(value) || value.kind !== 'file') return undefined;
-  const { artifact, wheel, sha256 } = value;
-  return isText(artifact) && isText(wheel) && isText(sha256) ? { kind: 'file', artifact, wheel, sha256 } : undefined;
+  if (!isObject(value)) return undefined;
+  const { kind, artifact, wheel, sha256, indexUrl, url, commit } = value;
+  if (kind === 'file' && isText(artifact) && isText(wheel) && isText(sha256)) return { kind, artifact, wheel, sha256 };
+  if (kind === 'index' && isText(indexUrl)) return { kind, indexUrl };
+  if (
+    kind === 'git' &&
+    isText(indexUrl) &&
+    isText(url) &&
+    typeof commit === 'string' &&
+    /^[a-f0-9]{40,64}$/.test(commit)
+  )
+    return { kind, indexUrl, url, commit };
+  return undefined;
 }
 
 /** Validate a pointer read from disk. The file is in the user area, so nothing in it is trusted. */

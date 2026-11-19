@@ -1,8 +1,13 @@
-import { mkdir, mkdtemp, readdir, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createFakeBundle, fakeRuntime, type FakeRuntimeOptions } from '../../tests/fixtures/extensionRuntime';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  createFakeBundle,
+  fakeRuntime,
+  installWheel,
+  type FakeRuntimeOptions,
+} from '../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../tests/fixtures/extensionWheels';
 import { ExtensionService } from './service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply } from './types';
@@ -80,7 +85,14 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     ['UNSUPPORTED', {}],
     ['INVALID_INPUT', { action: 'install' }],
     ['INVALID_INPUT', { action: 'install', source: { kind: 'file', path: 'relative/demo.whl' } }],
-    ['INVALID_INPUT', { action: 'install', source: { kind: 'index', name: 'demo' } }],
+    ['INVALID_INPUT', { action: 'install', source: { kind: 'index', name: '--extra-index-url' } }],
+    ['INVALID_INPUT', { action: 'install', source: { kind: 'index', name: 'demo @ https://other.invalid/' } }],
+    ['INVALID_INPUT', { action: 'install', source: { kind: 'index', name: 'demo', indexUrl: 'file:///wheels' } }],
+    [
+      'INVALID_INPUT',
+      { action: 'install', source: { kind: 'index', name: 'demo', indexUrl: 'https://user:pass@mirror.invalid/' } },
+    ],
+    ['INVALID_INPUT', { action: 'install', source: { kind: 'git', url: 'git+ext::other' } }],
     ['INVALID_INPUT', { action: 'install', source: { kind: 'file', path: '/tmp/demo.whl', folder: 'relative' } }],
     ['INVALID_INPUT', { action: 'install', source: { kind: 'file', path: '/tmp/de\0mo.whl' } }],
     ['INVALID_INPUT', { action: 'update', source: { kind: 'file', path: '/tmp/demo.whl' } }],
@@ -91,6 +103,127 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
   ])('answers %s to %j without starting anything', async (code, input) => {
     expect(await service.request('window:1', input)).toEqual({ ok: false, code });
     expect(spawn.calls).toEqual([]);
+  });
+
+  it('refuses both online sources before spawning anything when Studio settings turn them off', async () => {
+    let enabled = false;
+    service = new ExtensionService({
+      runtime: runtime.bundle,
+      root,
+      spawn,
+      onlineInstallEnabled: () => enabled,
+    });
+    const named = { action: 'install', source: { kind: 'index', name: 'demo-one' } };
+    const git = { action: 'install', source: { kind: 'git', url: 'git+https://git.invalid/owner/demo.git' } };
+    for (const request of [named, git])
+      expect(await service.request('window:1', request)).toEqual({ ok: false, code: 'ONLINE_INSTALL_DISABLED' });
+    expect(spawn.calls).toEqual([]);
+    expect(await readdir(scratch)).not.toContain('user data');
+
+    const file = await installRequest({ name: 'demo-one' });
+    expect(await settle(await service.request('window:1', file))).toMatchObject({ phase: 'switched' });
+    enabled = true;
+    runtime.install = async () => 1;
+    expect(await settle(await service.request('window:1', named))).toMatchObject({ code: 'INSTALLER_FAILED' });
+  });
+
+  it.each([
+    [undefined, 'https://pypi.org/simple/'],
+    ['http://127.0.0.1:8042/simple/', 'http://127.0.0.1:8042/simple/'],
+  ])('uses exactly one configured index (%s) even with ambient installer settings', async (indexUrl, selected) => {
+    service = new ExtensionService({
+      runtime: runtime.bundle,
+      root,
+      spawn,
+      onlineInstallEnabled: true,
+      env: {
+        PIP_INDEX_URL: 'https://ambient.invalid/',
+        PIP_EXTRA_INDEX_URL: 'https://extra.invalid/',
+        PIP_FIND_LINKS: 'https://links.invalid/',
+        PIP_CONFIG_FILE: '/home/user/pip.conf',
+        HTTPS_PROXY: 'http://proxy.invalid/',
+        GIT_CONFIG_GLOBAL: '/home/user/.gitconfig',
+      },
+    });
+    const artifact = await wheel({ name: 'demo-one', version: '1.0.0' });
+    runtime.install = async (venv) => {
+      await installWheel(venv, artifact);
+      return 0;
+    };
+    const request = { action: 'install', source: { kind: 'index', name: 'Demo.One', version: '1.0', indexUrl } };
+    expect(await settle(await service.request('window:1', request))).toMatchObject({ phase: 'switched' });
+    const installer = spawn.calls.find((call) => call.args.includes('install'));
+    expect(installer?.args.slice(-5)).toEqual(['install', 'demo-one==1.0', '--index-url', selected, '--yes']);
+    expect(installer?.env).toMatchObject({
+      PIP_INDEX_URL: selected,
+      PIP_CONFIG_FILE: '/dev/null',
+      PIP_DISABLE_PIP_VERSION_CHECK: '1',
+      GIT_CONFIG_GLOBAL: '/dev/null',
+      GIT_CONFIG_NOSYSTEM: '1',
+    });
+    expect(installer?.env).not.toHaveProperty('PIP_EXTRA_INDEX_URL');
+    expect(installer?.env).not.toHaveProperty('PIP_FIND_LINKS');
+    expect(installer?.env).not.toHaveProperty('HTTPS_PROXY');
+    expect((await listing()).extensions[0]).toMatchObject({
+      version: '1.0.0',
+      origin: { kind: 'index', indexUrl: selected },
+    });
+    expect(await readdir(path.join(root, 'artifacts'))).toEqual([]);
+  });
+
+  it('installs a git source against the selected build index and records the resolved commit', async () => {
+    const url = 'https://git.invalid/owner/demo.git';
+    const commit = '2'.repeat(40);
+    const indexUrl = 'https://mirror.invalid/simple/';
+    const artifact = await wheel({ name: 'demo-one' });
+    runtime.install = async (venv) => {
+      await installWheel(venv, artifact);
+      await writeFile(
+        path.join(venv.site, 'demo_one-0.1.0.dist-info', 'direct_url.json'),
+        JSON.stringify({ url, vcs_info: { vcs: 'git', requested_revision: 'stable', commit_id: commit } })
+      );
+      return 0;
+    };
+    const source = { kind: 'git', url: 'git+' + url + '@stable', indexUrl };
+    expect(await settle(await service.request('window:1', { action: 'install', source }))).toMatchObject({
+      phase: 'switched',
+    });
+    const installer = spawn.calls.find((call) => call.args.includes('install'));
+    expect(installer?.args.slice(-3)).toEqual(['install', source.url, '--yes']);
+    expect(installer?.env?.PIP_INDEX_URL).toBe(indexUrl);
+    expect((await listing()).extensions[0].origin).toEqual({ ...source, commit });
+  });
+
+  it('keeps the old generation when an unrelated extension is the only change after a git install', async () => {
+    const before = await settle(await service.request('window:1', await installRequest({ name: 'kept' })));
+    const unrelated = await wheel({ name: 'other' });
+    runtime.install = async (venv) => {
+      await installWheel(venv, unrelated);
+      return 0;
+    };
+    const request = { action: 'install', source: { kind: 'git', url: 'git+https://git.invalid/owner/demo.git' } };
+    expect(await settle(await service.request('window:1', request))).toMatchObject({
+      phase: 'failed',
+      code: 'REQUEST_MISMATCH',
+    });
+    expect((await listing()).current).toBe(before.generation);
+    expect(await readdir(path.join(root, 'generations'))).toEqual([before.generation]);
+  });
+
+  it('waits for an in-flight bundle reconcile to cancel when the helper is disposed', async () => {
+    const before = await settle(await service.request('window:1', await installRequest({ name: 'kept' })));
+    const manifest = path.join(runtime.bundle, 'manifest.json');
+    const changed = await readFile(manifest, 'utf8');
+    await writeFile(manifest, changed.replace('a'.repeat(64), 'b'.repeat(64)));
+    runtime.beforeLoad = () => false;
+    const pending = service.request('window:1', { action: 'reconcile_bundle' });
+    await vi.waitFor(() =>
+      expect(spawn.calls.filter((call) => call.args.includes('native-generation'))).toHaveLength(3)
+    );
+    await service.dispose();
+    expect(await pending).toEqual({ ok: false, code: 'CANCELLED' });
+    expect((await listing()).current).toBe(before.generation);
+    expect(await readdir(path.join(root, 'generations'))).toEqual([before.generation]);
   });
 
   it('reports the runtime as unavailable when there is no bundle, for every kind of request', async () => {
