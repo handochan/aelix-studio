@@ -14,11 +14,56 @@ FORK = {'clone', 'clone3', 'fork', 'vfork'}
 CLONE_CALL = re.compile(r'clone\((.*?)\)\s+=\s+(.+)')
 CLONE_RESTART_NOTICE = '? ERESTARTNOINTR (To be restarted)'
 CLONE_PID_RESULT = re.compile(r"([1-9][0-9]*)(?:<[^>]*>)?(?: /\* ([1-9][0-9]*) in strace's PID NS \*/)?")
-CLONE_ERROR_RESULT = re.compile(r'-1 (?!ERESTART(?:SYS|NOINTR|NOHAND|_RESTARTBLOCK) )E[A-Z0-9_]+ \([^()]*\)')
+CLONE_NAMED_ERROR = re.compile(r'-1 (E[A-Z0-9_]+) \([^()]+\)')
+CLONE_NUMERIC_ERROR = re.compile(r'-1 \(errno ([1-9][0-9]{0,3})\)')
 CLONE_TID_POINTER = re.compile(r', parent_tid=0x[0-9a-f]+(?=,|$)')
 CLONE_TID_OUTPUT = re.compile(r", parent_tid=\[[0-9]+(?:<[^>]*>)?(?: /\* [1-9][0-9]* in strace's PID NS \*/)?\](?=,|$)")
 SIGNAL_NOTICE = re.compile(r'--- (?:SIG[A-Z0-9_]+ \{.*\}|stopped by SIG[A-Z0-9_]+) ---')
-SIGNALED_EXIT = re.compile(r'\+\+\+ killed by (?:SIG[A-Z][A-Z0-9_]*|[1-9]|[1-5][0-9]|6[0-4])(?: \(core dumped\))? \+\+\+')
+SIGNALED_EXIT = re.compile(r'\+\+\+ killed by (SIG[A-Z0-9_]+)( \(core dumped\))? \+\+\+')
+# Linux fatal defaults and canonical names from strace 7.3's generic signalent.h
+# and signame(), used by the native x86_64 and aarch64 tracers.
+CORE_DUMP_SIGNALS = {
+    'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGBUS', 'SIGFPE',
+    'SIGSEGV', 'SIGXCPU', 'SIGXFSZ', 'SIGSYS',
+}
+FATAL_SIGNALS = CORE_DUMP_SIGNALS | {
+    'SIGHUP', 'SIGINT', 'SIGKILL', 'SIGUSR1', 'SIGUSR2', 'SIGPIPE', 'SIGALRM',
+    'SIGTERM', 'SIGSTKFLT', 'SIGVTALRM', 'SIGPROF', 'SIGIO', 'SIGPWR', 'SIGRTMIN',
+} | {f'SIGRT_{offset}' for offset in range(1, 33)}
+# Canonical strace 7.3 errnoent.h entries, with '-' marking unassigned numbers.
+# The Python host's errno table can differ, including on macOS test runners.
+STRACE_ERRNOS = {
+    number: name
+    for start, names in (
+        (1, """
+            EPERM ENOENT ESRCH EINTR EIO ENXIO E2BIG ENOEXEC EBADF ECHILD
+            EAGAIN ENOMEM EACCES EFAULT ENOTBLK EBUSY EEXIST EXDEV ENODEV ENOTDIR
+            EISDIR EINVAL ENFILE EMFILE ENOTTY ETXTBSY EFBIG ENOSPC ESPIPE EROFS
+            EMLINK EPIPE EDOM ERANGE EDEADLK ENAMETOOLONG ENOLCK ENOSYS ENOTEMPTY ELOOP
+            - ENOMSG EIDRM ECHRNG EL2NSYNC EL3HLT EL3RST ELNRNG EUNATCH ENOCSI
+            EL2HLT EBADE EBADR EXFULL ENOANO EBADRQC EBADSLT - EBFONT ENOSTR
+            ENODATA ETIME ENOSR ENONET ENOPKG EREMOTE ENOLINK EADV ESRMNT ECOMM
+            EPROTO EMULTIHOP EDOTDOT EBADMSG EOVERFLOW ENOTUNIQ EBADFD EREMCHG ELIBACC ELIBBAD
+            ELIBSCN ELIBMAX ELIBEXEC EILSEQ ERESTART ESTRPIPE EUSERS ENOTSOCK EDESTADDRREQ EMSGSIZE
+            EPROTOTYPE ENOPROTOOPT EPROTONOSUPPORT ESOCKTNOSUPPORT EOPNOTSUPP EPFNOSUPPORT
+            EAFNOSUPPORT EADDRINUSE EADDRNOTAVAIL ENETDOWN
+            ENETUNREACH ENETRESET ECONNABORTED ECONNRESET ENOBUFS EISCONN ENOTCONN ESHUTDOWN ETOOMANYREFS ETIMEDOUT
+            ECONNREFUSED EHOSTDOWN EHOSTUNREACH EALREADY EINPROGRESS ESTALE EUCLEAN ENOTNAM ENAVAIL EISNAM
+            EREMOTEIO EDQUOT ENOMEDIUM EMEDIUMTYPE ECANCELED ENOKEY EKEYEXPIRED EKEYREVOKED EKEYREJECTED EOWNERDEAD
+            ENOTRECOVERABLE ERFKILL EHWPOISON
+        """),
+        (512, """
+            ERESTARTSYS ERESTARTNOINTR ERESTARTNOHAND ENOIOCTLCMD ERESTART_RESTARTBLOCK
+            EPROBE_DEFER EOPENSTALE - - EBADHANDLE ENOTSYNC EBADCOOKIE ENOTSUPP
+            ETOOSMALL ESERVERFAULT EBADTYPE EJUKEBOX EIOCBQUEUED ERECALLCONFLICT
+        """),
+    )
+    for number, name in enumerate(names.split(), start)
+    if name != '-'
+}
+# The tracer's regular syscall formatter prints these kernel restart codes
+# through print_erestart(), never as a completed -1 error.
+CLONE_FINAL_ERRNO_NAMES = {name for number, name in STRACE_ERRNOS.items() if number not in (512, 513, 514, 516)}
 EXEC = {'execve', 'execveat'}
 IO_URING = {'io_uring_setup', 'io_uring_enter', 'io_uring_register'}
 SETUP_FLAGS = {name:1<<index for index,name in enumerate([
@@ -85,6 +130,28 @@ def matches_clone_retry(expected, call):
     original, pointers = CLONE_TID_POINTER.subn(', parent_tid=', expected)
     retried, outputs = CLONE_TID_OUTPUT.subn(', parent_tid=', arguments)
     return pointers == outputs == 1 and original == retried
+
+
+def is_clone_error_result(result):
+    """Recognize a final error in the pinned strace syscall formatter."""
+    named = CLONE_NAMED_ERROR.fullmatch(result)
+    if named:
+        return named[1] in CLONE_FINAL_ERRNO_NAMES
+    numeric = CLONE_NUMERIC_ERROR.fullmatch(result)
+    if not numeric:
+        return False
+    # print_err_ret uses the decimal fallback only for unnamed kernel errors.
+    code = int(numeric[1])
+    return code <= 4095 and code not in STRACE_ERRNOS
+
+
+def is_fatal_signal_exit(line):
+    """Match a WTERMSIG record for a fatal signal on the supported Linux ABIs."""
+    terminal = SIGNALED_EXIT.fullmatch(line)
+    if not terminal:
+        return False
+    permitted = CORE_DUMP_SIGNALS if terminal[2] else FATAL_SIGNALS
+    return terminal[1] in permitted
 
 
 def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None,
@@ -165,7 +232,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             expected = pending_clone_restarts.pop(pid)
             # Only the next call on this task can complete the interrupted
             # clone. A fatal signal can preempt it before a retry even starts.
-            if pid not in pending and SIGNALED_EXIT.fullmatch(line):
+            if pid not in pending and is_fatal_signal_exit(line):
                 signaled_clone_restarts.add(pid)
             elif pid in pending or clone is None or not matches_clone_retry(expected, clone):
                 classification_issue('unknown_fork_result', pid, 'clone')
@@ -258,7 +325,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                     else:
                         pending_clone_restarts[pid] = clone_arguments(clone)
                     return
-                if CLONE_ERROR_RESULT.fullmatch(returned) or (returned == '0' and not awaiting_clone):
+                if is_clone_error_result(returned) or (returned == '0' and not awaiting_clone):
                     return
                 result = CLONE_PID_RESULT.fullmatch(returned)
                 if not result:

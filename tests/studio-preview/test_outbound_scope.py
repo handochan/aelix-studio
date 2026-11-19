@@ -406,7 +406,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.enterContext(patch.object(audit.signal, 'setitimer', self.clock.setitimer))
 
     def audit_traces(self, traces, *, capture=None, stderr=b'', scoped=False, on_capture=None, on_start=None,
-                     evidence_deadline=None, capture_timeout=1):
+                     evidence_deadline=None, capture_timeout=1, terminal='+++ exited with 0 +++'):
         tracer = self.root / 'strace'
         tracer.touch()
         process = Mock(pid=123, returncode=0)
@@ -425,7 +425,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                 (directory / 'network.trace').write_text('\n'.join([
                     '1<app> execve("/owned/app", [...], 0x1) = 0',
                     *(f'1<app> {record}' for record in records),
-                    '1<app> +++ exited with 0 +++',
+                    f'1<app> {terminal}',
                 ]) + '\n')
                 (directory / 'command.stderr').write_bytes(stderr)
                 if on_start is not None:
@@ -465,6 +465,31 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                 self.assertEqual(report['cloneRestartResults'], 1)
                 self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
                               report['classificationIssues'])
+
+    def test_clone_restart_rejects_impossible_signal_exits(self):
+        for signal in ('SIGBOGUS', 'SIGSTOP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGCONT',
+                       'SIGCHLD', 'SIGURG', 'SIGWINCH', '19', '9', 'SIGIOT', 'SIGRT_0', 'SIGRT_33',
+                       'SIGKILL (core dumped)'):
+            with self.subTest(signal=signal):
+                terminal = f'+++ killed by {signal} +++'
+                self.assertEqual(self.audit_traces([[CLONE_RESTART]], terminal=terminal), (87, 1))
+                self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
+                              self.read()['classificationIssues'])
+
+    def test_clone_retry_accepts_straces_unmapped_numeric_errno(self):
+        for number in (41, 4095):
+            with self.subTest(number=number):
+                self.assertEqual(self.audit_traces([[CLONE_RESTART, f'{CLONE_CALL} = -1 (errno {number})']]), (0, 1))
+                self.assertEqual(self.read()['cloneRestartResults'], 1)
+
+    def test_clone_retry_rejects_errno_spellings_the_tracer_cannot_emit(self):
+        for error in ('EBOGUS (Bogus error)', 'EWOULDBLOCK (Resource temporarily unavailable)',
+                      '(errno 0)', '(errno 011)', '(errno 11)', '(errno 512)', '(errno 513)',
+                      '(errno 514)', '(errno 516)', '(errno 4096)', '(errno 4095) = ?'):
+            with self.subTest(error=error):
+                self.assertEqual(self.audit_traces([[CLONE_RESTART, f'{CLONE_CALL} = -1 {error}']]), (87, 1))
+                self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
+                              self.read()['classificationIssues'])
 
     def test_kernel_only_child_still_blocks_after_a_clone_restart(self):
         capture = task_capture_fixture()
@@ -1267,12 +1292,14 @@ class ScopedParserTests(unittest.TestCase):
         self.assertEqual(scoped['cloneRestartResultsUnit'], 'strace-restart-notices')
 
     def test_clone_restart_can_end_with_same_task_signaled_before_retry(self):
-        scoped, _ = self.parse(self.base() + [
-            f'2<host> {CLONE_RESTART}',
-            '2<host> --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER, si_pid=1, si_uid=0} ---',
-            '2<host> +++ killed by SIGTERM +++',
-            '1<app> +++ exited with 0 +++'], lifecycle=True)
-        self.assertEqual((scoped['unparsedRecords'], scoped['cloneRestartResults']), (0, 1))
+        for signal in ('SIGTERM', 'SIGKILL', 'SIGSEGV (core dumped)', 'SIGRTMIN', 'SIGRT_1', 'SIGRT_32'):
+            with self.subTest(signal=signal):
+                scoped, _ = self.parse(self.base() + [
+                    f'2<host> {CLONE_RESTART}',
+                    '2<host> --- SIGCHLD {si_signo=SIGCHLD, si_code=CLD_EXITED, si_pid=4} ---',
+                    f'2<host> +++ killed by {signal} +++',
+                    '1<app> +++ exited with 0 +++'], lifecycle=True)
+                self.assertEqual((scoped['unparsedRecords'], scoped['cloneRestartResults']), (0, 1))
 
     def test_clone_retry_can_return_the_written_parent_tid(self):
         scoped, _ = self.parse(self.base() + [
