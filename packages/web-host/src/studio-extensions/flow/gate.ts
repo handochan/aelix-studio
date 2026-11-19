@@ -11,7 +11,12 @@ import { loadEnvironment } from './environment.js';
 
 /** What a change asked for, in terms the result can be checked against. */
 export type ChangeRequest =
-  | { action: 'install' | 'update'; distribution: string; version: string }
+  | {
+      action: 'install' | 'update';
+      distribution: string;
+      version?: string;
+      matchesVersion?: (pin: string, installed: string) => boolean;
+    }
   | { action: 'remove'; distribution: string };
 
 /** Extension entry name to object reference: the set that must load, no more and no less. */
@@ -106,7 +111,12 @@ export function compareRequest(request: ChangeRequest, before: SiteSnapshot, aft
   } else {
     const installed = now.get(request.distribution);
     if (!installed) problems.push(`the requested distribution ${request.distribution} is not in the candidate`);
-    else if (installed.version !== request.version)
+    else if (
+      request.version !== undefined &&
+      !(request.matchesVersion
+        ? request.matchesVersion(request.version, installed.version)
+        : installed.version === request.version)
+    )
       problems.push(`${request.distribution} is ${installed.version}, the request was ${request.version}`);
     if (owned(after, request.distribution).length === 0)
       problems.push(`${request.distribution} provides no aelix.extensions entry point`);

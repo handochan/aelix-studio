@@ -282,6 +282,8 @@ export type FakeRuntimeOptions = {
   install?: (venv: Venv, wheel: string, spec: SpawnSpec) => Promise<number>;
   /** Replaces `extension remove`: return the native exit code. */
   remove?: (venv: Venv, entry: string) => Promise<number>;
+  /** Replaces `pip check` when revalidating a generation against a new bundle. */
+  checkDependencies?: () => number;
   /** Entry names `extension verify` reports as not bound. */
   unbound?: string[];
   /** Load errors by object reference. */
@@ -432,6 +434,10 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
           );
         })();
       };
+      return;
+    }
+    if (args.slice(-3).join(' ') === '-m pip check') {
+      child.exit(options.checkDependencies?.() ?? 0);
       return;
     }
     const native = args.slice(args.indexOf('native') + 1).filter((arg) => arg !== '--offline');

@@ -155,7 +155,7 @@ def _studio_generation(bundle, state):
         directory = root / 'generations' / generation
         site = directory / 'venv' / 'lib' / f"python{binding['pythonMinor']}" / 'site-packages'
         packs, modules = found['launch']['packs'], found['launch']['modules']
-        if found.get('binding') != binding or not own(site) or (packs and not own(directory / 'packs')):
+        if not own(site) or (packs and not own(directory / 'packs')):
             return None
         extensions = [str(directory / 'packs')] * packs + modules
         return (str(site), extensions) if extensions else None
@@ -171,7 +171,9 @@ def _studio_generation(bundle, state):
     try:
         for _attempt in range(3):
             chosen = pointer_in_effect(root)
-            if not chosen:
+            # A mismatched current generation stays on disk for reconciliation or reinstall.
+            # It must not lend its paths or extension arguments to this adapter.
+            if not chosen or chosen[2].get('binding') != binding:
                 return None
             held = lease(root / 'leases', chosen[0])
             if not held:

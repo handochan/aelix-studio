@@ -1,3 +1,5 @@
+import path from 'node:path';
+
 /**
  * The environment of every process the helper starts (D04 ADR 5.4).
  *
@@ -69,6 +71,8 @@ export type ManagementEnvironment = {
   constraintsUrl: string;
   /** Set for a file import: `file://` address of the stored wheel set, the only place pip may look. */
   offlineLinksUrl?: string;
+  /** Studio's only online index and a private directory for installer configuration and temporary files. */
+  online?: { indexUrl: string; home: string; work: string };
 };
 
 /**
@@ -105,6 +109,38 @@ export function managementEnvironment(
       https_proxy: DEAD_PROXY,
       all_proxy: DEAD_PROXY,
       no_proxy: '',
+    });
+  }
+  if (options.online) {
+    const { home, work, indexUrl } = options.online;
+    // pip 26 overwrites GIT_SSH_COMMAND when PIP_NO_INPUT is present. Keep the
+    // custom SSH command and use closed stdin, disabled keyring and askpass instead.
+    delete environment.PIP_NO_INPUT;
+    Object.assign(environment, {
+      HOME: home,
+      XDG_CONFIG_HOME: home,
+      TMPDIR: work,
+      PATH: '/usr/bin:/bin',
+      PIP_INDEX_URL: indexUrl,
+      PIP_KEYRING_PROVIDER: 'disabled',
+      NETRC: nullDevice(platform),
+      // A nonempty proxy map makes urllib skip system proxy discovery on macOS.
+      no_proxy: '*',
+      GIT_CONFIG_NOSYSTEM: '1',
+      GIT_CONFIG_GLOBAL: nullDevice(platform),
+      GIT_CEILING_DIRECTORIES: path.dirname(work),
+      GIT_TERMINAL_PROMPT: '0',
+      GIT_ASKPASS: '/usr/bin/false',
+      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_KEY_0: 'credential.helper',
+      GIT_CONFIG_VALUE_0: '',
+      GIT_CONFIG_KEY_1: 'http.proxy',
+      GIT_CONFIG_VALUE_1: '',
+      // OpenSSH resolves its default key locations through the account database,
+      // even when HOME is private. Permit host verification without ambient keys.
+      GIT_SSH_COMMAND:
+        '/usr/bin/ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no' +
+        ' -o IdentityFile=none -o IdentityAgent=none -o CertificateFile=none',
     });
   }
   return environment;

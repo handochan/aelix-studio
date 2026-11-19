@@ -2,7 +2,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import { constants, copyFile, lstat, mkdir, readdir, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { ExtensionFailure, type ExtensionSource } from '../types.js';
+import { ExtensionFailure, type FileExtensionOrigin, type FileExtensionSource } from '../types.js';
 import type { Layout } from './layout.js';
 import { removeFromState, type StateWriter } from './lock.js';
 
@@ -56,7 +56,11 @@ const isRegularFile = (file: string): Promise<boolean> =>
  *
  * @throws ExtensionFailure `NOT_A_WHEEL` when the requested file is not a `.whl` file.
  */
-export async function stageImport(layout: Layout, source: ExtensionSource, writer: StateWriter): Promise<StagedImport> {
+export async function stageImport(
+  layout: Layout,
+  source: FileExtensionSource,
+  writer: StateWriter
+): Promise<StagedImport> {
   const requested = path.resolve(source.path);
   const refuse = (reason: string): never => {
     throw new ExtensionFailure('NOT_A_WHEEL', [`${path.basename(requested)}: ${reason}`]);
@@ -132,6 +136,21 @@ async function storedDigests(directory: string, names: string[]): Promise<Record
   } catch {
     return undefined;
   }
+}
+
+/** Reopen a preserved wheel set only if every file still matches its content-addressed ID. */
+export async function readStoredImport(layout: Layout, origin: FileExtensionOrigin): Promise<ImportSet | undefined> {
+  if (!isImportSetId(origin.artifact) || path.basename(origin.wheel) !== origin.wheel) return undefined;
+  const directory = path.join(layout.artifacts, origin.artifact);
+  const names = (await readdir(directory).catch((): string[] => []))
+    .filter((name) => name !== 'sha256.json')
+    .toSorted();
+  if (!names.includes(origin.wheel) || !names.every(isWheelName)) return undefined;
+  const digests = await storedDigests(directory, names);
+  if (!digests || digests[origin.wheel] !== origin.sha256) return undefined;
+  if (createHash('sha256').update(JSON.stringify(digests)).digest('hex').slice(0, 16) !== origin.artifact)
+    return undefined;
+  return { id: origin.artifact, directory, target: path.join(directory, origin.wheel), digests };
 }
 
 /** Remove the entries of the store that `unwanted` picks, one after the other. Returns their names. */

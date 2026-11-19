@@ -2,7 +2,8 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
-import { describe, mutate, rollback, type MutationRequest } from './flow/mutate.js';
+import { describe, mutate, reconcileBundle, rollback, type MutationRequest } from './flow/mutate.js';
+import { parseOnlineSource } from './flow/onlineSource.js';
 import { spawnChild, type Spawn } from './process.js';
 import { locateLayout, resolveBundle } from './store/layout.js';
 import {
@@ -21,6 +22,8 @@ export type ExtensionServiceOptions = {
   root: string;
   /** Environment the allow-list is applied to. Defaults to this process's. */
   env?: NodeJS.ProcessEnv;
+  /** Read from Studio settings. False refuses name and git installs before any child starts. */
+  onlineInstallEnabled?: boolean | (() => boolean);
   platform?: NodeJS.Platform;
   arch?: string;
   spawn?: Spawn;
@@ -37,7 +40,7 @@ const TIMEOUTS: FlowContext['timeouts'] = {
   installerMs: 600_000,
   verifyMs: 120_000,
 };
-const ACTIONS = new Set(['list', 'install', 'update', 'remove', 'rollback', 'poll', 'cancel']);
+const ACTIONS = new Set(['list', 'install', 'update', 'remove', 'rollback', 'reconcile_bundle', 'poll', 'cancel']);
 const FINISHED = new Set(['switched', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
   ok: false,
@@ -47,11 +50,12 @@ const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => 
 const isPath = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 4096 && !value.includes('\0') && path.isAbsolute(value);
 
-/** Accept only a file source with absolute paths; anything else is not a request this helper takes. */
+/** Validate source data before starting a change. */
 function parseSource(value: unknown): ExtensionSource | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   const { kind, path: file, folder } = value as { kind?: unknown; path?: unknown; folder?: unknown };
-  if (kind !== 'file' || !isPath(file)) return undefined;
+  if (kind !== 'file') return parseOnlineSource(value as Record<string, unknown>);
+  if (!isPath(file)) return undefined;
   if (folder === undefined) return { kind, path: file };
   return isPath(folder) ? { kind, path: file, folder } : undefined;
 }
@@ -82,6 +86,7 @@ const isName = (value: unknown): value is string =>
  */
 export class ExtensionService {
   private operation?: Tracked;
+  private direct?: { owner: string; abort: AbortController; done: Promise<ExtensionReply> };
   private changing = false;
 
   constructor(private readonly options: ExtensionServiceOptions) {}
@@ -125,16 +130,24 @@ export class ExtensionService {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
       }
-      const change = command.action === 'rollback' ? undefined : parseChange(command);
-      if (command.action !== 'rollback' && !change) return fail('INVALID_INPUT');
+      const direct = command.action === 'rollback' || command.action === 'reconcile_bundle';
+      const change = direct ? undefined : parseChange(command);
+      if (!direct && !change) return fail('INVALID_INPUT');
+      if (change?.action === 'install' && change.source.kind !== 'file') {
+        const enabled = this.options.onlineInstallEnabled;
+        if ((typeof enabled === 'function' ? enabled() : enabled) === false) return fail('ONLINE_INSTALL_DISABLED');
+      }
       if (this.platform === 'win32') return fail('UNSUPPORTED_PLATFORM');
       if (this.changing) return fail('BUSY');
       this.changing = true;
       if (!change) {
+        const abort = new AbortController();
+        const done = this.runDirect(command.action === 'reconcile_bundle', abort.signal);
+        this.direct = { owner, abort, done };
         try {
-          const context = await this.context();
-          return context ? { ok: true, data: await rollback(context) } : fail('RUNTIME_UNAVAILABLE');
+          return await done;
         } finally {
+          this.direct = undefined;
           this.changing = false;
         }
       }
@@ -155,6 +168,17 @@ export class ExtensionService {
       this.operation = tracked;
       tracked.done = this.run(tracked, change, context);
       return { ok: true, data: { ...tracked.state } };
+    } catch (error) {
+      return error instanceof ExtensionFailure ? fail(error.code, error.detail) : this.unexpected(error);
+    }
+  }
+
+  private async runDirect(reconcile: boolean, signal: AbortSignal): Promise<ExtensionReply> {
+    try {
+      const context = await this.context(signal);
+      if (!context) return fail('RUNTIME_UNAVAILABLE');
+      const data = reconcile ? await reconcileBundle(context) : await rollback(context);
+      return { ok: true, data };
     } catch (error) {
       return error instanceof ExtensionFailure ? fail(error.code, error.detail) : this.unexpected(error);
     }
@@ -202,8 +226,8 @@ export class ExtensionService {
 
   /** Cancel a caller's running change when its window or WebUI session closes. */
   cancelOwner(owner: string, prefix = false): void {
-    const tracked = this.operation;
-    if (tracked && (prefix ? tracked.owner.startsWith(owner) : tracked.owner === owner)) tracked.abort.abort();
+    for (const tracked of [this.operation, this.direct])
+      if (tracked && (prefix ? tracked.owner.startsWith(owner) : tracked.owner === owner)) tracked.abort.abort();
   }
 
   /**
@@ -212,7 +236,8 @@ export class ExtensionService {
    */
   async dispose(): Promise<void> {
     this.operation?.abort.abort();
-    await this.operation?.done;
+    this.direct?.abort.abort();
+    await Promise.all([this.operation?.done, this.direct?.done]);
   }
 }
 
@@ -221,6 +246,11 @@ function parseChange(command: ExtensionCommand): MutationRequest | undefined {
   if (command.action !== 'install' && command.action !== 'update') return undefined;
   const source = parseSource(command.source);
   if (!source) return undefined;
-  if (command.action === 'install') return { action: 'install', source };
-  return isName(command.name) ? { action: 'update', name: command.name, source } : undefined;
+  if (command.action === 'install') {
+    const { replaceIncompatible } = command;
+    return replaceIncompatible === undefined || typeof replaceIncompatible === 'boolean'
+      ? { action: 'install', source, replaceIncompatible }
+      : undefined;
+  }
+  return source.kind === 'file' && isName(command.name) ? { action: 'update', name: command.name, source } : undefined;
 }
