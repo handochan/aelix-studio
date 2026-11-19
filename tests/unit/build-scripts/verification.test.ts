@@ -306,13 +306,24 @@ describe('Electron launch evidence and identity retry', () => {
     const launcher = `
       const { spawn } = require('node:child_process');
       process.once('message', () => process.exit(17));
-      spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], { stdio: 'inherit' }).unref();
+      if (process.platform !== 'win32')
+        spawn(process.execPath, ['-e', process.argv[1], process.argv[2]], { stdio: 'inherit' }).unref();
       process.send('ready');
     `;
     const main = spawn(process.execPath, ['-e', launcher, keeper, release], { stdio: ['pipe', 'pipe', 'pipe', 'ipc'] });
-    let pipesClosed = false;
-    const closed = once(main, 'close').then(() => {
-      pipesClosed = true;
+    const closed = once(main, 'close').then(() => {});
+    let releaseCloseNotification: (() => void) | undefined;
+    // The Windows runner can close those streams at process exit. Exercise the
+    // delayed Playwright notification there with the same real launcher exit.
+    const closeNotification =
+      process.platform === 'win32'
+        ? new Promise<void>((resolve) => {
+            releaseCloseNotification = resolve;
+          })
+        : closed;
+    let closeNotified = false;
+    void closeNotification.then(() => {
+      closeNotified = true;
     });
     const { app: fixture } = application();
     const app = {
@@ -323,13 +334,13 @@ describe('Electron launch evidence and identity retry', () => {
         main.send('exit');
         return new Promise((_resolve, reject) => {
           const timer = setTimeout(() => reject(new Error('firstWindow: timeout')), timeout);
-          void closed.then(() => {
+          void closeNotification.then(() => {
             clearTimeout(timer);
             reject(new Error('Playwright close'));
           });
         });
       }),
-      close: vi.fn(async () => closed),
+      close: vi.fn(async () => closeNotification),
     };
     const record = vi.fn();
     try {
@@ -338,7 +349,7 @@ describe('Electron launch evidence and identity retry', () => {
       await expect(boundedWait(result, 'OS exit fixture', { timeoutMs: 3000, log: () => {} })).rejects.toThrow(
         'application exited with code 17 before the first window'
       );
-      expect(pipesClosed).toBe(false);
+      expect(closeNotified).toBe(false);
       expect(app.evaluate).not.toHaveBeenCalled();
       expect(app.close).toHaveBeenCalledTimes(1);
       expect(record.mock.calls.find(([row]) => row.status === 'failed')?.[0]).toMatchObject({
@@ -348,6 +359,7 @@ describe('Electron launch evidence and identity retry', () => {
         firstWindowWait: { outcome: 'failed' },
       });
     } finally {
+      releaseCloseNotification?.();
       await fs.writeFile(release, '');
       await closed;
       await fs.rm(root, { recursive: true, force: true });
