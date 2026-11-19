@@ -137,24 +137,27 @@ const renderQueue = ({
   conversation_id,
   runtimeGate,
   isBusy = false,
+  holdExecution = false,
   onExecute = vi.fn().mockResolvedValue(undefined),
 }: {
   conversation_id: string;
   runtimeGate: ConversationCommandQueueRuntimeGate;
   isBusy?: boolean;
+  holdExecution?: boolean;
   onExecute?: (item: Parameters<Parameters<typeof useConversationCommandQueue>[0]['onExecute']>[0]) => Promise<void>;
 }) =>
   renderHook(
-    ({ gate, busy }) =>
+    ({ gate, busy, hold = false }: { gate: ConversationCommandQueueRuntimeGate; busy: boolean; hold?: boolean }) =>
       useConversationCommandQueue({
         conversation_id,
         enabled: true,
         isBusy: busy,
         runtimeGate: gate,
+        holdExecution: hold,
         onExecute,
       }),
     {
-      initialProps: { gate: runtimeGate, busy: isBusy },
+      initialProps: { gate: runtimeGate, busy: isBusy, hold: holdExecution },
       wrapper: createSwrWrapper(),
     }
   );
@@ -200,12 +203,13 @@ describe('useConversationCommandQueue drain', () => {
     expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'queued follow-up' }));
   });
 
-  it('keeps an auto-mode command queued while the gate is not hydrated, then drains it', async () => {
-    // AcpSendBox reports an unhydrated gate while the session holder check blocks sending.
+  it('keeps an auto-mode command queued while execution is held, then drains it', async () => {
+    // AcpSendBox holds execution while the session holder check blocks sending.
     const onExecute = vi.fn().mockResolvedValue(undefined);
     const { result, rerender } = renderQueue({
       conversation_id: 'conv-holder-check',
-      runtimeGate: { ...idleGate, hydrated: false },
+      runtimeGate: idleGate,
+      holdExecution: true,
       onExecute,
     });
 
@@ -217,14 +221,60 @@ describe('useConversationCommandQueue drain', () => {
       result.current.enqueue({ input: 'saved draft', files: [] });
     });
     await waitFor(() => expect(result.current.items).toHaveLength(1));
+    act(() => {
+      result.current.sendNow(result.current.items[0].id);
+    });
     await act(async () => {});
     expect(onExecute).not.toHaveBeenCalled();
     expect(result.current.items).toHaveLength(1);
 
-    rerender({ gate: idleGate, busy: false });
+    rerender({ gate: idleGate, busy: false, hold: false });
 
     await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
     expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'saved draft' }));
+  });
+
+  it('keeps held commands persisted after leaving and sends them once after returning to a released session', async () => {
+    const onExecute = vi.fn().mockResolvedValue(undefined);
+    const first = renderQueue({
+      conversation_id: 'conv-held-leave',
+      runtimeGate: idleGate,
+      holdExecution: true,
+      onExecute,
+    });
+    act(() => {
+      first.result.current.toggleMode();
+    });
+    await waitFor(() => expect(first.result.current.mode).toBe('auto'));
+    act(() => {
+      first.result.current.enqueue({ input: 'queued while locked', files: [] });
+    });
+    await waitFor(() => expect(first.result.current.items).toHaveLength(1));
+
+    // Leave the locked conversation: no background hand-off, even when a turn completes.
+    first.unmount();
+    emitTurnCompleted('conv-held-leave');
+    await act(async () => {});
+    expect(onExecute).not.toHaveBeenCalled();
+    expect(JSON.parse(sessionStorage.getItem(storageKey('conv-held-leave')) ?? '{}')).toMatchObject({
+      items: [expect.objectContaining({ input: 'queued while locked' })],
+    });
+
+    // Come back: still held while the lock check runs, then released.
+    const second = renderQueue({
+      conversation_id: 'conv-held-leave',
+      runtimeGate: idleGate,
+      holdExecution: true,
+      onExecute,
+    });
+    await waitFor(() => expect(second.result.current.items).toHaveLength(1));
+    await act(async () => {});
+    expect(onExecute).not.toHaveBeenCalled();
+
+    second.rerender({ gate: idleGate, busy: false, hold: false });
+
+    await waitFor(() => expect(onExecute).toHaveBeenCalledTimes(1));
+    expect(onExecute).toHaveBeenCalledWith(expect.objectContaining({ input: 'queued while locked' }));
   });
 
   it('ignores legacy persisted team-upgrade handoff state and drains normally', async () => {

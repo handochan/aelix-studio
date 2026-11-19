@@ -279,14 +279,11 @@ const AcpSendBox: React.FC<{
     setAtPath,
     setUploadFile,
   });
-  const runtimeGate = teamRuntime?.runtimeGate ?? {
+  const commandQueueRuntimeGate = teamRuntime?.runtimeGate ?? {
     hydrated: runtimeView.hydrated,
     canSendMessage: runtimeView.canSendMessage,
     isProcessing: runtimeView.isProcessing,
   };
-  // While sending is blocked, report the gate as not hydrated: the Draft Box keeps its
-  // items and waits instead of auto-sending them.
-  const commandQueueRuntimeGate = sendBlocked ? { ...runtimeGate, hydrated: false } : runtimeGate;
   const isCancelling = runtimeView.state === 'cancelling';
   const isBusy = isCancelling || commandQueueRuntimeGate.isProcessing || !commandQueueRuntimeGate.canSendMessage;
 
@@ -477,6 +474,9 @@ Please check your local CLI tool authentication status`,
     enabled: true,
     isBusy,
     runtimeGate: commandQueueRuntimeGate,
+    // While sending is blocked, the Draft Box keeps its items, including after this
+    // send box unmounts, instead of auto-sending them.
+    holdExecution: sendBlocked,
     onExecute: executeCommand,
   });
 
@@ -853,6 +853,7 @@ Please check your local CLI tool authentication status`,
         onInteractionUnlock={unlockInteraction}
         onEdit={handleEditQueuedCommand}
         onSendNow={handleSendNowQueued}
+        sendNowDisabledReason={sendBlocked ? t('conversation.sessionHolder.checking') : undefined}
         onToggleMode={toggleMode}
         onReorder={reorder}
         onRemove={remove}

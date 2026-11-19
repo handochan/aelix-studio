@@ -1136,21 +1136,24 @@ describe('AcpSendBox', () => {
       return props.onSendNow;
     };
 
-    it('holds the Draft Box queue and its send-now while the session holder check blocks sending', async () => {
-      const queueGate = () =>
-        (useConversationCommandQueueSpy.mock.calls.at(-1)?.[0] as { runtimeGate?: { hydrated: boolean } } | undefined)
-          ?.runtimeGate;
+    it('holds the Draft Box queue and disables its send-now while the session holder check blocks sending', async () => {
+      const queueArgs = () =>
+        useConversationCommandQueueSpy.mock.calls.at(-1)?.[0] as { holdExecution?: boolean } | undefined;
+      const panelProps = () =>
+        commandQueuePanelPropsSpy.mock.calls.at(-1)?.[0] as { sendNowDisabledReason?: string } | undefined;
       const { rerender } = render(
         <AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} sendBlocked />
       );
-      expect(queueGate()?.hydrated).toBe(false);
+      expect(queueArgs()?.holdExecution).toBe(true);
+      expect(panelProps()?.sendNowDisabledReason).toBe('conversation.sessionHolder.checking');
       await act(async () => getOnSendNow()(queuedItem));
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
       expect(removeMock).not.toHaveBeenCalled();
       expect(stopInvokeMock).not.toHaveBeenCalled();
 
       rerender(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
-      expect(queueGate()?.hydrated).toBe(true);
+      expect(queueArgs()?.holdExecution).toBe(false);
+      expect(panelProps()?.sendNowDisabledReason).toBeUndefined();
     });
 
     it('keeps a queued command from stopping a manual compaction', async () => {

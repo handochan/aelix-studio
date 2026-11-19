@@ -116,6 +116,18 @@ describe('CommandQueuePanel', () => {
     expect(onRemove).toHaveBeenCalledExactlyOnceWith('queued-1');
   });
 
+  it('disables send now with the reason while sending is blocked', () => {
+    const onSendNow = vi.fn();
+    renderPanel({ onSendNow, sendNowDisabledReason: 'Checking the session' });
+
+    const sendNow = screen.getByRole('button', { name: 'Send now' });
+    expect(sendNow).toBeDisabled();
+    expect(sendNow).toHaveAttribute('title', 'Checking the session');
+    fireEvent.click(sendNow);
+    expect(onSendNow).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Edit' })).toBeEnabled();
+  });
+
   it('shows the current mode and toggles it', () => {
     const onToggleMode = vi.fn();
     renderPanel({ mode: 'auto', onToggleMode });

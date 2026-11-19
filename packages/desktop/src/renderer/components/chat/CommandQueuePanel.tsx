@@ -71,6 +71,8 @@ type CommandQueuePanelProps = {
   onUpdate?: (commandId: string, input: string) => boolean;
   onEdit?: (item: ConversationCommandQueueItem) => void;
   onSendNow: (item: ConversationCommandQueueItem) => void;
+  /** When set, "Send now" is disabled and this text explains why. */
+  sendNowDisabledReason?: string;
   onToggleMode: () => void;
   onReorder: (activeCommandId: string, overCommandId: string) => void;
   onRemove: (commandId: string) => void;
@@ -79,6 +81,8 @@ type CommandQueuePanelProps = {
 
 type RenderActionIconButtonArgs = {
   ariaLabel: string;
+  /** Hover text; defaults to `ariaLabel`. */
+  title?: string;
   disabled?: boolean;
   onClick?: () => void;
   icon: React.ReactNode;
@@ -96,6 +100,8 @@ type SortableQueueItemProps = {
   t: (key: string, options?: Record<string, unknown>) => string;
   onEdit?: (item: ConversationCommandQueueItem) => void;
   onSendNow: (item: ConversationCommandQueueItem) => void;
+  /** When set, "Send now" is disabled and this text explains why. */
+  sendNowDisabledReason?: string;
   onRemove: (commandId: string) => void;
   onDragHandlePointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
 };
@@ -111,6 +117,8 @@ type QueueItemCardProps = {
   t: (key: string, options?: Record<string, unknown>) => string;
   onEdit?: (item: ConversationCommandQueueItem) => void;
   onSendNow: (item: ConversationCommandQueueItem) => void;
+  /** When set, "Send now" is disabled and this text explains why. */
+  sendNowDisabledReason?: string;
   onRemove: (commandId: string) => void;
   onDragHandlePointerDown: (event: React.PointerEvent<HTMLButtonElement>) => void;
   dragHandleButtonProps: React.ButtonHTMLAttributes<HTMLButtonElement>;
@@ -121,6 +129,7 @@ type QueueItemCardProps = {
 
 const renderQueueActionIconButton = ({
   ariaLabel,
+  title,
   disabled = false,
   onClick,
   icon,
@@ -135,7 +144,7 @@ const renderQueueActionIconButton = ({
     disabled={disabled}
     status={danger ? 'danger' : 'default'}
     aria-label={ariaLabel}
-    title={ariaLabel}
+    title={title ?? ariaLabel}
     onClick={onClick}
     icon={
       <>
@@ -170,6 +179,7 @@ const QueueItemCard: React.FC<QueueItemCardProps> = ({
   t,
   onEdit,
   onSendNow,
+  sendNowDisabledReason,
   onRemove,
   onDragHandlePointerDown,
   dragHandleButtonProps,
@@ -256,6 +266,8 @@ const QueueItemCard: React.FC<QueueItemCardProps> = ({
       <div className='flex items-center gap-0.5 shrink-0 h-24px overflow-hidden'>
         {renderQueueActionIconButton({
           ariaLabel: t('conversation.commandQueue.sendNow', { defaultValue: 'Send now' }),
+          title: sendNowDisabledReason,
+          disabled: !!sendNowDisabledReason,
           onClick: () => onSendNow(item),
           icon: <SendOne theme='outline' size='14' strokeWidth={2.5} />,
           accent: true,
@@ -286,6 +298,7 @@ const SortableQueueItem: React.FC<SortableQueueItemProps> = ({
   t,
   onEdit,
   onSendNow,
+  sendNowDisabledReason,
   onRemove,
   onDragHandlePointerDown,
 }) => {
@@ -315,6 +328,7 @@ const SortableQueueItem: React.FC<SortableQueueItemProps> = ({
         t={t}
         onEdit={onEdit}
         onSendNow={onSendNow}
+        sendNowDisabledReason={sendNowDisabledReason}
         onRemove={onRemove}
         onDragHandlePointerDown={onDragHandlePointerDown}
         dragHandleRef={dragViaCard ? undefined : setActivatorNodeRef}
@@ -349,6 +363,7 @@ const CommandQueuePanel: React.FC<CommandQueuePanelProps> = ({
   onInteractionUnlock,
   onEdit,
   onSendNow,
+  sendNowDisabledReason,
   onToggleMode,
   onReorder,
   onRemove,
@@ -583,6 +598,7 @@ const CommandQueuePanel: React.FC<CommandQueuePanelProps> = ({
                     t={t}
                     onEdit={onEdit}
                     onSendNow={onSendNow}
+                    sendNowDisabledReason={sendNowDisabledReason}
                     onRemove={onRemove}
                     onDragHandlePointerDown={(event) => {
                       activeDragHandleRef.current = event.currentTarget;
