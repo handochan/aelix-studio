@@ -7,6 +7,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 import os
 from pathlib import Path
+import sqlite3
 import subprocess
 import tempfile
 from threading import Thread
@@ -162,21 +163,39 @@ def verify_cases(api, runtime, adapter, sandbox, requests, contract):
                       "exclude_auto_inject_skills": list(excluded_skills)},
         })
 
-    leading = conversation("leading-command")
-    skills = leading["extra"]["skills"]
-    assert skills, "The leading command case needs pending host-generated rules"
-    messages = send_and_wait(api, leading["id"], contract["command"])
-    assert len(requests) == contract["providerRequestsForCommand"], "A leading /compact reached the provider"
-    assert compact_updates(messages) == [{"reason": "manual", "state": "failed"}], (
-        "The empty native session should attempt compaction and report no compactable history"
-    )
-    send_and_wait(api, leading["id"], contract["nextPrompt"])
-    first_model_input = requests[-1]["messages"][-1]["content"]
-    assert first_model_input.startswith(contract["rulesOpening"])
-    assert first_model_input.endswith(contract["rulesClosing"] + contract["nextPrompt"])
-    followup = "Continue after the rules were delivered"
-    send_and_wait(api, leading["id"], followup)
-    assert requests[-1]["messages"][-1]["content"] == followup
+    def acp_session(label):
+        with contextlib.closing(sqlite3.connect(sandbox / "acp/sessions.sqlite3")) as db:
+            row, = db.execute("SELECT id FROM sessions WHERE cwd=?", (str((sandbox / label).resolve()),))
+        return row[0]
+
+    for label, restart in (("leading-command", False), ("restart-after-command", True)):
+        leading = conversation(label)
+        skills = leading["extra"]["skills"]
+        assert skills, "The leading command case needs pending host-generated rules"
+        conversation_id = leading["id"]
+        before = len(requests)
+        messages = send_and_wait(api, conversation_id, contract["command"])
+        assert len(requests) - before == contract["providerRequestsForCommand"], "A leading /compact reached the provider"
+        assert compact_updates(messages) == [{"reason": "manual", "state": "failed"}], (
+            "The empty native session should attempt compaction and report no compactable history"
+        )
+        session_id = acp_session(label)
+        restart_route = f"/api/conversations/{conversation_id}/runtime/restart"
+        if restart:
+            api(restart_route, "POST")
+            assert acp_session(label) == session_id
+        send_and_wait(api, conversation_id, contract["nextPrompt"])
+        assert len(requests) == before + 1
+        first_model_input = requests[-1]["messages"][-1]["content"]
+        assert first_model_input.startswith(contract["rulesOpening"])
+        assert first_model_input.endswith(contract["rulesClosing"] + contract["nextPrompt"])
+        if restart:
+            api(restart_route, "POST")
+            assert acp_session(label) == session_id
+        followup = "Continue after the rules were delivered"
+        send_and_wait(api, conversation_id, followup)
+        assert len(requests) == before + 2
+        assert requests[-1]["messages"][-1]["content"] == followup
 
     pasted = conversation("pasted-example", skills)
     assert not pasted["extra"]["skills"], "The pasted input should carry only the user's rules-shaped text"
@@ -189,13 +208,15 @@ def verify_cases(api, runtime, adapter, sandbox, requests, contract):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", required=True, type=Path, help="Binary built from the host feature branch")
-    parser.add_argument("--host-source", required=True, type=Path, help="Clean checkout used to build --host")
+    parser.add_argument("--host", required=True, type=Path, help="Host binary to run")
+    parser.add_argument("--host-source", required=True, type=Path,
+                        help="Clean host checkout to record independently of --host")
     parser.add_argument("--runtime", required=True, type=Path, help="Prepared Studio runtime for the native pin")
     parser.add_argument("--acp-source", required=True, type=Path, help="Clean ACP feature-branch checkout")
     args = parser.parse_args()
     host, runtime, adapter = (path.resolve() for path in (args.host, args.runtime, args.acp_source))
-    host_head, acp_head = checkout_head(args.host_source), checkout_head(adapter)
+    host_checkout_head, acp_head = checkout_head(args.host_source), checkout_head(adapter)
+    host_binary_digest = hashlib.sha256(host.read_bytes()).hexdigest()
     baseline = json.loads((ROOT / "scripts/studio-preview/baseline.json").read_text())
     native_pin = baseline["native"]["sourceTag"]["commit"]
     receipt = json.loads((runtime / "receipt.json").read_text())
@@ -206,9 +227,10 @@ def main():
         port, requests = provider
         with start_host(host, runtime, sandbox, port) as api:
             verify_cases(api, runtime, adapter, sandbox, requests, contract)
-    print(json.dumps({"host": host_head, "hostBinarySha256": hashlib.sha256(host.read_bytes()).hexdigest(),
-                      "acp": acp_head, "native": native_pin,
-                      "passed": ["firstCompactBeforeRules", "rulesOnNextOrdinaryTurn", "pastedCompactIsOrdinary"]}))
+    print(json.dumps({"providedHostCheckoutSha": host_checkout_head, "hostBinarySha256": host_binary_digest,
+                      "hostBinaryBuildProvenance": "unverified", "acp": acp_head, "native": native_pin,
+                      "passed": ["firstCompactBeforeRules", "rulesOnNextOrdinaryTurn",
+                                 "rulesSurviveRuntimeRestart", "pastedCompactIsOrdinary"]}))
 
 
 if __name__ == "__main__":

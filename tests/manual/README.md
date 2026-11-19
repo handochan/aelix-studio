@@ -55,7 +55,9 @@ python3 tests/manual/aelixCompactBeforeRules.py \
 
 The fixture starts the source-built host, ACP and native with disposable state
 and a loopback provider. It checks that the first leading `/compact` enters
-compaction, the next ordinary prompt receives the pending rules exactly once,
-and a pasted rules block followed by a `/compact` example reaches the provider
-as ordinary text. The receipt reports both branch SHAs, the host binary digest
-and the native pin.
+compaction, the next ordinary prompt receives the pending rules exactly once
+even across runtime restarts, and a pasted rules block followed by a `/compact`
+example reaches the provider as ordinary text. The receipt records the provided
+host checkout SHA and the executable digest as independent inputs, alongside
+the ACP SHA and native pin. For commit-specific qualification, keep a separate
+build record linking the clean source commit to the executable digest.
