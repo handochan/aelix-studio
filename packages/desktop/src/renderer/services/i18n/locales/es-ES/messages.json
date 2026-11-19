@@ -84,6 +84,8 @@
     "action": "Bifurcar desde aquí",
     "errorTurnInFlight": "Espera a que termine la respuesta actual antes de bifurcar",
     "errorParentUnbound": "Esta conversación aún no tiene una sesión de backend para bifurcar",
+    "errorHeadChanged": "La conversación ha avanzado. Vuelve a crear una rama desde la respuesta más reciente.",
+    "errorHeadUnavailable": "Envía un mensaje y espera la respuesta antes de crear una rama.",
     "errorPointUnsupported": "Este agente solo puede bifurcar desde el último mensaje",
     "errorUnsupported": "Este agente no admite bifurcaciones",
     "errorGeneric": "Error al bifurcar: {{message}}"

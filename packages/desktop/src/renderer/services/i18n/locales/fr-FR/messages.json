@@ -84,6 +84,8 @@
     "action": "Bifurquer à partir d'ici",
     "errorTurnInFlight": "Attendez la fin de la réponse en cours avant de bifurquer",
     "errorParentUnbound": "Cette conversation n'a pas encore de session backend à bifurquer",
+    "errorHeadChanged": "La conversation a avancé. Créez une nouvelle branche depuis la dernière réponse.",
+    "errorHeadUnavailable": "Envoyez un message et attendez la réponse avant de créer une branche.",
     "errorPointUnsupported": "Cet agent ne peut bifurquer qu'à partir du dernier message",
     "errorUnsupported": "Cet agent ne prend pas en charge la bifurcation",
     "errorGeneric": "Échec de la bifurcation : {{message}}"

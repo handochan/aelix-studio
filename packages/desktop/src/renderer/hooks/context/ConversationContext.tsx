@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { TForkCapability } from '@/common/chat/forkConversation';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import React, { createContext, useContext } from 'react';
 
@@ -68,7 +69,7 @@ export interface ConversationContextValue {
    * (`fork_capability`). Absent = the agent cannot fork → hide the message
    * fork entry point. See `common/chat/forkConversation.ts`.
    */
-  forkCapability?: { at_turn: boolean };
+  forkCapability?: TForkCapability;
 
   /**
    * Prompt media capability from the conversation detail response

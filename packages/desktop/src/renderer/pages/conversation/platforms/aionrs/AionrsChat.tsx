@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type { TForkCapability } from '@/common/chat/forkConversation';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import type { ConversationContextValue } from '@/renderer/hooks/context/ConversationContext';
@@ -41,7 +42,7 @@ const AionrsChat: React.FC<{
   teamSendMessage?: (payload: { input: string; files: ChatFileRef[] }) => Promise<void>;
   teamRuntime?: TeamSendBoxRuntime;
   assistantId?: string;
-  forkCapability?: { at_turn: boolean };
+  forkCapability?: TForkCapability;
 }> = ({
   conversation_id,
   workspace,

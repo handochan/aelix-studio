@@ -84,6 +84,8 @@
     "action": "从此处分叉",
     "errorTurnInFlight": "请等待当前回复完成后再分叉",
     "errorParentUnbound": "该会话还没有可分叉的后端会话",
+    "errorHeadChanged": "对话已继续，分支起点已改变。请从最新回复重新创建分支。",
+    "errorHeadUnavailable": "请先发送消息，等回复结束后再创建分支。",
     "errorPointUnsupported": "该智能体仅支持从最新消息分叉",
     "errorUnsupported": "该智能体不支持会话分叉",
     "errorGeneric": "分叉失败：{{message}}"
