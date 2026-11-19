@@ -87,6 +87,15 @@ describe('AboutModalContent update ready state', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens the Studio issue tracker for contact', async () => {
+    const { openExternalUrl } = await import('@/renderer/utils/platform');
+    render(<AboutModalContent />);
+    fireEvent.click(screen.getByText('settings.contactMe'));
+    await waitFor(() =>
+      expect(openExternalUrl).toHaveBeenCalledWith('https://github.com/handochan/aelix-studio/issues')
+    );
+  });
+
   it('persists the automatic-update switch through desktop settings', async () => {
     const { ipcBridge } = await import('@/common');
     render(<AboutModalContent />);

@@ -1,3 +1,9 @@
+/** Studio uses a different origin from the upstream WebUI on port 25808. */
+export function getStudioWebUIDefaultPort(production: boolean, multiInstance = false): number {
+  if (production) return 25982;
+  return multiInstance ? 25984 : 25983;
+}
+
 type SourceHeaders = {
   host?: string;
   origin?: string;

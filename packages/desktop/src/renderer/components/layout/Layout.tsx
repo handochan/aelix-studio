@@ -426,11 +426,11 @@ const Layout: React.FC<{
                         }
                       }}
                     >
-                      {t('common.appName')}
+                      {t('login.brand')}
                     </div>
                   </Tooltip>
                 ) : (
-                  <div className='text-16px text-t-primary collapsed-hidden font-semibold'>{t('common.appName')}</div>
+                  <div className='text-16px text-t-primary collapsed-hidden font-semibold'>{t('login.brand')}</div>
                 )}
                 {isMobile && !collapsed && (
                   <button

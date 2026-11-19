@@ -36,7 +36,7 @@ vi.mock('@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListS
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, params?: { name?: string }) =>
-      key === 'common.appName' ? 'Aelix Studio' : params?.name ? `${key}::${params.name}` : key,
+      key === 'login.brand' ? 'Aelix Studio' : params?.name ? `${key}::${params.name}` : key,
   }),
 }));
 

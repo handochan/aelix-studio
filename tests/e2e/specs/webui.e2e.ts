@@ -35,13 +35,13 @@ test.describe('WebUI Service', () => {
 
   // ── Port & URL ─────────────────────────────────────────────────────────
 
-  test('displays default port 25808', async ({ page }) => {
+  test('displays default port 25982', async ({ page }) => {
     await goToWebui(page);
 
     const body = await page.locator('body').textContent();
     // Port may appear in UI text or may only appear when service is running.
     // Verify the WebUI panel itself is rendered (desktop mode).
-    const hasPort = body?.includes('25808');
+    const hasPort = body?.includes('25982');
     const hasWebUIPanel = body?.includes('WebUI') || body?.includes('Enable');
     expect(hasPort || hasWebUIPanel).toBeTruthy();
   });
@@ -50,7 +50,7 @@ test.describe('WebUI Service', () => {
     await goToWebui(page);
 
     const body = await page.locator('body').textContent();
-    // The URL (http://localhost:25808) is only shown when the service is running.
+    // The URL (http://localhost:25982) is only shown when the service is running.
     // In test environment, the service may not be started, so just verify
     // the WebUI page renders properly with relevant content.
     const hasUrl = body?.includes('localhost');

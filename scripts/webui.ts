@@ -8,7 +8,7 @@
  * starting Electron. Replaces the former `electron-vite dev -- --webui` flow.
  *
  * Env vars:
- *   AIONUI_PORT           : static server port (default 33000)
+ *   AIONUI_PORT           : static server port (production 25982, development 25983/25984)
  *   AIONUI_HOST           : listen host; set to 0.0.0.0 to imply --remote
  *   AIONUI_ALLOW_REMOTE   : "1"/"true" to expose to LAN
  *   AIONUI_DATA_DIR       : override userData path
@@ -28,13 +28,12 @@ import { fetchStudioBackend, startWebHost } from '@aionui/web-host';
 import { verifyDefaultHostBundle } from '../packages/shared-scripts/src/default-host.js';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
 import { getStandaloneWebDataFolder } from '../packages/desktop/src/common/config/appIdentity';
+import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
 
-// Aligned with packages/desktop/src/common/config/constants.ts WEBUI_DEFAULT_PORT.
-const DEFAULT_PORT = (() => {
-  if (process.env.NODE_ENV === 'production') return 25808;
-  if (process.env.AIONUI_MULTI_INSTANCE === '1') return 25810;
-  return 25809;
-})();
+const DEFAULT_PORT = getStudioWebUIDefaultPort(
+  process.env.NODE_ENV === 'production',
+  process.env.AIONUI_MULTI_INSTANCE === '1'
+);
 const BACKEND_BINARY = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -65,7 +64,7 @@ const getFlag = (name: string): string | undefined => {
  * Why a dedicated `-web` name, not the same `~/.aelix-studio[-dev]` that Electron
  * uses: on macOS, Electron's getDataPath() (packages/desktop/src/process/utils/
  * utils.ts) creates `~/.aelix-studio-dev` as a **symlink** to
- * `~/Library/Application Support/Aelix Studio-Dev/aelix-studio` so CLI tools (claude,
+ * `~/Library/Application Support/Aelix Studio-Dev/aionui` so CLI tools (claude,
  * gemini, qwen…) don't choke on the literal space in "Application Support".
  * If standalone webui runs first on a clean machine, it would create the
  * symlink location as a **real directory** instead. When Electron is later

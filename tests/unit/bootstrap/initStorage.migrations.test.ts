@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -25,7 +25,7 @@ afterEach(() => {
   rmSync(sandbox, { recursive: true, force: true });
 });
 
-async function launchStorage() {
+async function launchStorage(cliSafeAliases = false) {
   const { configureElectronIdentity, registerPlatformServices } = await import('@/common/platform');
   const { NodePlatformServices } = await import('@/common/platform/NodePlatformServices');
   const appData = path.join(sandbox, 'appData');
@@ -45,8 +45,11 @@ async function launchStorage() {
     paths: {
       ...platform.paths,
       getDataDir: () => userData,
+      isPackaged: () => true,
       getLogsDir: () => path.join(userData, 'logs'),
       getTempDir: () => sandbox,
+      getHomeDir: () => sandbox,
+      needsCliSafeSymlinks: () => cliSafeAliases,
     },
   });
   const storage = await import('@/process/utils/initStorage');
@@ -68,7 +71,7 @@ describe('Studio profile initialization', () => {
     const profile = path.join(sandbox, 'appData', 'Aelix Studio');
     expect({ cacheDir, workDir, logDir }).toEqual({
       cacheDir: path.join(profile, 'config'),
-      workDir: path.join(profile, 'aelix-studio'),
+      workDir: path.join(profile, 'aionui'),
       logDir: path.join(profile, 'logs'),
     });
     expect(existsSync(path.join(cacheDir, 'sentinel'))).toBe(false);
@@ -85,6 +88,20 @@ describe('Studio profile initialization', () => {
     const restarted = await launchStorage();
     expect(await restarted.ProcessConfig.get('language')).toBe('ko-KR');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'exposes a CLI alias that resolves to the extension-compatible Desktop profile',
+    async () => {
+      const storage = await launchStorage(true);
+      await storage.ProcessConfig.set('language', 'ko-KR');
+      const profile = realpathSync(path.join(sandbox, 'appData', 'Aelix Studio'));
+      const alias = path.join(sandbox, '.aelix-studio');
+      const database = realpathSync(alias);
+      expect(path.basename(database)).toBe('aionui');
+      expect(path.dirname(database)).toBe(profile);
+      expect(existsSync(path.join(profile, 'config', 'aionui-config.txt'))).toBe(true);
+    }
+  );
 
   it('keeps the packaged and two development profiles distinct', async () => {
     const { configureElectronIdentity } = await import('@/common/platform');
@@ -103,5 +120,21 @@ describe('standalone WebUI profile selection', () => {
     expect(getStandaloneWebDataFolder(true)).toBe('.aelix-studio-web');
     expect(getStandaloneWebDataFolder(false)).toBe('.aelix-studio-web-dev');
     expect(getStandaloneWebDataFolder(false, true)).toBe('.aelix-studio-web-dev-2');
+  });
+});
+
+describe('Studio WebUI port defaults', () => {
+  it('uses the Studio production port and respects the CLI, environment and stored overrides', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('AIONUI_PORT', undefined);
+    vi.stubEnv('PORT', undefined);
+    await launchStorage();
+    const { resolveWebUIPort } = await import('@/process/utils/webuiConfig');
+    const unset = () => undefined;
+    expect(resolveWebUIPort({}, unset)).toBe(25982);
+    expect(resolveWebUIPort({ port: 25808 }, unset)).toBe(25808);
+    vi.stubEnv('AIONUI_PORT', '33000');
+    expect(resolveWebUIPort({ port: 25808 }, unset)).toBe(33000);
+    expect(resolveWebUIPort({ port: 25808 }, (flag) => (flag === 'port' ? '34000' : undefined))).toBe(34000);
   });
 });

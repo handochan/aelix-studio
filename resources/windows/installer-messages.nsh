@@ -77,8 +77,8 @@
 !define AIONUI_MSG_FILE_OR_FOLDER_IN_USE_ZH "Aelix Studio 无法继续，因为安装目录中的文件或文件夹仍被占用："
 !define AIONUI_MSG_APPLICATION_USING_IT_EN "Application using it:"
 !define AIONUI_MSG_APPLICATION_USING_IT_ZH "正在使用它的应用："
-!define AIONUI_MSG_CLOSE_LISTED_RETRY_EN "Close the application listed above, then click Retry. If you are not sure what to close, click Cancel to send the installer log to the Aelix Studio team."
-!define AIONUI_MSG_CLOSE_LISTED_RETRY_ZH "请关闭上面列出的应用，然后点击重试。如果不确定要关闭哪个程序，请点击取消，将安装日志发送给 Aelix Studio 团队。"
+!define AIONUI_MSG_CLOSE_LISTED_RETRY_EN "Close the application listed above, then click Retry. If you are not sure what to close, click Cancel to save a local installer report."
+!define AIONUI_MSG_CLOSE_LISTED_RETRY_ZH "请关闭上面列出的应用，然后点击重试。如果不确定要关闭哪个程序，请点击取消以保存本地安装报告。"
 
 !define AIONUI_MSG_CLOSE_OR_REMOVE_PREVIOUS_EN "Aelix Studio could not finish closing or removing the previous version."
 !define AIONUI_MSG_CLOSE_OR_REMOVE_PREVIOUS_ZH "Aelix Studio 无法完成关闭或移除旧版本。"

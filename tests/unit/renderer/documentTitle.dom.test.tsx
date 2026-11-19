@@ -13,7 +13,7 @@ let mockLanguage = 'en-US';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => (key === 'common.appName' ? 'Aelix Studio' : mockLanguage === 'zh-CN' ? `zh:${key}` : key),
+    t: (key: string) => (key === 'login.brand' ? 'Aelix Studio' : mockLanguage === 'zh-CN' ? `zh:${key}` : key),
     i18n: { language: mockLanguage },
   }),
 }));
@@ -25,9 +25,9 @@ describe('titleForPath', () => {
 
   it('uses the login title on the login route only', () => {
     expect(titleForPath('/login', t)).toBe('t(login.pageTitle)');
-    expect(titleForPath('/guid', t)).toBe('t(common.appName)');
-    expect(titleForPath('/conversation/abc', t)).toBe('t(common.appName)');
-    expect(titleForPath('/settings/agent', t)).toBe('t(common.appName)');
+    expect(titleForPath('/guid', t)).toBe('t(login.brand)');
+    expect(titleForPath('/conversation/abc', t)).toBe('t(login.brand)');
+    expect(titleForPath('/settings/agent', t)).toBe('t(login.brand)');
   });
 });
 

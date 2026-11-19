@@ -374,6 +374,28 @@ def remove_install(app, kind, package):
         shutil.rmtree(long_path(app))
 
 
+def installed_runtime_probe(payload):
+    """Build the program passed to the bundled Python helper on every target."""
+    return textwrap.dedent("""
+    import os,sys,json
+    from pathlib import Path
+    import aelix_ai,aelix_coding_agent
+    def owned(value):
+        value=str(Path(value).resolve())
+        if sys.platform=='win32' and not value.startswith('\\\\\\\\?\\\\'):
+            value='\\\\\\\\?\\\\UNC\\\\'+value[2:] if value.startswith('\\\\\\\\') else '\\\\\\\\?\\\\'+value
+        return Path(value)
+    root=owned(ROOT_VALUE)
+    assert owned(sys.executable).is_relative_to(root)
+    assert all(owned(module.__file__).is_relative_to(root) for module in (aelix_ai,aelix_coding_agent))
+    assert sys.flags.isolated and sys.flags.no_site and sys.flags.no_user_site
+    if sys.platform=='win32':
+        import win32api,pywintypes
+        assert all(owned(module.__file__).is_relative_to(root) for module in (win32api,pywintypes))
+    print(json.dumps(dict(bundled=True,isolated=True)))
+    """).replace('ROOT_VALUE', repr(str(payload)))
+
+
 def main(args):
     runtime = Path(args.runtime).resolve()
     output = Path(args.output).resolve()
@@ -461,25 +483,7 @@ def main(args):
                            + os.environ.get('SystemRoot', os.environ.get('SYSTEMROOT', r'C:\Windows'))
                            if sys.platform == 'win32' else '/usr/bin:/bin')
             environment = dict(os.environ, PATH=system_path, PYTHONDONTWRITEBYTECODE='1')
-            probe_code = textwrap.dedent("""
-    import os,sys,json
-    from pathlib import Path
-import plistlib
-    import aelix_ai,aelix_coding_agent
-    def owned(value):
-        value=str(Path(value).resolve())
-        if sys.platform=='win32' and not value.startswith('\\\\\\\\?\\\\'):
-            value='\\\\\\\\?\\\\UNC\\\\'+value[2:] if value.startswith('\\\\\\\\') else '\\\\\\\\?\\\\'+value
-        return Path(value)
-    root=owned(ROOT_VALUE)
-    assert owned(sys.executable).is_relative_to(root)
-    assert all(owned(module.__file__).is_relative_to(root) for module in (aelix_ai,aelix_coding_agent))
-    assert sys.flags.isolated and sys.flags.no_site and sys.flags.no_user_site
-    if sys.platform=='win32':
-        import win32api,pywintypes
-        assert all(owned(module.__file__).is_relative_to(root) for module in (win32api,pywintypes))
-    print(json.dumps(dict(bundled=True,isolated=True)))
-    """).replace('ROOT_VALUE', repr(str(probe_payload)))
+            probe_code = installed_runtime_probe(probe_payload)
             probe = subprocess.check_output([*wrapper, *isolated, 'helper', '-c', probe_code],
                                             env=environment, text=True, encoding='utf-8', timeout=30)
             if not json.loads(probe)['bundled']:

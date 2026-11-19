@@ -4,11 +4,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { BrowserWindow } from 'electron';
+import path from 'node:path';
+import type { App, BrowserWindow } from 'electron';
 import { APP_SLUG } from '@/common/config/appIdentity';
 import { ipcBridge } from '@/common';
 
 export const PROTOCOL_SCHEME = APP_SLUG;
+
+/** Let NSIS own the Windows handler, including when a developer runs Electron directly. */
+export function registerStudioProtocol(
+  app: Pick<App, 'setAsDefaultProtocolClient'>,
+  platform = process.platform,
+  defaultApp = process.defaultApp,
+  argv = process.argv,
+  executable = process.execPath
+): void {
+  if (platform === 'win32') return;
+
+  if (defaultApp) {
+    const entryPoint = argv[1];
+    if (entryPoint) app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, executable, [path.resolve(entryPoint)]);
+  } else {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+  }
+}
 
 /**
  * Parse an aelix-studio:// URL into action and params.

@@ -16,7 +16,7 @@ import http, { type IncomingMessage, type Server, type ServerResponse } from 'no
 import { networkInterfaces } from 'node:os';
 import net, { type Socket } from 'node:net';
 import serveHandler from 'serve-handler';
-import { createRequestOriginPolicy, readSourceHeaders } from './requestOrigin.js';
+import { createRequestOriginPolicy, getStudioWebUIDefaultPort, readSourceHeaders } from './requestOrigin.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
 import {
@@ -42,7 +42,7 @@ export type StaticServerHandle = {
   stop: () => Promise<void>;
 };
 
-const DEFAULT_PORT = 25808;
+const DEFAULT_PORT = getStudioWebUIDefaultPort(true);
 
 // Ranges that are non-internal IPv4 yet never a reachable LAN address, so we
 // must never advertise them as the WebUI access URL even when they are the only

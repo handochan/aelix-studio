@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import type { IChannelPluginStatus } from '@/common/types/channel/channel';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import { channel, webui, type IWebUIStatus } from '@/common/adapter/ipcBridge';
@@ -619,7 +620,7 @@ const ChannelModalContent: React.FC = () => {
       const callbackPath = '/ext-wecom-bot/webhook';
       const localCallbackUrl = webuiStatus?.localUrl
         ? `${webuiStatus.localUrl}${callbackPath}`
-        : `http://localhost:25808${callbackPath}`;
+        : `http://localhost:${WEBUI_DEFAULT_PORT}${callbackPath}`;
       const lanCallbackUrl = webuiStatus?.networkUrl ? `${webuiStatus.networkUrl}${callbackPath}` : null;
       const publicBaseUrl =
         typeof values.publicBaseUrl === 'string' ? values.publicBaseUrl.trim().replace(/\/+$/, '') : '';

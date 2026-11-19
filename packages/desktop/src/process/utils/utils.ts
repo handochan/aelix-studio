@@ -98,7 +98,8 @@ const ensureCliSafeSymlink = (targetPath: string, symlinkName: string): string =
  */
 export const getDataPath = (): string => {
   const rootPath = getElectronPathOrFallback('userData');
-  const dataPath = path.join(rootPath, APP_SLUG);
+  // #32 locates the Desktop profile from this private directory name and its config.
+  const dataPath = path.join(rootPath, 'aionui');
   return ensureCliSafeSymlink(dataPath, getEnvAwareName(`.${APP_SLUG}`));
 };
 

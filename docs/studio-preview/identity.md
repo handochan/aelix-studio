@@ -10,7 +10,7 @@ and Windows use `Aelix Studio.app` and `Aelix Studio.exe`.
 | macOS desktop profile          | `~/Library/Application Support/Aelix Studio`                                                    |
 | Windows desktop profile        | `%APPDATA%\Aelix Studio`                                                                        |
 | Linux desktop profile          | `$XDG_CONFIG_HOME/Aelix Studio` or `~/.config/Aelix Studio`                                     |
-| Desktop settings and host data | `config/` and `aelix-studio/` within the profile                                                |
+| Desktop settings and host data | `config/` and `aionui/` within the profile                                                      |
 | Desktop app logs               | `~/Library/Logs/Aelix Studio` on macOS, `logs/` within the desktop profile on Windows and Linux |
 | Standalone WebUI data and logs | `~/.aelix-studio-web` and its `logs/` subdirectory                                              |
 
@@ -18,10 +18,23 @@ Desktop and bundled WebUI use the Studio profile, which Electron also uses for
 its single-instance lock. Development uses `Aelix Studio-Dev` or
 `Aelix Studio-Dev-2`. On macOS the CLI-safe symlinks are `~/.aelix-studio`
 and `~/.aelix-studio-config`, with corresponding development suffixes.
+The private `aionui/` database subdirectory lets the extension runtime discover
+the same profile from a direct Desktop database path or the macOS CLI-safe
+symlink. The extension state remains at `<Studio profile>/aelix-runtime`.
 Standalone WebUI source commands use `-dev` or `-dev-2` outside production.
 An explicit standalone `--data-dir` or `AIONUI_DATA_DIR` selects another directory.
 A first launch starts with a fresh profile and leaves the upstream app's
 profiles, temporary data, and URL registration independent.
+
+## WebUI defaults
+
+Studio WebUI uses port `25982` in production, `25983` in development, and
+`25984` for a second development instance. This lets AionUi keep its default
+port `25808` and gives each app its own browser origin and service worker scope.
+An explicit port or saved preference still takes priority. The local listener
+uses loopback unless remote access is enabled. Browser authentication cookies
+are scoped by host, so use separate browser profiles when signing into both
+apps on the same hostname.
 
 ## Upstream and compatibility names
 

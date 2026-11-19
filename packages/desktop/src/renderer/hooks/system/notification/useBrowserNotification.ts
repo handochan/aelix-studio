@@ -64,7 +64,7 @@ export const useBrowserNotification = (): void => {
       },
       show: ({ body, conversationId }) => {
         try {
-          const notification = new Notification(t('common.appName'), {
+          const notification = new Notification(t('login.brand'), {
             body,
             icon: notificationIcon,
           });

@@ -8,6 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBrowserUrl, shouldAutoOpenBrowser } from './browser.js';
 import { ensureAdminPassword } from './ensureAdminPassword.js';
+import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
 
 // tarball layout:
 //   aionui-web/
@@ -51,7 +52,7 @@ const isPackaged = (() => {
 })();
 
 const BACKEND_BINARY = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
-const DEFAULT_PORT = 25808;
+const DEFAULT_PORT = getStudioWebUIDefaultPort(true);
 const RESET_COMMAND = isPackaged ? 'aionui-web resetpass' : 'bun run resetpass';
 
 let currentHandle: WebHostHandle | StaticServerHandle | null = null;
@@ -223,7 +224,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     currentHandle = handle;
 
     console.log('');
-    console.log('AionUi WebUI is ready');
+    console.log('Aelix Studio WebUI is ready');
     console.log(`  Local  : ${handle.localUrl}`);
     if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
 

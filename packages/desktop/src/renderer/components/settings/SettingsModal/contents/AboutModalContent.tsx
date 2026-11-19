@@ -151,7 +151,7 @@ const AboutModalContent: React.FC = () => {
     },
     {
       title: t('settings.contactMe'),
-      url: 'https://github.com/handochan/aelix-studio/discussions',
+      url: 'https://github.com/handochan/aelix-studio/issues',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
@@ -176,7 +176,7 @@ const AboutModalContent: React.FC = () => {
             <img src={wordmarkLight} alt='' className='mb-8px w-112px dark:hidden' />
             <img src={wordmarkDark} alt='' className='mb-8px hidden w-112px dark:block' />
             <Typography.Title heading={3} className='text-24px font-bold text-t-primary mb-8px'>
-              {t('common.appName')}
+              {t('login.brand')}
             </Typography.Title>
             <Typography.Text className='text-14px text-t-secondary mb-12px text-center'>
               {t('settings.appDescription')}

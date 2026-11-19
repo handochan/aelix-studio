@@ -122,7 +122,7 @@ const WebuiModalContent: React.FC = () => {
         // preference. Reading `webui.desktop.enabled` from config and using it
         // as the Switch's checked value used to make the Switch look "on" when
         // the main-process auto-restore silently failed (port conflict, etc.),
-        // so users clicked the saved URL and got a white screen because 25808
+        // so users clicked the saved URL and got a white screen because the port
         // was empty. The main process is the sole writer of this key — the
         // start/stop IPC providers and restoreDesktopWebUIFromPreferences own
         // reconciliation, so the renderer only reads `running` and never

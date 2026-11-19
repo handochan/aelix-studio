@@ -29,13 +29,16 @@ async function mkRendererFixture(): Promise<string> {
 }
 
 async function startMockBackend(
-  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  port = 0
 ): Promise<{ port: number; close: () => Promise<void> }> {
   const server = http.createServer(handler);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-  const port = (server.address() as AddressInfo).port;
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve());
+  });
   return {
-    port,
+    port: (server.address() as AddressInfo).port,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
 }
@@ -87,6 +90,31 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const text = await r.text();
     expect(text).toContain('<title>root</title>');
+  });
+
+  it('runs at the Studio default while upstream occupies 25808, and rejects the upstream browser origin', async () => {
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', undefined);
+    const upstream = await startMockBackend((_req, res) => res.end('upstream fixture'), 25808);
+    const backend = await startMockBackend((req, res) => {
+      res.writeHead(req.headers.cookie === 'aionui-session=studio-cookie' ? 200 : 401).end();
+    });
+    stopBackend = backend.close;
+    try {
+      handle = await startStaticServer({ staticDir, backendPort: backend.port });
+      expect(handle.localUrl).toBe('http://127.0.0.1:25982');
+      expect(await (await fetch('http://127.0.0.1:25808')).text()).toBe('upstream fixture');
+      expect(await (await fetch(handle.localUrl)).text()).toContain('<title>root</title>');
+      const login = (origin: string, cookie: string) =>
+        requestStatus(handle!.port, '/login', {
+          method: 'POST',
+          headers: { origin, cookie, 'sec-fetch-site': 'same-origin' },
+        });
+      expect(await login('http://127.0.0.1:25808', 'aionui-session=studio-cookie')).toBe(403);
+      expect(await login(handle.localUrl, 'aionui-session=upstream-cookie')).toBe(401);
+      expect(await login(handle.localUrl, 'aionui-session=studio-cookie')).toBe(200);
+    } finally {
+      await upstream.close();
+    }
   });
 
   it('SPA fallback: /chat/123 returns index.html', async () => {
