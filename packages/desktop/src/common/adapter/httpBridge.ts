@@ -501,7 +501,15 @@ function ensureWs(): void {
       };
       const eventName = msg.name ?? msg.event;
       const payload = msg.data ?? msg.payload;
-      console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
+      if (
+        eventName === 'conversation.acpExtension' ||
+        eventName === 'conversation.acpExtensionsSubscribed' ||
+        eventName === 'conversation.acpExtensionError'
+      ) {
+        console.debug('[WS:msg]', eventName);
+      } else {
+        console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
+      }
       if (eventName) {
         dispatchWsEvent(eventName, payload);
       }

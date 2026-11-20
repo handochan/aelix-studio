@@ -66,6 +66,10 @@ class FakeWebSocket {
     for (const listener of this.listeners.open) listener();
   }
 
+  dispatchMessage(data: unknown) {
+    for (const listener of this.listeners.message) listener({ data: JSON.stringify(data) } as MessageEvent<string>);
+  }
+
   dispatchClose() {
     this.readyState = FakeWebSocket.CLOSED;
     for (const listener of this.listeners.close) listener({ code: 1006, reason: '' } as CloseEvent);
@@ -413,6 +417,29 @@ describe('httpBridge', () => {
       vi.clearAllTimers();
       unsubscribe();
       vi.useRealTimers();
+    });
+
+    it('dispatches ACP relay frames while logging only their event names', () => {
+      const events = [
+        'conversation.acpExtension',
+        'conversation.acpExtensionsSubscribed',
+        'conversation.acpExtensionError',
+      ];
+      const marker = 'sensitive extension content';
+      const received = vi.fn();
+      vi.stubGlobal('window', { __backendPort: 13400 });
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      const unsubscribers = events.map((name) => wsEmitter<unknown>(name).on(received));
+      const socket = FakeWebSocket.instances.at(-1)!;
+      for (const name of events) socket.dispatchMessage({ name, data: { marker } });
+      expect(received.mock.calls).toEqual(events.map(() => [{ marker }]));
+      expect(debug.mock.calls.filter(([prefix]) => prefix === '[WS:msg]')).toEqual(
+        events.map((name) => ['[WS:msg]', name])
+      );
+      for (const unsubscribe of unsubscribers) unsubscribe();
+      socket.close();
+      debug.mockRestore();
     });
 
     it('on returns unsubscribe function that removes listener', () => {
