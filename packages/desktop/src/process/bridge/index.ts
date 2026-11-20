@@ -58,7 +58,7 @@ export function initAllBridges(_deps: BridgeDependencies = {}): void {
     ) {
       return { ok: false, code: 'FORBIDDEN' };
     }
-    return nativeAuth.request(`desktop:${event.sender.id}`, command);
+    return nativeAuth.request(`desktop:${event.sender.id}`, command, app.getPath('userData'));
   });
   app.once('before-quit', () => nativeAuth.dispose());
 }
