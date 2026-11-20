@@ -17,10 +17,12 @@ const active = (turnId = target.turnId) => result({ active: true, turnId });
 
 function holdReply() {
   let reply!: (value: Response) => void;
-  const pending = new Promise<Response>((resolve) => {
+  let fail!: (error: Error) => void;
+  const pending = new Promise<Response>((resolve, reject) => {
     reply = resolve;
+    fail = reject;
   });
-  return { pending, reply };
+  return { pending, reply, fail };
 }
 
 describe('running input renderer client', () => {
@@ -101,15 +103,17 @@ describe('running input renderer client', () => {
     expect(calls()).toEqual(['discover']);
   });
 
-  it('preserves the draft on stale turn and never falls back to ordinary send', async () => {
+  it('preserves the draft on HTTP 200 stale-turn and reads the new turn without replaying the write', async () => {
     offer();
     fetchMock.mockResolvedValueOnce(result({ accepted: false, reason: 'stale-turn' }));
+    offer(target.bindingId, 'turn-2');
     await client.refresh();
     expect(await client.send('follow-up', target, secret)).toMatchObject({
       preserveDraft: true,
       receipt: { ...target, status: 'rejected', reason: 'stale-turn' },
     });
-    expect(calls()).toEqual(['discover', methods[0], methods[2]]);
+    expect(client.getSnapshot().channel).toMatchObject({ status: 'ready', turn: { turnId: 'turn-2' } });
+    expect(calls()).toEqual(['discover', methods[0], methods[2], 'discover', methods[0]]);
   });
 
   it('recovers auth and rediscovers without replaying the original POST', async () => {
@@ -195,9 +199,9 @@ describe('running input renderer client', () => {
       preserveDraft: true,
     });
     reconnect?.();
-    await client.refresh();
+    await vi.waitFor(() => expect(client.getSnapshot().channel.status).toBe('ready'));
     held.reply(result(accepted));
-    await pending;
+    expect(await pending).toMatchObject({ preserveDraft: true });
     expect(client.getSnapshot()).toMatchObject({
       channel: { status: 'ready', turn: { turnId: 'turn-2' } },
       receipts: [{ ...target, status: 'queued' }],
@@ -216,11 +220,115 @@ describe('running input renderer client', () => {
     const pending = client.send('steer', target, secret);
     const { requestId } = client.getSnapshot().receipts[0];
     reconnect?.();
-    await client.refresh();
+    await vi.waitFor(() => expect(client.getSnapshot().channel.status).toBe('ready'));
     held.reply(result(accepted));
     expect(await pending).toMatchObject({ preserveDraft: true });
     expect(client.getSnapshot().receipts).toEqual([]);
     expect(await client.lookup(requestId)).toEqual({ status: 'binding-changed', refreshHistory: true });
+  });
+
+  it('waits for rediscovery before clearing a draft or publishing a receipt from the old binding', async () => {
+    offer();
+    const write = holdReply();
+    const rediscover = holdReply();
+    fetchMock
+      .mockReturnValueOnce(write.pending)
+      .mockReturnValueOnce(rediscover.pending)
+      .mockResolvedValueOnce(active('turn-2'));
+    await client.refresh();
+
+    const queuedBindings: string[] = [];
+    const stop = client.subscribe(() => {
+      for (const receipt of client.getSnapshot().receipts) {
+        if (receipt.status === 'queued') queuedBindings.push(receipt.bindingId);
+      }
+    });
+    const send = client.send('steer', target, secret);
+    reconnect?.();
+    await vi.waitFor(() => expect(calls()).toHaveLength(4));
+
+    write.reply(result(accepted));
+    // Let the receipt reach the client while the rediscovery GET is still held.
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    rediscover.reply(discovery('new-binding'));
+
+    expect(await send).toMatchObject({ preserveDraft: true });
+    expect(queuedBindings).toEqual([]);
+    expect(client.getSnapshot()).toMatchObject({
+      channel: { status: 'ready', bindingId: 'new-binding' },
+      receipts: [],
+    });
+    stop();
+  });
+
+  it('settles an acknowledged write after a second reconnect supersedes a stalled discovery', async () => {
+    offer();
+    const write = holdReply();
+    const superseded = holdReply();
+    fetchMock.mockReturnValueOnce(write.pending).mockReturnValueOnce(superseded.pending);
+    offer('new-binding', 'turn-2');
+    await client.refresh();
+
+    const send = client.send('steer', target, secret);
+    reconnect?.();
+    write.reply(result(accepted));
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
+    reconnect?.();
+
+    await expect(send).resolves.toMatchObject({ preserveDraft: true });
+    expect(client.getSnapshot()).toMatchObject({
+      channel: { status: 'ready', bindingId: 'new-binding' },
+      receipts: [],
+    });
+    superseded.reply(discovery());
+  });
+
+  it.each([false, true])(
+    'keeps a lookup-confirmed receipt when the original response fails (dismissed: %s)',
+    async (dismissed) => {
+      offer();
+      const write = holdReply();
+      fetchMock
+        .mockReturnValueOnce(write.pending)
+        .mockResolvedValueOnce(result({ status: 'completed', result: accepted }));
+      await client.refresh();
+
+      const send = client.send('steer', target, secret);
+      const { requestId } = client.getSnapshot().receipts[0];
+      const lookup = await client.lookup(requestId);
+      expect(lookup).toMatchObject({ status: 'completed', receipt: { requestId, status: 'queued' } });
+      if (dismissed) client.dismiss(requestId);
+      write.fail(new Error('connection lost after queue admission'));
+
+      expect(await send).toMatchObject({ preserveDraft: false, receipt: { requestId, status: 'queued' } });
+      expect(client.getSnapshot().receipts).toEqual(
+        dismissed ? [] : [expect.objectContaining({ requestId, status: 'queued' })]
+      );
+      expect(calls()).toEqual(['discover', methods[0], methods[1], methods[3]]);
+    }
+  );
+
+  it('uses a fresh turn read for a refresh requested during a delayed state response', async () => {
+    const oldState = holdReply();
+    fetchMock.mockResolvedValueOnce(discovery()).mockReturnValueOnce(oldState.pending);
+    offer(target.bindingId, 'turn-2');
+    const readyTurns: (string | null)[] = [];
+    const stop = client.subscribe(() => {
+      const { channel } = client.getSnapshot();
+      if (channel.status === 'ready') readyTurns.push(channel.turn.turnId);
+    });
+
+    const first = client.refresh();
+    await vi.waitFor(() => expect(calls()).toEqual(['discover', methods[0]]));
+    const changed = client.refresh();
+    const repeated = client.refresh();
+    oldState.reply(active());
+
+    await Promise.all([first, changed, repeated]);
+    expect(readyTurns).toEqual(['turn-2']);
+    expect(client.getSnapshot().channel).toMatchObject({ status: 'ready', turn: { turnId: 'turn-2' } });
+    expect(calls()).toEqual(['discover', methods[0], 'discover', methods[0]]);
+    stop();
   });
 
   it('discards a discovery response superseded by a reconnect', async () => {
@@ -228,10 +336,11 @@ describe('running input renderer client', () => {
     fetchMock.mockReturnValueOnce(held.pending);
     offer('new-binding', 'turn-2');
     const first = client.refresh();
+    await vi.waitFor(() => expect(calls()).toEqual(['discover']));
     reconnect?.();
-    await client.refresh();
-    held.reply(discovery());
     await first;
+    held.reply(discovery());
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
     expect(client.getSnapshot().channel).toMatchObject({ status: 'ready', bindingId: 'new-binding' });
     expect(calls()).toEqual(['discover', 'discover', methods[0]]);
   });

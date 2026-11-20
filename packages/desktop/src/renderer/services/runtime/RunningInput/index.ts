@@ -63,7 +63,8 @@ export function createRunningInputClient(conversationId: string) {
   const listeners = new Set<() => void>();
   let snapshot: RunningInputSnapshot = { channel: { status: 'checking' }, receipts: [], sending: false };
   let binding: string | undefined;
-  let discovery: Promise<void> | undefined;
+  let discovery: { done: Promise<void>; finish: () => void; run: number } | undefined;
+  let inFlightReceipt: RunningInputReceipt | undefined;
   let generation = 0;
   let disposed = false;
 
@@ -141,22 +142,64 @@ export function createRunningInputClient(conversationId: string) {
 
   function refresh(force = false): Promise<void> {
     if (disposed) return Promise.resolve();
-    if (discovery && !force) return discovery;
-    const current = ++generation;
-    const operation = discover(current).finally(() => {
-      if (generation === current) discovery = undefined;
-    });
-    discovery = operation;
+    generation++;
+    if (discovery && !force) {
+      // The current observation is obsolete. A burst of signals shares one trailing read.
+      if (snapshot.channel.status !== 'checking') update({ channel: { status: 'checking' } });
+      return discovery.done;
+    }
+
+    // A reconnect starts a new read while existing waiters follow the latest result.
+    let finish!: () => void;
+    const pending = discovery ?? {
+      done: new Promise<void>((resolve) => {
+        finish = resolve;
+      }),
+      finish,
+      run: 0,
+    };
+    discovery = pending;
+    const run = ++pending.run;
     update({ channel: { status: 'checking' } });
-    return operation;
+    const isCurrentRun = () => discovery === pending && pending.run === run;
+    void (async () => {
+      try {
+        while (isCurrentRun()) {
+          const current = generation;
+          // eslint-disable-next-line no-await-in-loop -- refresh signals during this read need a later observation
+          await discover(current);
+          if (current === generation) break;
+        }
+      } finally {
+        if (isCurrentRun()) {
+          discovery = undefined;
+          pending.finish();
+        }
+      }
+    })();
+    return pending.done;
   }
 
   const unsubscribeReconnect = wsEmitter('realtime.reconnected').on(() => void refresh(true));
 
-  function replaceReceipt(original: RunningInputReceipt, outcome: RunningInputOutcome): RunningInputReceipt {
+  async function settleReceipt(
+    original: RunningInputReceipt,
+    outcome: RunningInputOutcome
+  ): Promise<RunningInputReceipt> {
+    // Until discovery settles, the previous binding may still be cached but could already have been replaced.
+    // eslint-disable-next-line no-await-in-loop -- a reconnect may supersede the operation being awaited
+    while (discovery) await discovery.done;
+
     const { requestId, bindingId, turnId, mode } = original;
+    const visible = snapshot.receipts.find((entry) => entry.requestId === requestId);
+    const inFlight = inFlightReceipt?.requestId === requestId ? inFlightReceipt : undefined;
+    const current = inFlight ?? visible ?? original;
+    // A definitive lookup result survives transport uncertainty and dismissal of the notice.
+    if (current.status === 'queued' || current.status === 'rejected') return current;
+
     const receipt = { requestId, bindingId, turnId, mode, ...outcome };
-    if (binding === bindingId && snapshot.receipts.some((entry) => entry.requestId === requestId)) {
+    if (inFlight) inFlightReceipt = receipt;
+    if (binding === bindingId && visible) {
       update({ receipts: snapshot.receipts.map((entry) => (entry.requestId === requestId ? receipt : entry)) });
     }
     return receipt;
@@ -174,7 +217,7 @@ export function createRunningInputClient(conversationId: string) {
       };
     },
 
-    /** Rediscover the binding and read input/state without reopening a turn. */
+    /** Rediscover the binding and read input/state after the refresh signal, without reopening a turn. */
     refresh: () => refresh(),
 
     /**
@@ -198,6 +241,7 @@ export function createRunningInputClient(conversationId: string) {
       const { bindingId, turnId } = target;
       const requestId = createRequestId();
       const pending: RunningInputReceipt = { bindingId, turnId, requestId, mode, status: 'pending' };
+      inFlightReceipt = pending;
       update({ sending: true, receipts: [...snapshot.receipts.slice(1 - MAX_VISIBLE_RECEIPTS), pending] });
       const reply = await requestRelay(path, {
         bindingId,
@@ -208,16 +252,21 @@ export function createRunningInputClient(conversationId: string) {
         reply.kind === 'success'
           ? parseOutcome(isRecord(reply.data) ? reply.data.result : undefined, turnId)
           : failureOutcome(reply.failure);
-      const receipt = replaceReceipt(pending, outcome);
-      if (reply.kind === 'failure' && (reply.failure.status === 401 || reply.failure.status === 409)) {
-        await refresh(true);
+      const staleTurn = outcome.status === 'rejected' && 'reason' in outcome && outcome.reason === 'stale-turn';
+      if (staleTurn || (reply.kind === 'failure' && (reply.failure.status === 401 || reply.failure.status === 409))) {
+        await refresh();
       }
+      const receipt = await settleReceipt(pending, outcome);
+      inFlightReceipt = undefined;
       update({ sending: false });
-      return {
-        status: 'sent',
-        receipt,
-        preserveDraft: disposed || receipt.status !== 'queued' || binding !== bindingId,
-      };
+      const current = snapshot.channel;
+      const confirmed =
+        receipt.status === 'queued' &&
+        current.status === 'ready' &&
+        current.bindingId === bindingId &&
+        current.turn.active &&
+        current.turn.turnId === turnId;
+      return { status: 'sent', receipt, preserveDraft: !confirmed };
     },
 
     /** Recheck one receipt on its original binding. A refreshHistory result asks the UI to refresh its existing history. */
@@ -241,8 +290,12 @@ export function createRunningInputClient(conversationId: string) {
               typeof result.rpcCode === 'number' && Number.isSafeInteger(result.rpcCode)
                 ? failureOutcome({ status: 422, code: 'EXT_AGENT_ERROR', rpcCode: result.rpcCode })
                 : parseOutcome(result.result, original.turnId);
-            if (outcome.status !== 'unknown')
-              return { status: 'completed', receipt: replaceReceipt(original, outcome) };
+            if (outcome.status !== 'unknown') {
+              const receipt = await settleReceipt(original, outcome);
+              if (disposed || binding !== original.bindingId)
+                return { status: 'binding-changed', refreshHistory: true };
+              return { status: 'completed', receipt };
+            }
           }
           if (result.status === 'pending') return { status: 'pending' };
         }
@@ -266,6 +319,9 @@ export function createRunningInputClient(conversationId: string) {
     dispose(): void {
       disposed = true;
       generation++;
+      discovery?.finish();
+      discovery = undefined;
+      inFlightReceipt = undefined;
       binding = undefined;
       snapshot = { channel: { status: 'unavailable' }, receipts: [], sending: false };
       listeners.clear();

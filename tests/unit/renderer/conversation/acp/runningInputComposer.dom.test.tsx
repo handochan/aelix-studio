@@ -224,6 +224,7 @@ describe('running input in the composer', () => {
     });
 
     expect(notices()).toHaveLength(1);
+    await expect(route).resolves.toBe('kept');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedEnded');
   });
 
@@ -246,6 +247,7 @@ describe('running input in the composer', () => {
       await route;
     });
 
+    await expect(route).resolves.toBe('kept');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedStopped');
   });
 
