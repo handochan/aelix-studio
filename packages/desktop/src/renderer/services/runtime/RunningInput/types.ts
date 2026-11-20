@@ -16,7 +16,7 @@ export type RunningInputReceipt = Readonly<
 
 export type RunningInputSnapshot = Readonly<{
   channel:
-    | { status: 'checking' | 'unsupported' }
+    | { status: 'unknown' | 'checking' | 'unsupported' | 'no-live-task' }
     | { status: 'unavailable'; failure?: RelayFailure }
     | {
         status: 'ready';
@@ -25,6 +25,8 @@ export type RunningInputSnapshot = Readonly<{
         modes: readonly RunningInputMode[];
         canLookup: boolean;
       };
+  /** Capability discovery succeeded, even if the subsequent state read failed. */
+  negotiated: boolean;
   receipts: readonly RunningInputReceipt[];
   sending: boolean;
 }>;

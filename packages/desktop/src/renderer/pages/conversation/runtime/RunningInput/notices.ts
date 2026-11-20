@@ -39,9 +39,9 @@ export const turnKey = (bindingId: string, turnId: string): string => JSON.strin
 function phaseOf(
   receipt: RunningInputReceipt,
   channel: RunningInputChannel | undefined,
-  stoppedTurns: ReadonlySet<string>
+  stoppedRequests: ReadonlySet<string>
 ): RunningInputTurnPhase {
-  if (stoppedTurns.has(turnKey(receipt.bindingId, receipt.turnId))) return 'stopped';
+  if (stoppedRequests.has(receipt.requestId)) return 'stopped';
   const { turn } = channel ?? {};
   if (channel?.bindingId === receipt.bindingId && turn?.active && turn.turnId === receipt.turnId) return 'active';
   return 'ended';
@@ -66,14 +66,15 @@ function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected'
 export function buildRunningInputNotices(
   receipts: readonly RunningInputReceipt[],
   channel: RunningInputChannel | undefined,
-  stoppedTurns: ReadonlySet<string>
+  stoppedRequests: ReadonlySet<string>
 ): RunningInputNotice[] {
   const notices: RunningInputNotice[] = [];
   const turns = new Map<string, Extract<RunningInputNotice, { kind: 'queued' }>>();
   for (const receipt of receipts) {
     const { requestId, mode } = receipt;
     if (receipt.status === 'queued') {
-      const key = turnKey(receipt.bindingId, receipt.turnId);
+      const phase = phaseOf(receipt, channel, stoppedRequests);
+      const key = turnKey(receipt.bindingId, receipt.turnId) + ':' + phase;
       const group = turns.get(key);
       if (group) {
         group.requestIds.push(requestId);
@@ -85,7 +86,7 @@ export function buildRunningInputNotices(
         key: 'turn:' + key,
         requestIds: [requestId],
         modes: [mode],
-        phase: phaseOf(receipt, channel, stoppedTurns),
+        phase,
       };
       turns.set(key, notice);
       notices.push(notice);

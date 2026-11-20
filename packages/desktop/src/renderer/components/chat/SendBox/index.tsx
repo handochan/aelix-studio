@@ -230,10 +230,12 @@ function extractBtwQuestion(value: string): string | null {
   return match ? match[1] || '' : null;
 }
 
+export type ComposerDraft = { slashCommand: boolean; hasQuote: boolean };
+
 const SendBox: React.FC<{
   value?: string;
   onChange?: (value: string) => void;
-  onSend: (message: string) => Promise<void | false>;
+  onSend: (message: string, draft: ComposerDraft) => Promise<void | false>;
   onStop?: () => Promise<void>;
   disabled?: boolean;
   /**
@@ -1601,11 +1603,8 @@ const SendBox: React.FC<{
 
     // 构建消息内容 / Build message content
     let finalMessage = input;
-    // Keep relay-aware slash commands on their command path when a reply or snippet is attached.
-    const preserveCommand = deferDraftClear && input.trimStart().startsWith('/');
-
     // Prepend reply quote as blockquote
-    if (replyQuote && !preserveCommand) {
+    if (replyQuote) {
       const quotedLines = replyQuote.content
         .split('\n')
         .map((line) => `> ${line}`)
@@ -1614,11 +1613,11 @@ const SendBox: React.FC<{
     }
 
     // 如果有 DOM 片段，附加完整 HTML / If has DOM snippets, append full HTML
-    if (domSnippets.length > 0 && !preserveCommand) {
+    if (domSnippets.length > 0) {
       const snippetsHtml = domSnippets
         .map((s) => `\n\n---\nDOM Snippet (${s.tag}):\n\`\`\`html\n${s.html}\n\`\`\``)
         .join('');
-      finalMessage = input + snippetsHtml;
+      finalMessage += snippetsHtml;
     }
 
     // Ordinary sends clear immediately. Deferred sends keep the text so its mention chips stay attached.
@@ -1628,7 +1627,7 @@ const SendBox: React.FC<{
       setReplyQuote(null);
     }
 
-    onSend(finalMessage)
+    onSend(finalMessage, { slashCommand: input.trimStart().startsWith('/'), hasQuote: Boolean(replyQuote) })
       .then((result) => {
         if (deferDraftClear) {
           if (result === false) return;

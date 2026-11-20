@@ -33,6 +33,7 @@ const STEER = PREFIX + 'input/steer';
 const FOLLOW_UP = PREFIX + 'input/follow-up';
 const LOOKUP = PREFIX + 'requests/lookup';
 const ALL_METHODS = [STATE, STEER, FOLLOW_UP, LOOKUP];
+const TEXT_DRAFT = { slashCommand: false, hasQuote: false };
 const NO_REFERENCES: RunningInputReferences = { files: [], sessions: [] };
 const IMAGE_REFERENCE: RunningInputReferences = {
   files: [{ kind: 'upload', path: '/client/input.png' }],
@@ -64,7 +65,7 @@ let controller: RunningInputController;
 const BASE: UseRunningInputOptions = {
   conversationId: 'conv-1',
   enabled: true,
-  hostBusy: true,
+  host: 'busy',
   hostTurnId: 'host-turn-1',
   stopping: false,
   paused: false,
@@ -112,7 +113,10 @@ async function mount(props: Partial<UseRunningInputOptions> = {}) {
 async function submit(message: string, references = NO_REFERENCES): Promise<RunningInputRoute> {
   let route: RunningInputRoute = 'ordinary';
   await act(async () => {
-    route = await controller.submit(message, references);
+    route = await controller.submit(message, references, {
+      slashCommand: message.trimStart().startsWith('/'),
+      hasQuote: false,
+    });
   });
   return route;
 }
@@ -166,9 +170,9 @@ describe('running input in the composer', () => {
 
   it('keeps the ordinary composer when the host does not offer the relay', async () => {
     server.discovery = () => failure(404, 'CONVERSATION_NOT_FOUND');
-    await mount();
+    await mount({ host: 'idle', hostTurnId: null });
 
-    expect(controller).toMatchObject({ supported: false, available: false });
+    expect(controller).toMatchObject({ handlesSubmit: false, available: false });
     expect(screen.queryByTestId('running-input-mode')).toBeNull();
     expect(await submit('hello')).toBe('ordinary');
     expect(fetchMock.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
@@ -210,12 +214,12 @@ describe('running input in the composer', () => {
       const reads = server.readState.mock.calls.length;
       server.turn = active ? { active: true, turnId: 'turn-1' } : { active: false, turnId: null };
       server.readState.mockReturnValueOnce(held.pending);
-      view.rerender(<Harness hostBusy={false} hostTurnId={null} />);
+      view.rerender(<Harness host='idle' hostTurnId={null} />);
       await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(reads + 1));
 
       let route: Promise<RunningInputRoute> | undefined;
       act(() => {
-        route = controller.submit('after the host went idle', NO_REFERENCES);
+        route = controller.submit('after the host went idle', NO_REFERENCES, TEXT_DRAFT);
       });
       await act(async () => {
         held.reply(result(server.turn));
@@ -229,29 +233,148 @@ describe('running input in the composer', () => {
   it('keeps a negotiated draft when a transient state-read failure leaves native idle unconfirmed', async () => {
     const view = await mount();
     server.readState.mockImplementation(() => failure(502, 'EXT_OUTCOME_UNKNOWN'));
-    view.rerender(<Harness hostBusy={false} hostTurnId={null} />);
+    view.rerender(<Harness host='idle' hostTurnId={null} />);
     await settle();
 
-    expect(controller.supported).toBe(true);
+    expect(controller.handlesSubmit).toBe(true);
     expect(await submit('keep until the native state is known')).toBe('kept');
     expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [409, 'EXT_NO_LIVE_TASK', 'ordinary'],
+    [409, 'EXT_STALE_BINDING', 'kept'],
+    [502, 'EXT_NO_LIVE_TASK', 'kept'],
+  ] as const)('routes an idle host after discovery returns %i %s', async (status, code, expected) => {
+    const view = await mount();
+    server.discovery = () => failure(status, code);
+    view.rerender(<Harness host='idle' hostTurnId={null} />);
+    await settle();
+    expect(controller.handlesSubmit).toBe(true);
+    expect(await submit('reopen the task', IMAGE_REFERENCE)).toBe(expected);
+    expect(server.metadata).not.toHaveBeenCalled();
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('allows an ordinary send if the idle task disappears between discovery and the native state read', async () => {
+    await mount({ host: 'idle', hostTurnId: null });
+    server.readState.mockReturnValueOnce(failure(409, 'EXT_NO_LIVE_TASK'));
+    expect(await submit('new ordinary prompt')).toBe('ordinary');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('keeps the original draft on a relay write conflict even if rediscovery confirms the idle task is gone', async () => {
+    await mount({ host: 'idle', hostTurnId: null });
+    server.write.mockImplementation(() => {
+      server.discovery = () => failure(409, 'EXT_NO_LIVE_TASK');
+      return failure(409, 'EXT_NO_LIVE_TASK');
+    });
+    expect(await submit('lost turn')).toBe('kept');
+    await settle();
+    expect(await submit('fresh click')).toBe('ordinary');
+    expect(writes()).toEqual([STEER]);
+  });
+
+  it('holds the first click during discovery and relays it only after the active native turn is confirmed', async () => {
+    const held = hold();
+    server.readState.mockReturnValueOnce(held.pending);
+    server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
+    render(<Harness host='idle' hostTurnId={null} />);
+    await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(1));
+    expect(controller.handlesSubmit).toBe(true);
+    let pending!: Promise<RunningInputRoute>;
+    act(() => {
+      pending = controller.submit('first click', NO_REFERENCES, TEXT_DRAFT);
+    });
+    expect(server.write).not.toHaveBeenCalled();
+    await act(async () => {
+      held.reply(result(server.turn));
+      await pending;
+    });
+    await expect(pending).resolves.toBe('sent');
+    expect(writes()).toEqual([STEER]);
+  });
+
+  it('rechecks a successfully stopped turn on the next explicit click after the host goes idle', async () => {
+    const view = await mount();
+    act(() => controller.beginStop()('done'));
+    view.rerender(<Harness host='idle' hostTurnId={null} />);
+    await settle();
+    expect(await submit('too early')).toBe('kept');
+    server.turn = { active: false, turnId: null };
+    expect(await submit('next prompt')).toBe('ordinary');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('keeps a click when a different host turn starts during native preflight', async () => {
+    const view = await mount({ host: 'idle', hostTurnId: null });
+    const held = hold();
+    server.readState.mockReturnValueOnce(held.pending);
+    let submission!: Promise<RunningInputRoute>;
+    act(() => {
+      submission = controller.submit('from idle', NO_REFERENCES, TEXT_DRAFT);
+    });
+    await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(2));
+    server.turn = { active: false, turnId: null };
+    view.rerender(<Harness host='busy' hostTurnId='next-host-turn' />);
+    await act(async () => {
+      held.reply(result(server.turn));
+      await submission;
+    });
+    await expect(submission).resolves.toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('keeps the send overlapping a failed Stop and accepts a fresh click on the same turn', async () => {
+    const held = hold();
+    server.write.mockReturnValueOnce(held.pending).mockImplementation(({ payload }) => accepted(payload.turnId));
+    await mount();
+    let first!: Promise<RunningInputRoute>;
+    act(() => {
+      first = controller.submit('first', NO_REFERENCES, TEXT_DRAFT);
+    });
+    await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
+    let finishStop!: ReturnType<RunningInputController['beginStop']>;
+    act(() => {
+      finishStop = controller.beginStop();
+    });
+    expect(await submit('while pending')).toBe('kept');
+    act(() => finishStop('failed'));
+    await act(async () => {
+      held.reply(accepted('turn-1'));
+      await first;
+    });
+    await expect(first).resolves.toBe('kept');
+    expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedStopped');
+    expect(await submit('new input')).toBe('sent');
+    expect(notices()[1]).toHaveTextContent('acp.runningInput.queued ');
+    expect(writes()).toEqual([STEER, STEER]);
   });
 
   it.each(['text', 'attachment'] as const)('keeps %s when Stop starts before the relay POST', async (kind) => {
     const held = hold();
     server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
-    await mount({ hostBusy: kind === 'attachment', hostTurnId: kind === 'attachment' ? 'host-turn-1' : null });
+    await mount({
+      host: kind === 'attachment' ? 'busy' : 'idle',
+      hostTurnId: kind === 'attachment' ? 'host-turn-1' : null,
+    });
     const reads = server.readState.mock.calls.length;
     if (kind === 'attachment') server.metadata.mockReturnValueOnce(held.pending);
     else server.readState.mockReturnValueOnce(held.pending);
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('under preparation', kind === 'attachment' ? IMAGE_REFERENCE : NO_REFERENCES);
+      route = controller.submit(
+        'under preparation',
+        kind === 'attachment' ? IMAGE_REFERENCE : NO_REFERENCES,
+        TEXT_DRAFT
+      );
     });
     if (kind === 'attachment') await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
     else await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(reads + 1));
-    act(() => controller.markStopped());
+    act(() => {
+      controller.beginStop();
+    });
     await act(async () => {
       held.reply(kind === 'attachment' ? success({ path: CONFIRMED_IMAGE, type: 'image/png' }) : result(server.turn));
       await route;
@@ -260,10 +383,10 @@ describe('running input in the composer', () => {
     expect(server.write).not.toHaveBeenCalled();
   });
 
-  it('leaves preflight sends to the existing busy path when the native turn is still idle', async () => {
+  it('keeps preflight sends while the host is busy and the native turn is still idle', async () => {
     server.turn = { active: false, turnId: null };
     await mount();
-    expect(await submit('hello')).toBe('ordinary');
+    expect(await submit('hello')).toBe('kept');
     expect(server.write).not.toHaveBeenCalled();
   });
 
@@ -318,7 +441,9 @@ describe('running input in the composer', () => {
 
   it('keeps slash commands with references out of preparation and the relay', async () => {
     await mount();
-    expect(await submit('/compact', IMAGE_REFERENCE)).toBe('ordinary');
+    expect(
+      await controller.submit('> quoted\n\n/compact', IMAGE_REFERENCE, { slashCommand: true, hasQuote: true })
+    ).toBe('kept');
     expect(server.metadata).not.toHaveBeenCalled();
     expect(server.write).not.toHaveBeenCalled();
   });
@@ -379,7 +504,7 @@ describe('running input in the composer', () => {
       await mount();
       let submission: Promise<RunningInputRoute> | undefined;
       act(() => {
-        submission = controller.submit('original', IMAGE_REFERENCE);
+        submission = controller.submit('original', IMAGE_REFERENCE, TEXT_DRAFT);
       });
       await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
       if (changed === 'binding') {
@@ -426,12 +551,12 @@ describe('running input in the composer', () => {
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('late', NO_REFERENCES);
+      route = controller.submit('late', NO_REFERENCES, TEXT_DRAFT);
     });
     await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
 
     server.turn = { active: false, turnId: null };
-    view.rerender(<Harness hostBusy={false} hostTurnId={null} />);
+    view.rerender(<Harness host='idle' hostTurnId={null} />);
     await waitFor(() => expect(controller.available).toBe(false));
     await act(async () => {
       held.reply(accepted('turn-1'));
@@ -450,10 +575,12 @@ describe('running input in the composer', () => {
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('withdrawn', IMAGE_REFERENCE);
+      route = controller.submit('withdrawn', IMAGE_REFERENCE, TEXT_DRAFT);
     });
     await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
-    act(() => controller.markStopped());
+    act(() => {
+      controller.beginStop();
+    });
 
     await act(async () => {
       held.reply(accepted('turn-1'));
@@ -507,10 +634,10 @@ describe('running input in the composer', () => {
   it('stays off for disabled composers and while sending is paused', async () => {
     const view = await mount({ enabled: false });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(controller.supported).toBe(false);
+    expect(controller.handlesSubmit).toBe(false);
 
     view.rerender(<Harness paused />);
-    await waitFor(() => expect(controller.supported).toBe(true));
+    await waitFor(() => expect(controller.handlesSubmit).toBe(true));
     expect(controller.available).toBe(false);
     expect(await submit('hello')).toBe('kept');
   });

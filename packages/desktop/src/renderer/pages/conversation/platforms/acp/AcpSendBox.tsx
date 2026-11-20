@@ -12,7 +12,7 @@ import MobileActionSheet, {
   type MobileActionSheetOption,
   useAttachEntry,
 } from '@/renderer/components/chat/MobileActionSheet';
-import SendBox from '@/renderer/components/chat/SendBox';
+import SendBox, { type ComposerDraft } from '@/renderer/components/chat/SendBox';
 import ThoughtDisplay from '@/renderer/components/chat/ThoughtDisplay';
 import FileAttachButton from '@/renderer/components/media/FileAttachButton';
 import { audioExts, getFileExtension, imageExts } from '@/renderer/services/FileService';
@@ -42,6 +42,11 @@ import {
   RunningInputNotices,
   useRunningInput,
 } from '@/renderer/pages/conversation/runtime/RunningInput';
+import {
+  getConversationRuntimeViewSnapshot,
+  type ConversationRuntimeView,
+} from '@/renderer/pages/conversation/runtime/conversationRuntimeViewStore';
+import type { HostTurnState } from '@/renderer/services/runtime/RunningInput/decideSend';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
 import { getConversationRuntimeWorkspaceErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
@@ -64,6 +69,11 @@ import { buildSendFailureError } from './buildSendFailureError';
 import { useAcpInitialMessage } from './useAcpInitialMessage';
 import { useAcpCompactionGuard } from './useAcpCompactionGuard';
 import type { UseAcpMessageReturn } from './useAcpMessage';
+
+function hostTurnState(view: ConversationRuntimeView): HostTurnState {
+  if (view.state !== 'idle' || view.activeTurnId !== null || view.isProcessing || !view.canSendMessage) return 'busy';
+  return view.hydrated && view.hasBackendRuntime ? 'idle' : 'unknown';
+}
 
 const configErrorMessageKey = (error: unknown) => {
   const errorKind = classifyConfigSetError(error);
@@ -316,8 +326,8 @@ const AcpSendBox: React.FC<{
   // Aelix running input (D20): steer/follow-up into the native turn when the host relay is negotiated.
   const runningInput = useRunningInput({
     conversationId: conversation_id,
-    enabled: !teamRuntime && !teamSendMessage,
-    hostBusy: isBusy,
+    enabled: !teamRuntime && !teamSendMessage && !teamPermission,
+    host: hostTurnState(getConversationRuntimeViewSnapshot(conversation_id)),
     hostTurnId: runtimeView.activeTurnId,
     stopping: isCancelling,
     paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
@@ -522,9 +532,9 @@ Please check your local CLI tool authentication status`,
   const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
   const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
-  const deferDraftClear = runningInput.supported && !supportsMidturnDelivery;
+  const deferDraftClear = runningInput.handlesSubmit && !supportsMidturnDelivery;
 
-  const onSendHandler = async (message: string): Promise<void | false> => {
+  const onSendHandler = async (message: string, draft: ComposerDraft): Promise<void | false> => {
     const files = collectChatFileRefs(uploadFile, atPath);
     const sessions = selectedSessions;
     const removeSubmitted = () => {
@@ -534,14 +544,19 @@ Please check your local CLI tool authentication status`,
       }
     };
     if (deferDraftClear) {
-      const route = await runningInput.submit(message, { files, sessions });
+      const route = await runningInput.submit(message, { files, sessions }, draft);
       if (route === 'kept') return false;
       if (route === 'sent') {
         removeSubmitted();
         return;
       }
     }
-    if (!supportsMidturnDelivery && isBusy) {
+    // Read the live host snapshot at the ordinary send edge. A turn event can
+    // update the store before React commits a render during native preflight.
+    const ordinaryBlocked = deferDraftClear
+      ? hostTurnState(getConversationRuntimeViewSnapshot(conversation_id)) !== 'idle'
+      : isBusy;
+    if (!supportsMidturnDelivery && ordinaryBlocked) {
       Message.warning(
         t('conversation.commandQueue.midturnBlocked', {
           defaultValue:
@@ -832,7 +847,10 @@ Please check your local CLI tool authentication status`,
     // connected → 409) so they don't bubble up as unhandled rejections.
     // UI state is still reset via finally.
     const turnId = runtimeView.activeTurnId;
+    const finishStop = runningInput.beginStop();
     if (!turnId) {
+      // The click still interrupts pending preflight, but there is no host Stop to acknowledge.
+      finishStop('failed');
       resetState();
       resetActiveExecution('stop');
       return;
@@ -841,8 +859,10 @@ Please check your local CLI tool authentication status`,
     try {
       const result = await ipcBridge.conversation.stop.invoke({ conversation_id, turn_id: turnId });
       runtimeView.markStopAcknowledged(turnId, result.runtime);
-    } catch (error) {
-      console.warn('[AcpSendBox] stop request failed', error);
+      finishStop('done');
+    } catch {
+      finishStop('failed');
+      console.warn('[AcpSendBox] stop request failed');
       runtimeView.resetLocalGate('stop_failed');
     } finally {
       resetState();
@@ -851,7 +871,6 @@ Please check your local CLI tool authentication status`,
   };
   const effectiveHandleStop = async () => {
     if (compactionStopGuardRef.current()) return;
-    runningInput.markStopped();
     await (teamRuntime?.onStop ?? handleStop)();
   };
   const handleSendNowQueued = useCallback(

@@ -62,7 +62,12 @@ function failureOutcome(failure: RelayFailure): RunningInputOutcome {
 export function createRunningInputClient(conversationId: string) {
   const path = '/api/conversations/' + encodeURIComponent(conversationId) + '/acp-extensions';
   const listeners = new Set<() => void>();
-  let snapshot: RunningInputSnapshot = { channel: { status: 'checking' }, receipts: [], sending: false };
+  let snapshot: RunningInputSnapshot = {
+    channel: { status: 'unknown' },
+    negotiated: false,
+    receipts: [],
+    sending: false,
+  };
   let binding: string | undefined;
   let discovery: { done: Promise<void>; finish: () => void; run: number } | undefined;
   let inFlightReceipt: RunningInputReceipt | undefined;
@@ -81,6 +86,13 @@ export function createRunningInputClient(conversationId: string) {
     update({ receipts: [] });
   }
 
+  function observeMissingTask(failure: RelayFailure): boolean {
+    if (failure.status !== 409 || failure.code !== 'EXT_NO_LIVE_TASK') return false;
+    setBinding();
+    update({ channel: { status: 'no-live-task' } });
+    return true;
+  }
+
   async function discover(current: number): Promise<void> {
     const isCurrent = () => !disposed && current === generation;
     let reply = await requestRelay(path);
@@ -96,11 +108,12 @@ export function createRunningInputClient(conversationId: string) {
     if (!isCurrent()) return;
     if (reply.kind === 'failure') {
       const { status, code } = reply.failure;
-      if (status === 404 || code === 'EXT_UNAVAILABLE') {
+      if (observeMissingTask(reply.failure)) return;
+      if (status === 404 || (status === 409 && code === 'EXT_UNAVAILABLE')) {
         setBinding();
-        update({ channel: { status: 'unsupported' } });
+        update({ channel: { status: 'unsupported' }, negotiated: false });
       } else {
-        if (code === 'EXT_NO_LIVE_TASK' || code === 'EXT_STALE_BINDING') setBinding();
+        if (code === 'EXT_STALE_BINDING') setBinding();
         update({ channel: { status: 'unavailable', failure: reply.failure } });
       }
       return;
@@ -115,7 +128,7 @@ export function createRunningInputClient(conversationId: string) {
       !Array.isArray(data.requests)
     ) {
       setBinding();
-      update({ channel: { status: 'unsupported' } });
+      update({ channel: { status: 'unsupported' }, negotiated: false });
       return;
     }
     const { bindingId } = data;
@@ -123,17 +136,19 @@ export function createRunningInputClient(conversationId: string) {
     const modes = MODES.filter((mode) => requests.includes(INPUT_METHODS[mode]));
     if (!requests.includes(INPUT_METHODS.state) || modes.length === 0) {
       setBinding();
-      update({ channel: { status: 'unsupported' } });
+      update({ channel: { status: 'unsupported' }, negotiated: false });
       return;
     }
 
     setBinding(bindingId);
+    if (!snapshot.negotiated) update({ negotiated: true });
     // H1 advertises requests only. The snapshot is read after discovery, without a socket subscription.
     const state = await requestRelay(
       path,
       JSON.stringify({ bindingId, method: INPUT_METHODS.state, payload: {} } satisfies RelayCall)
     );
     if (!isCurrent()) return;
+    if (state.kind === 'failure' && observeMissingTask(state.failure)) return;
     const turn = state.kind === 'success' && isRecord(state.data) ? parseTurn(state.data.result) : undefined;
     if (turn) {
       update({
@@ -334,7 +349,7 @@ export function createRunningInputClient(conversationId: string) {
       discovery = undefined;
       inFlightReceipt = undefined;
       binding = undefined;
-      snapshot = { channel: { status: 'unavailable' }, receipts: [], sending: false };
+      snapshot = { channel: { status: 'unavailable' }, negotiated: false, receipts: [], sending: false };
       listeners.clear();
       unsubscribeReconnect();
     },

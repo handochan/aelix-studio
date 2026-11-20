@@ -64,6 +64,7 @@ const {
   },
   runtimeViewMock: {
     hydrated: true,
+    hasBackendRuntime: true,
     state: 'idle' as 'idle' | 'running' | 'starting',
     isProcessing: false,
     canSendMessage: true,
@@ -93,13 +94,14 @@ const {
 const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock } = vi.hoisted(() => ({
   runningInputMock: {
     available: false,
-    supported: false,
+    handlesSubmit: false,
     modes: ['steer', 'follow-up'],
     mode: 'follow-up',
     setMode: vi.fn(),
     notices: [],
     submit: vi.fn(),
-    markStopped: vi.fn(),
+    beginStop: vi.fn(),
+    finishStop: vi.fn(),
     dismiss: vi.fn(),
     check: vi.fn(),
   },
@@ -165,7 +167,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     deferDraftClear,
     allowAttachmentOnlySend,
   }: {
-    onSend: (message: string) => Promise<void | false>;
+    onSend: (message: string, draft: { slashCommand: boolean; hasQuote: boolean }) => Promise<void | false>;
     onStop?: () => Promise<void>;
     onChange?: (value: string) => void;
     rightTools?: React.ReactNode;
@@ -227,7 +229,7 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
             // reaches `onSend` regardless of the button's visual `sendDisabled`
             // state (only a mouse click on the real, disabled button is
             // blocked natively) — the parent decides whether to block+toast.
-            void onSend('Hello').catch(() => {});
+            void onSend('Hello', { slashCommand: false, hasQuote: false }).catch(() => {});
           }}
         >
           send
@@ -329,6 +331,11 @@ vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', (
     };
   },
 }));
+vi.mock('@/renderer/pages/conversation/runtime/conversationRuntimeViewStore', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/renderer/pages/conversation/runtime/conversationRuntimeViewStore')>()),
+  getConversationRuntimeViewSnapshot: () => runtimeViewMock,
+}));
+
 vi.mock('@/renderer/pages/conversation/runtime/useConversationRuntimeView', () => ({
   useConversationRuntimeView: () => runtimeViewMock,
 }));
@@ -416,6 +423,7 @@ describe('AcpSendBox', () => {
     isMobileMock.current = false;
     mobileActionSheetEntries.current = [];
     runtimeViewMock.hydrated = true;
+    runtimeViewMock.hasBackendRuntime = true;
     runtimeViewMock.state = 'idle';
     runtimeViewMock.isProcessing = false;
     getMessagesInvokeMock.mockResolvedValue({ items: [] });
@@ -424,8 +432,9 @@ describe('AcpSendBox', () => {
     runtimeViewMock.activeTurnId = null;
     runtimeViewMock.supportsMidturnDelivery = false;
     draftContentRef.current = '';
+    runningInputMock.beginStop.mockReturnValue(runningInputMock.finishStop);
     runningInputMock.available = false;
-    runningInputMock.supported = false;
+    runningInputMock.handlesSubmit = false;
     runningInputMock.submit.mockResolvedValue('ordinary');
     useTeamPermissionMock.mockReturnValue(null);
     useAcpConfigOptionsMock.mockReturnValue({
@@ -1172,14 +1181,14 @@ describe('AcpSendBox', () => {
       runtimeViewMock.isProcessing = true;
       runtimeViewMock.state = 'running';
       runtimeViewMock.activeTurnId = 'turn-1';
-      runningInputMock.supported = true;
+      runningInputMock.handlesSubmit = true;
       runningInputMock.available = true;
       return render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
     };
     const lastSendBoxProps = () =>
       sendBoxPropsSpy.mock.calls.at(-1)?.[0] as {
         sendDisabled?: boolean;
-        onSend: (message: string) => Promise<void | false>;
+        onSend: (message: string, draft: { slashCommand: boolean; hasQuote: boolean }) => Promise<void | false>;
       };
 
     it('enables send with the mode switch while the relay can take input, and sends nothing ordinary', async () => {
@@ -1196,7 +1205,11 @@ describe('AcpSendBox', () => {
         screen.getByRole('button', { name: 'send' }).click();
       });
 
-      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [], sessions: [] });
+      expect(runningInputMock.submit).toHaveBeenCalledWith(
+        'Hello',
+        { files: [], sessions: [] },
+        { slashCommand: false, hasQuote: false }
+      );
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
       expect(draftMutateMock).not.toHaveBeenCalled();
       expect(messageWarningMock).not.toHaveBeenCalled();
@@ -1209,7 +1222,7 @@ describe('AcpSendBox', () => {
       expect(lastSendBoxProps()).toMatchObject({ allowAttachmentOnlySend: true });
 
       await act(async () => {
-        await expect(lastSendBoxProps().onSend('Hello')).resolves.toBe(false);
+        await expect(lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false })).resolves.toBe(false);
       });
 
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
@@ -1228,7 +1241,7 @@ describe('AcpSendBox', () => {
       fireEvent.click(screen.getByText('pick-session'));
       let sending: Promise<void | false> | undefined;
       act(() => {
-        sending = lastSendBoxProps().onSend('Hello');
+        sending = lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false });
       });
       fireEvent.click(screen.getByText('pick-another-session'));
       await act(async () => {
@@ -1236,7 +1249,11 @@ describe('AcpSendBox', () => {
         await sending;
       });
 
-      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [], sessions: [{ id: 'conv_target' }] });
+      expect(runningInputMock.submit).toHaveBeenCalledWith(
+        'Hello',
+        { files: [], sessions: [{ id: 'conv_target' }] },
+        { slashCommand: false, hasQuote: false }
+      );
       expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_new' }] });
     });
 
@@ -1250,13 +1267,17 @@ describe('AcpSendBox', () => {
       );
       renderRunning();
       collectChatFileRefsMock.mockReturnValueOnce([file]);
-      const send = lastSendBoxProps().onSend('Hello');
+      const send = lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false });
       await act(async () => {
         finish('sent');
         await send;
       });
 
-      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [file], sessions: [] });
+      expect(runningInputMock.submit).toHaveBeenCalledWith(
+        'Hello',
+        { files: [file], sessions: [] },
+        { slashCommand: false, hasQuote: false }
+      );
       const update = draftMutateMock.mock.calls.at(-1)?.[0] as (draft: { uploadFile: string[] }) => {
         uploadFile: string[];
       };
@@ -1280,8 +1301,91 @@ describe('AcpSendBox', () => {
       expect(messageWarningMock).toHaveBeenCalledTimes(1);
     });
 
+    it('sends the complete slash-prefixed reply body and all references on ordinary admission', async () => {
+      runningInputMock.handlesSubmit = true;
+      sendMessageInvokeMock.mockResolvedValue({ turn_id: 'next', runtime: null, msg_id: 'message' });
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      fireEvent.click(screen.getByText('pick-session'));
+      const file = { kind: 'upload', path: '/tmp/selected' };
+      collectChatFileRefsMock.mockReturnValueOnce([file]);
+      const input = '> Quoted reply\n\n/tmp/report\n\n---\nDOM Snippet (p):\n```html\n<p>Selected</p>\n```';
+      const draft = { slashCommand: true, hasQuote: true };
+      await act(async () => {
+        await lastSendBoxProps().onSend(input, draft);
+      });
+      const references = { files: [file], sessions: [{ id: 'conv_target' }] };
+      expect(runningInputMock.submit).toHaveBeenCalledWith(input, references, draft);
+      expect(sendMessageInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', input, ...references });
+    });
+
+    it('checks the live host turn before posting even if React has not rerendered', async () => {
+      runningInputMock.handlesSubmit = true;
+      let finish!: (route: 'ordinary') => void;
+      runningInputMock.submit.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      fireEvent.click(screen.getByText('pick-session'));
+      const sending = lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false });
+      runtimeViewMock.activeTurnId = 'claimed-in-another-tab';
+      await act(async () => {
+        finish('ordinary');
+        await expect(sending).resolves.toBe(false);
+      });
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_target' }] });
+    });
+
+    it('keeps the ordinary draft when hydration completed without a host runtime summary', async () => {
+      runtimeViewMock.hasBackendRuntime = false;
+      runningInputMock.handlesSubmit = true;
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ host: 'unknown' });
+      await act(async () => {
+        await expect(lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false })).resolves.toBe(false);
+      });
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('interrupts pending discovery even when there is no host turn to cancel', async () => {
+      runningInputMock.handlesSubmit = true;
+      runningInputMock.available = false;
+      let finish!: (route: 'kept') => void;
+      runningInputMock.submit.mockReturnValueOnce(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+      expect(lastSendBoxProps()).toMatchObject({ deferDraftClear: true });
+      const pending = lastSendBoxProps().onSend('Hello', { slashCommand: false, hasQuote: false });
+      await act(async () => {
+        await sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop();
+        finish('kept');
+        await pending;
+      });
+      expect(runningInputMock.beginStop).toHaveBeenCalledOnce();
+      expect(runningInputMock.finishStop).toHaveBeenCalledWith('failed');
+      expect(stopInvokeMock).not.toHaveBeenCalled();
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('reports a failed host Stop to the running-input controller', async () => {
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Keep working' } }],
+      });
+      stopInvokeMock.mockRejectedValueOnce(new Error('Stop failed'));
+      renderRunning();
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(runningInputMock.finishStop).toHaveBeenCalledWith('failed');
+      expect(runtimeViewMock.resetLocalGate).toHaveBeenCalledWith('stop_failed');
+    });
+
     it('keeps text and attachments when an ordinary send loses the host turn', async () => {
-      runningInputMock.supported = true;
+      runningInputMock.handlesSubmit = true;
       sendMessageInvokeMock.mockRejectedValue(
         new BackendHttpError({
           method: 'POST',
@@ -1313,9 +1417,10 @@ describe('AcpSendBox', () => {
       renderRunning();
       await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
       await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
-      expect(runningInputMock.markStopped).toHaveBeenCalledTimes(1);
+      expect(runningInputMock.beginStop).toHaveBeenCalledTimes(1);
+      expect(runningInputMock.finishStop).toHaveBeenCalledWith('done');
       expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-1' });
-      expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: true, hostBusy: true });
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: true, host: 'busy' });
 
       render(
         <AcpSendBox
@@ -1381,7 +1486,7 @@ describe('AcpSendBox', () => {
       const original = sendBoxPropsSpy.mock.calls.at(-1)?.[0];
       let submitted: Promise<void>;
       act(() => {
-        submitted = original.onSend('/compact keep decisions');
+        submitted = original.onSend('/compact keep decisions', { slashCommand: true, hasQuote: false });
       });
       await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalled());
       expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeUndefined();
