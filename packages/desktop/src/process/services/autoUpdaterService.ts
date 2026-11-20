@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { APP_SLUG } from '@/common/config/appIdentity';
 import { autoUpdater } from 'electron-updater';
 import type { ProgressInfo, ResolvedUpdateFileInfo, UpdateInfo } from 'electron-updater';
 import type { UpdateInfoAndProvider } from 'electron-updater/out/AppUpdater';
@@ -206,7 +207,7 @@ class AutoUpdaterService extends EventEmitter {
    * download step's `updaterCacheDirName` lookup succeeds in dev mode. The
    * `provider`/`url` here are placeholders — the real feed comes from
    * setFeedURL() — but `updaterCacheDirName` must match the packaged value
-   * (electron-builder defaults it to the appId) to reuse the same cache dir.
+   * (electron-builder derives it from the packaged name) to reuse the same cache dir.
    */
   private ensureDevUpdateConfig(): void {
     try {
@@ -215,7 +216,7 @@ class AutoUpdaterService extends EventEmitter {
         'provider: github',
         `owner: ${studioFeedOptions.owner}`,
         `repo: ${studioFeedOptions.repo}`,
-        'updaterCacheDirName: com.aionui.app',
+        `updaterCacheDirName: ${APP_SLUG}-updater`,
         '',
       ].join('\n');
       const configPath = path.join(app.getPath('userData'), 'dev-app-update.yml');
@@ -482,7 +483,7 @@ class AutoUpdaterService extends EventEmitter {
 
   /**
    * In dev mode the running shell is the stock Electron bundle (com.github.Electron),
-   * while the downloaded archive contains the packaged app (com.aionui.app). Squirrel.Mac
+   * while the downloaded archive contains the packaged app (ai.aelix.studio). Squirrel.Mac
    * looks for a bundle matching the *running* id, fails to find it, and reports
    * "Could not locate update bundle". This is expected in dev and cannot be reproduced
    * without a packaged build, so surface a clearer message instead of the raw error.

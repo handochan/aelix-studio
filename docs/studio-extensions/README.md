@@ -6,7 +6,7 @@
 
 상태: **설치 방식 채택(2026-11-17 사용자 결정, 8.2의 A1)** · 설치 helper 구현을 시작하고 화면에는 아직 내지
 않는다. 같은 날 A2·A3·A4·A10·A11·A12도 정해졌다. 2026-11-19에 A5·A6·A7을 정했다. A8·A9는 미정이다.
-Windows, Linux, 서명된 설치 앱에서는 실행하지 않았고 그 확인이 남아 있다(10절). 이 문서는 병합·출시 승인이
+초기 실험은 macOS 번들 사본에서 수행했다. OS별 설치 앱 확인은 9절의 1a′를 따른다. 이 문서는 병합·출시 승인이
 아니다. 구현·병합·출시는 각 Issue와 저장소 규칙을 따른다. 판단의 정본은
 [decisions.md](../studio-release-train/decisions.md)의 D04와 기록이다.
 
@@ -612,9 +612,14 @@ Studio 쪽에서 우회하지 않고 ACP 변경으로 요청한다.
   확인하고, lease를 잡고(5.6), 세대 경로와 `--extension` 인자를 붙인다. 맞는 세대가 없으면 지금 그대로
   실행한다. 처음 설계는 `launch.cjs`였지만, lease는 어댑터가 사는 동안 잡혀 있어야 하고 그 프로세스가
   `launch.py acp`라서 그쪽에 두었다. `launch.cjs`는 바꾸지 않는다.
-- 상태 디렉터리는 환경 변수 `AELIX_STUDIO_EXTENSION_STATE`로 알린다(`<Studio 사용자 데이터>/aelix-runtime`,
-  helper 서비스와 같은 경로). 화면 공개(1b)에서 Studio가 host를 띄우는 환경에 넣는다. 변수가 없으면 확장 없이
-  지금과 바이트 단위로 같은 인자로 시작한다. `launch.py`는 어댑터를 띄우기 전에 이 변수를 지운다.
+- Studio는 관리형 Aelix ACP를 등록할 때 명령별 환경에 `AELIX_STUDIO_EXTENSION_STATE`를 넣는다. 값은 helper와
+  같은 절대 경로 `<Studio 사용자 데이터>/aelix-runtime`이다. host는 로그인 셸 환경 다음에 명령별 환경을
+  적용하므로 같은 키는 Studio 값이 우선한다.
+  `launch.py acp`는 값을 읽고 어댑터 엔트리포인트를 호출하기 전에 환경에서 지운다. 변수가 없으면 번들만으로
+  시작한다. [2026-11-20 Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7014497017)
+- 별도 WebUI는 링크를 해석한 실제 DB 디렉터리로 사용자 데이터를 찾는다. 그 디렉터리가 `<프로필>/aionui`이고
+  프로필의 `config`에 `aionui-config.txt` 또는 `.aionui-env` 파일이 있으면 같은 Desktop 프로필을 사용한다.
+  그 밖에는 실제 DB 디렉터리 아래에 `aelix-runtime`을 둔다. [Studio PR #79](https://github.com/handochan/aelix-studio/pull/79)
 - 넘기는 형태는 helper가 세대 기록(`generation.json`, schema `/2`)의 `launch`에 적고, launcher는 그대로 쓴다:
   pack이 있으면 세대의 `packs` 디렉터리 하나, 그 뒤 모듈 참조를 entry 이름 순서로.
 - 번들 Python의 자식이 번들에 `.pyc`를 쓰지 않게 한다. PR #45의 launcher 변경이 이것을 한다. 병합 전에는
@@ -668,6 +673,10 @@ ADR을 채택하면 함께 확정되는 구현 방식이다.
   - **결정(2026-11-17): (가) 지금 ACP로 낸다.** 설치하면 다음 새 대화부터 확장의 명령과 도구를 쓴다. 확장
     구조에 따라 선언한 MCP 서버·테마·hook이 빠질 수 있고 그런 확장은 화면에 표시한다. 구조가 맞지 않아 로드에
     실패하는 일부 확장은 설치가 거부된다.
+  - **보완 결정(2026-11-20).** 상태 경로가 설정된 관리형 명령의 어댑터는 시작할 때 현재 세대를 고른다. 이미 떠 있는
+    어댑터는 종료할 때까지 잡고 있는 세대를 쓴다. 이 명령에 연결된 기존 대화도 유휴 정리나 런타임 재시작 뒤 어댑터가
+    다시 뜨면 그 시점의 현재 세대를 쓴다. 대화별 세대는 저장하지 않는다.
+    [Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7014497017)
 - **A3. 이름·git으로 설치하는 온라인 설치를 어떻게 낼 것인가.** 접속 대상을 지정한 index로 제한하는 수단이
   지금 없다(5.10).
   - (가) 낸다. → 사용자가 설치를 누를 때만 접속한다. 설치 전에 "index 말고도 패키지가 가리키는 주소와 빌드
@@ -787,24 +796,29 @@ pack이 있으면 launcher가 넘길 인자 그대로 한 번. 어댑터가 받�
 | 3    | 진행률, 오류 구분, 설치 전 계획, 남는 의존성 정리                                              | R8. 첫 Beta에는 요구하지 않기로 정해졌다(A10)                                                                         |
 
 - "R8 없이 된다"는 1a에 대한 말이다. 1b는 ACP 변경이 선행이다.
-- 1b의 선행에 더한다: host가 대화마다 어댑터 프로세스를 따로 띄우는지 확인한다. launcher는 어댑터가 시작할
-  때 세대를 고르므로, 어댑터 하나가 여러 대화를 맡으면 "다음 새 대화부터"(A2)가 성립하지 않는다. 그리고
-  Studio가 host를 띄우는 환경에 `AELIX_STUDIO_EXTENSION_STATE`를 넣는다(7.4). ACP의 쓰기 차단(7.3)은 그대로
-  선행이다.
+- macOS의 고정 번들 host에서 대화별 어댑터와 어댑터 재시작 시 세대 선택을 확인했다. Studio의 상태 경로 전달은
+  관리형 Aelix ACP 명령의 환경에서 처리한다(7.4). ACP의 쓰기 차단(7.3)은 화면 공개의 선행이다.
+  [Issue #32 host 확인](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7014402902) ·
+  [Studio PR #79](https://github.com/handochan/aelix-studio/pull/79)
 - #32의 완료 조건 네 가지에 해당하는 동작은 macOS에서 시험 스크립트로 실행해 봤다. 한 절차로 한 번에 돌린
   것이 아니라 차수별 실행을 합친 것이다(7.1). 3번 조건("Studio 업데이트 뒤에도 유지")은 번들 사본 교체로
   확인했고 실제 설치 앱 업데이트로는 확인하지 않았다. 완료 조건의 충족은 helper 구현 뒤에 다시 확인한다.
 
+1a′의 Provider Preview 설치 검증은 설치된 번들의 Python과 ACP launcher를 사용한다. 파일 반입과 loopback
+index 설치, 새 ACP 세션의 확장 명령, 잠금 경합과 lease, console script 경로, 되돌리기·제거, 번들 교체 모의의
+reinstall_needed를 기록한다. macOS는 ad-hoc 서명을 전후 검증하고, 다섯 target 모두 설치 번들의 파일을
+대조한다. Linux 감사에는 이 절차의 하위 프로세스도 포함한다.
+
+Windows 세대의 pack은 junction이고 관리 자식은 Windows Job Object로 묶는다. Windows의 distlib console
+launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치는 격리된 시스템 환경을 쓴다. Windows Git
+설치는 시스템 Git·SSH 경로를 확인하기 전까지 보류한다.
+
 ## 10. 확인하지 않은 것
 
-- **Windows.** venv가 사용자 영역에 `python.exe`(launcher 사본)를 만든다. 사용자 쓰기 영역의 실행 파일을
-  막는 정책(AppLocker 등)에서 설치가 되는지, 긴 경로, `pywin32` 경로 처리, 링크 디렉터리(junction), 파일
-  잠금, console script(`.exe`)의 경로 고치기를 확인해야 한다. 권장한 형태에서는 대화가 사용자 영역의 실행
-  파일을 쓰지 않으므로 영향은 설치 작업에 한정된다.
-- **Linux.** 실행하지 않았다.
-- **서명된 설치 앱.** 컴파일된 모듈(`.so`·`.pyd`)이 든 확장의 로드. `-S`는 이것을 막지 않는다. ABI, DLL 탐색,
-  서명 검증은 따로 확인해야 한다. `entitlements.plist`에 library validation 해제가 있지만 번들 Python에
-  적용되는지는 보지 않았다.
+- **Windows 기업 정책.** AppLocker처럼 사용자 영역 실행을 막는 정책, 최대 경로 정책을 바꾼 환경,
+  시스템 Git·SSH 설치는 OS별 확인에서 별도로 다뤄야 한다.
+- **배포 서명과 컴파일된 확장.** Preview macOS 검증은 ad-hoc 서명으로 실행한다. Developer ID·공증 및
+  별도로 서명하거나 컴파일한 확장의 ABI·DLL 탐색·library validation은 별도 확인 대상이다.
 - **실제 Studio 업데이트.** 번들 디렉터리를 바꿔치기한 모의다.
 - **Python minor가 바뀐 번들.** 감지만 했다.
 - **링크 디렉터리로 로드한 확장의 선언 기능.** manifest가 결합되는 것까지 봤다. 선언한 MCP 서버·테마·hook의
@@ -814,8 +828,6 @@ pack이 있으면 launcher가 넘길 인자 그대로 한 번. 어댑터가 받�
 - **잠금 순서.** 5.6의 포인터 선택·lease 순서는 launcher 조각에서 구현했고, 생성과 잠금 사이에 정리를 끼워
   넣는 harness로 확인했다. 실제 helper와 대화가 동시에 도는 경합의 빈도는 재현하지 않았다. 되돌리기의 순서는
   helper 구현을 따른다.
-- **host와 어댑터 프로세스.** host가 대화마다 어댑터를 따로 띄우는지, Studio가 host에 준 환경 변수를 어댑터에
-  그대로 넘기는지는 확인하지 않았다(9절의 1b 선행).
 - **대조를 넣은 뒤의 재구축과 전부 차단한 반입.** 5.5의 요청 대조를 넣은 뒤로는 기록을 다시 설치하는 재구축과
   네트워크를 전부 막은 반입을 다시 실행하지 않았다. 둘은 2차 절차로 실행했다.
 - **사용자의 터미널 CLI를 실행하는 목록·설치·제거.** 실행하지 않았다.

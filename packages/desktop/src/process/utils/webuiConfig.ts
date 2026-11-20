@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { getStudioWebUILocalUrl } from '@aionui/web-host/webui-defaults';
+import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -126,14 +128,6 @@ export const saveUserWebUIConfig = async (config: WebUIUserConfig): Promise<void
   await fs.promises.rename(tmpPath, configPath);
 };
 
-// Keep aligned with renderer's WEBUI_DEFAULT_PORT (common/config/constants.ts):
-//   production -> 25808, dev -> 25809, multi-instance dev -> 25810
-const DEFAULT_WEBUI_PORT = (() => {
-  if (process.env.NODE_ENV === 'production') return 25808;
-  if (process.env.AIONUI_MULTI_INSTANCE === '1') return 25810;
-  return 25809;
-})();
-
 export const resolveWebUIPort = (
   config: WebUIUserConfig,
   getSwitchValue: (flag: string) => string | undefined
@@ -147,7 +141,7 @@ export const resolveWebUIPort = (
   const configPort = parsePortValue(config.port);
   if (configPort) return configPort;
 
-  return DEFAULT_WEBUI_PORT;
+  return WEBUI_DEFAULT_PORT;
 };
 
 export const resolveRemoteAccess = (config: WebUIUserConfig, isRemoteMode: boolean): boolean => {
@@ -222,7 +216,7 @@ export async function startDesktopWebUI(opts: { port?: number; allowRemote?: boo
   }
 
   const allowRemote = opts.allowRemote === true;
-  const preferredPort = parsePortValue(opts.port) ?? DEFAULT_WEBUI_PORT;
+  const preferredPort = parsePortValue(opts.port) ?? WEBUI_DEFAULT_PORT;
   const sysDir = getSystemDir();
 
   // Reuse the backend already spawned by backendManager.start() in src/index.ts.
@@ -294,9 +288,9 @@ export function getDesktopWebUIStatus(): {
     const lanIP = getLanIP();
     return {
       running: false,
-      port: DEFAULT_WEBUI_PORT,
+      port: WEBUI_DEFAULT_PORT,
       allowRemote: false,
-      localUrl: `http://localhost:${DEFAULT_WEBUI_PORT}`,
+      localUrl: getStudioWebUILocalUrl(WEBUI_DEFAULT_PORT),
       lanIP: lanIP ?? undefined,
     };
   }
@@ -315,7 +309,7 @@ export const restoreDesktopWebUIFromPreferences = async (): Promise<void> => {
   const { enabled, allowRemote, port } = await readWebUIDesktopPreferences();
   if (!enabled) return;
 
-  const preferredPort = port ?? DEFAULT_WEBUI_PORT;
+  const preferredPort = port ?? WEBUI_DEFAULT_PORT;
 
   try {
     const handle = await startDesktopWebUI({ port: preferredPort, allowRemote });
@@ -325,7 +319,7 @@ export const restoreDesktopWebUIFromPreferences = async (): Promise<void> => {
   } catch (error) {
     // Reconcile the persisted preference with reality. Leaving enabled=true
     // means every subsequent launch will silently re-fail the same way, and
-    // the Settings page's Switch would render "on" against an empty 25808.
+    // the Settings page's Switch would render "on" against a server that never started.
     console.error('[WebUI] Failed to auto-restore from desktop preferences:', error);
     await writeWebUIDesktopEnabled(false);
   }

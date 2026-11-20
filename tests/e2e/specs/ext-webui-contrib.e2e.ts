@@ -21,7 +21,7 @@ async function ensureWebuiRunning(page: import('@playwright/test').Page): Promis
 
   if (status?.success && status.data?.running) {
     return {
-      port: typeof status.data.port === 'number' ? status.data.port : 25808,
+      port: typeof status.data.port === 'number' ? status.data.port : 25982,
       startedByTest: false,
     };
   }
@@ -50,7 +50,7 @@ async function ensureWebuiRunning(page: import('@playwright/test').Page): Promis
   }
 
   return {
-    port: typeof started.data?.port === 'number' ? started.data.port : 25808,
+    port: typeof started.data?.port === 'number' ? started.data.port : 25982,
     startedByTest: true,
   };
 }

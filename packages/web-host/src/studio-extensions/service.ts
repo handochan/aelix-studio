@@ -4,7 +4,7 @@ import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
 import { describe, mutate, reconcileBundle, rollback, type MutationRequest } from './flow/mutate.js';
 import { parseOnlineSource } from './flow/onlineSource.js';
-import { spawnChild, type Spawn } from './process.js';
+import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
 import { locateLayout, resolveBundle } from './store/layout.js';
 import {
   ExtensionFailure,
@@ -75,15 +75,8 @@ const isName = (value: unknown): value is string =>
  * One change runs at a time. `install`, `update` and `remove` return an operation to
  * `poll`; `list` and `rollback` answer directly.
  *
- * On Windows every change is refused with `UNSUPPORTED_PLATFORM`; only `list` answers. The
- * helper has not run on Windows, and these are known not to be right there yet. They are the
- * work of the per-platform verification stage (1a'):
- * - cancelling a change stops native but not pip, its child, and the pipe handles pip
- *   inherited can keep the cancelled change and its lock waiting;
- * - console scripts are `.exe` launchers with the interpreter path of the generation they
- *   were installed in built in, so one carried over still points at the old generation;
- * - the lock (`msvcrt.locking`), the venv layout and the name of the null device as pip
- *   compares it are written from documentation and have never been exercised.
+ * Windows runs the installer subprocess tree in a job so cancellation cannot strand
+ * pip. Git sources still require a qualified Windows Git/SSH toolchain.
  */
 export class ExtensionService {
   private operation?: Tracked;
@@ -103,7 +96,9 @@ export class ExtensionService {
       bundle,
       layout: await locateLayout(this.options.root),
       platform: this.platform,
-      spawn: this.options.spawn ?? spawnChild,
+      spawn:
+        this.options.spawn ??
+        (this.platform === 'win32' ? windowsChildSpawn(bundle.python, bundle.launcher) : spawnChild),
       base: baseEnvironment(this.options.env ?? process.env, this.platform),
       timeouts: { ...TIMEOUTS, ...this.options.timeouts },
       signal,
@@ -138,7 +133,8 @@ export class ExtensionService {
         const enabled = this.options.onlineInstallEnabled;
         if ((typeof enabled === 'function' ? enabled() : enabled) === false) return fail('ONLINE_INSTALL_DISABLED');
       }
-      if (this.platform === 'win32') return fail('UNSUPPORTED_PLATFORM');
+      if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
+        return fail('UNSUPPORTED_PLATFORM');
       if (this.changing) return fail('BUSY');
       this.changing = true;
       if (!change) {

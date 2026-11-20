@@ -1,3 +1,5 @@
+!include "${PROJECT_DIR}\resources\windows\support\studio-protocol.nsh"
+
 # The pinned NSIS CopyFiles path can drop deep npm directories. Re-extract the
 # same embedded payload and copy it with the OS long-path-aware implementation.
 # The app and installer qualification still verify the complete source seal.
@@ -58,5 +60,10 @@
       SetErrorLevel 1603
       Abort
     studio_copy_done:
+    !insertmacro STUDIO_REGISTER_PROTOCOL
   !macroend
 !endif
+
+!macro customUnInstall
+  !insertmacro STUDIO_UNREGISTER_PROTOCOL
+!macroend

@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import sqlite3
@@ -204,6 +205,76 @@ class FailedAuditReceiptTests(unittest.TestCase):
                 self.assertEqual(saved['recapturedAudits'],['provider'])
                 self.assertEqual(len(saved['auditedSessions'][0]['captureAttempts']),2)
 
+    def test_extension_failure_preserves_the_completed_smoke_verdict_and_controls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'acceptance.json'
+            smoke = dict(status='passed', failedAudits=[], permissionChecks=25,
+                         auditedSessions=[dict(name='permission', status='passed')],
+                         outboundControls=[dict(name='positive-control', status='passed')],
+                         auditedSessionsSha256='smoke-evidence')
+            audits = acceptance.AuditedSessions(root/'host', root/'python', root, ledger='outbound-extensions-sessions.json')
+            audits.enabled = True
+
+            def fail_extension(receipt):
+                checkpoint = json.loads(output.read_text())
+                self.assertEqual((checkpoint['status'], checkpoint['smokeStatus']), ('running', 'passed'))
+                self.assertEqual(checkpoint['outboundControls'], smoke['outboundControls'])
+                receipt.write_text('{"status": "passed"}')
+                audits.sessions.append(dict(name='extensions', status='failed', unparsedRecords=2))
+                audits.save()
+                raise RuntimeError('incomplete extension audit')
+
+            with self.assertRaisesRegex(RuntimeError, 'incomplete extension audit'):
+                acceptance.record_extension_qualification(smoke, output, audits, fail_extension)
+            acceptance.write_failure_receipt(output)
+            saved = json.loads(output.read_text())
+            self.assertEqual((saved['status'], saved['smokeStatus']), ('failed', 'passed'))
+            self.assertEqual(saved['auditedSessionsSha256'], 'smoke-evidence')
+            self.assertEqual(saved['permissionChecks'], 25)
+            self.assertEqual(saved['outboundControls'], [dict(name='positive-control', status='passed')])
+            self.assertEqual(saved['failedAudits'], ['extensions'])
+            extension = saved['extensionQualification']
+            self.assertEqual(extension['status'], 'failed')
+            self.assertEqual(extension['audit']['unparsedRecords'], 2)
+            self.assertEqual((extension['captureTimeoutSeconds'], extension['totalTimeoutSeconds']), (180, 540))
+            self.assertEqual(extension['timeoutScope'], 'audit-supervisor')
+            self.assertTrue(extension['bundleInventoryOutsideTimeout'])
+            self.assertGreaterEqual(extension['elapsedSeconds'], 0)
+
+    def test_installer_start_clears_only_stale_extension_receipts_and_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            permission = root / 'permission'
+            permission.mkdir()
+            extension_files = [
+                root / 'extensions-qualification.json',
+                permission / 'outbound-extensions-sessions.json',
+                *(permission / (name + suffix) for name in ('outbound-extensions', 'outbound-app-extensions')
+                  for suffix in ('.json', '.capture-1.json', '.capture-2.json')),
+            ]
+            smoke = permission / 'outbound.capture-2.json'
+            for file in (*extension_files, smoke):
+                file.write_text('old evidence')
+            args = Mock(runtime=str(root/'runtime'), output=str(root/'acceptance.json'),
+                        artifact=None, dmg=None, artifacts=str(root/'missing'))
+            with self.assertRaises(ValueError):
+                acceptance.main(args)
+            self.assertFalse(any(file.exists() for file in extension_files))
+            self.assertEqual(smoke.read_text(), 'old evidence')
+
+    def test_extension_pass_keeps_a_failed_smoke_verdict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'acceptance.json'
+            audits = acceptance.AuditedSessions(root/'host', root/'python', root)
+            acceptance.record_extension_qualification(
+                dict(status='failed', failedAudits=['provider']), output, audits,
+                lambda receipt: receipt.write_text('{"status": "passed"}'))
+            saved = json.loads(output.read_text())
+            self.assertEqual((saved['status'], saved['smokeStatus'], saved['extensionQualification']['status']),
+                             ('failed', 'failed', 'passed'))
+
     def test_running_or_old_passed_receipt_never_survives_a_failure(self):
         for status in ('running','passed'):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:
@@ -212,6 +283,71 @@ class FailedAuditReceiptTests(unittest.TestCase):
                 acceptance.write_failure_receipt(output)
                 self.assertEqual(json.loads(output.read_text())['status'],'failed')
                 self.assertNotIn('auditedSessions',json.loads(output.read_text()))
+
+
+class InstallerIdentityTests(unittest.TestCase):
+    def test_bundled_runtime_receives_valid_python_source(self):
+        for root in (Path("/tmp/Studio 한글 O'Neil"), Path(r"C:\Users\Studio 한글\Runtime")):
+            with self.subTest(root=root):
+                compile(acceptance.installed_runtime_probe(root), "installed-runtime-probe", "exec")
+
+    def test_windows_packaging_includes_the_same_protocol_file(self):
+        protocol = r'!include "${PROJECT_DIR}\resources\windows\support\studio-protocol.nsh"'
+        self.assertTrue((ROOT / 'resources/windows/support/studio-protocol.nsh').is_file())
+        common = (ROOT / 'resources/windows/installer-common.nsh').read_text()
+        preview = (ROOT / 'scripts/studio-preview/packaging/windowsInstaller.nsh').read_text()
+        self.assertIn(protocol, common)
+        self.assertIn(protocol, preview)
+        for architecture in ('x64', 'arm64'):
+            with self.subTest(architecture=architecture):
+                entry = (ROOT / f'resources/windows/windows-installer-{architecture}.nsh').read_text()
+                self.assertIn('!include "installer-common.nsh"', entry)
+
+    @unittest.skipUnless(shutil.which('pwsh'), 'PowerShell is required')
+    def test_windows_debug_builds_prefer_studio_and_keep_the_legacy_fallback(self):
+        source = ROOT / 'scripts/build-fast-debug-worktrees.ps1'
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo = root / 'repo'
+            local = root / 'local'
+            output = repo / 'out'
+            output.mkdir(parents=True)
+            legacy = output / 'AionUi-2.2.2-win-x64.exe'
+            studio = output / 'aelix-studio-2.2.2-win-x64.exe'
+            legacy.touch()
+            bundle = Path('resources/bundled-aioncore/win32-x64')
+            for name in ('AionUi', 'Aelix Studio'):
+                (local / 'Programs' / name / bundle / 'managed-resources').mkdir(parents=True)
+            driver = r'''
+$ErrorActionPreference = 'Stop'
+$parsed = [System.Management.Automation.Language.Parser]::ParseFile($env:STUDIO_FIXTURE_SOURCE, [ref]$null, [ref]$null)
+foreach ($definition in $parsed.FindAll({
+  $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] -and
+  $args[0].Name -in @('Find-BuildInstaller', 'Find-LocalHostBundle')
+}, $false)) {
+  . ([scriptblock]::Create($definition.Extent.Text))
+}
+Find-BuildInstaller $env:STUDIO_FIXTURE_REPO '2.2.2'
+New-Item -ItemType File -Path (Join-Path $env:STUDIO_FIXTURE_REPO 'out/aelix-studio-2.2.2-win-x64.exe') | Out-Null
+Find-BuildInstaller $env:STUDIO_FIXTURE_REPO '2.2.2'
+Find-LocalHostBundle $env:STUDIO_FIXTURE_REPO $env:STUDIO_FIXTURE_LOCAL
+'''
+            command = root / 'test.ps1'
+            command.write_text(driver, encoding='utf-8')
+            result = subprocess.check_output(['pwsh', '-NoProfile', '-NonInteractive', '-File', str(command)],
+                                             env=dict(os.environ, STUDIO_FIXTURE_SOURCE=str(source),
+                                                      STUDIO_FIXTURE_REPO=str(repo), STUDIO_FIXTURE_LOCAL=str(local)),
+                                             text=True, encoding='utf-8', timeout=20)
+            self.assertEqual([Path(line).resolve() for line in result.splitlines()],
+                             [legacy.resolve(), studio.resolve(), (local / 'Programs/Aelix Studio' / bundle).resolve()])
+
+    def test_windows_cancel_copy_describes_the_local_report(self):
+        messages = (ROOT / 'resources/windows/installer-messages.nsh').read_text(encoding='utf-8')
+        cancel = [line for line in messages.splitlines() if line.startswith('!define AIONUI_MSG_CLOSE_LISTED_RETRY_')]
+        self.assertEqual(len(cancel), 2)
+        self.assertIn('save a local installer report', '\n'.join(cancel))
+        self.assertIn('保存本地安装报告', '\n'.join(cancel))
+        self.assertNotRegex('\n'.join(cancel), r'send|发送')
 
 
 class InstallerWaitTests(unittest.TestCase):

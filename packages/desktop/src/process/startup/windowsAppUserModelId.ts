@@ -5,6 +5,7 @@
  */
 
 import type { App } from 'electron';
+import { APP_ID } from '@/common/config/appIdentity';
 
 /**
  * Windows AppUserModelID for packaged builds.
@@ -16,7 +17,7 @@ import type { App } from 'electron';
  * Squirrel.Windows installers only, so NSIS builds must do it themselves.
  * Consistency with electron-builder.yml is guarded by a unit test.
  */
-export const WINDOWS_APP_USER_MODEL_ID = 'com.aionui.app';
+export const WINDOWS_APP_USER_MODEL_ID = APP_ID;
 
 type AppUserModelIdTarget = Pick<App, 'isPackaged' | 'setAppUserModelId'>;
 

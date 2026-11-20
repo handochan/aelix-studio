@@ -147,15 +147,24 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
             : structuredError.workspacePath
               ? 'bodyWithPath'
               : 'body';
-    const body = errorCode
-      ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
-          workspacePath: structuredError.workspacePath,
-          methods,
-          profile,
-          source,
-          defaultValue: structuredError.message || content,
-        })
-      : structuredError.message || content;
+    const action = errorData.action;
+    const studioExtensionAction =
+      errorCode === 'USER_AGENT_OPERATION_REFUSED' &&
+      refusedKind === 'studio_extension_management_required' &&
+      (action === 'install' || action === 'update' || action === 'remove')
+        ? action
+        : undefined;
+    const body = studioExtensionAction
+      ? t(`acp.studioExtensionManagement.${studioExtensionAction}`)
+      : errorCode
+        ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
+            workspacePath: structuredError.workspacePath,
+            methods,
+            profile,
+            source,
+            defaultValue: structuredError.message || content,
+          })
+        : structuredError.message || content;
     const ownershipLabel = ownership
       ? t(`conversation.agentError.ownership.${ownership}`, {
           defaultValue: t('conversation.agentError.ownership.unknown_upstream'),

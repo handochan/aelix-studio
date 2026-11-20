@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { toHostCookieHeader } from './cookies.js';
 import { getNativeAuthService, type NativeAuthService } from './service.js';
 
 export const NATIVE_AUTH_ROUTE = '/api/studio/native-auth';
@@ -33,7 +34,7 @@ export async function handleNativeAuth(
     // /api/auth/user deliberately requires a real WebUI login, even when ordinary
     // backend routes inject a default user in --local mode. Never forward internal identity headers.
     const identity = await fetch(`http://127.0.0.1:${options.backendPort}/api/auth/user`, {
-      headers: { cookie: req.headers.cookie ?? '' },
+      headers: { cookie: toHostCookieHeader(req.headers.host, req.headers.cookie, req.url) ?? '' },
       signal: AbortSignal.timeout(5000),
       redirect: 'error',
     });

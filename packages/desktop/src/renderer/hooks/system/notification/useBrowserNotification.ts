@@ -9,6 +9,7 @@ import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { ipcBridge } from '@/common';
 import { configService } from '@/common/config/configService';
+import notificationIcon from '@renderer/assets/logos/brand/app.png';
 import { isElectronDesktop } from '@/renderer/utils/platform';
 import { getSnapshotConversationName } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 import {
@@ -63,7 +64,10 @@ export const useBrowserNotification = (): void => {
       },
       show: ({ body, conversationId }) => {
         try {
-          const notification = new Notification('AionUi', { body });
+          const notification = new Notification(t('login.brand'), {
+            body,
+            icon: notificationIcon,
+          });
           notification.onclick = () => {
             window.focus();
             if (conversationId) void navigate(`/conversation/${conversationId}`);

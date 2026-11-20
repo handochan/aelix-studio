@@ -220,6 +220,7 @@ jobs:
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
             .local/provider-installer/host-preflight.json
+            .local/provider-installer/extensions-qualification.json
             .local/provider-installer/inventory-diff.json
             .local/provider-installer/installer-copy-failure.json
             .local/provider-installer/installer-progress.json
@@ -667,7 +668,7 @@ jobs:
           Write-Host "SMOKE INSTALL: windows-x64"
           Write-Host "=========================================="
 
-          $installer = Get-ChildItem -Path out -Filter "AionUi-*-win-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $installer = Get-ChildItem -Path out -Filter "aelix-studio-*-win-*.exe" | Sort-Object LastWriteTime -Descending | Select-Object -First 1
           if (-not $installer) {
             throw "No Windows installer found in out/"
           }
@@ -680,9 +681,9 @@ jobs:
           }
 
           $candidates = @(
-            "$env:LOCALAPPDATA\\Programs\\AionUi\\AionUi.exe",
-            "$env:ProgramFiles\\AionUi\\AionUi.exe",
-            "$env:ProgramFiles(x86)\\AionUi\\AionUi.exe"
+            "$env:LOCALAPPDATA\\Programs\\Aelix Studio\\Aelix Studio.exe",
+            "$env:ProgramFiles\\Aelix Studio\\Aelix Studio.exe",
+            "$env:ProgramFiles(x86)\\Aelix Studio\\Aelix Studio.exe"
           )
 
           $installedExe = $candidates | Where-Object { Test-Path $_ } | Select-Object -First 1
@@ -702,8 +703,8 @@ jobs:
           echo "=========================================="
 
           DMG_FILE=$(ls out/*.dmg | head -n 1)
-          MOUNT_POINT="/tmp/aionui-smoke-mount"
-          APP_DIR="/tmp/aionui-smoke-app"
+          MOUNT_POINT="/tmp/aelix-studio-smoke-mount"
+          APP_DIR="/tmp/aelix-studio-smoke-app"
 
           rm -rf "$MOUNT_POINT" "$APP_DIR"
           mkdir -p "$MOUNT_POINT" "$APP_DIR"
@@ -713,7 +714,7 @@ jobs:
           hdiutil detach "$MOUNT_POINT"
 
           APP_PATH=$(ls -d "$APP_DIR"/*.app | head -n 1)
-          APP_BIN="$APP_PATH/Contents/MacOS/AionUi"
+          APP_BIN="$APP_PATH/Contents/MacOS/Aelix Studio"
 
           test -x "$APP_BIN"
           "$APP_BIN" --version || true
@@ -731,7 +732,7 @@ jobs:
           PKG_NAME=$(dpkg-deb -f "$DEB_FILE" Package)
           sudo dpkg -i "$DEB_FILE" || sudo apt-get install -f -y
 
-          INSTALLED_BIN=$(dpkg -L "$PKG_NAME" | grep -Ei '/(bin|opt)/.*(aionui)$' | head -n 1 || true)
+          INSTALLED_BIN=$(dpkg -L "$PKG_NAME" | grep -E '/opt/.*/aelix-studio$' | head -n 1 || true)
           if [ -z "$INSTALLED_BIN" ]; then
             echo "Package files:"
             dpkg -L "$PKG_NAME" | head -n 50
@@ -740,6 +741,8 @@ jobs:
           fi
 
           test -x "$INSTALLED_BIN"
+          sudo dpkg --remove "$PKG_NAME"
+          test ! -e "$INSTALLED_BIN"
 
   # Job 5: Test release scripts (fast, no build required)
   release-script-test:

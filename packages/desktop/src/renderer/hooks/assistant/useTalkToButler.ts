@@ -12,7 +12,7 @@ import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
 import { mutate as swrMutate } from 'swr';
 
-/** Backend manifest id of the built-in AionUi Butler assistant. */
+/** Backend manifest id of the built-in Aelix Studio Butler assistant. */
 const BUTLER_ASSISTANT_ID = 'aionui-assistant';
 
 export type TalkToButlerArgs = {
@@ -60,7 +60,7 @@ export const useTalkToButler = (): ((args: TalkToButlerArgs) => Promise<void>) =
             await ipcBridge.assistants.setState.invoke({ id: butler.id, enabled: true });
             await swrMutate('assistants.list');
             Message.success(
-              t('settings.talkToButler.enabledToast', { defaultValue: 'Enabled the AionUi Butler for you' })
+              t('settings.talkToButler.enabledToast', { defaultValue: 'Enabled the Aelix Studio Butler for you' })
             );
           }
         }

@@ -5,6 +5,7 @@ import json
 import math
 import os
 from pathlib import Path
+import plistlib
 import re
 import shutil
 import subprocess
@@ -28,6 +29,10 @@ from auditedSessions import AuditedSessions
 WINDOWS_INSTALL_TIMEOUT = 600
 INSTALL_PROGRESS_INTERVAL = 30
 INSTALL_PROBE_TIMEOUT = 5
+# Installer traces completed well inside this capture budget. Keep one bounded
+# recapture for incomplete measurements, without extending the smoke budget.
+EXTENSIONS_CAPTURE_TIMEOUT = 180
+EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
 INSTALL_PROGRESS_PROBE = r"""
 $ErrorActionPreference = 'Stop'
@@ -183,8 +188,12 @@ def write_failure_receipt(output):
         current = json.loads(output.read_text(encoding='utf-8'))
     except (OSError, ValueError):
         current = {}
-    # main() first resets the file to running. Preserve this run's completed
-    # or interrupted recapture evidence when the mandatory failure is raised.
+    # main() resets the file to running. A saved smoke verdict belongs to this run.
+    if 'smokeStatus' in current:
+        current['status'] = 'failed'
+        output.write_text(json.dumps(current, indent=2) + '\n', encoding='utf-8')
+        return
+    # Preserve interrupted recapture evidence before the smoke verdict exists.
     if current.get('status') == 'failed' and 'auditedSessions' in current and (current.get('failedAudits') or current.get('outboundRecaptures', 0)):
         return
     output.parent.mkdir(parents=True, exist_ok=True)
@@ -209,6 +218,74 @@ def long_path(path):
     return path
 
 
+def runtime_inventory(payload):
+    import stat
+    inventory = {'.': (payload.lstat().st_mode, None)}
+    for file in payload.rglob('*'):
+        mode = file.lstat().st_mode
+        content = os.readlink(file) if stat.S_ISLNK(mode) else digest(file) if stat.S_ISREG(mode) else None
+        inventory[str(file.relative_to(payload))] = (mode, content)
+    return inventory
+
+
+def qualify_extensions(audits, env, payload, app, kind, installed_python, report_path):
+    before = runtime_inventory(payload)
+    try:
+        audits.run('extensions', [
+            'node', '--import', 'tsx', str(ROOT / 'packages/web-host/tests/extensionInstallerQualification.ts'),
+            str(payload), str(report_path),
+        ], env=env, timeout=EXTENSIONS_CAPTURE_TIMEOUT, roots=(installed_python,), required=(installed_python,))
+        if audits.enabled:
+            audit = audits.sessions[-1]
+            if any(audit[field] for field in ('wholeAppExternalAttempts', 'wholeAppUnparsedRecords',
+                                              'wholeAppClassificationErrors')):
+                raise RuntimeError('Extension qualification emitted external or unclassified network activity')
+    finally:
+        if runtime_inventory(payload) != before:
+            raise RuntimeError('Extension qualification changed the installed runtime')
+        if kind == 'dmg':
+            subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True,
+                           timeout=EXTENSIONS_SIGNATURE_TIMEOUT)
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(installedRuntimeUnchanged=True, adHocSignatureVerifiedAfter=kind == 'dmg')
+    report_path.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+
+
+def record_extension_qualification(report, output, audits, verify, *, signature=False):
+    """Checkpoint the existing smoke verdict before adding the independent extension result."""
+    smoke_status = report['status']
+    report['smokeStatus'] = smoke_status
+    report['status'] = 'running'
+    verdict = dict(status='running', captureTimeoutSeconds=EXTENSIONS_CAPTURE_TIMEOUT,
+                   totalTimeoutSeconds=audits.time_budget(EXTENSIONS_CAPTURE_TIMEOUT),
+                   timeoutScope='audit-supervisor' if audits.enabled else 'qualifier-command',
+                   bundleInventoryOutsideTimeout=True,
+                   signatureTimeoutSeconds=EXTENSIONS_SIGNATURE_TIMEOUT if signature else None)
+    report['extensionQualification'] = verdict
+    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+    extension_report = output.with_name('extensions-qualification.json')
+    started = time.monotonic()
+    try:
+        extension_report.unlink(missing_ok=True)
+        verify(extension_report)
+        verdict['status'] = 'passed'
+        report['status'] = smoke_status
+    except BaseException as error:
+        report['status'] = verdict['status'] = 'failed'
+        verdict['exceptionKind'] = type(error).__name__
+        raise
+    finally:
+        verdict['elapsedSeconds'] = round(time.monotonic() - started, 3)
+        if audits.sessions:
+            verdict['audit'] = audits.sessions[-1]
+            if audits.ledger.is_file():
+                verdict['auditLedgerSha256'] = digest(audits.ledger)
+            report['failedAudits'] = [*report['failedAudits'], *audits.failed]
+        if extension_report.is_file():
+            report['extensionsQualificationSha256'] = digest(extension_report)
+        output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+
+
 def assert_windows_install_unused():
     # Refuse an existing real installation or running desktop before NSIS
     # can change its per-user registration or request another app's exit.
@@ -223,13 +300,15 @@ def assert_windows_install_unused():
                 for index in range(winreg.QueryInfoKey(key)[0]):
                     try:
                         with winreg.OpenKey(key, winreg.EnumKey(key, index)) as entry:
-                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().startswith('aionui'):
-                                raise ValueError('Refusing to replace an existing AionUi installation')
+                            if str(winreg.QueryValueEx(entry, 'DisplayName')[0]).lower().casefold().startswith('aelix studio'):
+                                raise ValueError('Refusing to replace an existing Aelix Studio installation')
                     except OSError:
                         continue
-    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq AionUi.exe', '/FO', 'CSV', '/NH'])
-    if b'aionui.exe' in processes.lower():
-        raise ValueError('Refusing to interrupt an existing AionUi process')
+    if windows_protocol_command() is not None:
+        raise ValueError('Refusing to replace an existing Studio protocol registration')
+    processes = subprocess.check_output(['tasklist', '/FI', 'IMAGENAME eq Aelix Studio.exe', '/FO', 'CSV', '/NH'])
+    if b'aelix studio.exe' in processes.lower():
+        raise ValueError('Refusing to interrupt an existing Aelix Studio process')
 
 
 def qualify_windows_copy_failure(artifact, directory, report_path):
@@ -237,7 +316,7 @@ def qualify_windows_copy_failure(artifact, directory, report_path):
     import ctypes
     from ctypes import wintypes
     assert_windows_install_unused()
-    app = directory / 'AionUi'
+    app = directory / 'Aelix Studio'
     relative = ('resources/bundled-aioncore/win32-x64/managed-resources/node/'
                 'node-v24.11.0-win-x64/node_modules/npm/node_modules/'
                 'validate-npm-package-license/node_modules/spdx-expression-parse/package.json')
@@ -285,18 +364,18 @@ def installed(artifact, directory, installer_receipt=None):
         mount.mkdir()
         subprocess.run(['hdiutil', 'attach', '-readonly', '-nobrowse', '-mountpoint', str(mount), str(artifact)],
                        check=True, stdout=subprocess.DEVNULL)
-        app = directory / 'AionUi.app'
+        app = directory / 'Aelix Studio.app'
         try:
-            subprocess.run(['ditto', str(mount / 'AionUi.app'), str(app)], check=True)
+            subprocess.run(['ditto', str(mount / 'Aelix Studio.app'), str(app)], check=True)
         finally:
             subprocess.run(['hdiutil', 'detach', str(mount)], check=True, stdout=subprocess.DEVNULL)
         subprocess.run(['codesign', '--verify', '--deep', '--strict', str(app)], check=True)
-        return app / 'Contents/MacOS/AionUi', app / 'Contents/Resources/studio-preview', app, 'dmg', None
+        return app / 'Contents/MacOS/Aelix Studio', app / 'Contents/Resources/studio-preview', app, 'dmg', None
     if sys.platform == 'win32':
         assert_windows_install_unused()
-        app = directory / 'AionUi'
+        app = directory / 'Aelix Studio'
         windows_installer(artifact, app, installer_receipt or directory / 'installer-progress.json', 'clean-install')
-        return app / 'AionUi.exe', long_path(app / 'resources/studio-preview'), app, 'nsis', None
+        return app / 'Aelix Studio.exe', long_path(app / 'resources/studio-preview'), app, 'nsis', None
     package = subprocess.check_output(['dpkg-deb', '--field', str(artifact), 'Package'], text=True).strip()
     if not re.fullmatch(r'[a-z0-9][a-z0-9+.-]*', package):
         raise ValueError('Invalid Debian package identity')
@@ -311,11 +390,52 @@ def installed(artifact, directory, installer_receipt=None):
         raise ValueError('Installed Debian package has no unique runtime manifest')
     payload = manifests[0].parent
     app = payload.parent.parent
-    executable = app / 'aionui'
-    if not executable.is_file():
-        executable = app / 'AionUi'
+    executable = app / 'aelix-studio'
     return executable, payload, app, 'deb', package
 
+
+def windows_protocol_command():
+    import winreg
+    try:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r'Software\Classes\aelix-studio\shell\open\command') as key:
+            return winreg.QueryValueEx(key, '')[0]
+    except FileNotFoundError:
+        return None
+
+
+def qualify_installed_identity(executable, app, kind, package):
+    if kind == 'dmg':
+        with (app / 'Contents/Info.plist').open('rb') as stream:
+            info = plistlib.load(stream)
+        schemes = [scheme for entry in info['CFBundleURLTypes'] for scheme in entry['CFBundleURLSchemes']]
+        if (info['CFBundleIdentifier'] != 'ai.aelix.studio' or info['CFBundleExecutable'] != executable.name
+                or info['CFBundleDisplayName'] != 'Aelix Studio' or schemes != ['aelix-studio']):
+            raise ValueError('Unexpected macOS bundle identity')
+        icon = info['CFBundleIconFile']
+        if not icon.endswith('.icns'):
+            icon += '.icns'
+        if not (app / 'Contents/Resources' / icon).is_file():
+            raise ValueError('Studio macOS bundle icon is missing')
+    elif kind == 'nsis':
+        if windows_protocol_command() != f'"{executable}" "%1"':
+            raise ValueError('Unexpected Windows Studio protocol registration')
+        metadata = subprocess.check_output(
+            ['powershell.exe', '-NoProfile', '-NonInteractive', '-Command',
+             '(Get-Item -LiteralPath $env:STUDIO_IDENTITY_EXE).VersionInfo.ProductName'],
+            env=dict(os.environ, STUDIO_IDENTITY_EXE=str(executable)), text=True, timeout=30).strip()
+        if metadata != 'Aelix Studio':
+            raise ValueError('Unexpected Windows executable product name')
+    else:
+        files = subprocess.check_output(['dpkg', '-L', package], text=True).splitlines()
+        entry_path = '/usr/share/applications/aelix-studio.desktop'
+        if package != 'aelix-studio' or entry_path not in files:
+            raise ValueError('Unexpected Studio Debian package identity')
+        entry = Path(entry_path).read_text(encoding='utf-8').splitlines()
+        if not {'Name=Aelix Studio', 'Icon=aelix-studio', 'MimeType=x-scheme-handler/aelix-studio;'}.issubset(entry):
+            raise ValueError('Unexpected Studio Linux desktop metadata')
+        if not any(item.endswith('/apps/aelix-studio.png') for item in files):
+            raise ValueError('Studio Linux desktop icon is missing')
+    return {'productName': 'Aelix Studio', 'protocol': 'aelix-studio'}
 
 def remove_install(app, kind, package):
     if kind == 'nsis':
@@ -330,11 +450,41 @@ def remove_install(app, kind, package):
         shutil.rmtree(long_path(app))
 
 
+def installed_runtime_probe(payload):
+    """Build the program passed to the bundled Python helper on every target."""
+    return textwrap.dedent("""
+    import os,sys,json
+    from pathlib import Path
+    import aelix_ai,aelix_coding_agent
+    def owned(value):
+        value=str(Path(value).resolve())
+        if sys.platform=='win32' and not value.startswith('\\\\\\\\?\\\\'):
+            value='\\\\\\\\?\\\\UNC\\\\'+value[2:] if value.startswith('\\\\\\\\') else '\\\\\\\\?\\\\'+value
+        return Path(value)
+    root=owned(ROOT_VALUE)
+    assert owned(sys.executable).is_relative_to(root)
+    assert all(owned(module.__file__).is_relative_to(root) for module in (aelix_ai,aelix_coding_agent))
+    assert sys.flags.isolated and sys.flags.no_site and sys.flags.no_user_site
+    if sys.platform=='win32':
+        import win32api,pywintypes
+        assert all(owned(module.__file__).is_relative_to(root) for module in (win32api,pywintypes))
+    print(json.dumps(dict(bundled=True,isolated=True)))
+    """).replace('ROOT_VALUE', repr(str(payload)))
+
+
 def main(args):
     runtime = Path(args.runtime).resolve()
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps({'status': 'running'}) + '\n', encoding='utf-8')
+    # Clear only the extension receipts this run can upload, even if their phase
+    # is never reached. The existing smoke uses its own report names.
+    output.with_name('extensions-qualification.json').unlink(missing_ok=True)
+    extension_audits = output.parent / 'permission'
+    (extension_audits / 'outbound-extensions-sessions.json').unlink(missing_ok=True)
+    for stem in ('outbound-extensions', 'outbound-app-extensions'):
+        for suffix in ('.json', '.capture-1.json', '.capture-2.json'):
+            (extension_audits / (stem + suffix)).unlink(missing_ok=True)
     installer_receipt = output.with_name('installer-progress.json')
     if sys.platform == 'win32':
         installer_receipt.write_text(json.dumps({'attempts': []}) + '\n', encoding='utf-8')
@@ -361,9 +511,11 @@ def main(args):
             qualify_windows_copy_failure(artifact, directory, copy_failure_report)
         executable, payload, app, kind, package = installed(artifact, directory, installer_receipt)
         audits = None
+        report = None
         try:
             if not executable.is_file():
                 raise ValueError('Installer did not produce its expected executable')
+            installed_identity = qualify_installed_identity(executable, app, kind, package)
             manifest = json.loads((payload / 'manifest.json').read_text(encoding='utf-8'))
             target = host_target()
             if manifest['target'] != target or manifest['nativePatches']:
@@ -416,24 +568,7 @@ def main(args):
                            + os.environ.get('SystemRoot', os.environ.get('SYSTEMROOT', r'C:\Windows'))
                            if sys.platform == 'win32' else '/usr/bin:/bin')
             environment = dict(os.environ, PATH=system_path, PYTHONDONTWRITEBYTECODE='1')
-            probe_code = textwrap.dedent("""
-    import os,sys,json
-    from pathlib import Path
-    import aelix_ai,aelix_coding_agent
-    def owned(value):
-        value=str(Path(value).resolve())
-        if sys.platform=='win32' and not value.startswith('\\\\\\\\?\\\\'):
-            value='\\\\\\\\?\\\\UNC\\\\'+value[2:] if value.startswith('\\\\\\\\') else '\\\\\\\\?\\\\'+value
-        return Path(value)
-    root=owned(ROOT_VALUE)
-    assert owned(sys.executable).is_relative_to(root)
-    assert all(owned(module.__file__).is_relative_to(root) for module in (aelix_ai,aelix_coding_agent))
-    assert sys.flags.isolated and sys.flags.no_site and sys.flags.no_user_site
-    if sys.platform=='win32':
-        import win32api,pywintypes
-        assert all(owned(module.__file__).is_relative_to(root) for module in (win32api,pywintypes))
-    print(json.dumps(dict(bundled=True,isolated=True)))
-    """).replace('ROOT_VALUE', repr(str(probe_payload)))
+            probe_code = installed_runtime_probe(probe_payload)
             probe = subprocess.check_output([*wrapper, *isolated, 'helper', '-c', probe_code],
                                             env=environment, text=True, encoding='utf-8', timeout=30)
             if not json.loads(probe)['bundled']:
@@ -507,7 +642,7 @@ def main(args):
                           permissionChecks=permission['checksPassed'], permissionReportSha256=digest(permission_output),
                           auditedSessions=audits.sessions, outboundControls=audits.controls,
                           **audits.recapture_summary(),
-                          artifactKind=kind, artifactSha256=digest(artifact),
+                          installedIdentity=installed_identity, artifactKind=kind, artifactSha256=digest(artifact),
                           artifactBytes=artifact.stat().st_size, qualifierSha256=digest(Path(__file__)),
                           installedRuntimeManifestSha256=digest(payload / 'manifest.json'),
                           installedAioncoreSha256=digest(core),
@@ -535,16 +670,27 @@ def main(args):
                               wholeAppUnparsedRecords=sum(item['wholeAppUnparsedRecords'] for item in audits.sessions))
             if kind == 'dmg':
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
+            extensions = AuditedSessions(core, installed_python, audits.directory,
+                                         ledger='outbound-extensions-sessions.json')
+            record_extension_qualification(report, output, extensions, lambda receipt: qualify_extensions(
+                extensions, environment, payload, app, kind, installed_python, receipt), signature=kind == 'dmg')
         finally:
             try:
-                if audits is not None:
-                    preserve_recapture_failure(output, audits, target)
-            finally:
                 remove_install(app, kind, package)
-        report['ownedTestAppRemoved'] = not app.exists()
+                if kind == 'nsis' and windows_protocol_command() is not None:
+                    if report is not None:
+                        report['status'] = 'failed'
+                    raise ValueError('Uninstall left the Studio protocol registered')
+            finally:
+                if report is not None:
+                    report['ownedTestAppRemoved'] = not app.exists()
+                    if not report['ownedTestAppRemoved']:
+                        report['status'] = 'failed'
+                    output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+                elif audits is not None:
+                    preserve_recapture_failure(output, audits, target)
         if not report['ownedTestAppRemoved']:
             raise ValueError('Owned installer files remain after cleanup')
-        output.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
         if audits.failed:
             raise RuntimeError('Installed host/native outbound audit failed: ' + ', '.join(audits.failed))
 

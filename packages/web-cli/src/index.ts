@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBrowserUrl, shouldAutoOpenBrowser } from './browser.js';
 import { ensureAdminPassword } from './ensureAdminPassword.js';
+import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
 
 // tarball layout:
 //   aionui-web/
@@ -56,7 +57,7 @@ const isPackaged = (() => {
 })();
 
 const BACKEND_BINARY = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
-const DEFAULT_PORT = 25808;
+const DEFAULT_PORT = getStudioWebUIDefaultPort(true);
 const RESET_COMMAND = isPackaged ? 'aionui-web resetpass' : 'bun run resetpass';
 
 let currentHandle: WebHostHandle | StaticServerHandle | null = null;
@@ -100,7 +101,7 @@ function resolveDataDir(flags: Map<string, string | true>): string {
   if (typeof override === 'string') return path.resolve(override);
   const envOverride = process.env.AIONUI_DATA_DIR;
   if (envOverride) return path.resolve(envOverride);
-  return path.join(os.homedir(), '.aionui-web');
+  return path.join(os.homedir(), '.aelix-studio-web');
 }
 
 function resolveLogDir(flags: Map<string, string | true>, dataDir: string): string {
@@ -188,7 +189,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     currentHandle = handle;
 
     console.log('');
-    console.log('AionUi WebUI (frontend only) is ready');
+    console.log('Aelix Studio WebUI (frontend only) is ready');
     console.log(`  Local  : ${handle.localUrl}`);
     if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
     if (autoOpenBrowser) {
@@ -228,7 +229,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     currentHandle = handle;
 
     console.log('');
-    console.log('AionUi WebUI is ready');
+    console.log('Aelix Studio WebUI is ready');
     console.log(`  Local  : ${handle.localUrl}`);
     if (handle.networkUrl) console.log(`  Network: ${handle.networkUrl}`);
 
@@ -307,13 +308,13 @@ Options for start:
   --remote                Bind 0.0.0.0 instead of 127.0.0.1
   --open                  Force opening the local URL in a browser
   --no-open               Disable automatic browser opening
-  --data-dir <path>       Override data dir (default: ~/.aionui-web)
+  --data-dir <path>       Override data dir (default: ~/.aelix-studio-web)
   --log-dir <path>        Override log dir (default: <data-dir>/logs)
   --static-dir <path>     Override static assets dir
   --backend-bin <path>    Override backend binary path
 
 Options for resetpass:
-  --data-dir <path>       Which data dir to reset (default: ~/.aionui-web)
+  --data-dir <path>       Which data dir to reset (default: ~/.aelix-studio-web)
   --password-stdin        Read the new password from stdin
   --backend-bin <path>    Override backend binary path
 

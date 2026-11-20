@@ -4,16 +4,36 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { BrowserWindow } from 'electron';
+import path from 'node:path';
+import type { App, BrowserWindow } from 'electron';
+import { APP_SLUG } from '@/common/config/appIdentity';
 import { ipcBridge } from '@/common';
 
-export const PROTOCOL_SCHEME = 'aionui';
+export const PROTOCOL_SCHEME = APP_SLUG;
+
+/** Let NSIS own the Windows handler, including when a developer runs Electron directly. */
+export function registerStudioProtocol(
+  app: Pick<App, 'setAsDefaultProtocolClient'>,
+  platform = process.platform,
+  defaultApp = process.defaultApp,
+  argv = process.argv,
+  executable = process.execPath
+): void {
+  if (platform === 'win32') return;
+
+  if (defaultApp) {
+    const entryPoint = argv[1];
+    if (entryPoint) app.setAsDefaultProtocolClient(PROTOCOL_SCHEME, executable, [path.resolve(entryPoint)]);
+  } else {
+    app.setAsDefaultProtocolClient(PROTOCOL_SCHEME);
+  }
+}
 
 /**
- * Parse an aionui:// URL into action and params.
+ * Parse an aelix-studio:// URL into action and params.
  * Supports two formats:
- *   1. aionui://add-provider?base_url=xxx&api_key=xxx
- *   2. aionui://provider/add?v=1&data=<base64 JSON>  (one-api / new-api style)
+ *   1. aelix-studio://add-provider?base_url=xxx&api_key=xxx
+ *   2. aelix-studio://provider/add?v=1&data=<base64 JSON>  (one-api / new-api style)
  */
 export const parseDeepLinkUrl = (url: string): { action: string; params: Record<string, string> } | null => {
   try {

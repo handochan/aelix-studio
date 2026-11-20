@@ -145,9 +145,10 @@ describe('choosing forms and writing the links of a candidate', () => {
     await writePacks(candidate, forms);
     const packs = path.join(candidate.paths.directory, PACKS_DIRECTORY);
     expect(await readdir(packs)).toEqual(['000-demo-one']);
-    expect(await readlink(path.join(packs, '000-demo-one'))).toBe(
-      path.relative(packs, path.join(candidate.paths.site, 'demo_one'))
-    );
+    const link = path.join(packs, '000-demo-one');
+    const target = path.join(candidate.paths.site, 'demo_one');
+    if (process.platform !== 'win32') expect(await readlink(link)).toBe(path.relative(packs, target));
+    expect(await realpath(link)).toBe(await realpath(target));
   });
 
   it('makes a pack of a bare module entry whose manifest names that module setup', async () => {

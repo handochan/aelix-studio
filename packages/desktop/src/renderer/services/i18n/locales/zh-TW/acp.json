@@ -7,6 +7,11 @@
   "send": {
     "failed": "發送訊息失敗：{{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "請在擴充功能頁面安裝擴充功能。",
+    "update": "請在擴充功能頁面更新擴充功能。",
+    "remove": "請在擴充功能頁面移除擴充功能。"
+  },
   "sendbox": {
     "placeholder": "發送訊息到 {{backend}}..."
   },

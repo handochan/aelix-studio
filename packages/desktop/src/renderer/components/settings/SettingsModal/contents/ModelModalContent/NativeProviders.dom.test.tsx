@@ -119,13 +119,16 @@ describe('native provider settings', () => {
     expect(screen.getByLabelText('API key')).toHaveValue('');
   });
 
-  it('starts a fresh conversation with the selected native model and explicit CLI root', async () => {
+  it('starts a fresh conversation with the selected native model and managed command environment', async () => {
     const configured = { ...catalog, providers: [{ ...catalog.providers[0], configured: true, source: 'stored' }] };
     const launch = {
       root: catalog.root,
       command: '/runtime/adapter/bin/aelix-acp',
       args: ['--provider', 'anthropic', '--model', 'test-model'],
-      env: [{ name: 'AELIX_CODING_AGENT_DIR', value: catalog.root }],
+      env: [
+        { name: 'AELIX_CODING_AGENT_DIR', value: catalog.root },
+        { name: 'AELIX_ACP_STUDIO_MANAGED', value: '1' },
+      ],
     };
     mocks.request.mockImplementation(async (command) => ({
       ok: true,

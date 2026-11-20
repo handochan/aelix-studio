@@ -104,8 +104,8 @@ SilentInstall normal
 !define AIONUI_FALLBACK_LOG "aionui-installer-smoke-fallback.log"
 !define VERSION "rstrtmgr-ui-smoke"
 !define AIONUI_TARGET_ARCH "x64"
-!define AIONUI_APP_EXECUTABLE_FILENAME "AionUi.exe"
-!define UNINSTALL_FILENAME "Uninstall AionUi.exe"
+!define AIONUI_APP_EXECUTABLE_FILENAME "Aelix Studio.exe"
+!define UNINSTALL_FILENAME "Uninstall Aelix Studio.exe"
 !define PROJECT_DIR "${nsisQuote(repoRoot)}"
 !include LogicLib.nsh
 !include "${nsisQuote(messagesPath)}"

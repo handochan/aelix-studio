@@ -53,8 +53,13 @@ foreach ($version in $buildVersions) {
       throw "build $version failed with exit code $LASTEXITCODE"
     }
 
-    $source = Join-Path $repoRoot "out\AionUi-$version-win-x64.exe"
-    $target = Join-Path $OutputDir "AionUi-$version-win-x64.exe"
+    $name = "aelix-studio-$version-win-x64.exe"
+    $source = Join-Path $repoRoot "out\$name"
+    if (-not (Test-Path -LiteralPath $source)) {
+        $name = "AionUi-$version-win-x64.exe"
+        $source = Join-Path $repoRoot "out\$name"
+    }
+    $target = Join-Path $OutputDir $name
     if (-not (Test-Path -LiteralPath $source)) {
       throw "Expected artifact was not produced: $source"
     }
