@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { Message } from '@arco-design/web-react';
@@ -90,7 +90,7 @@ const {
   getConversationOrNullMock: vi.fn(),
 }));
 
-const { runningInputMock, useRunningInputSpy } = vi.hoisted(() => ({
+const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock } = vi.hoisted(() => ({
   runningInputMock: {
     available: false,
     supported: false,
@@ -104,6 +104,7 @@ const { runningInputMock, useRunningInputSpy } = vi.hoisted(() => ({
     check: vi.fn(),
   },
   useRunningInputSpy: vi.fn(),
+  collectChatFileRefsMock: vi.fn((): object[] => []),
 }));
 
 vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
@@ -161,8 +162,10 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     onSelectedSessionsChange,
     crossSessionEnabled,
     isTeamConversation,
+    deferDraftClear,
+    allowAttachmentOnlySend,
   }: {
-    onSend: (message: string) => Promise<void>;
+    onSend: (message: string) => Promise<void | false>;
     onStop?: () => Promise<void>;
     onChange?: (value: string) => void;
     rightTools?: React.ReactNode;
@@ -178,6 +181,8 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
     onSelectedSessionsChange?: (sessions: Array<{ id: string }>) => void;
     crossSessionEnabled?: boolean;
     isTeamConversation?: boolean;
+    deferDraftClear?: boolean;
+    allowAttachmentOnlySend?: boolean;
   }) => {
     sendBoxPropsSpy({
       onSend,
@@ -191,6 +196,8 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
       selectedSessions,
       crossSessionEnabled,
       isTeamConversation,
+      deferDraftClear,
+      allowAttachmentOnlySend,
     });
     return (
       <div>
@@ -203,6 +210,12 @@ vi.mock('@/renderer/components/chat/SendBox', () => ({
         {/* Stands in for choosing a conversation in the `@@` picker. */}
         <button type='button' onClick={() => onSelectedSessionsChange?.([{ id: 'conv_target' }])}>
           pick-session
+        </button>
+        <button
+          type='button'
+          onClick={() => onSelectedSessionsChange?.([...(selectedSessions ?? []), { id: 'conv_new' }])}
+        >
+          pick-another-session
         </button>
         <button type='button' onClick={() => onAddToDraft?.()}>
           add-to-draft
@@ -350,7 +363,7 @@ vi.mock('@/renderer/utils/file/fileSelection', () => ({
   mergeFileSelectionItems: vi.fn(),
 }));
 vi.mock('@/renderer/utils/file/messageFiles', () => ({
-  collectChatFileRefs: () => [],
+  collectChatFileRefs: collectChatFileRefsMock,
   splitChatFileRefs: () => ({ uploadFiles: [], atPath: [] }),
 }));
 vi.mock('@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage', () => ({
@@ -1163,38 +1176,93 @@ describe('AcpSendBox', () => {
       runningInputMock.available = true;
       return render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
     };
-    const lastSendBoxProps = () => sendBoxPropsSpy.mock.calls.at(-1)?.[0] as { sendDisabled?: boolean };
-    const restoredContent = () => {
-      const update = draftMutateMock.mock.calls.at(-1)?.[0] as (prev: { content: string }) => { content: string };
-      return update({ content: '' }).content;
-    };
+    const lastSendBoxProps = () =>
+      sendBoxPropsSpy.mock.calls.at(-1)?.[0] as {
+        sendDisabled?: boolean;
+        onSend: (message: string) => Promise<void | false>;
+      };
 
     it('enables send with the mode switch while the relay can take input, and sends nothing ordinary', async () => {
       runningInputMock.submit.mockResolvedValue('sent');
       renderRunning();
 
-      expect(lastSendBoxProps().sendDisabled).toBe(false);
+      expect(lastSendBoxProps()).toMatchObject({
+        sendDisabled: false,
+        deferDraftClear: true,
+        allowAttachmentOnlySend: false,
+      });
       expect(screen.getByTestId('running-input-mode')).toBeInTheDocument();
       await act(async () => {
         screen.getByRole('button', { name: 'send' }).click();
       });
 
-      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', false);
+      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [], sessions: [] });
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
       expect(draftMutateMock).not.toHaveBeenCalled();
       expect(messageWarningMock).not.toHaveBeenCalled();
     });
 
-    it('puts the draft back when the relay did not accept it', async () => {
+    it('keeps the existing draft and chips when the relay did not accept them', async () => {
       runningInputMock.submit.mockResolvedValue('kept');
       renderRunning();
+      fireEvent.click(screen.getByText('pick-session'));
+      expect(lastSendBoxProps()).toMatchObject({ allowAttachmentOnlySend: true });
 
       await act(async () => {
-        screen.getByRole('button', { name: 'send' }).click();
+        await expect(lastSendBoxProps().onSend('Hello')).resolves.toBe(false);
       });
 
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
-      expect(restoredContent()).toBe('Hello');
+      expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_target' }] });
+      expect(draftMutateMock).not.toHaveBeenCalled();
+    });
+
+    it('clears only the submitted session chips when preparation and delivery finish', async () => {
+      let finish!: (route: 'sent') => void;
+      runningInputMock.submit.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      renderRunning();
+      fireEvent.click(screen.getByText('pick-session'));
+      let sending: Promise<void | false> | undefined;
+      act(() => {
+        sending = lastSendBoxProps().onSend('Hello');
+      });
+      fireEvent.click(screen.getByText('pick-another-session'));
+      await act(async () => {
+        finish('sent');
+        await sending;
+      });
+
+      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [], sessions: [{ id: 'conv_target' }] });
+      expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_new' }] });
+    });
+
+    it('removes only the submitted upload after a later upload is added to the draft', async () => {
+      const file = { kind: 'upload', path: '/tmp/submitted' };
+      let finish!: (route: 'sent') => void;
+      runningInputMock.submit.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      renderRunning();
+      collectChatFileRefsMock.mockReturnValueOnce([file]);
+      const send = lastSendBoxProps().onSend('Hello');
+      await act(async () => {
+        finish('sent');
+        await send;
+      });
+
+      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', { files: [file], sessions: [] });
+      const update = draftMutateMock.mock.calls.at(-1)?.[0] as (draft: { uploadFile: string[] }) => {
+        uploadFile: string[];
+      };
+      expect(update({ uploadFile: [file.path, '/tmp/added-during-validation'] }).uploadFile).toEqual([
+        '/tmp/added-during-validation',
+      ]);
     });
 
     it('keeps the existing busy block when the relay is not negotiated', async () => {
@@ -1232,7 +1300,7 @@ describe('AcpSendBox', () => {
       });
 
       expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
-      expect(restoredContent()).toBe('Hello');
+      expect(draftMutateMock).not.toHaveBeenCalled();
       expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_target' }] });
       expect(messageWarningMock).toHaveBeenCalledWith('acp.runningInput.ordinaryBusyKept');
     });

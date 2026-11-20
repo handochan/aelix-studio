@@ -132,6 +132,9 @@ const SendBoxHarness = ({
   initialValue = '',
   onSend = vi.fn().mockResolvedValue(undefined),
   onAddToDraft,
+  deferDraftClear,
+  allowAttachmentOnlySend,
+  hasPendingAttachments,
 }: {
   active?: boolean;
   onFocused?: () => void;
@@ -139,6 +142,9 @@ const SendBoxHarness = ({
   initialValue?: string;
   onSend?: (message: string) => Promise<void | false>;
   onAddToDraft?: () => void;
+  deferDraftClear?: boolean;
+  allowAttachmentOnlySend?: boolean;
+  hasPendingAttachments?: boolean;
 }) => {
   const [value, setValue] = useState(initialValue);
   return (
@@ -150,6 +156,9 @@ const SendBoxHarness = ({
       onFocused={onFocused}
       disabled={disabled}
       onAddToDraft={onAddToDraft}
+      deferDraftClear={deferDraftClear}
+      allowAttachmentOnlySend={allowAttachmentOnlySend}
+      hasPendingAttachments={hasPendingAttachments}
     />
   );
 };
@@ -181,6 +190,36 @@ describe('SendBox active-controlled focus', () => {
 
     expect(onSend).toHaveBeenCalledWith('blocked message');
     await waitFor(() => expect(textarea.value).toBe('blocked message'));
+  });
+
+  it('allows attachment-only sends for an opted-in composer', () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<SendBoxHarness onSend={onSend} deferDraftClear allowAttachmentOnlySend hasPendingAttachments />);
+    fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    expect(onSend).toHaveBeenCalledWith('');
+  });
+
+  it.each([
+    { result: false, edited: true },
+    { result: undefined, edited: true },
+    { result: undefined, edited: false },
+  ])('keeps concurrent draft edits while waiting for delivery ($result, $edited)', async ({ result, edited }) => {
+    let finish!: (outcome: void | false) => void;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void | false>((resolve) => {
+          finish = resolve;
+        })
+    );
+    render(<SendBoxHarness onSend={onSend} initialValue='submitted' deferDraftClear />);
+    const textarea = screen.getByTestId('sendbox-input');
+    fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    expect(textarea).toHaveValue('submitted');
+    if (edited) fireEvent.change(textarea, { target: { value: 'submitted and typed during validation' } });
+    await act(async () => {
+      finish(result);
+    });
+    expect(textarea).toHaveValue(edited ? 'submitted and typed during validation' : '');
   });
 
   it('uses the platform primary Enter shortcut for Draft box without sending', () => {

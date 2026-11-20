@@ -18,6 +18,8 @@ import {
 } from '@/renderer/pages/conversation/runtime/RunningInput';
 import type { UseRunningInputOptions } from '@/renderer/pages/conversation/runtime/RunningInput/useRunningInput';
 import { emitter } from '@/renderer/utils/emitter';
+import type { RunningInputReferences } from '@/renderer/services/runtime/RunningInput';
+import referencesFixture from './runningInputReferences.fixture.json';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -31,6 +33,12 @@ const STEER = PREFIX + 'input/steer';
 const FOLLOW_UP = PREFIX + 'input/follow-up';
 const LOOKUP = PREFIX + 'requests/lookup';
 const ALL_METHODS = [STATE, STEER, FOLLOW_UP, LOOKUP];
+const NO_REFERENCES: RunningInputReferences = { files: [], sessions: [] };
+const IMAGE_REFERENCE: RunningInputReferences = {
+  files: [{ kind: 'upload', path: '/client/input.png' }],
+  sessions: [],
+};
+const CONFIRMED_IMAGE = '/host/private/image.png';
 
 const success = (data: unknown) => Response.json({ success: true, data });
 const result = (value: unknown) => success({ result: value });
@@ -44,6 +52,9 @@ const server = {
   discovery: (): Response => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
   turn: { active: true, turnId: 'turn-1' } as Turn,
   write: vi.fn<(call: Write) => Response | Promise<Response>>(),
+  metadata: vi.fn<(file: { path?: string; relative_path?: string }) => Response | Promise<Response>>(),
+  mentionable: vi.fn<(id: string) => Response | Promise<Response>>(),
+  conversation: vi.fn<(id: string) => Response | Promise<Response>>(),
 };
 const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
 const writes = () => server.write.mock.calls.map(([call]) => call.method);
@@ -97,10 +108,10 @@ async function mount(props: Partial<UseRunningInputOptions> = {}) {
   return view;
 }
 
-async function submit(message: string, hasAttachments = false): Promise<RunningInputRoute> {
+async function submit(message: string, references = NO_REFERENCES): Promise<RunningInputRoute> {
   let route: RunningInputRoute = 'ordinary';
   await act(async () => {
-    route = await controller.submit(message, hasAttachments);
+    route = await controller.submit(message, references);
   });
   return route;
 }
@@ -112,8 +123,29 @@ describe('running input in the composer', () => {
     server.turn = { active: true, turnId: 'turn-1' };
     server.discovery = () => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS });
     server.write.mockReset();
+    server.metadata.mockReset().mockImplementation(() => success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
+    server.mentionable.mockReset().mockImplementation((id) => {
+      const titles: Record<string, string> = { same: 'Renamed target', other: 'Other\t\ntarget', unknown: 'Unbound' };
+      return success({ items: [{ id, name: titles[id] }] });
+    });
+    server.conversation.mockReset();
+    server.conversation.mockImplementation((id) =>
+      success({
+        id,
+        extra: { workspace: id === 'other' ? ' /other root ' : id === 'unknown' ? undefined : '/same root' },
+      })
+    );
     fetchMock.mockReset();
-    fetchMock.mockImplementation(async (_url, init) => {
+    fetchMock.mockImplementation(async (url, init) => {
+      if (url === '/api/fs/content/metadata') return server.metadata(JSON.parse(String(init.body)).file);
+      if (url.startsWith('/api/session-messages/mentionable?')) {
+        const params = new URLSearchParams(url.split('?')[1]);
+        expect(params.get('current_conversation_id')).toBe('conv-1');
+        return server.mentionable(params.get('id') ?? '');
+      }
+      if (url.startsWith('/api/conversations/') && !url.endsWith('/acp-extensions')) {
+        return server.conversation(url.split('/').at(-1) ?? '');
+      }
       if (init.method === 'GET') return server.discovery();
       const call = JSON.parse(String(init.body)) as Write;
       return call.method === STATE ? result(server.turn) : server.write(call);
@@ -140,19 +172,19 @@ describe('running input in the composer', () => {
     expect(fetchMock.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
   });
 
-  it('defaults to follow-up, clears the draft only on queue acceptance, and groups the turn without counts', async () => {
+  it('defaults to steer, clears the draft only on queue acceptance, and groups the turn without counts', async () => {
     server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
     await mount();
     expect(screen.getByTestId('running-input-mode')).toBeInTheDocument();
 
     expect(await submit('first')).toBe('sent');
-    fireEvent.click(screen.getByText('acp.runningInput.mode.steer'));
+    fireEvent.click(screen.getByText('acp.runningInput.mode.followUp'));
     expect(await submit('second')).toBe('sent');
 
-    expect(writes()).toEqual([FOLLOW_UP, STEER]);
+    expect(writes()).toEqual([STEER, FOLLOW_UP]);
     expect(notices()).toHaveLength(1);
     expect(notices()[0]).toHaveTextContent(
-      'acp.runningInput.queued {"modes":"acp.runningInput.mode.followUp, acp.runningInput.mode.steer"}'
+      'acp.runningInput.queued {"modes":"acp.runningInput.mode.steer, acp.runningInput.mode.followUp"}'
     );
   });
 
@@ -179,7 +211,7 @@ describe('running input in the composer', () => {
     await mount();
     const reads = fetchMock.mock.calls.length;
 
-    expect(await submit('late')).toBe('kept');
+    expect(await submit('late', IMAGE_REFERENCE)).toBe('kept');
     expect(notices()[0]).toHaveAttribute('data-kind', 'rejected');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.reason.staleTurn');
     await waitFor(() => expect(fetchMock.mock.calls.length).toBeGreaterThan(reads + 1));
@@ -192,16 +224,138 @@ describe('running input in the composer', () => {
     expect(await submit('hello')).toBe('kept');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.reason.sessionChanged');
     await act(async () => {});
+    expect(writes()).toEqual([STEER]);
+  });
+
+  it('uses follow-up when the host does not advertise steer', async () => {
+    server.discovery = () => success({ version: 1, bindingId: 'binding-1', requests: [STATE, FOLLOW_UP] });
+    server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
+    await mount();
+    expect(controller.mode).toBe('follow-up');
+    expect(await submit('use the advertised mode')).toBe('sent');
     expect(writes()).toEqual([FOLLOW_UP]);
   });
 
-  it('keeps drafts with attachments and slash commands out of the relay', async () => {
+  it.each(referencesFixture)('matches the host text format for $name', async (fixture) => {
+    for (const path of fixture.paths) {
+      server.metadata.mockReturnValueOnce(success({ path, type: fixture.image ? 'image/png' : 'text/plain' }));
+    }
+    server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
     await mount();
 
-    expect(await submit('with file', true)).toBe('kept');
-    expect(Message.warning).toHaveBeenCalledWith('acp.runningInput.attachmentsKept');
-    expect(await submit('/compact')).toBe('ordinary');
+    const files: RunningInputReferences['files'] =
+      fixture.paths.length === 2
+        ? [
+            { kind: 'project', pe_id: 'pe', relative_path: 'raw folder' },
+            { kind: 'local', path: '/picked/file.txt' },
+          ]
+        : fixture.paths.map(() => ({ kind: 'upload', path: '/selected/upload.png' }));
+    expect(await submit(fixture.message, { files, sessions: fixture.sessions.map((id) => ({ id })) })).toBe('sent');
+    expect(server.write.mock.calls[0][0]).toMatchObject({ method: STEER, payload: { message: fixture.expected } });
+    if (fixture.image) expect(Message.info).toHaveBeenCalledWith('acp.runningInput.imagesAsPaths');
+  });
+
+  it('keeps slash commands with references out of preparation and the relay', async () => {
+    await mount();
+    expect(await submit('/compact', IMAGE_REFERENCE)).toBe('ordinary');
+    expect(server.metadata).not.toHaveBeenCalled();
     expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it.each([403, 404])('keeps every reference when one lookup is denied with %s', async (status) => {
+    server.mentionable.mockReturnValueOnce(failure(status, 'NOT_FOUND'));
+    await mount();
+
+    expect(await submit('keep these', { ...IMAGE_REFERENCE, sessions: [{ id: 'same' }] })).toBe('kept');
+    expect(server.metadata).toHaveBeenCalledTimes(1);
+    expect(server.write).not.toHaveBeenCalled();
+    expect(Message.warning).toHaveBeenCalledWith('acp.runningInput.referencesUnverified');
+  });
+
+  it('keeps the draft when a reference is no longer mentionable', async () => {
+    server.mentionable.mockReturnValueOnce(success({ items: [] }));
+    await mount();
+    expect(await submit('', { files: [], sessions: [{ id: 'deleted' }] })).toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('rejects an unrepresentable path from metadata rather than changing it into another file name', async () => {
+    server.metadata.mockReturnValueOnce(success({ path: '/host/file\n/other', type: 'text/plain' }));
+    await mount();
+    expect(await submit('keep the file', IMAGE_REFERENCE)).toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('keeps the draft when a metadata POST times out or would require reauthentication', async () => {
+    server.metadata.mockImplementationOnce(() => {
+      throw new DOMException('Private failure', 'TimeoutError');
+    });
+    server.metadata.mockReturnValueOnce(failure(401, 'AUTH_REQUIRED'));
+    await mount();
+    expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+    expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+    expect(server.metadata).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.some(([url]) => url === '/api/auth/refresh')).toBe(false);
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it('omits private lookup bodies and errors from renderer diagnostics', async () => {
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const secretPath = '/private/running-input-file.png';
+    server.metadata.mockReturnValueOnce(Response.json({ error: secretPath }, { status: 404 }));
+    await mount();
+    expect(await submit('', { files: [{ kind: 'local', path: secretPath }], sessions: [] })).toBe('kept');
+    expect(JSON.stringify([...debug.mock.calls, ...error.mock.calls])).not.toContain(secretPath);
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it.each(['binding', 'turn'] as const)(
+    'retains the draft if the %s changes during reference preparation',
+    async (changed) => {
+      const pending = hold();
+      server.metadata.mockReturnValueOnce(pending.pending);
+      await mount();
+      let submission: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        submission = controller.submit('original', IMAGE_REFERENCE);
+      });
+      await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
+      if (changed === 'binding') {
+        server.discovery = () => success({ version: 1, bindingId: 'binding-2', requests: ALL_METHODS });
+      } else {
+        server.turn = { active: true, turnId: 'turn-2' };
+      }
+      await act(async () => {
+        pending.reply(success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
+        await submission;
+      });
+      await expect(submission).resolves.toBe('kept');
+      expect(server.write).not.toHaveBeenCalled();
+      expect(Message.warning).toHaveBeenCalledWith('acp.runningInput.preparationChanged');
+    }
+  );
+
+  it('reports the serialized size limit before writing any input', async () => {
+    await mount();
+    expect(await submit('한'.repeat(22_000), IMAGE_REFERENCE)).toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
+    expect(Message.warning).toHaveBeenCalledWith('acp.runningInput.inputTooLarge');
+  });
+
+  it('checks for a lost attachment send on the original request with the draft intact', async () => {
+    server.write.mockImplementation(({ method }) => {
+      if (method === LOOKUP) return result({ status: 'unavailable' });
+      throw new DOMException('Timeout', 'TimeoutError');
+    });
+    await mount();
+    expect(await submit('with attachment', IMAGE_REFERENCE)).toBe('kept');
+    expect(notices()[0]).toHaveAttribute('data-kind', 'unknown');
+    await act(async () => {
+      fireEvent.click(screen.getByText('acp.runningInput.check'));
+    });
+    expect(writes()).toEqual([STEER, LOOKUP]);
+    expect(server.write.mock.calls[1][0].payload.requestId).toBe(server.write.mock.calls[0][0].payload.requestId);
   });
 
   it('keeps a late acceptance on its original turn after that turn ends', async () => {
@@ -211,7 +365,7 @@ describe('running input in the composer', () => {
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('late', false);
+      route = controller.submit('late', NO_REFERENCES);
     });
     await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
 
@@ -235,7 +389,7 @@ describe('running input in the composer', () => {
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('withdrawn', false);
+      route = controller.submit('withdrawn', NO_REFERENCES);
     });
     await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
     act(() => controller.markStopped());

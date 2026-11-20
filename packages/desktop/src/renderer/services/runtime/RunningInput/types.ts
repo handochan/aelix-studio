@@ -30,7 +30,7 @@ export type RunningInputSnapshot = Readonly<{
 }>;
 
 export type RunningInputSendResult =
-  | { status: 'skipped'; reason: 'busy' | 'unavailable' | 'invalid-text'; preserveDraft: true }
+  | { status: 'skipped'; reason: 'busy' | 'unavailable' | 'invalid-text' | 'too-large'; preserveDraft: true }
   | { status: 'sent'; receipt: RunningInputReceipt; preserveDraft: boolean };
 
 export type RunningInputLookupResult =

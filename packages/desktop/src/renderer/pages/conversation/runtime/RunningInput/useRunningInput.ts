@@ -5,11 +5,13 @@
  */
 
 import { Message } from '@arco-design/web-react';
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import {
   createRunningInputClient,
+  prepareRunningInputMessage,
+  type RunningInputReferences,
   type RunningInputMode,
   type RunningInputSnapshot,
 } from '@/renderer/services/runtime/RunningInput';
@@ -47,15 +49,15 @@ export type RunningInputController = {
   mode: RunningInputMode;
   setMode: (mode: RunningInputMode) => void;
   notices: RunningInputNotice[];
-  submit: (message: string, hasAttachments: boolean) => Promise<RunningInputRoute>;
+  submit: (message: string, references: RunningInputReferences) => Promise<RunningInputRoute>;
   /** Record a Stop so late acceptances for the stopped turn say so. */
   markStopped: () => void;
   dismiss: (requestIds?: readonly string[]) => void;
   check: (requestId: string) => Promise<void>;
 };
 
-/** Follow-up leaves the running work as it is; steer is one click away. */
-export const DEFAULT_RUNNING_INPUT_MODE: RunningInputMode = 'follow-up';
+/** Match the native composer's default for input during a running turn. */
+export const DEFAULT_RUNNING_INPUT_MODE: RunningInputMode = 'steer';
 
 const NO_SNAPSHOT: RunningInputSnapshot = { channel: { status: 'unsupported' }, receipts: [], sending: false };
 const NO_TURNS: ReadonlySet<string> = new Set();
@@ -113,7 +115,8 @@ export function useRunningInput({
   const [session, setSession] = useState<Session | null>(null);
   const [lastReady, setLastReady] = useState<RunningInputChannel>();
   const [stoppedTurns, setStoppedTurns] = useState<ReadonlySet<string>>(NO_TURNS);
-  const [mode, setMode] = useState<RunningInputMode>(DEFAULT_RUNNING_INPUT_MODE);
+  const [requestedMode, setMode] = useState<RunningInputMode>(DEFAULT_RUNNING_INPUT_MODE);
+  const preparing = useRef<Session | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -143,7 +146,9 @@ export function useRunningInput({
     session?.refreshSoon();
   }, [session, hostBusy, hostTurnId]);
 
-  const latest = useLatestRef({ session, known, receipts, hostBusy, stopping, paused, mode });
+  const modes = known?.modes ?? [];
+  const mode = modes.includes(requestedMode) ? requestedMode : (modes[0] ?? requestedMode);
+  const latest = useLatestRef({ session, known, receipts, hostBusy, hostTurnId, stopping, paused, mode });
 
   const markStopped = useCallback(() => {
     const { known: current, receipts: sent } = latest.current;
@@ -161,7 +166,7 @@ export function useRunningInput({
   }, [stopping, markStopped]);
 
   const submit = useCallback(
-    async (message: string, hasAttachments: boolean): Promise<RunningInputRoute> => {
+    async (message: string, references: RunningInputReferences): Promise<RunningInputRoute> => {
       const state = latest.current;
       if (!state.session || !state.known || state.paused || state.stopping) return 'ordinary';
       const { client: relay, refreshSoon } = state.session;
@@ -174,28 +179,52 @@ export function useRunningInput({
       }
       // Commands never reach a running turn as text, as in the native composer.
       if (!target || message.trimStart().startsWith('/')) return 'ordinary';
-      if (hasAttachments) {
-        Message.warning(t('acp.runningInput.attachmentsKept'));
-        return 'kept';
-      }
-      if (relay.getSnapshot().sending) {
+      if (relay.getSnapshot().sending || preparing.current === state.session) {
         Message.info(t('acp.runningInput.previousSending'));
         return 'kept';
       }
 
       const chosen = target.modes.includes(latest.current.mode) ? latest.current.mode : target.modes[0];
-      const result = await relay.send(chosen, { bindingId: target.bindingId, turnId: target.turnId }, message);
+      let prepared = { text: message, hasImage: false };
+      if (references.files.length || references.sessions.length) {
+        preparing.current = state.session;
+        try {
+          prepared = await prepareRunningInputMessage(conversationId, message, references);
+          await relay.refresh();
+          const current = latest.current;
+          const active = activeTarget(relay.getSnapshot());
+          if (
+            current.session !== state.session ||
+            current.hostTurnId !== state.hostTurnId ||
+            current.stopping ||
+            current.paused ||
+            active?.bindingId !== target.bindingId ||
+            active?.turnId !== target.turnId
+          ) {
+            Message.warning(t('acp.runningInput.preparationChanged'));
+            return 'kept';
+          }
+        } catch {
+          Message.warning(t('acp.runningInput.referencesUnverified'));
+          return 'kept';
+        } finally {
+          if (preparing.current === state.session) preparing.current = null;
+        }
+      }
+      const result = await relay.send(chosen, { bindingId: target.bindingId, turnId: target.turnId }, prepared.text);
       if (result.status === 'skipped') {
         if (result.reason === 'invalid-text') Message.warning(t('acp.runningInput.invalidText'));
+        else if (result.reason === 'too-large') Message.warning(t('acp.runningInput.inputTooLarge'));
         else if (result.reason === 'busy') Message.info(t('acp.runningInput.previousSending'));
         else Message.warning(t('conversation.commandQueue.midturnBlocked'));
         return 'kept';
       }
       if (result.receipt.status !== 'queued') refreshSoon();
+      else if (prepared.hasImage) Message.info(t('acp.runningInput.imagesAsPaths'));
       // Clear the composer only for an acceptance the client attributes to the current binding and turn.
       return !result.preserveDraft && result.receipt.status === 'queued' ? 'sent' : 'kept';
     },
-    [latest, t]
+    [conversationId, latest, t]
   );
 
   const dismiss = useCallback(
@@ -228,7 +257,6 @@ export function useRunningInput({
     () => buildRunningInputNotices(receipts, known, stoppedTurns),
     [receipts, known, stoppedTurns]
   );
-  const modes = known?.modes ?? [];
   const supported = Boolean(session && known);
 
   return {

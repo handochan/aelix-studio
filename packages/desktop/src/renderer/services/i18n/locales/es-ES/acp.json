@@ -93,9 +93,12 @@
     "checkUnconfirmed": "No se pudo confirmar el resultado. Se recargó la conversación.",
     "dismiss": "Descartar",
     "dismissAll": "Descartar todo",
-    "attachmentsKept": "No se pueden enviar adjuntos mientras el agente trabaja. Se conservó tu borrador.",
+    "referencesUnverified": "No se pudo verificar un adjunto o una referencia a una conversación. Se conservó el borrador.",
+    "preparationChanged": "El turno activo cambió al verificar las referencias. Se conservó el borrador.",
+    "inputTooLarge": "La entrada para el turno activo supera los 64 KiB. Se conservó el borrador.",
+    "imagesAsPaths": "Durante un turno activo, las imágenes se envían como rutas de archivo.",
     "previousSending": "La entrada anterior aún se está enviando. Se conservó tu borrador.",
-    "invalidText": "Esta entrada es demasiado larga para enviarla mientras el agente trabaja. Se conservó tu borrador.",
+    "invalidText": "La entrada está vacía o no es válida. Se conservó el borrador.",
     "ordinaryBusyKept": "Otro turno empezó antes. Se conservaron tu mensaje y tus adjuntos."
   }
 }

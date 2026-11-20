@@ -93,9 +93,12 @@
     "checkUnconfirmed": "無法確認結果，已重新載入對話。",
     "dismiss": "關閉",
     "dismissAll": "全部關閉",
-    "attachmentsKept": "智慧體工作期間無法傳送附件。草稿已保留。",
+    "referencesUnverified": "無法驗證附件或對話參照，已保留草稿。",
+    "preparationChanged": "驗證參照時，執行中的回合已變更，已保留草稿。",
+    "inputTooLarge": "執行中輸入超過 64 KiB，已保留草稿。",
+    "imagesAsPaths": "回合執行時，圖片會以檔案路徑傳送。",
     "previousSending": "上一則輸入仍在傳送中。草稿已保留。",
-    "invalidText": "此輸入過長，無法在智慧體工作期間傳送。草稿已保留。",
+    "invalidText": "輸入為空或無效，已保留草稿。",
     "ordinaryBusyKept": "另一輪次已先開始。訊息與附件已保留。"
   }
 }

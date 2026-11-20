@@ -93,9 +93,12 @@
     "checkUnconfirmed": "无法确认结果，已重新加载对话。",
     "dismiss": "关闭",
     "dismissAll": "全部关闭",
-    "attachmentsKept": "智能体工作期间无法发送附件。草稿已保留。",
+    "referencesUnverified": "无法验证附件或会话引用，已保留草稿。",
+    "preparationChanged": "验证引用时，运行中的轮次发生了变化，已保留草稿。",
+    "inputTooLarge": "运行中输入超过 64 KiB，已保留草稿。",
+    "imagesAsPaths": "轮次运行时，图片以文件路径发送。",
     "previousSending": "上一条输入仍在发送中。草稿已保留。",
-    "invalidText": "该输入过长，无法在智能体工作期间发送。草稿已保留。",
+    "invalidText": "输入为空或无效，已保留草稿。",
     "ordinaryBusyKept": "另一轮次已先开始。消息和附件已保留。"
   }
 }

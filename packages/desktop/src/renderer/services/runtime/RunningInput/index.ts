@@ -1,6 +1,6 @@
 import { wsEmitter } from '@/common/adapter/httpBridge';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
-import { createRequestId, INPUT_METHODS, isRecord, requestRelay, type RelayFailure } from './transport';
+import { createRequestId, INPUT_METHODS, isRecord, requestRelay, type RelayCall, type RelayFailure } from './transport';
 import type {
   RunningInputLookupResult,
   RunningInputMode,
@@ -13,8 +13,9 @@ import type {
 } from './types';
 
 export type * from './types';
+export { prepareRunningInputMessage, type RunningInputReferences } from './references';
 
-const MAX_TEXT_BYTES = 64 * 1024;
+const MAX_RELAY_BODY_BYTES = 65_536;
 const MAX_VISIBLE_RECEIPTS = 256;
 const MODES = ['steer', 'follow-up'] as const;
 
@@ -128,7 +129,10 @@ export function createRunningInputClient(conversationId: string) {
 
     setBinding(bindingId);
     // H1 advertises requests only. The snapshot is read after discovery, without a socket subscription.
-    const state = await requestRelay(path, { bindingId, method: INPUT_METHODS.state, payload: {} });
+    const state = await requestRelay(
+      path,
+      JSON.stringify({ bindingId, method: INPUT_METHODS.state, payload: {} } satisfies RelayCall)
+    );
     if (!isCurrent()) return;
     const turn = state.kind === 'success' && isRecord(state.data) ? parseTurn(state.data.result) : undefined;
     if (turn) {
@@ -235,19 +239,23 @@ export function createRunningInputClient(conversationId: string) {
       ) {
         return { status: 'skipped', reason: 'unavailable', preserveDraft: true };
       }
-      if (!message.trim() || new TextEncoder().encode(message).length > MAX_TEXT_BYTES) {
+      if (!message.trim() || message.includes('\0')) {
         return { status: 'skipped', reason: 'invalid-text', preserveDraft: true };
       }
       const { bindingId, turnId } = target;
       const requestId = createRequestId();
-      const pending: RunningInputReceipt = { bindingId, turnId, requestId, mode, status: 'pending' };
-      inFlightReceipt = pending;
-      update({ sending: true, receipts: [...snapshot.receipts.slice(1 - MAX_VISIBLE_RECEIPTS), pending] });
-      const reply = await requestRelay(path, {
+      const body = JSON.stringify({
         bindingId,
         method: INPUT_METHODS[mode],
         payload: { requestId, turnId, message },
-      });
+      } satisfies RelayCall);
+      if (new TextEncoder().encode(body).length > MAX_RELAY_BODY_BYTES) {
+        return { status: 'skipped', reason: 'too-large', preserveDraft: true };
+      }
+      const pending: RunningInputReceipt = { bindingId, turnId, requestId, mode, status: 'pending' };
+      inFlightReceipt = pending;
+      update({ sending: true, receipts: [...snapshot.receipts.slice(1 - MAX_VISIBLE_RECEIPTS), pending] });
+      const reply = await requestRelay(path, body);
       const outcome =
         reply.kind === 'success'
           ? parseOutcome(isRecord(reply.data) ? reply.data.result : undefined, turnId)
@@ -277,11 +285,14 @@ export function createRunningInputClient(conversationId: string) {
         return { status: 'binding-changed', refreshHistory: true };
       }
       if (channel.status === 'ready' && channel.canLookup) {
-        const reply = await requestRelay(path, {
-          bindingId: original.bindingId,
-          method: INPUT_METHODS.lookup,
-          payload: { requestId },
-        });
+        const reply = await requestRelay(
+          path,
+          JSON.stringify({
+            bindingId: original.bindingId,
+            method: INPUT_METHODS.lookup,
+            payload: { requestId },
+          } satisfies RelayCall)
+        );
         if (disposed || binding !== original.bindingId) return { status: 'binding-changed', refreshHistory: true };
         const result = reply.kind === 'success' && isRecord(reply.data) ? reply.data.result : undefined;
         if (isRecord(result)) {

@@ -1,16 +1,22 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { _electron, chromium, expect, test, type Page } from '@playwright/test';
 import { BackendLifecycleManager, fetchStudioBackend, startStaticServer } from '@aionui/web-host';
 import { build } from 'esbuild';
-import type { createRunningInputClient } from '../../../../../packages/desktop/src/renderer/services/runtime/RunningInput';
+import type {
+  createRunningInputClient,
+  prepareRunningInputMessage,
+} from '../../../../../packages/desktop/src/renderer/services/runtime/RunningInput';
 
 type RelayWindow = Window & {
-  RunningInput: { createRunningInputClient: typeof createRunningInputClient };
+  RunningInput: {
+    createRunningInputClient: typeof createRunningInputClient;
+    prepareRunningInputMessage: typeof prepareRunningInputMessage;
+  };
   runningInput: ReturnType<typeof createRunningInputClient>;
   __backendPort?: number;
 };
@@ -59,12 +65,24 @@ async function prepareFixture(root: string) {
     releaseTurn = done;
   });
   const prompts: string[] = [];
+  const modelUserTexts: string[] = [];
   const model = createServer(async (req, res) => {
     try {
       const chunks: Buffer[] = [];
       for await (const chunk of req) chunks.push(Buffer.from(chunk));
-      const request = JSON.parse(Buffer.concat(chunks).toString()) as { messages: unknown[] };
+      const request = JSON.parse(Buffer.concat(chunks).toString()) as {
+        messages: { role: string; content: string | { type: string; text?: string }[] }[];
+      };
       prompts.push(JSON.stringify(request.messages));
+      const lastUser = request.messages.filter(({ role }) => role === 'user').at(-1)?.content;
+      modelUserTexts.push(
+        typeof lastUser === 'string'
+          ? lastUser
+          : (lastUser
+              ?.filter(({ type }) => type === 'text')
+              .map(({ text }) => text)
+              .join('') ?? '')
+      );
       await holdTurn;
       const chunk = (delta: object, finishReason: string | null) =>
         'data: ' +
@@ -123,9 +141,22 @@ async function prepareFixture(root: string) {
       bundle: true,
       format: 'iife',
       globalName: 'RunningInput',
+      define: { 'process.env.AIONUI_MULTI_INSTANCE': JSON.stringify('') },
       write: false,
     });
-    return { env, site, workspace, bundle: bundle.outputFiles[0].text, releaseTurn, prompts, stop };
+    const attachment = join(workspace, '첨부 자료.txt');
+    await writeFile(attachment, 'Running-input attachment fixture');
+    return {
+      env,
+      site,
+      workspace,
+      attachment,
+      bundle: bundle.outputFiles[0].text,
+      releaseTurn,
+      prompts,
+      modelUserTexts,
+      stop,
+    };
   } catch (error) {
     await stop();
     throw error;
@@ -167,6 +198,11 @@ async function checkRunningInput(page: Page, fixture: Awaited<ReturnType<typeof 
       custom_workspace: true,
     },
   })) as { id: string };
+  const mention = (await api(page, '/api/conversations', 'POST', {
+    type: 'acp',
+    name: 'Attachment target',
+    extra: { agent_id: agentId, backend: 'aelix', workspace: fixture.workspace, custom_workspace: true },
+  })) as { id: string };
   const route = '/api/conversations/' + conversation.id;
   await api(page, route + '/runtime/ensure', 'POST');
   await page.addScriptTag({ content: fixture.bundle });
@@ -186,12 +222,23 @@ async function checkRunningInput(page: Page, fixture: Awaited<ReturnType<typeof 
   });
   const receipts = await page.evaluate(
     async (input) => {
-      const client = (window as RelayWindow).runningInput;
-      const steer = await client.send('steer', input.target, input.steerText);
-      const followUp = await client.send('follow-up', input.target, input.followUpText);
+      const win = window as RelayWindow;
+      const { text } = await win.RunningInput.prepareRunningInputMessage(input.conversationId, input.steerText, {
+        files: [{ kind: 'local', path: input.attachment }],
+        sessions: [{ id: input.mentionId }],
+      });
+      const steer = await win.runningInput.send('steer', input.target, text);
+      const followUp = await win.runningInput.send('follow-up', input.target, input.followUpText);
       return { steer, followUp };
     },
-    { target, steerText, followUpText }
+    {
+      target,
+      steerText,
+      followUpText,
+      conversationId: conversation.id,
+      attachment: fixture.attachment,
+      mentionId: mention.id,
+    }
   );
   expect(receipts).toMatchObject({
     steer: { status: 'sent', preserveDraft: false, receipt: { ...target, mode: 'steer', status: 'queued' } },
@@ -221,10 +268,24 @@ async function checkRunningInput(page: Page, fixture: Awaited<ReturnType<typeof 
     preserveDraft: true,
     receipt: { ...target, status: 'rejected', reason: 'stale-turn' },
   });
+  const resolvedPath = await realpath(fixture.attachment);
+  expect(fixture.modelUserTexts.find((value) => value.startsWith(steerText))).toBe(
+    [
+      steerText,
+      '',
+      '[[AION_SESSIONS]]',
+      'To deliver to the conversations below, use the session-message skill (address by conversation id); if it is unavailable, run `"$AIONUI_HELPER_BIN" session capabilities` for the delivery contract.',
+      `Attachment target\t${mention.id}\tworkspace: same`,
+      '[[/AION_SESSIONS]]',
+      '',
+      '[[AION_FILES]]',
+      resolvedPath,
+    ].join('\n')
+  );
   expect(fixture.prompts[0]).toContain('ORIGINAL_RUNNING_INPUT_PROMPT');
   expect(fixture.prompts.join()).not.toContain(staleText);
   const history = JSON.stringify(await api(page, route + '/messages'));
-  for (const marker of [steerText, followUpText, staleText]) {
+  for (const marker of [steerText, followUpText, staleText, fixture.attachment, resolvedPath]) {
     expect(consoleMessages.join()).not.toContain(marker);
     expect(history).not.toContain(marker);
   }

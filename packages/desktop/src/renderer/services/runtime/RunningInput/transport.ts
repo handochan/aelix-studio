@@ -32,7 +32,7 @@ export type RelayFailure = Readonly<{
 }>;
 
 type RelayReply = { kind: 'success'; data: unknown } | { kind: 'failure'; failure: RelayFailure };
-type RelayCall = {
+export type RelayCall = {
   bindingId: string;
   method: (typeof INPUT_METHODS)[keyof typeof INPUT_METHODS];
   payload: Record<string, string>;
@@ -43,9 +43,9 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Use the normal desktop credential or WebUI cookie without the generic bridge's logging and replay. */
-export async function requestRelay(path: string, call?: RelayCall): Promise<RelayReply> {
+export async function requestRelay(path: string, body?: string): Promise<RelayReply> {
   const headers: Record<string, string> = {};
-  if (call) {
+  if (body !== undefined) {
     headers['content-type'] = 'application/json';
     const csrf = resolveCoreCsrfToken();
     if (csrf) headers['x-csrf-token'] = csrf;
@@ -53,20 +53,20 @@ export async function requestRelay(path: string, call?: RelayCall): Promise<Rela
 
   try {
     const response = await fetchFromDesktopOrBrowser(getBaseUrl() + path, {
-      method: call ? 'POST' : 'GET',
+      method: body === undefined ? 'GET' : 'POST',
       headers,
       credentials: 'same-origin',
       cache: 'no-store',
       redirect: 'error',
-      body: call ? JSON.stringify(call) : undefined,
+      body,
       signal: AbortSignal.timeout(125_000),
     });
-    const body: unknown = await response.json().catch((): undefined => undefined);
-    if (response.ok && isRecord(body) && body.success === true) {
-      return { kind: 'success', data: body.data };
+    const responseBody: unknown = await response.json().catch((): undefined => undefined);
+    if (response.ok && isRecord(responseBody) && responseBody.success === true) {
+      return { kind: 'success', data: responseBody.data };
     }
-    const code = isRecord(body) ? RELAY_CODES.find((known) => known === body.code) : undefined;
-    const details = isRecord(body) ? body.details : undefined;
+    const code = isRecord(responseBody) ? RELAY_CODES.find((known) => known === responseBody.code) : undefined;
+    const details = isRecord(responseBody) ? responseBody.details : undefined;
     const rpcCode = code === 'EXT_AGENT_ERROR' && isRecord(details) ? details.rpcCode : undefined;
     return {
       kind: 'failure',

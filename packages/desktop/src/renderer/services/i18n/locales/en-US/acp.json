@@ -93,9 +93,12 @@
     "checkUnconfirmed": "The result could not be confirmed. The conversation was reloaded.",
     "dismiss": "Dismiss",
     "dismissAll": "Dismiss all",
-    "attachmentsKept": "Attachments can't be sent while the agent is working. Your draft was kept.",
+    "referencesUnverified": "Couldn’t verify an attachment or conversation. Your draft was kept.",
+    "preparationChanged": "The running turn changed while checking references. Your draft was kept.",
+    "inputTooLarge": "This running input exceeds 64 KiB. Your draft was kept.",
+    "imagesAsPaths": "Images are sent as file paths during a running turn.",
     "previousSending": "The previous input is still being sent. Your draft was kept.",
-    "invalidText": "This input is too long to send while the agent is working. Your draft was kept.",
+    "invalidText": "The input is empty or invalid. Your draft was kept.",
     "ordinaryBusyKept": "Another turn started first. Your message and attachments were kept."
   }
 }

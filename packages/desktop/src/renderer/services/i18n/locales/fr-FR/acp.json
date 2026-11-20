@@ -93,9 +93,12 @@
     "checkUnconfirmed": "Le résultat n’a pas pu être confirmé. La conversation a été rechargée.",
     "dismiss": "Fermer",
     "dismissAll": "Tout fermer",
-    "attachmentsKept": "Les pièces jointes ne peuvent pas être envoyées pendant que l’agent travaille. Votre brouillon a été conservé.",
+    "referencesUnverified": "Une pièce jointe ou une référence de conversation n’a pas pu être vérifiée. Votre brouillon a été conservé.",
+    "preparationChanged": "Le tour en cours a changé pendant la vérification des références. Votre brouillon a été conservé.",
+    "inputTooLarge": "La saisie pour le tour en cours dépasse 64 Kio. Votre brouillon a été conservé.",
+    "imagesAsPaths": "Pendant un tour en cours, les images sont envoyées sous forme de chemins de fichiers.",
     "previousSending": "L’entrée précédente est encore en cours d’envoi. Votre brouillon a été conservé.",
-    "invalidText": "Cette entrée est trop longue pour être envoyée pendant que l’agent travaille. Votre brouillon a été conservé.",
+    "invalidText": "La saisie est vide ou non valide. Votre brouillon a été conservé.",
     "ordinaryBusyKept": "Un autre tour a commencé avant. Votre message et vos pièces jointes ont été conservés."
   }
 }

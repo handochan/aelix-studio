@@ -89,6 +89,30 @@ describe('running input renderer client', () => {
     expect(send).toMatchObject({ status: 'sent', preserveDraft: false, receipt: { ...target, status: 'queued' } });
   });
 
+  it('counts the exact UTF-8 envelope including escaped quotes, newlines, and the request UUID', async () => {
+    const bodyFor = (message: string) =>
+      JSON.stringify({
+        bindingId: target.bindingId,
+        method: methods[1],
+        payload: { requestId: '00000000-0000-7000-8000-000000000000', turnId: target.turnId, message },
+      });
+    const size = (text: string) => new TextEncoder().encode(text).length;
+    const seed = '한"\n'.repeat(9000);
+    const exact = seed + 'a'.repeat(65_536 - size(bodyFor(seed)));
+    offer();
+    fetchMock.mockResolvedValueOnce(result(accepted));
+    await client.refresh();
+
+    await expect(client.send('steer', target, exact + 'a')).resolves.toEqual({
+      status: 'skipped',
+      reason: 'too-large',
+      preserveDraft: true,
+    });
+    expect(calls()).toEqual(['discover', methods[0]]);
+    await expect(client.send('steer', target, exact)).resolves.toMatchObject({ preserveDraft: false });
+    expect(size(String(fetchMock.mock.calls[2][1].body))).toBe(65_536);
+  });
+
   it('keeps the draft and sends nothing to an unadvertised mode', async () => {
     fetchMock.mockResolvedValueOnce(discovery(target.bindingId, methods.slice(0, 2))).mockResolvedValueOnce(active());
     await client.refresh();

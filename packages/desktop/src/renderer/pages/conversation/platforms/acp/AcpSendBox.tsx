@@ -1,6 +1,7 @@
 import { ipcBridge } from '@/common';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
+import { chatFileRefKey, uploadFileRef, type ChatFileRef } from '@/common/types/chatFile';
 import { isSideQuestionSupported } from '@/common/chat/sideQuestion';
 import { parseError, uuid } from '@/common/utils';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
@@ -54,7 +55,6 @@ import { useCrossSessionMessageEnabled } from '@/renderer/hooks/chat/useCrossSes
 import { emitter, useAddEventListener } from '@/renderer/utils/emitter';
 import { localSelectionItems, mergeFileSelectionItems } from '@/renderer/utils/file/fileSelection';
 import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/messageFiles';
-import type { ChatFileRef } from '@/common/types/chatFile';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
@@ -106,7 +106,21 @@ const useSendBoxDraft = (conversation_id: string) => {
     [data, mutate]
   );
 
+  const removeSubmittedFiles = (files: ChatFileRef[]) => {
+    if (!files.length) return;
+    const sent = new Set(files.map(chatFileRefKey));
+    mutate((prev) => ({
+      ...prev,
+      uploadFile: prev?.uploadFile?.filter((path) => !sent.has(chatFileRefKey(uploadFileRef(path)))),
+      atPath: prev?.atPath?.filter((item) => {
+        const [ref] = collectChatFileRefs([], [item]);
+        return !ref || !sent.has(chatFileRefKey(ref));
+      }),
+    }));
+  };
+
   return {
+    removeSubmittedFiles,
     atPath,
     uploadFile,
     setAtPath,
@@ -155,7 +169,8 @@ const AcpSendBox: React.FC<{
   const showModeSelector = true;
   const isLeaderInTeam = teamPermission && conversation_id === teamPermission.leaderConversationId;
   const { checkAndUpdateTitle } = useAutoTitle();
-  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent } = useSendBoxDraft(conversation_id);
+  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, removeSubmittedFiles } =
+    useSendBoxDraft(conversation_id);
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
   const conversationContext = useConversationContextSafe();
@@ -507,23 +522,24 @@ Please check your local CLI tool authentication status`,
   const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
   const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
-  // Put text the composer took back in front of anything typed since, instead of overwriting it.
-  const restoreDraftText = (message: string) => {
-    const typed = contentRef.current;
-    setContentRef.current(typed.trim() ? `${message}\n${typed}` : message);
-  };
+  const deferDraftClear = runningInput.supported && !supportsMidturnDelivery;
 
-  // Supporting agents (mid-turn delivery) send immediately, busy or not.
-  // Non-supporting agents can no longer send while the agent is replying —
-  // that path is hard-blocked with a toast; the only way to queue a message
-  // while busy is the explicit "add to queue" entry (handleAddToQueue below).
-  // An Aelix session with the running-input relay routes that send to steer/follow-up instead.
   const onSendHandler = async (message: string): Promise<void | false> => {
-    const allFiles = collectChatFileRefs(uploadFile, atPath);
-    if (!supportsMidturnDelivery && runningInput.supported) {
-      const route = await runningInput.submit(message, allFiles.length > 0 || selectedSessions.length > 0);
-      if (route === 'kept') restoreDraftText(message);
-      if (route !== 'ordinary') return;
+    const files = collectChatFileRefs(uploadFile, atPath);
+    const sessions = selectedSessions;
+    const removeSubmitted = () => {
+      removeSubmittedFiles(files);
+      if (sessions.length) {
+        setSelectedSessions((current) => current.filter((ref) => !sessions.some((sent) => sent.id === ref.id)));
+      }
+    };
+    if (deferDraftClear) {
+      const route = await runningInput.submit(message, { files, sessions });
+      if (route === 'kept') return false;
+      if (route === 'sent') {
+        removeSubmitted();
+        return;
+      }
     }
     if (!supportsMidturnDelivery && isBusy) {
       Message.warning(
@@ -534,22 +550,20 @@ Please check your local CLI tool authentication status`,
       );
       return false;
     }
+    if (deferDraftClear && !message.trim()) return false;
 
-    const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
-    clearFiles();
-    setSelectedSessions([]);
-    emitter.emit('acp.selected.file.clear');
+    if (!deferDraftClear) {
+      clearFiles();
+      setSelectedSessions([]);
+      emitter.emit('acp.selected.file.clear');
+    }
     try {
-      await executeCommand({ input: message, files: allFiles, sessions });
+      await executeCommand({ input: message, files, sessions: sessions.length > 0 ? sessions : undefined });
+      if (deferDraftClear) removeSubmitted();
     } catch (error) {
-      if (!runningInput.supported || !classifyConversationBusyError(error)) throw error;
-      // Another action claimed the host turn first: keep text and attachments for the next explicit send.
-      const restored = splitChatFileRefs(allFiles);
-      setUploadFile(restored.uploadFiles);
-      setAtPath(restored.atPath);
-      setSelectedSessions(sessions ?? []);
-      restoreDraftText(message);
+      if (!deferDraftClear || !classifyConversationBusyError(error)) throw error;
       Message.warning(t('acp.runningInput.ordinaryBusyKept'));
+      return false;
     }
   };
 
@@ -957,6 +971,10 @@ Please check your local CLI tool authentication status`,
         className='z-10'
         onFilesAdded={handleFilesAdded}
         hasPendingAttachments={uploadFile.length > 0 || atPath.length > 0}
+        allowAttachmentOnlySend={
+          runningInputSendable && (uploadFile.length > 0 || atPath.length > 0 || selectedSessions.length > 0)
+        }
+        deferDraftClear={deferDraftClear}
         enableBtw={isSideQuestionSupported({ type: 'acp', backend })}
         supportedExts={allSupportedExts}
         defaultMultiLine={!isMobile}

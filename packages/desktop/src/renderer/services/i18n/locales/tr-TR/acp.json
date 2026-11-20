@@ -93,9 +93,12 @@
     "checkUnconfirmed": "Sonuç doğrulanamadı. Konuşma yeniden yüklendi.",
     "dismiss": "Kapat",
     "dismissAll": "Tümünü kapat",
-    "attachmentsKept": "Ajan çalışırken ekler gönderilemez. Taslağınız korundu.",
+    "referencesUnverified": "Bir ek veya sohbet başvurusu doğrulanamadı. Taslağınız korundu.",
+    "preparationChanged": "Başvurular doğrulanırken yürütülen tur değişti. Taslağınız korundu.",
+    "inputTooLarge": "Yürütülen tura gönderilen girdi 64 KiB sınırını aşıyor. Taslağınız korundu.",
+    "imagesAsPaths": "Bir tur yürütülürken görseller dosya yolu olarak gönderilir.",
     "previousSending": "Önceki girdi hâlâ gönderiliyor. Taslağınız korundu.",
-    "invalidText": "Bu girdi, ajan çalışırken gönderilemeyecek kadar uzun. Taslağınız korundu.",
+    "invalidText": "Girdi boş veya geçersiz. Taslağınız korundu.",
     "ordinaryBusyKept": "Önce başka bir tur başladı. Mesajınız ve ekleriniz korundu."
   }
 }

@@ -93,9 +93,12 @@
     "checkUnconfirmed": "Das Ergebnis konnte nicht bestätigt werden. Die Unterhaltung wurde neu geladen.",
     "dismiss": "Schließen",
     "dismissAll": "Alle schließen",
-    "attachmentsKept": "Anhänge können nicht gesendet werden, während der Agent arbeitet. Dein Entwurf wurde behalten.",
+    "referencesUnverified": "Ein Anhang oder Gesprächsverweis konnte nicht geprüft werden. Dein Entwurf wurde behalten.",
+    "preparationChanged": "Der laufende Durchgang änderte sich beim Prüfen der Verweise. Dein Entwurf wurde behalten.",
+    "inputTooLarge": "Die Eingabe für den laufenden Durchgang überschreitet 64 KiB. Dein Entwurf wurde behalten.",
+    "imagesAsPaths": "Bilder werden während eines laufenden Durchgangs als Dateipfade gesendet.",
     "previousSending": "Die vorherige Eingabe wird noch gesendet. Dein Entwurf wurde behalten.",
-    "invalidText": "Diese Eingabe ist zu lang, um sie während der Arbeit des Agenten zu senden. Dein Entwurf wurde behalten.",
+    "invalidText": "Die Eingabe ist leer oder ungültig. Dein Entwurf wurde behalten.",
     "ordinaryBusyKept": "Ein anderer Durchgang hat zuerst begonnen. Nachricht und Anhänge wurden behalten."
   }
 }
