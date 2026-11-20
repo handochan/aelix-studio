@@ -7,6 +7,11 @@
   "send": {
     "failed": "Nachricht konnte nicht gesendet werden: {{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "Installieren Sie Erweiterungen auf der Seite „Erweiterungen“.",
+    "update": "Aktualisieren Sie Erweiterungen auf der Seite „Erweiterungen“.",
+    "remove": "Entfernen Sie Erweiterungen auf der Seite „Erweiterungen“."
+  },
   "sendbox": {
     "placeholder": "Nachricht an {{backend}} senden..."
   },

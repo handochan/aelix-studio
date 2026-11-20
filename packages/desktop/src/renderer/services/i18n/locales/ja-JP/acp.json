@@ -7,6 +7,11 @@
   "send": {
     "failed": "メッセージの送信に失敗しました：{{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "拡張機能画面でインストールしてください。",
+    "update": "拡張機能画面で更新してください。",
+    "remove": "拡張機能画面で削除してください。"
+  },
   "sendbox": {
     "placeholder": "{{backend}}にメッセージを送信..."
   },

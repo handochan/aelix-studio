@@ -188,6 +188,7 @@ describe('ACP application HTTP failures', () => {
     ['USER_AGENT_TURN_FAILED_AFTER_DISPATCH', -33002, { cause: 'lost' }],
     ['USER_AGENT_BUSY', -32000, undefined],
     ['USER_AGENT_OPERATION_REFUSED', -32004, { kind: 'profile_unavailable', profile: 'team' }],
+    ['USER_AGENT_OPERATION_REFUSED', -32004, { kind: 'studio_extension_management_required', action: 'install' }],
   ])('keeps %s structured and never offers replay or reconnect', (code, protocol_code, data) => {
     const result = buildSendFailureError(
       httpError(502, code as string, 'upstream failure', { protocol_code, data, detail: 'original ACP detail' }),

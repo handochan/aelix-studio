@@ -20,6 +20,9 @@ const enConversation = JSON.parse(
     'utf8'
   )
 );
+const enAcp = JSON.parse(
+  readFileSync(path.join(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales/en-US/acp.json'), 'utf8')
+);
 
 const i18nConfig = JSON.parse(
   readFileSync(path.join(process.cwd(), 'packages/desktop/src/common/config/i18n-config.json'), 'utf8')
@@ -27,22 +30,19 @@ const i18nConfig = JSON.parse(
 
 const supportedLocaleNames = i18nConfig.supportedLanguages;
 
-const resolveConversationKey = (key: string): unknown => {
-  if (!key.startsWith('conversation.')) return undefined;
-
-  return key
-    .replace(/^conversation\./, '')
-    .split('.')
-    .reduce<unknown>((current, part) => {
-      if (!current || typeof current !== 'object') return undefined;
-      return (current as Record<string, unknown>)[part];
-    }, enConversation);
+const resolveKey = (key: string): unknown => {
+  const [module, ...parts] = key.split('.');
+  const locale = module === 'conversation' ? enConversation : module === 'acp' ? enAcp : undefined;
+  return parts.reduce<unknown>((current, part) => {
+    if (!current || typeof current !== 'object') return undefined;
+    return (current as Record<string, unknown>)[part];
+  }, locale);
 };
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: { defaultValue?: string }) => {
-      const value = resolveConversationKey(key);
+      const value = resolveKey(key);
       const text = typeof value === 'string' ? value : (options?.defaultValue ?? key);
       return text.replace(/{{(\w+)}}/g, (_match, name: string) =>
         String((options as Record<string, unknown>)?.[name] ?? '')
@@ -641,12 +641,32 @@ describe('host ACP application error display', () => {
     ['USER_AGENT_SESSION_LOCKED', undefined, 'lock is released'],
     ['USER_AGENT_TURN_FAILED_AFTER_DISPATCH', undefined, 'may already have run'],
     ['USER_AGENT_BUSY', undefined, 'cancel it before continuing'],
+    [
+      'USER_AGENT_BUSY',
+      { kind: 'studio_extension_management_required', action: 'install' },
+      'cancel it before continuing',
+    ],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'restrictions_unenforceable', methods: ['tools/write'] }, 'tools/write'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'profile_unavailable', profile: 'team' }, 'Restore the profile'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'extension_owned_by_launch', source: '/operator/extension' }, 'extension'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'runtime_control_required' }, 'runtime controls'],
     ['USER_AGENT_OPERATION_REFUSED', { kind: 'client_action_required' }, 'requested action in Studio'],
-    ['USER_AGENT_OPERATION_REFUSED', { kind: 'future_kind' }, 'agent refused this operation'],
+    [
+      'USER_AGENT_OPERATION_REFUSED',
+      { kind: 'studio_extension_management_required', action: 'install' },
+      '^Install extensions from the Extensions screen\\.$',
+    ],
+    [
+      'USER_AGENT_OPERATION_REFUSED',
+      { kind: 'studio_extension_management_required', action: 'update' },
+      '^Update extensions from the Extensions screen\\.$',
+    ],
+    [
+      'USER_AGENT_OPERATION_REFUSED',
+      { kind: 'studio_extension_management_required', action: 'remove' },
+      '^Remove extensions from the Extensions screen\\.$',
+    ],
+    ['USER_AGENT_OPERATION_REFUSED', { kind: 'future_kind', action: 'install' }, 'agent refused this operation'],
     ['USER_AGENT_OPERATION_REFUSED', null, 'agent refused this operation'],
   ])('renders %s with its specific explanation', (code, data, expected) => {
     render(
@@ -674,6 +694,8 @@ describe('host ACP application error display', () => {
     { kind: 'profile_unavailable', profile: ' ' },
     { kind: 'extension_owned_by_launch', source: '' },
     { kind: 'extension_owned_by_launch', source: '/' },
+    { kind: 'studio_extension_management_required' },
+    { kind: 'studio_extension_management_required', action: 'verify' },
   ])('uses the generic refusal body when context is empty: $kind', (data) => {
     render(
       <MessageTips

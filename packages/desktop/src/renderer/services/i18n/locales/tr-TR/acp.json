@@ -7,6 +7,11 @@
   "send": {
     "failed": "Mesaj gönderilemedi: {{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "Uzantıları Uzantılar ekranından yükleyin.",
+    "update": "Uzantıları Uzantılar ekranından güncelleyin.",
+    "remove": "Uzantıları Uzantılar ekranından kaldırın."
+  },
   "sendbox": {
     "placeholder": "{{backend}}'a mesaj gönder..."
   },
