@@ -1,4 +1,9 @@
-import { fetchStudioBackend, startWebHost, startStaticServer } from '@aionui/web-host';
+import {
+  fetchStudioBackend,
+  resolveStandaloneStudioUserDataPath,
+  startWebHost,
+  startStaticServer,
+} from '@aionui/web-host';
 import type { WebHostHandle, StaticServerHandle } from '@aionui/web-host';
 import { spawnSync } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -202,7 +207,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
         version,
         isPackaged: true,
         resourcesPath: cliRoot,
-        userDataPath: dataDir,
+        userDataPath: await resolveStandaloneStudioUserDataPath(dataDir),
       },
       staticDir,
       port,

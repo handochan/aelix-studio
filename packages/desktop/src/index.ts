@@ -953,11 +953,7 @@ const handleAppReady = async (): Promise<void> => {
           version: app.getVersion(),
           isPackaged: app.isPackaged,
           resourcesPath: app.getAppPath(),
-          // Same reason as dataDir below: webui.config.json must live next to
-          // the DB under the CLI-safe symlink path, so every password-change
-          // entry point (CLI --resetpass, settings-toggle IPC, browser login)
-          // reads the same file.
-          userDataPath: getDataPath(),
+          userDataPath: app.getPath('userData'),
         },
         staticDir: path.join(__dirname, '../renderer'),
         port: resolvedPort,

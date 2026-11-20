@@ -29,6 +29,7 @@ import {
 export type StaticServerOptions = {
   staticDir: string;
   backendPort: number;
+  userDataPath?: string;
   port?: number;
   allowRemote?: boolean;
 };
@@ -219,7 +220,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       if (expectContinue) res.writeContinue();
 
       if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
-        await handleNativeAuth(req, res, { backendPort: opts.backendPort, origins: [req.headers.origin ?? ''] });
+        await handleNativeAuth(req, res, {
+          backendPort: opts.backendPort,
+          origins: [req.headers.origin ?? ''],
+          userDataPath: opts.userDataPath,
+        });
         return;
       }
 
