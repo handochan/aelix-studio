@@ -25,6 +25,7 @@ import {
   newPointer,
   readGenerationRecord,
   readPointer,
+  recordedDefault,
   retainedDefaults,
   switchPointer,
   writeGenerationRecord,
@@ -264,7 +265,7 @@ function describeMutation(
       ? { kind: 'file', artifact: preparation.importSet.id, wheel: wheel.filename, sha256 }
       : undefined;
   };
-  const distributions: Record<string, RecordedDistribution> = {};
+  const distributions: Record<string, RecordedDistribution> = Object.create(null);
   for (const { name, version, recordSha256 } of contentDistributions(snapshot)) {
     const inherited = parent?.distributions[name];
     // An untouched distribution keeps its origin; one this change wrote came from the import set.
@@ -303,6 +304,17 @@ function describeCandidate(
   { bound, forms, launch }: Awaited<ReturnType<typeof verifyCandidate>>,
   createdAt: Date
 ): GenerationRecord {
+  const extensions: GenerationRecord['extensions'] = Object.create(null);
+  for (const [name, extension] of snapshot.extensions) {
+    const form = forms.get(name);
+    extensions[name] = {
+      reference: extension.reference,
+      distribution: extension.distribution,
+      manifestBound: bound.get(name) ?? false,
+      form: form?.form ?? 'module',
+      plugin: form?.form === 'pack' ? form.plugin : null,
+    };
+  }
   return newGenerationRecord({
     generation: candidate.id,
     parent: parent?.generation ?? null,
@@ -310,21 +322,7 @@ function describeCandidate(
     binding: context.bundle.binding,
     operation,
     distributions,
-    extensions: Object.fromEntries(
-      [...snapshot.extensions].map(([name, extension]) => {
-        const form = forms.get(name);
-        return [
-          name,
-          {
-            reference: extension.reference,
-            distribution: extension.distribution,
-            manifestBound: bound.get(name) ?? false,
-            form: form?.form ?? 'module',
-            plugin: form?.form === 'pack' ? form.plugin : null,
-          },
-        ];
-      })
-    ),
+    extensions,
     launch,
   });
 }
@@ -711,14 +709,14 @@ async function verifyReboundCandidate(
     if (
       actual?.reference !== entry.reference ||
       actual.distribution !== entry.distribution ||
-      !old.distributions[entry.distribution] ||
+      !Object.hasOwn(old.distributions, entry.distribution) ||
       snapshot.distributions.get(entry.distribution)?.version !== old.distributions[entry.distribution].version
     )
       throw new ExtensionFailure('REQUEST_MISMATCH', [`the new runtime did not preserve extension ${name}`]);
     expected.set(name, entry.reference);
   }
   if (expected.size !== snapshot.extensions.size) throw new ExtensionFailure('REQUEST_MISMATCH');
-  const distributions: GenerationRecord['distributions'] = {};
+  const distributions: GenerationRecord['distributions'] = Object.create(null);
   for (const { name, version, recordSha256 } of contentDistributions(snapshot)) {
     const prior = old.distributions[name];
     if (!replay && (prior?.version !== version || prior.recordSha256 !== recordSha256))
@@ -858,12 +856,10 @@ export async function setDefault(
       throw new ExtensionFailure('NOT_INSTALLED', ['the managed extension is not in the current generation']);
     if (!sameBinding(record.binding, context.bundle.binding)) throw new ExtensionFailure('BUNDLE_CHANGED');
     if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
-    if ((pointer.defaults?.[extensionId] ?? true) !== enabled) {
-      const next = {
-        ...pointer,
-        defaults: { ...pointer.defaults, [extensionId]: enabled },
-      };
-      await switchPointer(context.layout, next, null, lock);
+    if ((recordedDefault(pointer.defaults, extensionId) ?? true) !== enabled) {
+      const defaults: NonNullable<typeof pointer.defaults> = Object.assign(Object.create(null), pointer.defaults);
+      defaults[extensionId] = enabled;
+      await switchPointer(context.layout, { ...pointer, defaults }, null, lock);
     }
     return await describe(context);
   } catch (error) {
@@ -911,7 +907,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
           version: record.distributions[extension.distribution]?.version ?? '',
           reference: extension.reference,
           origin: record.distributions[extension.distribution]?.origin ?? null,
-          ...(managed.has(id) ? { managedId: id, defaultEnabled: pointer.defaults?.[id] ?? true } : {}),
+          ...(managed.has(id) ? { managedId: id, defaultEnabled: recordedDefault(pointer.defaults, id) ?? true } : {}),
           status: !usable
             ? ('reinstall_needed' as const)
             : extension.form === 'pack'

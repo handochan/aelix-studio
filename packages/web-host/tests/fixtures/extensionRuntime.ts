@@ -392,7 +392,7 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
       finish(child, async () => {
         const site = args[args.indexOf('-c') + 2];
         const wanted = JSON.parse(args[args.indexOf('-c') + 3]) as Record<string, string>;
-        const answers: Record<string, { id: string | null; python: string | null }> = {};
+        const answers: Record<string, { id: string | null; python: string | null }> = Object.create(null);
         for (const [name, relative] of Object.entries(wanted)) {
           const text = await readFile(path.join(site, ...relative.split('/')), 'utf8').catch(() => '');
           answers[name] = manifestFields(text);

@@ -134,8 +134,8 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
     createdAt,
     binding,
     operation: { action, target },
-    distributions: {},
-    extensions: {},
+    distributions: Object.create(null),
+    extensions: Object.create(null),
     launch: { packs: launch.packs, modules, ...(managed ? { managed } : {}) },
   };
   for (const [name, entry] of Object.entries(distributions)) {
@@ -171,7 +171,14 @@ export function newPointer(
   binding: BundleBinding,
   defaults?: Pointer['defaults']
 ): Pointer {
-  return { schema: POINTER_SCHEMA, generation, previous, revision, binding, ...(defaults ? { defaults } : {}) };
+  const pointer: Pointer = { schema: POINTER_SCHEMA, generation, previous, revision, binding };
+  if (defaults) pointer.defaults = Object.assign(Object.create(null), defaults);
+  return pointer;
+}
+
+/** Read a saved default only when the ID is present in the pointer. */
+export function recordedDefault(defaults: Pointer['defaults'], id: string): boolean | undefined {
+  return defaults && Object.hasOwn(defaults, id) ? defaults[id] : undefined;
 }
 
 /** Carry app defaults by distribution and exact entry name, across module and pack IDs. */
@@ -180,20 +187,20 @@ export function retainedDefaults(base: PointerState, next: GenerationRecord): Po
   const previous = new Map(Object.entries(base.record.extensions));
   const previousIds = new Set(base.record.launch.managed.map(({ id }) => id));
   const nextIds = new Set(next.launch.managed.map(({ id }) => id));
-  const defaults = new Map<string, boolean>();
+  const defaults: NonNullable<Pointer['defaults']> = Object.create(null);
   for (const [name, extension] of Object.entries(next.extensions)) {
     const prior = previous.get(name);
     if (prior?.distribution !== extension.distribution) continue;
     const oldId = managedExtensionId(prior.distribution, name, prior.plugin);
     const id = managedExtensionId(extension.distribution, name, extension.plugin);
     if (!previousIds.has(oldId) || !nextIds.has(id)) continue;
-    const enabled = base.pointer.defaults[oldId];
+    const enabled = recordedDefault(base.pointer.defaults, oldId);
     if (typeof enabled !== 'boolean') continue;
     // Several previously separate modules can become one pack. An explicit off
     // wins over on so grouping cannot activate a disabled extension.
-    defaults.set(id, (defaults.get(id) ?? true) && enabled);
+    defaults[id] = (defaults[id] ?? true) && enabled;
   }
-  return defaults.size ? Object.fromEntries(defaults) : undefined;
+  return Object.keys(defaults).length ? defaults : undefined;
 }
 
 /** A generation record with the current schema. */

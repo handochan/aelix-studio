@@ -386,6 +386,39 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     });
   }, 180_000);
 
+  it.skipIf(!HAS_MANAGED_ACP)(
+    'keeps a real wheel with a __proto__ entry disabled in the ACP snapshot after update',
+    async () => {
+      const name = 'fixture-special-entry';
+      const spec = { name, entry: '__proto__', manifest: false };
+      const extensionId = `${name}:${spec.entry}`;
+      expect(await install(spec)).toMatchObject({ phase: 'switched' });
+      expect(await service.request(OWNER, { action: 'set_default', extensionId, enabled: false })).toMatchObject({
+        ok: true,
+      });
+      expect(await changeWheel({ ...spec, version: '0.2.0' }, 'update')).toMatchObject({ phase: 'switched' });
+
+      const started = conversation();
+      try {
+        const sessionId = await started.open(workspace);
+        const reply = await started.request('_aelix/manage', {
+          sessionId,
+          action: 'extensions/overrides/list',
+          arguments: {},
+        });
+        expect(reply.error).toBeUndefined();
+        expect(reply.result).toMatchObject({
+          extensions: expect.arrayContaining([
+            expect.objectContaining({ extensionId, defaultEnabled: false, state: 'disabled' }),
+          ]),
+        });
+      } finally {
+        await started.close();
+      }
+    },
+    180_000
+  );
+
   it('starts with the bundle alone when the generations are gone', async () => {
     for (const generation of await readdir(path.join(root, 'generations')))
       await rm(path.join(root, 'generations', generation), { recursive: true, force: true });

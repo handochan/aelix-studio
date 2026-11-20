@@ -93,6 +93,34 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect((await listing()).extensions).toMatchObject([{ managedId: extensionId, defaultEnabled: false }]);
   });
 
+  it.each(
+    ['__proto__', 'constructor', 'toString'].flatMap((entry) => [
+      { entry, form: 'module', manifest: false },
+      { entry, form: 'pack', manifest: true },
+    ])
+  )('preserves a disabled $form with the entry name $entry on update', async ({ entry, manifest }) => {
+    const spec = { name: 'demo-one', entry, manifest };
+    const extensionId = manifest ? 'demo-one:pack:demo-one' : `demo-one:${entry}`;
+    expect(await settle(await service.request('window:1', await installRequest(spec)))).toMatchObject({
+      phase: 'switched',
+    });
+    expect(await service.request('window:1', { action: 'set_default', extensionId, enabled: false })).toMatchObject({
+      ok: true,
+    });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: spec.name,
+      source: { kind: 'file', path: await wheel({ ...spec, version: '0.2.0' }) },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect(JSON.parse(await readFile(path.join(root, 'current.json'), 'utf8')).defaults).toEqual({
+      [extensionId]: false,
+    });
+    expect((await listing()).extensions).toMatchObject([
+      { name: entry, managedId: extensionId, defaultEnabled: false },
+    ]);
+  });
+
   it('does not write defaults for IDs outside the managed generation', async () => {
     await settle(await service.request('window:1', await installRequest({ name: 'demo-one' })));
     expect(

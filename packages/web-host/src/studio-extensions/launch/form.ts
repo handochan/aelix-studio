@@ -125,7 +125,7 @@ export async function chooseForms(
 ): Promise<Map<string, ExtensionForm>> {
   const forms = new Map<string, ExtensionForm>([...expected.keys()].map((name) => [name, { form: 'module' }]));
   const site = await realpath(candidate.paths.site);
-  const wanted: Record<string, string> = {};
+  const wanted: Record<string, string> = Object.create(null);
   for (const [name, reference] of expected) {
     const extension = snapshot.extensions.get(name);
     const distribution = extension && snapshot.distributions.get(extension.distribution);
@@ -153,15 +153,13 @@ export async function chooseForms(
   let answers: Record<string, ManifestFields>;
   try {
     if (result.code !== 0) throw new Error('the manifest reader failed');
-    answers = JSON.parse(result.output.split('\n').findLast((line) => line.startsWith('{')) ?? '') as Record<
-      string,
-      ManifestFields
-    >;
+    const parsed = JSON.parse(result.output.split('\n').findLast((line) => line.startsWith('{')) ?? '');
+    answers = Object.assign(Object.create(null), parsed);
   } catch {
     throw new ExtensionFailure('VERIFICATION_FAILED', ['the manifests of the extensions could not be read']);
   }
   const fitting = Object.keys(wanted).filter((name) => {
-    const fields = answers[name];
+    const fields = Object.hasOwn(answers, name) ? answers[name] : undefined;
     // A bare module entry point names that module's `setup`, as a manifest entry always spells it.
     return (
       typeof fields?.id === 'string' &&

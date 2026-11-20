@@ -39,7 +39,10 @@ export function parseManagedCatalog(input: unknown): ManagedEntry[] | undefined 
     (process.platform !== 'win32' || !/^[A-Za-z]:/.test(value));
   for (const value of input as unknown[]) {
     if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
-    const { id, reference, entryPoints } = value as Record<string, unknown>;
+    if (!Object.hasOwn(value, 'id') || !Object.hasOwn(value, 'reference')) return undefined;
+    const fields = value as Record<string, unknown>;
+    const { id, reference } = fields;
+    const entryPoints = Object.hasOwn(fields, 'entryPoints') ? fields.entryPoints : undefined;
     if (!isManagedId(id) || ids.has(id) || typeof reference !== 'string') return undefined;
     if (Object.keys(value).length !== (entryPoints === undefined ? 2 : 3)) return undefined;
     if (entryPoints === undefined) {
