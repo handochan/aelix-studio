@@ -6,7 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
-import { startStaticServer } from '../../packages/web-host/src/static-server.ts';
+import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../packages/web-host/src/index.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
 import { boundedWait, closeElectron } from './host-release/verification.mjs';
 
@@ -85,6 +85,7 @@ let page;
 let lanPage;
 let foreign;
 let webui;
+let sharedDbLink;
 let stage = 'startup';
 const lanFailures = [];
 const trace = (next) => {
@@ -176,7 +177,17 @@ try {
   await expect(native.getByRole('button', { name: strings.startConversation, exact: true })).toBeEnabled({
     timeout: 15000,
   });
+  const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
+  const expectedExtensionState = path.join(fs.realpathSync(userDataPath), 'aelix-runtime');
+  const registration = page.waitForRequest(
+    (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/agents/custom'
+  );
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+  assert.equal(
+    (await registration).postDataJSON().env?.find(({ name }) => name === 'AELIX_STUDIO_EXTENSION_STATE')?.value,
+    expectedExtensionState,
+    'The managed command must send the original Studio data path to the host as an environment value'
+  );
   let input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
   await input.fill('Check rejected credentials');
@@ -335,9 +346,19 @@ try {
   const reset = await httpPost(page, '/api/webui/reset-password');
   const password = reset.new_password;
   assert.equal(typeof password, 'string');
-  webui = await startStaticServer({
+  const sharedDb = path.join(sandbox, '.aionui-dev');
+  fs.symlinkSync(path.join(userDataPath, 'aionui'), sharedDb, 'junction');
+  sharedDbLink = sharedDb;
+  webui = await startWebHost({
+    app: {
+      version: '0.0.0',
+      isPackaged: false,
+      resourcesPath: process.cwd(),
+      userDataPath: await resolveStandaloneStudioUserDataPath(sharedDb),
+    },
     staticDir: path.resolve('out/renderer'),
-    backendPort: port,
+    dataDir: sharedDb,
+    backend: { kind: 'useExistingBackend', port },
     port: 0,
     allowRemote: true,
   });
@@ -371,6 +392,17 @@ try {
   assert.equal(status.status, 200);
   const nativeStatus = await status.json();
   assert.equal(nativeStatus.ok, true);
+  const selected = await fetchWebUILoopback(route, {
+    method: 'POST',
+    headers: { ...headers, cookie },
+    body: JSON.stringify({ action: 'select', provider: 'fixture', model: 'fixture-model' }),
+  });
+  const selectedLaunch = await selected.json();
+  assert.equal(
+    selectedLaunch.data?.env?.find(({ name }) => name === 'AELIX_STUDIO_EXTENSION_STATE')?.value,
+    expectedExtensionState,
+    'The WebUI must use the same Studio data path as the desktop'
+  );
   const stored = await fetchWebUILoopback(route, {
     method: 'POST',
     headers: { ...headers, cookie },
@@ -516,6 +548,7 @@ try {
           'ui_key_registration',
           'wrong_key_rejected',
           'key_update_new_conversation',
+          'desktop_managed_command_extension_state',
           'first_response',
           'native_head_fork_desktop_authentication',
           'native_head_fork_ui_and_full_app_host_restart',
@@ -525,6 +558,7 @@ try {
           'unreachable_endpoint_reported',
           'untrusted_navigation_cannot_manage_credentials',
           'actual_webui_cookie_origin_and_secret_boundary',
+          'standalone_webui_shared_database_extension_state',
           'lan_http_insecure_context_without_web_locks_sends_and_receives',
         ],
         realProvider: false,
@@ -562,10 +596,15 @@ try {
   throw error;
 } finally {
   // Close the owned browser clients before waiting for fixture TCP listeners.
-  trace('stop_app');
-  await closeElectron(app);
-  trace('stop_webui');
-  if (webui) await webui.stop();
+  try {
+    trace('stop_app');
+    await closeElectron(app);
+    trace('stop_webui');
+    if (webui) await webui.stop();
+  } finally {
+    // The outer fork audit counts database paths, including Windows junctions.
+    if (sharedDbLink) fs.unlinkSync(sharedDbLink);
+  }
   if (foreign) {
     foreign.closeAllConnections();
     await new Promise((resolve) => foreign.close(resolve));

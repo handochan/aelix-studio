@@ -1,6 +1,7 @@
 import { fetchWebUILoopback } from '../../../../tests/e2e/helpers/httpBridge';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './facade';
 import { NativeAuthService } from './service';
@@ -12,6 +13,7 @@ describe('native auth facade authentication and request boundary', () => {
   let authenticate: boolean;
   let seenHeaders: http.IncomingHttpHeaders;
   let service: NativeAuthService;
+  const userDataPath = path.resolve('Studio 사용자 데이터');
   const handler = vi.fn(async () => ({ ok: true as const, data: { providers: [] } }));
   beforeEach(async () => {
     authenticate = false;
@@ -29,6 +31,7 @@ describe('native auth facade authentication and request boundary', () => {
       void handleNativeAuth(req, res, {
         backendPort: (backend.address() as AddressInfo).port,
         origins: [url],
+        userDataPath,
         service,
       });
     });
@@ -86,7 +89,7 @@ describe('native auth facade authentication and request boundary', () => {
     authenticate = true;
     const response = await request(url, { cookie: 'aelix-studio-session=valid' });
     expect(response.status).toBe(200);
-    expect(handler).toHaveBeenCalledWith('web:operator', { action: 'catalog' });
+    expect(handler).toHaveBeenCalledWith('web:operator', { action: 'catalog' }, userDataPath);
     expect(response.headers.get('cache-control')).toBe('no-store');
   });
   it('bounds oversized bodies and rejects malformed JSON without reflecting it', async () => {

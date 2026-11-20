@@ -15,6 +15,8 @@ export type {
 } from './studio-auth/types.js';
 export {
   ExtensionService,
+  locateStudioExtensionLayout,
+  resolveStandaloneStudioUserDataPath,
   STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY,
   STATE_ENVIRONMENT as EXTENSION_STATE_ENVIRONMENT,
 } from './studio-extensions/index.js';
@@ -77,6 +79,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
     staticHandle = await startStaticServer({
       staticDir: opts.staticDir,
       backendPort: backendHandle.port,
+      userDataPath: opts.app.userDataPath,
       port: opts.port,
       allowRemote: opts.allowRemote ?? false,
     });

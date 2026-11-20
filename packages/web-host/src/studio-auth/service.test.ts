@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { realpath } from 'node:fs/promises';
 import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -168,6 +169,25 @@ describe('sessionless native auth ownership and lifecycle', () => {
         env: [{ name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' }],
       },
     });
+  });
+
+  it('puts the Studio state path with spaces and Unicode in the managed command environment', async () => {
+    const userDataPath = path.join(await realpath(process.cwd()), 'Studio 사용자 데이터');
+    const pending = service.request('one', { action: 'select', provider: 'openai', model: 'model-one' }, userDataPath);
+    helper.frame({ result: { root: '/cli-root' } });
+    helper.emit('close', 0);
+    expect(await pending).toMatchObject({
+      ok: true,
+      data: {
+        env: [
+          { name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' },
+          { name: 'AELIX_STUDIO_EXTENSION_STATE', value: path.join(userDataPath, 'aelix-runtime') },
+        ],
+      },
+    });
+    expect(mocks.spawn.mock.calls[0][2].env.AELIX_STUDIO_EXTENSION_STATE).toBe(
+      process.env.AELIX_STUDIO_EXTENSION_STATE
+    );
   });
 
   it('refuses unknown methods and malformed inputs before spawning', async () => {

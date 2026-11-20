@@ -17,6 +17,7 @@ import path from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import {
   ExtensionService,
+  locateStudioExtensionLayout,
   STATE_ENVIRONMENT,
   type ExtensionListing,
   type ExtensionOperation,
@@ -165,7 +166,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     const scratch = process.env.AELIX_STUDIO_EXTENSION_SCRATCH ?? os.tmpdir();
     await mkdir(scratch, { recursive: true });
     sandbox = await mkdtemp(path.join(scratch, 'studio-launch-'));
-    root = path.join(sandbox, 'User Data', 'aelix-runtime');
+    ({ root } = await locateStudioExtensionLayout(path.join(sandbox, 'User Data')));
     workspace = path.join(sandbox, 'workspace');
     await Promise.all(['home', 'agent', 'workspace'].map((name) => mkdir(path.join(sandbox, name))));
     environment = {

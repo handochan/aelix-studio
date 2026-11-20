@@ -39,10 +39,31 @@ export const STATE_DIRECTORY = 'aelix-runtime';
 
 /**
  * The environment variable that tells the bundled launcher (`launch.py`) where the state
- * directory is. When the process that starts conversations has it, new conversations get the
- * extensions of the current generation; without it they start with the bundle alone.
+ * directory is. Each adapter reads the current generation when it starts, including when
+ * an existing conversation's adapter restarts. Without this variable it uses the bundle alone.
  */
 export const STATE_ENVIRONMENT = 'AELIX_STUDIO_EXTENSION_STATE';
+
+/** Locate the extension helper's state for a Studio user data directory. */
+export function locateStudioExtensionLayout(userDataPath: string): Promise<Layout> {
+  return locateLayout(path.resolve(userDataPath, STATE_DIRECTORY));
+}
+
+/** Locate the Studio profile for a standalone WebUI database directory. */
+export async function resolveStandaloneStudioUserDataPath(dataDir: string): Promise<string> {
+  const resolved = await realpath(path.resolve(dataDir));
+  const databaseName = path.basename(resolved);
+  if ((process.platform === 'win32' ? databaseName.toLowerCase() : databaseName) !== 'aionui') return resolved;
+
+  // Desktop keeps its database in <userData>/aionui and settings in <userData>/config.
+  // Inspect the resolved profile so a link and its target receive the same decision.
+  const profile = path.dirname(resolved);
+  const config = path.join(profile, 'config');
+  const markers = await Promise.all(
+    ['aionui-config.txt', '.aionui-env'].map((name) => stat(path.join(config, name)).catch((): undefined => undefined))
+  );
+  return markers.some((marker) => marker?.isFile()) ? profile : resolved;
+}
 
 /** The paths of the helper's state under `root`. Nothing is created. */
 export function layoutOf(root: string): Layout {

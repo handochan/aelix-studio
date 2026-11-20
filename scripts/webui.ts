@@ -24,7 +24,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { fetchStudioBackend, startWebHost } from '@aionui/web-host';
+import { fetchStudioBackend, resolveStandaloneStudioUserDataPath, startWebHost } from '@aionui/web-host';
 import { verifyDefaultHostBundle } from '../packages/shared-scripts/src/default-host.js';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
 import { getStandaloneWebDataFolder } from '../packages/desktop/src/common/config/appIdentity';
@@ -219,7 +219,7 @@ async function main(): Promise<void> {
       version: '0.0.0',
       isPackaged: false,
       resourcesPath: repoRoot,
-      userDataPath: workDir,
+      userDataPath: await resolveStandaloneStudioUserDataPath(workDir),
     },
     staticDir,
     port,

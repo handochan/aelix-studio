@@ -231,11 +231,7 @@ export async function startDesktopWebUI(opts: { port?: number; allowRemote?: boo
       version: app.getVersion(),
       isPackaged: app.isPackaged,
       resourcesPath: app.getAppPath(),
-      // webui.config.json must live next to the backend SQLite DB so --resetpass
-      // CLI and the runtime settings path read/write the same user record.
-      // getDataPath() returns ~/.aionui[-dev] symlink on macOS to sidestep
-      // path-with-spaces issues under Application Support.
-      userDataPath: getDataPath(),
+      userDataPath: app.getPath('userData'),
     },
     // After bundling, this file is out/main/index.js — renderer assets live at ../renderer.
     staticDir: path.join(__dirname, '../renderer'),
