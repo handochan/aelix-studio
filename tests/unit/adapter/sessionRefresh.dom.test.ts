@@ -18,6 +18,9 @@ describe('refreshSession (WebUI session refresh)', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    document.cookie = 'aionui-csrf-token=; Path=/; Max-Age=0';
+    document.cookie = 'aelix-studio-csrf-token=; Path=/; Max-Age=0';
     delete (window as WindowWithPort).__backendPort;
   });
 
@@ -35,10 +38,8 @@ describe('refreshSession (WebUI session refresh)', () => {
     expect(init.body).toBeUndefined();
   });
 
-  it('sends no x-csrf-token header (open-source WebUI has no CSRF layer — M6 removed, M7 restores)', async () => {
-    // resolveCoreCsrfToken() is a stub returning '' here, so the shared refresh
-    // primitive attaches no CSRF header. The aionpro superset resolves a real
-    // token and asserts the header is present instead.
+  it('ignores a legacy CSRF cookie during refresh', async () => {
+    document.cookie = 'aionui-csrf-token=foreign; Path=/';
     const fetchMock = vi.fn().mockResolvedValue({ ok: true });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -46,6 +47,16 @@ describe('refreshSession (WebUI session refresh)', () => {
 
     const [, init] = fetchMock.mock.calls[0];
     expect(init.headers ?? {}).not.toHaveProperty('x-csrf-token');
+  });
+
+  it('sends the Studio CSRF token for the host double-submit check', async () => {
+    document.cookie = 'aionui-csrf-token=foreign; Path=/';
+    document.cookie = 'aelix-studio-csrf-token=studio; Path=/';
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(refreshSession()).resolves.toBe(true);
+    expect(fetchMock.mock.calls[0][1].headers).toEqual({ 'x-csrf-token': 'studio' });
   });
 
   it('resolves false when the refresh token is also expired (non-ok response)', async () => {

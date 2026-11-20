@@ -11,7 +11,7 @@ param(
 
 # Installer diagnostics stay on this computer. No reporting endpoint or device ID.
 $ErrorActionPreference = 'Stop'
-$statusPath = Join-Path $env:TEMP 'aionui-installer-report.json'
+$statusPath = Join-Path $env:TEMP 'aelix-studio-installer-report.json'
 $staging = Join-Path $env:TEMP ('aelix-studio-report-' + [Guid]::NewGuid().ToString('N'))
 $archive = $staging + '.zip'
 $messages = $null

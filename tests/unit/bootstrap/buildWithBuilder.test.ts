@@ -72,7 +72,7 @@ function runWindowsBuild(locked: 'initial' | 'retry' | undefined, packagingFailu
               if (command.includes('bunx electron-builder')) {
                 packagingCalls++;
                 if (packagingFailure && packagingCalls === 1) {
-                  write('out/win-unpacked/AionUi.exe', 'owned fixture');
+                  write('out/win-unpacked/Aelix Studio.exe', 'owned fixture');
                   throw new Error('fixture rcedit failure');
                 }
               }
@@ -262,7 +262,7 @@ childProcess.execSync = function mockedExecSync(command) {
     expect(queryScript).toContain("'installer-self-lock'");
     expect(queryScript).toContain('outerInstallerPid');
     expect(queryScript).toContain('currentOutDir');
-    expect(queryScript).toContain("name = 'AionUi installer'");
+    expect(queryScript).toContain("name = 'Aelix Studio installer'");
   });
 
   it('continues with the bundled uninstaller when installed-uninstaller repair remains locked', () => {

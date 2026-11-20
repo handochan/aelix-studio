@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const PROCESS_NAMES = ['AionUi.exe', 'AionUi', 'electron.exe', 'electron'];
+const PROCESS_NAMES = ['Aelix Studio.exe', 'Aelix Studio', 'aelix-studio', 'electron.exe', 'electron'];
 
 async function launch(platform: 'win32' | 'darwin' | 'linux', args: string[], unreadable = false) {
   vi.resetModules();
@@ -14,9 +14,9 @@ async function launch(platform: 'win32' | 'darwin' | 'linux', args: string[], un
     linux: path.join(out, 'linux-unpacked'),
   }[platform];
   const executable = {
-    win32: path.join(cwd, 'AionUi.exe'),
-    darwin: path.join(cwd, 'AionUi.app/Contents/MacOS/AionUi'),
-    linux: path.join(cwd, 'aionui'),
+    win32: path.join(cwd, 'Aelix Studio.exe'),
+    darwin: path.join(cwd, 'Aelix Studio.app/Contents/MacOS/Aelix Studio'),
+    linux: path.join(cwd, 'aelix-studio'),
   }[platform];
   const log = vi.spyOn(console, 'log').mockImplementation(() => {});
   const error = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -33,7 +33,7 @@ async function launch(platform: 'win32' | 'darwin' | 'linux', args: string[], un
         if (unreadable) throw new Error('unreadable fixture output');
         return [out, cwd, executable].includes(file);
       },
-      readdirSync: () => ['AionUi.app'],
+      readdirSync: () => ['Aelix Studio.app'],
     },
   }));
   vi.doMock('node:process', () => ({

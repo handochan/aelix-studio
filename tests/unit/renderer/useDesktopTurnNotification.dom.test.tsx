@@ -34,7 +34,10 @@ vi.mock('@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListS
 }));
 // Interpolate the name so tests can assert both the key chosen and the value passed.
 vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string, params?: { name?: string }) => (params?.name ? `${k}::${params.name}` : k) }),
+  useTranslation: () => ({
+    t: (key: string, params?: { name?: string }) =>
+      key === 'login.brand' ? 'Aelix Studio' : params?.name ? `${key}::${params.name}` : key,
+  }),
 }));
 
 import { useDesktopTurnNotification } from '@/renderer/hooks/system/notification/useDesktopTurnNotification';
@@ -55,7 +58,7 @@ describe('useDesktopTurnNotification', () => {
     emitStream({ type: 'finish', conversation_id: 's1', turn_id: 't1' });
     expect(showInvoke).toHaveBeenCalledTimes(1);
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'Aelix Studio',
       body: 'settings.browserNotification.bodyTurnCompleted',
       conversation_id: 's1',
     });
@@ -65,7 +68,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'acp_permission', conversation_id: 's1', msg_id: 'm1' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'Aelix Studio',
       body: 'settings.browserNotification.bodyConfirmation',
       conversation_id: 's1',
     });
@@ -75,7 +78,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'ask', conversation_id: 's1', msg_id: 'm2' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'Aelix Studio',
       body: 'settings.browserNotification.bodyConfirmation',
       conversation_id: 's1',
     });
@@ -86,7 +89,7 @@ describe('useDesktopTurnNotification', () => {
     renderHook(() => useDesktopTurnNotification());
     emitStream({ type: 'acp_permission', conversation_id: 's1', msg_id: 'm3' });
     expect(showInvoke).toHaveBeenCalledWith({
-      title: 'AionUi',
+      title: 'Aelix Studio',
       body: 'settings.browserNotification.bodyConfirmationNamed::My Chat',
       conversation_id: 's1',
     });

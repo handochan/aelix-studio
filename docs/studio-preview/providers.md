@@ -23,6 +23,10 @@ The existing preparation venv is a qualification environment with absolute paths
 The installer workflow below creates a separate relocatable payload. Startup does
 not download a runtime or select a system Python fallback.
 
+When Studio and AionUi run on the same device, browsers can send Studio
+cookies to AionUi if both apps share an IPv4 fallback address or a proxy
+hostname. Use separate browser profiles or distinct hostnames. [WebUI access details](identity.md#webui-defaults).
+
 In the existing Model settings page or modal:
 
 1. Read the displayed native `auth.json` and `models.json` paths. Confirm that the

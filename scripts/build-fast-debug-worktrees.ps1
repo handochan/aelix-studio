@@ -152,6 +152,30 @@ function Copy-UntrackedBuildInputs([string]$RepoRoot, [string]$WorktreePath, [st
   }
 }
 
+function Find-BuildInstaller([string]$WorktreePath, [string]$Version) {
+  foreach ($prefix in @('aelix-studio', 'AionUi')) {
+    $candidate = Join-Path $WorktreePath "out\$prefix-$Version-win-x64.exe"
+    if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+      return $candidate
+    }
+  }
+  return $null
+}
+
+function Find-LocalHostBundle([string]$RepoRoot, [string]$LocalAppData) {
+  $candidates = @(
+    (Join-Path $RepoRoot 'out\win-unpacked\resources\bundled-aioncore\win32-x64'),
+    (Join-Path $LocalAppData 'Programs\Aelix Studio\resources\bundled-aioncore\win32-x64'),
+    (Join-Path $LocalAppData 'Programs\AionUi\resources\bundled-aioncore\win32-x64')
+  )
+  foreach ($candidate in $candidates) {
+    if (Test-Path -LiteralPath (Join-Path $candidate 'managed-resources') -PathType Container) {
+      return (Resolve-Path -LiteralPath $candidate).Path
+    }
+  }
+  return ''
+}
+
 function Wait-BuildProcess($Build, [int]$TimeoutSeconds) {
   $deadline = (Get-Date).AddSeconds($TimeoutSeconds)
   while (-not $Build.process.HasExited) {
@@ -166,8 +190,8 @@ function Wait-BuildProcess($Build, [int]$TimeoutSeconds) {
   $Build.process.WaitForExit()
   $Build.process.Refresh()
   $exitCode = $Build.process.ExitCode
-  $source = Join-Path $Build.worktreePath "out\AionUi-$($Build.version)-win-x64.exe"
-  if (-not (Test-Path -LiteralPath $source)) {
+  $source = Find-BuildInstaller $Build.worktreePath $Build.version
+  if (-not $source) {
     $tailParts = @()
     if (Test-Path -LiteralPath $Build.stderrPath) {
       $raw = Get-Content -LiteralPath $Build.stderrPath -Raw -ErrorAction SilentlyContinue
@@ -186,7 +210,7 @@ function Wait-BuildProcess($Build, [int]$TimeoutSeconds) {
       }
     }
     $tail = $tailParts -join "`n`n"
-    throw "build $($Build.version) failed with exit code $exitCode and did not produce $source. Logs: $($Build.stdoutPath), $($Build.stderrPath)`n$tail"
+    throw "build $($Build.version) failed with exit code $exitCode and did not produce a Studio or legacy installer in $($Build.worktreePath)\out. Logs: $($Build.stdoutPath), $($Build.stderrPath)`n$tail"
   }
 
   if ($null -ne $exitCode -and $exitCode -ne 0) {
@@ -198,7 +222,7 @@ function Wait-BuildProcess($Build, [int]$TimeoutSeconds) {
     throw "build $($Build.version) produced an unexpectedly small installer ($($sourceItem.Length) bytes): $source. Logs: $($Build.stdoutPath), $($Build.stderrPath)"
   }
 
-  $target = Join-Path $script:OutputDirResolved "AionUi-$($Build.version)-win-x64.exe"
+  $target = Join-Path $script:OutputDirResolved $sourceItem.Name
   Copy-Item -LiteralPath $source -Destination $target -Force
   $item = Get-Item -LiteralPath $target
   $hash = (Get-FileHash -LiteralPath $target -Algorithm SHA512).Hash
@@ -241,15 +265,10 @@ $hasPatch = (Get-Item -LiteralPath $patchPath).Length -gt 0
 $baseRef = (Invoke-Git $repoRoot @('rev-parse', 'HEAD')).Trim()
 $nodeModules = Join-Path $repoRoot 'node_modules'
 $localAioncoreBinary = Join-Path $repoRoot 'resources\bundled-aioncore\win32-x64\aelix-studio-host.exe'
-$localAioncoreBundleDir = Join-Path $repoRoot 'out\win-unpacked\resources\bundled-aioncore\win32-x64'
-if (-not (Test-Path -LiteralPath (Join-Path $localAioncoreBundleDir 'managed-resources') -PathType Container)) {
-  $localAioncoreBundleDir = Join-Path $env:LOCALAPPDATA 'Programs\AionUi\resources\bundled-aioncore\win32-x64'
-}
-if (Test-Path -LiteralPath (Join-Path $localAioncoreBundleDir 'managed-resources') -PathType Container) {
-  $localAioncoreBundleDir = (Resolve-Path -LiteralPath $localAioncoreBundleDir).Path
+$localAioncoreBundleDir = Find-LocalHostBundle $repoRoot $env:LOCALAPPDATA
+if ($localAioncoreBundleDir) {
   Write-Host "=== using local aioncore bundle fallback: $localAioncoreBundleDir ==="
 } else {
-  $localAioncoreBundleDir = ''
   Write-Warning 'Local aioncore bundle fallback was not found; builds may need to prepare managed resources.'
 }
 if (Test-Path -LiteralPath $localAioncoreBinary -PathType Leaf) {

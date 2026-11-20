@@ -21,7 +21,7 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'uninstaller-copy-or-rebuild-failed',
     defineName: 'AIONUI_E_UNINSTALLER_COPY_OR_REBUILD_FAILED',
     code: 'E1001',
-    message: 'AionUi could not repair the installed uninstaller.',
+    message: 'Aelix Studio could not repair the installed uninstaller.',
     action: 'Close AionUi, restart Windows if needed, then run this installer again.',
     diagnostics:
       'scenario=uninstaller-copy-or-rebuild-failed phase=uninstaller-repair result=copy-failed-retry-bundled-missing',
@@ -30,7 +30,7 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'old-uninstall-failed',
     defineName: 'AIONUI_E_OLD_UNINSTALL_FAILED',
     code: 'E1002',
-    message: 'The previous AionUi uninstaller returned an error.',
+    message: 'The previous Aelix Studio uninstaller returned an error.',
     action:
       'Close any program using the install folder, then run this installer again. If no program is listed, restart Windows and run this installer again.',
     diagnostics: 'scenario=old-uninstall-failed phase=old-uninstaller exitCode=2',
@@ -39,23 +39,23 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'install-dir-remove-or-locked',
     defineName: 'AIONUI_E_INSTALL_DIR_REMOVE_OR_LOCKED',
     code: 'E1003',
-    message: 'AionUi could not remove or replace the previous installation directory.',
-    action: 'Close AionUi and any program using the install folder, then run this installer again.',
+    message: 'Aelix Studio could not remove or replace the previous installation directory.',
+    action: 'Close Aelix Studio and any program using the install folder, then run this installer again.',
     diagnostics: 'scenario=install-dir-remove-or-locked phase=atomic-failed failedPath=install-dir',
   },
   {
     id: 'extract-failed',
     defineName: 'AIONUI_E_EXTRACT_FAILED',
     code: 'E1010',
-    message: 'AionUi could not extract the application files correctly.',
+    message: 'Aelix Studio could not extract the application files correctly.',
     action: 'Download a fresh installer and run it again.',
-    diagnostics: 'scenario=extract-failed phase=extract method=zip missing=AionUi.exe',
+    diagnostics: 'scenario=extract-failed phase=extract method=zip missing=Aelix Studio.exe',
   },
   {
     id: 'disk-insufficient',
     defineName: 'AIONUI_E_DISK_INSUFFICIENT',
     code: 'E1020',
-    message: 'AionUi cannot continue because the target disk does not have enough free space.',
+    message: 'Aelix Studio cannot continue because the target disk does not have enough free space.',
     action: 'Free disk space on the target drive, then run this installer again.',
     diagnostics: 'scenario=disk-insufficient phase=preflight requiredMb=1024 availableMb=0',
   },
@@ -63,7 +63,7 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'bundled-aioncore-incomplete',
     defineName: 'AIONUI_E_BUNDLED_AIONCORE_INCOMPLETE',
     code: 'E1030',
-    message: 'AionUi installed, but the bundled AionCore resources are incomplete.',
+    message: 'Aelix Studio installed, but the bundled AionCore resources are incomplete.',
     action: 'Download a fresh installer and run it again.',
     diagnostics: 'scenario=bundled-aioncore-incomplete phase=verify-bundled-aioncore runtime=win32-x64 result=1',
   },
@@ -71,8 +71,8 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'core-app-files-incomplete',
     defineName: 'AIONUI_E_CORE_APP_FILES_INCOMPLETE',
     code: 'E1031',
-    message: 'AionUi installation is incomplete because a required application file is missing.',
-    action: 'Reinstall AionUi or download a newer installer.',
+    message: 'Aelix Studio installation is incomplete because a required application file is missing.',
+    action: 'Reinstall Aelix Studio or download a newer installer.',
     diagnostics: 'scenario=core-app-files-incomplete phase=verify-required-file missing=resources/app.asar',
   },
   {
@@ -80,14 +80,14 @@ const INSTALLER_ERROR_SCENARIOS = [
     defineName: 'AIONUI_E_ARCH_MISMATCH',
     code: 'E1040',
     message: 'Installation package architecture mismatch.',
-    action: 'Download the AionUi installer that matches this Windows architecture, then run it again.',
+    action: 'Download the Aelix Studio installer that matches this Windows architecture, then run it again.',
     diagnostics: 'scenario=arch-mismatch phase=arch-check target=x64 actual=arm64',
   },
   {
     id: 'active-installer-conflict',
     defineName: 'AIONUI_E_ACTIVE_INSTALLER_CONFLICT',
     code: 'E1050',
-    message: 'Another AionUi installer appears to still be active.',
+    message: 'Another Aelix Studio installer appears to still be active.',
     action: 'Close the other installer window or wait for it to finish, then run this installer again.',
     diagnostics: 'scenario=active-installer-conflict phase=active-installer-marker state=active',
   },
@@ -95,15 +95,15 @@ const INSTALLER_ERROR_SCENARIOS = [
     id: 'registry-state-invalid',
     defineName: 'AIONUI_E_REGISTRY_STATE_INVALID',
     code: 'E1060',
-    message: 'AionUi found an invalid previous-install registry state.',
-    action: 'Uninstall the old AionUi from Windows Settings, then run this installer again.',
+    message: 'Aelix Studio found an invalid previous-install registry state.',
+    action: 'Uninstall the old Aelix Studio from Windows Settings, then run this installer again.',
     diagnostics: 'scenario=registry-state-invalid phase=registry-heal installLocation=invalid uninstallString=missing',
   },
   {
     id: 'active-marker-write-failed',
     defineName: 'AIONUI_E_ACTIVE_MARKER_WRITE_FAILED',
     code: 'E1070',
-    message: 'AionUi could not write the active-installer marker.',
+    message: 'Aelix Studio could not write the active-installer marker.',
     action: 'Restart Windows, then run this installer again.',
     diagnostics: 'scenario=active-marker-write-failed phase=active-installer-marker-write result=failed',
   },
@@ -314,7 +314,7 @@ function Find-FailureWindow([string]$Code, [int]$TimeoutSec = 90) {
     $windows = $root.FindAll([System.Windows.Automation.TreeScope]::Children, $windowCond)
     foreach ($window in $windows) {
       $text = Get-WindowText $window
-      if ($text -like "*AionUi installation failed ($Code)*" -or
+      if ($text -like "*Aelix Studio installation failed ($Code)*" -or
           ($text -like "*($Code)*" -and $text -like '*Send this installer failure report*')) {
         return [ordered]@{ window = $window; text = $text; title = $window.Current.Name }
       }
@@ -329,7 +329,7 @@ $proc = Start-Process -FilePath $ExePath -PassThru
 try {
   $failure = Find-FailureWindow $Code
   foreach ($required in @(
-    "AionUi installation failed ($Code)",
+    "Aelix Studio installation failed ($Code)",
     "scenario=$ScenarioId",
     'Suggested action:',
     'Diagnostics:',
@@ -381,7 +381,7 @@ function createHarnessNsi({ exePath, logPath, projectRoot, scenario }) {
   const detail = `${scenario.diagnostics} smoke=messagebox`;
   return `
 Unicode true
-Name "AionUi Failure MessageBox Smoke"
+Name "Aelix Studio Failure MessageBox Smoke"
 OutFile "${nsisQuote(exePath)}"
 RequestExecutionLevel user
 SilentInstall normal
@@ -460,7 +460,7 @@ function runHarness({ autoDecline, compileOnly, makensis, scenario }) {
     `aionui-installer-messagebox-smoke-${code}-${new Date().toISOString().replace(/[-:]/g, '').replace(/\..+$/, '').replace('T', '-')}-log.jsonl`
   );
   const automationPath = path.join(root, 'auto-decline.ps1');
-  const reportStatusPath = path.join(process.env.TEMP || tmpdir(), 'aionui-installer-report.json');
+  const reportStatusPath = path.join(process.env.TEMP || tmpdir(), 'aelix-studio-installer-report.json');
 
   copyHarnessProject(projectRoot);
   writeAutoDeclineScript(automationPath);
@@ -520,7 +520,10 @@ function runHarness({ autoDecline, compileOnly, makensis, scenario }) {
         if (status.status !== 'skipped' || status.reason !== 'empty-dsn') {
           throw new Error(`unexpected report status for ${code}: ${JSON.stringify(status)}`);
         }
-        if (typeof status.copyText !== 'string' || !status.copyText.includes(`AionUi installer failure ${code}`)) {
+        if (
+          typeof status.copyText !== 'string' ||
+          !status.copyText.includes(`Aelix Studio installer failure ${code}`)
+        ) {
           throw new Error(`report copyText missing support payload for ${code}`);
         }
       }

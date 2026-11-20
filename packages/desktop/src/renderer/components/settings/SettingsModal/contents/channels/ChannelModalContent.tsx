@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { getStudioWebUILocalUrl } from '@aionui/web-host/webui-defaults';
+import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import type { IChannelPluginStatus } from '@/common/types/channel/channel';
 import type { IProvider, TProviderWithModel } from '@/common/config/storage';
 import { channel, webui, type IWebUIStatus } from '@/common/adapter/ipcBridge';
@@ -619,7 +621,7 @@ const ChannelModalContent: React.FC = () => {
       const callbackPath = '/ext-wecom-bot/webhook';
       const localCallbackUrl = webuiStatus?.localUrl
         ? `${webuiStatus.localUrl}${callbackPath}`
-        : `http://localhost:25808${callbackPath}`;
+        : `${getStudioWebUILocalUrl(WEBUI_DEFAULT_PORT)}${callbackPath}`;
       const lanCallbackUrl = webuiStatus?.networkUrl ? `${webuiStatus.networkUrl}${callbackPath}` : null;
       const publicBaseUrl =
         typeof values.publicBaseUrl === 'string' ? values.publicBaseUrl.trim().replace(/\/+$/, '') : '';
@@ -731,7 +733,7 @@ const ChannelModalContent: React.FC = () => {
     const telegramChannel: ChannelConfig = {
       id: 'telegram',
       title: t('settings.channels.telegramTitle', 'Telegram'),
-      description: t('settings.channels.telegramDesc', 'Chat with AionUi assistant via Telegram'),
+      description: t('settings.channels.telegramDesc', 'Chat with Aelix Studio assistant via Telegram'),
       status: 'active',
       enabled: pluginStatus?.enabled || false,
       disabled: enableLoading,
@@ -753,7 +755,7 @@ const ChannelModalContent: React.FC = () => {
     const slackChannel: ChannelConfig = {
       id: 'slack',
       title: t('settings.channels.slackTitle', 'Slack'),
-      description: t('settings.channels.slackDesc', 'Chat with AionUi assistant via Slack'),
+      description: t('settings.channels.slackDesc', 'Chat with Aelix Studio assistant via Slack'),
       status: 'active',
       enabled: slackPluginStatus?.enabled || false,
       disabled: slackEnableLoading,
@@ -775,7 +777,7 @@ const ChannelModalContent: React.FC = () => {
     const discordChannel: ChannelConfig = {
       id: 'discord',
       title: t('settings.channels.discordTitle', 'Discord'),
-      description: t('settings.channels.discordDesc', 'Chat with AionUi assistant via Discord'),
+      description: t('settings.channels.discordDesc', 'Chat with Aelix Studio assistant via Discord'),
       status: 'active',
       enabled: discordPluginStatus?.enabled || false,
       disabled: discordEnableLoading,
@@ -797,7 +799,7 @@ const ChannelModalContent: React.FC = () => {
     const larkChannel: ChannelConfig = {
       id: 'lark',
       title: t('settings.channels.larkTitle', 'Lark / Feishu'),
-      description: t('settings.channels.larkDesc', 'Chat with AionUi assistant via Lark or Feishu'),
+      description: t('settings.channels.larkDesc', 'Chat with Aelix Studio assistant via Lark or Feishu'),
       status: 'active',
       enabled: larkPluginStatus?.enabled || false,
       disabled: larkEnableLoading,
@@ -815,7 +817,7 @@ const ChannelModalContent: React.FC = () => {
     const dingtalkChannel: ChannelConfig = {
       id: 'dingtalk',
       title: t('settings.channels.dingtalkTitle', 'DingTalk'),
-      description: t('settings.channels.dingtalkDesc', 'Chat with AionUi assistant via DingTalk'),
+      description: t('settings.channels.dingtalkDesc', 'Chat with Aelix Studio assistant via DingTalk'),
       status: 'active',
       enabled: dingtalkPluginStatus?.enabled || false,
       disabled: dingtalkEnableLoading,
@@ -833,7 +835,7 @@ const ChannelModalContent: React.FC = () => {
     const weixinChannel: ChannelConfig = {
       id: 'weixin',
       title: t('settings.channels.weixinTitle', 'WeChat'),
-      description: t('settings.channels.weixinDesc', 'Chat with AionUi assistant via WeChat'),
+      description: t('settings.channels.weixinDesc', 'Chat with Aelix Studio assistant via WeChat'),
       status: 'active',
       enabled: weixinPluginStatus?.enabled || false,
       disabled: weixinEnableLoading,
@@ -851,7 +853,7 @@ const ChannelModalContent: React.FC = () => {
     const wecomChannel: ChannelConfig = {
       id: 'wecom',
       title: t('settings.channels.wecomTitle', 'WeCom'),
-      description: t('settings.channels.wecomDesc', 'Chat with AionUi assistant via WeCom (Enterprise WeChat)'),
+      description: t('settings.channels.wecomDesc', 'Chat with Aelix Studio assistant via WeCom (Enterprise WeChat)'),
       status: 'coming_soon' as const,
       enabled: false,
       disabled: true,
@@ -939,7 +941,7 @@ const ChannelModalContent: React.FC = () => {
     return undefined;
   };
   const channelGuideText = t('settings.webui.featureChannelsDesc', {
-    defaultValue: 'Connect Telegram, Lark, and DingTalk to interact with AionUi from IM apps.',
+    defaultValue: 'Connect Telegram, Lark, and DingTalk to interact with Aelix Studio from IM apps.',
   });
   const channelSetupSteps = [
     t('settings.channels.selectFirst', {

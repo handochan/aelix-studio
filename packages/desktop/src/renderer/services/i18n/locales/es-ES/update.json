@@ -29,7 +29,7 @@
   "errorTitle": "Error en la actualización",
   "installerLastFailure": {
     "title": "La última actualización no terminó",
-    "description": "AionUi no se pudo cerrar durante la actualización silenciosa anterior. Puedes reintentar la actualización, ver el registro del instalador o enviar comentarios.",
+    "description": "Aelix Studio no se pudo cerrar durante la actualización silenciosa anterior. Puedes reintentar la actualización, ver el registro del instalador o enviar comentarios.",
     "retryUpdate": "Reintentar actualización",
     "viewLog": "Ver registro"
   },

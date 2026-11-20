@@ -1,8 +1,4 @@
-// Bumped from v1: the v1 networkFirst fallback returned OFFLINE_PAGE_URL
-// (index.html) for failed script requests, causing "module script MIME text/html"
-// errors when the server was down or served a different asset hash. The v2
-// activate handler deletes v1, flushing any poisoned cached entries.
-const CACHE_NAME = 'aionui-webui-v2';
+const CACHE_NAME = 'aelix-studio-webui-v1';
 const NON_CACHEABLE_PATHS = new Set(['/qr-login']);
 const OFFLINE_PAGE_URL = new URL('./index.html', self.location.href).toString();
 const PRECACHE_URLS = [
@@ -29,7 +25,7 @@ self.addEventListener('activate', (event) => {
       .then((keys) =>
         Promise.all(
           keys.map((key) => {
-            if (key === CACHE_NAME) {
+            if (key === CACHE_NAME || !key.startsWith('aelix-studio-webui-')) {
               return Promise.resolve();
             }
             return caches.delete(key);

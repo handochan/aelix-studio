@@ -43,7 +43,11 @@ async function main() {
   ]) {
     fs.mkdirSync(environment[key], { recursive: true });
   }
-  const config = path.join(environment.XDG_CONFIG_HOME, 'AionUi/config/aionui-config.txt');
+  const profile = path.join(environment.XDG_CONFIG_HOME, 'Aelix Studio');
+  const upstreamProfile = path.join(environment.XDG_CONFIG_HOME, 'AionUi');
+  fs.mkdirSync(upstreamProfile);
+  fs.writeFileSync(path.join(upstreamProfile, 'sentinel'), 'upstream');
+  const config = path.join(profile, 'config/aionui-config.txt');
   fs.mkdirSync(path.dirname(config), { recursive: true });
   fs.writeFileSync(
     config,
@@ -60,9 +64,20 @@ async function main() {
   let app;
   try {
     app = await electron.launch({ executablePath, args: [], cwd: root, env: environment, timeout: 60000 });
+    const paths = await app.evaluate(({ app }) => ({
+      name: app.getName(),
+      userData: app.getPath('userData'),
+      logs: app.getPath('logs'),
+    }));
+    assert.deepEqual(paths, { name: 'Aelix Studio', userData: profile, logs: path.join(profile, 'logs') });
     const page = await app.firstWindow();
     await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
     await expect(page.getByTestId('guid-send-btn')).toBeVisible({ timeout: 30000 });
+    await expect(page).toHaveTitle('Aelix Studio');
+    assert.deepEqual(fs.readdirSync(upstreamProfile), ['sentinel']);
+    assert.equal(fs.readFileSync(path.join(upstreamProfile, 'sentinel'), 'utf8'), 'upstream');
+    assert.ok(fs.readdirSync(paths.logs, { recursive: true }).some((entry) => String(entry).endsWith('.log')));
+    report.studioProfile = true;
     // Covers the old 3-second update and 30-second startup-log timers.
     await page.waitForTimeout(report.observationMs);
     report.status = 'passed';

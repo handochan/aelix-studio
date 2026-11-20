@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import wordmarkDark from '@renderer/assets/logos/brand/wordmark-dark.svg';
+import wordmarkLight from '@renderer/assets/logos/brand/wordmark-light.svg';
 import { Divider, Typography, Button, Switch, Message } from '@arco-design/web-react';
 import { Github, Right } from '@icon-park/react';
 import React, { useEffect, useState } from 'react';
@@ -134,7 +136,7 @@ const AboutModalContent: React.FC = () => {
   const linkItems: LinkItem[] = [
     {
       title: t('settings.helpDocumentation'),
-      url: 'https://github.com/iOfficeAI/AionUi/wiki',
+      url: 'https://github.com/handochan/aelix-studio/tree/main/docs/studio-preview',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
@@ -149,12 +151,12 @@ const AboutModalContent: React.FC = () => {
     },
     {
       title: t('settings.contactMe'),
-      url: 'https://x.com/WailiVery',
+      url: 'https://github.com/handochan/aelix-studio/issues',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
     {
       title: t('settings.officialWebsite'),
-      url: 'https://www.aionui.com',
+      url: 'https://github.com/handochan/aelix-studio',
       icon: <Right theme='outline' size='16' className='rtl-mirror' />,
     },
   ];
@@ -171,8 +173,10 @@ const AboutModalContent: React.FC = () => {
         <div className='flex flex-col max-w-500px mx-auto'>
           {/* App Info Section */}
           <div className='flex flex-col items-center pb-24px'>
+            <img src={wordmarkLight} alt='' className='mb-8px w-112px dark:hidden' />
+            <img src={wordmarkDark} alt='' className='mb-8px hidden w-112px dark:block' />
             <Typography.Title heading={3} className='text-24px font-bold text-t-primary mb-8px'>
-              AionUi
+              {t('login.brand')}
             </Typography.Title>
             <Typography.Text className='text-14px text-t-secondary mb-12px text-center'>
               {t('settings.appDescription')}
@@ -184,7 +188,7 @@ const AboutModalContent: React.FC = () => {
               <div
                 className='text-t-primary cursor-pointer hover:text-t-secondary transition-colors p-4px'
                 onClick={() =>
-                  openLink('https://github.com/iOfficeAI/AionUi').catch((error) =>
+                  openLink('https://github.com/handochan/aelix-studio').catch((error) =>
                     console.error('Failed to open link:', error)
                   )
                 }

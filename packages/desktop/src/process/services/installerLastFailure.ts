@@ -7,6 +7,7 @@
 import type { InstallerLastFailureMarker } from '@/common/update/updateTypes';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { APP_NAME } from '@/common/config/appIdentity';
 
 export const INSTALLER_LAST_FAILURE_FILE_NAME = 'installer-last-failure.json';
 
@@ -18,7 +19,7 @@ type ConsumeOptions = {
 const isString = (value: unknown): value is string => typeof value === 'string' && value.trim().length > 0;
 
 export function getInstallerLastFailureMarkerPath(appDataDir: string): string {
-  return path.join(appDataDir, 'AionUi', INSTALLER_LAST_FAILURE_FILE_NAME);
+  return path.join(appDataDir, APP_NAME, INSTALLER_LAST_FAILURE_FILE_NAME);
 }
 
 export function parseInstallerLastFailureMarker(raw: unknown): InstallerLastFailureMarker | null {

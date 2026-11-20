@@ -6,6 +6,7 @@ import os, { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
+import { CookieJar } from 'jsdom';
 import { startWebHost } from '../src/index.js';
 import { startStaticServer, type StaticServerHandle } from '../src/static-server.js';
 
@@ -29,13 +30,16 @@ async function mkRendererFixture(): Promise<string> {
 }
 
 async function startMockBackend(
-  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void
+  handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
+  port = 0
 ): Promise<{ port: number; close: () => Promise<void> }> {
   const server = http.createServer(handler);
-  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', () => resolve()));
-  const port = (server.address() as AddressInfo).port;
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(port, '127.0.0.1', () => resolve());
+  });
   return {
-    port,
+    port: (server.address() as AddressInfo).port,
     close: () => new Promise<void>((r) => server.close(() => r())),
   };
 }
@@ -87,6 +91,200 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const text = await r.text();
     expect(text).toContain('<title>root</title>');
+  });
+
+  it('runs at the Studio default while upstream occupies 25808, and rejects the upstream browser origin', async () => {
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', undefined);
+    const upstream = await startMockBackend((_req, res) => res.end('upstream fixture'), 25808);
+    const backend = await startMockBackend((req, res) => {
+      res.writeHead(req.headers.cookie === 'aionui-session=studio-cookie' ? 200 : 401).end();
+    });
+    stopBackend = backend.close;
+    try {
+      handle = await startStaticServer({ staticDir, backendPort: backend.port });
+      expect(handle.localUrl).toBe('http://[::1]:25982');
+      expect(await (await fetch('http://127.0.0.1:25808')).text()).toBe('upstream fixture');
+      expect(await (await fetch(handle.localUrl)).text()).toContain('<title>root</title>');
+      const login = (origin: string, cookie: string) =>
+        requestStatus(handle!.port, '/login', {
+          method: 'POST',
+          headers: { host: new URL(handle!.localUrl).host, origin, cookie, 'sec-fetch-site': 'same-origin' },
+        });
+      expect(await login('http://127.0.0.1:25808', 'aelix-studio-session=studio-cookie')).toBe(403);
+      expect(await login(handle.localUrl, 'aionui-session=studio-cookie')).toBe(401);
+      expect(await login(handle.localUrl, 'aelix-studio-session=studio-cookie')).toBe(200);
+    } finally {
+      await upstream.close();
+    }
+  });
+
+  it('separates login, refresh and logout cookies even in one browser cookie jar', async () => {
+    const legacy = (value: string, expire = false) => [
+      'aionui-session=' + value + '; Path=/; HttpOnly; SameSite=Lax' + (expire ? '; Max-Age=0' : ''),
+      'aionui-refresh=' + value + '; Path=/api/auth/refresh; HttpOnly; SameSite=Lax' + (expire ? '; Max-Age=0' : ''),
+    ];
+    const heard: (string | undefined)[] = [];
+    const backend = await startMockBackend((req, res) => {
+      heard.push(req.headers.cookie);
+      res
+        .writeHead(200, {
+          'set-cookie': legacy(req.url === '/api/auth/refresh' ? 'rotated' : 'studio', req.url === '/logout'),
+        })
+        .end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const studio = handle.localUrl;
+    const upstream = 'http://127.0.0.1:25808';
+    const jar = new CookieJar();
+    for (const cookie of legacy('upstream')) await jar.setCookie(cookie, upstream + '/login');
+    const send = async (pathname: string) => {
+      const url = studio + pathname;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { origin: studio, cookie: await jar.getCookieString(url) },
+      });
+      expect(response.status).toBe(200);
+      for (const cookie of response.headers.getSetCookie()) await jar.setCookie(cookie, url);
+    };
+    await send('/login');
+    expect(await jar.getCookieString(studio + '/api/auth/user')).toBe('aelix-studio-session=studio');
+    expect(await jar.getCookieString(studio + '/api/auth/refresh', { http: false })).toBe('');
+    expect(await jar.getCookieString(upstream + '/api/auth/refresh')).toBe(
+      'aionui-refresh=upstream; aionui-session=upstream'
+    );
+    await send('/api/auth/refresh');
+    expect(await jar.getCookieString(studio + '/api/auth/user')).toBe('aelix-studio-session=rotated');
+    await send('/logout');
+    expect(await jar.getCookieString(studio + '/api/auth/refresh')).toBe('');
+    expect(await jar.getCookieString(upstream + '/api/auth/refresh')).toBe(
+      'aionui-refresh=upstream; aionui-session=upstream'
+    );
+    expect(heard).toEqual([undefined, 'aionui-session=studio; aionui-refresh=studio', 'aionui-session=rotated']);
+  });
+
+  it('redirects shared loopback navigation and withholds auth cookies on its raw alias', async () => {
+    let backendCookie: string | undefined;
+    const backend = await startMockBackend((req, res) => {
+      backendCookie = req.headers.cookie;
+      res.writeHead(200, { 'set-cookie': 'aionui-session=synthetic; Path=/; HttpOnly' }).end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const alias = 'http://127.0.0.1:' + handle.port;
+    const page = await fetch(alias + '/login', { headers: { accept: 'text/html' }, redirect: 'manual' });
+    expect(page.headers.get('location')).toBe(handle.localUrl + '/login');
+    const raw = await fetch(alias + '/login', {
+      method: 'POST',
+      headers: { origin: alias, cookie: 'aionui-session=foreign; aelix-studio-session=forged' },
+    });
+    expect(raw.headers.getSetCookie()).toEqual([]);
+    expect(backendCookie).toBeUndefined();
+  });
+
+  it('keeps a configured localhost proxy on its own authority for navigation and login', async () => {
+    const origin = 'http://localhost:28443';
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', origin);
+    const backend = await startMockBackend((_req, res) => {
+      res.writeHead(200, { 'set-cookie': 'aionui-session=proxy-session; Path=/; HttpOnly' }).end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const host = new URL(origin).host;
+    const response = (method: string, path: string) =>
+      new Promise<{ status?: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+        const req = http.request(
+          { host: '127.0.0.1', port: handle!.port, path, method, headers: { host, origin, accept: 'text/html' } },
+          (res) => {
+            res.resume();
+            resolve({ status: res.statusCode, headers: res.headers });
+          }
+        );
+        req.once('error', reject).end();
+      });
+    const home = await response('GET', '/');
+    expect(home.status).toBe(200);
+    expect(home.headers.location).toBeUndefined();
+    const login = await response('POST', '/login');
+    expect(login.headers['set-cookie']).toEqual(['aelix-studio-session=proxy-session; Path=/; HttpOnly; SameSite=Lax']);
+  });
+
+  it('keeps IPv4 WebUI usable if the same IPv6 loopback port is occupied', async () => {
+    const occupied = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupied.once('error', reject);
+      occupied.listen({ host: '::1', port: 0, ipv6Only: true }, resolve);
+    });
+    try {
+      const backend = await startMockBackend((req, res) => {
+        res.writeHead(200, { 'set-cookie': 'aionui-session=fallback; Path=/; HttpOnly' }).end(req.headers.cookie);
+      });
+      stopBackend = backend.close;
+      const port = (occupied.address() as AddressInfo).port;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port });
+      expect(handle.localUrl).toBe('http://127.0.0.1:' + port);
+      const login = await fetch(handle.localUrl + '/login', {
+        method: 'POST',
+        headers: { origin: handle.localUrl, cookie: 'aionui-session=foreign; aelix-studio-session=studio' },
+      });
+      expect(await login.text()).toBe('aionui-session=studio');
+      expect(login.headers.getSetCookie()[0]).toContain('aelix-studio-session=fallback');
+    } finally {
+      await new Promise<void>((resolve) => occupied.close(() => resolve()));
+    }
+  });
+
+  it('applies secure HTTPS attributes only for the configured origin and drops Domain', async () => {
+    const origin = 'https://studio.example.test';
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', origin);
+    const backend = await startMockBackend((_req, res) => {
+      res
+        .writeHead(200, {
+          'set-cookie': [
+            'aionui-session=session; Domain=example.test; Path=/other; Max-Age=30',
+            'aionui-csrf-token=csrf; Domain=example.test; Path=/; HttpOnly',
+            'aionui-refresh=refresh; Path=/; HttpOnly; Max-Age=0',
+          ],
+        })
+        .end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    expect(
+      await requestStatus(handle.port, '/login', {
+        method: 'POST',
+        headers: { host: 'studio.example.test:' + handle.port, origin },
+      })
+    ).toBe(403);
+    // Hit the listener while simulating the exact authority a configured HTTPS proxy preserves.
+    const raw = await new Promise<string[] | undefined>((resolve, reject) => {
+      const req = http.request(
+        {
+          host: '127.0.0.1',
+          port: handle!.port,
+          path: '/login',
+          method: 'POST',
+          headers: { host: 'studio.example.test', origin },
+        },
+        (res) => {
+          res.resume();
+          resolve(res.headers['set-cookie']);
+        }
+      );
+      req.once('error', reject).end();
+    });
+    expect(raw).toEqual([
+      'aelix-studio-session=session; Path=/; HttpOnly; SameSite=Strict; Secure; Max-Age=30',
+      'aelix-studio-csrf-token=csrf; Path=/; SameSite=Strict; Secure',
+      'aelix-studio-refresh=refresh; Path=/api/auth/refresh; HttpOnly; SameSite=Strict; Secure; Max-Age=0',
+    ]);
+    const spoof = await fetch(handle.localUrl + '/login', {
+      method: 'POST',
+      headers: { origin: handle.localUrl, 'x-forwarded-proto': 'https' },
+    });
+    expect(spoof.headers.getSetCookie()[0]).toBe(
+      'aelix-studio-session=session; Path=/; HttpOnly; SameSite=Lax; Max-Age=30'
+    );
   });
 
   it('SPA fallback: /chat/123 returns index.html', async () => {
@@ -160,9 +358,9 @@ describe('static-server', () => {
       }
     );
 
-    it('rejects bracketed IPv6 at the IPv4 listener port', async () => {
+    it('rejects non-loopback IPv6 authorities', async () => {
       const { port } = handle!;
-      expect(await requestStatus(port, '/', { headers: { host: '[::1]:' + port } })).toBe(403);
+      expect(await requestStatus(port, '/', { headers: { host: '[2001:db8::1]:' + port } })).toBe(403);
     });
 
     it('rejects mixing two individually allowed authorities', async () => {
@@ -193,7 +391,10 @@ describe('static-server', () => {
     it('handles same-origin OPTIONS locally', async () => {
       const server = handle!;
       expect(
-        await requestStatus(server.port, '/api/anything', { method: 'OPTIONS', headers: { origin: server.localUrl } })
+        await requestStatus(server.port, '/api/anything', {
+          method: 'OPTIONS',
+          headers: { host: new URL(server.localUrl).host, origin: server.localUrl },
+        })
       ).toBe(204);
       expect(backendRequests).toBe(0);
     });
@@ -304,7 +505,7 @@ describe('static-server', () => {
       body: JSON.stringify({ username: 'admin', password: 'anything' }),
     });
     expect(r.status).toBe(200);
-    expect(r.headers.get('set-cookie')).toMatch(/aionui-session=backend-token/);
+    expect(r.headers.get('set-cookie')).toMatch(/aelix-studio-session=backend-token; Path=\/; HttpOnly; SameSite=Lax/);
     const json = (await r.json()) as { proxied: boolean };
     expect(json.proxied).toBe(true);
   });
@@ -342,7 +543,10 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
 
-    const r = await fetch(`${handle.localUrl}/logout`, { method: 'POST', headers: { origin: handle.localUrl } });
+    const r = await fetch(`${handle.localUrl}/logout`, {
+      method: 'POST',
+      headers: { origin: handle.localUrl },
+    });
     expect(r.status).toBe(200);
     expect(r.headers.get('set-cookie')).toMatch(/Max-Age=0/);
   });
@@ -408,6 +612,7 @@ describe('static-server', () => {
     }
 
     let backendUpgrades = 0;
+    let upgradeCookie: string | undefined;
     let upgradeCredential: string | string[] | undefined;
 
     beforeEach(async () => {
@@ -418,6 +623,7 @@ describe('static-server', () => {
       server.on('upgrade', (req, socket) => {
         backendUpgrades += 1;
         upgradeCredential = req.headers['x-aionui-studio-auth'];
+        upgradeCookie = req.headers.cookie;
         upstreamSockets.add(socket);
         socket.once('close', () => upstreamSockets.delete(socket));
         socket.once('error', () => socket.destroy());
@@ -451,6 +657,18 @@ describe('static-server', () => {
       ).toContain(' 101 ');
       expect(backendUpgrades).toBe(1);
       expect(upgradeCredential).toBeUndefined();
+    });
+
+    it('maps Studio session cookies and drops foreign and off-path refresh cookies', async () => {
+      const headers = { Host: new URL(handle!.localUrl).host, Origin: handle!.localUrl };
+      expect(
+        await upgrade('/ws', { ...headers, Cookie: 'aionui-session=foreign; aelix-studio-refresh=off-path' })
+      ).toContain(' 101 ');
+      expect(upgradeCookie).toBeUndefined();
+      expect(
+        await upgrade('/ws', { ...headers, Cookie: 'aionui-session=foreign; aelix-studio-session=studio' })
+      ).toContain(' 101 ');
+      expect(upgradeCookie).toBe('aionui-session=studio');
     });
 
     it.each(paths)('relays the first server frame and a round trip for %s', async (path) => {
@@ -557,6 +775,7 @@ describe('static-server', () => {
           method: 'POST',
           path: '/api/fs/upload',
           headers: {
+            host: new URL(handle!.localUrl).host,
             origin: handle!.localUrl,
             'content-type': 'application/octet-stream',
             'content-length': BODY_LEN,

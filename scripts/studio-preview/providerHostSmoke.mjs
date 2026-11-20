@@ -381,7 +381,11 @@ try {
     .map((value) => value.split(';')[0])
     .join('; ');
   assert.ok(cookie.length > 0);
-  const status = await fetch(route, { method: 'POST', headers: { ...headers, cookie }, body: '{"action":"catalog"}' });
+  const status = await fetch(route, {
+    method: 'POST',
+    headers: { ...headers, cookie },
+    body: '{"action":"catalog"}',
+  });
   assert.equal(status.status, 200);
   const nativeStatus = await status.json();
   assert.equal(nativeStatus.ok, true);

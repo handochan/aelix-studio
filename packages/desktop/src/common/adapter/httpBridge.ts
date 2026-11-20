@@ -6,6 +6,7 @@
  * so existing renderer code works without changes.
  */
 
+import { STUDIO_CSRF_COOKIE_NAME } from '@aionui/web-host/webui-cookies';
 import { fetchFromDesktopOrBrowser } from './desktopBackendFetch';
 import { refreshSession, WS_CLOSE_POLICY_VIOLATION } from './sessionRefresh';
 
@@ -185,23 +186,15 @@ function isAuthEndpoint(path: string): boolean {
   return path.startsWith(REFRESH_ENDPOINT) || path === '/login' || path === '/logout';
 }
 
-/**
- * Resolve the Core CSRF double-submit token for the current context.
- *
- * The open-source WebUI removed its CSRF layer with the legacy webserver (M6);
- * a double-submit scheme is slated to return in M7. Until then this is a stub
- * that reports "no token available", so the shared session-refresh primitive
- * (`sessionRefresh.ts`) attaches no `x-csrf-token` header and the backend —
- * which enforces no CSRF check here — accepts the request unchanged.
- *
- * It exists as the single seam every state-changing request would call for its
- * token, so restoring CSRF in M7 (and the aionpro superset, whose backend does
- * enforce the double-submit check) only swaps this body — no caller changes.
- *
- * Returns '' — always, for now.
- */
+/** Read the browser-visible Studio token used for the host's double-submit check. */
 export function resolveCoreCsrfToken(): string {
-  return '';
+  if (!isWebUiBrowserMode()) return '';
+  const prefix = STUDIO_CSRF_COOKIE_NAME + '=';
+  const candidates = document.cookie
+    .split(';')
+    .map((field) => field.trim())
+    .filter((field) => field.startsWith(prefix));
+  return candidates.length === 1 ? candidates[0].slice(prefix.length) : '';
 }
 
 function sendHttpRequest(
