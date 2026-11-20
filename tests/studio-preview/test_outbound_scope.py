@@ -30,6 +30,15 @@ CLONE_RESTART = CLONE_CALL + ' = ? ERESTARTNOINTR (To be restarted)'
 CLONE_FAILED = CLONE_CALL + ' = -1 EAGAIN (Resource temporarily unavailable)'
 
 
+def register_resume(leader):
+    """strace 7.3's unreadable-register resume as printed after this leader.
+
+    tabto() pads ') ' to column 40 from the start of the leader; see
+    RegisterResumePaddingTests for verbatim strace 7.3 output.
+    """
+    return leader + '<... ??? resumed>)' + ' ' * (1 + max(0, 40 - (len(leader) + 19))) + '= ?'
+
+
 def task_capture_fixture():
     return dict(status='captured',complete=True,drained=True,lostEvents=0,pidNamespaceVerified=True,
         namespaceInode=7,eventCount=0,events=[],recordErrors=[],root={'kernelPid':100},
@@ -1095,7 +1104,7 @@ class ScopedParserTests(unittest.TestCase):
                         trace=Path(directory)/'trace'
                         lines=self.base()+['2<host> ???( <unfinished ...>']
                         if signals:lines+=['2<host> --- SIGTERM {si_signo=SIGTERM, si_code=SI_USER} ---']
-                        lines+=['2<host> <... ??? resumed>) = ?', '2<host> '+ending,'1<app> +++ exited with 0 +++']
+                        lines+=[register_resume('2<host> '), '2<host> '+ending,'1<app> +++ exited with 0 +++']
                         trace.write_text('\n'.join(lines)+'\n')
                         if hidden_network:
                             capture['network']['events']=[{'kind':'H','time':10,'pid':2,'tgid':2,
@@ -1831,7 +1840,7 @@ class TaskEvidenceReportTests(unittest.TestCase):
     def test_observed_close_and_register_syntax_survives_existing_resolution_without_contents(self):
         lines=['1<app> execve("/Users/SECRET_TRACE/app", ["SECRET_ARG"], ["SECRET_ENV"]) = 0',
                '1<app> close(7</Users/SECRET_TRACE/file>) = ?',
-               '1<app> ???( <unfinished ...>','1<app> <... ??? resumed>) = ?',
+               '1<app> ???( <unfinished ...>',register_resume('1<app> '),
                '1<app> +++ exited with 0 +++']
         _,report=self.parse(lines,self.fixture());row=self.task(report)
         self.assertEqual((report['unparsedRecords'],report['kernelResolvedRecords'],report['kernelMetadataResolvedRecords']),(0,2,1))
@@ -1867,14 +1876,14 @@ class TaskEvidenceReportTests(unittest.TestCase):
                     self.assertGreater(report['unparsedRecords'],0)
 
     def test_orphan_register_resume_is_not_described_as_a_terminal_delimited_stub(self):
-        _,report=self.parse(['1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++'],self.fixture())
+        _,report=self.parse([register_resume('1<app> '),'1<app> +++ exited with 0 +++'],self.fixture())
         self.assertFalse(self.task(report)['terminalDelimited'])
         self.assertGreater(report['unparsedRecords'],0)
 
     def test_terminal_boundary_does_not_validate_duplicate_resume_or_intervening_syscall(self):
-        for invalid in ('<... ??? resumed>) = ?', 'close(7) = 0'):
+        for invalid in (register_resume('1<app> ')[len('1<app> '):], 'close(7) = 0'):
             with self.subTest(invalid=invalid):
-                _,report=self.parse(['1<app> ???( <unfinished ...>', '1<app> <... ??? resumed>) = ?',
+                _,report=self.parse(['1<app> ???( <unfinished ...>', register_resume('1<app> '),
                     f'1<app> {invalid}', '1<app> +++ exited with 0 +++'],self.fixture())
                 row=self.task(report)
                 self.assertTrue(row['terminalDelimited'])
@@ -1906,7 +1915,7 @@ class TaskEvidenceReportTests(unittest.TestCase):
                 self.assertFalse(any(row['tid']==3 for row in report['taskEvidence']['straceTasks']))
 
     def test_unavailable_kernel_never_creates_zero_network_evidence_for_strace_task(self):
-        _,report=self.parse(['1<app> ???( <unfinished ...>','1<app> <... ??? resumed>) = ?',
+        _,report=self.parse(['1<app> ???( <unfinished ...>',register_resume('1<app> '),
                             '1<app> +++ killed by SIGKILL +++'])
         source=report['taskEvidence']['source']
         self.assertIsNone(source['networkReconciled'])
@@ -1944,7 +1953,7 @@ class TaskEvidenceReportTests(unittest.TestCase):
 
     def test_replacing_diagnostic_payload_cannot_change_any_existing_report_field(self):
         lines=['1<app> close(7) = ?','1<app> ???( <unfinished ...>',
-               '1<app> <... ??? resumed>) = ?','1<app> +++ exited with 0 +++']
+               register_resume('1<app> '),'1<app> +++ exited with 0 +++']
         baseline=self.parse(lines,self.fixture())
         with patch.object(audit.TaskEvidence,'result',return_value={'tasks':[],'forgedEligibility':True}):
             replaced=self.parse(lines,self.fixture())
@@ -1958,3 +1967,230 @@ class TaskEvidenceReportTests(unittest.TestCase):
         report['unparsedRecords']+=1
         report['taskEvidence']={'purpose':'forged','source':{'complete':True},'resolved':True,'tasks':[]}
         tests.assert_no_recapture(report)
+
+
+class RegisterResumePaddingTests(unittest.TestCase):
+    """strace 7.3 pads the unreadable-register resume to column 40 (Issue #59)."""
+
+    # Verbatim strace 7.3 output (v7.3 release archive, the audit's options)
+    # after leaders of 9, 10, 18, 21 and 23 characters.
+    VERBATIM = ('14150<X> <... ??? resumed>)             = ?',
+                '14078<AB> <... ??? resumed>)            = ?',
+                '14054<Compositor> <... ??? resumed>)    = ?',
+                '14111<PerfettoTrace> <... ??? resumed>) = ?',
+                '14021<Chrome_ChildIOT> <... ??? resumed>) = ?')
+    # Verbatim strace 7.3 output for names it escapes: UTF-8 'Compösitor',
+    # 'a<b>c', 'q"\\x', a control byte before '7' (three octal digits) and a tab.
+    VERBATIM_ESCAPED = ('14026<Comp\\303\\266sitor> <... ??? resumed>) = ?',
+                        '14020<a\\74b\\76c> <... ??? resumed>)     = ?',
+                        '14084<q\\"\\\\x> <... ??? resumed>)        = ?',
+                        '14057<d\\0017z> <... ??? resumed>)       = ?',
+                        '14051<tab\\tname> <... ??? resumed>)     = ?')
+    COMPOSITOR = '15423<Compositor> '
+    WRITE = 'write(27</dev/null<char 1:3>>, ""..., 1) = 1'
+    CONNECT = ('connect(30<UDPv6:[5001]>, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), '
+               'inet_pton(AF_INET6, "2001:4860:4860::8888", &sin6_addr), sin6_scope_id=0}, 28) '
+               '= -1 ENETUNREACH (Network is unreachable)')
+
+    def analyze(self, lines, capture):
+        with tempfile.TemporaryDirectory() as directory:
+            trace = Path(directory) / 'trace'
+            trace.write_text('\n'.join(lines) + '\n')
+            return audit.analyze_processes([trace], (), (), True, capture)[1]
+
+    def stub_capture(self, pid):
+        capture = task_capture_fixture()
+        capture['network']['tasks'][1].update(pid=pid, tgid=pid)
+        return capture
+
+    def stub(self, leader, resume, capture=True, ending='+++ exited with 0 +++'):
+        pid = int(leader.split('<')[0])
+        return self.analyze([leader + '???( <unfinished ...>', resume, leader + ending],
+                            self.stub_capture(pid) if capture else None)
+
+    def test_verbatim_strace_resumes_are_exact_register_stubs(self):
+        for line in self.VERBATIM + self.VERBATIM_ESCAPED + (register_resume(self.COMPOSITOR),):
+            leader = line[:line.index('<... ')]
+            with self.subTest(leader=leader):
+                self.assertEqual(register_resume(leader), line)
+                report = self.stub(leader, line)
+                self.assertEqual((report['unparsedRecords'], report['kernelResolvedRecords']), (0, 2))
+                # Parsing never discharges the hole without kernel corroboration.
+                strict = self.stub(leader, line, capture=False, ending='+++ killed by SIGKILL +++')
+                self.assertEqual(strict['classificationIssues'], [])
+                self.assertEqual(strict['processes'][0]['unparsedRecordKinds'], {'register_stub': 2})
+        # Run 44562904164 kept this record as an unknown 25-character resume.
+        self.assertEqual(len(register_resume(self.COMPOSITOR)) - len(self.COMPOSITOR), 25)
+
+    def test_any_other_gap_leader_or_suffix_remains_an_unknown_record(self):
+        head = '<... ??? resumed>)'
+        lines = {'one space after an 18-character leader': self.COMPOSITOR + head + ' = ?',
+                 'three spaces': self.COMPOSITOR + head + '   = ?',
+                 'five spaces': self.COMPOSITOR + head + '     = ?',
+                 'tab': self.COMPOSITOR + head + '\t= ?',
+                 'trailing space': register_resume(self.COMPOSITOR) + ' ',
+                 'unavailable suffix': register_resume(self.COMPOSITOR) + ' <unavailable>',
+                 'unfinished resume': self.COMPOSITOR + '<... ??? resumed> <unfinished ...>)  = ?',
+                 'two-space leader': '15423<Compositor>  ' + head + '   = ?'}
+        for name, line in lines.items():
+            with self.subTest(name=name):
+                report = self.stub(self.COMPOSITOR, line)
+                reasons = {issue['reason'] for issue in report['classificationIssues']}
+                if name != 'unfinished resume':
+                    self.assertIn('unknown_record', reasons)
+                self.assertIn('unknown_unfinished_syscall', reasons)
+                self.assertGreater(report['unparsedRecords'], 0)
+                self.assertEqual(report['kernelResolvedRecords'], 0)
+        # Leaders that strace 7.3 printleader() cannot write, each with the
+        # padding its length would otherwise get.
+        for leader in ('015423<Compositor> ', '007   ', '15423<a<b> ', '15423<q"x> ', '15423<a\\074b> ',
+                       '15423<a\\nb> ', '15423<a\\000b> ', '15423<x\\> ', '15423<ABCDEFGHIJKLMNOP> ',
+                       '15423<Compösitor> ', '15423<> '):
+            with self.subTest(leader=leader):
+                report = self.stub(leader, register_resume(leader))
+                self.assertIn('unknown_record', {issue['reason'] for issue in report['classificationIssues']})
+                self.assertEqual(report['kernelResolvedRecords'], 0)
+
+    def test_leader_without_comm_and_unprefixed_records(self):
+        from outboundScope import PREFIX, is_register_resume
+        # printleader() uses '%-5u' and one space when comm is not decoded.
+        for raw, valid in ((register_resume('7     '), True), (register_resume('7 '), False)):
+            prefix = PREFIX.match(raw)
+            self.assertEqual(is_register_resume(prefix[3], prefix), valid)
+        self.assertFalse(is_register_resume('<... ??? resumed>) = ?', None))
+
+    def ci_replica(self, variant=None):
+        """Shapes preserved by run 44562904164's installed-app report."""
+        from uring.network import SOCKET_HOOKS
+        from uring.rawTrace import coverage
+        from uring.socketProgram import definitions
+        resume = {'single-space': self.COMPOSITOR + '<... ??? resumed>) = ?',
+                  'five-spaces': self.COMPOSITOR + '<... ??? resumed>)     = ?',
+                  'tab': self.COMPOSITOR + '<... ??? resumed>)\t= ?',
+                  'unavailable-suffix': register_resume(self.COMPOSITOR) + ' <unavailable>'}.get(
+                      variant, register_resume(self.COMPOSITOR))
+        child = 'clone(child_stack=NULL, flags=SIGCHLD) = '
+        lines = ['1<app> execve("/owned/app", [...], 0x1 /* 1 var */) = 0',
+                 '1<app> ' + child + '15344<Chrome_ChildIOT>', '1<app> ' + child + '14479<Chrome_ChildIOT>',
+                 '1<app> ' + child + '14798<PerfettoTrace>', '1<app> ' + child + '15423<Compositor>',
+                 '15344<Chrome_ChildIOT> socket(AF_INET6, SOCK_DGRAM|SOCK_CLOEXEC|SOCK_NONBLOCK, IPPROTO_IP) = 30<UDPv6:[5001]>',
+                 '15344<Chrome_ChildIOT> ' + self.CONNECT, '15344<Chrome_ChildIOT> close(30<UDPv6:[5001]>) = 0',
+                 '15344<Chrome_ChildIOT> +++ exited with 0 +++', '14479<Chrome_ChildIOT> ' + self.WRITE,
+                 self.COMPOSITOR + self.WRITE, self.COMPOSITOR + '???( <unfinished ...>',
+                 '14798<PerfettoTrace> ???( <unfinished ...>', resume]
+        if variant == 'resume-then-syscall':
+            lines.append(self.COMPOSITOR + self.WRITE)
+        if variant != 'resume-without-terminal':
+            lines.append(self.COMPOSITOR + '+++ exited with 0 +++')
+        lines += ['14798<PerfettoTrace> +++ exited with 0 +++', '14479<Chrome_ChildIOT> +++ exited with 0 +++',
+                  '1<app> +++ exited with 0 +++']
+
+        def task(pid, kernel, parent, start, end, last):
+            return dict(pid=pid, tgid=pid, kernelPid=kernel, kernelTgid=kernel, parentKernelPid=parent,
+                        start=start, end=end, lastOrdinal=last, kernelThread=False, ioWorker=False)
+
+        def event(kind, time, pid, call, ordinal, value, result=0, **fields):
+            return dict(kind=kind, time=time, pid=pid, tgid=pid, kernelPid=pid + 100000, kernelTgid=pid + 100000,
+                        call=call, ordinal=ordinal, value=value, result=result, **fields)
+
+        hook = SOCKET_HOOKS.index('__ip6_datagram_connect') + 1
+        tasks = [task(100, 100, 0, 1, 1000, 0), task(1, 101, 100, 2, 999, 10)] + [
+            task(pid, pid + 100000, 101, 10, end, last)
+            for pid, end, last in ((15344, 35, 3), (14479, 70, 2), (14798, 70, 1), (15423, 70, 2))]
+        events = [event('P', 20, 15344, 1, 2, 30), event('N', 21, 15344, 1, 2, 30),
+                  event('H', 22, 15344, 1, 2, hook, 10), event('X', 23, 15344, 1, 2, 30, -101),
+                  event('P', 40, 14479, 5, 1, 27), event('N', 41, 14479, 5, 1, 27), event('X', 42, 14479, 5, 1, 27, 1),
+                  event('P', 60, 14479, 5, 2, 27),  # final pre-entry of a killed task: never executed
+                  event('P', 43, 15423, 5, 1, 27), event('N', 44, 15423, 5, 1, 27), event('X', 45, 15423, 5, 1, 27, 1)]
+        if variant == 'final-write-executed':
+            events += [event('N', 61, 14479, 5, 2, 27), event('X', 62, 14479, 5, 2, 27, 1)]
+        if variant == 'final-write-not-last-ordinal':
+            tasks[3]['lastOrdinal'] = 3
+        if variant == 'hidden-socket-hook-in-stub-task':
+            events.append(event('H', 65, 15423, 0, 2, hook, 10))
+        socket = dict(socket=0xdead, generation=15, family=10)
+        objects = [dict(event('B', 15, 15344, 0, 1, 0), fd=0, hook=0, **socket),
+                   dict(event('C', 22, 15344, 1, 2, 0), fd=30, hook=1, **socket)]
+        if variant == 'udp-send':
+            objects.append(dict(event('S', 25, 15344, 5, 3, 0), fd=30, hook=2, **socket))
+        objects += [dict(kind=kind, time=time, pid=0, tgid=0, kernelPid=0, kernelTgid=0, ordinal=0,
+                         call=0, fd=0, hook=0, **socket) for kind, time in (('Q', 30), ('F', 31))]
+        expected = coverage()
+        programs = [dict(prog_id=index + 1, prog_type=kind, recursion_misses=0) for index, kind in enumerate(
+            [26] * expected['tracing'] + [17] * expected['raw'] + [7] * expected['interval'])]
+        if variant == 'kernel-loss':
+            programs[0]['recursion_misses'] = 1
+        capture = dict(status='captured', complete=True, drained=True, lostEvents=0, pidNamespaceVerified=True,
+                       namespaceInode=7, eventCount=0, events=[], recordErrors=[], root={'kernelPid': 100, 'time': 1},
+                       network=dict(complete=True, eventCount=len(events), events=events, workers=[], tasks=tasks),
+                       udpObjects=dict(schema=1, complete=True, eventCount=len(objects), events=objects),
+                       udpProbeLoss=dict(complete=True, mode='raw-tracepoint-and-btf-fentry-fexit',
+                                         hooks=definitions(), coverage=expected, programs=programs))
+        return self.analyze(lines, capture)
+
+    def test_run_44562904164_shapes_pass_with_the_exact_resume(self):
+        report = self.ci_replica()
+        self.assertEqual(report['classificationIssues'], [])
+        self.assertEqual((report['unparsedRecords'], report['externalAttempts'], report['udpConnectOnly']), (0, 0, 1))
+        # Two Compositor and one PerfettoTrace stub records, by existing kernel proof.
+        self.assertEqual((report['kernelResolvedRecords'], report['kernelNotExecutedInvocations']), (3, 1))
+        self.assertEqual(report['kernelNotExecuted'][0]['reason'], 'final_pre_entry_without_kernel_execution')
+
+    def test_run_44562904164_negative_controls_still_fail(self):
+        expected = {'single-space': 'unknown_record', 'five-spaces': 'unknown_record', 'tab': 'unknown_record',
+                    'unavailable-suffix': 'unknown_record', 'resume-then-syscall': 'unknown_unfinished_syscall',
+                    'resume-without-terminal': 'missing_terminal_record',
+                    'final-write-executed': 'kernel_network_strace_entry_missing',
+                    'final-write-not-last-ordinal': 'kernel_network_strace_entry_missing',
+                    'hidden-socket-hook-in-stub-task': 'kernel_socket_operation_strace_missing',
+                    'udp-send': 'udp_socket_send_strace_unmatched', 'kernel-loss': 'udp_socket_capture_incomplete'}
+        for variant, reason in expected.items():
+            with self.subTest(variant=variant):
+                report = self.ci_replica(variant)
+                self.assertIn(reason, {issue['reason'] for issue in report['classificationIssues']})
+                self.assertGreater(report['unparsedRecords'], 0)
+                self.assertEqual((report['externalAttempts'], report['udpConnectOnly']), (1, 0))
+
+    def test_parsed_stub_with_kernel_loss_still_cannot_recapture(self):
+        capture = self.stub_capture(15423)
+        capture.update(status='failed', complete=False, reason='kernel_bpf_program_recursion_lost')
+        report = self.stub(self.COMPOSITOR, register_resume(self.COMPOSITOR))
+        lost = self.analyze([self.COMPOSITOR + '???( <unfinished ...>', register_resume(self.COMPOSITOR),
+                             self.COMPOSITOR + '+++ exited with 0 +++'], capture)
+        self.assertEqual(report['unparsedRecords'], 0)
+        self.assertEqual(lost['processes'][0]['unparsedRecordKinds'], {'register_stub': 2})
+        lost.update(outcome='evidence_incomplete', commandStarted=True, commandExitCode=0)
+        self.assertFalse(audit.should_recapture(lost))
+        # The parsed stub is what blocks it: the same loss alone may recapture once.
+        alone = copy.deepcopy(lost)
+        alone['processes'][0].update(unparsedRecords=0, unparsedRecordKinds={})
+        alone['unparsedRecords'] = len(alone['classificationIssues'])
+        self.assertTrue(audit.should_recapture(alone))
+
+    def test_audit_strace_options_keep_the_leader_and_column_this_rule_assumes(self):
+        capture = Mock()
+        capture.start.side_effect = RuntimeError('kernel_tracepoint_unavailable')
+        capture.stop.return_value = dict(status='failed', complete=False, pidNamespaceVerified=False,
+                                         lostEvents=0, events=[], eventCount=0)
+        process = Mock(pid=123, returncode=0)
+        process.poll.return_value = 0
+        with tempfile.TemporaryDirectory() as directory, patch.dict(os.environ, {}, clear=True), \
+             patch.object(audit.sys, 'platform', 'linux'), \
+             patch.object(audit, 'resolve_strace', return_value='/pinned/strace'), \
+             patch.object(audit, 'npm_config_paths', return_value=[]), \
+             patch.object(audit, 'npm_proxy_configured', return_value=False), \
+             patch.object(audit, 'Capture', return_value=capture), \
+             patch.object(audit, 'capture_deadline', return_value=nullcontext()), \
+             patch.object(audit.signal, 'setitimer', create=True), \
+             patch.object(audit.signal, 'ITIMER_REAL', 0, create=True), \
+             patch.object(audit.subprocess, 'Popen', return_value=process) as popen, \
+             redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            audit.audit(['/owned/command'], Path(directory) / 'report.json')
+        argv = next(call.args[0] for call in popen.call_args_list if '/pinned/strace' in call.args[0])
+        options = argv[argv.index('/pinned/strace') + 1:]
+        options = options[:options.index('--')]
+        flags = [token for index, token in enumerate(options)
+                 if token.startswith('-') and options[index - 1] not in ('-s', '-e', '-o')]
+        # -a/--columns, -ff, timestamps, -i, -n or --secontext would change
+        # the leader or the alignment column that is_register_resume() assumes.
+        self.assertEqual(flags, ['-f', '--decode-pids=comm,pidns', '-yy', '-q', '-s', '-e', '-e', '-o'])
