@@ -45,7 +45,7 @@ die()     { error "$*"; exit 1; }
 banner() {
     echo -e "${CYAN}${BOLD}"
     echo "  ╔══════════════════════════════════════════════╗"
-    echo "  ║          Aelix Studio WebUI Installer           ║"
+    echo "  ║         Aelix Studio WebUI Installer         ║"
     echo "  ╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
