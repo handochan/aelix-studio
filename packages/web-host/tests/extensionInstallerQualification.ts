@@ -19,7 +19,7 @@ import { buildWheel, writeWheel } from './fixtures/extensionWheels';
 type Message = {
   id?: number;
   error?: unknown;
-  result?: { sessionId?: string };
+  result?: { sessionId?: string; _meta?: Record<string, unknown>; generation?: string; extensions?: unknown };
   params?: { sessionId?: string; update?: { sessionUpdate?: string; availableCommands?: { name: string }[] } };
 };
 
@@ -102,11 +102,14 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
     return reply.data;
   };
 
-  const worker = async (expected: string[], binding = bundle, keep = false): Promise<Child> => {
+  const worker = async (
+    expected: string[],
+    { keep = false, managed = true }: { keep?: boolean; managed?: boolean } = {}
+  ): Promise<Child> => {
     const state = path.join(scratch, 'acp-' + ++sequence);
     const child = spawnChild({
-      command: binding.python,
-      args: [...launcherArgs, binding.launcher, 'acp', '--offline', '--state-dir', state],
+      command: bundle.python,
+      args: [...launcherArgs, bundle.launcher, 'acp', '--offline', '--state-dir', state],
       env: { ...env, AELIX_CODING_AGENT_DIR: path.join(state, 'agent'), [STATE_ENVIRONMENT]: root },
       cwd: scratch,
     });
@@ -144,9 +147,19 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
       assert(!reply.error && reply.result, JSON.stringify(reply.error) + '\n' + errors);
       return reply.result;
     };
-    await request(1, 'initialize', { protocolVersion: 1, clientCapabilities: {} });
+    const initialized = await request(1, 'initialize', { protocolVersion: 1, clientCapabilities: {} });
+    assert.deepEqual(initialized._meta?.['aelix/extensionOverrides'], managed ? { version: 1 } : undefined);
     const { sessionId } = await request(2, 'session/new', { cwd: scratch, mcpServers: [] });
     assert(sessionId);
+    if (managed) {
+      const status = await request(3, '_aelix/manage', {
+        sessionId,
+        action: 'extensions/overrides/list',
+        arguments: {},
+      });
+      assert.equal(status.generation, (await current()).current);
+      if (expected.length === 0) assert.deepEqual(status.extensions, []);
+    }
     const commands = await until('the ACP extension command catalogue', () => {
       assert(!exited, errors);
       return messages.find(
@@ -222,7 +235,7 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
     } finally {
       await lock.release();
     }
-    checks.push('OS lock contention, launcher lease and new ACP conversation');
+    checks.push('OS lock contention, launcher lease and managed ACP snapshot in a new conversation');
 
     const second = await applied({ action: 'install', source: { kind: 'index', name: onlineName, indexUrl } });
     assert.deepEqual(urls, ['/simple/' + onlineName + '/', '/' + dist.filename]);
@@ -261,7 +274,7 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
     }
     checks.push('console script names the copied generation interpreter');
 
-    const held = await worker([localName, onlineName], bundle, true);
+    const held = await worker([localName, onlineName], { keep: true });
     // Change only the stored lock hash. Keep the installed app and Python minor intact
     // so removing the launcher's binding check would load these extensions.
     const generationRecord = paths(second).record;
@@ -271,7 +284,7 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
     assert.notEqual(alteredRecord.binding.dependencyLockSha256, bundle.binding.dependencyLockSha256);
     await writeFile(generationRecord, JSON.stringify(alteredRecord));
     try {
-      await worker([]);
+      await worker([], { managed: false });
     } finally {
       await writeFile(generationRecord, originalRecord);
     }

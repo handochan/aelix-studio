@@ -638,9 +638,9 @@ Studio 쪽에서 우회하지 않고 ACP 변경으로 요청한다.
   빈 세대도 빈 목록으로 넘긴다. 스냅샷은 `leases/`에 lease의 보조 파일로 두고 어댑터 종료나 만료 lease 수집 때
   제거한다. 관리형 목록은 스냅샷으로만 넘긴다. 별도 운영자 확장은 ACP 계약의 `--extension`을 따른다.
   [ACP v1 계약](https://github.com/handochan/aelix-acp/blob/a1a32b9afb803ecd1d57c0950882dc907b4bd68f/docs/studio-extension-overrides.md)
-- 현재 Studio ACP pin은 v1 입력을 받기 전이다. 새로 검증한 세대는 켜진 항목을 개별 `--extension` 인자로
-  넘긴다. 관리형 검증 이전의 세대는 기존 pack 디렉터리와 모듈 참조를 사용한다. 대화별 예외는 v1 입력을
-  지원하는 ACP와 관리형 검증을 마친 세대가 함께 있을 때 적용된다.
+- Studio ACP pin `369df4784`는 관리형 v1 입력을 지원한다. 이전 ACP에는 새로 검증한 세대의 켜진 항목을 개별
+  `--extension` 인자로 넘긴다. 관리형 검증 이전의 세대는 기존 pack 디렉터리와 모듈 참조를 사용한다.
+  대화별 예외는 v1 입력을 지원하는 ACP와 관리형 검증을 마친 세대가 함께 있을 때 적용된다.
 - 번들 Python의 자식이 번들에 `.pyc`를 쓰지 않게 한다. PR #45의 launcher 변경이 이것을 한다. 병합 전에는
   helper가 환경 변수를 준다(`NativeAuthService`가 이미 그렇게 한다).
 - native wheel, `native-site`, lock, host는 바꾸지 않는다.
