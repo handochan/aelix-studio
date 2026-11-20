@@ -8,8 +8,8 @@
     "status": "beta.3-candidate",
     "sourceTag": {
       "repository": "https://github.com/handochan/aelix-ai",
-      "commit": "cad65ce9bbc8da4bfa02c444d20e07301ee057f4",
-      "archiveSha256": "6afb7773bbf92d818ca16c3592871e71767a8453ab0d94008abc4ac9a992502f",
+      "commit": "83714045439478b17ab0c61248dc5c414435927a",
+      "archiveSha256": "f9b317f25fecad4ed488e86fc0928680ab4d59cbedb077e1e84812e73cadf400",
       "relationship": "Unmodified source wheels built from the exact beta.3 candidate; source still declares 0.1.0b2. Not public beta.3 wheels."
     },
     "imports": [
@@ -26,10 +26,10 @@
   },
   "acp": {
     "repository": "handochan/aelix-acp",
-    "commit": "11fb4fe787f6332024955efbcc4c9d2c5f2901a9",
+    "commit": "369df47844d0b702e45808b0de7b2e2b05dedcd5",
     "version": "0.2.0a1",
-    "archiveSha256": "cce68133026e618f3b2fe9000b7212a9414f9511cfd58783e70392cf01af0703",
-    "runtimeReferenceSha256": "eadd9fa1a45c358062a785765a70fab2cba530e8cbc58a9083286fff8146038a"
+    "archiveSha256": "5102442685996322b39d4eac9a8739971eba3c374950c2356f96f9ea77a1b34c",
+    "runtimeReferenceSha256": "8374583bf33510f6ca4820b3ef35f5a000135b28f5947d3db8683a610d4b20d9"
   },
   "aioncore": {
     "repository": "handochan/aelix-studio-host",
