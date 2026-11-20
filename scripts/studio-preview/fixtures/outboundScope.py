@@ -76,10 +76,36 @@ RESUMED = re.compile(r'^<\.\.\. (\w+) resumed>')
 ADDR = re.compile(r'sa_family=AF_INET6?\b[^{}]*')
 QUOTED = r'"(?:[^"\\]|\\.)*"'
 REGISTER_ENTRY = '???( <unfinished ...>'
-REGISTER_RESUME = '<... ??? resumed>) = ?'
+REGISTER_RESUME_HEAD = '<... ??? resumed>)'
+# strace 7.3 (https://github.com/strace/strace/blob/v7.3/) print_event_exit()
+# prints this resume as ')', one space, tabto() and '= ?' (src/strace.c
+# #L3683-L3719). tabto() pads with spaces up to the default alignment column,
+# counted from the start of the '<pid><comm> ' leader (src/strace.c#L969-L974,
+# DEFAULT_ACOLUMN in src/defs.h#L73-L74). The audit passes no -a/--columns, so
+# the column is exactly 40.
+STRACE_ALIGNMENT_COLUMN = 40
 CLOSE_ARGUMENT = r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
 CLOSE_MISSING_RETURN = re.compile(CLOSE_ARGUMENT + r'\)\s+=\s+\?')
 CLOSE_PENDING = re.compile(CLOSE_ARGUMENT)
+
+
+def is_register_resume(line, prefix):
+    """Match strace 7.3's unreadable-register resume with its exact padding.
+
+    ``prefix`` is the PREFIX match of the whole record. Its leader must be the
+    one printleader() writes for -f -o (src/strace.c#L899-L917): '<pid><comm> ',
+    or a '%-5u' PID and one space when comm is empty. Any other gap or leader
+    is not this record.
+    """
+    if prefix is None:
+        return False
+    pid, comm = prefix[1], prefix[2]
+    leader = f'{pid}<{comm}> ' if comm else f'{pid:<5} '
+    if prefix.string != leader + line or not leader.isascii():
+        return False
+    column = len(leader) + len(REGISTER_RESUME_HEAD) + 1
+    padding = 1 + max(0, STRACE_ALIGNMENT_COLUMN - column)
+    return line == REGISTER_RESUME_HEAD + ' ' * padding + '= ?'
 
 
 def is_register_terminal(line, with_kernel):
@@ -448,7 +474,7 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             # With kernel evidence, signal notifications and normal termination
             # can delimit the same final hole. Known calls, ambiguous edges,
             # pending fork/exec and post-termination records remain fatal.
-            unreadable_resume = line == REGISTER_RESUME
+            unreadable_resume = is_register_resume(line, prefix)
             signal_record=line.startswith('--- SIG')
             final_record=is_register_terminal(line, kernel_capture is not None)
             if pid in signaled_clone_restarts:

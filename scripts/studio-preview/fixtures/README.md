@@ -61,8 +61,14 @@ for a fatal Linux signal. A failed retry must use a canonical errno name or the
 exact [numeric fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L403-L417)
 for an unnamed errno. Any child still needs a recorded fork edge and lifecycle.
 An exact `???( <unfinished ...>` register-decoding stub, optionally followed by
-`<... ??? resumed>) = ?`, then that task's termination record is retained as a
-register hole. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
+`<... ??? resumed>)`, spaces and `= ?`, then that task's termination record is
+retained as a register hole. strace 7.3 [prints that resume](https://github.com/strace/strace/blob/v7.3/src/strace.c#L3683-L3719)
+with [`tabto()`](https://github.com/strace/strace/blob/v7.3/src/strace.c#L969-L974)
+padding to the [default column 40](https://github.com/strace/strace/blob/v7.3/src/defs.h#L73-L74),
+counted from the start of the [`<pid><comm> ` leader](https://github.com/strace/strace/blob/v7.3/src/strace.c#L899-L917).
+The audit passes no `-a`, so the gap is exactly `1 + max(0, 40 - (leader + 19))`
+spaces: one for a 21-character leader, four for `15423<Compositor> `. Any other
+gap, leader or suffix stays unparsed. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
 does not identify the syscall. Issue #15 decision 6629110086 permits resolving
 these records only with complete independent kernel corroboration below. There
 must be complete fork ancestry, no pending fork/exec and no subsequent known
