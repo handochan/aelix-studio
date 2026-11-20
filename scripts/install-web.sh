@@ -276,7 +276,7 @@ extract_tarball() {
         die "Tarball structure is invalid (missing aelix-studio-web/$EXECUTABLE)"
     [[ -z "$(find "$EXTRACT_TEMP" -mindepth 1 -maxdepth 1 ! -name aelix-studio-web -print)" ]] ||
         die "Tarball contains entries outside the aelix-studio-web directory"
-    validate_archive_links "$payload"
+    validate_archive_links "$payload" || exit 1
     validate_payload "$payload"
     chmod +x "$payload/$EXECUTABLE"
     [[ ! -e "$payload/$INSTALL_MARKER" && ! -L "$payload/$INSTALL_MARKER" ]] ||
@@ -299,28 +299,48 @@ extract_tarball() {
         [[ -z "$backup_dir" ]] || mv "$backup_dir" "$INSTALL_DIR"
         die "Failed to move the new installation into place"
     fi
-    if [[ "$CREATE_SYMLINK" == 1 ]] && ! create_symlink; then
-        # The downloaded payload was moved on the same filesystem. Move it
-        # back to staging before restoring the previous installation.
+    local failure=""
+    if ! validate_archive_links "$INSTALL_DIR"; then
+        failure="Installed package links are invalid"
+    elif [[ "$CREATE_SYMLINK" == 1 ]] && ! create_symlink; then
+        failure="Failed to create the command link"
+    fi
+    if [[ -n "$failure" ]]; then
+        # The payload and staging share a filesystem. Restore the previous installation on failure.
         mv "$INSTALL_DIR" "$payload" || die "Could not roll back the installation at $INSTALL_DIR"
         [[ -z "$backup_dir" ]] || mv "$backup_dir" "$INSTALL_DIR"
-        die "Failed to create the command link; the new installation was rolled back"
+        die "$failure; the new installation was rolled back"
     fi
 
     success "Installation completed"
     if [[ "$CREATE_SYMLINK" == 1 ]]; then success "Symlink ready: $BIN_DIR/$EXECUTABLE"; fi
 }
 
+archive_link_stays_inside() {
+    local root="$1" current="$2" target="$3" component
+    # Resolve each hop so leaving and reentering through the staging folder name is rejected.
+    while IFS= read -r -d / component; do
+        [[ -n "$component" ]] || continue
+        current=$(realpath "$current/$component" 2>/dev/null) || return 1
+        [[ "$current" == "$root" || "$current" == "$root/"* ]] || return 1
+    done <<< "$target/"
+}
+
 validate_archive_links() {
     local root link target resolved
-    root=$(realpath "$1") || die "Cannot resolve the extracted package"
-    find "$root" -type l -print0 > "$TEMP_DIR/archive-links" || die "Could not inspect tarball links"
+    root=$(realpath "$1") || { error "Cannot resolve the package directory: $1"; return 1; }
+    find "$root" -type l -print0 > "$TEMP_DIR/archive-links" || { error "Could not inspect package links"; return 1; }
     while IFS= read -r -d '' link; do
-        target=$(readlink "$link") || die "Could not read tarball link: ${link#"$root/"}"
-        [[ "$target" != /* ]] || die "Tarball contains an absolute link: ${link#"$root/"}"
-        resolved=$(realpath "$link" 2>/dev/null) || die "Tarball contains a dangling or invalid link: ${link#"$root/"}"
-        [[ -e "$resolved" && "$resolved" == "$root/"* ]] ||
-            die "Tarball link escapes its installation tree or is dangling: ${link#"$root/"}"
+        target=$(readlink "$link") || { error "Could not read tarball link: ${link#"$root/"}"; return 1; }
+        if [[ "$target" == /* ]]; then
+            error "Tarball contains an absolute link: ${link#"$root/"}"
+            return 1
+        fi
+        if ! resolved=$(realpath "$link" 2>/dev/null) || [[ ! -e "$resolved" || "$resolved" != "$root/"* ]] ||
+                ! archive_link_stays_inside "$root" "${link%/*}" "$target"; then
+            error "Tarball link escapes its installation tree or is dangling: ${link#"$root/"}"
+            return 1
+        fi
     done < "$TEMP_DIR/archive-links"
 }
 
@@ -361,7 +381,6 @@ canonical_path() {
 
 normalize_install_paths() {
     [[ "$INSTALL_DIR" == /* ]] || INSTALL_DIR="$PWD/$INSTALL_DIR"
-    [[ "$BIN_DIR" == /* ]] || BIN_DIR="$PWD/$BIN_DIR"
     while [[ "$INSTALL_DIR" != / ]]; do
         case "$INSTALL_DIR" in
             */) INSTALL_DIR="${INSTALL_DIR%/}" ;;
@@ -372,7 +391,10 @@ normalize_install_paths() {
     [[ -n "$INSTALL_DIR" && ! -L "$INSTALL_DIR" ]] || die "Invalid installation directory: $INSTALL_DIR"
     INSTALL_DIR=$(canonical_path "$INSTALL_DIR") || die "Could not resolve the installation directory"
     [[ "$INSTALL_DIR" != / ]] || die "The filesystem root cannot be an installation directory"
-    BIN_DIR=$(canonical_path "$BIN_DIR") || die "Could not resolve the command directory"
+    if [[ "$CREATE_SYMLINK" == 1 || "$UPDATE_PATH" == 1 ]]; then
+        [[ "$BIN_DIR" == /* ]] || BIN_DIR="$PWD/$BIN_DIR"
+        BIN_DIR=$(canonical_path "$BIN_DIR") || die "Could not resolve the command directory"
+    fi
 }
 
 link_points_to_install() {
@@ -516,11 +538,13 @@ print_summary() {
         echo "    # Start Aelix Studio WebUI (using full path)"
         printf "    %q start\n" "${INSTALL_DIR}/${EXECUTABLE}"
         echo ""
-        echo "    # Or add symlink to PATH:"
-        if [[ "$CREATE_SYMLINK" != "1" ]]; then
-            printf '    ln -s %q %q\n' "$INSTALL_DIR/$EXECUTABLE" "$BIN_DIR/$EXECUTABLE"
+        if [[ "$CREATE_SYMLINK" == 1 || "$UPDATE_PATH" == 1 ]]; then
+            echo "    # Or add symlink to PATH:"
+            if [[ "$CREATE_SYMLINK" != "1" ]]; then
+                printf '    ln -s %q %q\n' "$INSTALL_DIR/$EXECUTABLE" "$BIN_DIR/$EXECUTABLE"
+            fi
+            printf '    %s\n' "$(path_command "$(basename "${SHELL:-bash}")")"
         fi
-        printf '    %s\n' "$(path_command "$(basename "${SHELL:-bash}")")"
     fi
     echo ""
     echo -e "  ${BOLD}📖 Documentation:${NC}  https://github.com/handochan/aelix-studio"

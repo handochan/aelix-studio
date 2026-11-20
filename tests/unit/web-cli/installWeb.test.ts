@@ -166,14 +166,50 @@ describe.skipIf(process.platform === 'win32')('standalone Studio WebUI installer
     expect(fs.existsSync(studioLink)).toBe(false);
   });
 
-  it('preserves a relative link that resolves inside the installed tree', () => {
+  it.each([false, true])(
+    'rejects a link that leaves the payload and reenters by its old name (sibling: %s)',
+    (sibling) => {
+      const installDir = path.join(root, 'custom Studio installation');
+      if (sibling) {
+        const siblingStatic = path.join(root, cli, 'static');
+        fs.mkdirSync(siblingStatic, { recursive: true });
+        fs.writeFileSync(path.join(siblingStatic, 'version.json'), 'external');
+      }
+      createAsset(cli, 'files', (payload) => {
+        fs.renameSync(path.join(payload, 'package.json'), path.join(payload, 'static/version.json'));
+        fs.symlinkSync(`../${cli}/static/version.json`, path.join(payload, 'package.json'));
+      });
+
+      const result = install(['--install-dir', installDir]);
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('link escapes its installation tree');
+      expect(fs.existsSync(installDir)).toBe(false);
+    }
+  );
+
+  it('preserves a relative link that resolves inside a renamed installation', () => {
+    const installDir = path.join(root, 'custom Studio installation');
     createAsset(cli, 'files', (payload) => {
       fs.symlinkSync('../package.json', path.join(payload, 'static/version.json'));
     });
-    const result = install();
+    const result = install(['--install-dir', installDir]);
     expect(result.status, result.stderr).toBe(0);
-    const installed = path.dirname(fs.realpathSync(studioLink));
-    expect(fs.readlinkSync(path.join(installed, 'static/version.json'))).toBe('../package.json');
+    expect(fs.realpathSync(path.join(installDir, 'static/version.json'))).toBe(
+      fs.realpathSync(path.join(installDir, 'package.json'))
+    );
+  });
+
+  it('ignores a dangling BIN_DIR when both the command link and profile update are disabled', () => {
+    createAsset();
+    const installDir = path.join(root, 'custom Studio installation');
+    const binDir = path.join(root, 'dangling bin directory');
+    const missing = path.join(root, 'missing');
+    fs.symlinkSync(missing, binDir);
+    const result = install(['--install-dir', installDir, '--no-symlink'], binDir);
+    expect(result.status, result.stderr).toBe(0);
+    expect(execFileSync(path.join(installDir, cli), ['version'], { encoding: 'utf8' }).trim()).toBe(version);
+    expect(fs.readlinkSync(binDir)).toBe(missing);
+    expect(result.stdout).not.toContain(binDir);
   });
 
   it('rejects a plain HTTP mirror before attempting a download', () => {
