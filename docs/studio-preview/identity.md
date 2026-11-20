@@ -45,11 +45,11 @@ The session and CSRF cookies use `Path=/`, and the refresh cookie uses
 serves the configured HTTPS origin. The WebUI proxy maps only Studio
 credentials to the pinned host. Existing browser sessions require a new login.
 
-When both applications share an IPv4 or proxy hostname, the browser can send
-Studio credentials to AionUi on matching paths even with different ports.
-Distinct cookie names keep the applications' login state separate, and the
-Studio proxy discards foreign cookie names. Separate browser hostnames are
-required to isolate delivery. [RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
+When using Studio and AionUi on the same device, the browser can also send
+Studio cookies to AionUi if Studio falls back to IPv4 and both apps use the
+same address, or if a proxy serves both apps under the same hostname. Use
+separate browser profiles or distinct hostnames, even when the apps use
+different ports. [RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
 
 ## Upstream and compatibility names
 
