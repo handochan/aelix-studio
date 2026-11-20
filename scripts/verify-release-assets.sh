@@ -76,7 +76,7 @@ done
 
 # Web-CLI tarballs + checksums
 for plat in darwin-arm64 darwin-x86_64 linux-arm64 linux-x86_64 win-x86_64; do
-  tarball="aionui-web-1.0.0-${plat}.tar.gz"
+  tarball="aelix-studio-web-1.0.0-${plat}.tar.gz"
   for f in "$tarball" "${tarball}.sha256"; do
     if [ ! -f "$OUTPUT_DIR/$f" ]; then
       echo "FAIL: missing web-cli asset: $f"
@@ -87,11 +87,11 @@ for plat in darwin-arm64 darwin-x86_64 linux-arm64 linux-x86_64 win-x86_64; do
   done
 done
 
-if [ ! -f "$OUTPUT_DIR/install-web.sh" ]; then
-  echo "FAIL: missing install-web.sh"
+if [ ! -f "$OUTPUT_DIR/install-aelix-studio-web.sh" ]; then
+  echo "FAIL: missing install-aelix-studio-web.sh"
   ERRORS=$((ERRORS + 1))
 else
-  echo "PASS: install-web.sh exists"
+  echo "PASS: install-aelix-studio-web.sh exists"
 fi
 
 echo ""

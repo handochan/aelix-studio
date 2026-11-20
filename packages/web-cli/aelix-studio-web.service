@@ -1,0 +1,11 @@
+[Unit]
+Description=Aelix Studio standalone WebUI
+
+[Service]
+ExecStart=%h/.local/share/aelix-studio-web/aelix-studio-web start --no-open
+Restart=on-failure
+# The initial operator password is printed to stdout during interactive setup.
+StandardOutput=null
+
+[Install]
+WantedBy=default.target

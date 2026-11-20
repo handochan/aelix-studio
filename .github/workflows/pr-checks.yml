@@ -744,6 +744,17 @@ jobs:
           sudo dpkg --remove "$PKG_NAME"
           test ! -e "$INSTALLED_BIN"
 
+  webui-install:
+    name: Standalone Studio WebUI
+    needs: full-verify-gate
+    if: needs.full-verify-gate.outputs.run == 'true' && contains(github.event.pull_request.labels.*.name, 'full-verify')
+    permissions:
+      contents: read
+    uses: ./.github/workflows/pack-web-cli.yml
+    with:
+      ref: ${{ github.event.pull_request.head.sha }}
+      skip_code_quality: true
+
   # Job 5: Test release scripts (fast, no build required)
   release-script-test:
     name: Release Script Test

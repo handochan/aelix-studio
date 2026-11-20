@@ -14,51 +14,35 @@ import { fileURLToPath } from 'node:url';
 import { openBrowserUrl, shouldAutoOpenBrowser } from './browser.js';
 import { ensureAdminPassword } from './ensureAdminPassword.js';
 import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
+import { getStandaloneWebDataFolder } from '../../desktop/src/common/config/appIdentity.js';
 
 // tarball layout:
-//   aionui-web/
-//   ├── aionui-web              ← bun-compiled standalone binary (process.execPath)
+//   aelix-studio-web/
+//   ├── aelix-studio-web              ← bun-compiled standalone binary (process.execPath)
 //   ├── package.json             ← for runtime version lookup
-//   ├── bundled-aioncore/<plat-arch>/aioncore[.exe]
+//   ├── bundled-aioncore/<plat-arch>/aelix-studio-host[.exe]
 //   └── static/                  ← SPA assets
 //
 // Under `bun build --compile`, import.meta.url resolves to a virtual /$bunfs/
 // path, NOT the real tarball location — we MUST use process.execPath to find
 // sibling files. In dev (tsx/node), process.execPath is the node/bun binary,
 // so fall back to import.meta.url there.
-function resolveCliRoot(): string {
-  // Heuristic: if the executable path ends in "aionui-web" or "aionui-web.exe",
-  // treat it as the packaged single-file binary and return its directory.
-  const exe = process.execPath;
-  const exeName = path.basename(exe).toLowerCase();
-  if (exeName === 'aionui-web' || exeName === 'aionui-web.exe') {
-    return path.dirname(exe);
-  }
-  // Dev mode (tsx/node/bun running from source): use import.meta.url
-  const __filename = fileURLToPath(import.meta.url);
-  return path.resolve(path.dirname(__filename), '..');
-}
+const executable = fs.realpathSync(process.execPath);
+const executableName = path.basename(executable).toLowerCase();
+const isPackaged = executableName === 'aelix-studio-web' || executableName === 'aelix-studio-web.exe';
+const cliRoot = isPackaged
+  ? path.dirname(executable)
+  : path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
-const cliRoot = resolveCliRoot();
-
-// `isPackaged` mirrors AppMetadata.isPackaged: true when running as the
-// bun-compiled single-file binary inside a release tarball. Only the
-// resetpass hint text varies by mode today.
-//
 // Note on macOS quarantine: we tried stripping `com.apple.quarantine` from
 // cliRoot at process start, but Gatekeeper refuses exec _before_ our code
 // runs, so the first launch still fails. Users must either run
-// `xattr -dr com.apple.quarantine <path>` manually or use `install-web.sh`,
+// `xattr -dr com.apple.quarantine <path>` manually or use `install-aelix-studio-web.sh`,
 // which does it for them. Until we sign + notarize, there is nothing the
 // binary itself can do about first-launch quarantine.
-const isPackaged = (() => {
-  const exeName = path.basename(process.execPath).toLowerCase();
-  return exeName === 'aionui-web' || exeName === 'aionui-web.exe';
-})();
-
 const BACKEND_BINARY = process.platform === 'win32' ? 'aelix-studio-host.exe' : 'aelix-studio-host';
 const DEFAULT_PORT = getStudioWebUIDefaultPort(true);
-const RESET_COMMAND = isPackaged ? 'aionui-web resetpass' : 'bun run resetpass';
+const RESET_COMMAND = isPackaged ? 'aelix-studio-web resetpass' : 'bun run resetpass';
 
 let currentHandle: WebHostHandle | StaticServerHandle | null = null;
 
@@ -101,7 +85,7 @@ function resolveDataDir(flags: Map<string, string | true>): string {
   if (typeof override === 'string') return path.resolve(override);
   const envOverride = process.env.AIONUI_DATA_DIR;
   if (envOverride) return path.resolve(envOverride);
-  return path.join(os.homedir(), '.aelix-studio-web');
+  return path.join(os.homedir(), getStandaloneWebDataFolder(true));
 }
 
 function resolveLogDir(flags: Map<string, string | true>, dataDir: string): string {
@@ -155,17 +139,17 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
   });
 
   if (!fs.existsSync(staticDir)) {
-    console.error(`[aionui-web] static dir not found: ${staticDir}`);
+    console.error(`[aelix-studio-web] static dir not found: ${staticDir}`);
     console.error(`  hint: pass --static-dir <path> pointing to the SPA build output`);
     process.exit(1);
   }
 
-  console.log(`[aionui-web] version    : ${version}`);
-  console.log(`[aionui-web] data dir   : ${dataDir}`);
-  console.log(`[aionui-web] log dir    : ${logDir}`);
-  console.log(`[aionui-web] static dir : ${staticDir}`);
-  console.log(`[aionui-web] backend bin: ${backendBin}`);
-  console.log(`[aionui-web] launching  : port=${port} allowRemote=${allowRemote}`);
+  console.log(`[aelix-studio-web] version    : ${version}`);
+  console.log(`[aelix-studio-web] data dir   : ${dataDir}`);
+  console.log(`[aelix-studio-web] log dir    : ${logDir}`);
+  console.log(`[aelix-studio-web] static dir : ${staticDir}`);
+  console.log(`[aelix-studio-web] backend bin: ${backendBin}`);
+  console.log(`[aelix-studio-web] launching  : port=${port} allowRemote=${allowRemote}`);
 
   const backendAvailable = fs.existsSync(backendBin);
 
@@ -177,7 +161,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     console.warn('⚠️  Backend binary not found — starting in FRONTEND-ONLY mode.');
     console.warn(`   Missing: ${backendBin}`);
     console.warn('   The web UI will load but API calls will fail until a backend is available.');
-    console.warn('   To enable backend: download aioncore and set AIONUI_BACKEND_BIN.');
+    console.warn('   To enable backend: provide aelix-studio-host and set AIONUI_BACKEND_BIN.');
     console.warn('');
 
     const handle = await startStaticServer({
@@ -195,9 +179,9 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     if (autoOpenBrowser) {
       const openResult = openBrowserUrl(handle.localUrl);
       if (openResult.ok) {
-        console.log(`[aionui-web] opened ${handle.localUrl} in your browser.`);
+        console.log(`[aelix-studio-web] opened ${handle.localUrl} in your browser.`);
       } else {
-        console.warn(`[aionui-web] could not open the browser automatically: ${openResult.reason}`);
+        console.warn(`[aelix-studio-web] could not open the browser automatically: ${openResult.reason}`);
       }
     }
     console.log('');
@@ -250,9 +234,9 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     if (autoOpenBrowser) {
       const openResult = openBrowserUrl(handle.localUrl);
       if (openResult.ok) {
-        console.log(`[aionui-web] opened ${handle.localUrl} in your browser.`);
+        console.log(`[aelix-studio-web] opened ${handle.localUrl} in your browser.`);
       } else {
-        console.warn(`[aionui-web] could not open the browser automatically: ${openResult.reason}`);
+        console.warn(`[aelix-studio-web] could not open the browser automatically: ${openResult.reason}`);
       }
     }
 
@@ -264,11 +248,11 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
   const shutdown = async (signal: string): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
-    console.log(`\n[aionui-web] received ${signal}, stopping...`);
+    console.log(`\n[aelix-studio-web] received ${signal}, stopping...`);
     try {
       if (currentHandle) await currentHandle.stop();
     } catch (err) {
-      console.error('[aionui-web] stop failed:', err);
+      console.error('[aelix-studio-web] stop failed:', err);
     }
     process.exit(0);
   };
@@ -282,7 +266,7 @@ function runResetPassword(flags: Map<string, string | true>): void {
   const args = ['--data-dir', resolveDataDir(flags), 'user', 'set-password', '--require-stopped'];
   if (flags.has('password-stdin')) args.push('--password-stdin');
   const result = spawnSync(backendBin, args, { stdio: 'inherit' });
-  if (result.error) console.error(`[aionui-web] could not run the host account manager: ${result.error.message}`);
+  if (result.error) console.error(`[aelix-studio-web] could not run the host account manager: ${result.error.message}`);
   process.exitCode = result.status ?? 1;
 }
 
@@ -295,7 +279,7 @@ async function main(): Promise<void> {
   }
 
   if (command === '--help' || command === 'help' || command === '-h') {
-    console.log(`Usage: aionui-web <command> [options]
+    console.log(`Usage: aelix-studio-web <command> [options]
 
 Commands:
   start              Start the WebUI (default)
@@ -305,7 +289,7 @@ Commands:
 
 Options for start:
   --port <n>              Listen port (default: ${DEFAULT_PORT})
-  --remote                Bind 0.0.0.0 instead of 127.0.0.1
+  --remote                Allow network access (default: loopback only)
   --open                  Force opening the local URL in a browser
   --no-open               Disable automatic browser opening
   --data-dir <path>       Override data dir (default: ~/.aelix-studio-web)
@@ -332,7 +316,7 @@ Environment variables:
 
   if (command !== 'start') {
     console.error(`Unknown command: ${command}`);
-    console.error('Usage: aionui-web [start|resetpass|version|help]');
+    console.error('Usage: aelix-studio-web [start|resetpass|version|help]');
     process.exit(1);
   }
 
@@ -340,7 +324,7 @@ Environment variables:
 }
 
 main().catch((err: Error) => {
-  console.error('[aionui-web] fatal:', err.message);
+  console.error('[aelix-studio-web] fatal:', err.message);
   if (currentHandle) void currentHandle.stop().catch(() => undefined);
   process.exit(1);
 });

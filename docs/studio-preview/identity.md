@@ -45,17 +45,64 @@ The session and CSRF cookies use `Path=/`, and the refresh cookie uses
 serves the configured HTTPS origin. The WebUI proxy maps only Studio
 credentials to the pinned host. Existing browser sessions require a new login.
 
-When using Studio and AionUi on the same device, the browser can also send
-Studio cookies to AionUi if Studio falls back to IPv4 and both apps use the
-same address, or if a proxy serves both apps under the same hostname. Use
-separate browser profiles or distinct hostnames, even when the apps use
-different ports. [RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
+Use distinct hostnames when serving Studio and AionUi remotely. On one device,
+use separate browser profiles or distinct hostnames. Cookies are scoped by
+host, so applications on the same hostname can receive the same cookies even
+if their ports differ. This also applies if Studio falls back to IPv4.
+[RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
+
+## Standalone WebUI installation
+
+The release asset is `install-aelix-studio-web.sh`. When the Beta assets are
+published, download it from
+`https://github.com/handochan/aelix-studio/releases/download/v<VERSION>/install-aelix-studio-web.sh`.
+Use the complete version from the tag, including any prerelease suffix. The
+installer reads the matching `aelix-studio-web-<VERSION>-<OS>-<ARCH>.tar.gz`
+and `.tar.gz.sha256` from the same release. An offline mirror may use
+`--mirror file:///path/to/releases`, with the tarball and checksum in a
+`v<VERSION>/` subdirectory. Use HTTPS for online mirrors. GitHub and other
+mirrors that redirect require `curl`. GNU Wget can use direct HTTPS mirrors.
+
+```bash
+bash install-aelix-studio-web.sh --no-path
+~/.local/bin/aelix-studio-web start --no-open
+```
+
+The installer defaults to `~/.local/share/aelix-studio-web` and links the
+command at `~/.local/bin/aelix-studio-web`. The data and logs default to
+`~/.aelix-studio-web` and `~/.aelix-studio-web/logs`. Use
+`aelix-studio-web resetpass` while the server is stopped. When starting or
+resetting with an alternate data directory, use the same `--data-dir` or
+`AIONUI_DATA_DIR` both times. The flag takes priority over the environment.
+
+On Linux with a systemd user manager, start the WebUI in a terminal first to
+read the generated operator password. After stopping that instance with
+Ctrl+C, you can run the packaged unit in the background.
+
+```bash
+mkdir -p ~/.config/systemd/user
+cp ~/.local/share/aelix-studio-web/aelix-studio-web.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now aelix-studio-web.service
+```
+
+The user manager normally follows the login session. To keep the service
+running after logout, enable lingering for the account with
+`loginctl enable-linger "$USER"` if your system permits it.
+
+If you installed to a custom directory, adjust the installed unit's
+`ExecStart`. Before upgrading, stop the running WebUI or its systemd unit.
+Run the new installer, then start the WebUI again. To uninstall, stop the foreground process or disable the user
+unit with `systemctl --user disable --now aelix-studio-web.service`. If you
+copied the unit, remove `~/.config/systemd/user/aelix-studio-web.service` and
+run `systemctl --user daemon-reload`. Then remove the Studio link and install
+root. Any previous Studio version is kept beside the install root in an
+`.backup.*` directory. Keep the Studio data directory if you plan to reinstall.
 
 ## Upstream and compatibility names
 
-- The source package and workspaces (`AionUi`, `@aionui/*`) and the compiled
-  WebUI CLI command (`aionui-web`) retain their internal names for upstream
-  compatibility. Product metadata is applied during desktop packaging.
+- The source package and workspaces (`AionUi`, `@aionui/*`) retain their
+  internal names. Product metadata is applied during packaging.
 - Existing `AIONUI_*` environment variables, `x-aionui-*` headers,
   `AIONCORE_*` process messages, `bundled-aioncore` resources, and
   `aionui-backend.db` are host and runtime interfaces.

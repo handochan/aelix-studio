@@ -35,7 +35,7 @@ export type EnsureAdminPasswordOptions = {
   statusPollIntervalMs?: number;
   /**
    * Command to show in fallback hints ("Forgot the password? Stop WebUI, then run ..."). Varies
-   * by launch context — packaged tarball = `aionui-web resetpass`, in-repo dev
+   * by launch context — packaged tarball = `aelix-studio-web resetpass`, in-repo dev
    * = `bun run resetpass`. Defaults to the packaged form.
    */
   resetCommand?: string;
@@ -101,14 +101,16 @@ export async function ensureAdminPassword(
 ): Promise<void> {
   const timeoutMs = opts.statusTimeoutMs ?? 15_000;
   const intervalMs = opts.statusPollIntervalMs ?? 500;
-  const resetCmd = opts.resetCommand ?? 'aionui-web resetpass';
+  const resetCmd = opts.resetCommand ?? 'aelix-studio-web resetpass';
   const base = `http://127.0.0.1:${opts.backendPort}`;
 
   let status: AuthStatus;
   try {
     status = await waitForStatus(deps, `${base}/api/auth/status`, timeoutMs, intervalMs);
   } catch (err) {
-    deps.warn(`[aionui-web] could not verify admin credentials: ${err instanceof Error ? err.message : String(err)}`);
+    deps.warn(
+      `[aelix-studio-web] could not verify admin credentials: ${err instanceof Error ? err.message : String(err)}`
+    );
     return;
   }
 
@@ -117,7 +119,7 @@ export async function ensureAdminPassword(
   if (!needsSetup) {
     const username = await fetchAdminUsername(deps, opts.backendPort);
     deps.log(
-      `[aionui-web] Log in with username "${username}". Forgot the password? Stop WebUI, then run \`${resetCmd}\`.`
+      `[aelix-studio-web] Log in with username "${username}". Forgot the password? Stop WebUI, then run \`${resetCmd}\`.`
     );
     return;
   }
@@ -126,7 +128,7 @@ export async function ensureAdminPassword(
     const resetRes = await deps.fetch(`${base}/api/webui/reset-password`, { method: 'POST' });
     if (!resetRes.ok) {
       deps.warn(
-        `[aionui-web] /api/webui/reset-password returned ${resetRes.status} — stop WebUI, then run \`${resetCmd}\``
+        `[aelix-studio-web] /api/webui/reset-password returned ${resetRes.status} — stop WebUI, then run \`${resetCmd}\``
       );
       return;
     }
@@ -134,18 +136,18 @@ export async function ensureAdminPassword(
     const newPassword = payload.data?.new_password ?? payload.new_password;
     if (!newPassword) {
       deps.warn(
-        `[aionui-web] /api/webui/reset-password returned no new_password — stop WebUI, then run \`${resetCmd}\``
+        `[aelix-studio-web] /api/webui/reset-password returned no new_password — stop WebUI, then run \`${resetCmd}\``
       );
       return;
     }
     const username = await fetchAdminUsername(deps, opts.backendPort);
-    deps.log(`[aionui-web] Generated initial admin password: ${newPassword}`);
+    deps.log(`[aelix-studio-web] Generated initial admin password: ${newPassword}`);
     deps.log(
-      `[aionui-web] Log in with username "${username}" with the generated password. To change it, stop WebUI and run \`${resetCmd}\`.`
+      `[aelix-studio-web] Log in with username "${username}" with the generated password. To change it, stop WebUI and run \`${resetCmd}\`.`
     );
   } catch (err) {
     deps.warn(
-      `[aionui-web] failed to seed initial admin password: ${err instanceof Error ? err.message : String(err)}. Stop WebUI, then run \`${resetCmd}\`.`
+      `[aelix-studio-web] failed to seed initial admin password: ${err instanceof Error ? err.message : String(err)}. Stop WebUI, then run \`${resetCmd}\`.`
     );
   }
 }
