@@ -97,7 +97,7 @@ export type ExtensionFailureCode =
   | 'UNSAFE_ROOT'
   /** The name fits more than one installed extension the way native compares names. */
   | 'AMBIGUOUS_NAME'
-  /** Changes are not offered on this platform yet; see `ExtensionService`. */
+  /** This source is not offered on the platform; see `ExtensionService`. */
   | 'UNSUPPORTED_PLATFORM'
   /** The result differs from what was asked for. */
   | 'REQUEST_MISMATCH'

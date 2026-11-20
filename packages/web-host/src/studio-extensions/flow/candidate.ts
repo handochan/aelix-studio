@@ -117,6 +117,27 @@ export function rewriteScriptHeader(content: Buffer, from: string, to: string): 
   ]);
 }
 
+/**
+ * Relocate a distlib console launcher. Its PE stub is followed by an interpreter
+ * shebang and a ZIP containing __main__.py. Native executables are left alone.
+ */
+export function rewriteWindowsLauncher(content: Buffer, from: string, to: string): Buffer | undefined {
+  if (content.subarray(0, 2).toString() !== 'MZ') return undefined;
+  const zip = content.lastIndexOf(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+  const filename = '__main__.py';
+  if (zip < 0 || content.subarray(zip + 30, zip + 30 + filename.length).toString() !== filename) return undefined;
+  const start = content.lastIndexOf('#!', zip);
+  if (start < 0) return undefined;
+  const shebang = /^#!("([^"\r\n]+)"|([^\r\n"]+))(\r?\n)$/.exec(content.subarray(start, zip).toString('utf8'));
+  if (!shebang) return undefined;
+  const executable = (shebang[2] ?? shebang[3]).toLowerCase();
+  const namespaced = path.win32.toNamespacedPath(from).toLowerCase();
+  if (executable !== from.toLowerCase() && executable !== namespaced) return undefined;
+  const target = executable.startsWith('\\\\?\\') ? path.win32.toNamespacedPath(to) : to;
+  const quoted = shebang[2] !== undefined ? '"' + target + '"' : target;
+  return Buffer.concat([content.subarray(0, start), Buffer.from('#!' + quoted + shebang[4]), content.subarray(zip)]);
+}
+
 /** Device and inode of a regular file, without following a link; undefined for anything else. */
 async function fileIdentity(file: string): Promise<string | undefined> {
   try {
@@ -208,9 +229,10 @@ async function carryOver(
       const identity = await fileIdentity(destination);
       if (identity !== undefined) made.set(identity, origin);
       copied.add(destination);
-      if (platform === 'win32' || path.dirname(destination) !== candidate.scripts) continue;
+      if (path.dirname(destination) !== candidate.scripts) continue;
       // oxlint-disable-next-line no-await-in-loop
-      const rewritten = rewriteScriptHeader(await readFile(destination), parent.python, candidate.python);
+      const rewrite = platform === 'win32' ? rewriteWindowsLauncher : rewriteScriptHeader;
+      const rewritten = rewrite(await readFile(destination), parent.python, candidate.python);
       // oxlint-disable-next-line no-await-in-loop
       if (rewritten) await writeFile(destination, rewritten);
     }
@@ -268,7 +290,9 @@ export async function createCandidate(
   const skeleton = await readSkeleton(paths).catch((): undefined => undefined);
   const lines = skeleton?.configuration.split(/\r?\n/) ?? [];
   const linked = async (): Promise<boolean> =>
-    context.platform === 'win32' || (await realpath(paths.python)) === (await realpath(context.bundle.python));
+    context.platform === 'win32'
+      ? (await lstat(paths.python)).isFile()
+      : (await realpath(paths.python)) === (await realpath(context.bundle.python));
   const owned =
     lines.includes(`home = ${path.dirname(context.bundle.python)}`) &&
     lines.includes('include-system-site-packages = false') &&

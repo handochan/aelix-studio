@@ -12,7 +12,7 @@ import { writeWheel, type WheelSpec } from '../../tests/fixtures/extensionWheels
 import { ExtensionService } from './service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply } from './types';
 
-// Changes are refused on Windows (see the last block); what follows runs where they are offered.
+// These fixtures assert POSIX paths and installer environment. Preview installer CI runs real Windows.
 describe.skipIf(process.platform === 'win32')('the extension helper service', () => {
   let scratch = '';
   let root = '';
@@ -479,9 +479,6 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
   });
 });
 
-// Review findings 8 and 9: stopping pip and rewriting console scripts are not right on
-// Windows, and nothing of the helper has run there. Until that is done (stage 1a'), changes
-// are refused instead of being offered as if they worked.
 describe('the extension helper service on Windows', () => {
   let scratch = '';
   let spawn: ReturnType<typeof fakeRuntime>;
@@ -501,18 +498,10 @@ describe('the extension helper service on Windows', () => {
   });
   afterEach(() => rm(scratch, { recursive: true, force: true }));
 
-  it.each<[string, unknown]>([
-    ['install', { action: 'install', source: { kind: 'file', path: path.resolve('demo-0.1.0-py3-none-any.whl') } }],
-    [
-      'update',
-      { action: 'update', name: 'demo', source: { kind: 'file', path: path.resolve('demo-0.2.0-py3-none-any.whl') } },
-    ],
-    ['remove', { action: 'remove', name: 'demo' }],
-    ['rollback', { action: 'rollback' }],
-  ])('refuses %s with a code of its own and starts nothing', async (_action, command) => {
+  it('refuses a Git install until the Windows Git and SSH toolchain is qualified', async () => {
+    const command = { action: 'install', source: { kind: 'git', url: 'git+https://git.invalid/demo.git' } };
     expect(await service.request('window:1', command)).toEqual({ ok: false, code: 'UNSUPPORTED_PLATFORM' });
     expect(spawn.calls).toEqual([]);
-    await expect(readdir(path.join(scratch, 'aelix-runtime'))).rejects.toThrow();
   });
 
   it('still lists, which only reads files', async () => {

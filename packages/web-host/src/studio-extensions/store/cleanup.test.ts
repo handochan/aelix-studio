@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,7 @@ import { collect, recover } from './cleanup';
 import { ensureLayout, layoutOf, locateLayout, type Bundle, type BundleBinding, type Layout } from './layout';
 import type { StateWriter } from './lock';
 import { ExtensionFailure } from '../types';
-import { newGenerationRecord, newPointer, switchPointer, writeGenerationRecord } from './pointer';
+import { newGenerationRecord, newPointer, readGenerationRecord, switchPointer, writeGenerationRecord } from './pointer';
 
 const BINDING: BundleBinding = {
   bundle: '/bundle',
@@ -67,6 +67,26 @@ describe('recovery and clean-up', () => {
     expect(await names(layout.generations)).toEqual([G1]);
     expect(await names(layout.root)).toEqual(['artifacts', 'generations', 'leases']);
     expect(await names(layout.artifacts)).toEqual([SET_A]);
+  });
+
+  it('recovers past a partially removed generation and collects it without restoring its retired record', async () => {
+    await Promise.all([generation(G1), generation(G2), generation(G3)]);
+    const retired = path.join(layout.generations, G1);
+    await rename(path.join(retired, 'generation.json'), path.join(layout.generations, '.retired-' + G1));
+    await writeFile(path.join(retired, 'venv', 'locked.exe'), 'fixture');
+    await switchPointer(layout, newPointer(G3, G2, 3, BINDING), null, writer);
+    await expect(
+      recover(layout, {
+        replace: writer.replace,
+        remove: () => Promise.reject(new Error('the retired executable is locked')),
+      })
+    ).resolves.toEqual([]);
+    expect(await readGenerationRecord(layout, G1)).toBeUndefined();
+    expect((await collect(request())).removed).toEqual([G1]);
+    // The fake writer modeled a crash between removing the tree and deleting its sibling record.
+    expect(await names(layout.generations)).toEqual(['.retired-' + G1, G2, G3]);
+    await recover(layout, writer);
+    expect(await names(layout.generations)).toEqual([G2, G3]);
   });
 
   it('removes a link among the generations without touching what it points at', async () => {

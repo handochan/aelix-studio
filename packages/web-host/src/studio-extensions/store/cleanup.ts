@@ -2,13 +2,19 @@ import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import type { Spawn } from '../process.js';
 import { isImportSetId, pruneArtifacts, removeStaging } from './artifacts.js';
-import type { Bundle, Layout } from './layout.js';
+import { isGenerationId, type Bundle, type Layout } from './layout.js';
 import { probeLeases, type StateWriter } from './lock.js';
 import { readGenerationRecord, readPointer } from './pointer.js';
 
 const list = (directory: string): Promise<string[]> => readdir(directory).catch(() => [] as string[]);
 
-/** Whether an entry of `generations` is a directory of its own (not a link) with its record in it. */
+/** The Windows lock holder preserves a sibling record during interrupted retirement. */
+function retiredGeneration(entry: string): string | undefined {
+  const prefix = '.retired-';
+  const generation = entry.slice(prefix.length);
+  return entry.startsWith(prefix) && isGenerationId(generation) ? generation : undefined;
+}
+
 async function isFinished(layout: Layout, entry: string): Promise<boolean> {
   const directory = path.join(layout.generations, entry);
   try {
@@ -22,15 +28,25 @@ async function isFinished(layout: Layout, entry: string): Promise<boolean> {
  * Undo what an interrupted change left behind (D04 ADR 5.6). Call under the mutation lock,
  * before reading the pointer: with the lock held, nothing else can be building a candidate.
  *
+ * A Windows generation marked retired is retried by collection after the next switch.
  * Removes generation directories that never got their `generation.json`, temporary files
  * of interrupted writes and staging directories of the wheel store. Everything is removed by
  * the lock holder. Returns the candidates removed.
  */
 export async function recover(layout: Layout, writer: StateWriter): Promise<string[]> {
   const removed: string[] = [];
-  for (const entry of await list(layout.generations)) {
+  const entries = await list(layout.generations);
+  const present = new Set(entries);
+  const retired = new Set(entries.map(retiredGeneration).filter((id) => id !== undefined));
+  for (const entry of entries) {
+    const target = retiredGeneration(entry);
+    if (target !== undefined) {
+      // oxlint-disable-next-line no-await-in-loop -- a crash may have removed the directory but left its record
+      if (!present.has(target)) await writer.remove('generations/' + entry);
+      continue;
+    }
     // oxlint-disable-next-line no-await-in-loop -- a handful of directories, checked in order
-    if (await isFinished(layout, entry)) continue;
+    if (retired.has(entry) || (await isFinished(layout, entry))) continue;
     // A link among the generations is not one the helper made; the holder removes the link, not its target.
     // oxlint-disable-next-line no-await-in-loop
     await writer.remove(`generations/${entry}`);
@@ -83,6 +99,7 @@ export async function collect(request: CollectRequest): Promise<CollectReport> {
   const keep = new Set([pointer?.generation, pointer?.previous]);
   const referenced = new Set<string>();
   for (const entry of await list(layout.generations)) {
+    if (retiredGeneration(entry) !== undefined) continue;
     // Without a usable pointer there is no telling what is current: every generation stays.
     if (pointer && !keep.has(entry) && !leases.held.has(entry)) {
       // oxlint-disable-next-line no-await-in-loop -- removal of a few directories, in order
