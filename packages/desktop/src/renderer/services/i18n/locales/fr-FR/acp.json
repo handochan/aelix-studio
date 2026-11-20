@@ -65,5 +65,37 @@
       "ended": "Tour terminé ; état final non signalé"
     },
     "elapsedReported": "Dernière durée signalée : {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Comment l’entrée parvient au tour en cours",
+      "steer": "Orienter",
+      "steerHint": "L’agent la lit à la prochaine étape de ce tour.",
+      "followUp": "Suite",
+      "followUpHint": "L’agent la lit après avoir terminé cette réponse."
+    },
+    "queued": "En file d’attente · {{modes}}",
+    "queuedEnded": "En file d’attente · Une entrée dont la prise en compte n’est pas confirmée peut être traitée au prochain prompt",
+    "queuedStopped": "En file d’attente · Traitement après Arrêt non confirmé",
+    "pending": "Envoi de {{mode}}…",
+    "unknown": "{{mode}} : résultat inconnu. Votre brouillon a été conservé ; vérifiez avant de le renvoyer.",
+    "rejected": "{{mode}} non mis en file : {{reason}}. Votre brouillon a été conservé.",
+    "reason": {
+      "staleTurn": "le tour est déjà terminé",
+      "dedupCapacity": "trop d’entrées sont en attente",
+      "rateLimited": "trop de requêtes, réessayez dans un instant",
+      "tooLarge": "l’entrée est trop volumineuse",
+      "sessionChanged": "la session a changé",
+      "failed": "l’envoi a échoué"
+    },
+    "check": "Vérifier",
+    "checkPending": "L’entrée est encore en cours d’envoi.",
+    "checkUnconfirmed": "Le résultat n’a pas pu être confirmé. La conversation a été rechargée.",
+    "dismiss": "Fermer",
+    "dismissAll": "Tout fermer",
+    "attachmentsKept": "Les pièces jointes ne peuvent pas être envoyées pendant que l’agent travaille. Votre brouillon a été conservé.",
+    "previousSending": "L’entrée précédente est encore en cours d’envoi. Votre brouillon a été conservé.",
+    "invalidText": "Cette entrée est trop longue pour être envoyée pendant que l’agent travaille. Votre brouillon a été conservé.",
+    "ordinaryBusyKept": "Un autre tour a commencé avant. Votre message et vos pièces jointes ont été conservés."
   }
 }

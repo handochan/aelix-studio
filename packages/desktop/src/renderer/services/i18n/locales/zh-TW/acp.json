@@ -65,5 +65,37 @@
       "ended": "回合已結束，未回報最終狀態"
     },
     "elapsedReported": "上次回報耗時：{{value}} 秒"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "輸入如何送達正在執行的輪次",
+      "steer": "引導",
+      "steerHint": "智慧體會在本輪的下一步讀取它。",
+      "followUp": "後續",
+      "followUpHint": "智慧體會在完成本次回答後讀取它。"
+    },
+    "queued": "已進入佇列 · {{modes}}",
+    "queuedEnded": "已進入佇列 · 未確認已處理的輸入可能會在下一則提示中處理",
+    "queuedStopped": "已進入佇列 · 停止後是否處理未確認",
+    "pending": "正在傳送{{mode}}…",
+    "unknown": "{{mode}}：結果未知。草稿已保留，請先確認再重新傳送。",
+    "rejected": "{{mode}}未進入佇列：{{reason}}。草稿已保留。",
+    "reason": {
+      "staleTurn": "該輪次已結束",
+      "dedupCapacity": "等待中的輸入過多",
+      "rateLimited": "請求過多，請稍後再試",
+      "tooLarge": "輸入過大",
+      "sessionChanged": "工作階段已變更",
+      "failed": "無法送達"
+    },
+    "check": "確認",
+    "checkPending": "輸入仍在送達中。",
+    "checkUnconfirmed": "無法確認結果，已重新載入對話。",
+    "dismiss": "關閉",
+    "dismissAll": "全部關閉",
+    "attachmentsKept": "智慧體工作期間無法傳送附件。草稿已保留。",
+    "previousSending": "上一則輸入仍在傳送中。草稿已保留。",
+    "invalidText": "此輸入過長，無法在智慧體工作期間傳送。草稿已保留。",
+    "ordinaryBusyKept": "另一輪次已先開始。訊息與附件已保留。"
   }
 }

@@ -90,6 +90,31 @@ const {
   getConversationOrNullMock: vi.fn(),
 }));
 
+const { runningInputMock, useRunningInputSpy } = vi.hoisted(() => ({
+  runningInputMock: {
+    available: false,
+    supported: false,
+    modes: ['steer', 'follow-up'],
+    mode: 'follow-up',
+    setMode: vi.fn(),
+    notices: [],
+    submit: vi.fn(),
+    markStopped: vi.fn(),
+    dismiss: vi.fn(),
+    check: vi.fn(),
+  },
+  useRunningInputSpy: vi.fn(),
+}));
+
+vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
+  useRunningInput: (options: unknown) => {
+    useRunningInputSpy(options);
+    return runningInputMock;
+  },
+  RunningInputModeSwitch: () => <div data-testid='running-input-mode' />,
+  RunningInputNotices: () => null,
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
     team: {
@@ -386,6 +411,9 @@ describe('AcpSendBox', () => {
     runtimeViewMock.activeTurnId = null;
     runtimeViewMock.supportsMidturnDelivery = false;
     draftContentRef.current = '';
+    runningInputMock.available = false;
+    runningInputMock.supported = false;
+    runningInputMock.submit.mockResolvedValue('ordinary');
     useTeamPermissionMock.mockReturnValue(null);
     useAcpConfigOptionsMock.mockReturnValue({
       setStatus: { state: 'idle' },
@@ -1123,6 +1151,113 @@ describe('AcpSendBox', () => {
       });
       expect(enqueueMock).not.toHaveBeenCalled();
       expect(messageWarningMock).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('Aelix running input', () => {
+    const renderRunning = () => {
+      runtimeViewMock.isProcessing = true;
+      runtimeViewMock.state = 'running';
+      runtimeViewMock.activeTurnId = 'turn-1';
+      runningInputMock.supported = true;
+      runningInputMock.available = true;
+      return render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+    };
+    const lastSendBoxProps = () => sendBoxPropsSpy.mock.calls.at(-1)?.[0] as { sendDisabled?: boolean };
+    const restoredContent = () => {
+      const update = draftMutateMock.mock.calls.at(-1)?.[0] as (prev: { content: string }) => { content: string };
+      return update({ content: '' }).content;
+    };
+
+    it('enables send with the mode switch while the relay can take input, and sends nothing ordinary', async () => {
+      runningInputMock.submit.mockResolvedValue('sent');
+      renderRunning();
+
+      expect(lastSendBoxProps().sendDisabled).toBe(false);
+      expect(screen.getByTestId('running-input-mode')).toBeInTheDocument();
+      await act(async () => {
+        screen.getByRole('button', { name: 'send' }).click();
+      });
+
+      expect(runningInputMock.submit).toHaveBeenCalledWith('Hello', false);
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(draftMutateMock).not.toHaveBeenCalled();
+      expect(messageWarningMock).not.toHaveBeenCalled();
+    });
+
+    it('puts the draft back when the relay did not accept it', async () => {
+      runningInputMock.submit.mockResolvedValue('kept');
+      renderRunning();
+
+      await act(async () => {
+        screen.getByRole('button', { name: 'send' }).click();
+      });
+
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(restoredContent()).toBe('Hello');
+    });
+
+    it('keeps the existing busy block when the relay is not negotiated', async () => {
+      runtimeViewMock.isProcessing = true;
+      runtimeViewMock.state = 'running';
+      render(<AcpSendBox conversation_id='conv-1' backend='claude' messageState={makeMessageState()} />);
+
+      expect(lastSendBoxProps().sendDisabled).toBe(true);
+      expect(screen.queryByTestId('running-input-mode')).toBeNull();
+      await act(async () => {
+        screen.getByRole('button', { name: 'send' }).click();
+      });
+      expect(runningInputMock.submit).not.toHaveBeenCalled();
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(messageWarningMock).toHaveBeenCalledTimes(1);
+    });
+
+    it('keeps text and attachments when an ordinary send loses the host turn', async () => {
+      runningInputMock.supported = true;
+      sendMessageInvokeMock.mockRejectedValue(
+        new BackendHttpError({
+          method: 'POST',
+          path: '/api/conversations/conv-1/messages',
+          status: 409,
+          body: { success: false, code: 'CONFLICT', error: 'conversation conv-1 is already running' },
+        })
+      );
+      render(<AcpSendBox conversation_id='conv-1' backend='aelix' messageState={makeMessageState()} />);
+
+      await act(async () => {
+        screen.getByText('pick-session').click();
+      });
+      await act(async () => {
+        screen.getByRole('button', { name: 'send' }).click();
+      });
+
+      expect(sendMessageInvokeMock).toHaveBeenCalledTimes(1);
+      expect(restoredContent()).toBe('Hello');
+      expect(lastSendBoxProps()).toMatchObject({ selectedSessions: [{ id: 'conv_target' }] });
+      expect(messageWarningMock).toHaveBeenCalledWith('acp.runningInput.ordinaryBusyKept');
+    });
+
+    it('records Stop for receipts and leaves team chats on their own path', async () => {
+      getMessagesInvokeMock.mockResolvedValue({
+        items: [{ type: 'text', position: 'right', content: { content: 'Keep working' } }],
+      });
+      stopInvokeMock.mockResolvedValue({ runtime: null });
+      renderRunning();
+      await waitFor(() => expect(sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop).toBeTypeOf('function'));
+      await act(async () => sendBoxPropsSpy.mock.calls.at(-1)?.[0].onStop());
+      expect(runningInputMock.markStopped).toHaveBeenCalledTimes(1);
+      expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-1' });
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: true, hostBusy: true });
+
+      render(
+        <AcpSendBox
+          conversation_id='conv-1'
+          backend='aelix'
+          messageState={makeMessageState()}
+          teamSendMessage={vi.fn().mockResolvedValue(undefined)}
+        />
+      );
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: false });
     });
   });
 

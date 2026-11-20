@@ -36,6 +36,11 @@ import {
   type ConversationCommandQueueItem,
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
+import {
+  RunningInputModeSwitch,
+  RunningInputNotices,
+  useRunningInput,
+} from '@/renderer/pages/conversation/runtime/RunningInput';
 import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
 import { getConversationRuntimeWorkspaceErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
 import { getChatSurfaceWidthClass } from '@/renderer/pages/conversation/utils/chatSurfaceWidth';
@@ -293,6 +298,16 @@ const AcpSendBox: React.FC<{
   };
   const isCancelling = runtimeView.state === 'cancelling';
   const isBusy = isCancelling || commandQueueRuntimeGate.isProcessing || !commandQueueRuntimeGate.canSendMessage;
+  // Aelix running input (D20): steer/follow-up into the native turn when the host relay is negotiated.
+  const runningInput = useRunningInput({
+    conversationId: conversation_id,
+    enabled: !teamRuntime && !teamSendMessage,
+    hostBusy: isBusy,
+    hostTurnId: runtimeView.activeTurnId,
+    stopping: isCancelling,
+    paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
+  });
+  const runningInputSendable = runningInput.available && !supportsMidturnDelivery;
 
   // Register handler for adding text from preview panel to sendbox
   useEffect(() => {
@@ -492,11 +507,24 @@ Please check your local CLI tool authentication status`,
   const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
   const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
+  // Put text the composer took back in front of anything typed since, instead of overwriting it.
+  const restoreDraftText = (message: string) => {
+    const typed = contentRef.current;
+    setContentRef.current(typed.trim() ? `${message}\n${typed}` : message);
+  };
+
   // Supporting agents (mid-turn delivery) send immediately, busy or not.
   // Non-supporting agents can no longer send while the agent is replying —
   // that path is hard-blocked with a toast; the only way to queue a message
   // while busy is the explicit "add to queue" entry (handleAddToQueue below).
+  // An Aelix session with the running-input relay routes that send to steer/follow-up instead.
   const onSendHandler = async (message: string): Promise<void | false> => {
+    const allFiles = collectChatFileRefs(uploadFile, atPath);
+    if (!supportsMidturnDelivery && runningInput.supported) {
+      const route = await runningInput.submit(message, allFiles.length > 0 || selectedSessions.length > 0);
+      if (route === 'kept') restoreDraftText(message);
+      if (route !== 'ordinary') return;
+    }
     if (!supportsMidturnDelivery && isBusy) {
       Message.warning(
         t('conversation.commandQueue.midturnBlocked', {
@@ -507,12 +535,22 @@ Please check your local CLI tool authentication status`,
       return false;
     }
 
-    const allFiles = collectChatFileRefs(uploadFile, atPath);
     const sessions = selectedSessions.length > 0 ? selectedSessions : undefined;
     clearFiles();
     setSelectedSessions([]);
     emitter.emit('acp.selected.file.clear');
-    await executeCommand({ input: message, files: allFiles, sessions });
+    try {
+      await executeCommand({ input: message, files: allFiles, sessions });
+    } catch (error) {
+      if (!runningInput.supported || !classifyConversationBusyError(error)) throw error;
+      // Another action claimed the host turn first: keep text and attachments for the next explicit send.
+      const restored = splitChatFileRefs(allFiles);
+      setUploadFile(restored.uploadFiles);
+      setAtPath(restored.atPath);
+      setSelectedSessions(sessions ?? []);
+      restoreDraftText(message);
+      Message.warning(t('acp.runningInput.ordinaryBusyKept'));
+    }
   };
 
   const [interrupting, setInterrupting] = useState(false);
@@ -799,6 +837,7 @@ Please check your local CLI tool authentication status`,
   };
   const effectiveHandleStop = async () => {
     if (compactionStopGuardRef.current()) return;
+    runningInput.markStopped();
     await (teamRuntime?.onStop ?? handleStop)();
   };
   const handleSendNowQueued = useCallback(
@@ -875,6 +914,11 @@ Please check your local CLI tool authentication status`,
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
+      <RunningInputNotices
+        notices={runningInput.notices}
+        onDismiss={runningInput.dismiss}
+        onCheck={(requestId) => void runningInput.check(requestId)}
+      />
       <SendBox
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}
         value={content}
@@ -892,9 +936,9 @@ Please check your local CLI tool authentication status`,
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={sendBlocked}
-        sendDisabled={!supportsMidturnDelivery && isBusy}
+        sendDisabled={!supportsMidturnDelivery && isBusy && !runningInputSendable}
         sendDisabledTooltip={
-          !supportsMidturnDelivery && isBusy
+          !supportsMidturnDelivery && isBusy && !runningInputSendable
             ? t('conversation.commandQueue.midturnBlockedSendHint', {
                 defaultValue:
                   'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
@@ -1005,6 +1049,13 @@ Please check your local CLI tool authentication status`,
               >
                 {t('team.interruptAndSend')}
               </Button>
+            )}
+            {runningInputSendable && (
+              <RunningInputModeSwitch
+                modes={runningInput.modes}
+                value={runningInput.mode}
+                onChange={runningInput.setMode}
+              />
             )}
             {tokenUsage ? <ContextUsageIndicator tokenUsage={tokenUsage} context_limit={context_limit} /> : undefined}
           </>

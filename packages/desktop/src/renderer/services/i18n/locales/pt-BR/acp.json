@@ -65,5 +65,37 @@
       "ended": "Turno encerrado; estado final não informado"
     },
     "elapsedReported": "Último tempo informado: {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Como a entrada chega ao turno em execução",
+      "steer": "Direcionar",
+      "steerHint": "O agente lê isso no próximo passo deste turno.",
+      "followUp": "Continuação",
+      "followUpHint": "O agente lê isso depois de terminar esta resposta."
+    },
+    "queued": "Na fila · {{modes}}",
+    "queuedEnded": "Na fila · Entradas sem consumo confirmado podem ser tratadas no próximo prompt",
+    "queuedStopped": "Na fila · Não confirmado se foi tratada após Parar",
+    "pending": "Enviando {{mode}}…",
+    "unknown": "{{mode}}: resultado desconhecido. Seu rascunho foi mantido; verifique antes de enviar de novo.",
+    "rejected": "{{mode}} não entrou na fila: {{reason}}. Seu rascunho foi mantido.",
+    "reason": {
+      "staleTurn": "o turno já terminou",
+      "dedupCapacity": "há entradas demais aguardando",
+      "rateLimited": "solicitações demais, tente novamente em instantes",
+      "tooLarge": "a entrada é grande demais",
+      "sessionChanged": "a sessão mudou",
+      "failed": "não foi possível entregar"
+    },
+    "check": "Verificar",
+    "checkPending": "A entrada ainda está sendo entregue.",
+    "checkUnconfirmed": "Não foi possível confirmar o resultado. A conversa foi recarregada.",
+    "dismiss": "Dispensar",
+    "dismissAll": "Dispensar tudo",
+    "attachmentsKept": "Não é possível enviar anexos enquanto o agente trabalha. Seu rascunho foi mantido.",
+    "previousSending": "A entrada anterior ainda está sendo enviada. Seu rascunho foi mantido.",
+    "invalidText": "Esta entrada é longa demais para enviar enquanto o agente trabalha. Seu rascunho foi mantido.",
+    "ordinaryBusyKept": "Outro turno começou antes. Sua mensagem e seus anexos foram mantidos."
   }
 }

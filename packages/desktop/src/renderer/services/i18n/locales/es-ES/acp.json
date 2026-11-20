@@ -65,5 +65,37 @@
       "ended": "Turno finalizado; estado final sin informar"
     },
     "elapsedReported": "Último tiempo informado: {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Cómo llega la entrada al turno en curso",
+      "steer": "Dirigir",
+      "steerHint": "El agente lo lee en el siguiente paso de este turno.",
+      "followUp": "Seguimiento",
+      "followUpHint": "El agente lo lee después de terminar esta respuesta."
+    },
+    "queued": "En cola · {{modes}}",
+    "queuedEnded": "En cola · La entrada sin consumo confirmado puede procesarse en el siguiente prompt",
+    "queuedStopped": "En cola · Sin confirmar si se procesó después de Detener",
+    "pending": "Enviando {{mode}}…",
+    "unknown": "{{mode}}: resultado desconocido. Se conservó tu borrador; compruébalo antes de volver a enviarlo.",
+    "rejected": "{{mode}} no entró en la cola: {{reason}}. Se conservó tu borrador.",
+    "reason": {
+      "staleTurn": "el turno ya terminó",
+      "dedupCapacity": "hay demasiadas entradas en espera",
+      "rateLimited": "demasiadas solicitudes, vuelve a intentarlo en breve",
+      "tooLarge": "la entrada es demasiado grande",
+      "sessionChanged": "la sesión cambió",
+      "failed": "no se pudo entregar"
+    },
+    "check": "Comprobar",
+    "checkPending": "La entrada aún se está entregando.",
+    "checkUnconfirmed": "No se pudo confirmar el resultado. Se recargó la conversación.",
+    "dismiss": "Descartar",
+    "dismissAll": "Descartar todo",
+    "attachmentsKept": "No se pueden enviar adjuntos mientras el agente trabaja. Se conservó tu borrador.",
+    "previousSending": "La entrada anterior aún se está enviando. Se conservó tu borrador.",
+    "invalidText": "Esta entrada es demasiado larga para enviarla mientras el agente trabaja. Se conservó tu borrador.",
+    "ordinaryBusyKept": "Otro turno empezó antes. Se conservaron tu mensaje y tus adjuntos."
   }
 }

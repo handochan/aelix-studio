@@ -65,5 +65,37 @@
       "ended": "Turn ended; final status not reported"
     },
     "elapsedReported": "Last reported elapsed: {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "How input reaches the running turn",
+      "steer": "Steer",
+      "steerHint": "The agent reads it at its next step in this turn.",
+      "followUp": "Follow-up",
+      "followUpHint": "The agent reads it after it finishes this answer."
+    },
+    "queued": "Queued · {{modes}}",
+    "queuedEnded": "Queued · Input not confirmed as consumed may be handled in the next prompt",
+    "queuedStopped": "Queued · Not confirmed whether it was handled after Stop",
+    "pending": "Sending {{mode}}…",
+    "unknown": "{{mode}}: result unknown. Your draft was kept; check before sending it again.",
+    "rejected": "{{mode}} not queued: {{reason}}. Your draft was kept.",
+    "reason": {
+      "staleTurn": "the turn already ended",
+      "dedupCapacity": "too many inputs are waiting",
+      "rateLimited": "too many requests, try again shortly",
+      "tooLarge": "the input is too large",
+      "sessionChanged": "the session changed",
+      "failed": "it could not be delivered"
+    },
+    "check": "Check",
+    "checkPending": "The input is still being delivered.",
+    "checkUnconfirmed": "The result could not be confirmed. The conversation was reloaded.",
+    "dismiss": "Dismiss",
+    "dismissAll": "Dismiss all",
+    "attachmentsKept": "Attachments can't be sent while the agent is working. Your draft was kept.",
+    "previousSending": "The previous input is still being sent. Your draft was kept.",
+    "invalidText": "This input is too long to send while the agent is working. Your draft was kept.",
+    "ordinaryBusyKept": "Another turn started first. Your message and attachments were kept."
   }
 }
