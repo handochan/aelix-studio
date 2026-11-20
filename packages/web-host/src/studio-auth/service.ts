@@ -97,7 +97,10 @@ export class NativeAuthService {
       try {
         const reply = await this.run(runtime, command);
         if (command.action === 'select' && reply.ok && 'root' in reply.data) {
-          const env = [{ name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root }];
+          const env = [
+            { name: 'AELIX_CODING_AGENT_DIR', value: reply.data.root },
+            { name: 'AELIX_ACP_STUDIO_MANAGED', value: '1' },
+          ];
           if (userDataPath) {
             // The host applies the command environment after the login shell environment.
             const { root } = await locateStudioExtensionLayout(userDataPath);

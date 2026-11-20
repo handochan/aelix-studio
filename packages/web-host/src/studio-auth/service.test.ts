@@ -156,7 +156,7 @@ describe('sessionless native auth ownership and lifecycle', () => {
     expect(helper.writes.at(-1)).toContain('"value":""');
   });
 
-  it('selects a native launch without requiring credentials in the agent database', async () => {
+  it('marks a managed launch even without an extension state path or credentials in the agent database', async () => {
     const pending = service.request('one', { action: 'select', provider: 'openai', model: 'model-one' });
     helper.frame({ result: { root: '/cli-root' } });
     helper.emit('close', 0);
@@ -166,7 +166,10 @@ describe('sessionless native auth ownership and lifecycle', () => {
         root: '/cli-root',
         command: 'node',
         args: [path.join(runtime, 'launch.cjs'), '--profile', 'coding', '--provider=openai', '--model=model-one'],
-        env: [{ name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' }],
+        env: [
+          { name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' },
+          { name: 'AELIX_ACP_STUDIO_MANAGED', value: '1' },
+        ],
       },
     });
   });
@@ -181,6 +184,7 @@ describe('sessionless native auth ownership and lifecycle', () => {
       data: {
         env: [
           { name: 'AELIX_CODING_AGENT_DIR', value: '/cli-root' },
+          { name: 'AELIX_ACP_STUDIO_MANAGED', value: '1' },
           { name: 'AELIX_STUDIO_EXTENSION_STATE', value: path.join(userDataPath, 'aelix-runtime') },
         ],
       },
@@ -188,6 +192,7 @@ describe('sessionless native auth ownership and lifecycle', () => {
     expect(mocks.spawn.mock.calls[0][2].env.AELIX_STUDIO_EXTENSION_STATE).toBe(
       process.env.AELIX_STUDIO_EXTENSION_STATE
     );
+    expect(mocks.spawn.mock.calls[0][2].env.AELIX_ACP_STUDIO_MANAGED).toBe(process.env.AELIX_ACP_STUDIO_MANAGED);
   });
 
   it('refuses unknown methods and malformed inputs before spawning', async () => {
