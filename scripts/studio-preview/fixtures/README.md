@@ -67,8 +67,12 @@ with [`tabto()`](https://github.com/strace/strace/blob/v7.3/src/strace.c#L969-L9
 padding to the [default column 40](https://github.com/strace/strace/blob/v7.3/src/defs.h#L73-L74),
 counted from the start of the [`<pid><comm> ` leader](https://github.com/strace/strace/blob/v7.3/src/strace.c#L899-L917).
 The audit passes no `-a`, so the gap is exactly `1 + max(0, 40 - (leader + 19))`
-spaces: one for a 21-character leader, four for `15423<Compositor> `. Any other
-gap, leader or suffix stays unparsed. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
+spaces: one for a 21-character leader, four for `15423<Compositor> `. The leader
+must be one strace can print: a decimal PID without leading zeros and a 1–15
+byte comm [quoted](https://github.com/strace/strace/blob/v7.3/src/util.c#L1191-L1248)
+with `<`/`>` escaped and octal escapes in their canonical form (for example
+`Comp\303\266sitor`), or a `%-5u` PID without comm. Any other gap, leader or
+suffix stays unparsed. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)
 does not identify the syscall. Issue #15 decision 6629110086 permits resolving
 these records only with complete independent kernel corroboration below. There
 must be complete fork ancestry, no pending fork/exec and no subsequent known

@@ -84,24 +84,81 @@ REGISTER_RESUME_HEAD = '<... ??? resumed>)'
 # DEFAULT_ACOLUMN in src/defs.h#L73-L74). The audit passes no -a/--columns, so
 # the column is exactly 40.
 STRACE_ALIGNMENT_COLUMN = 40
+# strace 7.3 reads comm from /proc/<pid>/comm with fgets() into PROC_COMM_LEN
+# (16) bytes and strips trailing newlines (src/strace.c#L1020-L1046,
+# src/defs.h#L332), so it has 1..15 bytes and no NUL or newline.
+STRACE_COMM_BYTES = 15
+STRACE_COMM_TOKEN = re.compile(r'\\(?:[0-7]{1,3}|["\\fnrtv])|[^\\]|\\')
+STRACE_CONTROL_ESCAPES = {'\f': 'f', '\n': 'n', '\r': 'r', '\t': 't', '\v': 'v'}
 CLOSE_ARGUMENT = r'close\(\s*(-?[0-9]{1,10})(?:<(?:[^<>]|->)*>)?\s*'
 CLOSE_MISSING_RETURN = re.compile(CLOSE_ARGUMENT + r'\)\s+=\s+\?')
 CLOSE_PENDING = re.compile(CLOSE_ARGUMENT)
+
+
+def quote_strace_comm(raw):
+    """Quote comm bytes as strace 7.3 print_comm_str() prints them.
+
+    print_comm_str() (src/strace.c#L857-L865) calls string_quote() without
+    quotes, -x or extra flags and with '<>' escaped (src/util.c#L1191-L1248):
+    quote and backslash get a backslash, \\f\\n\\r\\t\\v use letters, other
+    bytes outside 0x20..0x7e plus '<' and '>' use the shortest octal form, or
+    three digits before an octal digit (sprint_byte_oct(), src/print_utils.h
+    #L41-L60).
+    """
+    quoted = []
+    for index, byte in enumerate(raw):
+        char = chr(byte)
+        if char in '"\\':
+            quoted.append('\\' + char)
+        elif char in STRACE_CONTROL_ESCAPES:
+            quoted.append('\\' + STRACE_CONTROL_ESCAPES[char])
+        elif 0x20 <= byte < 0x7f and char not in '<>':
+            quoted.append(char)
+        else:
+            octal_next = index + 1 < len(raw) and 0x30 <= raw[index + 1] <= 0x37
+            quoted.append('\\' + format(byte, '03o' if octal_next else 'o'))
+    return ''.join(quoted)
+
+
+def is_strace_comm(text):
+    """Accept only a comm that strace 7.3 can print, byte for byte."""
+    letters = {letter: char for char, letter in STRACE_CONTROL_ESCAPES.items()}
+    raw = bytearray()
+    # The tokens cover the whole text; re-quoting rejects every other form.
+    for token in STRACE_COMM_TOKEN.findall(text):
+        if len(token) == 1:
+            value = ord(token)
+        elif token[1] in '01234567':
+            value = int(token[1:], 8)
+        else:
+            value = ord(letters.get(token[1], token[1]))
+        if not 0 < value <= 0xff or value == 0x0a:
+            return False
+        raw.append(value)
+    return 1 <= len(raw) <= STRACE_COMM_BYTES and quote_strace_comm(raw) == text
 
 
 def is_register_resume(line, prefix):
     """Match strace 7.3's unreadable-register resume with its exact padding.
 
     ``prefix`` is the PREFIX match of the whole record. Its leader must be the
-    one printleader() writes for -f -o (src/strace.c#L899-L917): '<pid><comm> ',
-    or a '%-5u' PID and one space when comm is empty. Any other gap or leader
-    is not this record.
+    one printleader() writes for -f -o (src/strace.c#L899-L917): the decimal
+    PID without leading zeros, then '<comm> ' with the comm quoted as above,
+    or '%-5u ' when strace has no comm. Any other gap or leader is not this
+    record.
     """
     if prefix is None:
         return False
     pid, comm = prefix[1], prefix[2]
-    leader = f'{pid}<{comm}> ' if comm else f'{pid:<5} '
-    if prefix.string != leader + line or not leader.isascii():
+    if not re.fullmatch(r'[1-9][0-9]*', pid):
+        return False
+    if comm is None:
+        leader = f'{pid:<5} '
+    elif is_strace_comm(comm):
+        leader = f'{pid}<{comm}> '
+    else:
+        return False
+    if prefix.string != leader + line:
         return False
     column = len(leader) + len(REGISTER_RESUME_HEAD) + 1
     padding = 1 + max(0, STRACE_ALIGNMENT_COLUMN - column)

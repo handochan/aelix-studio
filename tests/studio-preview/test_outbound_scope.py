@@ -1979,6 +1979,13 @@ class RegisterResumePaddingTests(unittest.TestCase):
                 '14054<Compositor> <... ??? resumed>)    = ?',
                 '14111<PerfettoTrace> <... ??? resumed>) = ?',
                 '14021<Chrome_ChildIOT> <... ??? resumed>) = ?')
+    # Verbatim strace 7.3 output for names it escapes: UTF-8 'Compösitor',
+    # 'a<b>c', 'q"\\x', a control byte before '7' (three octal digits) and a tab.
+    VERBATIM_ESCAPED = ('14026<Comp\\303\\266sitor> <... ??? resumed>) = ?',
+                        '14020<a\\74b\\76c> <... ??? resumed>)     = ?',
+                        '14084<q\\"\\\\x> <... ??? resumed>)        = ?',
+                        '14057<d\\0017z> <... ??? resumed>)       = ?',
+                        '14051<tab\\tname> <... ??? resumed>)     = ?')
     COMPOSITOR = '15423<Compositor> '
     WRITE = 'write(27</dev/null<char 1:3>>, ""..., 1) = 1'
     CONNECT = ('connect(30<UDPv6:[5001]>, {sa_family=AF_INET6, sin6_port=htons(443), sin6_flowinfo=htonl(0), '
@@ -2002,7 +2009,7 @@ class RegisterResumePaddingTests(unittest.TestCase):
                             self.stub_capture(pid) if capture else None)
 
     def test_verbatim_strace_resumes_are_exact_register_stubs(self):
-        for line in self.VERBATIM + (register_resume(self.COMPOSITOR),):
+        for line in self.VERBATIM + self.VERBATIM_ESCAPED + (register_resume(self.COMPOSITOR),):
             leader = line[:line.index('<... ')]
             with self.subTest(leader=leader):
                 self.assertEqual(register_resume(leader), line)
@@ -2034,7 +2041,11 @@ class RegisterResumePaddingTests(unittest.TestCase):
                 self.assertIn('unknown_unfinished_syscall', reasons)
                 self.assertGreater(report['unparsedRecords'], 0)
                 self.assertEqual(report['kernelResolvedRecords'], 0)
-        for leader in ('15423<Compösitor> ', '15423<> '):
+        # Leaders that strace 7.3 printleader() cannot write, each with the
+        # padding its length would otherwise get.
+        for leader in ('015423<Compositor> ', '007   ', '15423<a<b> ', '15423<q"x> ', '15423<a\\074b> ',
+                       '15423<a\\nb> ', '15423<a\\000b> ', '15423<x\\> ', '15423<ABCDEFGHIJKLMNOP> ',
+                       '15423<Compösitor> ', '15423<> '):
             with self.subTest(leader=leader):
                 report = self.stub(leader, register_resume(leader))
                 self.assertIn('unknown_record', {issue['reason'] for issue in report['classificationIssues']})
