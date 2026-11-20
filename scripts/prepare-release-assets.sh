@@ -53,8 +53,8 @@ WEB_CLI_FILES=()
 while IFS= read -r file; do
   WEB_CLI_FILES+=("$file")
 done < <(find "$ARTIFACTS_DIR" -type f \( \
-  -name "aionui-web-*.tar.gz" -o \
-  -name "aionui-web-*.tar.gz.sha256" \
+  -name "aelix-studio-web-*.tar.gz" -o \
+  -name "aelix-studio-web-*.tar.gz.sha256" \
 \) | sort)
 
 WEB_CLI_DUPS=$(for file in "${WEB_CLI_FILES[@]}"; do basename "$file"; done | sort | uniq -d || true)
@@ -69,13 +69,13 @@ for file in "${WEB_CLI_FILES[@]}"; do
 done
 
 # ---------------------------------------------------------------------------
-# 1c) Copy install-web.sh (version-substituted)
+# 1c) Copy install-aelix-studio-web.sh (version-substituted)
 # ---------------------------------------------------------------------------
-echo "==> Copying install-web.sh ..."
-INSTALL_SCRIPT=$(find "$ARTIFACTS_DIR" -type f -name 'install-web.sh' | head -n 1 || true)
+echo "==> Copying install-aelix-studio-web.sh ..."
+INSTALL_SCRIPT=$(find "$ARTIFACTS_DIR" -type f -name 'install-aelix-studio-web.sh' | head -n 1 || true)
 if [ -n "$INSTALL_SCRIPT" ]; then
-  cp -f "$INSTALL_SCRIPT" "$OUTPUT_DIR/install-web.sh"
-  chmod +x "$OUTPUT_DIR/install-web.sh"
+  cp -f "$INSTALL_SCRIPT" "$OUTPUT_DIR/install-aelix-studio-web.sh"
+  chmod +x "$OUTPUT_DIR/install-aelix-studio-web.sh"
 fi
 
 # ---------------------------------------------------------------------------
@@ -159,7 +159,7 @@ WEB_PLATFORMS=(
 )
 
 for plat in "${WEB_PLATFORMS[@]}"; do
-  tarball="aionui-web-${VERSION}-${plat}.tar.gz"
+  tarball="aelix-studio-web-${VERSION}-${plat}.tar.gz"
   if [ ! -f "$OUTPUT_DIR/$tarball" ]; then
     echo "::error::Missing web-cli tarball: $tarball"
     MISSING=1
@@ -170,8 +170,8 @@ for plat in "${WEB_PLATFORMS[@]}"; do
   fi
 done
 
-if [ ! -f "$OUTPUT_DIR/install-web.sh" ]; then
-  echo "::error::Missing install-web.sh"
+if [ ! -f "$OUTPUT_DIR/install-aelix-studio-web.sh" ]; then
+  echo "::error::Missing install-aelix-studio-web.sh"
   MISSING=1
 fi
 

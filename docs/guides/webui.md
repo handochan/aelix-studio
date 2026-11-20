@@ -661,12 +661,14 @@ aionui --resetpass username
 
 ### Standalone WebUI
 
+See [Aelix Studio standalone installation](../studio-preview/identity.md#standalone-webui-installation).
+
 Stop the standalone WebUI before resetting its password. Use the same data
 directory you passed to the WebUI. The host checks that no server owns this
 directory before reading or changing the password.
 
 ```bash
-aionui-web resetpass --data-dir /path/to/webui-data
+aelix-studio-web resetpass --data-dir /path/to/webui-data
 bun run resetpass --data-dir /path/to/webui-data
 ```
 

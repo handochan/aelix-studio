@@ -1,17 +1,13 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-TARBALL_PATH=$1
-
-if [ -z "$TARBALL_PATH" ]; then
-  echo "Usage: $0 <tarball-path>"
-  exit 1
-fi
+PACKAGE=${1:?Usage: $0 <tarball-or-installed-directory> [installed-link]}
+CLI=${2:-./aelix-studio-web}
 
 echo "========================================"
 echo "Smoke test for web-cli tarball"
 echo "========================================"
-echo "Tarball: $TARBALL_PATH"
+echo "Package: $PACKAGE"
 
 # 1. Extract tarball
 echo ""
@@ -26,21 +22,20 @@ cleanup() {
   rm -rf "$TEMP_DIR"
 }
 trap cleanup EXIT
-tar -xzf "$TARBALL_PATH" -C "$TEMP_DIR"
+if [ -d "$PACKAGE" ]; then
+  cd "$PACKAGE"
+else
+  tar -xzf "$PACKAGE" -C "$TEMP_DIR"
+  cd "$TEMP_DIR/aelix-studio-web"
+fi
 
 # 2. Verify directory structure
 echo ""
 echo "2. Verifying directory structure..."
-if [ ! -d "$TEMP_DIR/aionui-web" ]; then
-  echo "❌ Missing aionui-web directory"
-  exit 1
-fi
-
-cd "$TEMP_DIR/aionui-web"
 
 # New layout (bun compile standalone binary):
-#   aionui-web/
-#   ├── aionui-web           ← single compiled executable (no bin/, no dist/, no node_modules)
+#   aelix-studio-web/
+#   ├── aelix-studio-web           ← single compiled executable (no bin/, no dist/, no node_modules)
 #   ├── package.json         ← for version lookup
 #   ├── static/              ← SPA assets
 #   └── bundled-aioncore/<plat-arch>/...
@@ -61,16 +56,16 @@ echo "✓ Found package.json"
 # 3. Check executable
 echo ""
 echo "3. Checking executable..."
-if [ ! -x "aionui-web" ]; then
-  echo "❌ aionui-web is not executable"
+if [ ! -x "aelix-studio-web" ]; then
+  echo "❌ aelix-studio-web is not executable"
   exit 1
 fi
-echo "✓ aionui-web is executable"
+echo "✓ aelix-studio-web is executable"
 
 # 4. Test version command
 echo ""
 echo "4. Testing version command..."
-VERSION=$(./aionui-web version)
+VERSION=$("$CLI" version)
 if [ -z "$VERSION" ]; then
   echo "❌ version command returned empty"
   exit 1
@@ -102,17 +97,19 @@ echo "✓ Backend binary loads on this platform"
 
 # Exercise the extracted CLI and its bundled host with a fresh data directory.
 DATA_DIR="$TEMP_DIR/data"
-BACKEND_BINARY="$PWD/$BACKEND_BINARY"
+IGNORED_DATA_DIR="$TEMP_DIR/ignored-data-dir"
 webui_curl() {
   curl --noproxy '*' "$@"
 }
 start_webui() {
-  ./aionui-web start --backend-bin "$BACKEND_BINARY" --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &
+  AIONUI_DATA_DIR="$IGNORED_DATA_DIR" "$CLI" start --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 45); do
     BASE_URL=$(sed -n 's/^  Local  : //p' "$TEMP_DIR/webui.log" | head -1)
     if [ -n "$BASE_URL" ] && webui_curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
       grep -q '<html' "$TEMP_DIR/index.html"
+      test -d "$DATA_DIR/logs"
+      test ! -e "$IGNORED_DATA_DIR"
       return
     fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
@@ -144,9 +141,12 @@ done
 test -n "$PASSWORD"
 login "$PASSWORD"
 webui_curl -fsS -b "$TEMP_DIR/cookies" -o /dev/null "$BASE_URL/api/auth/user"
+HTTP_CODE=$(webui_curl -sS -H 'Origin: http://example.invalid' -H 'Content-Type: application/json' \
+  --data '{}' -o /dev/null -w '%{http_code}' "$BASE_URL/login")
+test "$HTTP_CODE" = "403"
 echo "✓ First launch and browser login"
 
-if ./aionui-web resetpass --backend-bin "$BACKEND_BINARY" --data-dir "$DATA_DIR" --password-stdin </dev/null >"$TEMP_DIR/reset.log" 2>&1; then
+if "$CLI" resetpass --data-dir "$DATA_DIR" --password-stdin </dev/null >"$TEMP_DIR/reset.log" 2>&1; then
   echo "Reset unexpectedly succeeded while WebUI was running" >&2
   exit 1
 fi
@@ -155,9 +155,9 @@ stop_webui
 
 NEW_PASSWORD='Synthetic-offline-reset-Pass123'
 printf '%s\n' "$NEW_PASSWORD" |
-  ./aionui-web resetpass --backend-bin "$BACKEND_BINARY" --data-dir "$DATA_DIR" --password-stdin >"$TEMP_DIR/reset.log" 2>&1
+  AIONUI_DATA_DIR="$DATA_DIR" "$CLI" resetpass --password-stdin >"$TEMP_DIR/reset.log" 2>&1
 start_webui
-HTTP_CODE=$(curl -sS -b "$TEMP_DIR/cookies" -o /dev/null -w '%{http_code}' "$BASE_URL/api/auth/user")
+HTTP_CODE=$(webui_curl -sS -b "$TEMP_DIR/cookies" -o /dev/null -w '%{http_code}' "$BASE_URL/api/auth/user")
 test "$HTTP_CODE" = "401"
 login "$NEW_PASSWORD"
 stop_webui

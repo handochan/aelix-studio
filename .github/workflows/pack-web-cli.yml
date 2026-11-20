@@ -28,6 +28,7 @@ on:
 
 env:
   BUN_INSTALL_REGISTRY: 'https://registry.npmjs.org/'
+  AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
 
 jobs:
   code-quality:
@@ -78,7 +79,7 @@ jobs:
       matrix:
         include:
           - { platform: darwin, arch: arm64, os: macos-15 }
-          - { platform: darwin, arch: x64, os: macos-15 }
+          - { platform: darwin, arch: x64, os: macos-15-intel }
           - { platform: linux, arch: x64, os: ubuntu-latest }
           - { platform: linux, arch: arm64, os: ubuntu-24.04-arm }
           - { platform: win32, arch: x64, os: windows-2022 }
@@ -94,7 +95,7 @@ jobs:
         shell: bash
         run: |
           SHORT=$(git rev-parse --short HEAD)
-          echo "short=$SHORT" >> $GITHUB_OUTPUT
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -133,7 +134,7 @@ jobs:
           retention-days: 7
 
   prepare-install-script:
-    name: Prepare install-web.sh for release
+    name: Prepare install-aelix-studio-web.sh for release
     runs-on: ubuntu-latest
     needs: pack-web-cli
     if: ${{ always() && needs.pack-web-cli.result == 'success' }}
@@ -149,7 +150,7 @@ jobs:
         shell: bash
         run: |
           SHORT=$(git rev-parse --short HEAD)
-          echo "short=$SHORT" >> $GITHUB_OUTPUT
+          echo "short=$SHORT" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -160,90 +161,60 @@ jobs:
         id: version
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Replace __VERSION__ placeholder in install-web.sh
+      - name: Replace __VERSION__ placeholder in install-aelix-studio-web.sh
         run: |
           mkdir -p dist-scripts
-          sed "s/__VERSION__/${{ steps.version.outputs.version }}/g" scripts/install-web.sh > dist-scripts/install-web.sh
-          chmod +x dist-scripts/install-web.sh
+          sed "s/__VERSION__/${{ steps.version.outputs.version }}/g" scripts/install-web.sh > dist-scripts/install-aelix-studio-web.sh
+          chmod +x dist-scripts/install-aelix-studio-web.sh
 
-      - name: Upload install-web.sh artifact
+      - name: Upload install-aelix-studio-web.sh artifact
         uses: actions/upload-artifact@v6
         with:
-          name: ${{ inputs.append_commit_hash && format('install-web-script-{0}', steps.commit.outputs.short) || 'install-web-script' }}
-          path: dist-scripts/install-web.sh
+          name: ${{ inputs.append_commit_hash && format('install-aelix-studio-web-script-{0}', steps.commit.outputs.short) || 'install-aelix-studio-web-script' }}
+          path: dist-scripts/install-aelix-studio-web.sh
           retention-days: 7
 
-  smoke-test:
-    name: Smoke test web-cli tarball (Linux x86_64)
-    runs-on: ubuntu-latest
-    needs: pack-web-cli
-    if: ${{ always() && needs.pack-web-cli.result == 'success' }}
-    container:
-      image: debian:bookworm-slim
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y curl tar gzip nodejs
-
-      - name: Download linux-x86_64 tarball
-        uses: actions/download-artifact@v7
-        with:
-          name: web-cli-linux-x64
-          path: dist-web-cli
-
-      - name: Run smoke test
-        shell: bash
-        run: |
-          chmod +x scripts/smoke-test-web-cli.sh
-          TARBALL=$(ls dist-web-cli/*.tar.gz | head -1)
-          bash scripts/smoke-test-web-cli.sh "$TARBALL"
-
   smoke-test-install:
-    name: Smoke test install-web.sh (Linux x86_64)
-    runs-on: ubuntu-latest
+    name: Install and run Studio WebUI (${{ matrix.platform }}-${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
     needs: [pack-web-cli, prepare-install-script]
     if: ${{ always() && needs.pack-web-cli.result == 'success' && needs.prepare-install-script.result == 'success' }}
-    container:
-      image: debian:bookworm-slim
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { platform: darwin, arch: arm64, os: macos-15 }
+          - { platform: darwin, arch: x64, os: macos-15-intel }
+          - { platform: linux, arch: x64, os: ubuntu-latest }
+          - { platform: linux, arch: arm64, os: ubuntu-24.04-arm }
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
-
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y curl tar gzip nodejs coreutils
+        with:
+          ref: ${{ inputs.ref }}
 
       - name: Resolve version
         id: version
-        shell: bash
-        run: |
-          VERSION=$(node -p "require('./package.json').version")
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Resolved version: $VERSION"
+        run: echo "version=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
 
-      - name: Download linux-x86_64 tarball
+      - name: Download WebUI tarball and checksum
         uses: actions/download-artifact@v7
         with:
-          name: web-cli-linux-x64
-          path: /tmp/releases/v${{ steps.version.outputs.version }}
+          pattern: web-cli-${{ matrix.platform }}-${{ matrix.arch }}*
+          merge-multiple: true
+          path: ${{ runner.temp }}/webui-releases/v${{ steps.version.outputs.version }}
 
-      - name: Download install-web.sh
+      - name: Download installer
         uses: actions/download-artifact@v7
         with:
-          name: install-web-script
-          path: /tmp/releases
+          pattern: install-aelix-studio-web-script*
+          merge-multiple: true
+          path: ${{ runner.temp }}/webui-releases
 
-      - name: Run smoke test
+      - name: Install, run and remove Studio WebUI
         shell: bash
-        run: |
-          chmod +x scripts/smoke-test-install-web.sh
-          bash scripts/smoke-test-install-web.sh file:///tmp/releases ${{ steps.version.outputs.version }}
+        run: bash scripts/smoke-test-install-web.sh "file://$RUNNER_TEMP/webui-releases" "${{ steps.version.outputs.version }}"
