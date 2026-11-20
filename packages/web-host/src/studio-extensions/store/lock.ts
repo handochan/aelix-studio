@@ -148,6 +148,9 @@ if mode == 'hold':
 else:
     live, stale = [], []
     for name in sorted(os.listdir(target)):
+        # A snapshot is protected by its corresponding adapter lease.
+        if name.endswith('.snapshot.json'):
+            continue
         try:
             fd = os.open(os.path.join(target, name), os.O_RDWR | NOFOLLOW)
         except FileNotFoundError:

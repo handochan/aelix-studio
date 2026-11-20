@@ -2,10 +2,11 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
-import { describe, mutate, reconcileBundle, rollback, type MutationRequest } from './flow/mutate.js';
+import { describe, mutate, reconcileBundle, rollback, setDefault, type MutationRequest } from './flow/mutate.js';
 import { parseOnlineSource } from './flow/onlineSource.js';
 import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
 import { locateLayout, resolveBundle } from './store/layout.js';
+import { isManagedId } from './launch/managedCatalog.js';
 import {
   ExtensionFailure,
   type ExtensionCommand,
@@ -40,7 +41,18 @@ const TIMEOUTS: FlowContext['timeouts'] = {
   installerMs: 600_000,
   verifyMs: 120_000,
 };
-const ACTIONS = new Set(['list', 'install', 'update', 'remove', 'rollback', 'reconcile_bundle', 'poll', 'cancel']);
+type DirectCommand = Extract<ExtensionCommand, { action: 'rollback' | 'reconcile_bundle' | 'set_default' }>;
+const ACTIONS = new Set([
+  'list',
+  'install',
+  'update',
+  'remove',
+  'set_default',
+  'rollback',
+  'reconcile_bundle',
+  'poll',
+  'cancel',
+]);
 const FINISHED = new Set(['switched', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
   ok: false,
@@ -126,20 +138,16 @@ export class ExtensionService {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
       }
-      const direct = command.action === 'rollback' || command.action === 'reconcile_bundle';
-      const change = direct ? undefined : parseChange(command);
-      if (!direct && !change) return fail('INVALID_INPUT');
-      if (change?.action === 'install' && change.source.kind !== 'file') {
-        const enabled = this.options.onlineInstallEnabled;
-        if ((typeof enabled === 'function' ? enabled() : enabled) === false) return fail('ONLINE_INSTALL_DISABLED');
-      }
-      if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
-        return fail('UNSUPPORTED_PLATFORM');
-      if (this.changing) return fail('BUSY');
-      this.changing = true;
-      if (!change) {
+      if (command.action === 'rollback' || command.action === 'reconcile_bundle' || command.action === 'set_default') {
+        if (
+          command.action === 'set_default' &&
+          (!isManagedId(command.extensionId) || typeof command.enabled !== 'boolean')
+        )
+          return fail('INVALID_INPUT');
+        if (this.changing) return fail('BUSY');
+        this.changing = true;
         const abort = new AbortController();
-        const done = this.runDirect(command.action === 'reconcile_bundle', abort.signal);
+        const done = this.runDirect(command, abort.signal);
         this.direct = { owner, abort, done };
         try {
           return await done;
@@ -148,6 +156,16 @@ export class ExtensionService {
           this.changing = false;
         }
       }
+      const change = parseChange(command);
+      if (!change) return fail('INVALID_INPUT');
+      if (change?.action === 'install' && change.source.kind !== 'file') {
+        const enabled = this.options.onlineInstallEnabled;
+        if ((typeof enabled === 'function' ? enabled() : enabled) === false) return fail('ONLINE_INSTALL_DISABLED');
+      }
+      if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
+        return fail('UNSUPPORTED_PLATFORM');
+      if (this.changing) return fail('BUSY');
+      this.changing = true;
       const abort = new AbortController();
       let context: FlowContext | undefined;
       try {
@@ -170,11 +188,13 @@ export class ExtensionService {
     }
   }
 
-  private async runDirect(reconcile: boolean, signal: AbortSignal): Promise<ExtensionReply> {
+  private async runDirect(command: DirectCommand, signal: AbortSignal): Promise<ExtensionReply> {
     try {
       const context = await this.context(signal);
       if (!context) return fail('RUNTIME_UNAVAILABLE');
-      const data = reconcile ? await reconcileBundle(context) : await rollback(context);
+      if (command.action === 'set_default')
+        return { ok: true, data: await setDefault(context, command.extensionId, command.enabled) };
+      const data = command.action === 'reconcile_bundle' ? await reconcileBundle(context) : await rollback(context);
       return { ok: true, data };
     } catch (error) {
       return error instanceof ExtensionFailure ? fail(error.code, error.detail) : this.unexpected(error);

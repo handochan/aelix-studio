@@ -25,6 +25,7 @@ import {
   newPointer,
   readGenerationRecord,
   readPointer,
+  retainedDefaults,
   switchPointer,
   writeGenerationRecord,
   type GenerationRecord,
@@ -45,13 +46,13 @@ import {
 import {
   chooseForms,
   conversationReference,
-  launchArguments,
   launchFormOf,
   loadedNames,
   writePacks,
   type ExtensionForm,
   type LaunchForm,
 } from '../launch/form.js';
+import { managedExtensionId, writeManagedCatalog } from '../launch/managedCatalog.js';
 import { createCandidate, scanGeneration, type Candidate, type FlowContext } from './candidate.js';
 import { managementEnvironment } from './environment.js';
 import {
@@ -60,6 +61,7 @@ import {
   redactPaths,
   resolveDistribution,
   runLoadCheck,
+  verifyManagedCatalog,
   type ChangeRequest,
   type ExpectedExtensions,
   type LoadExpectation,
@@ -417,19 +419,23 @@ async function verifyCandidate(
       unsupported.map((reference) => `${reference} cannot be passed to a conversation by module reference`)
     );
   await writePacks(candidate, forms);
+  launch.managed = await writeManagedCatalog(candidate, snapshot, expected, forms);
+  await verifyManagedCatalog(context, candidate, launch.managed);
   // Every extension by reference, in the order conversations get them: imports each and runs
   // its setup() now, lazy pack or not. Without packs this is exactly what conversations get.
   const byReference = new Map(
     [...expected].map(([name, reference]): [string, string] => [name, conversationReference(reference)])
   );
-  const references = [...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? '');
+  const references = [...new Set([...byReference.keys()].toSorted().map((name) => byReference.get(name) ?? ''))];
   await loadOrRefuse(context, candidate, references, byReference);
   // Then exactly the way new conversations get them, which binds the manifests of the packs.
   if (launch.packs)
     await loadOrRefuse(
       context,
       candidate,
-      launchArguments(candidate.paths.directory, launch),
+      launch.managed.map(({ reference, entryPoints }) =>
+        entryPoints ? path.join(candidate.paths.directory, ...reference.split('/')) : reference
+      ),
       loadedNames(expected, forms)
     );
 
@@ -470,7 +476,13 @@ async function commitCandidate(
   if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
   await switchPointer(
     layout,
-    newPointer(record.generation, base.pointer?.generation ?? null, revision + 1, record.binding),
+    newPointer(
+      record.generation,
+      base.pointer?.generation ?? null,
+      revision + 1,
+      record.binding,
+      retainedDefaults(base.pointer, record)
+    ),
     base.pointer,
     lock
   );
@@ -816,10 +828,44 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
       return { current: record.generation, previous: base.pointer.generation, revision: base.pointer.revision + 1 };
     }
     if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
-    const next = newPointer(target.generation, base.pointer.generation, base.pointer.revision + 1, target.binding);
+    const next = newPointer(
+      target.generation,
+      base.pointer.generation,
+      base.pointer.revision + 1,
+      target.binding,
+      retainedDefaults(base.pointer, target)
+    );
     await switchPointer(context.layout, next, base.pointer, lock);
     await tidy(context, lock);
     return { current: next.generation, previous: next.previous, revision: next.revision };
+  } catch (error) {
+    throw outcome(error, lock);
+  } finally {
+    await lock.release();
+  }
+}
+
+/** Update the current pointer's app defaults without changing the active generation or its rollback target. */
+export async function setDefault(
+  context: FlowContext,
+  extensionId: string,
+  enabled: boolean
+): Promise<ExtensionListing> {
+  const { lock, base } = await begin(context);
+  try {
+    const { pointer, record } = base;
+    if (!pointer || !record?.launch.managed?.some(({ id }) => id === extensionId))
+      throw new ExtensionFailure('NOT_INSTALLED', ['the managed extension is not in the current generation']);
+    if (!sameBinding(record.binding, context.bundle.binding)) throw new ExtensionFailure('BUNDLE_CHANGED');
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+    if ((pointer.defaults?.[extensionId] ?? true) !== enabled) {
+      const next = {
+        ...pointer,
+        defaults: { ...pointer.defaults, [extensionId]: enabled },
+      };
+      await switchPointer(context.layout, next, null, lock);
+    }
+    return await describe(context);
   } catch (error) {
     throw outcome(error, lock);
   } finally {
@@ -849,6 +895,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
     };
   const usable = sameBinding(record.binding, context.bundle.binding);
   const previous = pointer.previous ? await readGenerationRecord(context.layout, pointer.previous) : undefined;
+  const managed = new Set(record.launch.managed?.map(({ id }) => id));
   return {
     current: pointer.generation,
     previous: pointer.previous,
@@ -856,18 +903,22 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
     appliesAt: 'new_session',
     rollbackAvailable: previous !== undefined,
     extensions: Object.entries(record.extensions)
-      .map(([name, extension]) => ({
-        name,
-        distribution: extension.distribution,
-        version: record.distributions[extension.distribution]?.version ?? '',
-        reference: extension.reference,
-        origin: record.distributions[extension.distribution]?.origin ?? null,
-        status: !usable
-          ? ('reinstall_needed' as const)
-          : extension.form === 'pack'
-            ? ('ready' as const)
-            : ('manifest_unbound' as const),
-      }))
+      .map(([name, extension]) => {
+        const id = managedExtensionId(extension.distribution, name, extension.plugin);
+        return {
+          name,
+          distribution: extension.distribution,
+          version: record.distributions[extension.distribution]?.version ?? '',
+          reference: extension.reference,
+          origin: record.distributions[extension.distribution]?.origin ?? null,
+          ...(managed.has(id) ? { managedId: id, defaultEnabled: pointer.defaults?.[id] ?? true } : {}),
+          status: !usable
+            ? ('reinstall_needed' as const)
+            : extension.form === 'pack'
+              ? ('ready' as const)
+              : ('manifest_unbound' as const),
+        };
+      })
       .toSorted((left, right) => (left.name < right.name ? -1 : 1)),
   };
 }

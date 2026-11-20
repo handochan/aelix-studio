@@ -4,6 +4,7 @@ import type { Candidate, FlowContext } from '../flow/candidate.js';
 import type { SiteSnapshot } from '../inspect/site.js';
 import { runToExit } from '../process.js';
 import { ExtensionFailure } from '../types.js';
+import type { ManagedEntry } from './managedCatalog.js';
 
 /**
  * How conversations are given the extensions of a generation (D04 ADR 8.3, decision B5).
@@ -15,6 +16,8 @@ export type LaunchForm = {
   packs: boolean;
   /** Module references passed one by one after the packs: their code loads, their manifest does not. */
   modules: string[];
+  /** Verified ACP v1 catalogue. Older generations only have the legacy launch form. */
+  managed?: ManagedEntry[];
 };
 
 /** How one extension is passed to a conversation. */
@@ -166,13 +169,28 @@ export async function chooseForms(
       fields.python === conversationReference(expected.get(name) ?? '')
     );
   });
-  const plugins = fitting.map((name) => answers[name].id as string);
+  const plugins = new Map<string, Set<string>>();
   for (const name of fitting) {
     const plugin = answers[name].id as string;
-    if (plugins.indexOf(plugin) !== plugins.lastIndexOf(plugin)) continue;
+    const directories = plugins.get(plugin) ?? new Set<string>();
+    directories.add(path.posix.dirname(wanted[name]));
+    plugins.set(plugin, directories);
+  }
+  for (const name of fitting) {
+    const plugin = answers[name].id as string;
+    if (plugins.get(plugin)?.size !== 1) continue;
     forms.set(name, { form: 'pack', plugin, directory: path.posix.dirname(wanted[name]) });
   }
   return forms;
+}
+
+export function linkPack(site: string, packageDirectory: string, link: string): Promise<void> {
+  const target = path.join(site, ...packageDirectory.split('/'));
+  return symlink(
+    process.platform === 'win32' ? target : path.relative(path.dirname(link), target),
+    link,
+    process.platform === 'win32' ? 'junction' : 'dir'
+  );
 }
 
 /**
@@ -187,13 +205,15 @@ export async function writePacks(candidate: Candidate, forms: Map<string, Extens
   if (packs.length === 0) return;
   const directory = path.join(candidate.paths.directory, PACKS_DIRECTORY);
   await mkdir(directory);
+  const linked = new Set<string>();
   for (const [index, [name, pack]] of packs.entries()) {
-    const target = path.join(candidate.paths.site, ...pack.directory.split('/'));
+    if (linked.has(pack.plugin)) continue;
+    linked.add(pack.plugin);
     // oxlint-disable-next-line no-await-in-loop -- a handful of links, made in order
-    await symlink(
-      process.platform === 'win32' ? target : path.relative(directory, target),
-      path.join(directory, `${String(index).padStart(3, '0')}-${name}`),
-      process.platform === 'win32' ? 'junction' : 'dir'
+    await linkPack(
+      candidate.paths.site,
+      pack.directory,
+      path.join(directory, `${String(index).padStart(3, '0')}-${name}`)
     );
   }
 }

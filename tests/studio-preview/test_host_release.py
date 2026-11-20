@@ -404,8 +404,12 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
         # Stands in for the adapter: reports what it was started with, then waits when asked to.
         (adapter / 'server.py').write_text(
             'import json, os, sys\n'
+            'from pathlib import Path\n'
             'def main():\n'
-            '    print(json.dumps({"argv": sys.argv[1:], "state": os.environ.get("AELIX_STUDIO_EXTENSION_STATE")}), flush=True)\n'
+            '    reply = {"argv": sys.argv[1:], "state": os.environ.get("AELIX_STUDIO_EXTENSION_STATE")}\n'
+            '    if "--managed-extensions" in sys.argv:\n'
+            '        reply["snapshot"] = json.loads(Path(sys.argv[sys.argv.index("--managed-extensions") + 1]).read_bytes())\n'
+            '    print(json.dumps(reply), flush=True)\n'
             '    if os.environ.get("STUDIO_TEST_HOLD"):\n'
             '        sys.stdin.readline()\n')
         native = self.bundle / 'native-site' / 'aelix_coding_agent' / 'cli'
@@ -417,6 +421,10 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
             'def main_sync():\n'
             '    print(json.dumps({"argv": sys.argv, "last": sys.path[-1], "first": sys.path[0]}))\n')
         (self.bundle / 'launch.py').write_bytes((ROOT / 'scripts/studio-preview/packaging/launch.py').read_bytes())
+        managed = ROOT / 'packages/web-host/src/studio-extensions/launch'
+        shutil.copy2(managed / 'managedSnapshot.py', self.bundle)
+        (self.bundle / 'managed-verifier').mkdir()
+        shutil.copy2(managed / 'upstream/managed_module.py', self.bundle / 'managed-verifier')
         self.manifest = {'schema': 'aelix.studio-preview.runtime/1', 'target': 'test-target', 'python': '3.12.15',
                          'dependencyLockSha256': 'a' * 64, 'native': {'sourceTag': {'commit': 'c' * 40}}}
         (self.bundle / 'manifest.json').write_text(json.dumps(self.manifest))
@@ -492,6 +500,72 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
                                                       '--profile', 'coding'))
         self.assertIsNone(reply['state'])
         self.assertEqual(errors, '')
+
+    def managed_catalogue(self, entries, defaults, *, capable=True):
+        if capable:
+            runtime = self.bundle / 'adapter-site/aelix_acp/runtime'
+            runtime.mkdir()
+            (runtime / 'managed_extensions.py').write_text('')
+        self.edit_record(self.GENERATION, lambda value: value['launch'].update(managed=entries))
+        pointer = self.state / 'current.json'
+        data = json.loads(pointer.read_bytes())
+        pointer.write_text(json.dumps(dict(data, defaults=defaults)))
+
+    def test_passes_all_verified_entries_and_defaults_through_one_generation_snapshot(self):
+        entries = [{'id': 'first:module', 'reference': 'first:setup'},
+                   {'id': 'second:module', 'reference': 'second:setup'}]
+        self.managed_catalogue(entries, {'second:module': False})
+        reply, _ = self.started()
+        self.assertIn('--managed-extensions', reply['argv'])
+        self.assertNotIn('--extension', reply['argv'])
+        source = Path(reply['argv'][reply['argv'].index('--managed-extensions') + 1])
+        self.assertEqual(source.parent, self.state / 'leases')
+        self.assertFalse(source.exists())
+        self.assertEqual(reply['snapshot'], {
+            'version': 1, 'generation': self.GENERATION,
+            'sitePackages': str(self.state / 'generations' / self.GENERATION / 'venv/lib/python3.12/site-packages'),
+            'extensions': [dict(item, defaultEnabled=(index == 0)) for index, item in enumerate(entries)],
+        })
+
+    def test_uses_enabled_explicit_references_with_the_older_adapter(self):
+        self.managed_catalogue([{'id': 'first:module', 'reference': 'first:setup'},
+                                {'id': 'second:module', 'reference': 'second:setup'}],
+                               {'second:module': False}, capable=False)
+        reply, _ = self.started()
+        self.assertEqual(reply['argv'], self.extended(self.GENERATION, ['first:setup']))
+
+    def test_passes_an_empty_snapshot_but_does_not_pass_a_mismatched_generation(self):
+        self.managed_catalogue([], {})
+        reply, _ = self.started()
+        self.assertEqual(reply['snapshot'], {'version': 1, 'generation': self.GENERATION, 'extensions': []})
+        self.edit_record(self.GENERATION, lambda value: value['binding'].update(nativeCommit='mismatch'))
+        reply, _ = self.started()
+        self.assertEqual(reply['argv'], self.legacy())
+        self.assertNotIn('snapshot', reply)
+
+    def test_rejects_an_opaque_callable_using_the_upstream_managed_module_verifier(self):
+        native = self.bundle / 'native-site/aelix_coding_agent/extensions'
+        native.mkdir()
+        (native / '__init__.py').write_text('')
+        (native / 'loader.py').write_text(
+            'from contextlib import nullcontext\nfrom importlib import import_module\n'
+            'def _import_module_outside_cwd(name, cwd):\n    return import_module(name)\n'
+            'def _import_path_without_cwd(cwd):\n    return nullcontext()\n',
+            encoding='utf-8',
+        )
+        site = self.state / 'generations' / self.GENERATION / 'venv/lib/python3.12/site-packages'
+        (site / 'checking_factory.py').write_text('from functools import lru_cache\n@lru_cache()\ndef setup(api): pass\n')
+        result = subprocess.run(
+            [sys.executable, '-I', '-S', '-B', str(self.bundle / 'launch.py'), 'verify-managed', str(site)],
+            input=json.dumps({'generation': self.GENERATION,
+                              'catalogue': [{'id': 'demo:factory', 'reference': 'checking_factory:setup'}]}),
+            text=True, capture_output=True, timeout=30,
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        self.assertEqual(json.loads(result.stdout), {
+            'managedVerification': False,
+            'reason': 'demo:factory: managed factory origin could not be verified',
+        })
 
     def test_holds_a_lease_on_the_generation_for_as_long_as_the_adapter_runs(self):
         import fcntl
@@ -607,6 +681,8 @@ class ExtensionGenerationLaunchTests(unittest.TestCase):
                 schema='aelix.studio.extensions.generation/1')),
             'a module the adapter would refuse': lambda: self.edit_record(self.GENERATION, lambda value: value[
                 'launch'].update(modules=['./x.py'])),
+            'a malformed managed catalogue': lambda: self.edit_record(self.GENERATION, lambda value: value[
+                'launch'].update(managed=None)),
         }
         for what, damage in cases.items():
             with self.subTest(what):

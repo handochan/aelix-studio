@@ -2,7 +2,8 @@ import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isAdapterReference, isObjectReference } from '../inspect/metadata.js';
 import type { LaunchForm } from '../launch/form.js';
-import type { ExtensionOrigin } from '../types.js';
+import { isManagedId, parseManagedCatalog } from '../launch/managedCatalog.js';
+import { ExtensionFailure, type ExtensionOrigin } from '../types.js';
 import { isGenerationId, writeAtomic, writeTemporary, type BundleBinding, type Layout } from './layout.js';
 import type { StateWriter } from './lock.js';
 
@@ -18,6 +19,8 @@ export type Pointer = {
   /** Goes up by one on every switch. A switch is refused when it moved since the candidate was made. */
   revision: number;
   binding: BundleBinding;
+  /** Explicit app defaults, keyed by the managed IDs in this generation. Missing means enabled. */
+  defaults?: Record<string, boolean>;
 };
 
 export type RecordedDistribution = { version: string; recordSha256: string; origin?: ExtensionOrigin };
@@ -89,11 +92,17 @@ export function parsePointer(text: string): Pointer | undefined {
   }
   if (!isObject(value) || value.schema !== POINTER_SCHEMA) return undefined;
   const binding = parseBinding(value.binding);
-  const { generation, revision } = value;
+  const { generation, revision, defaults } = value;
   const previous = optionalGeneration(value.previous);
   if (!binding || !isGenerationId(generation) || previous === undefined) return undefined;
   if (typeof revision !== 'number' || !Number.isSafeInteger(revision) || revision < 1) return undefined;
-  return { schema: POINTER_SCHEMA, generation, previous, revision, binding };
+  if (
+    defaults !== undefined &&
+    (!isObject(defaults) ||
+      Object.entries(defaults).some(([id, enabled]) => !isManagedId(id) || typeof enabled !== 'boolean'))
+  )
+    return undefined;
+  return newPointer(generation, previous, revision, binding, defaults as Pointer['defaults']);
 }
 
 /** Validate a generation record read from disk. */
@@ -113,6 +122,8 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
   if (!isObject(launch) || typeof launch.packs !== 'boolean' || !Array.isArray(launch.modules)) return undefined;
   const modules = launch.modules.filter((module): module is string => typeof module === 'string');
   if (modules.length !== launch.modules.length || !modules.every(isAdapterReference)) return undefined;
+  const managed = launch.managed === undefined ? undefined : parseManagedCatalog(launch.managed);
+  if (launch.managed !== undefined && managed === undefined) return undefined;
   const { action, target } = operation;
   if ((action !== 'install' && action !== 'update' && action !== 'remove') || typeof target !== 'string')
     return undefined;
@@ -125,7 +136,7 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
     operation: { action, target },
     distributions: {},
     extensions: {},
-    launch: { packs: launch.packs, modules },
+    launch: { packs: launch.packs, modules, ...(managed ? { managed } : {}) },
   };
   for (const [name, entry] of Object.entries(distributions)) {
     if (!isObject(entry) || !isText(entry.version) || typeof entry.recordSha256 !== 'string') return undefined;
@@ -157,9 +168,18 @@ export function newPointer(
   generation: string,
   previous: string | null,
   revision: number,
-  binding: BundleBinding
+  binding: BundleBinding,
+  defaults?: Pointer['defaults']
 ): Pointer {
-  return { schema: POINTER_SCHEMA, generation, previous, revision, binding };
+  return { schema: POINTER_SCHEMA, generation, previous, revision, binding, ...(defaults ? { defaults } : {}) };
+}
+
+/** Carry app defaults only for stable IDs still installed in the selected generation. */
+export function retainedDefaults(base: Pointer | null, next: GenerationRecord): Pointer['defaults'] {
+  if (!base?.defaults || !next.launch.managed) return undefined;
+  const ids = new Set(next.launch.managed.map(({ id }) => id));
+  const entries = Object.entries(base.defaults).filter(([id]) => ids.has(id));
+  return entries.length ? Object.fromEntries(entries) : undefined;
 }
 
 /** A generation record with the current schema. */
@@ -185,7 +205,10 @@ export async function readGenerationRecord(layout: Layout, generation: string): 
 
 /** Mark a generation complete by writing its record. This is the last write into a generation. */
 export async function writeGenerationRecord(layout: Layout, record: GenerationRecord): Promise<void> {
-  await writeAtomic(recordFile(layout, record.generation), JSON.stringify(record, null, 2) + '\n');
+  const content = JSON.stringify(record, null, 2) + '\n';
+  if (Buffer.byteLength(content) > 1024 * 1024)
+    throw new ExtensionFailure('MANAGED_EXTENSION_INVALID', ['the generation record exceeds 1 MiB']);
+  await writeAtomic(recordFile(layout, record.generation), content);
 }
 
 export type PointerState = {

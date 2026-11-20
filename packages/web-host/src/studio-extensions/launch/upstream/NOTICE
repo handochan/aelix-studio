@@ -1,0 +1,8 @@
+Aelix ACP
+Copyright 2026 Aelix contributors
+
+managed_module.py is copied without changes from
+https://github.com/handochan/aelix-acp/blob/a1a32b9afb803ecd1d57c0950882dc907b4bd68f/src/aelix_acp/runtime/managed_module.py
+
+Studio runs this verifier with the bundled native runtime when checking
+candidate generations. The ACP wheel and its Studio pin are unchanged.

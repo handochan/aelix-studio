@@ -15,7 +15,14 @@ import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWhe
 import { generationPaths, resolveBundle } from '../store/layout';
 import { newPointer, readGenerationRecord, readPointer, switchPointer } from '../store/pointer';
 import { ExtensionFailure, type FileExtensionSource } from '../types';
-import { describe as describeInstalled, mutate, reconcileBundle, rollback, type MutationHooks } from './mutate';
+import {
+  describe as describeInstalled,
+  mutate,
+  reconcileBundle,
+  rollback,
+  setDefault,
+  type MutationHooks,
+} from './mutate';
 
 describe('changing what is installed', () => {
   let scratch = '';
@@ -291,7 +298,26 @@ describe('changing what is installed', () => {
         .slice(-2)
         .map((call) => call.args.slice(call.args.indexOf('--no-extensions') + 1));
       expect(byReference).toEqual(['-e', 'demo_one:setup', '-e', 'demo_two:setup']);
-      expect(asLaunched).toEqual(['-e', path.join(helper.context.layout.generations, 'g00000002-0002', 'packs')]);
+      expect(asLaunched).toEqual([
+        '-e',
+        path.join(helper.context.layout.generations, 'g00000002-0002', 'pack-inputs', '0'),
+        '-e',
+        path.join(helper.context.layout.generations, 'g00000002-0002', 'pack-inputs', '1'),
+      ]);
+    });
+
+    it('refuses a candidate when a default-disabled factory fails managed origin verification', async () => {
+      await install({ name: 'demo-one', manifest: false });
+      await setDefault(helper.context, 'demo-one:demo-one', false);
+      const [pointer, directories] = [await current(), await generations()];
+      helper.runtime.managedError = 'demo-one:demo-one: managed factory origin could not be verified';
+      const refused = await failure(install({ name: 'demo-two', manifest: false }));
+      const verifier = helper.spawn.calls.findLastIndex((call) => call.args.includes('verify-managed'));
+      expect(JSON.parse(helper.spawn.children[verifier].written[0])).toMatchObject({
+        catalogue: expect.arrayContaining([{ id: 'demo-one:demo-one', reference: 'demo_one:setup' }]),
+      });
+      expect(refused).toMatchObject({ code: 'MANAGED_EXTENSION_INVALID', detail: [helper.runtime.managedError] });
+      await expectUntouched(pointer, directories);
     });
 
     describe('in the form conversations get it (decision B5)', () => {
@@ -311,6 +337,19 @@ describe('changing what is installed', () => {
           launch: { packs: true, modules: [] },
         });
         expect(await statuses()).toEqual([['demo-one', 'ready']]);
+      });
+
+      it('groups entry points of one installed pack into one ACP input', async () => {
+        await install({ name: 'demo-one', aliases: { 'demo-alias': 'demo_one' } });
+        const generation = path.join(helper.context.layout.generations, 'g00000001-0001');
+        expect((await record('g00000001-0001'))?.launch.managed).toEqual([
+          { id: 'demo-one:pack:demo-one', reference: 'pack-inputs/0', entryPoints: ['demo_one:setup'] },
+        ]);
+        expect(await readdir(path.join(generation, 'pack-inputs', '0'))).toEqual(['demo_one']);
+        expect((await describeInstalled(helper.context)).extensions.map((entry) => entry.managedId)).toEqual([
+          'demo-one:pack:demo-one',
+          'demo-one:pack:demo-one',
+        ]);
       });
 
       it.each<[string, WheelSpec, string[]?]>([
@@ -347,7 +386,7 @@ describe('changing what is installed', () => {
         });
         await install({ name: 'demo-one', manifest: false, files: claim('demo_one') });
         await install({ name: 'demo-two', manifest: false, files: claim('demo_two') });
-        expect((await record('g00000002-0002'))?.launch).toEqual({
+        expect((await record('g00000002-0002'))?.launch).toMatchObject({
           packs: false,
           modules: ['demo_one:setup', 'demo_two:setup'],
         });
@@ -988,6 +1027,8 @@ describe('changing what is installed', () => {
           reference: 'demo_one:setup',
           origin: expect.objectContaining({ kind: 'file', wheel: 'demo_one-0.1.0-py3-none-any.whl' }),
           status: 'manifest_unbound',
+          managedId: 'demo-one:demo-one',
+          defaultEnabled: true,
         },
       ]);
     });

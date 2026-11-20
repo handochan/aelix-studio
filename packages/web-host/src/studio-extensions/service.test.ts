@@ -76,6 +76,30 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect((await service.request('window:1', await installRequest({ name: 'demo-two' }))).ok).toBe(true);
   });
 
+  it('persists an app default without switching generations and carries it through an update', async () => {
+    await settle(await service.request('window:1', await installRequest({ name: 'demo-one' })));
+    const { current } = await listing();
+    const extensionId = 'demo-one:pack:demo-one';
+    expect(await service.request('window:1', { action: 'set_default', extensionId, enabled: false })).toMatchObject({
+      ok: true,
+      data: { current, extensions: [{ managedId: extensionId, defaultEnabled: false }] },
+    });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: 'demo-one',
+      source: { kind: 'file', path: await wheel({ name: 'demo-one', version: '0.2.0' }) },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect((await listing()).extensions).toMatchObject([{ managedId: extensionId, defaultEnabled: false }]);
+  });
+
+  it('does not write defaults for IDs outside the managed generation', async () => {
+    await settle(await service.request('window:1', await installRequest({ name: 'demo-one' })));
+    expect(
+      await service.request('window:1', { action: 'set_default', extensionId: 'missing:entry', enabled: false })
+    ).toMatchObject({ ok: false, code: 'NOT_INSTALLED' });
+  });
+
   it.each<[string, unknown]>([
     ['INVALID_INPUT', null],
     ['INVALID_INPUT', 'install'],
@@ -99,6 +123,7 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     ['INVALID_INPUT', { action: 'update', name: '  ', source: { kind: 'file', path: '/tmp/demo.whl' } }],
     ['INVALID_INPUT', { action: 'remove' }],
     ['INVALID_INPUT', { action: 'remove', name: 7 }],
+    ['INVALID_INPUT', { action: 'set_default', extensionId: 'demo:entry', enabled: 'off' }],
     ['NOT_FOUND', { action: 'poll', operationId: 'unknown' }],
   ])('answers %s to %j without starting anything', async (code, input) => {
     expect(await service.request('window:1', input)).toEqual({ ok: false, code });
