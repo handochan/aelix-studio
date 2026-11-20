@@ -414,6 +414,12 @@ type UseConversationCommandQueueOptions = {
   isBusy: boolean;
   isHydrated?: boolean;
   runtimeGate?: ConversationCommandQueueRuntimeGate;
+  /**
+   * Keeps queued commands persisted without executing them, in the foreground and after
+   * this hook unmounts (no background hand-off). Used while another writer may hold the
+   * session; execution resumes when it turns false on a mounted hook.
+   */
+  holdExecution?: boolean;
   onExecute: (item: ConversationCommandQueueItem) => Promise<void>;
 };
 
@@ -469,9 +475,21 @@ const registerBackgroundCommandQueueRunner = (
   ensureBackgroundTurnCompletedListener();
 };
 
-const detachBackgroundCommandQueueRunner = (conversation_id: string): void => {
+const detachBackgroundCommandQueueRunner = (conversation_id: string, hold = false): void => {
   const runner = backgroundRunners.get(conversation_id);
   if (!runner) {
+    return;
+  }
+
+  // A held queue (e.g. the session is locked by another writer) must not be handed to
+  // the background runner, which sends without that gate. Items stay persisted and the
+  // next mounted hook resumes them once execution is allowed.
+  if (hold) {
+    backgroundRunners.delete(conversation_id);
+    releaseBackgroundTurnCompletedListener();
+    logCommandQueue(conversation_id, 'background-held', {
+      pendingItemCount: readPersistedQueueState(conversation_id).items.length,
+    });
     return;
   }
 
@@ -598,10 +616,15 @@ export const useConversationCommandQueue = ({
   isBusy,
   isHydrated = true,
   runtimeGate,
+  holdExecution = false,
   onExecute,
 }: UseConversationCommandQueueOptions) => {
   const { t } = useTranslation();
-  const executionGate = getCommandQueueExecutionGate({ isBusy, isHydrated, runtimeGate });
+  const baseExecutionGate = getCommandQueueExecutionGate({ isBusy, isHydrated, runtimeGate });
+  // A held queue reports an unhydrated gate, so every runner condition waits.
+  const executionGate = holdExecution ? { ...baseExecutionGate, hydrated: false } : baseExecutionGate;
+  const holdExecutionRef = useRef(holdExecution);
+  holdExecutionRef.current = holdExecution;
   const { data = createDefaultQueueState(), mutate } = useSWR(
     [`/conversation-command-queue/${conversation_id}`, conversation_id, enabled],
     ([, id, is_enabled]) => (is_enabled ? readPersistedQueueState(id) : createDefaultQueueState())
@@ -698,7 +721,7 @@ export const useConversationCommandQueue = ({
     });
 
     return () => {
-      detachBackgroundCommandQueueRunner(conversation_id);
+      detachBackgroundCommandQueueRunner(conversation_id, holdExecutionRef.current);
     };
   }, [conversation_id, enabled]);
 
@@ -887,7 +910,7 @@ export const useConversationCommandQueue = ({
 
   const sendNow = useCallback(
     (commandId: string) => {
-      if (!enabled) {
+      if (!enabled || holdExecutionRef.current) {
         return;
       }
 

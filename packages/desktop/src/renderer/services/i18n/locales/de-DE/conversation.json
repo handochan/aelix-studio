@@ -810,5 +810,25 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Plan ausklappen",
     "collapse": "Plan einklappen"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "Läuft in der CLI",
+      "body": "Diese Sitzung ist in der Aelix-CLI oder einem anderen Aelix-Prozess geöffnet. Studio zeigt sie schreibgeschützt an, bis dieser Prozess die Sitzung schließt."
+    },
+    "other": {
+      "title": "Von einem anderen Prozess verwendet",
+      "body": "Ein anderer Aelix-Prozess verwendet diese Sitzung. Diese Ansicht bleibt schreibgeschützt, bis der Prozess sie freigibt."
+    },
+    "readOnly": "Schreibgeschützt",
+    "recheck": "Erneut prüfen",
+    "stillHeld": "Noch in Verwendung. Schließen Sie die Sitzung dort und prüfen Sie dann erneut.",
+    "checking": "Prüfe, ob diese Sitzung anderswo geöffnet ist…",
+    "checkFailed": "Die Sitzung konnte nicht geprüft werden. Versuchen Sie es erneut.",
+    "unconfirmed": {
+      "title": "Sitzung konnte nicht geprüft werden",
+      "body": "Studio konnte nicht bestätigen, dass kein anderer Prozess diese Sitzung verwendet. Senden und Entwurfsbox sind pausiert. Prüfen Sie erneut, um fortzufahren."
+    },
+    "paused": "Senden und Entwurfsbox bleiben pausiert, bis eine Prüfung erfolgreich ist."
   }
 }

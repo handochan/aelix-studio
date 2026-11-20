@@ -34,13 +34,15 @@ describe('startWebHost', () => {
     }));
 
     const { startWebHost } = await import('../src/index.js');
+    const { startStaticServer } = await import('../src/static-server.js');
+    const userDataPath = '/tmp/Studio 사용자 데이터';
 
     const handle = await startWebHost({
       app: {
         version: '1.0.0',
         isPackaged: false,
         resourcesPath: '/app',
-        userDataPath: '/tmp/test-data',
+        userDataPath,
       },
       staticDir: '/tmp/static',
       backend: {
@@ -54,6 +56,7 @@ describe('startWebHost', () => {
     expect('initialPassword' in handle).toBe(false);
     expect(handle.port).toBe(33000);
     expect(handle.backendPort).toBe(55555);
+    expect(startStaticServer).toHaveBeenCalledWith(expect.objectContaining({ userDataPath }));
 
     await handle.stop();
 

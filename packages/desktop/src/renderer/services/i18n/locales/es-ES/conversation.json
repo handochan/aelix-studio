@@ -810,5 +810,25 @@
     "progress": "{{completed}}/{{total}}",
     "expand": "Expandir plan",
     "collapse": "Contraer plan"
+  },
+  "sessionHolder": {
+    "native": {
+      "title": "En ejecución en la CLI",
+      "body": "Esta sesión está abierta en la CLI de Aelix u otro proceso de Aelix. Studio la muestra en solo lectura hasta que ese proceso cierre la sesión."
+    },
+    "other": {
+      "title": "En uso por otro proceso",
+      "body": "Otro proceso de Aelix está usando esta sesión. Esta vista será de solo lectura hasta que ese proceso la libere."
+    },
+    "readOnly": "Solo lectura",
+    "recheck": "Comprobar de nuevo",
+    "stillHeld": "Sigue en uso. Cierre la sesión allí y vuelva a comprobar.",
+    "checking": "Comprobando si esta sesión está abierta en otro lugar…",
+    "checkFailed": "No se pudo comprobar la sesión. Inténtelo de nuevo.",
+    "unconfirmed": {
+      "title": "No se pudo comprobar esta sesión",
+      "body": "Studio no pudo confirmar que ningún otro proceso use esta sesión, así que el envío y la bandeja de borradores están en pausa. Compruebe de nuevo para continuar."
+    },
+    "paused": "El envío y la bandeja de borradores seguirán en pausa hasta que una comprobación tenga éxito."
   }
 }

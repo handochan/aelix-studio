@@ -7,7 +7,7 @@ export const NATIVE_AUTH_ROUTE = '/api/studio/native-auth';
 export async function handleNativeAuth(
   req: IncomingMessage,
   res: ServerResponse,
-  options: { backendPort: number; origins: string[]; service?: NativeAuthService }
+  options: { backendPort: number; origins: string[]; userDataPath?: string; service?: NativeAuthService }
 ): Promise<void> {
   const respond = (status: number, body: unknown): void => {
     if (res.destroyed) return;
@@ -68,7 +68,11 @@ export async function handleNativeAuth(
       respond(400, { ok: false, code: 'INVALID_INPUT' });
       return;
     }
-    const reply = await (options.service ?? getNativeAuthService()).request(`web:${result.user.id}`, command);
+    const reply = await (options.service ?? getNativeAuthService()).request(
+      `web:${result.user.id}`,
+      command,
+      options.userDataPath
+    );
     respond(200, reply);
   } catch {
     respond(503, { ok: false, code: 'UNAVAILABLE' });

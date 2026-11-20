@@ -147,11 +147,16 @@ class WindowsChildBootstrapTests(unittest.TestCase):
             _, module, fake = self.fixture(root)
             environment = dict(os.environ)
             handle = object()
-            with patch.object(module, 'sys', fake), patch.object(module.os, 'add_dll_directory', return_value=handle, create=True), patch.dict(sys.modules, {'pywin32_bootstrap': ModuleType('pywin32_bootstrap')}):
-                self.assertTrue(module._configure_native_child())
-            self.assertEqual(fake.path[:3], [str(root / 'native-site' / name) for name in ('win32', 'win32/lib', 'Pythonwin')])
-            self.assertEqual(module._DLL_HANDLES, [handle])
-            self.assertEqual(dict(os.environ), environment)
+            for flags in ([], ['-P']):
+                with self.subTest(flags=flags):
+                    fake.orig_argv = [fake.executable, *flags, '-m', 'aelix_coding_agent', '--mode', 'json']
+                    fake.path = ['original']
+                    module._DLL_HANDLES.clear()
+                    with patch.object(module, 'sys', fake), patch.object(module.os, 'add_dll_directory', return_value=handle, create=True), patch.dict(sys.modules, {'pywin32_bootstrap': ModuleType('pywin32_bootstrap')}):
+                        self.assertTrue(module._configure_native_child())
+                    self.assertEqual(fake.path[:3], [str(root / 'native-site' / name) for name in ('win32', 'win32/lib', 'Pythonwin')])
+                    self.assertEqual(module._DLL_HANDLES, [handle])
+                    self.assertEqual(dict(os.environ), environment)
 
     def test_project_modules_other_interpreters_and_venvs_are_untouched(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -160,6 +165,8 @@ class WindowsChildBootstrapTests(unittest.TestCase):
             venv = root / 'project-venv'
             venv.mkdir()
             cases = [dict(orig_argv=[fake.executable, '-m', 'project_module']),
+                     dict(orig_argv=[fake.executable, '-P', '-m', 'project_module']),
+                     dict(orig_argv=[fake.executable, '-c', 'pass', '-P', '-m', 'aelix_coding_agent']),
                      dict(executable=sys.executable), dict(prefix=str(venv))]
             for changes in cases:
                 candidate = SimpleNamespace(**{**vars(fake), **changes, 'path': ['original']})

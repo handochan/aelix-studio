@@ -38,6 +38,7 @@
     "commandAck": "Comando enviado, mas o estado ainda não foi confirmado. Atualize ou tente novamente mais tarde.",
     "timeout": "A confirmação da configuração expirou. O estado anterior continua sendo exibido.",
     "busy": "Outra configuração está sendo aplicada. Tente novamente mais tarde.",
+    "modelChangeObservedWithError": "O agente relatou um erro ao mudar o modelo. O seletor exibe o modelo e o nível de raciocínio atuais.",
     "failed": "Falha ao aplicar a configuração. O estado anterior continua sendo exibido."
   },
   "thoughtLevel": {

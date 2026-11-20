@@ -10,6 +10,7 @@ import React from 'react';
 import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
 import type { AcpModelInfo } from '@/common/types/platform/acpTypes';
 import type { AcpConfigSetStatus, AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
+import * as configOptions from '@/renderer/hooks/agent/useAcpConfigOptions';
 
 const { messageSuccessMock, messageErrorMock, useAcpModelInfoMock } = vi.hoisted(() => ({
   messageSuccessMock: vi.fn(),
@@ -378,6 +379,26 @@ describe('AcpModelSelector runtime options', () => {
     fireEvent.click(screen.getByText('GPT-5.2 Mini'));
 
     expect(selectModel).toHaveBeenCalledWith('gpt-5.2-mini');
+  });
+
+  it('shows the localized change error separately from the current selector label', () => {
+    const classify = vi
+      .spyOn(configOptions, 'classifyConfigSetError')
+      .mockReturnValueOnce('model_change_observed_with_error');
+    try {
+      render(<AcpModelSelector conversation_id='conversation-1' />);
+      const hookArgs = useAcpModelInfoMock.mock.calls[0][0] as {
+        onSelectModelFailed: (modelId: string, error: unknown) => void;
+      };
+
+      act(() => hookArgs.onSelectModelFailed('gpt-5.2', new Error('Native hook error')));
+
+      expect(messageErrorMock).toHaveBeenCalledWith('agent.config.modelChangeObservedWithError');
+      expect(messageSuccessMock).not.toHaveBeenCalled();
+      expect(screen.getByTestId('acp-model-selector')).toHaveTextContent('GPT-5.2 · High');
+    } finally {
+      classify.mockRestore();
+    }
   });
 
   it('sets thought level through the existing config option setter', async () => {

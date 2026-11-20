@@ -69,7 +69,8 @@ const isName = (value: unknown): value is string =>
  *
  * It starts the generation's own interpreter and the bundled one by argument vector and
  * never through a shell. It does not go through the host or ACP and never touches a
- * running conversation: a change applies to conversations started afterwards.
+ * running conversation. Each adapter reads the current generation when it starts,
+ * including when an existing conversation's adapter restarts.
  *
  * One change runs at a time. `install`, `update` and `remove` return an operation to
  * `poll`; `list` and `rollback` answer directly.
