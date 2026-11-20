@@ -140,11 +140,13 @@ describe('recovery and clean-up', () => {
     await mkdir(path.join(layout.artifacts, SET_A));
     await writeFile(path.join(layout.leases, `${G1}.4711`), '');
     await writeFile(path.join(layout.leases, `${G2}.4712`), '');
+    await writeFile(path.join(layout.leases, `${G1}.4711.snapshot.json`), '{}');
+    await writeFile(path.join(layout.leases, `${G2}.4712.snapshot.json`), '{}');
     await switchPointer(layout, newPointer(G4, G3, 4, BINDING), null, writer);
     const report = await collect(request([`${G1}.4711`]));
     expect(report).toMatchObject({ removed: [G2], leased: [G1], removedArtifacts: [] });
     expect(await names(layout.generations)).toEqual([G1, G3, G4]);
-    expect(await names(layout.leases)).toEqual([`${G1}.4711`]);
+    expect(await names(layout.leases)).toEqual([`${G1}.4711`, `${G1}.4711.snapshot.json`]);
   });
 
   it('removes nothing when it cannot tell which generations are in use', async () => {

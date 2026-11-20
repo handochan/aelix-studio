@@ -91,7 +91,11 @@ export async function collect(request: CollectRequest): Promise<CollectReport> {
   const report: CollectReport = { removed: [], leased: [], removedArtifacts: [], skipped: false };
   const leases = await probeLeases(request);
   if (!leases) return { ...report, skipped: true };
+  const leaseFiles = new Set(await list(layout.leases));
   for (const name of leases.stale) {
+    const snapshot = name + '.snapshot.json';
+    // oxlint-disable-next-line no-await-in-loop -- sidecar must go before its stale lease
+    if (leaseFiles.has(snapshot)) await writer.remove(`leases/${snapshot}`);
     // oxlint-disable-next-line no-await-in-loop -- the lock holder removes one entry at a time
     await writer.remove(`leases/${name}`);
   }

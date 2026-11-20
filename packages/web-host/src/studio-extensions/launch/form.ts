@@ -4,6 +4,7 @@ import type { Candidate, FlowContext } from '../flow/candidate.js';
 import type { SiteSnapshot } from '../inspect/site.js';
 import { runToExit } from '../process.js';
 import { ExtensionFailure } from '../types.js';
+import type { ManagedEntry } from './managedCatalog.js';
 
 /**
  * How conversations are given the extensions of a generation (D04 ADR 8.3, decision B5).
@@ -15,6 +16,8 @@ export type LaunchForm = {
   packs: boolean;
   /** Module references passed one by one after the packs: their code loads, their manifest does not. */
   modules: string[];
+  /** Verified ACP v1 catalogue. Older generations only have the legacy launch form. */
+  managed?: ManagedEntry[];
 };
 
 /** How one extension is passed to a conversation. */
@@ -122,7 +125,7 @@ export async function chooseForms(
 ): Promise<Map<string, ExtensionForm>> {
   const forms = new Map<string, ExtensionForm>([...expected.keys()].map((name) => [name, { form: 'module' }]));
   const site = await realpath(candidate.paths.site);
-  const wanted: Record<string, string> = {};
+  const wanted: Record<string, string> = Object.create(null);
   for (const [name, reference] of expected) {
     const extension = snapshot.extensions.get(name);
     const distribution = extension && snapshot.distributions.get(extension.distribution);
@@ -150,15 +153,13 @@ export async function chooseForms(
   let answers: Record<string, ManifestFields>;
   try {
     if (result.code !== 0) throw new Error('the manifest reader failed');
-    answers = JSON.parse(result.output.split('\n').findLast((line) => line.startsWith('{')) ?? '') as Record<
-      string,
-      ManifestFields
-    >;
+    const parsed = JSON.parse(result.output.split('\n').findLast((line) => line.startsWith('{')) ?? '');
+    answers = Object.assign(Object.create(null), parsed);
   } catch {
     throw new ExtensionFailure('VERIFICATION_FAILED', ['the manifests of the extensions could not be read']);
   }
   const fitting = Object.keys(wanted).filter((name) => {
-    const fields = answers[name];
+    const fields = Object.hasOwn(answers, name) ? answers[name] : undefined;
     // A bare module entry point names that module's `setup`, as a manifest entry always spells it.
     return (
       typeof fields?.id === 'string' &&
@@ -166,13 +167,28 @@ export async function chooseForms(
       fields.python === conversationReference(expected.get(name) ?? '')
     );
   });
-  const plugins = fitting.map((name) => answers[name].id as string);
+  const plugins = new Map<string, Set<string>>();
   for (const name of fitting) {
     const plugin = answers[name].id as string;
-    if (plugins.indexOf(plugin) !== plugins.lastIndexOf(plugin)) continue;
+    const directories = plugins.get(plugin) ?? new Set<string>();
+    directories.add(path.posix.dirname(wanted[name]));
+    plugins.set(plugin, directories);
+  }
+  for (const name of fitting) {
+    const plugin = answers[name].id as string;
+    if (plugins.get(plugin)?.size !== 1) continue;
     forms.set(name, { form: 'pack', plugin, directory: path.posix.dirname(wanted[name]) });
   }
   return forms;
+}
+
+export function linkPack(site: string, packageDirectory: string, link: string): Promise<void> {
+  const target = path.join(site, ...packageDirectory.split('/'));
+  return symlink(
+    process.platform === 'win32' ? target : path.relative(path.dirname(link), target),
+    link,
+    process.platform === 'win32' ? 'junction' : 'dir'
+  );
 }
 
 /**
@@ -187,13 +203,15 @@ export async function writePacks(candidate: Candidate, forms: Map<string, Extens
   if (packs.length === 0) return;
   const directory = path.join(candidate.paths.directory, PACKS_DIRECTORY);
   await mkdir(directory);
+  const linked = new Set<string>();
   for (const [index, [name, pack]] of packs.entries()) {
-    const target = path.join(candidate.paths.site, ...pack.directory.split('/'));
+    if (linked.has(pack.plugin)) continue;
+    linked.add(pack.plugin);
     // oxlint-disable-next-line no-await-in-loop -- a handful of links, made in order
-    await symlink(
-      process.platform === 'win32' ? target : path.relative(directory, target),
-      path.join(directory, `${String(index).padStart(3, '0')}-${name}`),
-      process.platform === 'win32' ? 'junction' : 'dir'
+    await linkPack(
+      candidate.paths.site,
+      pack.directory,
+      path.join(directory, `${String(index).padStart(3, '0')}-${name}`)
     );
   }
 }

@@ -76,6 +76,8 @@ export type WheelSpec = {
   entry?: string;
   /** Value of the `aelix.extensions` entry point; `<module>:setup` by default. */
   reference?: string;
+  /** Additional entry-point aliases supplied by the same distribution. */
+  aliases?: Record<string, string>;
   /** Python statements at module level, before `setup`. */
   prelude?: string;
   /** Python statements inside `setup(aelix)`, before the command is registered. */
@@ -151,7 +153,10 @@ export function buildWheel(spec: WheelSpec): { filename: string; data: Buffer } 
   );
   const points =
     (spec.scripts?.length ? `[console_scripts]\n${spec.scripts.join('\n')}\n` : '') +
-    (extension ? `[aelix.extensions]\n${spec.entry ?? spec.name} = ${spec.reference ?? `${module}:setup`}\n` : '');
+    (extension ? `[aelix.extensions]\n${spec.entry ?? spec.name} = ${spec.reference ?? `${module}:setup`}\n` : '') +
+    Object.entries(spec.aliases ?? {})
+      .map(([name, value]) => `${name} = ${value}\n`)
+      .join('');
   if (points) files.set(`${info}/entry_points.txt`, points);
   const record = [...files].map(([name, content]) => {
     const digest = createHash('sha256').update(content).digest('base64url');
