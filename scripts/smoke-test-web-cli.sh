@@ -104,7 +104,7 @@ echo "✓ Backend binary loads on this platform"
 DATA_DIR="$TEMP_DIR/data"
 BACKEND_BINARY="$PWD/$BACKEND_BINARY"
 webui_curl() {
-  curl --noproxy aelix-studio.localhost --resolve "aelix-studio.localhost:${BASE_URL##*:}:127.0.0.1" "$@"
+  curl --noproxy '*' "$@"
 }
 start_webui() {
   ./aionui-web start --backend-bin "$BACKEND_BINARY" --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &

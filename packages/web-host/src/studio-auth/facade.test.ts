@@ -1,4 +1,3 @@
-import { fetchWebUILoopback } from '../../../../tests/e2e/helpers/httpBridge';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -36,7 +35,7 @@ describe('native auth facade authentication and request boundary', () => {
       });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
-    url = `http://aelix-studio.localhost:${(server.address() as AddressInfo).port}`;
+    url = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   });
   afterEach(async () => {
     service.dispose();
@@ -52,7 +51,7 @@ describe('native auth facade authentication and request boundary', () => {
     );
   });
   const request = (base: string, headers: Record<string, string> = {}, body = '{"action":"catalog"}') =>
-    fetchWebUILoopback(base + NATIVE_AUTH_ROUTE, {
+    fetch(base + NATIVE_AUTH_ROUTE, {
       method: 'POST',
       headers: {
         origin: base,

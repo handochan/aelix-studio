@@ -1,4 +1,3 @@
-import { fetchWebUILoopback } from '../../../tests/e2e/helpers/httpBridge';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { promises as fs } from 'node:fs';
 import http from 'node:http';
@@ -88,7 +87,7 @@ describe('static-server', () => {
     const backend = await startMockBackend((_req, res) => res.end('nope'));
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const r = await fetchWebUILoopback(`${handle.localUrl}/`);
+    const r = await fetch(`${handle.localUrl}/`);
     expect(r.status).toBe(200);
     const text = await r.text();
     expect(text).toContain('<title>root</title>');
@@ -103,9 +102,9 @@ describe('static-server', () => {
     stopBackend = backend.close;
     try {
       handle = await startStaticServer({ staticDir, backendPort: backend.port });
-      expect(handle.localUrl).toBe('http://aelix-studio.localhost:25982');
+      expect(handle.localUrl).toBe('http://[::1]:25982');
       expect(await (await fetch('http://127.0.0.1:25808')).text()).toBe('upstream fixture');
-      expect(await (await fetchWebUILoopback(handle.localUrl)).text()).toContain('<title>root</title>');
+      expect(await (await fetch(handle.localUrl)).text()).toContain('<title>root</title>');
       const login = (origin: string, cookie: string) =>
         requestStatus(handle!.port, '/login', {
           method: 'POST',
@@ -141,7 +140,7 @@ describe('static-server', () => {
     for (const cookie of legacy('upstream')) await jar.setCookie(cookie, upstream + '/login');
     const send = async (pathname: string) => {
       const url = studio + pathname;
-      const response = await fetchWebUILoopback(url, {
+      const response = await fetch(url, {
         method: 'POST',
         headers: { origin: studio, cookie: await jar.getCookieString(url) },
       });
@@ -183,6 +182,58 @@ describe('static-server', () => {
     expect(backendCookie).toBeUndefined();
   });
 
+  it('keeps a configured localhost proxy on its own authority for navigation and login', async () => {
+    const origin = 'http://localhost:28443';
+    vi.stubEnv('AELIX_STUDIO_ORIGIN', origin);
+    const backend = await startMockBackend((_req, res) => {
+      res.writeHead(200, { 'set-cookie': 'aionui-session=proxy-session; Path=/; HttpOnly' }).end();
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+    const host = new URL(origin).host;
+    const response = (method: string, path: string) =>
+      new Promise<{ status?: number; headers: http.IncomingHttpHeaders }>((resolve, reject) => {
+        const req = http.request(
+          { host: '127.0.0.1', port: handle!.port, path, method, headers: { host, origin, accept: 'text/html' } },
+          (res) => {
+            res.resume();
+            resolve({ status: res.statusCode, headers: res.headers });
+          }
+        );
+        req.once('error', reject).end();
+      });
+    const home = await response('GET', '/');
+    expect(home.status).toBe(200);
+    expect(home.headers.location).toBeUndefined();
+    const login = await response('POST', '/login');
+    expect(login.headers['set-cookie']).toEqual(['aelix-studio-session=proxy-session; Path=/; HttpOnly; SameSite=Lax']);
+  });
+
+  it('keeps IPv4 WebUI usable if the same IPv6 loopback port is occupied', async () => {
+    const occupied = net.createServer();
+    await new Promise<void>((resolve, reject) => {
+      occupied.once('error', reject);
+      occupied.listen({ host: '::1', port: 0, ipv6Only: true }, resolve);
+    });
+    try {
+      const backend = await startMockBackend((req, res) => {
+        res.writeHead(200, { 'set-cookie': 'aionui-session=fallback; Path=/; HttpOnly' }).end(req.headers.cookie);
+      });
+      stopBackend = backend.close;
+      const port = (occupied.address() as AddressInfo).port;
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port });
+      expect(handle.localUrl).toBe('http://127.0.0.1:' + port);
+      const login = await fetch(handle.localUrl + '/login', {
+        method: 'POST',
+        headers: { origin: handle.localUrl, cookie: 'aionui-session=foreign; aelix-studio-session=studio' },
+      });
+      expect(await login.text()).toBe('aionui-session=studio');
+      expect(login.headers.getSetCookie()[0]).toContain('aelix-studio-session=fallback');
+    } finally {
+      await new Promise<void>((resolve) => occupied.close(() => resolve()));
+    }
+  });
+
   it('applies secure HTTPS attributes only for the configured origin and drops Domain', async () => {
     const origin = 'https://studio.example.test';
     vi.stubEnv('AELIX_STUDIO_ORIGIN', origin);
@@ -199,11 +250,12 @@ describe('static-server', () => {
     });
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const response = await fetchWebUILoopback('http://studio.example.test:' + handle.port + '/login', {
-      method: 'POST',
-      headers: { origin },
-    });
-    expect(response.status).toBe(403);
+    expect(
+      await requestStatus(handle.port, '/login', {
+        method: 'POST',
+        headers: { host: 'studio.example.test:' + handle.port, origin },
+      })
+    ).toBe(403);
     // Hit the listener while simulating the exact authority a configured HTTPS proxy preserves.
     const raw = await new Promise<string[] | undefined>((resolve, reject) => {
       const req = http.request(
@@ -226,7 +278,7 @@ describe('static-server', () => {
       'aelix-studio-csrf-token=csrf; Path=/; SameSite=Strict; Secure',
       'aelix-studio-refresh=refresh; Path=/api/auth/refresh; HttpOnly; SameSite=Strict; Secure; Max-Age=0',
     ]);
-    const spoof = await fetchWebUILoopback(handle.localUrl + '/login', {
+    const spoof = await fetch(handle.localUrl + '/login', {
       method: 'POST',
       headers: { origin: handle.localUrl, 'x-forwarded-proto': 'https' },
     });
@@ -239,7 +291,7 @@ describe('static-server', () => {
     const backend = await startMockBackend((_req, res) => res.end('nope'));
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const r = await fetchWebUILoopback(`${handle.localUrl}/chat/123`);
+    const r = await fetch(`${handle.localUrl}/chat/123`);
     expect(r.status).toBe(200);
     expect(await r.text()).toContain('<title>root</title>');
   });
@@ -248,7 +300,7 @@ describe('static-server', () => {
     const backend = await startMockBackend((_req, res) => res.end('nope'));
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const r = await fetchWebUILoopback(`${handle.localUrl}/assets/main.js`);
+    const r = await fetch(`${handle.localUrl}/assets/main.js`);
     expect(r.status).toBe(200);
     expect(await r.text()).toContain('hi');
   });
@@ -306,9 +358,9 @@ describe('static-server', () => {
       }
     );
 
-    it('rejects bracketed IPv6 at the IPv4 listener port', async () => {
+    it('rejects non-loopback IPv6 authorities', async () => {
       const { port } = handle!;
-      expect(await requestStatus(port, '/', { headers: { host: '[::1]:' + port } })).toBe(403);
+      expect(await requestStatus(port, '/', { headers: { host: '[2001:db8::1]:' + port } })).toBe(403);
     });
 
     it('rejects mixing two individually allowed authorities', async () => {
@@ -366,7 +418,7 @@ describe('static-server', () => {
     });
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const r = await fetchWebUILoopback(`${handle.localUrl}/api/anything`);
+    const r = await fetch(`${handle.localUrl}/api/anything`);
     expect(r.status).toBe(200);
     const json = (await r.json()) as { path: string };
     expect(json.path).toBe('/api/anything');
@@ -379,7 +431,7 @@ describe('static-server', () => {
     });
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
-    const response = await fetchWebUILoopback(handle.localUrl + '/api/anything', {
+    const response = await fetch(handle.localUrl + '/api/anything', {
       headers: {
         'x-forwarded-for': '192.0.2.1',
         'x-aionui-internal': '1',
@@ -447,7 +499,7 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
 
-    const r = await fetchWebUILoopback(`${handle.localUrl}/login`, {
+    const r = await fetch(`${handle.localUrl}/login`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', origin: handle.localUrl },
       body: JSON.stringify({ username: 'admin', password: 'anything' }),
@@ -470,7 +522,7 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
 
-    const r = await fetchWebUILoopback(`${handle.localUrl}/api/auth/user`);
+    const r = await fetch(`${handle.localUrl}/api/auth/user`);
     expect(r.status).toBe(200);
     const json = (await r.json()) as { user: { username: string } };
     expect(json.user.username).toBe('from-backend');
@@ -491,7 +543,7 @@ describe('static-server', () => {
     stopBackend = backend.close;
     handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
 
-    const r = await fetchWebUILoopback(`${handle.localUrl}/logout`, {
+    const r = await fetch(`${handle.localUrl}/logout`, {
       method: 'POST',
       headers: { origin: handle.localUrl },
     });
@@ -506,7 +558,7 @@ describe('static-server', () => {
     await placeholder.close();
 
     handle = await startStaticServer({ staticDir, backendPort: freePort, port: 0 });
-    const r = await fetchWebUILoopback(`${handle.localUrl}/api/anything`);
+    const r = await fetch(`${handle.localUrl}/api/anything`);
     expect(r.status).toBe(502);
   });
 

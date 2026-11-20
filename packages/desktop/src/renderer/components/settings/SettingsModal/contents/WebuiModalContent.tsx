@@ -87,7 +87,6 @@ const WebuiModalContent: React.FC = () => {
   const port = WEBUI_DEFAULT_PORT;
   const [webuiEnabled, setWebuiEnabled] = useState(false);
   const [allowRemotePreference, setAllowRemotePreference] = useState(false);
-  const [cachedIP, setCachedIP] = useState<string | null>(null);
   const [cachedPassword, setCachedPassword] = useState<string | null>(null);
   // 标记密码是否可以明文显示（首次启动且未复制过）/ Flag for plaintext password display (first startup and not copied)
   const [canShowPlainPassword, setCanShowPlainPassword] = useState(false);
@@ -129,14 +128,6 @@ const WebuiModalContent: React.FC = () => {
         // writes the flag back.
         setWebuiEnabled(statusData.running);
 
-        if (statusData.lanIP) {
-          setCachedIP(statusData.lanIP);
-        } else if (statusData.networkUrl) {
-          const match = statusData.networkUrl.match(/http:\/\/([^:]+):/);
-          if (match) {
-            setCachedIP(match[1]);
-          }
-        }
         if (statusData.initialPassword) {
           setCachedPassword(statusData.initialPassword);
           // 有初始密码说明可以显示明文 / Having initial password means can show plaintext
@@ -154,7 +145,7 @@ const WebuiModalContent: React.FC = () => {
               running: false,
               port: WEBUI_DEFAULT_PORT,
               allowRemote: false,
-              localUrl: `http://localhost:${WEBUI_DEFAULT_PORT}`,
+              localUrl: '',
               adminUsername: 'admin',
             }
         );
@@ -184,15 +175,11 @@ const WebuiModalContent: React.FC = () => {
           running: true,
           port: data.port ?? prev?.port ?? WEBUI_DEFAULT_PORT,
           allowRemote: prev?.allowRemote ?? false,
-          localUrl: data.localUrl ?? `http://localhost:${data.port ?? WEBUI_DEFAULT_PORT}`,
+          localUrl: data.localUrl ?? (data.port === prev?.port ? (prev?.localUrl ?? '') : ''),
           networkUrl: data.networkUrl,
           lanIP: prev?.lanIP,
           initialPassword: prev?.initialPassword,
         }));
-        if (data.networkUrl) {
-          const match = data.networkUrl.match(/http:\/\/([^:]+):/);
-          if (match) setCachedIP(match[1]);
-        }
       } else {
         setStatus((prev) => (prev ? { ...prev, running: false } : null));
       }
@@ -214,33 +201,10 @@ const WebuiModalContent: React.FC = () => {
     }
   }, [status?.running, status?.initialPassword, cachedPassword, loading]);
 
-  // 获取当前 IP 地址 / Get current IP
-  const getLocalIP = useCallback(() => {
-    if (status?.lanIP) return status.lanIP;
-    if (cachedIP) return cachedIP;
-    if (status?.networkUrl) {
-      const match = status.networkUrl.match(/http:\/\/([^:]+):/);
-      if (match) return match[1];
-    }
-    return null;
-  }, [status?.lanIP, cachedIP, status?.networkUrl]);
-
-  // 获取显示的 URL / Get display URL
-  const getDisplayUrl = useCallback(() => {
-    const currentIP = getLocalIP();
-    const currentPort = status?.port || port;
-    const useRemote = status?.running ? status.allowRemote : allowRemotePreference;
-    if (useRemote && currentIP) {
-      return `http://${currentIP}:${currentPort}`;
-    }
-    return `http://localhost:${currentPort}`;
-  }, [allowRemotePreference, getLocalIP, status?.allowRemote, status?.port, status?.running, port]);
+  const accessUrl = status?.running ? (status.allowRemote && status.networkUrl) || status.localUrl : undefined;
 
   // 启动/停止 WebUI / Start/Stop WebUI
   const handleToggle = async (enabled: boolean) => {
-    // 使用缓存的 IP，不再阻塞获取 / Use cached IP, no longer block to fetch
-    const currentIP = getLocalIP();
-
     // 保存原始值用于回滚 / Save original value for rollback
     const previousEnabled = webuiEnabled;
 
@@ -250,17 +214,13 @@ const WebuiModalContent: React.FC = () => {
 
     try {
       if (enabled) {
-        const localUrl = `http://localhost:${port}`;
-
         // Await the real result — Promise.race with a 3s fallback used to hide
         // backend failures behind a fake "started" toast while the server was
         // still RESOLVING or had crashed, leaving webui.desktop.enabled unset.
         const startResult = await webui.start.invoke({ port, allowRemote: allowRemotePreference });
 
-        const responseIP = startResult.lanIP || currentIP;
         const responsePassword = startResult.initialPassword;
 
-        if (responseIP) setCachedIP(responseIP);
         if (responsePassword) {
           setCachedPassword(responsePassword);
           setCanShowPlainPassword(true);
@@ -268,12 +228,8 @@ const WebuiModalContent: React.FC = () => {
 
         setStatus((prev) => ({
           ...(prev || { adminUsername: 'admin' }),
+          ...startResult,
           running: true,
-          port,
-          allowRemote: allowRemotePreference,
-          localUrl,
-          networkUrl: allowRemotePreference && responseIP ? `http://${responseIP}:${port}` : undefined,
-          lanIP: responseIP,
           initialPassword: responsePassword || cachedPassword || prev?.initialPassword,
         }));
 
@@ -321,20 +277,14 @@ const WebuiModalContent: React.FC = () => {
         // failures as success (see handleToggle).
         const startResult = await webui.start.invoke({ port, allowRemote: checked });
 
-        const responseIP = startResult.lanIP;
         const responsePassword = startResult.initialPassword;
 
-        if (responseIP) setCachedIP(responseIP);
         if (responsePassword) setCachedPassword(responsePassword);
 
         setStatus((prev) => ({
           ...(prev || { adminUsername: 'admin' }),
+          ...startResult,
           running: true,
-          port,
-          allowRemote: checked,
-          localUrl: `http://localhost:${port}`,
-          networkUrl: checked && responseIP ? `http://${responseIP}:${port}` : undefined,
-          lanIP: responseIP,
           initialPassword: responsePassword || cachedPassword || prev?.initialPassword,
         }));
 
@@ -353,29 +303,7 @@ const WebuiModalContent: React.FC = () => {
       try {
         await configService.set(DESKTOP_WEBUI_ALLOW_REMOTE_KEY, checked);
 
-        // 获取 IP 用于显示 / Get IP for display
-        let newIP: string | undefined;
-        try {
-          const snapshot = await webui.getStatus.invoke();
-          if (snapshot?.lanIP) {
-            newIP = snapshot.lanIP;
-            setCachedIP(newIP);
-          }
-        } catch {
-          // ignore
-        }
-
-        const existingIP = newIP || cachedIP || status?.lanIP;
-        setStatus((prev) =>
-          prev
-            ? {
-                ...prev,
-                allowRemote: checked,
-                lanIP: existingIP || prev.lanIP,
-                networkUrl: checked && existingIP ? `http://${existingIP}:${port}` : undefined,
-              }
-            : null
-        );
+        setStatus((prev) => (prev ? { ...prev, allowRemote: checked } : null));
       } catch (error) {
         // 回滚 UI 状态 / Rollback UI state
         setAllowRemotePreference(previousAllowRemote);
@@ -470,7 +398,7 @@ const WebuiModalContent: React.FC = () => {
 
   // 生成二维码 / Generate QR code
   const generateQRCode = useCallback(async () => {
-    if (!status?.running) return;
+    if (!accessUrl) return;
 
     setQrLoading(true);
     try {
@@ -480,11 +408,7 @@ const WebuiModalContent: React.FC = () => {
       const qrData = await webui.generateQRToken.invoke();
 
       if (qrData) {
-        const baseUrl =
-          status.allowRemote && status.networkUrl
-            ? status.networkUrl
-            : (status.localUrl ?? `http://localhost:${status.port ?? port}`);
-        setQrUrl(`${baseUrl}/qr-login?token=${qrData.token}`);
+        setQrUrl(`${accessUrl}/qr-login?token=${qrData.token}`);
         setQrExpiresAt(qrData.expires_at_ms);
 
         // 设置自动刷新定时器（4分钟后自动刷新，因为 token 5分钟过期）
@@ -508,7 +432,7 @@ const WebuiModalContent: React.FC = () => {
     } finally {
       setQrLoading(false);
     }
-  }, [status?.running, status?.allowRemote, status?.networkUrl, status?.localUrl, status?.port, port, t]);
+  }, [accessUrl, t]);
 
   // 当服务器启动且允许远程访问时自动生成二维码 / Auto-generate QR code when server starts and remote access is allowed
   useEffect(() => {
@@ -633,20 +557,21 @@ const WebuiModalContent: React.FC = () => {
             <Switch checked={webuiEnabled} loading={startLoading} onChange={handleToggle} />
           </PreferenceRow>
 
-          {/* 访问地址（启用 WebUI 后即显示，不依赖后端 running 状态）/ Access URL (shown whenever WebUI is enabled, not tied to backend running state) */}
-          {webuiEnabled && (
+          {/* Use only the URL reported by the running WebUI. */}
+          {webuiEnabled && accessUrl && (
             <PreferenceRow label={t('settings.webui.accessUrl')}>
               <div className='flex items-center gap-8px min-w-0'>
                 <button
                   className='text-14px text-primary font-mono hover:underline cursor-pointer bg-transparent border-none p-0 truncate'
-                  onClick={() => shell.openExternal.invoke(getDisplayUrl()).catch(console.error)}
+                  onClick={() => shell.openExternal.invoke(accessUrl).catch(console.error)}
                 >
-                  {getDisplayUrl()}
+                  {accessUrl}
                 </button>
                 <Tooltip content={t('common.copy')}>
                   <button
                     className='p-4px text-t-tertiary hover:text-t-primary cursor-pointer bg-transparent border-none'
-                    onClick={() => handleCopy(getDisplayUrl())}
+                    aria-label={t('common.copy')}
+                    onClick={() => handleCopy(accessUrl)}
                   >
                     <Copy size={16} />
                   </button>

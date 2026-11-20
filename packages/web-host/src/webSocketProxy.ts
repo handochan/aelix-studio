@@ -72,7 +72,8 @@ export function proxyWebSocket(
   requestHead: string,
   backendPort: number,
   isAllowed: (source: ReturnType<typeof readSourceHeaders>, requireOrigin: boolean) => boolean,
-  isSecureOrigin: (authority: string | undefined) => boolean
+  isSecureOrigin: (authority: string | undefined) => boolean,
+  browserCookieAuthority: (authority: string | undefined) => string | undefined
 ): void {
   const upgrade = parseUpgrade(requestHead);
   if (!upgrade) {
@@ -88,7 +89,7 @@ export function proxyWebSocket(
   const host = '127.0.0.1:' + backendPort;
   const headers: OutgoingHttpHeaders = { ...upgrade.headers, host, origin: 'http://' + host, connection: 'Upgrade' };
 
-  const authority = upgrade.headers.host;
+  const authority = browserCookieAuthority(upgrade.headers.host);
   const cookie = toHostCookieHeader(authority, upgrade.headers.cookie, upgrade.path);
   if (cookie) headers.cookie = cookie;
   else delete headers.cookie;

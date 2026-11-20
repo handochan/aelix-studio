@@ -1,7 +1,5 @@
-export const STUDIO_WEBUI_LOOPBACK_HOST = 'aelix-studio.localhost';
-
-export function getStudioWebUILocalUrl(port: number): string {
-  return `http://${STUDIO_WEBUI_LOOPBACK_HOST}:${port}`;
+export function getStudioWebUILocalUrl(port: number, ipv6 = true): string {
+  return `http://${ipv6 ? '[::1]' : '127.0.0.1'}:${port}`;
 }
 
 /** Studio uses a different origin from the upstream WebUI on port 25808. */
@@ -41,9 +39,20 @@ export function parseOrigin(value: string): URL | undefined {
   }
 }
 
+export function matchesOriginAuthority(origin: URL, authority: string | undefined): boolean {
+  const host = authority?.toLowerCase();
+  const defaultPort = origin.protocol === 'https:' ? '443' : '80';
+  return host === origin.host || (!origin.port && host === `${origin.host}:${defaultPort}`);
+}
+
 /** Bind the browser origin to the Host authority received by this listener. */
-export function createRequestOriginPolicy(port: number, readLanAddresses: () => string[], configuredOrigin?: string) {
-  const origins = ['127.0.0.1', 'localhost', STUDIO_WEBUI_LOOPBACK_HOST].map(
+export function createRequestOriginPolicy(
+  port: number,
+  readLanAddresses: () => string[],
+  configuredOrigin?: string,
+  ipv6 = false
+) {
+  const origins = ['127.0.0.1', 'localhost', ...(ipv6 ? ['[::1]'] : [])].map(
     (host) => new URL(`http://${host}:${port}`)
   );
   const configured = configuredOrigin && parseOrigin(configuredOrigin);
@@ -57,11 +66,8 @@ export function createRequestOriginPolicy(port: number, readLanAddresses: () => 
     const origin = source?.origin === undefined ? undefined : parseOrigin(source.origin);
     if (!origin && (requireOrigin || source?.origin !== undefined)) return false;
 
-    const matchesSource = (allowed: URL): boolean => {
-      const defaultPort = allowed.protocol === 'https:' ? '443' : '80';
-      const matchesHost = host === allowed.host || (!allowed.port && host === `${allowed.host}:${defaultPort}`);
-      return matchesHost && (!origin || origin.origin === allowed.origin);
-    };
+    const matchesSource = (allowed: URL): boolean =>
+      matchesOriginAuthority(allowed, host) && (!origin || origin.origin === allowed.origin);
     return (
       origins.some(matchesSource) ||
       readLanAddresses().some((address) => matchesSource(new URL(`http://${address}:${port}`)))

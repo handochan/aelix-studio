@@ -28,11 +28,14 @@ profiles, temporary data, and URL registration independent.
 
 ## WebUI defaults
 
-The default browser address is `http://aelix-studio.localhost:25982`. Development
-uses port `25983`, and a second development instance uses `25984`. An explicit
-port or saved preference takes priority. The local listener still binds IPv4
-loopback unless remote access is enabled. Browser navigation from the old raw
-loopback aliases is redirected to the Studio hostname.
+The preferred browser address is `http://[::1]:25982`. Development uses
+port `25983`, and a second development instance uses `25984`. The IPv6
+listener binds only to loopback and requires no DNS resolution in Safari.
+The existing IPv4 listener binds to loopback unless remote access is enabled.
+If the IPv6 endpoint is unavailable, Studio advertises `127.0.0.1` instead.
+Explicit ports and saved preferences take priority. Desktop settings display,
+copy, and open the address returned by the running listener. A proxy configured
+through `AELIX_STUDIO_ORIGIN` retains its scheme, hostname, and public port.
 
 Studio publishes host-only `aelix-studio-session`, `aelix-studio-refresh`, and
 `aelix-studio-csrf-token` cookies. Session and refresh cookies use `HttpOnly`.
@@ -42,10 +45,11 @@ The session and CSRF cookies use `Path=/`, and the refresh cookie uses
 serves the configured HTTPS origin. The WebUI proxy maps only Studio
 credentials to the pinned host. Existing browser sessions require a new login.
 
-For two remote deployments on the same machine, use a dedicated browser
-hostname for Studio. Cookies do not distinguish ports, so a shared LAN address
-with different ports cannot isolate cookie delivery.
-[RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
+When both applications share an IPv4 or proxy hostname, the browser can send
+Studio credentials to AionUi on matching paths even with different ports.
+Distinct cookie names keep the applications' login state separate, and the
+Studio proxy discards foreign cookie names. Separate browser hostnames are
+required to isolate delivery. [RFC 6265, Weak Confidentiality](https://www.rfc-editor.org/rfc/rfc6265#section-8.5).
 
 ## Upstream and compatibility names
 

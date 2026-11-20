@@ -10,7 +10,7 @@ import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../package
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
 import { boundedWait, closeElectron } from './host-release/verification.mjs';
 
-const { fetchWebUILoopback, httpGet, httpPost } = httpBridge;
+const { httpGet, httpPost } = httpBridge;
 
 const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
@@ -369,11 +369,8 @@ try {
     connection: 'close',
   };
   const route = webui.localUrl + '/api/studio/native-auth';
-  assert.equal(
-    (await fetchWebUILoopback(route, { method: 'POST', headers, body: '{"action":"catalog"}' })).status,
-    401
-  );
-  const login = await fetchWebUILoopback(webui.localUrl + '/login', {
+  assert.equal((await fetch(route, { method: 'POST', headers, body: '{"action":"catalog"}' })).status, 401);
+  const login = await fetch(webui.localUrl + '/login', {
     method: 'POST',
     headers,
     body: JSON.stringify({ username: 'admin', password, remember: false }),
@@ -384,7 +381,7 @@ try {
     .map((value) => value.split(';')[0])
     .join('; ');
   assert.ok(cookie.length > 0);
-  const status = await fetchWebUILoopback(route, {
+  const status = await fetch(route, {
     method: 'POST',
     headers: { ...headers, cookie },
     body: '{"action":"catalog"}',
@@ -392,7 +389,7 @@ try {
   assert.equal(status.status, 200);
   const nativeStatus = await status.json();
   assert.equal(nativeStatus.ok, true);
-  const selected = await fetchWebUILoopback(route, {
+  const selected = await fetch(route, {
     method: 'POST',
     headers: { ...headers, cookie },
     body: JSON.stringify({ action: 'select', provider: 'fixture', model: 'fixture-model' }),
@@ -403,7 +400,7 @@ try {
     expectedExtensionState,
     'The WebUI must use the same Studio data path as the desktop'
   );
-  const stored = await fetchWebUILoopback(route, {
+  const stored = await fetch(route, {
     method: 'POST',
     headers: { ...headers, cookie },
     body: JSON.stringify({
@@ -419,7 +416,7 @@ try {
   assert.equal(JSON.stringify(storedStatus).includes('synthetic-provider-key'), false);
   assert.equal(
     (
-      await fetchWebUILoopback(route, {
+      await fetch(route, {
         method: 'POST',
         headers: { ...headers, cookie, origin: 'https://foreign.invalid' },
         body: '{"action":"catalog"}',
@@ -448,9 +445,9 @@ try {
     })
   );
   const endpointStatus = await (
-    await fetchWebUILoopback(route, { method: 'POST', headers: { ...headers, cookie }, body: '{"action":"catalog"}' })
+    await fetch(route, { method: 'POST', headers: { ...headers, cookie }, body: '{"action":"catalog"}' })
   ).json();
-  const restoredEndpoint = await fetchWebUILoopback(route, {
+  const restoredEndpoint = await fetch(route, {
     method: 'POST',
     headers: { ...headers, cookie },
     body: JSON.stringify({

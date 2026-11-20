@@ -6,7 +6,7 @@ const cookies = [
   { hostName: 'aionui-csrf-token', studioName: STUDIO_CSRF_COOKIE_NAME, path: '/', httpOnly: false },
 ] as const;
 
-/** Common loopback names remain usable for navigation and non-cookie clients. */
+/** The ordinary IPv4 loopback authorities AionUi also accepts. */
 export function usesSharedLoopbackHost(authority: string | undefined): boolean {
   return /^(127\.0\.0\.1|localhost)(?::\d+)?$/i.test(authority ?? '');
 }
@@ -17,7 +17,7 @@ export function toHostCookieHeader(
   header: string | undefined,
   requestUrl: string
 ): string | undefined {
-  if (!authority || !header || usesSharedLoopbackHost(authority)) return undefined;
+  if (!authority || !header) return undefined;
   const fields = header.split(';').map((field) => field.trim());
   const pathname = requestUrl.split('?', 1)[0];
   const translated = cookies.flatMap(({ hostName, studioName, path }) => {
@@ -35,7 +35,7 @@ export function toStudioSetCookie(
   values: readonly string[],
   secureOrigin: boolean
 ): string[] {
-  if (!authority || usesSharedLoopbackHost(authority)) return [];
+  if (!authority) return [];
   return values.flatMap((value) => {
     const [pair, ...attributes] = value.split(';').map((field) => field.trim());
     const separator = pair.indexOf('=');

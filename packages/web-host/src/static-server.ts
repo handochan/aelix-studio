@@ -20,6 +20,7 @@ import {
   createRequestOriginPolicy,
   getStudioWebUIDefaultPort,
   getStudioWebUILocalUrl,
+  matchesOriginAuthority,
   parseOrigin,
   readSourceHeaders,
 } from './requestOrigin.js';
@@ -91,7 +92,13 @@ export function pickLanIP(nets: ReturnType<typeof networkInterfaces>): string | 
   return candidates[0] ?? null;
 }
 
-function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort: number, secureOrigin: boolean): void {
+function forwardToBackend(
+  req: IncomingMessage,
+  res: ServerResponse,
+  backendPort: number,
+  secureOrigin: boolean,
+  cookieAuthority: string | undefined
+): void {
   const headers: http.OutgoingHttpHeaders = { ...req.headers };
   const connectionFields = new Set(
     req.headers.connection
@@ -114,7 +121,7 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
     }
   }
   const cookie = toHostCookieHeader(
-    req.headers.host,
+    cookieAuthority,
     typeof headers.cookie === 'string' ? headers.cookie : undefined,
     req.url ?? ''
   );
@@ -134,7 +141,7 @@ function forwardToBackend(req: IncomingMessage, res: ServerResponse, backendPort
     for (const name of Object.keys(responseHeaders)) {
       if (name.startsWith('access-control-')) delete responseHeaders[name];
     }
-    const cookies = toStudioSetCookie(req.headers.host, proxyRes.headers['set-cookie'] ?? [], secureOrigin);
+    const cookies = toStudioSetCookie(cookieAuthority, proxyRes.headers['set-cookie'] ?? [], secureOrigin);
     if (cookies.length) responseHeaders['set-cookie'] = cookies;
     else delete responseHeaders['set-cookie'];
     res.writeHead(proxyRes.statusCode ?? 502, responseHeaders);
@@ -214,13 +221,18 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     );
   const configuredOrigin = process.env.AELIX_STUDIO_ORIGIN;
   const publicOrigin = configuredOrigin ? parseOrigin(configuredOrigin) : undefined;
-  const isSecureOrigin = (authority: string | undefined): boolean => {
-    const host = authority?.toLowerCase();
-    if (publicOrigin?.protocol !== 'https:') return false;
-    return host === publicOrigin.host || (!publicOrigin.port && host === publicOrigin.host + ':443');
-  };
+  const isConfiguredAuthority = (authority: string | undefined): boolean =>
+    publicOrigin !== undefined && matchesOriginAuthority(publicOrigin, authority);
+  const isSecureOrigin = (authority: string | undefined): boolean =>
+    publicOrigin?.protocol === 'https:' && isConfiguredAuthority(authority);
   let isAllowed = createRequestOriginPolicy(port, readLanAddresses, configuredOrigin);
-  let localUrl = getStudioWebUILocalUrl(port);
+  let localOrigin = new URL(getStudioWebUILocalUrl(port));
+  const isLoopbackAlias = (authority: string | undefined): boolean =>
+    usesSharedLoopbackHost(authority) &&
+    !matchesOriginAuthority(localOrigin, authority) &&
+    !isConfiguredAuthority(authority);
+  const browserCookieAuthority = (authority: string | undefined): string | undefined =>
+    isLoopbackAlias(authority) ? undefined : authority;
 
   // Bun's HTTP server upgrade socket does not reliably write the 101 response
   // (#2824). Keep client upgrades on the TCP listener and use this HTTP
@@ -244,15 +256,17 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       if (
         (req.method === 'GET' || req.method === 'HEAD') &&
         (req.headers['sec-fetch-mode'] === 'navigate' || req.headers.accept?.includes('text/html')) &&
-        usesSharedLoopbackHost(req.headers.host) &&
+        isLoopbackAlias(req.headers.host) &&
         req.url.startsWith('/')
       ) {
-        res.writeHead(307, { location: localUrl + req.url, 'cache-control': 'no-store' }).end();
+        res.writeHead(307, { location: localOrigin.origin + req.url, 'cache-control': 'no-store' }).end();
         return;
       }
       if (expectContinue) res.writeContinue();
+      const cookieAuthority = browserCookieAuthority(req.headers.host);
 
       if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
+        if (!cookieAuthority) delete req.headers.cookie;
         await handleNativeAuth(req, res, {
           backendPort: opts.backendPort,
           origins: [req.headers.origin ?? ''],
@@ -266,7 +280,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       // so WebUI browser clients reach the backend without a path-rewrite.
       const pathname = req.url.split('?', 1)[0];
       if (pathname.startsWith('/api/') || ['/login', '/logout', '/qr-login', '/api'].includes(pathname)) {
-        forwardToBackend(req, res, opts.backendPort, isSecureOrigin(req.headers.host));
+        forwardToBackend(req, res, opts.backendPort, isSecureOrigin(req.headers.host), cookieAuthority);
         return;
       }
 
@@ -302,7 +316,7 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
 
   // Closing the listener must also close active upgrades.
   const clients = new Set<Socket>();
-  const tcp_server = net.createServer((client: Socket) => {
+  const acceptConnection = (client: Socket): void => {
     clients.add(client);
     client.once('close', () => clients.delete(client));
     let peeked = Buffer.alloc(0);
@@ -323,7 +337,14 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         } else if (peeked.length !== headerEnd + 4) {
           rejectSocket(client, 400);
         } else {
-          proxyWebSocket(client, peeked.toString('latin1', 0, headerEnd), opts.backendPort, isAllowed, isSecureOrigin);
+          proxyWebSocket(
+            client,
+            peeked.toString('latin1', 0, headerEnd),
+            opts.backendPort,
+            isAllowed,
+            isSecureOrigin,
+            browserCookieAuthority
+          );
         }
         return;
       }
@@ -338,24 +359,50 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     client.on('data', onData);
     client.on('error', close);
     client.once('close', cleanup);
-  });
+  };
 
-  try {
-    await new Promise<void>((resolve, reject) => {
-      tcp_server.once('error', reject);
-      tcp_server.listen(port, host, () => {
-        tcp_server.off('error', reject);
+  const listen = (server: net.Server, options: net.ListenOptions) =>
+    new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(options, () => {
+        server.off('error', reject);
         resolve();
       });
     });
+  const tcpServer = net.createServer(acceptConnection);
+  const ipv6LoopbackServer = net.createServer(acceptConnection);
+  const close = (server: net.Server) =>
+    new Promise<void>((resolve) => {
+      if (server.listening) server.close(() => resolve());
+      else resolve();
+    });
+  const closeListeners = async () => {
+    for (const client of clients) client.destroy();
+    await Promise.all([close(tcpServer), close(ipv6LoopbackServer), close(http_server)]);
+  };
+
+  let actualPort: number;
+  try {
+    await listen(tcpServer, { port, host });
+    actualPort = (tcpServer.address() as net.AddressInfo).port;
+    try {
+      // A numeric, loopback-only IPv6 endpoint needs no browser or OS DNS support.
+      await listen(ipv6LoopbackServer, { port: actualPort, host: '::1', ipv6Only: true });
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (!['EADDRINUSE', 'EADDRNOTAVAIL', 'EAFNOSUPPORT', 'EPROTONOSUPPORT', 'EACCES', 'EPERM'].includes(code ?? '')) {
+        throw error;
+      }
+      // Keep the IPv4 listener when IPv6 is unavailable or the chosen port is in use.
+    }
   } catch (error) {
-    http_server.close();
+    await closeListeners();
     throw error;
   }
 
-  const actualPort = (tcp_server.address() as { port: number } | null)?.port ?? port;
-  isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin);
-  localUrl = getStudioWebUILocalUrl(actualPort);
+  isAllowed = createRequestOriginPolicy(actualPort, readLanAddresses, configuredOrigin, ipv6LoopbackServer.listening);
+  const localUrl = getStudioWebUILocalUrl(actualPort, ipv6LoopbackServer.listening);
+  localOrigin = new URL(localUrl);
 
   const handle: StaticServerHandle = {
     port: actualPort,
@@ -370,14 +417,10 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     get lanIP() {
       return pickLanIP(readInterfaces()) ?? undefined;
     },
-    stop: () =>
-      new Promise<void>((resolve) => {
-        getNativeAuthService().cancelOwner('web:', true);
-        for (const client of clients) client.destroy();
-        tcp_server.close(() => {
-          http_server.close(() => resolve());
-        });
-      }),
+    stop: async () => {
+      getNativeAuthService().cancelOwner('web:', true);
+      await closeListeners();
+    },
   };
   return handle;
 }
