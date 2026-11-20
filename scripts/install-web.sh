@@ -3,7 +3,8 @@
 # Aelix Studio WebUI — One-Click Installation Script
 # ============================================================================
 # Usage:
-#   curl -fsSL https://github.com/handochan/aelix-studio/releases/latest/download/install-aelix-studio-web.sh | bash
+#   # Set RELEASE_TAG to the published Studio tag, including its v prefix.
+#   curl -fsSL "https://github.com/handochan/aelix-studio/releases/download/${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
 #   # Or specify version:
 #   VERSION=1.0.0 bash install-aelix-studio-web.sh
 #   # Or install to custom directory:
@@ -90,12 +91,14 @@ show_help() {
 Usage: install-aelix-studio-web.sh [OPTIONS]
 
 Options:
-  --version <version>       Specify version to install (default: latest or CI-embedded)
+  --version <version>       Override the embedded version (use latest for stable releases)
   --mirror <url>            Specify mirror URL (default: GitHub releases)
   --install-dir <path>      Specify installation directory (default: ~/.local/share/aelix-studio-web)
   --no-symlink              Do not create symlink in ~/.local/bin
   --no-path                 Do not add PATH to shell profile
   --help                    Show this help message
+
+Stop the running WebUI or its systemd service before upgrading.
 
 Environment Variables:
   VERSION                   Version to install (same as --version)
@@ -103,8 +106,8 @@ Environment Variables:
   MIRROR                    Mirror URL (same as --mirror)
 
 Examples:
-  # Install latest version
-  curl -fsSL https://github.com/handochan/aelix-studio/releases/latest/download/install-aelix-studio-web.sh | bash
+  # Set RELEASE_TAG to the published Studio tag (include its v prefix).
+  curl -fsSL "https://github.com/handochan/aelix-studio/releases/download/\${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
 
   # Install specific version
   VERSION=1.0.0 bash install-aelix-studio-web.sh
@@ -163,27 +166,26 @@ detect_platform_arch() {
 }
 
 resolve_version() {
-    if [[ "$VERSION" == latest || "$VERSION" == __*__ ]]; then
-        info "Resolving latest version from GitHub API..."
-
-        if command -v curl &>/dev/null; then
-            VERSION=$(curl -fsSL "https://api.github.com/repos/handochan/aelix-studio/releases/latest" \
-                | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
-        elif command -v wget &>/dev/null; then
-            VERSION=$(wget -qO- "https://api.github.com/repos/handochan/aelix-studio/releases/latest" \
-                | grep '"tag_name"' | head -1 | sed 's/.*"v\([^"]*\)".*/\1/')
-        else
-            die "curl or wget is required to resolve version. Please install curl or wget."
-        fi
-
-        if [[ -z "$VERSION" ]]; then
-            die "Failed to resolve latest version. Please specify version manually: VERSION=1.0.0 bash $0"
-        fi
-
-        info "Latest version: ${BOLD}v${VERSION}${NC}"
-    else
-        info "Using specified version: ${BOLD}v${VERSION}${NC}"
+    if [[ "$VERSION" == __*__ ]]; then
+        die "This source installer has no embedded version. Pass --version or use the installer from a versioned Studio release."
     fi
+
+    if [[ "$VERSION" == latest ]]; then
+        info "Resolving the latest stable release from GitHub..."
+        local release_url="https://api.github.com/repos/handochan/aelix-studio/releases/latest"
+        local release_json
+        local release_error="Could not resolve a stable release. Pass --version with the version from the published Studio tag."
+        if command -v curl &>/dev/null; then
+            release_json=$(curl -fsSL "$release_url") || die "$release_error"
+        elif command -v wget &>/dev/null; then
+            release_json=$(wget -qO- "$release_url") || die "$release_error"
+        else
+            die "curl or wget is required to resolve the latest stable release"
+        fi
+        VERSION=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' <<< "$release_json")
+        [[ -n "$VERSION" ]] || die "$release_error"
+    fi
+    info "Using version: ${BOLD}v${VERSION}${NC}"
 
     if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.+-]+)?$ ]]; then
         die "Invalid release version: $VERSION"
@@ -306,6 +308,7 @@ extract_tarball() {
     tar -xzf "$TARBALL_PATH" -C "$EXTRACT_TEMP" || die "Failed to extract tarball"
     [[ -d "$payload" && ! -L "$payload" && -f "$payload/$EXECUTABLE" && ! -L "$payload/$EXECUTABLE" ]] ||
         die "Tarball structure is invalid (missing aelix-studio-web/$EXECUTABLE)"
+    validate_payload "$payload"
     chmod +x "$payload/$EXECUTABLE"
 
     # Leave a previous Studio version recoverable on upgrade.
@@ -319,6 +322,13 @@ extract_tarball() {
         [[ -z "$backup_dir" ]] || mv "$backup_dir" "$INSTALL_DIR"
         die "Failed to move the new installation into place"
     fi
+    if [[ "$CREATE_SYMLINK" == 1 ]] && ! create_symlink; then
+        # The downloaded payload was moved on the same filesystem. Move it
+        # back to staging before restoring the previous installation.
+        mv "$INSTALL_DIR" "$payload" || die "Could not roll back the installation at $INSTALL_DIR"
+        [[ -z "$backup_dir" ]] || mv "$backup_dir" "$INSTALL_DIR"
+        die "Failed to create the command link; the new installation was rolled back"
+    fi
 
     # On macOS, strip the quarantine xattr Safari/Chrome/curl-downloaded files
     # inherit — otherwise Gatekeeper kills unsigned Mach-O binaries with a
@@ -329,6 +339,27 @@ extract_tarball() {
     fi
 
     success "Installation completed"
+    if [[ "$CREATE_SYMLINK" == 1 ]]; then success "Symlink ready: $BIN_DIR/$EXECUTABLE"; fi
+}
+
+validate_payload() {
+    local payload="$1"
+    local host_platform="$PLATFORM"
+    local host_arch="$ARCH"
+    local host="aelix-studio-host"
+    if [[ "$PLATFORM" == win ]]; then
+        host_platform="win32"
+        host="${host}.exe"
+    fi
+    if [[ "$ARCH" == x86_64 ]]; then host_arch="x64"; fi
+    local host_path="$payload/bundled-aioncore/${host_platform}-${host_arch}/$host"
+    [[ -f "$host_path" && -x "$host_path" ]] || die "Tarball structure is invalid (missing executable Studio host)"
+    local required_files=(package.json static/index.html)
+    if [[ "$PLATFORM" == linux ]]; then required_files+=(aelix-studio-web.service); fi
+    local file
+    for file in "${required_files[@]}"; do
+        [[ -f "$payload/$file" && -s "$payload/$file" ]] || die "Tarball structure is invalid (missing $file)"
+    done
 }
 
 check_install_paths() {
@@ -344,6 +375,8 @@ check_install_paths() {
     fi
 
     if [[ "$CREATE_SYMLINK" == 1 ]]; then
+        while [[ "$BIN_DIR" != / && "$BIN_DIR" == */ ]]; do BIN_DIR="${BIN_DIR%/}"; done
+        [[ "$BIN_DIR" != "$INSTALL_DIR" ]] || die "Command link directory must differ from the installation root"
         local link="$BIN_DIR/$EXECUTABLE"
         if [[ -L "$link" ]]; then
             [[ "$(readlink "$link")" == "$INSTALL_DIR/$EXECUTABLE" ]] || die "Symlink already points elsewhere: $link"
@@ -356,11 +389,18 @@ check_install_paths() {
 create_symlink() {
     local symlink_path="${BIN_DIR}/${EXECUTABLE}"
     local target_path="${INSTALL_DIR}/${EXECUTABLE}"
-    mkdir -p "$BIN_DIR"
-    if [[ ! -L "$symlink_path" ]]; then
-        ln -s "$target_path" "$symlink_path" || die "Failed to create symlink"
+    mkdir -p "$BIN_DIR" || return 1
+    if [[ -e "$symlink_path" && ! -L "$symlink_path" ]]; then
+        error "File already exists at $symlink_path"
+        return 1
     fi
-    success "Symlink ready: $symlink_path"
+    if [[ ! -L "$symlink_path" ]]; then
+        ln -sn "$target_path" "$symlink_path" || return 1
+    fi
+    if [[ "$(readlink "$symlink_path")" != "$target_path" ]]; then
+        error "Command path does not point to the Studio executable: $symlink_path"
+        return 1
+    fi
 }
 
 update_shell_profile() {
@@ -493,20 +533,15 @@ main() {
     # Step 4: Verify SHA256 checksum
     verify_checksum
 
-    # Step 5: Extract tarball
+    # Step 5: Install the validated tarball and command link
     extract_tarball
 
-    # Step 6: Create symlink
-    if [[ "$CREATE_SYMLINK" == "1" ]]; then
-        create_symlink
-    fi
-
-    # Step 7: Update shell profile PATH
+    # Step 6: Update shell profile PATH
     if [[ "$UPDATE_PATH" == "1" ]]; then
         update_shell_profile
     fi
 
-    # Step 8: Print summary
+    # Step 7: Print summary
     print_summary
 }
 

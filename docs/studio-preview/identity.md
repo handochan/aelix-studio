@@ -86,7 +86,8 @@ systemctl --user enable --now aelix-studio-web.service
 ```
 
 If you installed to a custom directory, adjust the installed unit's
-`ExecStart`. To uninstall, stop the foreground process or disable the user
+`ExecStart`. Before upgrading, stop the running WebUI or its systemd unit.
+Run the new installer, then start the WebUI again. To uninstall, stop the foreground process or disable the user
 unit with `systemctl --user disable --now aelix-studio-web.service`. If you
 copied the unit, remove `~/.config/systemd/user/aelix-studio-web.service` and
 run `systemctl --user daemon-reload`. Then remove the Studio link and install

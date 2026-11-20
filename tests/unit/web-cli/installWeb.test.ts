@@ -16,21 +16,37 @@ let studioLink: string;
 let upstreamDir: string;
 let upstreamLink: string;
 
-function createAsset(name = cli): string {
-  const payload = path.join(root, name);
-  fs.mkdirSync(payload, { recursive: true });
+function createAsset(name = cli, resources: 'files' | 'directories' | 'command-directory' | 'none' = 'files'): string {
+  const staging = fs.mkdtempSync(path.join(root, 'stage-'));
+  const payload = path.join(staging, name);
+  fs.mkdirSync(payload);
   fs.writeFileSync(path.join(payload, name), `#!/bin/sh\nprintf '%s\\n' '${version}'\n`, { mode: 0o755 });
+  if (resources !== 'none') {
+    const host = path.join(payload, 'bundled-aioncore', `${os.platform()}-${os.arch()}`);
+    fs.mkdirSync(host, { recursive: true });
+    fs.writeFileSync(path.join(host, 'aelix-studio-host'), 'stub', { mode: 0o755 });
+    fs.mkdirSync(path.join(payload, 'static'));
+    if (resources === 'directories') {
+      fs.mkdirSync(path.join(payload, 'package.json'));
+      fs.mkdirSync(path.join(payload, 'static/index.html'));
+    } else {
+      fs.writeFileSync(path.join(payload, 'package.json'), JSON.stringify({ version }));
+      fs.writeFileSync(path.join(payload, 'static/index.html'), '<html></html>');
+    }
+    if (resources === 'command-directory') fs.mkdirSync(path.join(payload, 'bin', cli), { recursive: true });
+    if (os.platform() === 'linux') fs.writeFileSync(path.join(payload, 'aelix-studio-web.service'), '[Service]\n');
+  }
   const arch = os.arch() === 'x64' ? 'x86_64' : 'arm64';
   const tarball = path.join(mirror, `v${version}`, `${cli}-${version}-${os.platform()}-${arch}.tar.gz`);
   fs.mkdirSync(path.dirname(tarball), { recursive: true });
-  execFileSync('tar', ['-czf', tarball, '-C', root, name]);
+  execFileSync('tar', ['-czf', tarball, '-C', staging, name]);
   fs.writeFileSync(`${tarball}.sha256`, createHash('sha256').update(fs.readFileSync(tarball)).digest('hex'));
   return tarball;
 }
 
-function install(...args: string[]) {
+function install(args: string[] = [], binDir?: string) {
   return spawnSync('bash', [installer, '--mirror', `file://${mirror}`, '--version', version, '--no-path', ...args], {
-    env: { HOME: home, PATH: process.env.PATH },
+    env: { HOME: home, PATH: process.env.PATH, BIN_DIR: binDir },
     encoding: 'utf8',
   });
 }
@@ -62,7 +78,7 @@ describe.skipIf(process.platform === 'win32')('standalone Studio WebUI installer
   });
 
   it('refuses an explicit install directory belonging to AionUi', () => {
-    const result = install('--install-dir', upstreamDir);
+    const result = install(['--install-dir', upstreamDir]);
     expect(result.status).toBe(1);
     expect(fs.readFileSync(upstreamLink, 'utf8')).toBe('upstream');
   });
@@ -81,11 +97,46 @@ describe.skipIf(process.platform === 'win32')('standalone Studio WebUI installer
     expect(fs.existsSync(studioLink)).toBe(false);
   });
 
-  it('keeps the installed version when the new archive has the wrong payload', () => {
+  it('keeps the existing install in place when the new command directory is blocked', () => {
     createAsset();
     const first = install();
     expect(first.status, first.stderr).toBe(0);
-    createAsset('aionui-web');
+    const blockedBin = path.join(root, 'blocked-bin');
+    fs.writeFileSync(blockedBin, 'existing file');
+    const result = install([], path.join(blockedBin, 'bin'));
+    expect(result.stderr).toContain('the new installation was rolled back');
+    expect(fs.readdirSync(path.join(home, '.local/share')).toSorted()).toEqual([cli, 'aionui-web'].toSorted());
+    expect(execFileSync(studioLink, ['version'], { encoding: 'utf8' }).trim()).toBe(version);
+  });
+
+  it('supports an explicitly nested command link', () => {
+    createAsset();
+    const nestedBin = path.join(home, '.local/share', cli, 'bin');
+    const result = install([], nestedBin);
+    expect(result.status, result.stderr).toBe(0);
+    expect(execFileSync(path.join(nestedBin, cli), ['version'], { encoding: 'utf8' }).trim()).toBe(version);
+  });
+
+  it('rolls back when the payload occupies an explicitly nested command path', () => {
+    createAsset(cli, 'command-directory');
+    const installDir = path.join(home, '.local/share', cli);
+    const result = install([], path.join(installDir, 'bin'));
+    expect(result.stderr).toContain('the new installation was rolled back');
+    expect(fs.existsSync(installDir)).toBe(false);
+  });
+
+  it('rejects a tarball that puts directories where metadata and the SPA entry should be', () => {
+    createAsset(cli, 'directories');
+    const result = install();
+    expect(result.stderr).toContain('missing package.json');
+    expect(fs.existsSync(studioLink)).toBe(false);
+  });
+
+  it.each(['aionui-web', cli])('keeps the installed version when the new %s archive is incomplete', (name) => {
+    createAsset();
+    const first = install();
+    expect(first.status, first.stderr).toBe(0);
+    createAsset(name, 'none');
     expect(install().stderr).toContain('Tarball structure is invalid');
     expect(execFileSync(studioLink, ['version'], { encoding: 'utf8' }).trim()).toBe(version);
   });
