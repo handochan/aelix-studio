@@ -481,7 +481,7 @@ async function commitCandidate(
       base.pointer?.generation ?? null,
       revision + 1,
       record.binding,
-      retainedDefaults(base.pointer, record)
+      retainedDefaults(base, record)
     ),
     base.pointer,
     lock
@@ -833,7 +833,7 @@ export async function rollback(context: FlowContext): Promise<ExtensionRollback>
       base.pointer.generation,
       base.pointer.revision + 1,
       target.binding,
-      retainedDefaults(base.pointer, target)
+      retainedDefaults(base, target)
     );
     await switchPointer(context.layout, next, base.pointer, lock);
     await tidy(context, lock);

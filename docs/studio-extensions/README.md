@@ -186,8 +186,12 @@ Studio 사용자 데이터 디렉터리 아래에 둔다. 앱 번들, 사용자�
 - 세대는 번들의 경로, `target`, Python minor 버전, `dependencyLockSha256`, native commit에 묶는다(번들
   `manifest.json`에서 읽는다). D04의 "bundled source/ABI/lock에 연결"이 이것이다.
 - 앱 기본값은 `current.json`의 선택적 `defaults`에 관리형 확장 ID와 boolean 값으로 적는다. 값이 없는 설치는
-  기본으로 켜져 있다. 전환할 때 다음 세대에도 있는 ID의 값을 이어받는다. 같은 pack을 여는 entry point들은 ID
-  하나와 기본값 하나를 공유한다. 모듈은 `배포판:entry`, pack은 `배포판:pack:plugin-id`를 쓴다.
+  기본으로 켜져 있다. 세대 전환 때 배포판과 entry 이름이 같은 항목의 값을 이어받는다. 모듈과 pack 사이에서
+  형태가 달라져도 이 규칙을 적용한다. 이름이 바뀐 entry는 새 항목으로 취급한다. 같은 pack을 여는 entry
+  point들은 ID와 기본값을 공유한다. 이름이 그대로인 항목 중 하나라도 명시적으로 꺼져 있으면 pack도 꺼지고,
+  이어받을 값이 없으면 기본으로 켜진다.
+  기존 ASCII ID 형식은 모듈 `배포판:entry`와 pack `배포판:pack:plugin-id`다. 이 형식이 ACP ID 문법이나 길이 제한에
+  맞지 않는 이름에는 배포판과 원래 이름의 SHA-256을 붙인 ASCII ID를 쓴다.
   기본값만 바꾸는 작업은 잠금 아래 현재 포인터를 원자적으로 교체하고 세대와 되돌리기 대상을 유지한다.
 - 세대 하나는 약 12MB였다. 거의 전부 세대마다 들어가는 pip이다. **[실행]**
 

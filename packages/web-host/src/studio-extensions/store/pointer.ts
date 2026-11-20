@@ -2,7 +2,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { isAdapterReference, isObjectReference } from '../inspect/metadata.js';
 import type { LaunchForm } from '../launch/form.js';
-import { isManagedId, parseManagedCatalog } from '../launch/managedCatalog.js';
+import { isManagedId, managedExtensionId, parseManagedCatalog } from '../launch/managedCatalog.js';
 import { ExtensionFailure, type ExtensionOrigin } from '../types.js';
 import { isGenerationId, writeAtomic, writeTemporary, type BundleBinding, type Layout } from './layout.js';
 import type { StateWriter } from './lock.js';
@@ -174,12 +174,26 @@ export function newPointer(
   return { schema: POINTER_SCHEMA, generation, previous, revision, binding, ...(defaults ? { defaults } : {}) };
 }
 
-/** Carry app defaults only for stable IDs still installed in the selected generation. */
-export function retainedDefaults(base: Pointer | null, next: GenerationRecord): Pointer['defaults'] {
-  if (!base?.defaults || !next.launch.managed) return undefined;
-  const ids = new Set(next.launch.managed.map(({ id }) => id));
-  const entries = Object.entries(base.defaults).filter(([id]) => ids.has(id));
-  return entries.length ? Object.fromEntries(entries) : undefined;
+/** Carry app defaults by distribution and exact entry name, across module and pack IDs. */
+export function retainedDefaults(base: PointerState, next: GenerationRecord): Pointer['defaults'] {
+  if (!base.pointer?.defaults || !base.record?.launch.managed || !next.launch.managed) return undefined;
+  const previous = new Map(Object.entries(base.record.extensions));
+  const previousIds = new Set(base.record.launch.managed.map(({ id }) => id));
+  const nextIds = new Set(next.launch.managed.map(({ id }) => id));
+  const defaults = new Map<string, boolean>();
+  for (const [name, extension] of Object.entries(next.extensions)) {
+    const prior = previous.get(name);
+    if (prior?.distribution !== extension.distribution) continue;
+    const oldId = managedExtensionId(prior.distribution, name, prior.plugin);
+    const id = managedExtensionId(extension.distribution, name, extension.plugin);
+    if (!previousIds.has(oldId) || !nextIds.has(id)) continue;
+    const enabled = base.pointer.defaults[oldId];
+    if (typeof enabled !== 'boolean') continue;
+    // Several previously separate modules can become one pack. An explicit off
+    // wins over on so grouping cannot activate a disabled extension.
+    defaults.set(id, (defaults.get(id) ?? true) && enabled);
+  }
+  return defaults.size ? Object.fromEntries(defaults) : undefined;
 }
 
 /** A generation record with the current schema. */

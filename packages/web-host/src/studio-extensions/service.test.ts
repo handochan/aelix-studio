@@ -100,6 +100,90 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     ).toMatchObject({ ok: false, code: 'NOT_INSTALLED' });
   });
 
+  it.each([
+    { before: 'module', manifest: false, beforeId: 'demo-one:demo-one', afterId: 'demo-one:pack:demo-one' },
+    { before: 'pack', manifest: true, beforeId: 'demo-one:pack:demo-one', afterId: 'demo-one:demo-one' },
+  ])('retains disabled defaults when a $before changes launch form', async ({ manifest, beforeId, afterId }) => {
+    await settle(await service.request('window:1', await installRequest({ name: 'demo-one', manifest })));
+    expect(
+      await service.request('window:1', { action: 'set_default', extensionId: beforeId, enabled: false })
+    ).toMatchObject({ ok: true });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: 'demo-one',
+      source: { kind: 'file', path: await wheel({ name: 'demo-one', version: '0.2.0', manifest: !manifest }) },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect((await listing()).extensions).toMatchObject([{ managedId: afterId, defaultEnabled: false }]);
+    expect(JSON.parse(await readFile(path.join(root, 'current.json'), 'utf8')).defaults).toEqual({
+      [afterId]: false,
+    });
+    expect(await service.request('window:1', { action: 'rollback' })).toMatchObject({ ok: true });
+    expect((await listing()).extensions).toMatchObject([{ managedId: beforeId, defaultEnabled: false }]);
+  });
+
+  it('starts with a fresh default after renaming the only entry of a pack', async () => {
+    await settle(await service.request('window:1', await installRequest({ name: 'demo-one', entry: 'old-name' })));
+    const extensionId = 'demo-one:pack:demo-one';
+    await service.request('window:1', { action: 'set_default', extensionId, enabled: false });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: 'demo-one',
+      source: { kind: 'file', path: await wheel({ name: 'demo-one', version: '0.2.0', entry: 'new-name' }) },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect((await listing()).extensions).toMatchObject([
+      { name: 'new-name', managedId: extensionId, defaultEnabled: true },
+    ]);
+  });
+
+  it('keeps a pack disabled when its previously separate entries disagree', async () => {
+    await settle(
+      await service.request(
+        'window:1',
+        await installRequest({ name: 'demo-one', manifest: false, aliases: { alias: 'demo_one:other' } })
+      )
+    );
+    await service.request('window:1', { action: 'set_default', extensionId: 'demo-one:demo-one', enabled: false });
+    await service.request('window:1', { action: 'set_default', extensionId: 'demo-one:demo-one', enabled: true });
+    await service.request('window:1', { action: 'set_default', extensionId: 'demo-one:alias', enabled: false });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: 'demo-one',
+      source: {
+        kind: 'file',
+        path: await wheel({ name: 'demo-one', version: '0.2.0', aliases: { alias: 'demo_one:setup' } }),
+      },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect((await listing()).extensions).toMatchObject([
+      { name: 'alias', managedId: 'demo-one:pack:demo-one', defaultEnabled: false },
+      { name: 'demo-one', managedId: 'demo-one:pack:demo-one', defaultEnabled: false },
+    ]);
+  });
+
+  it.each([
+    { kind: 'Unicode', entry: '확장' },
+    { kind: 'overlong ASCII', entry: 'a'.repeat(260) },
+  ])('uses one stable ASCII ID and preserves the default for a $kind entry point', async ({ entry }) => {
+    const spec = { name: 'demo-one', manifest: false, entry };
+    expect(await settle(await service.request('window:1', await installRequest(spec)))).toMatchObject({
+      phase: 'switched',
+    });
+    const extensionId = (await listing()).extensions[0]?.managedId;
+    expect(extensionId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/);
+    await service.request('window:1', { action: 'set_default', extensionId, enabled: false });
+    const update = await service.request('window:1', {
+      action: 'update',
+      name: 'demo-one',
+      source: { kind: 'file', path: await wheel({ ...spec, version: '0.2.0' }) },
+    });
+    expect(await settle(update)).toMatchObject({ phase: 'switched' });
+    expect((await listing()).extensions).toMatchObject([
+      { name: entry, managedId: extensionId, defaultEnabled: false },
+    ]);
+  });
+
   it.each<[string, unknown]>([
     ['INVALID_INPUT', null],
     ['INVALID_INPUT', 'install'],

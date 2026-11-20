@@ -134,10 +134,10 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
   };
   const list = async (): Promise<ExtensionListing> =>
     data<ExtensionListing>(await service.request(OWNER, { action: 'list' }));
-  const install = async (spec: WheelSpec): Promise<ExtensionOperation> => {
+  const changeWheel = async (spec: WheelSpec, action: 'install' | 'update'): Promise<ExtensionOperation> => {
     const file = await writeWheel(path.join(sandbox, 'wheels'), spec);
     let state = data<ExtensionOperation>(
-      await service.request(OWNER, { action: 'install', source: { kind: 'file', path: file } })
+      await service.request(OWNER, { action, name: spec.name, source: { kind: 'file', path: file } })
     );
     while (!['switched', 'failed', 'cancelled'].includes(state.phase)) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -147,6 +147,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     }
     return state;
   };
+  const install = (spec: WheelSpec): Promise<ExtensionOperation> => changeWheel(spec, 'install');
   /** Start the adapter the way the host does, with or without Studio's state directory. */
   const conversation = (withState = true): Conversation => {
     const started = new Conversation(
@@ -341,6 +342,48 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('conversations with ins
     } finally {
       await writeFile(pointer, saved);
     }
+  }, 180_000);
+
+  it('keeps a real wheel disabled across both launch form changes', async () => {
+    const name = 'fixture-form-change';
+    const spec = { name, manifest: false };
+    expect(await install(spec)).toMatchObject({ phase: 'switched' });
+    expect(
+      await service.request(OWNER, { action: 'set_default', extensionId: `${name}:${name}`, enabled: false })
+    ).toMatchObject({ ok: true });
+
+    const expectDisabled = async (managedId: string) => {
+      expect((await list()).extensions.find((entry) => entry.name === name)).toMatchObject({
+        managedId,
+        defaultEnabled: false,
+      });
+      const started = conversation();
+      const session = await started.open(workspace);
+      expect((await started.prompt(session, `/${name}-cmd`)).error?.message).toMatch(/unknown slash command/i);
+      await started.close();
+    };
+    expect(await changeWheel({ ...spec, version: '0.2.0', manifest: true }, 'update')).toMatchObject({
+      phase: 'switched',
+    });
+    await expectDisabled(`${name}:pack:${name}`);
+    expect(await changeWheel({ ...spec, version: '0.3.0' }, 'update')).toMatchObject({ phase: 'switched' });
+    await expectDisabled(`${name}:${name}`);
+  }, 180_000);
+
+  it('installs a real wheel with a Unicode entry point and keeps its managed ID on update', async () => {
+    const name = 'fixture-unicode-entry';
+    const spec = { name, entry: '확장', manifest: false };
+    expect(await install(spec)).toMatchObject({ phase: 'switched' });
+    const extensionId = (await list()).extensions.find((entry) => entry.name === spec.entry)?.managedId;
+    expect(extensionId).toMatch(/^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/);
+    expect(await service.request(OWNER, { action: 'set_default', extensionId, enabled: false })).toMatchObject({
+      ok: true,
+    });
+    expect(await changeWheel({ ...spec, version: '0.2.0' }, 'update')).toMatchObject({ phase: 'switched' });
+    expect((await list()).extensions.find((entry) => entry.name === spec.entry)).toMatchObject({
+      managedId: extensionId,
+      defaultEnabled: false,
+    });
   }, 180_000);
 
   it('starts with the bundle alone when the generations are gone', async () => {

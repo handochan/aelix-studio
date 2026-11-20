@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { ExtensionFailure } from '../types.js';
@@ -17,7 +18,14 @@ export function isManagedId(input: unknown): input is string {
 
 /** A stable group ID when multiple entry points resolve to one pack. */
 export function managedExtensionId(distribution: string, name: string, plugin?: string | null): string {
-  return plugin ? `${distribution}:pack:${plugin}` : `${distribution}:${name}`;
+  const id = plugin ? `${distribution}:pack:${plugin}` : `${distribution}:${name}`;
+  if (isManagedId(id)) return id;
+  // Keep existing ASCII IDs. Entry names cannot contain a colon, and the legacy
+  // multi-component pack format uses the literal ":pack:" discriminator.
+  const digest = createHash('sha256')
+    .update(JSON.stringify([distribution, plugin ?? name]))
+    .digest('hex');
+  return `studio:encoded:${plugin ? 'pack' : 'entry'}:${digest}`;
 }
 
 /** Parse generation-local references. The bundled Python validator also resolves their actual paths. */
