@@ -26,6 +26,7 @@ describe('send routing for an explicit click', () => {
     ['idle', 'active', true, 'relay-steer', 'text'],
     ['busy', 'idle', false, 'keep', 'refresh'],
     ['busy', 'idle', true, 'keep', 'host'],
+    ['unknown', 'idle', false, 'keep', 'refresh-host'],
     ['unknown', 'idle', true, 'keep', 'host'],
     ['unknown', 'active', true, 'keep', 'host'],
     ['idle', 'unknown', false, 'keep', 'refresh'],
@@ -41,7 +42,7 @@ describe('send routing for an explicit click', () => {
     it.each([
       ['idle', false, 'refresh'],
       ['busy', false, 'refresh'],
-      ['unknown', false, 'host'],
+      ['unknown', false, 'refresh-host'],
       ['idle', true, 'unconfirmed'],
       ['busy', true, 'unconfirmed'],
       ['unknown', true, 'host'],
@@ -65,7 +66,7 @@ describe('send routing for an explicit click', () => {
     it.each([
       ['idle', 'ordinary', 'host-only'],
       ['busy', 'keep', 'host'],
-      ['unknown', 'keep', 'host'],
+      ['unknown', 'keep', 'refresh-host'],
     ] as const)('host %s → %s', (host, route, reason) => {
       expect(decideSend({ ...base, channel, host, native: 'unknown', turnKey: null })).toEqual({ route, reason });
     });

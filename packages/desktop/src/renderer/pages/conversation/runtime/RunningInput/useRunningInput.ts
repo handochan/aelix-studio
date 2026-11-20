@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { wsEmitter } from '@/common/adapter/httpBridge';
 import { Message } from '@arco-design/web-react';
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -42,6 +43,7 @@ export type UseRunningInputOptions = {
   /** Most recent host turn observation. */
   host: HostTurnState;
   hostTurnId: string | null;
+  refreshHost: () => Promise<{ host: HostTurnState; hostTurnId: string | null }>;
   /** The host is cancelling the turn. */
   stopping: boolean;
   /** Sending is held elsewhere (session check, manual compaction). */
@@ -98,6 +100,7 @@ export function useRunningInput({
   enabled,
   host,
   hostTurnId,
+  refreshHost,
   stopping,
   paused,
 }: UseRunningInputOptions): RunningInputController {
@@ -137,9 +140,25 @@ export function useRunningInput({
     void session?.client.refresh();
   }, [session, host, hostTurnId]);
 
+  useEffect(() => {
+    if (!enabled || host !== 'unknown') return;
+    return wsEmitter('realtime.reconnected').on(() => void refreshHost());
+  }, [enabled, host, refreshHost]);
+
   const modes = known?.modes ?? [];
   const mode = modes.includes(requestedMode) ? requestedMode : (modes[0] ?? requestedMode);
-  const latest = useLatestRef({ session, conversationId, enabled, known, host, hostTurnId, stopping, paused, mode });
+  const latest = useLatestRef({
+    session,
+    conversationId,
+    enabled,
+    known,
+    host,
+    hostTurnId,
+    refreshHost,
+    stopping,
+    paused,
+    mode,
+  });
 
   const beginStop = useCallback(() => {
     const { session: currentSession, known, hostTurnId } = latest.current;
@@ -194,8 +213,11 @@ export function useRunningInput({
           current.paused
         );
       };
-      const decide = (refreshed: boolean) => {
-        const { host, hostTurnId } = latest.current;
+      const decide = (
+        refreshed: boolean,
+        observationHost: Pick<UseRunningInputOptions, 'host' | 'hostTurnId'> = latest.current
+      ) => {
+        const { host, hostTurnId } = observationHost;
         const observation = relay.getSnapshot();
         const { channel, sending } = observation;
         const target = activeTarget(observation);
@@ -207,7 +229,7 @@ export function useRunningInput({
           native: channel.status === 'ready' ? (channel.turn.active ? 'active' : 'idle') : 'unknown',
           turnKey: target ? turnKey(target.bindingId, target.turnId) : null,
           stop: currentSession.stop,
-          interrupted: interrupted(),
+          interrupted: interrupted() || hostTurnId !== initial.hostTurnId,
           inFlight: sending || preparing.current === currentSession,
           refreshed,
           negotiated: observation.negotiated,
@@ -217,7 +239,11 @@ export function useRunningInput({
       };
 
       let decision = decide(false);
-      if (decision.reason === 'refresh') {
+      if (decision.reason === 'refresh-host') {
+        const recovered = await initial.refreshHost();
+        if (recovered.host !== 'unknown') await relay.refresh();
+        decision = decide(true, latest.current.host === 'unknown' ? recovered : latest.current);
+      } else if (decision.reason === 'refresh') {
         await relay.refresh();
         decision = decide(true);
       }
@@ -300,7 +326,9 @@ export function useRunningInput({
     [receipts, known, stoppedRequests]
   );
   const handlesSubmit =
-    enabled && channel.status !== 'unsupported' && (channel.status !== 'unavailable' || snapshot.negotiated);
+    enabled &&
+    channel.status !== 'unsupported' &&
+    (host === 'unknown' || channel.status !== 'unavailable' || snapshot.negotiated);
 
   return {
     available: enabled && snapshot.negotiated && host === 'busy' && !stopping && !paused && modes.length > 0,

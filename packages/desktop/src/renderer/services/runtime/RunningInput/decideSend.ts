@@ -24,7 +24,10 @@ export type SendInput = {
 type Decision =
   | { route: 'ordinary'; reason: 'host-only' | 'idle' }
   | { route: 'relay-steer' | 'relay-follow-up'; reason: 'text' | 'quoted' | 'references' }
-  | { route: 'keep'; reason: 'interrupted' | 'stop' | 'in-flight' | 'host' | 'slash' | 'refresh' | 'unconfirmed' };
+  | {
+      route: 'keep';
+      reason: 'interrupted' | 'stop' | 'in-flight' | 'host' | 'slash' | 'refresh' | 'refresh-host' | 'unconfirmed';
+    };
 
 /**
  * Route one explicit submission. Evaluate rows in order. A refresh reads state only,
@@ -36,7 +39,8 @@ type Decision =
  * | Pending Stop on this turn | Keep |
  * | Completed Stop on this still-active turn | Read once, then keep if still active |
  * | Another submission is pending | Keep |
- * | Host unknown | Keep |
+ * | Host unknown on Send | Read the host summary once, then re-evaluate with current channel state |
+ * | Host still unknown after that read | Keep until another Send or reconnect can read again |
  * | Unsupported, never negotiated after discovery failure, or confirmed no live task | Ordinary only on idle host |
  * | Original slash prefix, busy host | Keep |
  * | Channel uncertain, or cached native and host activity disagree | Refresh once |
@@ -60,7 +64,7 @@ export function decideSend(input: SendInput): Decision {
     }
   }
   if (input.inFlight) return { route: 'keep', reason: 'in-flight' };
-  if (host === 'unknown') return { route: 'keep', reason: 'host' };
+  if (host === 'unknown') return { route: 'keep', reason: input.refreshed ? 'host' : 'refresh-host' };
   if (channel === 'unsupported' || channel === 'no-live-task' || (channel === 'unavailable' && !input.negotiated)) {
     return host === 'idle' ? { route: 'ordinary', reason: 'host-only' } : { route: 'keep', reason: 'host' };
   }

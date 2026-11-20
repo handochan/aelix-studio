@@ -11,7 +11,7 @@ import {
   reconcileWaitingConfirmationFromRuntime,
 } from '@/renderer/pages/conversation/GroupedHistory/hooks/useConversationListSync';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
-import { useCallback, useEffect, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useSyncExternalStore } from 'react';
 import {
   conversationDeleted,
   getConversationRuntimeViewSnapshot,
@@ -42,6 +42,7 @@ type UseConversationRuntimeViewReturn = {
   canSendMessage: boolean;
   activeTurnId: string | null;
   supportsMidturnDelivery: boolean;
+  refreshMissingRuntime: () => Promise<ConversationRuntimeView>;
   markSendStarted: () => void;
   markSendAccepted: (turn_id: string, runtime: TConversationRuntimeSummary, msg_id?: string) => void;
   markSendFailed: (failure: ConversationRuntimeSendFailure) => void;
@@ -78,45 +79,63 @@ const flushRuntimeViewLogs = (logs: ConversationRuntimeViewLogEntry[]): void => 
 const getRuntimeOrNull = (runtime: TConversationRuntimeSummary | undefined): TConversationRuntimeSummary | null =>
   runtime ?? null;
 
+// Multiple mounted surfaces and a reconnect/Send can observe the same missing summary.
+const pendingReads = new WeakMap<ConversationRuntimeView, ReturnType<typeof getConversationOrNull>>();
+
+function readConversation(view: ConversationRuntimeView): ReturnType<typeof getConversationOrNull> {
+  const pending = pendingReads.get(view);
+  if (pending) return pending;
+  const read = getConversationOrNull(view.conversation_id).finally(() => pendingReads.delete(view));
+  pendingReads.set(view, read);
+  return read;
+}
+
 export const useConversationRuntimeView = (conversation_id: string): UseConversationRuntimeViewReturn => {
   const getSnapshot = useCallback(() => getConversationRuntimeViewSnapshot(conversation_id), [conversation_id]);
   const view = useSyncExternalStore(subscribeConversationRuntimeView, getSnapshot, getSnapshot);
 
+  const reader = useRef<{ id: string; read: () => Promise<void> } | null>(null);
+
   useEffect(() => {
-    if (!conversation_id) {
-      return;
-    }
-
+    if (!conversation_id) return;
     let cancelled = false;
-    flushRuntimeViewLogs(hydrateStarted(conversation_id));
 
-    void getConversationOrNull(conversation_id)
-      .then((conversation) => {
-        if (cancelled) {
-          return;
-        }
+    const read = async (): Promise<void> => {
+      const before = getSnapshot();
+      // A newer host event, local submission or deletion takes precedence over a delayed GET.
+      const current = () => !cancelled && before === getSnapshot();
+      try {
+        const conversation = await readConversation(before);
+        if (!current()) return;
         const runtime = getRuntimeOrNull(conversation?.runtime);
         flushRuntimeViewLogs(hydrateSucceeded(conversation_id, runtime));
-        // Reconcile the sidebar spinner against authoritative runtime state:
-        // a missed WS frame (window reload/reconnect race) can otherwise
-        // leave the row dark even though the runtime is still processing.
         if (runtime) {
           reconcileGeneratingFromRuntime(conversation_id, runtime.is_processing === true);
           reconcileWaitingConfirmationFromRuntime(conversation_id, runtime.pending_confirmations ?? 0);
         }
-      })
-      .catch((error: unknown) => {
-        if (cancelled) {
-          return;
-        }
+      } catch (error: unknown) {
+        if (!current()) return;
         const reason = error instanceof Error ? error.message : String(error);
         flushRuntimeViewLogs(hydrateFailed(conversation_id, normalizeReason(reason)));
-      });
+      }
+    };
 
+    const view = getSnapshot();
+    if (view.hydrated && !pendingReads.has(view)) flushRuntimeViewLogs(hydrateStarted(conversation_id));
+    reader.current = { id: conversation_id, read };
+    void read();
     return () => {
       cancelled = true;
+      reader.current = null;
     };
-  }, [conversation_id]);
+  }, [conversation_id, getSnapshot]);
+
+  const refreshMissingRuntime = useCallback(async () => {
+    const view = getSnapshot();
+    const mounted = reader.current;
+    if ((!view.hydrated || !view.hasBackendRuntime) && mounted?.id === conversation_id) await mounted.read();
+    return getSnapshot();
+  }, [conversation_id, getSnapshot]);
 
   useEffect(() => {
     if (!conversation_id) {
@@ -220,6 +239,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
     canSendMessage: view.canSendMessage,
     activeTurnId: view.activeTurnId,
     supportsMidturnDelivery: view.supportsMidturnDelivery,
+    refreshMissingRuntime,
     markSendStarted,
     markSendAccepted,
     markSendFailed,

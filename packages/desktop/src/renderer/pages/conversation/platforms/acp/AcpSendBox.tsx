@@ -324,11 +324,17 @@ const AcpSendBox: React.FC<{
   const isCancelling = runtimeView.state === 'cancelling';
   const isBusy = isCancelling || commandQueueRuntimeGate.isProcessing || !commandQueueRuntimeGate.canSendMessage;
   // Aelix running input (D20): steer/follow-up into the native turn when the host relay is negotiated.
+  const { refreshMissingRuntime } = runtimeView;
+  const refreshHost = useCallback(async () => {
+    const view = await refreshMissingRuntime();
+    return { host: hostTurnState(view), hostTurnId: view.activeTurnId };
+  }, [refreshMissingRuntime]);
   const runningInput = useRunningInput({
     conversationId: conversation_id,
     enabled: !teamRuntime && !teamSendMessage && !teamPermission,
     host: hostTurnState(getConversationRuntimeViewSnapshot(conversation_id)),
     hostTurnId: runtimeView.activeTurnId,
+    refreshHost,
     stopping: isCancelling,
     paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
   });

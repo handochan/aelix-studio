@@ -16,6 +16,14 @@ import {
   type RunningInputController,
   type RunningInputRoute,
 } from '@/renderer/pages/conversation/runtime/RunningInput';
+import { useConversationRuntimeView } from '@/renderer/pages/conversation/runtime/useConversationRuntimeView';
+import {
+  getConversationRuntimeViewSnapshot,
+  hydrateSucceeded,
+  resetConversationRuntimeViewStoreForTest,
+  type ConversationRuntimeView,
+} from '@/renderer/pages/conversation/runtime/conversationRuntimeViewStore';
+import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import type { UseRunningInputOptions } from '@/renderer/pages/conversation/runtime/RunningInput/useRunningInput';
 import { emitter } from '@/renderer/utils/emitter';
 import type { RunningInputReferences } from '@/renderer/services/runtime/RunningInput';
@@ -66,6 +74,7 @@ const BASE: UseRunningInputOptions = {
   conversationId: 'conv-1',
   enabled: true,
   host: 'busy',
+  refreshHost: async () => ({ host: 'unknown', hostTurnId: null }),
   hostTurnId: 'host-turn-1',
   stopping: false,
   paused: false,
@@ -85,6 +94,29 @@ const Harness: React.FC<Partial<UseRunningInputOptions>> = (props) => {
       />
     </>
   );
+};
+
+const IDLE_RUNTIME: TConversationRuntimeSummary = {
+  state: 'idle',
+  can_send_message: true,
+  has_task: false,
+  is_processing: false,
+  turn_id: null,
+  pending_confirmations: 0,
+};
+
+const RecoveringComposer = () => {
+  const { view, refreshMissingRuntime } = useConversationRuntimeView(BASE.conversationId);
+  const observe = (value: ConversationRuntimeView): Pick<UseRunningInputOptions, 'host' | 'hostTurnId'> => ({
+    host: value.isProcessing ? 'busy' : value.hydrated && value.hasBackendRuntime ? 'idle' : 'unknown',
+    hostTurnId: value.activeTurnId,
+  });
+  return <Harness {...observe(view)} refreshHost={async () => observe(await refreshMissingRuntime())} />;
+};
+
+const RuntimeObserver = () => {
+  useConversationRuntimeView(BASE.conversationId);
+  return null;
 };
 
 function hold() {
@@ -255,6 +287,92 @@ describe('running input in the composer', () => {
     expect(server.metadata).not.toHaveBeenCalled();
     expect(server.write).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ['send', 409],
+    ['reconnect', 409],
+    ['send', 503],
+  ] as const)(
+    'recovers a failed host GET on %s after discovery returned %s, in the same conversation',
+    async (trigger, discoveryStatus) => {
+      resetConversationRuntimeViewStoreForTest();
+      const reconnect = new Set<() => void>();
+      vi.mocked(httpBridge.wsEmitter).mockImplementation((event) => ({
+        on: (listener: () => void) => {
+          if (event === 'realtime.reconnected') reconnect.add(listener);
+          return () => reconnect.delete(listener);
+        },
+        emit: () => {},
+      }));
+      server.conversation.mockImplementation(() => failure(503, 'TEMPORARY_FAILURE'));
+      server.discovery = () =>
+        failure(discoveryStatus, discoveryStatus === 409 ? 'EXT_NO_LIVE_TASK' : 'TEMPORARY_FAILURE');
+      render(<RecoveringComposer />);
+      await settle();
+      expect(getConversationRuntimeViewSnapshot(BASE.conversationId)).toMatchObject({
+        hydrated: true,
+        hasBackendRuntime: false,
+      });
+      expect(server.conversation).toHaveBeenCalledTimes(1);
+      expect(controller.handlesSubmit).toBe(true);
+      expect(await submit('my draft')).toBe('kept');
+      expect(server.conversation).toHaveBeenCalledTimes(2);
+
+      server.discovery = () => failure(409, 'EXT_NO_LIVE_TASK');
+      server.conversation.mockImplementation(() => success({ id: BASE.conversationId, runtime: IDLE_RUNTIME }));
+      if (trigger === 'reconnect') {
+        act(() => {
+          for (const listener of reconnect) listener();
+        });
+        await waitFor(() =>
+          expect(getConversationRuntimeViewSnapshot(BASE.conversationId).hasBackendRuntime).toBe(true)
+        );
+        expect(server.write).not.toHaveBeenCalled();
+      }
+      expect(await submit('my draft')).toBe('ordinary');
+      expect(server.conversation).toHaveBeenCalledTimes(3);
+      expect(server.write).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each(['initial', 'recovery'] as const)(
+    'shares the %s GET and preserves a newer host turn over a late idle result',
+    async (stage) => {
+      resetConversationRuntimeViewStoreForTest();
+      const held = hold();
+      if (stage === 'recovery') server.conversation.mockReturnValueOnce(failure(503, 'TEMPORARY_FAILURE'));
+      server.conversation.mockReturnValueOnce(held.pending);
+      server.discovery = () => failure(409, 'EXT_NO_LIVE_TASK');
+      render(
+        <>
+          <RuntimeObserver />
+          <RecoveringComposer />
+        </>
+      );
+      await settle();
+      let pending!: Promise<RunningInputRoute>;
+      act(() => {
+        pending = controller.submit('my draft', NO_REFERENCES, TEXT_DRAFT);
+      });
+      await waitFor(() => expect(server.conversation).toHaveBeenCalledTimes(stage === 'initial' ? 1 : 2));
+      act(() => {
+        hydrateSucceeded(BASE.conversationId, {
+          ...IDLE_RUNTIME,
+          state: 'running',
+          turn_id: 'new-turn',
+          can_send_message: false,
+          is_processing: true,
+        });
+      });
+      await act(async () => {
+        held.reply(success({ id: BASE.conversationId, runtime: IDLE_RUNTIME }));
+        await pending;
+      });
+      await expect(pending).resolves.toBe('kept');
+      expect(getConversationRuntimeViewSnapshot(BASE.conversationId).activeTurnId).toBe('new-turn');
+      expect(server.write).not.toHaveBeenCalled();
+    }
+  );
 
   it('allows an ordinary send if the idle task disappears between discovery and the native state read', async () => {
     await mount({ host: 'idle', hostTurnId: null });
