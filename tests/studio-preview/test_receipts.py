@@ -205,6 +205,76 @@ class FailedAuditReceiptTests(unittest.TestCase):
                 self.assertEqual(saved['recapturedAudits'],['provider'])
                 self.assertEqual(len(saved['auditedSessions'][0]['captureAttempts']),2)
 
+    def test_extension_failure_preserves_the_completed_smoke_verdict_and_controls(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'acceptance.json'
+            smoke = dict(status='passed', failedAudits=[], permissionChecks=25,
+                         auditedSessions=[dict(name='permission', status='passed')],
+                         outboundControls=[dict(name='positive-control', status='passed')],
+                         auditedSessionsSha256='smoke-evidence')
+            audits = acceptance.AuditedSessions(root/'host', root/'python', root, ledger='outbound-extensions-sessions.json')
+            audits.enabled = True
+
+            def fail_extension(receipt):
+                checkpoint = json.loads(output.read_text())
+                self.assertEqual((checkpoint['status'], checkpoint['smokeStatus']), ('running', 'passed'))
+                self.assertEqual(checkpoint['outboundControls'], smoke['outboundControls'])
+                receipt.write_text('{"status": "passed"}')
+                audits.sessions.append(dict(name='extensions', status='failed', unparsedRecords=2))
+                audits.save()
+                raise RuntimeError('incomplete extension audit')
+
+            with self.assertRaisesRegex(RuntimeError, 'incomplete extension audit'):
+                acceptance.record_extension_qualification(smoke, output, audits, fail_extension)
+            acceptance.write_failure_receipt(output)
+            saved = json.loads(output.read_text())
+            self.assertEqual((saved['status'], saved['smokeStatus']), ('failed', 'passed'))
+            self.assertEqual(saved['auditedSessionsSha256'], 'smoke-evidence')
+            self.assertEqual(saved['permissionChecks'], 25)
+            self.assertEqual(saved['outboundControls'], [dict(name='positive-control', status='passed')])
+            self.assertEqual(saved['failedAudits'], ['extensions'])
+            extension = saved['extensionQualification']
+            self.assertEqual(extension['status'], 'failed')
+            self.assertEqual(extension['audit']['unparsedRecords'], 2)
+            self.assertEqual((extension['captureTimeoutSeconds'], extension['totalTimeoutSeconds']), (180, 540))
+            self.assertEqual(extension['timeoutScope'], 'audit-supervisor')
+            self.assertTrue(extension['bundleInventoryOutsideTimeout'])
+            self.assertGreaterEqual(extension['elapsedSeconds'], 0)
+
+    def test_installer_start_clears_only_stale_extension_receipts_and_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            permission = root / 'permission'
+            permission.mkdir()
+            extension_files = [
+                root / 'extensions-qualification.json',
+                permission / 'outbound-extensions-sessions.json',
+                *(permission / (name + suffix) for name in ('outbound-extensions', 'outbound-app-extensions')
+                  for suffix in ('.json', '.capture-1.json', '.capture-2.json')),
+            ]
+            smoke = permission / 'outbound.capture-2.json'
+            for file in (*extension_files, smoke):
+                file.write_text('old evidence')
+            args = Mock(runtime=str(root/'runtime'), output=str(root/'acceptance.json'),
+                        artifact=None, dmg=None, artifacts=str(root/'missing'))
+            with self.assertRaises(ValueError):
+                acceptance.main(args)
+            self.assertFalse(any(file.exists() for file in extension_files))
+            self.assertEqual(smoke.read_text(), 'old evidence')
+
+    def test_extension_pass_keeps_a_failed_smoke_verdict(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            output = root / 'acceptance.json'
+            audits = acceptance.AuditedSessions(root/'host', root/'python', root)
+            acceptance.record_extension_qualification(
+                dict(status='failed', failedAudits=['provider']), output, audits,
+                lambda receipt: receipt.write_text('{"status": "passed"}'))
+            saved = json.loads(output.read_text())
+            self.assertEqual((saved['status'], saved['smokeStatus'], saved['extensionQualification']['status']),
+                             ('failed', 'failed', 'passed'))
+
     def test_running_or_old_passed_receipt_never_survives_a_failure(self):
         for status in ('running','passed'):
             with self.subTest(status=status), tempfile.TemporaryDirectory() as directory:

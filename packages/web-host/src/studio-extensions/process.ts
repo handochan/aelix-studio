@@ -65,6 +65,16 @@ export const spawnChild: Spawn = (spec) => {
   };
 };
 
+/** The installed Windows launcher holds a job for the child and all of its descendants. */
+export function windowsChildSpawn(python: string, launcher: string): Spawn {
+  return (spec) =>
+    spawnChild({
+      ...spec,
+      command: python,
+      args: ['-I', '-S', '-B', '-X', 'utf8', launcher, 'windows-child', spec.command, ...spec.args],
+    });
+}
+
 /** Keeps the end of a stream of text, cut at a character boundary. */
 export class OutputTail {
   private text = '';

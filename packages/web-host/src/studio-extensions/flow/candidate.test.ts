@@ -14,7 +14,13 @@ import type { Child, SpawnSpec } from '../process';
 import { readBundleFacts, type BundleFacts } from '../store/layout';
 import { newGenerationRecord, writeGenerationRecord, type GenerationRecord } from '../store/pointer';
 import { ExtensionFailure } from '../types';
-import { createCandidate, rewriteScriptHeader, scanGeneration, type Candidate } from './candidate';
+import {
+  createCandidate,
+  rewriteScriptHeader,
+  rewriteWindowsLauncher,
+  scanGeneration,
+  type Candidate,
+} from './candidate';
 
 const [PARENT, CHILD] = ['g00000001-aaaa', 'g00000002-bbbb'];
 
@@ -49,6 +55,30 @@ describe('console script headers', () => {
     expect(rewrite(`print("${from}")\n`)).toBeUndefined();
     expect(rewrite(`#!${from}`)).toBeUndefined();
     expect(rewriteScriptHeader(Buffer.from([0x7f, 0x45, 0x4c, 0x46, 0x0a]), from, to)).toBeUndefined();
+  });
+});
+
+describe('Windows distlib console launchers', () => {
+  const from = 'C:\\user data\\g00000001-aaaa\\venv\\Scripts\\python.exe';
+  const to = 'C:\\user data\\g00000002-bbbb\\venv\\Scripts\\python.exe';
+  const zip = Buffer.concat([Buffer.from([0x50, 0x4b, 3, 4]), Buffer.alloc(26), Buffer.from('__main__.py')]);
+  const stub = Buffer.from('MZfixture');
+  const launcher = (interpreter: string): Buffer =>
+    Buffer.concat([stub, Buffer.from('#!"' + interpreter + '"\r\n'), zip]);
+
+  it('preserves the PE stub and ZIP while pointing the shebang at the new interpreter', () => {
+    expect(rewriteWindowsLauncher(launcher(from), from, to)).toEqual(launcher(to));
+  });
+
+  it('preserves the namespace prefix when the old shebang uses it', () => {
+    expect(rewriteWindowsLauncher(launcher(path.win32.toNamespacedPath(from)), from, to)).toEqual(
+      launcher(path.win32.toNamespacedPath(to))
+    );
+  });
+
+  it('ignores an executable that has no distlib ZIP or belongs to another interpreter', () => {
+    expect(rewriteWindowsLauncher(Buffer.from('MZ#!' + from), from, to)).toBeUndefined();
+    expect(rewriteWindowsLauncher(launcher(to), from, to)).toBeUndefined();
   });
 });
 

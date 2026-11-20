@@ -176,7 +176,7 @@ export async function chooseForms(
 }
 
 /**
- * Create the links directory of a candidate: one relative link per pack, named so that native
+ * Create the links directory of a candidate: one symlink or Windows junction per pack, named so native
  * loads them in entry-name order, pointing at the package that holds the pack's manifest.
  * Nothing is created when there is no pack.
  */
@@ -190,6 +190,10 @@ export async function writePacks(candidate: Candidate, forms: Map<string, Extens
   for (const [index, [name, pack]] of packs.entries()) {
     const target = path.join(candidate.paths.site, ...pack.directory.split('/'));
     // oxlint-disable-next-line no-await-in-loop -- a handful of links, made in order
-    await symlink(path.relative(directory, target), path.join(directory, `${String(index).padStart(3, '0')}-${name}`));
+    await symlink(
+      process.platform === 'win32' ? target : path.relative(directory, target),
+      path.join(directory, `${String(index).padStart(3, '0')}-${name}`),
+      process.platform === 'win32' ? 'junction' : 'dir'
+    );
   }
 }

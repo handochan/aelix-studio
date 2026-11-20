@@ -19,16 +19,17 @@ def digest(path):
 
 
 class AuditedSessions:
-    def __init__(self, core, native, directory):
+    def __init__(self, core, native, directory, *, ledger='outbound-sessions.json'):
         self.core, self.native, self.directory = core.resolve(), native.resolve(), directory.resolve()
         self.auditor = Path(__file__).parents[1] / 'fixtures/outboundAudit.py'
         self.root = Path(__file__).resolve().parents[3]
         self.enabled = sys.platform == 'linux'
         self.sessions, self.controls = [], []
+        self.ledger = self.directory / ledger
 
     def save(self):
         self.directory.mkdir(parents=True, exist_ok=True)
-        (self.directory / 'outbound-sessions.json').write_text(json.dumps({
+        self.ledger.write_text(json.dumps({
             'schema': 'aelix.scoped-audited-sessions/1', 'auditedSessions': self.sessions,
             'positiveControls': self.controls, 'recipeSha256': digest(Path(__file__))}, indent=2) + '\n')
 
@@ -36,6 +37,9 @@ class AuditedSessions:
         record.update(recaptures=scoped.get('recaptures', 0), captureAttempts=scoped.get('captureAttempts', []))
         if record['recaptures']:
             print('::warning title=Recaptured outbound session::'+record['name']+' required '+str(record['recaptures'])+' recapture; see '+report.name, flush=True)
+
+    def time_budget(self, timeout):
+        return 2 * (timeout + CAPTURE_CLEANUP) + 30 if self.enabled else timeout
 
     def run(self, name, command, *, env, timeout, required=(), expected_external=None,
             roots=None, namespace=False, defer_failure=False, expected_ring_opcode=None, **options):
@@ -47,7 +51,7 @@ class AuditedSessions:
         report = self.directory / ('outbound' + stem + '.json')
         whole_path = self.directory / ('outbound-app' + stem + '.json')
         audited = [sys.executable, '-I', '-B', str(self.auditor), '--capture-timeout', str(timeout)]
-        total_timeout = 2 * (timeout + CAPTURE_CLEANUP) + 30
+        total_timeout = self.time_budget(timeout)
         for root in (roots if roots is not None else (self.core, self.native)):
             audited += ['--scope-executable', str(root)]
         for root in required: audited += ['--require-executable', str(root)]

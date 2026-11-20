@@ -6,7 +6,7 @@
 
 상태: **설치 방식 채택(2026-11-17 사용자 결정, 8.2의 A1)** · 설치 helper 구현을 시작하고 화면에는 아직 내지
 않는다. 같은 날 A2·A3·A4·A10·A11·A12도 정해졌다. 2026-11-19에 A5·A6·A7을 정했다. A8·A9는 미정이다.
-Windows, Linux, 서명된 설치 앱에서는 실행하지 않았고 그 확인이 남아 있다(10절). 이 문서는 병합·출시 승인이
+초기 실험은 macOS 번들 사본에서 수행했다. OS별 설치 앱 확인은 9절의 1a′를 따른다. 이 문서는 병합·출시 승인이
 아니다. 구현·병합·출시는 각 Issue와 저장소 규칙을 따른다. 판단의 정본은
 [decisions.md](../studio-release-train/decisions.md)의 D04와 기록이다.
 
@@ -795,16 +795,21 @@ pack이 있으면 launcher가 넘길 인자 그대로 한 번. 어댑터가 받�
   것이 아니라 차수별 실행을 합친 것이다(7.1). 3번 조건("Studio 업데이트 뒤에도 유지")은 번들 사본 교체로
   확인했고 실제 설치 앱 업데이트로는 확인하지 않았다. 완료 조건의 충족은 helper 구현 뒤에 다시 확인한다.
 
+1a′의 Provider Preview 설치 검증은 설치된 번들의 Python과 ACP launcher를 사용한다. 파일 반입과 loopback
+index 설치, 새 ACP 세션의 확장 명령, 잠금 경합과 lease, console script 경로, 되돌리기·제거, 번들 교체 모의의
+reinstall_needed를 기록한다. macOS는 ad-hoc 서명을 전후 검증하고, 다섯 target 모두 설치 번들의 파일을
+대조한다. Linux 감사에는 이 절차의 하위 프로세스도 포함한다.
+
+Windows 세대의 pack은 junction이고 관리 자식은 Windows Job Object로 묶는다. Windows의 distlib console
+launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치는 격리된 시스템 환경을 쓴다. Windows Git
+설치는 시스템 Git·SSH 경로를 확인하기 전까지 보류한다.
+
 ## 10. 확인하지 않은 것
 
-- **Windows.** venv가 사용자 영역에 `python.exe`(launcher 사본)를 만든다. 사용자 쓰기 영역의 실행 파일을
-  막는 정책(AppLocker 등)에서 설치가 되는지, 긴 경로, `pywin32` 경로 처리, 링크 디렉터리(junction), 파일
-  잠금, console script(`.exe`)의 경로 고치기를 확인해야 한다. 권장한 형태에서는 대화가 사용자 영역의 실행
-  파일을 쓰지 않으므로 영향은 설치 작업에 한정된다.
-- **Linux.** 실행하지 않았다.
-- **서명된 설치 앱.** 컴파일된 모듈(`.so`·`.pyd`)이 든 확장의 로드. `-S`는 이것을 막지 않는다. ABI, DLL 탐색,
-  서명 검증은 따로 확인해야 한다. `entitlements.plist`에 library validation 해제가 있지만 번들 Python에
-  적용되는지는 보지 않았다.
+- **Windows 기업 정책.** AppLocker처럼 사용자 영역 실행을 막는 정책, 최대 경로 정책을 바꾼 환경,
+  시스템 Git·SSH 설치는 OS별 확인에서 별도로 다뤄야 한다.
+- **배포 서명과 컴파일된 확장.** Preview macOS 검증은 ad-hoc 서명으로 실행한다. Developer ID·공증 및
+  별도로 서명하거나 컴파일한 확장의 ABI·DLL 탐색·library validation은 별도 확인 대상이다.
 - **실제 Studio 업데이트.** 번들 디렉터리를 바꿔치기한 모의다.
 - **Python minor가 바뀐 번들.** 감지만 했다.
 - **링크 디렉터리로 로드한 확장의 선언 기능.** manifest가 결합되는 것까지 봤다. 선언한 MCP 서버·테마·hook의

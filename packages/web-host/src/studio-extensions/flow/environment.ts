@@ -115,6 +115,33 @@ export function managementEnvironment(
     const { home, work, indexUrl } = options.online;
     // pip 26 overwrites GIT_SSH_COMMAND when PIP_NO_INPUT is present. Keep the
     // custom SSH command and use closed stdin, disabled keyring and askpass instead.
+    if (platform === 'win32') {
+      // Keep the interpreter's Windows system utilities and use no ambient Git,
+      // proxy, credential store, or per-user installation configuration.
+      for (const name of Object.keys(environment))
+        if (
+          ['PATH', 'TEMP', 'TMP', 'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'HOMEDRIVE', 'HOMEPATH'].includes(
+            name.toUpperCase()
+          )
+        )
+          delete environment[name];
+      const system = Object.entries(base).find(([name]) => name.toUpperCase() === 'SYSTEMROOT')?.[1] ?? 'C:\\Windows';
+      Object.assign(environment, {
+        PATH: path.win32.join(system, 'System32'),
+        HOME: home,
+        USERPROFILE: home,
+        APPDATA: home,
+        LOCALAPPDATA: home,
+        XDG_CONFIG_HOME: home,
+        TMP: work,
+        TEMP: work,
+        PIP_INDEX_URL: indexUrl,
+        PIP_KEYRING_PROVIDER: 'disabled',
+        NETRC: nullDevice(platform),
+        no_proxy: '*',
+      });
+      return environment;
+    }
     delete environment.PIP_NO_INPUT;
     Object.assign(environment, {
       HOME: home,

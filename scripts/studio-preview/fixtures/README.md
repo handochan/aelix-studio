@@ -52,6 +52,14 @@ report has `enforcement: report-only` and never changes the gate result. Both
 reports include counts, PID/parent/comm, root identities and parser source hashes.
 Classification failures also include fixed reason codes and numeric task IDs in
 `classificationIssues`; no raw trace text or executable path is included.
+`cloneRestartResults` counts strace restart notice records. A retry can produce
+another notice, and a notice on its own leaves the result unparsed. The same task
+must next show a matching `clone` with a complete result or a fatal-signal exit
+before a retry starts. Signal exit evidence comes from strace 7.3's
+[`WTERMSIG` wait record](https://github.com/strace/strace/blob/v7.3/src/strace.c#L3427-L3443)
+for a fatal Linux signal. A failed retry must use a canonical errno name or the
+exact [numeric fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L403-L417)
+for an unnamed errno. Any child still needs a recorded fork edge and lifecycle.
 An exact `???( <unfinished ...>` register-decoding stub, optionally followed by
 `<... ??? resumed>) = ?`, then that task's termination record is retained as a
 register hole. The [strace register-read fallback](https://github.com/strace/strace/blob/v7.3/src/syscall.c#L1445-L1466)

@@ -11,6 +11,59 @@ NETWORK = {'connect', 'send', 'sendto', 'sendmsg', 'sendmmsg', 'write', 'writev'
 UDP_META = {'socket', 'unshare'}
 FD_META = {'close','close_range','mmap','mmap2','dup','dup2','dup3','fcntl'}
 FORK = {'clone', 'clone3', 'fork', 'vfork'}
+CLONE_CALL = re.compile(r'clone\((.*?)\)\s+=\s+(.+)')
+CLONE_RESTART_NOTICE = '? ERESTARTNOINTR (To be restarted)'
+CLONE_PID_RESULT = re.compile(r"([1-9][0-9]*)(?:<[^>]*>)?(?: /\* ([1-9][0-9]*) in strace's PID NS \*/)?")
+CLONE_NAMED_ERROR = re.compile(r'-1 (E[A-Z0-9_]+) \([^()]+\)')
+CLONE_NUMERIC_ERROR = re.compile(r'-1 \(errno ([1-9][0-9]{0,3})\)')
+CLONE_TID_POINTER = re.compile(r', parent_tid=0x[0-9a-f]+(?=,|$)')
+CLONE_TID_OUTPUT = re.compile(r", parent_tid=\[[0-9]+(?:<[^>]*>)?(?: /\* [1-9][0-9]* in strace's PID NS \*/)?\](?=,|$)")
+SIGNAL_NOTICE = re.compile(r'--- (?:SIG[A-Z0-9_]+ \{.*\}|stopped by SIG[A-Z0-9_]+) ---')
+SIGNALED_EXIT = re.compile(r'\+\+\+ killed by (SIG[A-Z0-9_]+)( \(core dumped\))? \+\+\+')
+# Linux fatal defaults and canonical names from strace 7.3's generic signalent.h
+# and signame(), used by the native x86_64 and aarch64 tracers.
+CORE_DUMP_SIGNALS = {
+    'SIGQUIT', 'SIGILL', 'SIGTRAP', 'SIGABRT', 'SIGBUS', 'SIGFPE',
+    'SIGSEGV', 'SIGXCPU', 'SIGXFSZ', 'SIGSYS',
+}
+FATAL_SIGNALS = CORE_DUMP_SIGNALS | {
+    'SIGHUP', 'SIGINT', 'SIGKILL', 'SIGUSR1', 'SIGUSR2', 'SIGPIPE', 'SIGALRM',
+    'SIGTERM', 'SIGSTKFLT', 'SIGVTALRM', 'SIGPROF', 'SIGIO', 'SIGPWR', 'SIGRTMIN',
+} | {f'SIGRT_{offset}' for offset in range(1, 33)}
+# Canonical strace 7.3 errnoent.h entries, with '-' marking unassigned numbers.
+# The Python host's errno table can differ, including on macOS test runners.
+STRACE_ERRNOS = {
+    number: name
+    for start, names in (
+        (1, """
+            EPERM ENOENT ESRCH EINTR EIO ENXIO E2BIG ENOEXEC EBADF ECHILD
+            EAGAIN ENOMEM EACCES EFAULT ENOTBLK EBUSY EEXIST EXDEV ENODEV ENOTDIR
+            EISDIR EINVAL ENFILE EMFILE ENOTTY ETXTBSY EFBIG ENOSPC ESPIPE EROFS
+            EMLINK EPIPE EDOM ERANGE EDEADLK ENAMETOOLONG ENOLCK ENOSYS ENOTEMPTY ELOOP
+            - ENOMSG EIDRM ECHRNG EL2NSYNC EL3HLT EL3RST ELNRNG EUNATCH ENOCSI
+            EL2HLT EBADE EBADR EXFULL ENOANO EBADRQC EBADSLT - EBFONT ENOSTR
+            ENODATA ETIME ENOSR ENONET ENOPKG EREMOTE ENOLINK EADV ESRMNT ECOMM
+            EPROTO EMULTIHOP EDOTDOT EBADMSG EOVERFLOW ENOTUNIQ EBADFD EREMCHG ELIBACC ELIBBAD
+            ELIBSCN ELIBMAX ELIBEXEC EILSEQ ERESTART ESTRPIPE EUSERS ENOTSOCK EDESTADDRREQ EMSGSIZE
+            EPROTOTYPE ENOPROTOOPT EPROTONOSUPPORT ESOCKTNOSUPPORT EOPNOTSUPP EPFNOSUPPORT
+            EAFNOSUPPORT EADDRINUSE EADDRNOTAVAIL ENETDOWN
+            ENETUNREACH ENETRESET ECONNABORTED ECONNRESET ENOBUFS EISCONN ENOTCONN ESHUTDOWN ETOOMANYREFS ETIMEDOUT
+            ECONNREFUSED EHOSTDOWN EHOSTUNREACH EALREADY EINPROGRESS ESTALE EUCLEAN ENOTNAM ENAVAIL EISNAM
+            EREMOTEIO EDQUOT ENOMEDIUM EMEDIUMTYPE ECANCELED ENOKEY EKEYEXPIRED EKEYREVOKED EKEYREJECTED EOWNERDEAD
+            ENOTRECOVERABLE ERFKILL EHWPOISON
+        """),
+        (512, """
+            ERESTARTSYS ERESTARTNOINTR ERESTARTNOHAND ENOIOCTLCMD ERESTART_RESTARTBLOCK
+            EPROBE_DEFER EOPENSTALE - - EBADHANDLE ENOTSYNC EBADCOOKIE ENOTSUPP
+            ETOOSMALL ESERVERFAULT EBADTYPE EJUKEBOX EIOCBQUEUED ERECALLCONFLICT
+        """),
+    )
+    for number, name in enumerate(names.split(), start)
+    if name != '-'
+}
+# The tracer's regular syscall formatter prints these kernel restart codes
+# through print_erestart(), never as a completed -1 error.
+CLONE_FINAL_ERRNO_NAMES = {name for number, name in STRACE_ERRNOS.items() if number not in (512, 513, 514, 516)}
 EXEC = {'execve', 'execveat'}
 IO_URING = {'io_uring_setup', 'io_uring_enter', 'io_uring_register'}
 SETUP_FLAGS = {name:1<<index for index,name in enumerate([
@@ -61,6 +114,46 @@ def canonical(value):
     return str(Path(value).resolve())
 
 
+def clone_arguments(call):
+    """Compare the printed clone arguments across attempts."""
+    # Joining an unfinished entry can leave a space before the next comma.
+    return re.sub(r'\s+,', ',', call[1].strip())
+
+
+def matches_clone_retry(expected, call):
+    arguments = clone_arguments(call)
+    if arguments == expected:
+        return True
+    if not CLONE_PID_RESULT.fullmatch(call[2]):
+        return False
+    # strace can replace the parent_tid pointer with its written value on success.
+    original, pointers = CLONE_TID_POINTER.subn(', parent_tid=', expected)
+    retried, outputs = CLONE_TID_OUTPUT.subn(', parent_tid=', arguments)
+    return pointers == outputs == 1 and original == retried
+
+
+def is_clone_error_result(result):
+    """Recognize a final error in the pinned strace syscall formatter."""
+    named = CLONE_NAMED_ERROR.fullmatch(result)
+    if named:
+        return named[1] in CLONE_FINAL_ERRNO_NAMES
+    numeric = CLONE_NUMERIC_ERROR.fullmatch(result)
+    if not numeric:
+        return False
+    # print_err_ret uses the decimal fallback only for unnamed kernel errors.
+    code = int(numeric[1])
+    return code <= 4095 and code not in STRACE_ERRNOS
+
+
+def is_fatal_signal_exit(line):
+    """Match a WTERMSIG record for a fatal signal on the supported Linux ABIs."""
+    terminal = SIGNALED_EXIT.fullmatch(line)
+    if not terminal:
+        return False
+    permitted = CORE_DUMP_SIGNALS if terminal[2] else FATAL_SIGNALS
+    return terminal[1] in permitted
+
+
 def analyze_processes(paths, scope_executables=(), require_executables=(), require_lifecycle=False, kernel_capture=None,
                       *, task_evidence=None):
     """Scope by successful exec roots plus all forks/threads, never by address/name."""
@@ -69,7 +162,9 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
     states, parents, roots, matches = {}, {}, set(), set()
     root_executables = {}
     fork_at, executions = {}, {}
-    clone_threads, io_calls = {}, []
+    clone_threads, clone_restarts, io_calls = {}, {}, []
+    pending_clone_restarts = {}
+    signaled_clone_restarts = set()
     sequence = 0
     classification_issues = []
     observed_order = []
@@ -131,6 +226,16 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         # after '('; it is lexical whitespace, not an unknown destination.
         line = re.sub(r'^(\w+\()\s+', r'\1', line)
         udp_records.append((pid, line, started, sequence))
+        clone = CLONE_CALL.fullmatch(line) if line.startswith('clone(') else None
+        awaiting_clone = pid in pending_clone_restarts
+        if awaiting_clone and not SIGNAL_NOTICE.fullmatch(line):
+            expected = pending_clone_restarts.pop(pid)
+            # Only the next call on this task can complete the interrupted
+            # clone. A fatal signal can preempt it before a retry even starts.
+            if pid not in pending and is_fatal_signal_exit(line):
+                signaled_clone_restarts.add(pid)
+            elif pid in pending or clone is None or not matches_clone_retry(expected, clone):
+                classification_issue('unknown_fork_result', pid, 'clone')
         if line.startswith('+++'):
             if re.match(r'^\+\+\+ (?:exited with |killed by |superseded by execve in pid )', line):
                 item['finished'] = True
@@ -209,13 +314,31 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             io_calls.append(entry)
             return
         if call in FORK:
-            result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
-            if not result:
-                classification_issue('unknown_fork_result', pid, call); return
-            child = int(result[1])
-            translated = re.search(r"/\* (\d+) in strace's PID NS \*/", result[2])
-            if child > 0 and translated:
-                child = int(translated[1])
+            if call == 'clone':
+                # CLONE_CALL splits at the first return delimiter. Validate
+                # the entire result so a second delimiter can't hide a gap.
+                returned = clone[2] if clone else ''
+                if returned == CLONE_RESTART_NOTICE:
+                    clone_restarts[pid] = clone_restarts.get(pid, 0) + 1
+                    if item['finished'] or pid in pending:
+                        classification_issue('unknown_fork_result', pid, call)
+                    else:
+                        pending_clone_restarts[pid] = clone_arguments(clone)
+                    return
+                if is_clone_error_result(returned) or (returned == '0' and not awaiting_clone):
+                    return
+                result = CLONE_PID_RESULT.fullmatch(returned)
+                if not result:
+                    classification_issue('unknown_fork_result', pid, call); return
+                child = int(result[2] or result[1])
+            else:
+                result = re.search(r'\)\s+=\s+(-?\d+)(?:<[^>]*>)?(.*)$', line)
+                if not result:
+                    classification_issue('unknown_fork_result', pid, call); return
+                child = int(result[1])
+                translated = re.search(r"/\* (\d+) in strace's PID NS \*/", result[2])
+                if child > 0 and translated:
+                    child = int(translated[1])
             if child > 0:
                 if child == pid or child in parents:
                     classification_issue('conflicting_fork_edge', child, call)
@@ -328,6 +451,12 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
             unreadable_resume = line == REGISTER_RESUME
             signal_record=line.startswith('--- SIG')
             final_record=is_register_terminal(line, kernel_capture is not None)
+            if pid in signaled_clone_restarts:
+                signaled_clone_restarts.remove(pid)
+                classification_issue('unknown_fork_result', pid, 'clone')
+            if (line == REGISTER_ENTRY or unreadable_resume) and pid in pending_clone_restarts:
+                del pending_clone_restarts[pid]
+                classification_issue('unknown_fork_result', pid, 'clone')
             if pid in terminal_stops:
                 shape=('signal' if signal_record else 'resume' if unreadable_resume else
                        'exit' if final_record else 'register-entry' if line==REGISTER_ENTRY else 'other')
@@ -373,6 +502,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
         if kernel_capture is not None and call in NETWORK | {'close'}:
             record(pid,_line,_started)
         else: unknown(pid, call,'pending_at_end')
+    for pid in pending_clone_restarts:
+        classification_issue('unknown_fork_result', pid, 'clone')
     for pid, at in terminal_stops.items():
         if pid in invalid_terminal_stops or terminal_at.get(pid, 0) <= at:
             classification_issue('unknown_unfinished_syscall', pid)
@@ -651,6 +782,8 @@ def analyze_processes(paths, scope_executables=(), require_executables=(), requi
                               'unparsedRecordKinds':dict(sorted(item['unparsed_kinds'].items()))})
         return {'schema': 'aelix-studio-host.outbound-audit/1', 'scope': scope,
                 'traceFiles': len(paths), 'processCount': len(pids), 'rootPids': sorted(roots),
+                'cloneRestartResults': sum(clone_restarts.get(pid, 0) for pid in pids),
+                'cloneRestartResultsUnit': 'strace-restart-notices',
                 'rootExecutables': [{'pid': pid, 'executable': root_executables[pid]} for pid in sorted(roots)],
                 'destinationAttempts': len(events), 'externalAttempts': len(external),
                 'udpConnectOnly': sum(event['udpAssociationOnly'] for event in events),

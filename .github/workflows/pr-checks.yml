@@ -220,6 +220,7 @@ jobs:
             .local/provider-installer/acceptance.json
             .local/provider-installer/aioncore-identity.json
             .local/provider-installer/host-preflight.json
+            .local/provider-installer/extensions-qualification.json
             .local/provider-installer/inventory-diff.json
             .local/provider-installer/installer-copy-failure.json
             .local/provider-installer/installer-progress.json
