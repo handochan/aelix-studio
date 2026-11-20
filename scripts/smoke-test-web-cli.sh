@@ -13,6 +13,7 @@ echo "Package: $PACKAGE"
 echo ""
 echo "1. Extracting tarball..."
 TEMP_DIR=$(mktemp -d)
+TEMP_DIR=$(realpath "$TEMP_DIR")
 SERVER_PID=""
 cleanup() {
   if [ -n "$SERVER_PID" ]; then
@@ -95,28 +96,56 @@ if ! "$BACKEND_BINARY" --help > /dev/null 2>&1; then
 fi
 echo "✓ Backend binary loads on this platform"
 
-# Exercise the extracted CLI and its bundled host with a fresh data directory.
-DATA_DIR="$TEMP_DIR/data"
+# Run npm through the copied Node bundle so a build-machine symlink cannot pass.
+BUNDLED_NODE=$(find "$BACKEND_DIR/managed-resources" -type f -path '*/bin/node' -print)
+BUNDLED_BIN=$(dirname "$(realpath "$BUNDLED_NODE")")
+PATH="$BUNDLED_BIN:$PATH" "$BUNDLED_BIN/npm" --version
+
+# Give the installed CLI a clean profile, including when this script is run on a tarball directly.
+export HOME="$TEMP_DIR/home"
+mkdir -p "$HOME"
+unset AIONUI_DATA_DIR AIONUI_LOG_DIR AIONUI_PORT PORT AIONUI_ALLOW_REMOTE AIONUI_REMOTE AIONUI_BACKEND_BIN AELIX_STUDIO_ORIGIN
+DEFAULT_DATA_DIR="$(realpath "$HOME")/.aelix-studio-web"
+DATA_DIR="$(realpath "$TEMP_DIR")/data"
 IGNORED_DATA_DIR="$TEMP_DIR/ignored-data-dir"
 webui_curl() {
-  curl --noproxy '*' "$@"
+  curl -q --noproxy '*' --max-time 5 "$@"
 }
 start_webui() {
-  AIONUI_DATA_DIR="$IGNORED_DATA_DIR" "$CLI" start --no-open --port 0 --data-dir "$DATA_DIR" >"$TEMP_DIR/webui.log" 2>&1 &
+  AIONUI_OPEN_BROWSER=0 "$CLI" start "$@" >"$TEMP_DIR/webui.log" 2>&1 &
   SERVER_PID=$!
   for _ in $(seq 1 45); do
     BASE_URL=$(sed -n 's/^  Local  : //p' "$TEMP_DIR/webui.log" | head -1)
-    if [ -n "$BASE_URL" ] && webui_curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
+    if grep -q 'Press Ctrl+C to stop' "$TEMP_DIR/webui.log" && [ -n "$BASE_URL" ] &&
+        webui_curl -fsS "$BASE_URL/" >"$TEMP_DIR/index.html"; then
       grep -q '<html' "$TEMP_DIR/index.html"
-      test -d "$DATA_DIR/logs"
-      test ! -e "$IGNORED_DATA_DIR"
       return
     fi
     if ! kill -0 "$SERVER_PID" 2>/dev/null; then break; fi
     sleep 1
   done
-  echo "WebUI did not start" >&2
+  echo 'WebUI did not start' >&2
   exit 1
+}
+assert_default_listeners() {
+  local expected="$1" listeners
+  if [[ "$(uname -s)" == Linux ]]; then
+    local tables=(/proc/net/tcp)
+    if [[ -r /proc/net/tcp6 ]]; then tables+=(/proc/net/tcp6); fi
+    listeners=$(awk '$4 == "0A" && $2 ~ /:657E$/ {
+      if ($2 == "0100007F:657E") print "127.0.0.1:25982"
+      else if ($2 == "00000000000000000000000001000000:657E") print "[::1]:25982"
+      else print $2
+    }' "${tables[@]}")
+  else
+    listeners=$(lsof -nP -a -p "$SERVER_PID" -iTCP:25982 -sTCP:LISTEN -Fn | sed -n 's/^n//p')
+  fi
+  if ! grep -Fxq '127.0.0.1:25982' <<< "$listeners" ||
+      grep -Evx '127\.0\.0\.1:25982|\[::1\]:25982' <<< "$listeners" ||
+      ! grep -Fxq "${expected#http://}" <<< "$listeners"; then
+    printf 'Unexpected listeners on port 25982:\n%s\n' "$listeners" >&2
+    exit 1
+  fi
 }
 stop_webui() {
   kill "$SERVER_PID"
@@ -131,7 +160,33 @@ login() {
   grep -q 'aelix-studio-session' "$TEMP_DIR/cookies"
 }
 
+EXPECTED_DEFAULT_URL=$(node -e '
+  const server = require("node:net").createServer();
+  server.on("error", (error) => {
+    if (!["EADDRNOTAVAIL", "EAFNOSUPPORT", "EPROTONOSUPPORT", "EACCES", "EPERM"].includes(error.code)) throw error;
+    console.log("http://127.0.0.1:25982");
+  });
+  server.listen({ host: "::1", port: 0, ipv6Only: true }, () => {
+    console.log("http://[::1]:25982");
+    server.close();
+  });
+')
 start_webui
+test "$BASE_URL" = "$EXPECTED_DEFAULT_URL"
+assert_default_listeners "$EXPECTED_DEFAULT_URL"
+grep -Fxq "[aelix-studio-web] data dir   : $DEFAULT_DATA_DIR" "$TEMP_DIR/webui.log"
+grep -Fxq "[aelix-studio-web] log dir    : $DEFAULT_DATA_DIR/logs" "$TEMP_DIR/webui.log"
+test -d "$DEFAULT_DATA_DIR/logs"
+test "$(webui_curl -sS -o /dev/null -w '%{http_code}' "$BASE_URL/api/auth/user")" = 401
+echo "✓ Default $BASE_URL, loopback sockets, data and log paths, anonymous API rejection"
+stop_webui
+
+start_with_overrides() {
+  AIONUI_DATA_DIR="$IGNORED_DATA_DIR" start_webui --port 0 --data-dir "$DATA_DIR"
+  test -d "$DATA_DIR/logs"
+  test ! -e "$IGNORED_DATA_DIR"
+}
+start_with_overrides
 PASSWORD=""
 for _ in $(seq 1 20); do
   PASSWORD=$(sed -n 's/.*Generated initial admin password: //p' "$TEMP_DIR/webui.log" | head -1)
@@ -156,7 +211,7 @@ stop_webui
 NEW_PASSWORD='Synthetic-offline-reset-Pass123'
 printf '%s\n' "$NEW_PASSWORD" |
   AIONUI_DATA_DIR="$DATA_DIR" "$CLI" resetpass --password-stdin >"$TEMP_DIR/reset.log" 2>&1
-start_webui
+start_with_overrides
 HTTP_CODE=$(webui_curl -sS -b "$TEMP_DIR/cookies" -o /dev/null -w '%{http_code}' "$BASE_URL/api/auth/user")
 test "$HTTP_CODE" = "401"
 login "$NEW_PASSWORD"

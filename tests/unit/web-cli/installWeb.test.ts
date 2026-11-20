@@ -1,6 +1,9 @@
-import { spawnSync, execFileSync } from 'node:child_process';
+import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import fs from 'node:fs';
+import http from 'node:http';
+import https from 'node:https';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -16,7 +19,11 @@ let studioLink: string;
 let upstreamDir: string;
 let upstreamLink: string;
 
-function createAsset(name = cli, resources: 'files' | 'directories' | 'command-directory' | 'none' = 'files'): string {
+function createAsset(
+  name = cli,
+  resources: 'files' | 'directories' | 'command-directory' | 'none' = 'files',
+  prepare?: (payload: string) => void
+): string {
   const staging = fs.mkdtempSync(path.join(root, 'stage-'));
   const payload = path.join(staging, name);
   fs.mkdirSync(payload);
@@ -36,6 +43,7 @@ function createAsset(name = cli, resources: 'files' | 'directories' | 'command-d
     if (resources === 'command-directory') fs.mkdirSync(path.join(payload, 'bin', cli), { recursive: true });
     if (os.platform() === 'linux') fs.writeFileSync(path.join(payload, 'aelix-studio-web.service'), '[Service]\n');
   }
+  prepare?.(payload);
   const arch = os.arch() === 'x64' ? 'x86_64' : 'arm64';
   const tarball = path.join(mirror, `v${version}`, `${cli}-${version}-${os.platform()}-${arch}.tar.gz`);
   fs.mkdirSync(path.dirname(tarball), { recursive: true });
@@ -44,11 +52,32 @@ function createAsset(name = cli, resources: 'files' | 'directories' | 'command-d
   return tarball;
 }
 
-function install(args: string[] = [], binDir?: string) {
-  return spawnSync('bash', [installer, '--mirror', `file://${mirror}`, '--version', version, '--no-path', ...args], {
-    env: { HOME: home, PATH: process.env.PATH, BIN_DIR: binDir },
+function installerArgs(args: string[], updatePath?: boolean): string[] {
+  return [
+    installer,
+    '--mirror',
+    `file://${mirror}`,
+    '--version',
+    version,
+    ...(updatePath ? [] : ['--no-path']),
+    ...args,
+  ];
+}
+
+function install(args: string[] = [], binDir?: string, options?: { cwd?: string; updatePath?: boolean }) {
+  return spawnSync('bash', installerArgs(args, options?.updatePath), {
+    cwd: options?.cwd,
+    env: { HOME: home, PATH: process.env.PATH, BIN_DIR: binDir, SHELL: '/bin/bash' },
     encoding: 'utf8',
   });
+}
+
+async function listenLocal(server: http.Server | https.Server): Promise<number> {
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected an IP listener');
+  return address.port;
 }
 
 describe.skipIf(process.platform === 'win32')('standalone Studio WebUI installer', () => {
@@ -81,6 +110,153 @@ describe.skipIf(process.platform === 'win32')('standalone Studio WebUI installer
     const result = install(['--install-dir', upstreamDir]);
     expect(result.status).toBe(1);
     expect(fs.readFileSync(upstreamLink, 'utf8')).toBe('upstream');
+  });
+
+  it('preserves the AionUi command when a marked Studio layout shares the AionUi installation directory', () => {
+    createAsset();
+    const first = install();
+    expect(first.status, first.stderr).toBe(0);
+    fs.cpSync(path.dirname(fs.realpathSync(studioLink)), upstreamDir, { recursive: true });
+    fs.writeFileSync(path.join(upstreamDir, 'aionui-web'), '#!/bin/sh\nprintf upstream\n');
+    const result = install(['--install-dir', upstreamDir, '--no-symlink']);
+    expect(result.stderr).toContain('contains AionUi WebUI');
+    expect(execFileSync(upstreamLink, { encoding: 'utf8' })).toBe('upstream');
+  });
+
+  it('upgrades an unmarked Studio installation from its own directory using --install-dir .', () => {
+    createAsset();
+    const first = install();
+    expect(first.status, first.stderr).toBe(0);
+    const installDir = path.dirname(fs.realpathSync(studioLink));
+    fs.unlinkSync(path.join(installDir, '.aelix-studio-web-install'));
+    fs.unlinkSync(studioLink);
+    fs.symlinkSync(`${installDir}/./${cli}`, studioLink);
+    const result = install(['--install-dir', '.'], undefined, { cwd: installDir });
+    expect(result.status, result.stderr).toBe(0);
+    expect(fs.realpathSync(studioLink)).toBe(path.join(installDir, cli));
+    expect(fs.readdirSync(path.dirname(installDir)).some((entry) => entry.startsWith(`${cli}.backup.`))).toBe(true);
+  });
+
+  it('loads a literal dollar sign from both the generated Bash profile and the PATH instruction', () => {
+    createAsset();
+    const profile = path.join(home, '.bashrc');
+    fs.writeFileSync(profile, '');
+    const binDir = path.join(home, 'bin $STUDIO_PATH_VARIABLE');
+    const result = install([], binDir, { updatePath: true });
+    expect(result.status, result.stderr).toBe(0);
+    const summary = result.stdout.match(/^    (export PATH=.*)$/m)?.[1];
+    expect(summary).toBeDefined();
+    for (const pathCommand of ['. "$HOME/.bashrc"', summary]) {
+      const listed = execFileSync('bash', ['-c', `${pathCommand}\nprintf '%s' "\${PATH%%:*}"`], {
+        env: { HOME: home, PATH: process.env.PATH, STUDIO_PATH_VARIABLE: 'expanded' },
+        encoding: 'utf8',
+      });
+      expect(listed).toBe(fs.realpathSync(binDir));
+    }
+  });
+
+  it.each(['absolute', 'relative'])('rejects a tarball with an %s link to a file outside the installation', (kind) => {
+    const outside = path.join(home, '.local/share/outside');
+    fs.writeFileSync(outside, 'outside');
+    createAsset(cli, 'files', (payload) => {
+      fs.symlinkSync(kind === 'absolute' ? outside : '../../../outside', path.join(payload, 'static/escape'));
+    });
+    const result = install();
+    expect(result.stderr).toMatch(/absolute link|link escapes its installation tree/);
+    expect(fs.existsSync(studioLink)).toBe(false);
+  });
+
+  it('preserves a relative link that resolves inside the installed tree', () => {
+    createAsset(cli, 'files', (payload) => {
+      fs.symlinkSync('../package.json', path.join(payload, 'static/version.json'));
+    });
+    const result = install();
+    expect(result.status, result.stderr).toBe(0);
+    const installed = path.dirname(fs.realpathSync(studioLink));
+    expect(fs.readlinkSync(path.join(installed, 'static/version.json'))).toBe('../package.json');
+  });
+
+  it('rejects a plain HTTP mirror before attempting a download', () => {
+    const result = install(['--mirror', 'http://127.0.0.1:1']);
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('Mirrors must use HTTPS or a local file:// path');
+  });
+
+  it('disables automatic redirects when GNU Wget is the online downloader', () => {
+    const toolDir = path.join(root, 'tools');
+    fs.mkdirSync(toolDir);
+    for (const command of ['bash', 'uname', 'realpath', 'dirname', 'basename', 'mktemp', 'rm']) {
+      const executable = execFileSync('bash', ['-c', 'command -v "$1"', 'bash', command], { encoding: 'utf8' }).trim();
+      fs.symlinkSync(executable, path.join(toolDir, command));
+    }
+    fs.writeFileSync(path.join(toolDir, 'wget'), '#!/bin/sh\nprintf "%s\\n" "$@" > "$HOME/wget-args"\nexit 8\n', {
+      mode: 0o755,
+    });
+    const result = spawnSync('bash', installerArgs(['--mirror', 'https://releases.example.invalid']), {
+      env: { HOME: home, PATH: toolDir },
+      encoding: 'utf8',
+    });
+    expect(result.stderr).toContain('Use curl for mirrors that redirect');
+    expect(fs.readFileSync(path.join(home, 'wget-args'), 'utf8').split('\n')).toContain('--max-redirect=0');
+  });
+
+  it('follows HTTPS redirects and refuses HTTP redirects for both release assets', async () => {
+    const tarball = createAsset();
+    const key = path.join(root, 'local.key');
+    const cert = path.join(root, 'local.crt');
+    execFileSync(
+      'openssl',
+      [
+        'req',
+        '-x509',
+        '-newkey',
+        'rsa:2048',
+        '-nodes',
+        '-days',
+        '1',
+        '-subj',
+        '/CN=127.0.0.1',
+        '-addext',
+        'subjectAltName=IP:127.0.0.1',
+        '-keyout',
+        key,
+        '-out',
+        cert,
+      ],
+      { stdio: 'ignore' }
+    );
+    const requests: string[] = [];
+    const plain = http.createServer((request, response) => {
+      requests.push(request.url ?? '');
+      response.end('plain HTTP');
+    });
+    const plainPort = await listenLocal(plain);
+    const tls = https.createServer({ key: fs.readFileSync(key), cert: fs.readFileSync(cert) }, (request, response) => {
+      const url = request.url ?? '';
+      const checksum = url.endsWith('.sha256');
+      if ((url.startsWith('/redirect-archive/') && !checksum) || (url.startsWith('/redirect-checksum/') && checksum)) {
+        response.writeHead(302, { Location: `http://127.0.0.1:${plainPort}/plain` }).end();
+      } else if (url.startsWith('/secure/')) {
+        response.writeHead(302, { Location: checksum ? '/files/checksum' : '/files/archive' }).end();
+      } else {
+        response.end(fs.readFileSync(checksum || url === '/files/checksum' ? `${tarball}.sha256` : tarball));
+      }
+    });
+    try {
+      const tlsPort = await listenLocal(tls);
+      for (const route of ['redirect-archive', 'redirect-checksum', 'secure']) {
+        const child = spawn('bash', installerArgs(['--mirror', `https://127.0.0.1:${tlsPort}/${route}`]), {
+          env: { HOME: home, PATH: process.env.PATH, CURL_CA_BUNDLE: cert },
+          stdio: 'ignore',
+        });
+        const [status] = await once(child, 'close');
+        expect(status).toBe(route === 'secure' ? 0 : 1);
+      }
+      expect(requests).toEqual([]);
+    } finally {
+      tls.close();
+      plain.close();
+    }
   });
 
   it('preserves a foreign link at the requested command path', () => {

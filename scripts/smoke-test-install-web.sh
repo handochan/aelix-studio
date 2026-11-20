@@ -8,11 +8,11 @@ trap 'rm -rf -- "$SMOKE_DIR"' EXIT
 INSTALLER="$SMOKE_DIR/install-aelix-studio-web.sh"
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 
-if [[ "$MIRROR" == file://* ]]; then
-  cp "${MIRROR#file://}/install-aelix-studio-web.sh" "$INSTALLER"
-else
-  curl -fsSL "$MIRROR/install-aelix-studio-web.sh" -o "$INSTALLER"
-fi
+case "$MIRROR" in
+  file://*) cp "${MIRROR#file://}/install-aelix-studio-web.sh" "$INSTALLER" ;;
+  https://*) curl -q --proto '=https' --proto-redir '=https' -fsSL -o "$INSTALLER" -- "$MIRROR/install-aelix-studio-web.sh" ;;
+  *) echo 'Mirrors must use HTTPS or a local file:// path' >&2; exit 1 ;;
+esac
 
 export HOME="$SMOKE_DIR/home"
 mkdir -p "$HOME"
@@ -22,7 +22,7 @@ link="$HOME/.local/bin/aelix-studio-web"
 env -u VERSION -u INSTALL_DIR -u BIN_DIR -u CREATE_SYMLINK -u UPDATE_PATH \
   bash "$INSTALLER" --mirror "$MIRROR" --no-path
 
-[[ -L "$link" && "$(readlink "$link")" == "$install_dir/aelix-studio-web" ]]
+[[ -L "$link" && "$(readlink "$link")" == "$(realpath "$install_dir/aelix-studio-web")" ]]
 [[ "$("$link" version)" == "$VERSION" ]]
 if [[ "$(uname -s)" == Linux ]]; then
   test -f "$install_dir/aelix-studio-web.service"

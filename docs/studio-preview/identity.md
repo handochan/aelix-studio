@@ -60,7 +60,8 @@ Use the complete version from the tag, including any prerelease suffix. The
 installer reads the matching `aelix-studio-web-<VERSION>-<OS>-<ARCH>.tar.gz`
 and `.tar.gz.sha256` from the same release. An offline mirror may use
 `--mirror file:///path/to/releases`, with the tarball and checksum in a
-`v<VERSION>/` subdirectory.
+`v<VERSION>/` subdirectory. Use HTTPS for online mirrors. GitHub and other
+mirrors that redirect require `curl`. GNU Wget can use direct HTTPS mirrors.
 
 ```bash
 bash install-aelix-studio-web.sh --no-path
@@ -84,6 +85,10 @@ cp ~/.local/share/aelix-studio-web/aelix-studio-web.service ~/.config/systemd/us
 systemctl --user daemon-reload
 systemctl --user enable --now aelix-studio-web.service
 ```
+
+The user manager normally follows the login session. To keep the service
+running after logout, enable lingering for the account with
+`loginctl enable-linger "$USER"` if your system permits it.
 
 If you installed to a custom directory, adjust the installed unit's
 `ExecStart`. Before upgrading, stop the running WebUI or its systemd unit.

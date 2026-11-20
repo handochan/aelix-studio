@@ -2,8 +2,9 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 const { prepareAioncore } = require('../packages/shared-scripts/src/prepare-aioncore.js');
+const { verifyDefaultHostBundle } = require('../packages/shared-scripts/src/default-host.js');
 const { resolveAioncoreVersion } = require('./resolveAioncoreVersion.js');
 
 const projectRoot = path.resolve(__dirname, '..');
@@ -52,7 +53,7 @@ const bunTarget = `bun-${bunTargetPlatform}-${bunTargetArch}`;
 const executableName = platform === 'win32' ? 'aelix-studio-web.exe' : 'aelix-studio-web';
 const executablePath = path.join(tarballContentDir, executableName);
 const webCliEntry = path.join(projectRoot, 'packages/web-cli/src/index.ts');
-execSync(`bun build --compile --target=${bunTarget} --outfile="${executablePath}" "${webCliEntry}"`, {
+execFileSync('bun', ['build', '--compile', `--target=${bunTarget}`, '--outfile', executablePath, webCliEntry], {
   cwd: projectRoot,
   stdio: 'inherit',
 });
@@ -73,7 +74,7 @@ console.log('6. Copying static files...');
 const rendererOutDir = path.join(projectRoot, 'out/renderer');
 const staticDest = path.join(tarballContentDir, 'static');
 if (fs.existsSync(rendererOutDir)) {
-  fs.cpSync(rendererOutDir, staticDest, { recursive: true });
+  fs.cpSync(rendererOutDir, staticDest, { recursive: true, verbatimSymlinks: true });
 } else {
   throw new Error(`Desktop renderer output not found at ${rendererOutDir}. Run bunx electron-vite build first.`);
 }
@@ -85,11 +86,12 @@ if (!fs.existsSync(backendSrc)) {
   throw new Error(`Backend bundle dir missing at ${backendSrc}. Ensure prepareAioncore succeeded.`);
 }
 fs.mkdirSync(path.dirname(backendDest), { recursive: true });
-fs.cpSync(backendSrc, backendDest, { recursive: true });
+fs.cpSync(backendSrc, backendDest, { recursive: true, verbatimSymlinks: true });
+verifyDefaultHostBundle(backendDest, `${platform}-${arch}`);
 
 // 8. Create tarball
 fs.mkdirSync(distDir, { recursive: true });
-execSync(`tar -czf ${path.basename(tarballPath)} -C ${stagingDir} aelix-studio-web`, {
+execFileSync('tar', ['-czf', path.basename(tarballPath), '-C', stagingDir, 'aelix-studio-web'], {
   cwd: path.dirname(tarballPath),
   stdio: 'inherit',
 });

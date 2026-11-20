@@ -4,7 +4,7 @@
 # ============================================================================
 # Usage:
 #   # Set RELEASE_TAG to the published Studio tag, including its v prefix.
-#   curl -fsSL "https://github.com/handochan/aelix-studio/releases/download/${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
+#   curl -q --proto '=https' --proto-redir '=https' -fsSL "https://github.com/handochan/aelix-studio/releases/download/${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
 #   # Or specify version:
 #   VERSION=1.0.0 bash install-aelix-studio-web.sh
 #   # Or install to custom directory:
@@ -24,6 +24,7 @@ UPDATE_PATH="${UPDATE_PATH:-1}"
 TEMP_DIR=""
 EXTRACT_TEMP=""
 INSTALL_LOCK=""
+INSTALL_MARKER=".aelix-studio-web-install"
 
 # ─── Color Definitions ──────────────────────────────────────────────────────
 RED='\033[0;31m'
@@ -44,7 +45,7 @@ die()     { error "$*"; exit 1; }
 banner() {
     echo -e "${CYAN}${BOLD}"
     echo "  ╔══════════════════════════════════════════════╗"
-    echo "  ║     Aelix Studio WebUI Installer                  ║"
+    echo "  ║          Aelix Studio WebUI Installer           ║"
     echo "  ╚══════════════════════════════════════════════╝"
     echo -e "${NC}"
 }
@@ -92,13 +93,15 @@ Usage: install-aelix-studio-web.sh [OPTIONS]
 
 Options:
   --version <version>       Override the embedded version (use latest for stable releases)
-  --mirror <url>            Specify mirror URL (default: GitHub releases)
+  --mirror <url>            Use an HTTPS or local file:// mirror (default: GitHub releases)
   --install-dir <path>      Specify installation directory (default: ~/.local/share/aelix-studio-web)
   --no-symlink              Do not create symlink in ~/.local/bin
   --no-path                 Do not add PATH to shell profile
   --help                    Show this help message
 
 Stop the running WebUI or its systemd service before upgrading.
+curl is required for mirrors that redirect, including GitHub release assets.
+Without curl, GNU Wget can fetch an HTTPS mirror that serves files directly.
 
 Environment Variables:
   VERSION                   Version to install (same as --version)
@@ -107,7 +110,7 @@ Environment Variables:
 
 Examples:
   # Set RELEASE_TAG to the published Studio tag (include its v prefix).
-  curl -fsSL "https://github.com/handochan/aelix-studio/releases/download/\${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
+  curl -q --proto '=https' --proto-redir '=https' -fsSL "https://github.com/handochan/aelix-studio/releases/download/\${RELEASE_TAG}/install-aelix-studio-web.sh" | bash
 
   # Install specific version
   VERSION=1.0.0 bash install-aelix-studio-web.sh
@@ -165,6 +168,20 @@ detect_platform_arch() {
     fi
 }
 
+fetch_https() {
+    local url="$1" output="$2"
+    [[ "$url" == https://* ]] || die "Online downloads require HTTPS: $url"
+    if command -v curl &>/dev/null; then
+        curl -q --proto '=https' --proto-redir '=https' -fsSL -o "$output" -- "$url"
+    elif command -v wget &>/dev/null; then
+        # GNU Wget's --https-only only applies to recursive downloads.
+        wget --no-config --max-redirect=0 -q -O "$output" -- "$url" ||
+            die "Direct HTTPS download failed. Use curl for mirrors that redirect."
+    else
+        die "curl or GNU Wget is required to download over HTTPS"
+    fi
+}
+
 resolve_version() {
     if [[ "$VERSION" == __*__ ]]; then
         die "This source installer has no embedded version. Pass --version or use the installer from a versioned Studio release."
@@ -175,13 +192,7 @@ resolve_version() {
         local release_url="https://api.github.com/repos/handochan/aelix-studio/releases/latest"
         local release_json
         local release_error="Could not resolve a stable release. Pass --version with the version from the published Studio tag."
-        if command -v curl &>/dev/null; then
-            release_json=$(curl -fsSL "$release_url") || die "$release_error"
-        elif command -v wget &>/dev/null; then
-            release_json=$(wget -qO- "$release_url") || die "$release_error"
-        else
-            die "curl or wget is required to resolve the latest stable release"
-        fi
+        release_json=$(fetch_https "$release_url" -) || die "$release_error"
         VERSION=$(sed -n 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/p' <<< "$release_json")
         [[ -n "$VERSION" ]] || die "$release_error"
     fi
@@ -196,70 +207,25 @@ resolve_version() {
     CHECKSUM_NAME="${TARBALL_NAME}.sha256"
 }
 
+download_asset() {
+    local name="$1" destination="$2"
+    local url="${MIRROR%/}/v${VERSION}/$name"
+    info "Downloading ${BOLD}${name}${NC}..."
+    if [[ "$url" == file://* ]]; then
+        local source="${url#file://}"
+        [[ -f "$source" ]] || die "File not found at local mirror: $source"
+        cp -- "$source" "$destination"
+    else
+        fetch_https "$url" "$destination" || die "HTTPS download failed: $name"
+    fi
+}
+
 download_tarball() {
-    # Create temp directory
     TEMP_DIR="$(mktemp -d)"
     TARBALL_PATH="${TEMP_DIR}/${TARBALL_NAME}"
     CHECKSUM_PATH="${TEMP_DIR}/${CHECKSUM_NAME}"
-
-    # Build download URL
-    # MIRROR formats:
-    #   - GitHub: https://github.com/handochan/aelix-studio/releases/download
-    #   - file: file:///path/to/releases
-    if [[ "$MIRROR" == file://* ]]; then
-        # Local file mirror (for offline installation or testing)
-        local base_path="${MIRROR#file://}"
-        TARBALL_URL="file://${base_path}/v${VERSION}/${TARBALL_NAME}"
-        CHECKSUM_URL="file://${base_path}/v${VERSION}/${CHECKSUM_NAME}"
-    else
-        # GitHub releases
-        TARBALL_URL="${MIRROR}/v${VERSION}/${TARBALL_NAME}"
-        CHECKSUM_URL="${MIRROR}/v${VERSION}/${CHECKSUM_NAME}"
-    fi
-
-    info "Downloading ${BOLD}${TARBALL_NAME}${NC}..."
-    info "URL: $TARBALL_URL"
-
-    # Download tarball
-    if [[ "$TARBALL_URL" == file://* ]]; then
-        # Local file: copy directly
-        local src_path="${TARBALL_URL#file://}"
-        if [[ ! -f "$src_path" ]]; then
-            die "Tarball not found at local mirror: $src_path"
-        fi
-        cp "$src_path" "$TARBALL_PATH"
-    else
-        # Remote file: use curl or wget
-        if command -v curl &>/dev/null; then
-            curl -fSL --progress-bar -o "$TARBALL_PATH" "$TARBALL_URL" || die "Download failed"
-        elif command -v wget &>/dev/null; then
-            wget --show-progress -q -O "$TARBALL_PATH" "$TARBALL_URL" || die "Download failed"
-        else
-            die "curl or wget is required. Please install curl or wget."
-        fi
-    fi
-
-    local size
-    size=$(du -h "$TARBALL_PATH" | cut -f1)
-    success "Downloaded tarball ($size)"
-
-    # Download SHA256 checksum
-    info "Downloading ${BOLD}${CHECKSUM_NAME}${NC}..."
-    if [[ "$CHECKSUM_URL" == file://* ]]; then
-        local src_path="${CHECKSUM_URL#file://}"
-        if [[ ! -f "$src_path" ]]; then
-            die "Checksum file not found at local mirror: $src_path"
-        fi
-        cp "$src_path" "$CHECKSUM_PATH"
-    else
-        if command -v curl &>/dev/null; then
-            curl -fSL -o "$CHECKSUM_PATH" "$CHECKSUM_URL" || die "Checksum download failed"
-        elif command -v wget &>/dev/null; then
-            wget -q -O "$CHECKSUM_PATH" "$CHECKSUM_URL" || die "Checksum download failed"
-        fi
-    fi
-
-    success "Downloaded checksum"
+    download_asset "$TARBALL_NAME" "$TARBALL_PATH"
+    download_asset "$CHECKSUM_NAME" "$CHECKSUM_PATH"
 }
 
 verify_checksum() {
@@ -308,8 +274,19 @@ extract_tarball() {
     tar -xzf "$TARBALL_PATH" -C "$EXTRACT_TEMP" || die "Failed to extract tarball"
     [[ -d "$payload" && ! -L "$payload" && -f "$payload/$EXECUTABLE" && ! -L "$payload/$EXECUTABLE" ]] ||
         die "Tarball structure is invalid (missing aelix-studio-web/$EXECUTABLE)"
+    [[ -z "$(find "$EXTRACT_TEMP" -mindepth 1 -maxdepth 1 ! -name aelix-studio-web -print)" ]] ||
+        die "Tarball contains entries outside the aelix-studio-web directory"
+    validate_archive_links "$payload"
     validate_payload "$payload"
     chmod +x "$payload/$EXECUTABLE"
+    [[ ! -e "$payload/$INSTALL_MARKER" && ! -L "$payload/$INSTALL_MARKER" ]] ||
+        die "Tarball contains the reserved installation marker"
+    printf '%s\n' 'aelix-studio-web' > "$payload/$INSTALL_MARKER"
+
+    # Clear macOS quarantine on the verified staging tree without following links.
+    if [[ "$PLATFORM" == darwin ]] && command -v xattr &>/dev/null; then
+        xattr -d -r -s com.apple.quarantine "$payload" 2>/dev/null || true
+    fi
 
     # Leave a previous Studio version recoverable on upgrade.
     local backup_dir=""
@@ -330,16 +307,21 @@ extract_tarball() {
         die "Failed to create the command link; the new installation was rolled back"
     fi
 
-    # On macOS, strip the quarantine xattr Safari/Chrome/curl-downloaded files
-    # inherit — otherwise Gatekeeper kills unsigned Mach-O binaries with a
-    # "damaged, can't be opened" dialog. This is standard practice for CLI
-    # tools distributed as tarballs (bun, deno, rustup do the same).
-    if command -v xattr &>/dev/null; then
-        xattr -dr com.apple.quarantine "${INSTALL_DIR}" 2>/dev/null || true
-    fi
-
     success "Installation completed"
     if [[ "$CREATE_SYMLINK" == 1 ]]; then success "Symlink ready: $BIN_DIR/$EXECUTABLE"; fi
+}
+
+validate_archive_links() {
+    local root link target resolved
+    root=$(realpath "$1") || die "Cannot resolve the extracted package"
+    find "$root" -type l -print0 > "$TEMP_DIR/archive-links" || die "Could not inspect tarball links"
+    while IFS= read -r -d '' link; do
+        target=$(readlink "$link") || die "Could not read tarball link: ${link#"$root/"}"
+        [[ "$target" != /* ]] || die "Tarball contains an absolute link: ${link#"$root/"}"
+        resolved=$(realpath "$link" 2>/dev/null) || die "Tarball contains a dangling or invalid link: ${link#"$root/"}"
+        [[ -e "$resolved" && "$resolved" == "$root/"* ]] ||
+            die "Tarball link escapes its installation tree or is dangling: ${link#"$root/"}"
+    done < "$TEMP_DIR/archive-links"
 }
 
 validate_payload() {
@@ -362,24 +344,67 @@ validate_payload() {
     done
 }
 
-check_install_paths() {
-    # A relative override is resolved against the calling shell, not the link directory.
+canonical_path() {
+    local candidate="$1" parent leaf
+    if [[ -e "$candidate" || -L "$candidate" ]]; then
+        realpath "$candidate"
+        return
+    fi
+    parent=$(canonical_path "$(dirname "$candidate")") || return 1
+    leaf=$(basename "$candidate")
+    case "$leaf" in
+        .) printf '%s\n' "$parent" ;;
+        ..) dirname "$parent" ;;
+        *) printf '%s/%s\n' "${parent%/}" "$leaf" ;;
+    esac
+}
+
+normalize_install_paths() {
     [[ "$INSTALL_DIR" == /* ]] || INSTALL_DIR="$PWD/$INSTALL_DIR"
     [[ "$BIN_DIR" == /* ]] || BIN_DIR="$PWD/$BIN_DIR"
-    while [[ "$INSTALL_DIR" == */ ]]; do INSTALL_DIR="${INSTALL_DIR%/}"; done
+    while [[ "$INSTALL_DIR" != / ]]; do
+        case "$INSTALL_DIR" in
+            */) INSTALL_DIR="${INSTALL_DIR%/}" ;;
+            */.) INSTALL_DIR="${INSTALL_DIR%/.}" ;;
+            *) break ;;
+        esac
+    done
     [[ -n "$INSTALL_DIR" && ! -L "$INSTALL_DIR" ]] || die "Invalid installation directory: $INSTALL_DIR"
+    INSTALL_DIR=$(canonical_path "$INSTALL_DIR") || die "Could not resolve the installation directory"
+    [[ "$INSTALL_DIR" != / ]] || die "The filesystem root cannot be an installation directory"
+    BIN_DIR=$(canonical_path "$BIN_DIR") || die "Could not resolve the command directory"
+}
+
+link_points_to_install() {
+    local link="$1" target="$INSTALL_DIR/$EXECUTABLE" resolved
+    if [[ "$(readlink "$link")" == "$target" ]]; then return 0; fi
+    resolved=$(realpath "$link" 2>/dev/null) || return 1
+    [[ "$resolved" == "$target" ]]
+}
+
+check_install_paths() {
+    [[ ! -L "$INSTALL_DIR" ]] || die "Invalid installation directory: $INSTALL_DIR"
     if [[ -e "$INSTALL_DIR" ]]; then
-        local installed="$INSTALL_DIR/$EXECUTABLE"
+        local upstream
+        for upstream in aionui-web aionui-web.exe; do
+            if [[ -e "$INSTALL_DIR/$upstream" || -L "$INSTALL_DIR/$upstream" ]]; then
+                die "Installation directory contains AionUi WebUI: $INSTALL_DIR"
+            fi
+        done
+        local installed="$INSTALL_DIR/$EXECUTABLE" marker="$INSTALL_DIR/$INSTALL_MARKER"
         [[ -f "$installed" && -x "$installed" && ! -L "$installed" ]] ||
             die "Installation directory already exists and does not contain Aelix Studio WebUI: $INSTALL_DIR"
+        if [[ ! -f "$marker" || -L "$marker" || "$(< "$marker")" != aelix-studio-web ]]; then
+            # Earlier Studio installations have no marker. Require the Studio-specific layout.
+            validate_payload "$INSTALL_DIR"
+        fi
     fi
 
     if [[ "$CREATE_SYMLINK" == 1 ]]; then
-        while [[ "$BIN_DIR" != / && "$BIN_DIR" == */ ]]; do BIN_DIR="${BIN_DIR%/}"; done
         [[ "$BIN_DIR" != "$INSTALL_DIR" ]] || die "Command link directory must differ from the installation root"
         local link="$BIN_DIR/$EXECUTABLE"
         if [[ -L "$link" ]]; then
-            [[ "$(readlink "$link")" == "$INSTALL_DIR/$EXECUTABLE" ]] || die "Symlink already points elsewhere: $link"
+            link_points_to_install "$link" || die "Symlink already points elsewhere: $link"
         elif [[ -e "$link" ]]; then
             die "File already exists at $link"
         fi
@@ -397,9 +422,19 @@ create_symlink() {
     if [[ ! -L "$symlink_path" ]]; then
         ln -sn "$target_path" "$symlink_path" || return 1
     fi
-    if [[ "$(readlink "$symlink_path")" != "$target_path" ]]; then
+    if ! link_points_to_install "$symlink_path"; then
         error "Command path does not point to the Studio executable: $symlink_path"
         return 1
+    fi
+}
+
+path_command() {
+    if [[ "$1" == fish ]]; then
+        local fish_bin_dir="${BIN_DIR//\\/\\\\}"
+        fish_bin_dir="${fish_bin_dir//\'/\\\'}"
+        printf "set -gx PATH '%s' \$PATH\n" "$fish_bin_dir"
+    else
+        printf 'export PATH=%q:"$PATH"\n' "$BIN_DIR"
     fi
 }
 
@@ -442,22 +477,20 @@ update_shell_profile() {
         return
     fi
 
-    # Add PATH configuration
-    local path_line="export PATH=\"${BIN_DIR}:\$PATH\""
+    local path_line
+    path_line=$(path_command "$shell_name")
 
     # Check if configuration already exists
-    if grep -Fq -- "${BIN_DIR}" "$profile_file" 2>/dev/null; then
+    if grep -Fxq -- "$path_line" "$profile_file" 2>/dev/null; then
         info "PATH configuration already exists in $profile_file"
         return
     fi
 
     # Add to profile
-    echo "" >> "$profile_file"
-    echo "# Added by aelix-studio-web installer" >> "$profile_file"
-    echo "$path_line" >> "$profile_file"
+    printf '\n# Added by aelix-studio-web installer\n%s\n' "$path_line" >> "$profile_file"
 
     success "Added PATH to $profile_file"
-    warn "Please restart your shell or run: source $profile_file"
+    warn "Restart your shell to load the updated PATH."
 }
 
 print_summary() {
@@ -484,12 +517,10 @@ print_summary() {
         printf "    %q start\n" "${INSTALL_DIR}/${EXECUTABLE}"
         echo ""
         echo "    # Or add symlink to PATH:"
-        if [[ "$CREATE_SYMLINK" == "1" ]]; then
-            echo "    export PATH=\"${BIN_DIR}:\$PATH\""
-        else
+        if [[ "$CREATE_SYMLINK" != "1" ]]; then
             printf '    ln -s %q %q\n' "$INSTALL_DIR/$EXECUTABLE" "$BIN_DIR/$EXECUTABLE"
-            echo "    export PATH=\"${BIN_DIR}:\$PATH\""
         fi
+        printf '    %s\n' "$(path_command "$(basename "${SHELL:-bash}")")"
     fi
     echo ""
     echo -e "  ${BOLD}📖 Documentation:${NC}  https://github.com/handochan/aelix-studio"
@@ -522,6 +553,12 @@ main() {
 
     # Step 1: Detect platform and architecture
     detect_platform_arch
+    case "$MIRROR" in
+        https://*|file://*) ;;
+        *) die "Mirrors must use HTTPS or a local file:// path" ;;
+    esac
+    command -v realpath &>/dev/null || die "realpath is required to validate installation paths"
+    normalize_install_paths
     check_install_paths
 
     # Step 2: Resolve version (if VERSION is __VERSION__ or latest)
