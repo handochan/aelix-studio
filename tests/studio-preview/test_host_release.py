@@ -358,6 +358,35 @@ class OutboundAuditTests(unittest.TestCase):
         self.assertEqual(result['unparsedRecords'], 1)
 
 
+class ManagedAcpLaunchTests(unittest.TestCase):
+    def test_acp_receives_the_command_marker_and_the_launcher_consumes_the_state_path(self):
+        with tempfile.TemporaryDirectory(prefix='studio acp marker-') as temporary:
+            bundle = Path(temporary)
+            launcher = bundle / 'launch.py'
+            shutil.copyfile(ROOT / 'scripts/studio-preview/packaging/launch.py', launcher)
+            adapter = bundle / 'adapter-site' / 'aelix_acp'
+            adapter.mkdir(parents=True)
+            (adapter / '__init__.py').write_text('')
+            (adapter / 'server.py').write_text(
+                'import json, os\n'
+                'def main():\n'
+                '    print(json.dumps([os.environ.get("AELIX_ACP_STUDIO_MANAGED"),\n'
+                '                      os.environ.get("AELIX_STUDIO_EXTENSION_STATE")]))\n',
+                encoding='utf-8',
+            )
+            environment = dict(os.environ, AELIX_STUDIO_EXTENSION_STATE=str(bundle / 'absent state'))
+            environment.pop('AELIX_ACP_STUDIO_MANAGED', None)
+            for marker in (None, '1'):
+                with self.subTest(marker=marker):
+                    if marker is not None:
+                        environment['AELIX_ACP_STUDIO_MANAGED'] = marker
+                    observed = subprocess.check_output(
+                        [sys.executable, '-I', '-S', '-B', str(launcher), 'acp'],
+                        env=environment, text=True, timeout=30,
+                    )
+                    self.assertEqual(json.loads(observed), [marker, None])
+
+
 @unittest.skipIf(os.name == 'nt', 'the synthetic launcher fixture uses POSIX flock, symlinks and venv paths')
 class ExtensionGenerationLaunchTests(unittest.TestCase):
     """The bundled launcher adds the current extension generation to new conversations (Studio #32)."""

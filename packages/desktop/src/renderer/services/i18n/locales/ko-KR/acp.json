@@ -7,6 +7,11 @@
   "send": {
     "failed": "메시지 전송에 실패했습니다: {{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "확장 화면에서 설치하세요.",
+    "update": "확장 화면에서 업데이트하세요.",
+    "remove": "확장 화면에서 제거하세요."
+  },
   "sendbox": {
     "placeholder": "{{backend}}에게 메시지 보내기..."
   },

@@ -7,6 +7,11 @@
   "send": {
     "failed": "Échec de l'envoi du message : {{error}}"
   },
+  "studioExtensionManagement": {
+    "install": "Installez les extensions depuis l’écran Extensions.",
+    "update": "Mettez à jour les extensions depuis l’écran Extensions.",
+    "remove": "Supprimez les extensions depuis l’écran Extensions."
+  },
   "sendbox": {
     "placeholder": "Envoyer un message à {{backend}}..."
   },

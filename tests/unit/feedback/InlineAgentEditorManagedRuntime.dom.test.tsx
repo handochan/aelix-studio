@@ -97,6 +97,19 @@ describe('InlineAgentEditor managed runtime feedback', () => {
     expect(screen.getByText(/CLI exited before ACP initialize completed/i)).toBeInTheDocument();
   });
 
+  it('saves a manually registered Aelix command without Studio-managed environment entries', async () => {
+    const save = vi.fn();
+    const user = userEvent.setup();
+    renderEditor(save);
+
+    const [name, command] = screen.getAllByRole('textbox');
+    await user.type(name, 'My Aelix ACP');
+    await user.type(command, 'aelix-acp');
+    await user.click(screen.getByRole('button', { name: 'common.save' }));
+
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ command: 'aelix-acp', env: undefined }));
+  });
+
   it.each([
     { setting: true, policy: { supports_side_question: true, supports_team: true } },
     { setting: false, policy: { supports_side_question: true, supports_team: false } },
