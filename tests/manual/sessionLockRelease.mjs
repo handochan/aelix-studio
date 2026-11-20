@@ -26,7 +26,7 @@ function responseAt(page, path, status) {
 async function expireFixtureAccess(context, origin) {
   const secret = process.env.STUDIO_RELEASE_FIXTURE_JWT;
   assert(secret, 'The retry regression requires a disposable protected host fixture');
-  const cookie = (await context.cookies(origin)).find(({ name }) => name === 'aionui-session');
+  const cookie = (await context.cookies(origin)).find(({ name }) => name === 'aelix-studio-session');
   assert(cookie, 'The test browser is missing its fixture access cookie');
   const [header, payload] = cookie.value.split('.');
   const claims = JSON.parse(Buffer.from(payload, 'base64url').toString('utf8'));
