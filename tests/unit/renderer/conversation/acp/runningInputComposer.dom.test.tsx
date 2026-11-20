@@ -51,6 +51,7 @@ type Write = { method: string; payload: Record<string, string> };
 const server = {
   discovery: (): Response => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
   turn: { active: true, turnId: 'turn-1' } as Turn,
+  readState: vi.fn<() => Response | Promise<Response>>(),
   write: vi.fn<(call: Write) => Response | Promise<Response>>(),
   metadata: vi.fn<(file: { path?: string; relative_path?: string }) => Response | Promise<Response>>(),
   mentionable: vi.fn<(id: string) => Response | Promise<Response>>(),
@@ -123,6 +124,7 @@ describe('running input in the composer', () => {
     server.turn = { active: true, turnId: 'turn-1' };
     server.discovery = () => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS });
     server.write.mockReset();
+    server.readState.mockReset().mockImplementation(() => result(server.turn));
     server.metadata.mockReset().mockImplementation(() => success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
     server.mentionable.mockReset().mockImplementation((id) => {
       const titles: Record<string, string> = { same: 'Renamed target', other: 'Other\t\ntarget', unknown: 'Unbound' };
@@ -148,7 +150,7 @@ describe('running input in the composer', () => {
       }
       if (init.method === 'GET') return server.discovery();
       const call = JSON.parse(String(init.body)) as Write;
-      return call.method === STATE ? result(server.turn) : server.write(call);
+      return call.method === STATE ? server.readState() : server.write(call);
     });
     vi.stubGlobal('fetch', fetchMock);
     vi.spyOn(httpBridge, 'wsEmitter').mockImplementation(() => ({ on: () => () => {}, emit: () => {} }));
@@ -197,6 +199,65 @@ describe('running input in the composer', () => {
     server.turn = { active: true, turnId: 'turn-2' };
     expect(await submit('hello')).toBe('sent');
     expect(server.write.mock.calls[0][0].payload).toMatchObject({ turnId: 'turn-2', message: 'hello' });
+  });
+
+  it.each([true, false])(
+    'waits for native state when the host is idle during rediscovery (active: %s)',
+    async (active) => {
+      const held = hold();
+      server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
+      const view = await mount();
+      const reads = server.readState.mock.calls.length;
+      server.turn = active ? { active: true, turnId: 'turn-1' } : { active: false, turnId: null };
+      server.readState.mockReturnValueOnce(held.pending);
+      view.rerender(<Harness hostBusy={false} hostTurnId={null} />);
+      await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(reads + 1));
+
+      let route: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        route = controller.submit('after the host went idle', NO_REFERENCES);
+      });
+      await act(async () => {
+        held.reply(result(server.turn));
+        await route;
+      });
+      await expect(route).resolves.toBe(active ? 'sent' : 'ordinary');
+      expect(writes()).toEqual(active ? [STEER] : []);
+    }
+  );
+
+  it('keeps a negotiated draft when a transient state-read failure leaves native idle unconfirmed', async () => {
+    const view = await mount();
+    server.readState.mockImplementation(() => failure(502, 'EXT_OUTCOME_UNKNOWN'));
+    view.rerender(<Harness hostBusy={false} hostTurnId={null} />);
+    await settle();
+
+    expect(controller.supported).toBe(true);
+    expect(await submit('keep until the native state is known')).toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
+  });
+
+  it.each(['text', 'attachment'] as const)('keeps %s when Stop starts before the relay POST', async (kind) => {
+    const held = hold();
+    server.write.mockImplementation(({ payload }) => accepted(payload.turnId));
+    await mount({ hostBusy: kind === 'attachment', hostTurnId: kind === 'attachment' ? 'host-turn-1' : null });
+    const reads = server.readState.mock.calls.length;
+    if (kind === 'attachment') server.metadata.mockReturnValueOnce(held.pending);
+    else server.readState.mockReturnValueOnce(held.pending);
+
+    let route: Promise<RunningInputRoute> | undefined;
+    act(() => {
+      route = controller.submit('under preparation', kind === 'attachment' ? IMAGE_REFERENCE : NO_REFERENCES);
+    });
+    if (kind === 'attachment') await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
+    else await waitFor(() => expect(server.readState).toHaveBeenCalledTimes(reads + 1));
+    act(() => controller.markStopped());
+    await act(async () => {
+      held.reply(kind === 'attachment' ? success({ path: CONFIRMED_IMAGE, type: 'image/png' }) : result(server.turn));
+      await route;
+    });
+    await expect(route).resolves.toBe('kept');
+    expect(server.write).not.toHaveBeenCalled();
   });
 
   it('leaves preflight sends to the existing busy path when the native turn is still idle', async () => {
@@ -382,20 +443,18 @@ describe('running input in the composer', () => {
     expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedEnded');
   });
 
-  it('says processing after Stop is unconfirmed for an acceptance that arrives after Stop', async () => {
+  it('keeps the submitted draft when Stop precedes the receipt and the native turn is still active', async () => {
     const held = hold();
     server.write.mockReturnValueOnce(held.pending);
-    const view = await mount();
+    await mount();
 
     let route: Promise<RunningInputRoute> | undefined;
     act(() => {
-      route = controller.submit('withdrawn', NO_REFERENCES);
+      route = controller.submit('withdrawn', IMAGE_REFERENCE);
     });
     await waitFor(() => expect(notices()[0]).toHaveAttribute('data-kind', 'pending'));
     act(() => controller.markStopped());
 
-    server.turn = { active: true, turnId: 'turn-2' };
-    view.rerender(<Harness hostTurnId='host-turn-2' />);
     await act(async () => {
       held.reply(accepted('turn-1'));
       await route;
@@ -403,6 +462,7 @@ describe('running input in the composer', () => {
 
     await expect(route).resolves.toBe('kept');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedStopped');
+    expect(writes()).toEqual([STEER]);
   });
 
   it('dismisses one notice or all notices', async () => {
@@ -452,6 +512,6 @@ describe('running input in the composer', () => {
     view.rerender(<Harness paused />);
     await waitFor(() => expect(controller.supported).toBe(true));
     expect(controller.available).toBe(false);
-    expect(await submit('hello')).toBe('ordinary');
+    expect(await submit('hello')).toBe('kept');
   });
 });

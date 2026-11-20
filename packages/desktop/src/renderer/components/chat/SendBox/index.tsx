@@ -1601,9 +1601,11 @@ const SendBox: React.FC<{
 
     // 构建消息内容 / Build message content
     let finalMessage = input;
+    // Keep relay-aware slash commands on their command path when a reply or snippet is attached.
+    const preserveCommand = deferDraftClear && input.trimStart().startsWith('/');
 
     // Prepend reply quote as blockquote
-    if (replyQuote) {
+    if (replyQuote && !preserveCommand) {
       const quotedLines = replyQuote.content
         .split('\n')
         .map((line) => `> ${line}`)
@@ -1612,7 +1614,7 @@ const SendBox: React.FC<{
     }
 
     // 如果有 DOM 片段，附加完整 HTML / If has DOM snippets, append full HTML
-    if (domSnippets.length > 0) {
+    if (domSnippets.length > 0 && !preserveCommand) {
       const snippetsHtml = domSnippets
         .map((s) => `\n\n---\nDOM Snippet (${s.tag}):\n\`\`\`html\n${s.html}\n\`\`\``)
         .join('');

@@ -114,16 +114,12 @@ vi.mock('@/renderer/hooks/system/useLiveTranscriptInsertion', async (importOrigi
   };
 });
 
-vi.mock('@/renderer/utils/emitter', () => ({
-  emitter: { emit: vi.fn() },
-  useAddEventListener: vi.fn(),
-}));
-
 vi.mock('@/renderer/components/chat/BtwOverlay', () => ({ default: () => null }));
 vi.mock('@/renderer/components/chat/SpeechInputButton', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/UploadProgressBar', () => ({ default: () => null }));
 
 import SendBox from '@/renderer/components/chat/SendBox';
+import { emitter } from '@/renderer/utils/emitter';
 
 const SendBoxHarness = ({
   active,
@@ -190,6 +186,20 @@ describe('SendBox active-controlled focus', () => {
 
     expect(onSend).toHaveBeenCalledWith('blocked message');
     await waitFor(() => expect(textarea.value).toBe('blocked message'));
+  });
+
+  it('passes the original slash command through the relay-aware composer with a reply quote', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<SendBoxHarness initialValue='/compact' onSend={onSend} deferDraftClear />);
+    act(() => {
+      emitter.emit('sendbox.reply', { messageId: 'previous', content: 'Earlier answer', position: 'left' });
+    });
+    expect(screen.getByText('Earlier answer')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    });
+    expect(onSend).toHaveBeenCalledWith('/compact');
   });
 
   it('allows attachment-only sends for an opted-in composer', () => {

@@ -18,12 +18,17 @@ import {
 import { emitter } from '@/renderer/utils/emitter';
 import { buildRunningInputNotices, turnKey, type RunningInputChannel, type RunningInputNotice } from './notices';
 
-type Session = Readonly<{ client: ReturnType<typeof createRunningInputClient>; refreshSoon: () => void }>;
+type Session = {
+  client: ReturnType<typeof createRunningInputClient>;
+  refreshSoon: () => void;
+  stopRevision: number;
+  stoppedTurns: ReadonlySet<string>;
+};
 
 /**
  * `ordinary`: the composer keeps its existing send path. `sent`: the native queue
- * accepted the text for the current binding and turn, so the draft is cleared.
- * `kept`: nothing was accepted (or the result is unclear), so the draft goes back.
+ * accepted the text for the current binding and turn before a Stop, so the draft is cleared.
+ * `kept`: the composer preserves the draft.
  */
 export type RunningInputRoute = 'ordinary' | 'sent' | 'kept';
 
@@ -89,7 +94,7 @@ function openSession(conversationId: string): Session {
       }
     })();
   };
-  return { client, refreshSoon };
+  return { client, refreshSoon, stopRevision: 0, stoppedTurns: NO_TURNS };
 }
 
 function activeTarget({ channel }: RunningInputSnapshot) {
@@ -136,7 +141,7 @@ export function useRunningInput({
 
   useEffect(() => {
     if (channel.status === 'ready') setLastReady(channel);
-    else if (channel.status !== 'checking') setLastReady(undefined);
+    else if (channel.status === 'unsupported') setLastReady(undefined);
   }, [channel]);
 
   // Keep the last discovered channel while a refresh runs so the composer does not flicker.
@@ -148,17 +153,23 @@ export function useRunningInput({
 
   const modes = known?.modes ?? [];
   const mode = modes.includes(requestedMode) ? requestedMode : (modes[0] ?? requestedMode);
-  const latest = useLatestRef({ session, known, receipts, hostBusy, hostTurnId, stopping, paused, mode });
+  const latest = useLatestRef({ session, known, hostBusy, hostTurnId, stopping, paused, mode });
 
   const markStopped = useCallback(() => {
-    const { known: current, receipts: sent } = latest.current;
-    const keys = sent.filter((receipt) => receipt.status === 'pending').map((r) => turnKey(r.bindingId, r.turnId));
+    const { session: currentSession, known } = latest.current;
+    if (!currentSession) return;
+
+    // Mark synchronously before the host Stop request or a React render.
+    currentSession.stopRevision++;
+    const currentSnapshot = currentSession.client.getSnapshot();
+    const current = currentSnapshot.channel.status === 'ready' ? currentSnapshot.channel : known;
+    const keys = currentSnapshot.receipts
+      .filter((receipt) => receipt.status === 'pending')
+      .map(({ bindingId, turnId }) => turnKey(bindingId, turnId));
     if (current?.turn.active) keys.push(turnKey(current.bindingId, current.turn.turnId));
-    if (keys.length === 0) return;
-    setStoppedTurns((previous) => {
-      if (keys.every((key) => previous.has(key))) return previous;
-      return new Set([...previous, ...keys]);
-    });
+    if (keys.every((key) => currentSession.stoppedTurns.has(key))) return;
+    currentSession.stoppedTurns = new Set([...currentSession.stoppedTurns, ...keys]);
+    setStoppedTurns(currentSession.stoppedTurns);
   }, [latest]);
 
   useEffect(() => {
@@ -168,18 +179,42 @@ export function useRunningInput({
   const submit = useCallback(
     async (message: string, references: RunningInputReferences): Promise<RunningInputRoute> => {
       const state = latest.current;
-      if (!state.session || !state.known || state.paused || state.stopping) return 'ordinary';
-      const { client: relay, refreshSoon } = state.session;
-      let target = activeTarget(relay.getSnapshot());
-      if (!target && !state.hostBusy) return 'ordinary';
-      if (!target || !state.hostBusy) {
-        // An ordinary send needs both turns idle; the relay needs the native turn the adapter sees now.
+      const currentSession = state.session;
+      // Commands keep their existing path through the composer.
+      if (!currentSession || message.trimStart().startsWith('/')) return 'ordinary';
+      const { client: relay, refreshSoon, stopRevision } = currentSession;
+      const interrupted = () => {
+        const current = latest.current;
+        return (
+          current.session !== currentSession ||
+          currentSession.stopRevision !== stopRevision ||
+          current.stopping ||
+          current.paused
+        );
+      };
+
+      const initial = relay.getSnapshot().channel;
+      if (initial.status === 'unsupported') return 'ordinary';
+      if (interrupted()) return 'kept';
+      if (initial.status === 'ready' && !initial.turn.active && !state.hostBusy) return 'ordinary';
+      if (initial.status !== 'ready' || !initial.turn.active || !state.hostBusy) {
+        // Host idle can arrive before the native queue settles.
         await relay.refresh();
-        target = activeTarget(relay.getSnapshot());
       }
-      // Commands never reach a running turn as text, as in the native composer.
-      if (!target || message.trimStart().startsWith('/')) return 'ordinary';
-      if (relay.getSnapshot().sending || preparing.current === state.session) {
+      if (interrupted()) return 'kept';
+      const observed = relay.getSnapshot();
+      const target = activeTarget(observed);
+      if (!target) {
+        if (
+          observed.channel.status === 'unsupported' ||
+          (observed.channel.status === 'ready' && !observed.channel.turn.active)
+        ) {
+          return 'ordinary';
+        }
+        Message.warning(t('conversation.commandQueue.midturnBlocked'));
+        return 'kept';
+      }
+      if (observed.sending || preparing.current === currentSession) {
         Message.info(t('acp.runningInput.previousSending'));
         return 'kept';
       }
@@ -187,17 +222,15 @@ export function useRunningInput({
       const chosen = target.modes.includes(latest.current.mode) ? latest.current.mode : target.modes[0];
       let prepared = { text: message, hasImage: false };
       if (references.files.length || references.sessions.length) {
-        preparing.current = state.session;
+        preparing.current = currentSession;
         try {
           prepared = await prepareRunningInputMessage(conversationId, message, references);
           await relay.refresh();
           const current = latest.current;
           const active = activeTarget(relay.getSnapshot());
           if (
-            current.session !== state.session ||
+            interrupted() ||
             current.hostTurnId !== state.hostTurnId ||
-            current.stopping ||
-            current.paused ||
             active?.bindingId !== target.bindingId ||
             active?.turnId !== target.turnId
           ) {
@@ -208,9 +241,11 @@ export function useRunningInput({
           Message.warning(t('acp.runningInput.referencesUnverified'));
           return 'kept';
         } finally {
-          if (preparing.current === state.session) preparing.current = null;
+          if (preparing.current === currentSession) preparing.current = null;
         }
       }
+      const key = turnKey(target.bindingId, target.turnId);
+      if (interrupted() || currentSession.stoppedTurns.has(key)) return 'kept';
       const result = await relay.send(chosen, { bindingId: target.bindingId, turnId: target.turnId }, prepared.text);
       if (result.status === 'skipped') {
         if (result.reason === 'invalid-text') Message.warning(t('acp.runningInput.invalidText'));
@@ -221,8 +256,13 @@ export function useRunningInput({
       }
       if (result.receipt.status !== 'queued') refreshSoon();
       else if (prepared.hasImage) Message.info(t('acp.runningInput.imagesAsPaths'));
-      // Clear the composer only for an acceptance the client attributes to the current binding and turn.
-      return !result.preserveDraft && result.receipt.status === 'queued' ? 'sent' : 'kept';
+      // A receipt can reach the original turn while the host is still cancelling it.
+      return result.receipt.status === 'queued' &&
+        !result.preserveDraft &&
+        !interrupted() &&
+        !currentSession.stoppedTurns.has(key)
+        ? 'sent'
+        : 'kept';
     },
     [conversationId, latest, t]
   );
@@ -257,7 +297,7 @@ export function useRunningInput({
     () => buildRunningInputNotices(receipts, known, stoppedTurns),
     [receipts, known, stoppedTurns]
   );
-  const supported = Boolean(session && known);
+  const supported = Boolean(session && channel.status !== 'unsupported' && (known ?? lastReady));
 
   return {
     available: supported && hostBusy && !stopping && !paused && modes.length > 0,
