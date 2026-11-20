@@ -38,6 +38,7 @@ import { resolveCoreCsrfToken } from './httpBridge';
 export const WS_CLOSE_POLICY_VIOLATION = 1008;
 
 const REFRESH_ENDPOINT = '/api/auth/refresh';
+const REFRESH_TIMEOUT_MS = 15_000;
 
 /**
  * WebUI browser mode = a real DOM with no Electron preload port. Only here do
@@ -92,6 +93,7 @@ async function performRefresh(): Promise<boolean> {
       // the cookie and only falls back to a body token for legacy native clients.
       credentials: 'include',
       headers,
+      signal: AbortSignal.timeout(REFRESH_TIMEOUT_MS),
     });
     return response.ok;
   } catch {

@@ -154,6 +154,12 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
+  keepalive?: boolean;
+  /** Total deadline for the initial request, refresh wait and optional replay. */
+  timeoutMs?: number;
+  signal?: AbortSignal;
+  /** Unloading pages can only send their departure once. */
+  refreshAuth?: boolean;
   /** Extra request headers merged on top of the default `Content-Type`. */
   headers?: Record<string, string>;
 };
@@ -201,13 +207,32 @@ function sendHttpRequest(
   method: string,
   path: string,
   headers: Record<string, string>,
-  body?: unknown
+  body?: unknown,
+  options?: Pick<HttpRequestOptions, 'keepalive'>,
+  signal?: AbortSignal
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
   return fetchFromDesktopOrBrowser(url, {
     method,
     headers,
     body: body !== undefined ? JSON.stringify(body) : undefined,
+    ...(options?.keepalive ? { keepalive: true } : {}),
+    ...(signal ? { signal } : {}),
+  });
+}
+
+function refreshWithinDeadline(signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
+  const refresh = refreshSession();
+  if (!signal) return refresh;
+
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    void refresh.then((refreshed) => {
+      signal.removeEventListener('abort', abort);
+      resolve(refreshed);
+    });
   });
 }
 
@@ -232,18 +257,23 @@ export async function httpRequest<T>(
     body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
   );
 
-  let response = await sendHttpRequest(method, path, headers, body);
+  const deadline = options?.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
+  const lifetime = options?.signal;
+  const signal = deadline && lifetime ? AbortSignal.any([deadline, lifetime]) : (deadline ?? lifetime);
+  signal?.throwIfAborted();
+  let response = await sendHttpRequest(method, path, headers, body, options, signal);
 
   // Expired access cookie → 401. Attempt one silent session refresh, then replay
   // the original request — the WebUI half of the #4124 fix. refreshSession() is a
   // no-op outside browser mode and single-flights concurrent 401s into one POST.
   // The auth endpoints themselves are skipped to avoid recursion.
-  if (response.status === 401 && !isAuthEndpoint(path)) {
+  if (response.status === 401 && options?.refreshAuth !== false && !isAuthEndpoint(path)) {
     console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
-    const refreshed = await refreshSession();
+    const refreshed = await refreshWithinDeadline(signal);
     if (refreshed) {
       console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
-      response = await sendHttpRequest(method, path, headers, body);
+      signal?.throwIfAborted();
+      response = await sendHttpRequest(method, path, headers, body, options, signal);
     }
   }
 
@@ -316,14 +346,16 @@ export function httpGet<Data, Params = undefined>(
 
 export function httpPost<Data, Params = undefined>(
   path: string | ((params: Params) => string),
-  mapBody?: (params: Params) => unknown
+  mapBody?: (params: Params) => unknown,
+  options?: HttpRequestOptions | ((params: Params) => HttpRequestOptions)
 ): ProviderLike<Data, Params> {
   return {
     provider: () => {},
     invoke: (async (params?: Params) => {
       const resolvedPath = typeof path === 'function' ? path(params!) : path;
       const body = mapBody ? mapBody(params!) : params;
-      return httpRequest<Data>('POST', resolvedPath, body);
+      const requestOptions = typeof options === 'function' ? options(params!) : options;
+      return httpRequest<Data>('POST', resolvedPath, body, requestOptions);
     }) as ProviderLike<Data, Params>['invoke'],
   };
 }

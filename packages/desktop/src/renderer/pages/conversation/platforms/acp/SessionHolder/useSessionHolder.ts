@@ -5,9 +5,9 @@
  */
 
 import { ipcBridge } from '@/common';
-import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyCheckFailure, type CheckFailure } from './checkFailure';
+import type { SessionLockView } from './useSessionLockView';
 import { sessionHolderFromError, sessionHolderFromStreamMessage, type SessionHolder } from './sessionHolder';
 
 /**
@@ -64,19 +64,22 @@ const withoutResult = (current: State, error: unknown): State => ({
  * Tracks whether another writer (the CLI or another Aelix process) holds this
  * conversation's native session.
  *
- * It only observes outcomes the host already reports: the `runtime/ensure` call the
- * conversation makes on open (deduplicated with the existing warmup), and lock errors
- * on the response stream. It never takes, releases, or polls the lock on its own;
- * `recheck` repeats the same ensure call that reopening the conversation would make.
+ * Host ensure and stream errors are the source of the holder state. The view also
+ * asks the host to release the solo runtime when the conversation closes.
+ * `recheck` repeats the ensure call that opening the conversation makes.
  *
  * Only a successful ensure (a confirmed lock-free result) makes the conversation
  * writable: on first open, on return, and on recheck. Any other failure keeps sending,
  * the stored first message, and the Draft Box blocked and saved until a check succeeds.
  */
-export const useSessionHolder = (conversationId: string, onWritable?: () => void): SessionHolderState => {
+export const useSessionHolder = (
+  conversationId: string,
+  view: SessionLockView,
+  onWritable?: () => void
+): SessionHolderState => {
+  const ensureViewRuntime = view.ensure;
   const [state, setState] = useState<State>(() => initialState(conversationId));
-  const activeIdRef = useRef(conversationId);
-  activeIdRef.current = conversationId;
+  const activeCheck = useRef<symbol | null>(null);
   const onWritableRef = useRef(onWritable);
   onWritableRef.current = onWritable;
 
@@ -90,21 +93,22 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
 
   useEffect(() => {
     setState(initialState(conversationId));
-    let cancelled = false;
-    ensureConversationRuntime(conversationId).then(
+    const check = Symbol();
+    activeCheck.current = check;
+    ensureViewRuntime().then(
       () => {
-        if (cancelled) return;
+        if (activeCheck.current !== check) return;
         knownHolders.delete(conversationId);
         setState(WRITABLE);
       },
       (error: unknown) => {
-        if (!cancelled) settle(conversationId, error, false);
+        if (activeCheck.current === check) settle(conversationId, error, false);
       }
     );
     return () => {
-      cancelled = true;
+      activeCheck.current = null;
     };
-  }, [conversationId, settle]);
+  }, [conversationId, ensureViewRuntime, settle]);
 
   useEffect(
     () =>
@@ -120,19 +124,23 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
 
   const recheck = useCallback(() => {
     const requestedId = conversationId;
+    const check = activeCheck.current;
+    if (!check) return Promise.resolve();
     setState((current) => ({ ...current, recheckState: 'checking' }));
-    ensureConversationRuntime(requestedId).then(
+    return ensureViewRuntime().then(
       () => {
-        if (activeIdRef.current !== requestedId) return;
+        if (activeCheck.current !== check) return;
         knownHolders.delete(requestedId);
         setState(WRITABLE);
         onWritableRef.current?.();
       },
       (error: unknown) => {
-        if (activeIdRef.current === requestedId) settle(requestedId, error, true);
+        if (activeCheck.current === check) settle(requestedId, error, true);
       }
     );
-  }, [conversationId, settle]);
+  }, [conversationId, ensureViewRuntime, settle]);
+
+  useEffect(() => view.onLeaseExpired(recheck), [view, recheck]);
 
   return { ...state, recheck };
 };

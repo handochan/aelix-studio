@@ -109,7 +109,7 @@ function fetchAcpSlashCommands(conversation_id: string): Promise<SlashCommandIte
 
 export const useAcpMessage = (
   conversation_id: string,
-  options?: { skipWarmup?: boolean; prepareRuntime?: () => Promise<void> }
+  options?: { skipWarmup?: boolean; prepareRuntime?: () => Promise<unknown> }
 ): UseAcpMessageReturn => {
   const mergeLiveMessage = useMergeLiveMessage();
   const [running, setRunning] = useState(false);
@@ -728,7 +728,10 @@ export const useAcpMessage = (
       .catch(() => {});
     // A live invalidation must win over an older in-flight HTTP snapshot.
     void runtimeReady
-      .then(() => ipcBridge.conversation.getUsage.invoke({ conversation_id }))
+      .then(() => {
+        if (cancelled) return;
+        return ipcBridge.conversation.getUsage.invoke({ conversation_id });
+      })
       .then((usage) => {
         if (cancelled || usageSourceRef.current === 'liveUnknown' || !usage || typeof usage.used !== 'number') return;
         if (usageSourceRef.current === 'live') {

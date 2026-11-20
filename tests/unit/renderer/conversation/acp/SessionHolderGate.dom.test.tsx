@@ -11,11 +11,17 @@ import type { IResponseMessage } from '@/common/adapter/ipcBridge';
 
 const mocks = vi.hoisted(() => ({
   ensure: vi.fn<(conversationId: string) => Promise<unknown>>(),
+  renew: vi.fn(),
   listeners: new Set<(message: IResponseMessage) => void>(),
 }));
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    conversation: {
+      renewViewLease: { invoke: mocks.renew },
+      releaseRuntime: { invoke: () => Promise.resolve() },
+      releaseRuntimeOnPageHide: { invoke: () => Promise.resolve() },
+    },
     acpConversation: {
       responseStream: {
         on: (listener: (message: IResponseMessage) => void) => {
@@ -37,6 +43,7 @@ vi.mock('react-i18next', () => ({
 
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import SessionHolderGate from '@/renderer/pages/conversation/platforms/acp/SessionHolder';
+import { useSessionLockView } from '@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionLockView';
 import { resetSessionHolderMemoryForTests } from '@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionHolder';
 
 const lockError = (lockedBy = 'native') =>
@@ -73,12 +80,17 @@ const sendBox = (sendBlocked: boolean) => (
   <textarea data-testid='send-box' data-blocked={String(sendBlocked)} disabled={sendBlocked} />
 );
 
-const renderGate = (onWritable = vi.fn()) => {
-  const view = render(
-    <SessionHolderGate conversationId='c1' onWritable={onWritable}>
+const Gate = ({ conversationId, onWritable }: { conversationId: string; onWritable?: () => void }) => {
+  const view = useSessionLockView(conversationId)!;
+  return (
+    <SessionHolderGate conversationId={conversationId} view={view} onWritable={onWritable}>
       {sendBox}
     </SessionHolderGate>
   );
+};
+
+const renderGate = (onWritable = vi.fn()) => {
+  const view = render(<Gate conversationId='c1' onWritable={onWritable} />);
   return { ...view, onWritable };
 };
 
@@ -92,11 +104,47 @@ const recheckButton = () => screen.getByRole('button', { name: 'conversation.ses
 
 beforeEach(() => {
   mocks.ensure.mockReset();
+  mocks.renew.mockReset().mockResolvedValue(undefined);
   mocks.listeners.clear();
   resetSessionHolderMemoryForTests();
 });
 
 describe('SessionHolderGate', () => {
+  const expireLease = () => {
+    mocks.renew.mockRejectedValueOnce(
+      new BackendHttpError({
+        method: 'POST',
+        path: '/api/conversations/c1/active-lease',
+        status: 409,
+        body: {},
+      })
+    );
+    return act(async () => document.dispatchEvent(new Event('visibilitychange')));
+  };
+
+  it('clears the old CLI holder and restores sending after the expired view acquires its lease', async () => {
+    mocks.ensure.mockRejectedValueOnce(lockError()).mockResolvedValueOnce({});
+    const { onWritable } = renderGate();
+    await flush();
+    expectHeldSendBox();
+
+    await expireLease();
+    expect(screen.queryByTestId('session-holder-bar')).toBeNull();
+    expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
+    expect(onWritable).toHaveBeenCalledOnce();
+  });
+
+  it('shows a new CLI holder when the expired view cannot reacquire the writer', async () => {
+    mocks.ensure.mockResolvedValueOnce({}).mockRejectedValueOnce(lockError());
+    const { onWritable } = renderGate();
+    await flush();
+    await expireLease();
+
+    expectHeldSendBox();
+    expect(screen.getByText('conversation.sessionHolder.native.title')).toBeTruthy();
+    expect(onWritable).not.toHaveBeenCalled();
+  });
+
   it('blocks sending until the first check settles, then unblocks a writable session', async () => {
     const first = deferred();
     mocks.ensure.mockReturnValueOnce(first.promise);
@@ -309,7 +357,7 @@ describe('SessionHolderGate', () => {
     const first = deferred();
     mocks.ensure.mockReturnValueOnce(first.promise).mockResolvedValueOnce({});
     const { rerender } = renderGate();
-    rerender(<SessionHolderGate conversationId='c2'>{sendBox}</SessionHolderGate>);
+    rerender(<Gate conversationId='c2' />);
     await act(async () => first.reject(lockError()));
     expect(screen.getByTestId('send-box').dataset.blocked).toBe('false');
   });

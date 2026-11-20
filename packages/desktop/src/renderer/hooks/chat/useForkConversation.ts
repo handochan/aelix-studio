@@ -61,9 +61,9 @@ export function useForkConversation(conversationId: string | undefined, requires
         }
         emitter.emit('chat.history.refresh');
         void navigate(`/conversation/${forked.id}`);
-        // Lazy fork + eager surfacing: materialize the backend session now so
-        // "parent session gone" style failures show up before the first send.
-        if (!requiresNativeHead) {
+        // Standalone ACP destinations materialize through their mounted view.
+        // Other runtime types retain the existing eager warmup.
+        if (!requiresNativeHead && forked.type !== 'acp' && forked.type !== 'antigravity') {
           void ipcBridge.conversation.ensureRuntime.invoke({ conversation_id: forked.id }).catch((): void => undefined);
         }
       } catch (error) {

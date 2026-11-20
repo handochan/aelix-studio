@@ -28,6 +28,8 @@ import React from 'react';
 import AcpE2EStreamInjector from './AcpE2EStreamInjector';
 import AcpSendBox from './AcpSendBox';
 import SessionHolderGate from './SessionHolder';
+import type { SessionLockView } from './SessionHolder/useSessionLockView';
+import type { AcpConfigOptionsPort } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useAcpMessage } from './useAcpMessage';
 
 const AcpChat: React.FC<{
@@ -38,6 +40,8 @@ const AcpChat: React.FC<{
   agent_name?: string;
   cron_job_id?: string;
   hideSendBox?: boolean;
+  sessionView?: SessionLockView;
+  viewConfigPort?: AcpConfigOptionsPort;
   emptySlot?: React.ReactNode;
   loadedSkills?: string[];
   loadedMcpServers?: string[];
@@ -55,6 +59,8 @@ const AcpChat: React.FC<{
   agent_name,
   cron_job_id,
   hideSendBox,
+  sessionView,
+  viewConfigPort,
   emptySlot,
   loadedSkills,
   loadedMcpServers,
@@ -71,7 +77,7 @@ const AcpChat: React.FC<{
   const teamPermission = useTeamPermission();
   const messageState = useAcpMessage(conversation_id, {
     skipWarmup: Boolean(teamPermission),
-    prepareRuntime: teamPermission?.warmupSession,
+    prepareRuntime: teamPermission?.warmupSession ?? sessionView?.ensure,
   });
 
   const renderSendBox = (sendBlocked = false) => (
@@ -84,6 +90,7 @@ const AcpChat: React.FC<{
       teamSendMessage={teamSendMessage}
       teamRuntime={teamRuntime}
       sendBlocked={sendBlocked}
+      viewConfigPort={viewConfigPort}
     ></AcpSendBox>
   );
 
@@ -112,10 +119,14 @@ const AcpChat: React.FC<{
           <ConversationPlanBar conversation_id={conversation_id} />
           {/* Team chats prepare their runtime through the team, so the holder probe stays out of them. */}
           {!hideSendBox &&
-            (teamPermission ? (
+            (!sessionView || teamPermission ? (
               renderSendBox()
             ) : (
-              <SessionHolderGate conversationId={conversation_id} onWritable={messageState.fetchSlashCommands}>
+              <SessionHolderGate
+                conversationId={conversation_id}
+                view={sessionView}
+                onWritable={messageState.fetchSlashCommands}
+              >
                 {renderSendBox}
               </SessionHolderGate>
             ))}
