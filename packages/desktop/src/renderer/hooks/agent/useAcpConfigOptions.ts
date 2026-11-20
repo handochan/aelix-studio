@@ -146,6 +146,7 @@ export type AcpConfigOptionBlocker = (conversation_id: string, option_id: string
  */
 export type AcpConfigOptionsPort = {
   load: AcpConfigOptionLoad;
+  loadFresh?: AcpConfigOptionLoad;
   /** Overrides the per-conversation setter. Team members route through the team API. */
   setConfigOption?: AcpConfigOptionSetter;
   /** Reports an option as temporarily not settable (e.g. runtime still starting). */
@@ -239,11 +240,13 @@ function subscribeConversationPending(
 /** Default port: talks to the conversation's own runtime. */
 const conversationConfigOptionsPort: AcpConfigOptionsPort = {
   load: async (conversation_id: string) => (await ensureConversationRuntime(conversation_id)).config_options,
+  loadFresh: async (conversation_id: string) =>
+    (await ensureConversationRuntime(conversation_id, { fresh: true })).config_options,
 };
 
 type ConfigOptionsRead = { epoch: number; options: AcpConfigOptionDto[] | null };
 
-const configOptionsInFlight = new Map<string, Promise<ConfigOptionsRead>>();
+const configOptionsInFlight = new Map<string, { port: AcpConfigOptionsPort; result: Promise<ConfigOptionsRead> }>();
 // Record request start and observation order per conversation, including reads
 // joined by a different selector while the original request is still running.
 const configOptionsEpochs = new Map<string, number>();
@@ -268,21 +271,18 @@ function fetchConfigOptionsOnce(
 ): Promise<ConfigOptionsRead> {
   const [, conversation_id] = key;
   const existing = configOptionsInFlight.get(conversation_id);
-  if (existing && !fresh) return existing;
+  if (existing?.port === port && !fresh) return existing.result;
 
   const epoch = advanceConfigOptionsEpoch(conversation_id);
-  const load =
-    fresh && port === conversationConfigOptionsPort
-      ? ensureConversationRuntime(conversation_id, { fresh }).then((response) => response.config_options)
-      : port.load(conversation_id);
+  const load = fresh && port.loadFresh ? port.loadFresh(conversation_id) : port.load(conversation_id);
   const promise = load
     .then((options) => ({ epoch, options: options ?? null }))
     .finally(() => {
-      if (configOptionsInFlight.get(conversation_id) === promise) {
+      if (configOptionsInFlight.get(conversation_id)?.result === promise) {
         configOptionsInFlight.delete(conversation_id);
       }
     });
-  configOptionsInFlight.set(conversation_id, promise);
+  configOptionsInFlight.set(conversation_id, { port, result: promise });
   return promise;
 }
 

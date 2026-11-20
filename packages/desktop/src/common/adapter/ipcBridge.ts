@@ -269,6 +269,16 @@ export const auth = {
 // Conversation — REST + WS
 // ---------------------------------------------------------------------------
 
+const releaseViewRuntime = (pageClosing: boolean) =>
+  httpPost<
+    { outcome: 'released' | 'inactive' | 'view_active' | 'deferred' },
+    { conversation_id: string; view_id: string }
+  >(
+    (p) => `/api/conversations/${p.conversation_id}/runtime/release`,
+    (p) => ({ view_id: p.view_id }),
+    { keepalive: pageClosing, refreshAuth: !pageClosing, timeoutMs: 8_000, silentStatuses: [404, 405] }
+  );
+
 export const conversation = {
   create: withResponseMap(
     httpPost<TChatConversation, ICreateConversationParams>('/api/conversations', (p) => buildCreateConversationBody(p)),
@@ -339,12 +349,16 @@ export const conversation = {
     ),
     fromApiConversation
   ),
-  ensureRuntime: httpPost<EnsureConversationRuntimeResponse, { conversation_id: string; view_id?: string }>(
+  ensureRuntime: httpPost<
+    EnsureConversationRuntimeResponse,
+    { conversation_id: string; view_id?: string; signal?: AbortSignal }
+  >(
     (p) => {
       const path = `/api/conversations/${p.conversation_id}/runtime/ensure`;
       return p.view_id ? `${path}?${new URLSearchParams({ view_id: p.view_id })}` : path;
     },
-    () => undefined
+    () => undefined,
+    ({ signal }) => ({ signal })
   ),
   /**
    * Restart the conversation's agent runtime: tears down the cached CLI agent
@@ -366,14 +380,8 @@ export const conversation = {
     (p) => ({ view_id: p.view_id }),
     { timeoutMs: 5_000, silentStatuses: [409] }
   ),
-  releaseRuntime: httpPost<
-    { outcome: 'released' | 'inactive' | 'view_active' | 'deferred' },
-    { conversation_id: string; view_id: string }
-  >(
-    (p) => `/api/conversations/${p.conversation_id}/runtime/release`,
-    (p) => ({ view_id: p.view_id }),
-    { keepalive: true, timeoutMs: 8_000, silentStatuses: [404, 405] }
-  ),
+  releaseRuntime: releaseViewRuntime(false),
+  releaseRuntimeOnPageHide: releaseViewRuntime(true),
   stop: httpPost<{ runtime: TConversationRuntimeSummary }, { conversation_id: string; turn_id: string }>(
     (p) => `/api/conversations/${p.conversation_id}/cancel`,
     (p) => ({ turn_id: p.turn_id })

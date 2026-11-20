@@ -10,7 +10,11 @@ import { uuid } from '@/common/utils';
 import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
 import { CronJobManager } from '@/renderer/pages/cron';
 import { resolveCronJobId } from '@/renderer/pages/cron/cronUtils';
-import { classifyConfigSetError, useAcpConfigOptions } from '@/renderer/hooks/agent/useAcpConfigOptions';
+import {
+  classifyConfigSetError,
+  type AcpConfigOptionsPort,
+  useAcpConfigOptions,
+} from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
@@ -24,6 +28,7 @@ import { emitter } from '../../../utils/emitter';
 import AcpChat from '../platforms/acp/AcpChat';
 import ChatLayout from './ChatLayout';
 import ChatSlider from './ChatSlider.tsx';
+import { useSessionLockView } from '../platforms/acp/SessionHolder/useSessionLockView';
 import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
 import AcpRuntimeRestartButton from '@/renderer/components/agent/AcpRuntimeRestartButton';
 import { getConversationOrNull } from '@/renderer/pages/conversation/utils/conversationCache';
@@ -287,6 +292,15 @@ const ChatConversation: React.FC<{
   const resolvedHideSendBox = hideSendBox || isLegacyReadOnlyConversationType(conversation?.type);
   const usesHolderView = !resolvedHideSendBox && (conversation?.type === 'acp' || conversation?.type === 'antigravity');
   useActiveLease({ type: 'conversation', id: usesHolderView ? undefined : conversation?.id });
+  const sessionView = useSessionLockView(usesHolderView ? conversation?.id : undefined);
+  const viewConfigPort = useMemo<AcpConfigOptionsPort | undefined>(
+    () =>
+      sessionView && {
+        load: async () => (await sessionView.ensure()).config_options,
+        loadFresh: async () => (await sessionView.ensure({ fresh: true })).config_options,
+      },
+    [sessionView]
+  );
 
   // 使用统一的 Hook 获取预设助手信息（ACP/Codex 会话）
   // Use unified hook for preset assistant info (ACP/Codex conversations)
@@ -330,6 +344,8 @@ const ChatConversation: React.FC<{
             agent_name={assistantDisplayName}
             cron_job_id={cronJobId}
             hideSendBox={resolvedHideSendBox}
+            sessionView={sessionView}
+            viewConfigPort={viewConfigPort}
             emptySlot={emptySlot}
             loadedSkills={(conversation.extra as { skills?: string[] } | undefined)?.skills}
             loadedMcpServers={(conversation.extra as { mcp_servers?: string[] } | undefined)?.mcp_servers}
@@ -352,6 +368,8 @@ const ChatConversation: React.FC<{
     assistantDisplayName,
     cronJobId,
     resolvedHideSendBox,
+    sessionView,
+    viewConfigPort,
     acpAssistantId,
   ]);
 
@@ -382,12 +400,21 @@ const ChatConversation: React.FC<{
           backend={resolvedConversationBackend}
           initialModelId={extra.current_model_id}
           onRuntimeReadyChange={handleRuntimeReadyChange}
+          configOptionsPort={viewConfigPort}
           waitForWarmup
         />
       );
     }
     return <GoogleModelSelector disabled={true} />;
-  }, [conversation, isAionrsConversation, isMobile, isLegacyReadOnlyConversation, resolvedConversationBackend]);
+  }, [
+    conversation,
+    isAionrsConversation,
+    isMobile,
+    isLegacyReadOnlyConversation,
+    resolvedConversationBackend,
+    handleRuntimeReadyChange,
+    viewConfigPort,
+  ]);
 
   if (conversation && conversation.type === 'aionrs') {
     return <AionrsConversationPanel key={conversation.id} conversation={conversation} sliderTitle={sliderTitle} />;

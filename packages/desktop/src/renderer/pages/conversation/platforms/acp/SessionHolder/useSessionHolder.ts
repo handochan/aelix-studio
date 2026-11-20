@@ -7,7 +7,7 @@
 import { ipcBridge } from '@/common';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { classifyCheckFailure, type CheckFailure } from './checkFailure';
-import { useSessionLockView } from './useSessionLockView';
+import type { SessionLockView } from './useSessionLockView';
 import { sessionHolderFromError, sessionHolderFromStreamMessage, type SessionHolder } from './sessionHolder';
 
 /**
@@ -72,8 +72,12 @@ const withoutResult = (current: State, error: unknown): State => ({
  * writable: on first open, on return, and on recheck. Any other failure keeps sending,
  * the stored first message, and the Draft Box blocked and saved until a check succeeds.
  */
-export const useSessionHolder = (conversationId: string, onWritable?: () => void): SessionHolderState => {
-  const ensureViewRuntime = useSessionLockView(conversationId);
+export const useSessionHolder = (
+  conversationId: string,
+  view: SessionLockView,
+  onWritable?: () => void
+): SessionHolderState => {
+  const ensureViewRuntime = view.ensure;
   const [state, setState] = useState<State>(() => initialState(conversationId));
   const activeCheck = useRef<symbol | null>(null);
   const onWritableRef = useRef(onWritable);
@@ -121,8 +125,9 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
   const recheck = useCallback(() => {
     const requestedId = conversationId;
     const check = activeCheck.current;
+    if (!check) return Promise.resolve();
     setState((current) => ({ ...current, recheckState: 'checking' }));
-    ensureViewRuntime().then(
+    return ensureViewRuntime().then(
       () => {
         if (activeCheck.current !== check) return;
         knownHolders.delete(requestedId);
@@ -134,6 +139,8 @@ export const useSessionHolder = (conversationId: string, onWritable?: () => void
       }
     );
   }, [conversationId, ensureViewRuntime, settle]);
+
+  useEffect(() => view.onLeaseExpired(recheck), [view, recheck]);
 
   return { ...state, recheck };
 };

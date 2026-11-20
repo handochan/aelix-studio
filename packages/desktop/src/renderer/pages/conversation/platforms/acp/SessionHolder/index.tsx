@@ -8,9 +8,11 @@ import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import SessionHolderBar, { useHolderNotice } from './SessionHolderBar';
 import { useSessionHolder, type SessionHolderState } from './useSessionHolder';
+import type { SessionLockView } from './useSessionLockView';
 
 type SessionHolderGateProps = {
   conversationId: string;
+  view: SessionLockView;
   /** Called after a recheck finds the session writable again. */
   onWritable?: () => void;
   /**
@@ -40,8 +42,8 @@ const useAnnouncement = ({ status, holder, recheckState, failure }: SessionHolde
  * The status region is mounted before any result so assistive technology announces
  * the lock when the send box is replaced, and each recheck outcome after it.
  */
-const SessionHolderGate: React.FC<SessionHolderGateProps> = ({ conversationId, onWritable, children }) => {
-  const state = useSessionHolder(conversationId, onWritable);
+const SessionHolderGate: React.FC<SessionHolderGateProps> = ({ conversationId, view, onWritable, children }) => {
+  const state = useSessionHolder(conversationId, view, onWritable);
   const announcement = useAnnouncement(state);
   const { status, holder, recheckState, failure, recheck } = state;
   const blocked = isBlockedNotice(status);

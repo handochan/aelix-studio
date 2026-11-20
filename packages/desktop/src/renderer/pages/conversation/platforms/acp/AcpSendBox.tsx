@@ -17,7 +17,11 @@ import FileAttachButton from '@/renderer/components/media/FileAttachButton';
 import { audioExts, getFileExtension, imageExts } from '@/renderer/services/FileService';
 import FilePreview from '@/renderer/components/media/FilePreview';
 import HorizontalFileList from '@/renderer/components/media/HorizontalFileList';
-import { classifyConfigSetError, useAcpConfigOptions } from '@/renderer/hooks/agent/useAcpConfigOptions';
+import {
+  classifyConfigSetError,
+  type AcpConfigOptionsPort,
+  useAcpConfigOptions,
+} from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getSendBoxDraftHook, type FileOrFolderItem } from '@/renderer/hooks/chat/useSendBoxDraft';
@@ -117,6 +121,7 @@ const AcpSendBox: React.FC<{
   teamRuntime?: TeamSendBoxRuntime;
   /** Blocks typing, sending, and the stored first message (e.g. while the session holder is unknown). */
   sendBlocked?: boolean;
+  viewConfigPort?: AcpConfigOptionsPort;
 }> = ({
   conversation_id,
   backend,
@@ -126,6 +131,7 @@ const AcpSendBox: React.FC<{
   teamSendMessage,
   teamRuntime,
   sendBlocked = false,
+  viewConfigPort,
 }) => {
   const {
     aiProcessing,
@@ -183,7 +189,7 @@ const AcpSendBox: React.FC<{
     conversation_id,
     prepareRuntime: prepareRuntimeConfig,
     prepareSetRuntime: teamPermission?.warmupSession,
-    configOptionsPort: teamPermission?.configOptionsPort,
+    configOptionsPort: teamPermission?.configOptionsPort ?? viewConfigPort,
     requireDeferredModeAcceptance: Boolean(isLeaderInTeam) && backend !== 'antigravity',
     enabled: true,
   });
@@ -204,7 +210,7 @@ const AcpSendBox: React.FC<{
     backend,
     prepareRuntime: prepareRuntimeConfig,
     prepareSetRuntime: teamPermission?.warmupSession,
-    configOptionsPort: teamPermission?.configOptionsPort,
+    configOptionsPort: teamPermission?.configOptionsPort ?? viewConfigPort,
     enabled: isMobile,
     onSelectModelSuccess: () => Message.success(t('agent.model.switchSuccess')),
     onSelectModelFailed: (_modelId, error) => Message.error(t(configErrorMessageKey(error))),
@@ -933,7 +939,7 @@ Please check your local CLI tool authentication status`,
                 onModeChanged={propagateTeamMode}
                 beforeRuntimeSync={prepareRuntimeConfig}
                 beforeRuntimeSet={teamPermission?.warmupSession}
-                configOptionsPort={teamPermission?.configOptionsPort}
+                configOptionsPort={teamPermission?.configOptionsPort ?? viewConfigPort}
               />
             )}
           </div>

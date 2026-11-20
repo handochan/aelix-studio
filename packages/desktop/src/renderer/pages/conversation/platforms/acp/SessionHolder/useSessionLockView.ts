@@ -4,67 +4,105 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useCallback, useEffect, useRef } from 'react';
+import { useLayoutEffect, useMemo } from 'react';
 import { ipcBridge } from '@/common';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { uuid } from '@/common/utils/utils';
 import { ACTIVE_LEASE_RENEW_INTERVAL_MS } from '@/renderer/pages/conversation/hooks/useActiveLease';
 import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
 
-/** Bind runtime ensure, heartbeat and departure to one mounted view. */
-export function useSessionLockView(conversationId: string): () => ReturnType<typeof ensureConversationRuntime> {
-  const current = useRef<{ conversation_id: string; view_id: string } | undefined>(undefined);
-  const ensure = useCallback(() => {
-    const view = current.current;
-    return ensureConversationRuntime(conversationId, { viewId: view?.view_id });
-  }, [conversationId]);
+export type SessionLockView = {
+  ensure: (options?: { fresh?: boolean }) => ReturnType<typeof ensureConversationRuntime>;
+  onLeaseExpired: (listener: () => Promise<void>) => () => void;
+};
 
-  useEffect(() => {
-    const params = { conversation_id: conversationId, view_id: uuid(36) };
-    current.current = params;
+type ViewLifetime = { id: string; lifetime: AbortController };
 
-    let departed = false;
+function createSessionView(conversationId: string | undefined) {
+  let active: ViewLifetime | undefined;
+  let onExpired: (() => Promise<void>) | undefined;
+  const view: SessionLockView = {
+    ensure: ({ fresh } = {}) => {
+      if (!conversationId || !active) {
+        return Promise.reject(new DOMException('Conversation view has departed', 'AbortError'));
+      }
+      return ensureConversationRuntime(conversationId, {
+        viewId: active.id,
+        signal: active.lifetime.signal,
+        fresh,
+      });
+    },
+    onLeaseExpired: (listener) => {
+      onExpired = listener;
+      return () => {
+        if (onExpired === listener) onExpired = undefined;
+      };
+    },
+  };
+
+  return {
+    view,
+    attach: (lifetime: ViewLifetime | undefined) => {
+      active = lifetime;
+    },
+    recover: async () => {
+      await onExpired?.();
+    },
+  };
+}
+
+/** Share the mounted view's runtime admission with every standalone ACP reader. */
+export function useSessionLockView(conversationId: string | undefined): SessionLockView | undefined {
+  const scope = useMemo(() => createSessionView(conversationId), [conversationId]);
+
+  useLayoutEffect(() => {
+    if (!conversationId) return;
+    const active = { id: uuid(36), lifetime: new AbortController() };
+    const params = { conversation_id: conversationId, view_id: active.id };
+    scope.attach(active);
+
     let renewing = false;
     const renew = async () => {
-      if (departed || renewing || document.visibilityState === 'hidden') return;
+      if (active.lifetime.signal.aborted || renewing || document.visibilityState === 'hidden') return;
       renewing = true;
       try {
         await ipcBridge.conversation.renewViewLease.invoke(params);
       } catch (error) {
-        // A background tab may have outlived the host's lease. Re-register only
-        // the view which is still mounted, using the same fenced ensure path.
-        if (!departed && isBackendHttpError(error) && error.status === 409) {
-          void ensure().catch(() => {});
+        if (!active.lifetime.signal.aborted && isBackendHttpError(error) && error.status === 409) {
+          await scope.recover();
         }
       } finally {
         renewing = false;
       }
     };
-    const heartbeat = setInterval(() => void renew(), ACTIVE_LEASE_RENEW_INTERVAL_MS);
     const visible = (): void => {
       void renew();
     };
+    const heartbeat = setInterval(visible, ACTIVE_LEASE_RENEW_INTERVAL_MS);
     document.addEventListener('visibilitychange', visible);
 
-    const depart = () => {
-      if (departed) return;
-      departed = true;
+    const depart = (pageClosing: boolean) => {
+      if (active.lifetime.signal.aborted) return;
+      active.lifetime.abort();
+      scope.attach(undefined);
       clearInterval(heartbeat);
       document.removeEventListener('visibilitychange', visible);
       // The host schedules the release even if this page cannot receive a reply.
-      void ipcBridge.conversation.releaseRuntime.invoke(params).catch(() => {});
+      const release = pageClosing
+        ? ipcBridge.conversation.releaseRuntimeOnPageHide
+        : ipcBridge.conversation.releaseRuntime;
+      void release.invoke(params).catch(() => {});
     };
     const closePage = (event: PageTransitionEvent) => {
-      if (!event.persisted) depart();
+      if (!event.persisted) depart(true);
     };
     window.addEventListener('pagehide', closePage);
 
     return () => {
       window.removeEventListener('pagehide', closePage);
-      if (current.current === params) current.current = undefined;
-      depart();
+      depart(false);
     };
-  }, [conversationId, ensure]);
+  }, [conversationId, scope]);
 
-  return ensure;
+  return conversationId ? scope.view : undefined;
 }

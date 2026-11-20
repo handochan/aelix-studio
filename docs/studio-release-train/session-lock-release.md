@@ -4,7 +4,8 @@
 
 Each Studio mount uses a fresh UUID. It registers the view while warming the runtime with
 `POST /api/conversations/c1/runtime/ensure?view_id=a6407d4e-c752-4970-8bc2-3d1c9ee18876`.
-It then renews the registered view through `POST /api/conversations/c1/active-lease`.
+Slash-command, usage, model and mode reads share that view's ensure. A callback from a departed
+view cannot start another ensure. It then renews the registered view through `POST /api/conversations/c1/active-lease`.
 The existing request without a body continues to renew a legacy lease.
 
 ```json
@@ -32,8 +33,9 @@ even if the browser tab has closed. The host checks the exact runtime identity a
 before passing close to ACP. A newly admitted view supersedes a pending departure. If close has
 already started, ensure waits for it on the host and opens the saved session afterwards. A short
 tombstone rejects late requests from the departed view. Unknown stand-alone heartbeat requests
-cannot register a view. The renderer bounds the heartbeat and departure HTTP requests and starts
-reopening independently of their responses.
+cannot register a view. The renderer bounds the heartbeat and departure HTTP requests and starts reopening independently
+of their responses. While the page remains open, a 401 permits one shared cookie refresh and a
+replay within the original deadline. Closing the browser tab sends one keepalive departure.
 
 Release is scoped to standalone Aelix ACP runtimes. The conversation row, history and saved ACP
 session anchor survive. ACP `a78db597d` already closes non-destructively through
@@ -63,3 +65,8 @@ to the host's `scripts/verification/smoke_session_release.py`. The fixture start
 native turn, opens and closes a Chromium tab, finishes the turn and checks that the CLI
 immediately opens the same native session. Set `STUDIO_RELEASE_CHROMIUM` if using a system
 Chromium executable.
+
+The same probe has a `STUDIO_RELEASE_SCENARIO=late-spa` mode for an isolated host
+started with `--studio-auth`. Set `STUDIO_RELEASE_FIXTURE_JWT` to that fixture's temporary
+signing key. It preserves the live refresh cookie, expires only the access cookie, and
+verifies heartbeat and SPA departure replay plus rejection of an ensure delivered after release.

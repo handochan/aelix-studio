@@ -163,12 +163,14 @@ describe('httpBridge', () => {
       expect(fetchSpy.mock.calls[0][1].keepalive).toBe(true);
     });
 
-    it('does not start a separate authentication refresh for a bounded POST', async () => {
+    it('does not start an authentication refresh for a one-shot pagehide POST', async () => {
       const fetchSpy = vi.fn().mockResolvedValue(new Response(null, { status: 401 }));
       vi.stubGlobal('fetch', fetchSpy);
       vi.stubGlobal('window', {});
       vi.stubGlobal('document', {});
-      await expect(httpPost('/api/lifecycle', undefined, { timeoutMs: 50 }).invoke()).rejects.toMatchObject({
+      await expect(
+        httpPost('/api/lifecycle', undefined, { timeoutMs: 50, refreshAuth: false }).invoke()
+      ).rejects.toMatchObject({
         status: 401,
       });
       expect(fetchSpy).toHaveBeenCalledTimes(1);

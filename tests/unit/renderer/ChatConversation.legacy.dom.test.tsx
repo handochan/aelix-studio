@@ -6,8 +6,10 @@ import type { TChatConversation } from '@/common/config/storage';
 import ChatConversation from '@/renderer/pages/conversation/components/ChatConversation';
 
 const usePresetAssistantInfoMock = vi.fn();
-const acpChatMock = vi.fn(() => <div data-testid='mock-acp-chat'>acp chat</div>);
-const acpModelSelectorMock = vi.fn(() => <div data-testid='mock-acp-model-selector'>model selector</div>);
+const acpChatMock = vi.fn((_props: unknown) => <div data-testid='mock-acp-chat'>acp chat</div>);
+const acpModelSelectorMock = vi.fn((_props: unknown) => (
+  <div data-testid='mock-acp-model-selector'>model selector</div>
+));
 const backendFetch = vi.fn(() => Promise.reject(new Error('Unexpected backend HTTP in a routing fixture')));
 const backendWebSocket = vi.fn(function () {
   throw new Error('Unexpected backend WebSocket in a routing fixture');
@@ -16,6 +18,14 @@ const backendWebSocket = vi.fn(function () {
 // Routing/identity is under test; lease renewal and runtime transport have their
 // own focused tests and must not leave live IO behind when this fixture unmounts.
 vi.mock('@/renderer/pages/conversation/hooks/useActiveLease', () => ({ useActiveLease: vi.fn() }));
+const scopedView = {
+  ensure: vi.fn(async () => ({ config_options: [] })),
+  onLeaseExpired: () => () => {},
+};
+vi.mock('@/renderer/pages/conversation/platforms/acp/SessionHolder/useSessionLockView', () => ({
+  useSessionLockView: (conversationId?: string) => (conversationId ? scopedView : undefined),
+}));
+
 vi.mock('@/renderer/components/agent/AcpRuntimeRestartButton', () => ({ default: () => null }));
 
 vi.mock('@/renderer/pages/conversation/Messages/MessageList', () => ({
@@ -161,11 +171,12 @@ describe('ChatConversation legacy runtime rendering', () => {
       expect.objectContaining({
         backend: 'codex',
         assistantId: 'assistant-research',
+        sessionView: scopedView,
       })
     );
   });
 
-  it('passes the resolved assistant backend to the ACP model selector for ACP conversations', () => {
+  it('passes the ACP chat view’s configuration port to the header selector', () => {
     usePresetAssistantInfoMock.mockReturnValue({
       info: {
         name: 'Research Assistant',
@@ -204,7 +215,11 @@ describe('ChatConversation legacy runtime rendering', () => {
         backend: 'codex',
         initialModelId: 'model-1',
         waitForWarmup: true,
+        configOptionsPort: expect.objectContaining({ load: expect.any(Function) }),
       })
     );
+    const header = vi.mocked(acpModelSelectorMock).mock.calls[0]?.[0] as { configOptionsPort: unknown };
+    const chat = vi.mocked(acpChatMock).mock.calls[0]?.[0] as { viewConfigPort: unknown };
+    expect(header.configOptionsPort).toBe(chat.viewConfigPort);
   });
 });
