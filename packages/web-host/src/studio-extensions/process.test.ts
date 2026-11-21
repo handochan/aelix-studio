@@ -164,20 +164,32 @@ describe('masking credentials in output', () => {
     return performance.now() - start;
   };
   /**
-   * Linear-time checks without a tight clock: on a 1 MiB input, rescanning or backtracking per
-   * position takes minutes, a linear pass milliseconds. A 2-second bound tells them apart with
-   * room for a loaded CI runner.
+   * Linear-time checks without a tight clock. Each input is sized so that a quadratic path
+   * (rescanning or backtracking from every position) takes tens of seconds or more, while a
+   * linear pass takes milliseconds; a 2-second bound tells them apart with room for a loaded
+   * CI runner. Each of the three paths the masking once had is caught by one of these:
+   * the cap regex by the cap boundary, the per-position scheme regex by dense scheme
+   * characters, and rescanning the held-back text by the character-by-character stream.
    */
   const BOUND_MS = 2000;
   const MIB = 1024 * 1024;
 
-  it.each([65_536, 65_537])('keeps a %i-character token by the cap, whole or split', (length) => {
+  it.each([65_536, 65_537])('keeps a %i-character token by the cap in linear time, whole or split', (length) => {
+    // A run just at the cap is where a "longer than the cap" regex backtracks from every position.
     const text = 'start ' + 'x'.repeat(length) + ' end\n';
     const expected = length > 65_536 ? 'start […] end\n' : text;
-    for (const chunks of [[text], [text.slice(0, 40_000), text.slice(40_000)]]) {
-      const tail = new OutputTail(70_000, redactUrlCredentials);
-      for (const chunk of chunks) tail.push(chunk);
-      expect(tail.toString() === expected).toBe(true);
+    for (const [name, chunks] of [
+      ['one chunk', [text]],
+      ['two chunks', [text.slice(0, 40_000), text.slice(40_000)]],
+    ] as [string, string[]][]) {
+      let result = '';
+      const time = elapsed(() => {
+        const tail = new OutputTail(70_000, redactUrlCredentials);
+        for (const chunk of chunks) tail.push(chunk);
+        result = tail.toString();
+      });
+      expect([name, result === expected]).toEqual([name, true]);
+      expect([name, time < BOUND_MS]).toEqual([name, true]);
     }
   });
 
@@ -204,7 +216,11 @@ describe('masking credentials in output', () => {
   });
 
   it('keeps a character-by-character stream linear', () => {
-    const text = 'x'.repeat(256 * 1024) + ' done';
+    // Runs just under the cap, one character at a time: rescanning what is held back on each
+    // push reads up to the whole run again for every character. That is bounded by the cap, so
+    // it grows with pushes times the cap; about 4 MiB of pushes makes it seconds, a linear
+    // pass a fraction of one.
+    const text = Array.from({ length: 64 }, () => 'x'.repeat(65_000)).join(' ') + ' done';
     const time = elapsed(() => {
       const tail = new OutputTail(4096, redactUrlCredentials);
       for (const character of text) tail.push(character);
@@ -214,11 +230,12 @@ describe('masking credentials in output', () => {
   });
 
   it.each([
-    ['dense scheme characters', 'a.'.repeat(MIB / 2)],
+    // A word boundary at every other character: a scheme regex would scan to the end from each.
+    ['dense scheme characters', 'a.'.repeat(MIB / 8)],
     ['dense separators', 'a://'.repeat(MIB / 4)],
     ['many addresses', 'https://u:p@h/ '.repeat(MIB / 16)],
     ['one long authority', 'https://' + 'u'.repeat(MIB) + '@h'],
-  ])('masks %s of 1 MiB in linear time', (_case, text) => {
+  ])('masks %s in linear time', (_case, text) => {
     expect(elapsed(() => redactUrlCredentials(text))).toBeLessThan(BOUND_MS);
   });
 
