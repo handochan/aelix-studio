@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { canonicalName } from '../inspect/metadata.js';
-import type { SiteSnapshot } from '../inspect/site.js';
-import { compareVersions, parseVersion } from '../inspect/version.js';
-import { ExtensionFailure, type ExtensionOrigin, type OnlineExtensionSource } from '../types.js';
+import { fileURLToPath } from 'node:url';
+import { canonicalName } from '../../inspect/metadata.js';
+import type { SiteSnapshot } from '../../inspect/site.js';
+import { compareVersions, parseVersion } from '../../inspect/version.js';
+import { ExtensionFailure, type ExtensionOrigin, type OnlineExtensionSource } from '../../types.js';
 
 const PYPI = 'https://pypi.org/simple/';
 const PACKAGE = /^[a-z0-9](?:[a-z0-9._-]*[a-z0-9])?$/i;
@@ -52,6 +53,23 @@ function safeFileGitPath(pathname: string): boolean {
   }
 }
 
+/** One name of a repository subdirectory: no `.`/`..`, no hidden or option-like name, nothing native reads as extras. */
+const SUBDIRECTORY_PART = /^[a-z0-9_][a-z0-9._-]*$/i;
+
+/**
+ * A repository subdirectory as requested: a relative path of plain names joined by `/`.
+ * Absolute paths, drive letters, backslashes, `.`, `..`, empty names and `.git` cannot be
+ * spelled. This is the first check only: the path is checked again against the checkout.
+ */
+export function parseSubdirectory(value: unknown): string | undefined {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 1024) return undefined;
+  const parts = value.split('/');
+  if (parts.length > 32) return undefined;
+  return parts.every((part) => part.length <= 255 && SUBDIRECTORY_PART.test(part) && !part.endsWith('.'))
+    ? value
+    : undefined;
+}
+
 /** Parse only the documented package-name and git install forms. A request cannot supply extra indexes or flags. */
 export function parseOnlineSource(source: Record<string, unknown>): OnlineExtensionSource | undefined {
   const index = source.indexUrl === undefined ? new URL(PYPI) : address(source.indexUrl, ['http:', 'https:']);
@@ -74,9 +92,93 @@ export function parseOnlineSource(source: Record<string, unknown>): OnlineExtens
   if (!url?.pathname || url.pathname === '/' || target.includes('?')) return undefined;
   // Check the spelling before URL normalization can remove dot segments from a ref.
   const pathname = target.slice(target.indexOf('/', target.indexOf('://') + 3));
-  // pip owns the checkout. Even a plain relative subdirectory can be a symlink in it.
   if (!safeGitRevision(pathname) || (url.protocol === 'file:' && !safeFileGitPath(pathname))) return undefined;
-  return { kind: 'git', url: 'git+' + url.href, indexUrl: index.href };
+  // A `#subdirectory=` fragment would let pip pick the path in its own checkout, where even a
+  // plain name can be a link. A subdirectory is a field of its own, checked against Studio's checkout.
+  if (source.subdirectory === undefined) return { kind: 'git', url: 'git+' + url.href, indexUrl: index.href };
+  const subdirectory = parseSubdirectory(source.subdirectory);
+  return subdirectory === undefined
+    ? undefined
+    : { kind: 'git', url: 'git+' + url.href, subdirectory, indexUrl: index.href };
+}
+
+/** The repository address and the revision of a parsed git source, split the way pip splits them. */
+export function gitLocation(source: Extract<OnlineExtensionSource, { kind: 'git' }>): {
+  repository: string;
+  revision: string | undefined;
+} {
+  const requested = new URL(source.url.slice(4));
+  const at = requested.pathname.lastIndexOf('@');
+  const revision = at < 0 ? undefined : decodeURIComponent(requested.pathname.slice(at + 1));
+  if (at >= 0) requested.pathname = requested.pathname.slice(0, at);
+  return { repository: requested.href, revision };
+}
+
+/** PEP 610 provenance of one distribution in a site, or undefined when it has none that parses. */
+async function directUrl(site: string, info: string): Promise<Record<string, unknown> | undefined> {
+  const recorded = await readFile(path.join(site, info, 'direct_url.json'), 'utf8').catch(() => '');
+  try {
+    const value: unknown = JSON.parse(recorded);
+    return typeof value === 'object' && value !== null && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Canonical names of the extension distributions a change added or rewrote. */
+function changedExtensionDistributions(before: SiteSnapshot, after: SiteSnapshot): string[] {
+  return [...new Set([...after.extensions.values()].map((entry) => entry.distribution))].filter((name) => {
+    const installed = after.distributions.get(name);
+    return installed !== undefined && before.distributions.get(name)?.recordSha256 !== installed.recordSha256;
+  });
+}
+
+/**
+ * Resolve a subdirectory install against its PEP 610 provenance. native installed the checked
+ * directory as a local path, so exactly one changed extension distribution must record that
+ * very directory, as a plain (not editable) directory install. The origin records the
+ * repository, the commit Studio checked out and the subdirectory.
+ */
+export async function installedCheckoutOrigin(
+  source: Extract<OnlineExtensionSource, { kind: 'git' }>,
+  site: string,
+  before: SiteSnapshot,
+  after: SiteSnapshot,
+  checkout: { directory: string; commit: string }
+): Promise<{ distribution: string; origin: ExtensionOrigin }> {
+  const matches: string[] = [];
+  for (const name of changedExtensionDistributions(before, after)) {
+    const installed = after.distributions.get(name);
+    if (!installed) continue;
+    // oxlint-disable-next-line no-await-in-loop -- only the metadata of changed extension distributions
+    const direct = await directUrl(site, installed.info);
+    const info = direct?.dir_info as { editable?: unknown } | undefined;
+    const url = typeof direct?.url === 'string' ? URL.parse(direct.url) : null;
+    if (url?.protocol !== 'file:' || typeof info !== 'object' || info === null || info.editable === true) continue;
+    let recorded: string;
+    try {
+      recorded = fileURLToPath(url);
+    } catch {
+      continue;
+    }
+    if (path.resolve(recorded) === checkout.directory) matches.push(name);
+  }
+  if (matches.length !== 1 || source.subdirectory === undefined)
+    throw new ExtensionFailure('REQUEST_MISMATCH', [
+      'the checked subdirectory did not identify exactly one changed extension distribution',
+    ]);
+  return {
+    distribution: matches[0],
+    origin: {
+      kind: 'git',
+      url: source.url,
+      commit: checkout.commit,
+      indexUrl: source.indexUrl ?? PYPI,
+      subdirectory: source.subdirectory,
+    },
+  };
 }
 
 /** Resolve a git install against actual PEP 610 provenance, never against an unrelated dependency. */
@@ -92,26 +194,21 @@ export async function installedGitOrigin(
   if (at >= 0) requested.pathname = requested.pathname.slice(0, at);
   requested.username = '';
   const matches = [];
-  for (const name of new Set([...after.extensions.values()].map((entry) => entry.distribution))) {
+  for (const name of changedExtensionDistributions(before, after)) {
     const installed = after.distributions.get(name);
-    if (!installed || before.distributions.get(name)?.recordSha256 === installed.recordSha256) continue;
+    if (!installed) continue;
     // oxlint-disable-next-line no-await-in-loop -- only the metadata of changed extension distributions
-    const recorded = await readFile(path.join(site, installed.info, 'direct_url.json'), 'utf8').catch(() => '');
-    if (!recorded) continue;
-    let direct: { url?: unknown; subdirectory?: unknown; vcs_info?: { vcs?: unknown; commit_id?: unknown } } | null;
-    try {
-      direct = JSON.parse(recorded);
-    } catch {
-      continue;
-    }
-    const url = typeof direct?.url === 'string' ? URL.parse(direct.url) : null;
+    const direct = await directUrl(site, installed.info);
+    if (!direct) continue;
+    const url = typeof direct.url === 'string' ? URL.parse(direct.url) : null;
     // pip removes credentials (including the optional SSH username) from its saved URL.
     if (url) url.username = '';
-    const commit = direct?.vcs_info?.commit_id;
+    const vcs = direct.vcs_info as { vcs?: unknown; commit_id?: unknown } | undefined;
+    const commit = vcs?.commit_id;
     if (
       url?.href === requested.href &&
-      direct?.subdirectory === undefined &&
-      direct?.vcs_info?.vcs === 'git' &&
+      direct.subdirectory === undefined &&
+      vcs?.vcs === 'git' &&
       typeof commit === 'string' &&
       COMMIT.test(commit) &&
       (!COMMIT.test(commitPin) || commitPin === commit)
