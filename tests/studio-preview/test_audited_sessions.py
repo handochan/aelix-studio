@@ -1,4 +1,5 @@
 """Installer sessions keep Provider/version traffic under the same strict audit."""
+import errno
 import importlib.util
 import json
 import os
@@ -94,17 +95,6 @@ class SessionReceiptTests(unittest.TestCase):
                  patch.object(module,'run_supervised',check_command):
                 audit.run('provider',['/owned/command'],env={},timeout=480,namespace=True)
 
-    def test_provider_phases_share_one_budget_even_if_helper_uses_its_full_limit(self):
-        import sys
-        source=ROOT/'scripts/studio-preview/providerSmoke.py'
-        with patch.object(sys,'path',[str(source.parent),*sys.path]):
-            spec=importlib.util.spec_from_file_location('provider_phase_budget',source)
-            provider=importlib.util.module_from_spec(spec);spec.loader.exec_module(provider)
-        with patch.object(provider.time,'monotonic',return_value=300):
-            self.assertEqual(provider.phase_timeout(450,240),150)
-        with patch.object(provider.time,'monotonic',return_value=451):
-            self.assertEqual(provider.phase_timeout(450,240),0)
-
     def test_provider_attempts_are_rejected_even_if_command_succeeds(self):
         with tempfile.TemporaryDirectory() as directory:
             audit, run = self.run_report(Path(directory), attempts=1)
@@ -170,6 +160,47 @@ class SessionReceiptTests(unittest.TestCase):
                                       capture_output=True,text=True,timeout=10)
                 self.assertNotEqual(result.returncode,0)
                 self.assertIn(message,result.stderr)
+
+
+class ProviderStageTests(unittest.TestCase):
+    def setUp(self):
+        source = ROOT / 'scripts/studio-preview/providerSmoke.py'
+        spec = importlib.util.spec_from_file_location('provider_stage', source)
+        self.provider = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(self.provider)
+
+    def test_only_darwin_x64_gets_a_larger_provider_budget(self):
+        with patch.object(self.provider.time, 'monotonic', return_value=100):
+            self.assertEqual(self.provider.provider_host_timeout(450, 'darwin-x64'), 300)
+            for target in ('darwin-arm64', 'linux-arm64', 'linux-x64', 'win32-x64'):
+                with self.subTest(target=target):
+                    self.assertEqual(self.provider.provider_host_timeout(450, target), 240)
+
+    def test_provider_budget_is_capped_by_the_remaining_shared_time(self):
+        for target in ('darwin-x64', 'darwin-arm64'):
+            for elapsed, remaining in ((300, 150), (451, 0)):
+                with (self.subTest(target=target, elapsed=elapsed),
+                      patch.object(self.provider.time, 'monotonic', return_value=elapsed)):
+                    self.assertEqual(self.provider.provider_host_timeout(450, target), remaining)
+
+    def test_sandbox_cleanup_keeps_timeout_primary(self):
+        with patch.object(self.provider.tempfile, 'TemporaryDirectory') as temporary:
+            temporary.return_value.name = '/owned/provider-sandbox'
+            temporary.return_value.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
+            timeout = TimeoutError('Provider host stage ran out of time')
+            with self.assertRaises(TimeoutError) as observed, self.provider.provider_sandbox():
+                raise timeout
+        self.assertIs(observed.exception, timeout)
+        self.assertIn('Directory not empty', timeout.__notes__[0])
+        temporary.return_value.cleanup.assert_called_once_with()
+
+    def test_sandbox_cleanup_failure_still_fails_a_successful_stage(self):
+        with patch.object(self.provider.tempfile, 'TemporaryDirectory') as temporary:
+            temporary.return_value.name = '/owned/provider-sandbox'
+            temporary.return_value.cleanup.side_effect = OSError(errno.ENOTEMPTY, 'Directory not empty')
+            with self.assertRaises(OSError) as observed, self.provider.provider_sandbox():
+                pass
+        self.assertEqual(observed.exception.errno, errno.ENOTEMPTY)
 
 
 @unittest.skipUnless(sys.platform=='linux','Linux tracing required')

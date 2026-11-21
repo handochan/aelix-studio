@@ -23,9 +23,31 @@ FORK_CHILD = 'SYNTHETIC_HEAD_FORK_CHILD'
 FORK_RESTART = 'SYNTHETIC_HEAD_FORK_RESTART'
 
 def phase_timeout(deadline, limit):
-    """Bound each phase by both its unchanged limit and the shared deadline."""
+    """Bound each phase by both its own limit and the shared deadline."""
     return min(limit, max(0, deadline - time.monotonic()))
 
+
+def provider_host_timeout(deadline, target):
+    """Allow extra Provider UI time on macOS Intel within the shared deadline."""
+    # On the Intel runner, passing UI runs took up to 225s and slower runs
+    # exhausted 240s before the full desktop and LAN flow could finish (#107).
+    return phase_timeout(deadline, 300 if target == 'darwin-x64' else 240)
+
+
+@contextlib.contextmanager
+def provider_sandbox():
+    """Keep a UI failure primary when a leftover process races sandbox cleanup."""
+    temporary = tempfile.TemporaryDirectory(prefix='Studio Provider user 한글-')
+    try:
+        yield Path(temporary.name).resolve()
+    except BaseException as failure:
+        try:
+            temporary.cleanup()
+        except OSError as cleanup_error:
+            failure.add_note(f'Provider sandbox cleanup failed: {cleanup_error}')
+        raise
+    else:
+        temporary.cleanup()
 
 
 def verify_fork_bindings(root, parent_id, child_id):
@@ -177,8 +199,7 @@ async def main(args):
     bundled_before = helper_bytes() if helper_manifest else None
     fixture = ProviderFixture()
     await fixture.start()
-    with tempfile.TemporaryDirectory(prefix='Studio Provider user 한글-') as temporary:
-        sandbox = Path(temporary).resolve()
+    with provider_sandbox() as sandbox:
         for name in ('home', 'agent', 'workspace', 'extensions'):
             (sandbox / name).mkdir()
         import base64
@@ -227,7 +248,7 @@ async def main(args):
             process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
                 cwd=ROOT, env=dict(env, PROVIDER_DRIVER_PYTHON=sys.executable),
                 **({'start_new_session': True} if os.name != 'nt' else {}))
-            host_timeout = phase_timeout(qualification_deadline, 240)
+            host_timeout = provider_host_timeout(qualification_deadline, receipt['target'])
             print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
                               'sharedTimeoutSeconds': 450}), flush=True)
             async with asyncio.timeout(host_timeout):
