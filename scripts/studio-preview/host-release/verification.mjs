@@ -83,19 +83,23 @@ export function verifyConfigPreserved(file, { phase, launch, record }) {
 export async function boundedWait(
   work,
   label,
-  { timeoutMs = 20000, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
+  { timeoutMs = 20000, deadline = null, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
 ) {
   const started = performance.now();
   const startedAt = new Date().toISOString();
   let timer;
   let status = 'passed';
+  const timeoutError = () => new Error(`${label}: bounded wait elapsed (${timeoutMs}ms)`);
   try {
-    return await Promise.race([
+    const value = await Promise.race([
       work,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label}: bounded wait elapsed (${timeoutMs}ms)`)), timeoutMs);
+        timer = setTimeout(() => reject(timeoutError()), timeoutMs);
       }),
     ]);
+    // A reply can be processed before an overdue timer runs.
+    if (deadline !== null && performance.now() >= deadline) throw timeoutError();
+    return value;
   } catch (error) {
     status = 'failed';
     throw error;
@@ -244,25 +248,36 @@ export function recordLaunchFailure(app, error) {
   );
 }
 
+function readMainIdentity() {
+  return {
+    pid: process.pid,
+    backendOverride: process.env.AIONUI_BACKEND_BIN,
+    resourcesPath: process.resourcesPath,
+  };
+}
+
 async function evaluateIdentity(app, protocol) {
   const token = randomUUID();
   const finish = protocol.trackIdentityEvaluation(token);
   let result;
   try {
-    const identity = await app.evaluate(
-      () => ({
-        pid: process.pid,
-        backendOverride: process.env.AIONUI_BACKEND_BIN,
-        resourcesPath: process.resourcesPath,
-      }),
-      token
-    );
+    const identity = await app.evaluate(readMainIdentity, token);
     result = { identity };
   } catch (error) {
     result = { failedAt: new Date().toISOString(), error };
   }
   const protocolError = finish();
   return { ...result, protocolError };
+}
+
+function inspectorPromiseCollected(error) {
+  // Playwright rewrites this V8 inspector error as a destroyed context.
+  return error?.code === -32000 && error.messageRedacted === false && error.message === 'Promise was collected';
+}
+
+/** Verify that an installed app did not use the development backend override. */
+export function verifyInstalledBackend(identity) {
+  assert.equal(identity.backendOverride, undefined);
 }
 
 /** Share the launch timeout with first-window readiness before evaluating identity. */
@@ -381,44 +396,65 @@ export async function launchWithIdentity(
       }
       processTimeline?.beginIdentity();
       observation.identityStartedAt = new Date().toISOString();
-      const first = await evaluateIdentity(app, protocol);
-      let identity = first.identity;
-      if (first.failedAt) {
-        observation.identityFailedAt = first.failedAt;
+      const result = await evaluateIdentity(app, protocol);
+      let identity = result.identity;
+      if (result.failedAt) {
+        observation.identityFailedAt = result.failedAt;
         observation.identityProtocol = observation.protocol = protocol.snapshot();
-        const original = first.protocolError;
+        diagnostic();
+        const remaining = deadline - performance.now();
         if (
-          original?.code !== -32000 ||
-          original.messageRedacted !== false ||
-          original.message !== 'Promise was collected' ||
+          !inspectorPromiseCollected(result.protocolError) ||
+          !protocol.evaluateMainSynchronously ||
           exited(main) ||
-          app.process() !== main
+          app.process() !== main ||
+          remaining <= 0
         ) {
-          diagnostic();
-          throw first.error;
+          throw result.error;
         }
-
-        const retry = { startedAt: new Date().toISOString(), firstProtocolError: original };
-        observation.identityRetry = { ...retry, outcome: 'pending' };
-        diagnostic();
-        const second = await evaluateIdentity(app, protocol);
-        // The same Playwright app uses its original inspector handle.
-        // app.process() can be the Windows launcher, with a different PID.
-        const sameApp = !second.failedAt && !exited(main) && app.process() === main;
-        const pid = second.identity?.pid;
-        const validPid = Number.isSafeInteger(pid) && pid > 0;
-        observation.identityRetry = {
-          ...retry,
-          finishedAt: second.failedAt ?? new Date().toISOString(),
-          outcome: sameApp && validPid ? 'passed' : 'failed',
-          secondProtocolError: second.protocolError,
+        const retry = {
+          startedAt: new Date().toISOString(),
+          firstProtocolError: result.protocolError,
+          method: 'synchronous-inspector',
+          outcome: 'pending',
         };
+        observation.identityRetry = retry;
+        console.log(
+          `Studio launch #${launchNumber}: retrying identity without awaiting a promise (Promise was collected)`
+        );
         diagnostic();
-        if (second.failedAt) throw second.error;
-        if (!sameApp) throw new Error('Studio app changed during identity retry');
-        if (!validPid) throw new Error('Studio identity retry returned an invalid PID');
-        identity = second.identity;
+        try {
+          if (exited(main) || app.process() !== main) throw new Error('Studio app changed during identity retry');
+          const timeoutMs = deadline - performance.now();
+          if (timeoutMs <= 0) throw result.error;
+          identity = await boundedWait(
+            protocol.evaluateMainSynchronously(app, readMainIdentity),
+            'electron-identity-retry-response',
+            {
+              timeoutMs,
+              deadline,
+              launch: launchNumber,
+              pid: main.pid,
+              phase: 'identity',
+            }
+          );
+          if (exited(main) || app.process() !== main) throw new Error('Studio app changed during identity retry');
+          // Windows can use a launcher whose PID differs from the Electron PID.
+          const pid = identity?.pid;
+          if (!Number.isSafeInteger(pid) || pid <= 0) throw new Error('Studio identity retry returned an invalid PID');
+          retry.outcome = 'passed';
+        } finally {
+          if (retry.outcome === 'pending') retry.outcome = 'failed';
+          retry.finishedAt = new Date().toISOString();
+          diagnostic();
+        }
+      } else if (performance.now() >= deadline) {
+        throw new Error(
+          `Studio launch #${launchNumber}: identity evaluation exceeded the ${launchTimeoutMs}ms launch timeout`
+        );
       }
+      if (exited(main))
+        throw new Error(`Studio launch #${launchNumber}: application exited during identity evaluation`);
       observation.identifiedAt = new Date().toISOString();
       record({ ...observation, status: 'identified' });
       return { app, identity };
