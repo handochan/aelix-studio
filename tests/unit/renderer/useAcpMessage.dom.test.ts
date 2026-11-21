@@ -85,6 +85,30 @@ describe('useAcpMessage', () => {
     responseStreamHandlerRef.current = undefined;
   });
 
+  it.each(['finish', 'error'] as const)('logs request %s without stream data', async (type) => {
+    vi.mocked(getConversationOrNull).mockResolvedValue(null);
+    const { result } = renderHook(() => useAcpMessage('conv-1'));
+    await waitFor(() => expect(result.current.hasHydratedRunningState).toBe(true));
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const envelope = { msg_id: 'msg-1', conversation_id: 'conv-1' };
+    try {
+      act(() => {
+        responseStreamHandlerRef.current?.({
+          ...envelope,
+          type: 'request_trace',
+          data: { timestamp: Date.now(), model_id: 'private model path', prompt: 'private prompt' },
+        });
+        responseStreamHandlerRef.current?.({ ...envelope, type, data: 'private error detail' });
+      });
+      expect(log.mock.calls).toEqual([
+        ['[RequestTrace] START'],
+        [`[RequestTrace] ${type.toUpperCase()}`, { durationMs: expect.any(Number) }],
+      ]);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
   it('completes hydration when the conversation lookup fails', async () => {
     vi.mocked(getConversationOrNull).mockRejectedValue(new TypeError('Failed to fetch'));
 

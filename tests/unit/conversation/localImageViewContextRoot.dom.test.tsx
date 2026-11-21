@@ -45,6 +45,18 @@ const renderInConversation = (workspace: string | undefined, src: string) =>
   );
 
 describe('LocalImageView workspace root from ConversationContext', () => {
+  it('logs a fixed event when loading a conversation image fails', async () => {
+    const path = '/private/workspace/tool-image.png';
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    hoisted.getImageBase64.mockRejectedValueOnce(new Error(path));
+    try {
+      renderInConversation(undefined, path);
+      await waitFor(() => expect(error).toHaveBeenCalledExactlyOnceWith('[LocalImageView] Failed to load image'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('joins a relative src onto the conversation workspace and forwards it as the fs workspace', async () => {
     renderInConversation('/workspace/demo', './material.jpeg');
     await waitFor(() => expect(hoisted.getImageBase64).toHaveBeenCalled());

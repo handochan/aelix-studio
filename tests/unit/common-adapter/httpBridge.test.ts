@@ -26,6 +26,7 @@ import {
   stubEmitter,
   httpRequest,
 } from '@/common/adapter/httpBridge';
+import { fs } from '@/common/adapter/ipcBridge';
 
 type FakeSocketEventMap = {
   open: () => void;
@@ -66,8 +67,8 @@ class FakeWebSocket {
     for (const listener of this.listeners.open) listener();
   }
 
-  dispatchMessage(data: unknown) {
-    for (const listener of this.listeners.message) listener({ data: JSON.stringify(data) } as MessageEvent<string>);
+  dispatchMessage(data: string) {
+    for (const listener of this.listeners.message) listener({ data } as MessageEvent<string>);
   }
 
   dispatchClose() {
@@ -419,27 +420,83 @@ describe('httpBridge', () => {
       vi.useRealTimers();
     });
 
-    it('dispatches ACP relay frames while logging only their event names', () => {
-      const events = [
-        'conversation.acpExtension',
-        'conversation.acpExtensionsSubscribed',
-        'conversation.acpExtensionError',
-      ];
-      const marker = 'sensitive extension content';
+    const body = 'studio-ws body "private"\nline';
+    const path = 'C:\\studio-ws\\private.txt';
+    const image = 'c3R1ZGlvLXdzLXByaXZhdGUtaW1hZ2U=';
+    it.each([
+      { kind: 'body', marker: body, message: { type: 'text', data: body } },
+      { kind: 'path', marker: path, message: { type: 'acp_tool_call', data: { update: { rawInput: { path } } } } },
+      {
+        kind: 'image',
+        marker: image,
+        message: { type: 'acp_tool_call', data: { update: { rawOutput: { data: image } } } },
+      },
+    ])('dispatches standard frames without logging the $kind', ({ marker, message }) => {
+      const name = 'message.stream';
+      const data = { conversation_id: 'conv-1', msg_id: 'msg-1', ...message };
+      const frame = JSON.stringify({ name, data });
       const received = vi.fn();
       vi.stubGlobal('window', { __backendPort: 13400 });
       vi.stubGlobal('WebSocket', FakeWebSocket);
-      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
-      const unsubscribers = events.map((name) => wsEmitter<unknown>(name).on(received));
-      const socket = FakeWebSocket.instances.at(-1)!;
-      for (const name of events) socket.dispatchMessage({ name, data: { marker } });
-      expect(received.mock.calls).toEqual(events.map(() => [{ marker }]));
-      expect(debug.mock.calls.filter(([prefix]) => prefix === '[WS:msg]')).toEqual(
-        events.map((name) => ['[WS:msg]', name])
+      const logs = (['debug', 'info', 'log', 'warn', 'error'] as const).map((level) =>
+        vi.spyOn(console, level).mockImplementation(() => {})
       );
-      for (const unsubscribe of unsubscribers) unsubscribe();
-      socket.close();
-      debug.mockRestore();
+      const unsubscribe = wsEmitter<unknown>(name).on(received);
+      const socket = FakeWebSocket.instances.at(-1)!;
+      const escaped = JSON.stringify(marker).slice(1, -1);
+      const capturedOutput = () =>
+        logs
+          .flatMap((log) => log.mock.calls.flat())
+          .map((arg) => (typeof arg === 'string' ? arg : JSON.stringify(arg)))
+          .join('\n');
+
+      try {
+        // Positive control: the sink detects decoded text and the old serialized prefix.
+        console.debug(marker);
+        expect(capturedOutput()).toContain(marker);
+        logs[0].mockClear();
+        console.debug(JSON.stringify(data).slice(0, 200));
+        expect(capturedOutput()).toContain(escaped);
+        for (const log of logs) log.mockClear();
+        socket.dispatchMessage(frame);
+
+        expect(received).toHaveBeenCalledWith(data);
+        const output = capturedOutput();
+        for (const form of [marker, escaped]) expect(output).not.toContain(form);
+        expect(logs[0]).toHaveBeenCalledExactlyOnceWith('[WS:msg]', name, frame.length);
+      } finally {
+        unsubscribe();
+        socket.close();
+        for (const log of logs) log.mockRestore();
+      }
+    });
+
+    it('logs sizes for ACP relay frames and keeps unknown event names out of diagnostics', () => {
+      const name = 'conversation.acpExtension';
+      const data = { marker: 'private extension content' };
+      const relay = JSON.stringify({ event: name, payload: data });
+      const unknown = JSON.stringify({ name: 'private event name', data });
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      const received = vi.fn();
+      vi.stubGlobal('window', { __backendPort: 13400 });
+      vi.stubGlobal('WebSocket', FakeWebSocket);
+      const unsubscribe = wsEmitter<unknown>(name).on(received);
+      const socket = FakeWebSocket.instances.at(-1)!;
+      try {
+        debug.mockClear();
+        socket.dispatchMessage(relay);
+        socket.dispatchMessage(unknown);
+        socket.dispatchMessage('{"data":"malformed private content"');
+        expect(received).toHaveBeenCalledExactlyOnceWith(data);
+        expect(debug.mock.calls).toEqual([
+          ['[WS:msg]', name, relay.length],
+          ['[WS:msg]', 'unsubscribed', unknown.length],
+        ]);
+      } finally {
+        unsubscribe();
+        socket.close();
+        debug.mockRestore();
+      }
     });
 
     it('on returns unsubscribe function that removes listener', () => {
@@ -501,6 +558,29 @@ describe('httpBridge', () => {
   });
 
   describe('httpRequest', () => {
+    it('keeps image lookup paths and backend error bodies out of diagnostics', async () => {
+      const path = 'C:\\private-workspace\\tool-image.png';
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: path }), { status: 403 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        await expect(fs.getImageBase64.invoke({ path })).rejects.toMatchObject({
+          status: 403,
+          backendMessage: '',
+          body: undefined,
+        });
+        expect(fetchSpy).toHaveBeenCalledWith(
+          expect.stringContaining('/api/fs/image-base64'),
+          expect.objectContaining({ body: JSON.stringify({ path }) })
+        );
+        expect([...debug.mock.calls, ...error.mock.calls]).toEqual([]);
+      } finally {
+        debug.mockRestore();
+        error.mockRestore();
+      }
+    });
+
     it('performs fetch and unwraps data envelope', async () => {
       const fetchSpy = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({ data: { result: 'ok' } }), {

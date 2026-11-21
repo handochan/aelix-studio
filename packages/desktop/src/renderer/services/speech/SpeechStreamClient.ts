@@ -218,10 +218,10 @@ export const startSpeechStream = (options: {
     );
   };
 
-  const warnUnknownFrame = (raw: string): void => {
+  const warnUnknownFrame = (length: number): void => {
     if (warnedUnknownFrame) return;
     warnedUnknownFrame = true;
-    console.warn('[SpeechStreamClient] ignoring unrecognized server frame:', raw.slice(0, 200));
+    console.warn('[SpeechStreamClient] ignoring unrecognized server frame', length);
   };
 
   socket.onopen = () => {
@@ -255,7 +255,7 @@ export const startSpeechStream = (options: {
     try {
       frame = JSON.parse(raw) as ServerFrame;
     } catch {
-      warnUnknownFrame(raw);
+      warnUnknownFrame(raw.length);
       return;
     }
     switch (frame.type) {
@@ -284,7 +284,7 @@ export const startSpeechStream = (options: {
         break;
       }
       default:
-        warnUnknownFrame(raw);
+        warnUnknownFrame(raw.length);
     }
   };
 

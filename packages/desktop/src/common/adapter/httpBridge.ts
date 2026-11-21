@@ -148,9 +148,8 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  * Per-request overrides for `httpRequest`.
  *
  * `silentStatuses` lets known-soft failures (e.g. a runtime-scoped lookup
- * returning 404 before the agent has attached) skip the noisy `console.error`
- * and the Sentry breadcrumb that comes with it. The error is still thrown so
- * the caller's existing try/catch keeps working.
+ * returning 404 before the agent has attached) log at debug level. The error
+ * is still thrown so the caller's existing try/catch keeps working.
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
@@ -481,7 +480,7 @@ function ensureWs(): void {
   });
 
   current.addEventListener('close', (e) => {
-    console.debug('[ensureWs] CLOSED code=' + e.code + ' reason=' + e.reason);
+    console.debug('[ensureWs] CLOSED', e.code);
     if (ws === current) ws = null;
     if (e.code === WS_CLOSE_POLICY_VIOLATION) {
       // Auth policy violation (expired/missing session). Blindly reconnecting with
@@ -500,26 +499,20 @@ function ensureWs(): void {
   });
 
   current.addEventListener('message', (event: MessageEvent) => {
+    const frame: unknown = event.data;
+    if (typeof frame !== 'string') return;
     try {
-      const msg = JSON.parse(event.data as string) as {
+      const msg = JSON.parse(frame) as {
         name?: string;
         event?: string;
         data?: unknown;
         payload?: unknown;
       };
       const eventName = msg.name ?? msg.event;
-      const payload = msg.data ?? msg.payload;
-      if (
-        eventName === 'conversation.acpExtension' ||
-        eventName === 'conversation.acpExtensionsSubscribed' ||
-        eventName === 'conversation.acpExtensionError'
-      ) {
-        console.debug('[WS:msg]', eventName);
-      } else {
-        console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
-      }
-      if (eventName) {
-        dispatchWsEvent(eventName, payload);
+      if (typeof eventName === 'string' && eventName) {
+        // Only echo event names registered locally by a bridge consumer.
+        console.debug('[WS:msg]', wsListeners.has(eventName) ? eventName : 'unsubscribed', frame.length);
+        dispatchWsEvent(eventName, msg.data ?? msg.payload);
       }
     } catch {
       // ignore non-JSON
