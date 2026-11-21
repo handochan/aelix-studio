@@ -19,6 +19,11 @@ const names = [
   'corrupt-idat.png',
   'adam7.png',
   'passthrough-8000.png',
+  'passthrough-8000-padded.png',
+  'screenshot-macos.png',
+  'screenshot-windows.png',
+  'screenshot-windows-padded.png',
+  'screenshot-ancillary.png',
 ];
 const cases = await Promise.all(
   names.map(async (name) => ({ name, sha256: sha256(await readFile(path.join(fixtures, name))) }))
@@ -96,11 +101,13 @@ const server = createServer(async (request, response) => {
             } else if (test.name === 'alpha.png') {
               if (result.pixels[0][3] !== 0 || result.pixels[1][3] !== 128 ||
                   ![133,99,88].every((value, index) => Math.abs(result.pixels[1][index] - value) <= 6)) throw new Error();
-            } else if (test.name === 'passthrough-8000.png') {
+            } else if (test.name.startsWith('passthrough-8000')) {
               if (result.changed || result.preview !== 'icon' || result.sent.width !== 8000 || result.sent.height !== 8000) {
                 throw new Error();
               }
             }
+            if (test.name.startsWith('screenshot-') &&
+                (result.changed || result.original.digest.sha256 !== result.sent.digest.sha256)) throw new Error();
             results.push({ fixture: test.name, result: 'passed' });
           } catch {
             results.push({ fixture: test.name, result: 'failed', stage });

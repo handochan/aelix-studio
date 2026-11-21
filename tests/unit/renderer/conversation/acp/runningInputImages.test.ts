@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { crc32, deflateSync } from 'node:zlib';
+import { constants, crc32, deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeImage } from '@renderer/services/runtime/RunningInput/Images/codec';
 import { hashImage } from '@renderer/services/runtime/RunningInput/Images/digest';
@@ -10,6 +10,8 @@ import {
   verifyImageGrants,
 } from '@renderer/services/runtime/RunningInput/Images';
 import type { ImageMime } from '@renderer/services/runtime/RunningInput/Images';
+import { findZlibEnd } from '@renderer/services/runtime/RunningInput/Images/Png/deflate';
+import { verifyPngData } from '@renderer/services/runtime/RunningInput/Images/Png';
 import { readImageHeader } from '@renderer/services/runtime/RunningInput/Images/headers';
 import { readReferencedImage } from '@renderer/services/runtime/RunningInput/Images/transfer';
 import {
@@ -26,19 +28,21 @@ const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
   'base64'
 );
-function pngWithIdat(payload: Uint8Array, trailingIdat?: Uint8Array): Blob {
-  const chunk = (data: Uint8Array) => {
-    const result = Buffer.alloc(12 + data.length);
-    result.writeUInt32BE(data.length);
-    result.write('IDAT', 4);
-    result.set(data, 8);
-    result.writeUInt32BE(crc32(result.subarray(4, 8 + data.length)), 8 + data.length);
-    return result;
-  };
+function pngChunk(type: string, data: Uint8Array) {
+  const result = Buffer.alloc(12 + data.length);
+  result.writeUInt32BE(data.length);
+  result.write(type, 4);
+  result.set(data, 8);
+  result.writeUInt32BE(crc32(result.subarray(4, 8 + data.length)), 8 + data.length);
+  return result;
+}
+
+function pngWithIdat(payload: Uint8Array, trailingIdat?: Uint8Array, following: Buffer[] = []): Blob {
   return new Blob([
     png.subarray(0, 33),
-    chunk(payload),
-    ...(trailingIdat ? [chunk(trailingIdat)] : []),
+    pngChunk('IDAT', payload),
+    ...(trailingIdat ? [pngChunk('IDAT', trailingIdat)] : []),
+    ...following,
     png.subarray(-12),
   ]);
 }
@@ -165,6 +169,63 @@ describe('image container and digest', () => {
     expect(bitmap).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['Windows-style zero padding', Buffer.alloc(16)],
+    ['opaque padding', Buffer.from([0xd4, 0, 0x78, 0x9c, 0x04, 0xee])],
+  ])('preserves %s after a split zlib trailer and before a legal ancillary chunk', async (_label, padding) => {
+    const zlib = deflateSync(new Uint8Array(5));
+    const split = zlib.length - 2;
+    const blob = pngWithIdat(zlib.subarray(0, split), Buffer.concat([zlib.subarray(split), padding]), [
+      pngChunk('tEXt', Buffer.from('Description\0Screenshot fixture')),
+    ]);
+    const header = await readImageHeader(blob);
+    const bitmap = vi.fn();
+    vi.stubGlobal('createImageBitmap', bitmap);
+    const result = await encodeImage(
+      {
+        kind: 'encode',
+        source: blob,
+        header,
+        byteLimit: 3_750_000,
+        edgeLimit: 8000,
+        residentBytes: blob.size,
+      },
+      () => {}
+    );
+    expect(result.changed).toBe(false);
+    expect(Buffer.from(await result.output.arrayBuffer()).equals(Buffer.from(await blob.arrayBuffer()))).toBe(true);
+    expect(bitmap).not.toHaveBeenCalled();
+  });
+
+  it('checks Adler-32 after removing padding from the final IDAT', async () => {
+    const zlib = deflateSync(new Uint8Array(5));
+    zlib[zlib.length - 1] ^= 1;
+    await expect(verifyPngData(pngWithIdat(Buffer.concat([zlib, Buffer.alloc(16)])))).rejects.toMatchObject({
+      code: 'invalid-image',
+    });
+  });
+
+  it('rejects a padded stream that contains an invalid scanline filter', async () => {
+    const padded = Buffer.concat([deflateSync(Uint8Array.of(5, 0, 0, 0, 0)), Buffer.alloc(16)]);
+    await expect(verifyPngData(pngWithIdat(padded))).rejects.toMatchObject({ code: 'invalid-image' });
+  });
+
+  it('detects animation even after a padded IDAT', async () => {
+    const padded = Buffer.concat([deflateSync(new Uint8Array(5)), Buffer.alloc(16)]);
+    await expect(
+      readImageHeader(pngWithIdat(padded, undefined, [pngChunk('acTL', Buffer.alloc(8))]))
+    ).rejects.toMatchObject({ code: 'unsupported-format' });
+  });
+
+  it('rejects an oversized chunk declaration after a padded IDAT', async () => {
+    const malformed = pngChunk('tEXt', Buffer.from('Source\0Fixture'));
+    malformed.writeUInt32BE(0x80000000, 0);
+    const padded = Buffer.concat([deflateSync(new Uint8Array(5)), Buffer.alloc(16)]);
+    await expect(readImageHeader(pngWithIdat(padded, undefined, [malformed]))).rejects.toMatchObject({
+      code: 'invalid-image',
+    });
+  });
+
   it('keeps a verified derivative when thumbnail canvas initialization fails', async () => {
     class Bitmap {
       close = vi.fn();
@@ -268,6 +329,29 @@ describe('image container and digest', () => {
     const result = await hashImage(new Blob([input]), 'hash-original', ({ loaded }) => updates.push(loaded), true);
     expect(result.sha256).toBe(createHash('sha256').update(input).digest('hex'));
     expect(updates).toEqual([0, 262144, 524288, 600001]);
+  });
+});
+
+describe('zlib frame length', () => {
+  it.each([
+    { name: 'stored', options: { level: 0 }, kind: 0 },
+    { name: 'fixed', options: { strategy: constants.Z_FIXED }, kind: 1 },
+    { name: 'dynamic', options: { level: 9 }, kind: 2 },
+  ])('finds the checksum end across $name blocks and IDAT boundaries', ({ options, kind }) => {
+    const data = Buffer.from('Some different screenshot intensities 0123456789 '.repeat(2000));
+    const frame = deflateSync(data, options);
+    expect((frame[2] >> 1) & 3).toBe(kind);
+    const input = Uint8Array.from(Buffer.concat([frame, Buffer.alloc(4096, 0xa3)]));
+    function* split() {
+      for (let offset = 0; offset < input.length; offset += 11) yield input.subarray(offset, offset + 11);
+    }
+    expect(findZlibEnd(split(), data.length)).toBe(frame.length);
+  });
+
+  it('rejects an invalid stored block length complement', () => {
+    const frame = Uint8Array.from(deflateSync(Buffer.from('source'), { level: 0 }));
+    frame[5] ^= 1;
+    expect(() => findZlibEnd([frame].values(), 6)).toThrow('invalid-image');
   });
 });
 

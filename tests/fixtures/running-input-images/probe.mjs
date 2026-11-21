@@ -265,6 +265,15 @@ try {
   await run('animated.png', { expected: 'unsupported-format' });
   await run('corrupt-idat.png', { expected: 'invalid-image' });
   await run('adam7.png');
+  for (const fixture of [
+    'screenshot-macos.png',
+    'screenshot-windows.png',
+    'screenshot-windows-padded.png',
+    'screenshot-ancillary.png',
+  ]) {
+    const screenshot = await run(fixture);
+    assert.ok(!screenshot.changed, 'Screenshot fixture should be passed through');
+  }
   let noRasterLoads = 0;
   const noRaster = async (route) => {
     noRasterLoads++;
@@ -278,6 +287,9 @@ try {
   const workerPattern = '**/image.worker-*.js';
   if (kind === 'chrome') await page.route(workerPattern, noRaster);
   const huge = await run('passthrough-8000.png');
+  const paddedHuge = await run('passthrough-8000-padded.png');
+  assert.ok(!paddedHuge.changed && paddedHuge.preview === 'icon');
+  assert.deepEqual([paddedHuge.sent.width, paddedHuge.sent.height], [8000, 8000]);
   if (kind === 'chrome') {
     await page.unroute(workerPattern, noRaster);
     assert.ok(noRasterLoads > 0, 'Raster prohibition was not installed in the worker');

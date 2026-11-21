@@ -52,8 +52,50 @@ def exactly_png(image, target):
     return padded
 
 
+def split_png(blob):
+    offset = 8
+    while offset < len(blob):
+        length, kind = struct.unpack_from(">I4s", blob, offset)
+        end = offset + 8 + length
+        yield kind, blob[offset + 8:end]
+        offset = end + 4
+
+
+def with_final_idat_padding(blob, padding, ancillary=None):
+    chunks = list(split_png(blob))
+    final = max(i for i, (kind, _) in enumerate(chunks) if kind == b"IDAT")
+    _, payload = chunks[final]
+    chunks[final] = (b"IDAT", payload + padding)
+    if ancillary:
+        chunks.insert(final + 1, ancillary)
+    return blob[:8] + b"".join(png_chunk(kind, data) for kind, data in chunks)
+
+
+def screenshot_samples(output, p3):
+    # Match a 520×253 RGBA Snipping Tool sample's pHYs, tIME and 8 KiB IDAT layout
+    # using generated swatches rather than the artwork in Microsoft's example.
+    screen = corners(520, 253).convert("RGBA")
+    screen.paste(Image.frombytes("RGBA", (100, 80), random.Random(106).randbytes(100 * 80 * 4)), (110, 90))
+    buffer = BytesIO()
+    screen.save(buffer, format="PNG", dpi=(120, 120))
+    chunks = list(split_png(buffer.getvalue()))
+    compressed = b"".join(data for kind, data in chunks if kind == b"IDAT")
+    windows_chunks = [(kind, data) for kind, data in chunks if kind in (b"IHDR", b"pHYs")]
+    windows_chunks.append((b"tIME", struct.pack(">HBBBBB", 2026, 11, 21, 10, 0, 0)))
+    windows_chunks.extend((b"IDAT", compressed[i:i + 8192]) for i in range(0, len(compressed), 8192))
+    windows_chunks.append((b"IEND", b""))
+    windows = buffer.getvalue()[:8] + b"".join(png_chunk(kind, data) for kind, data in windows_chunks)
+    (output / "screenshot-windows.png").write_bytes(windows)
+    (output / "screenshot-windows-padded.png").write_bytes(with_final_idat_padding(windows, bytes(16)))
+    (output / "screenshot-ancillary.png").write_bytes(with_final_idat_padding(
+        windows, b"\xa5\x00\x5a", (b"tEXt", b"Description\x00Synthetic screen capture")))
+    mac = screen.resize((1040, 506), Image.Resampling.NEAREST)
+    mac.save(output / "screenshot-macos.png", dpi=(144, 144), icc_profile=p3.read_bytes() if p3 else None)
+
+
 def generate(output, p3):
     output.mkdir(parents=True, exist_ok=True)
+    screenshot_samples(output, p3)
     image = corners(96, 64)
     for orientation in range(1, 9):
         image.save(output / f"exif-{orientation}.jpg", quality=95, exif=exif(orientation))
@@ -64,7 +106,9 @@ def generate(output, p3):
     image.save(output / "baseline-48mp.jpg", quality=92, exif=exif(6))
     image.save(output / "progressive-48mp.jpg", quality=92, progressive=True, exif=exif(6))
 
-    Image.new("RGBA", (8000, 8000), (12, 40, 80, 128)).save(output / "passthrough-8000.png")
+    large_png = output / "passthrough-8000.png"
+    Image.new("RGBA", (8000, 8000), (12, 40, 80, 128)).save(large_png)
+    (output / "passthrough-8000-padded.png").write_bytes(with_final_idat_padding(large_png.read_bytes(), bytes(16)))
     Image.new("RGBA", (8001, 8000), (12, 40, 80, 128)).save(output / "oversized-8001.png")
     Image.new("RGBA", (100, 16385), (12, 40, 80, 128)).save(output / "long.png")
     image = Image.new("RGBA", (2304, 1536), (128, 100, 90, 128))

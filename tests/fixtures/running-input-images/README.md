@@ -54,9 +54,16 @@ file retained after a completed upload. The probe removes its per-conversation
 fixture uploads after checking retention.
 
 The corrupt-IDAT fixture carries valid PNG chunk CRCs and invalid zlib bytes.
-The 8000×8000 pass-through case also runs with bitmap creation disabled in the
-Chrome worker, and the browser matrix includes Adam7 and the CMYK derivative.
+The 8000×8000 pass-through cases with and without final IDAT padding also run
+with bitmap creation disabled in the Chrome worker. The browser matrix includes
+Adam7 and the CMYK derivative.
 
-The browser inflater expects the zlib stream to end at its checksum. PNGs with
-unused padding in the final IDAT therefore take the invalid-image path.
-[PNG IDAT](https://www.w3.org/TR/png-3/#11IDAT) · [Compression Standard](https://compression.spec.whatwg.org/#supported-formats)
+The portable screenshot fixtures use generated RGBA pixels. The Windows samples
+mirror the chunk layout of Microsoft's published 520×253 Snipping Tool image.
+They cover the original layout, sixteen zero bytes in the final IDAT, and
+nonzero padding followed by a valid text chunk. The macOS-style sample uses 2×
+dimensions, 144 DPI, and the supplied Display P3 ICC profile. The worker
+validates the exact zlib frame and passes the original PNG bytes through.
+[Microsoft sample](https://support.microsoft.com/en-us/windows/media/snipping-tool-opened-png.png)
+· [PNG IDAT](https://www.w3.org/TR/png-3/#11IDAT)
+· [Compression Standard](https://compression.spec.whatwg.org/#supported-formats)

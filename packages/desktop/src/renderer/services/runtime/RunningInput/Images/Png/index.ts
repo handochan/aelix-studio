@@ -1,4 +1,5 @@
-import { ImagePreparationError, MIB, type ImageHeader } from './types';
+import { ImagePreparationError, MIB, type ImageHeader } from '../types';
+import { findZlibEnd } from './deflate';
 
 export const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
 const IHDR = 0x49484452;
@@ -52,6 +53,7 @@ export function readPng(bytes: Uint8Array) {
   let dataStart = 0;
   let dataEnd = 0;
   let compressedSize = 0;
+  let finalIdatStart = 0;
   let hasPalette = false;
   for (let offset = 8; offset + 12 <= bytes.length; ) {
     const length = view.getUint32(offset);
@@ -68,6 +70,7 @@ export function readPng(bytes: Uint8Array) {
       if (dataEnd && dataEnd !== offset) invalid();
       dataStart ||= offset;
       dataEnd = next;
+      if (length) finalIdatStart = compressedSize;
       compressedSize += length;
     } else if (type === PLTE) {
       const maxEntries = colorType === 3 ? 2 ** depth : 256;
@@ -85,7 +88,15 @@ export function readPng(bytes: Uint8Array) {
     } else if (type === IEND) {
       if (length || next !== bytes.length || !compressedSize || (colorType === 3 && !hasPalette)) invalid();
       const header: ImageHeader = { mime: 'image/png', width, height, orientation: 1, highBitDepth: depth === 16 };
-      return { header, dataStart, dataEnd, interlaced, bitsPerPixel: color.samples * depth };
+      return {
+        header,
+        dataStart,
+        dataEnd,
+        compressedSize,
+        finalIdatStart,
+        interlaced,
+        bitsPerPixel: color.samples * depth,
+      };
     } else if ((type & ANCILLARY_CHUNK_BIT) === 0 && offset !== 8) {
       invalid();
     }
@@ -94,31 +105,27 @@ export function readPng(bytes: Uint8Array) {
   return invalid();
 }
 
-function* idatSlices(bytes: Uint8Array<ArrayBuffer>, start: number, end: number) {
+function* idatSlices(bytes: Uint8Array<ArrayBuffer>, start: number, end: number, remaining = Infinity) {
   const view = new DataView(bytes.buffer);
-  for (let offset = start; offset < end; ) {
+  for (let offset = start; offset < end && remaining > 0; ) {
     const length = view.getUint32(offset);
     const payloadEnd = offset + 8 + length;
-    for (let cursor = offset + 8; cursor < payloadEnd; cursor += INFLATE_INPUT_BYTES) {
-      yield bytes.subarray(cursor, Math.min(cursor + INFLATE_INPUT_BYTES, payloadEnd));
+    for (let cursor = offset + 8; cursor < payloadEnd && remaining > 0; ) {
+      const size = Math.min(remaining, INFLATE_INPUT_BYTES, payloadEnd - cursor);
+      yield bytes.subarray(cursor, cursor + size);
+      remaining -= size;
+      cursor += size;
     }
     offset = payloadEnd + 4;
   }
 }
 
-/** Check zlib integrity, scanline lengths and filter bytes, without reconstructing pixels. */
-export async function verifyPngData(blob: Blob): Promise<void> {
-  if (typeof DecompressionStream !== 'function') throw new ImagePreparationError('codec-unavailable');
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  const { header, dataStart, dataEnd, interlaced, bitsPerPixel } = readPng(bytes);
-  const passes = (interlaced ? ADAM7 : [[0, 0, 1, 1]])
-    .map(([x, y, stepX, stepY]) => {
-      const columns = Math.ceil((header.width - x) / stepX);
-      const rows = Math.ceil((header.height - y) / stepY);
-      return { rowBytes: 1 + Math.ceil((columns * bitsPerPixel) / 8), rows, columns };
-    })
-    .filter(({ rows, columns }) => rows > 0 && columns > 0);
-  const slices = idatSlices(bytes, dataStart, dataEnd);
+type ScanlinePass = { rowBytes: number; rows: number };
+
+async function verifyScanlines(
+  slices: Iterator<Uint8Array<ArrayBuffer>, void>,
+  passes: readonly ScanlinePass[]
+): Promise<void> {
   const compressed = new ReadableStream<Uint8Array<ArrayBuffer>>({
     pull(controller) {
       const item = slices.next();
@@ -151,10 +158,37 @@ export async function verifyPngData(blob: Blob): Promise<void> {
       }
     }
     if (pass !== passes.length) invalid();
-  } catch {
-    await reader.cancel().catch(() => {});
-    invalid();
   } finally {
+    await reader.cancel().catch(() => {});
     reader.releaseLock();
+  }
+}
+
+/** Check zlib integrity, scanline lengths and filter bytes, without reconstructing pixels. */
+export async function verifyPngData(blob: Blob): Promise<void> {
+  if (typeof DecompressionStream !== 'function') throw new ImagePreparationError('codec-unavailable');
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const { header, dataStart, dataEnd, compressedSize, finalIdatStart, interlaced, bitsPerPixel } = readPng(bytes);
+  const passes = (interlaced ? ADAM7 : [[0, 0, 1, 1]])
+    .map(([x, y, stepX, stepY]) => {
+      const columns = Math.ceil((header.width - x) / stepX);
+      const rows = Math.ceil((header.height - y) / stepY);
+      return { rowBytes: 1 + Math.ceil((columns * bitsPerPixel) / 8), rows, columns };
+    })
+    .filter(({ rows, columns }) => rows > 0 && columns > 0);
+
+  try {
+    await verifyScanlines(idatSlices(bytes, dataStart, dataEnd), passes);
+  } catch (error) {
+    if (error instanceof ImagePreparationError) throw error;
+    // PNG §11.2.3 allows unused bytes in the last IDAT; the browser inflater requires an exact stream.
+    const expectedBytes = passes.reduce((sum, { rowBytes, rows }) => sum + rowBytes * rows, 0);
+    const streamEnd = findZlibEnd(idatSlices(bytes, dataStart, dataEnd), expectedBytes);
+    if (streamEnd < finalIdatStart || streamEnd >= compressedSize) invalid();
+    try {
+      await verifyScanlines(idatSlices(bytes, dataStart, dataEnd, streamEnd), passes);
+    } catch {
+      invalid();
+    }
   }
 }

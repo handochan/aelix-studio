@@ -1,6 +1,6 @@
 import { hashImage } from './digest';
 import { displayDimensions, readImageHeader } from './headers';
-import { PNG_INFLATE_WORKSPACE_BYTES, verifyPngData } from './png';
+import { PNG_INFLATE_WORKSPACE_BYTES, verifyPngData } from './Png';
 import {
   ImagePreparationError,
   MAX_PLANNED_BYTES,

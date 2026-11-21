@@ -1,4 +1,4 @@
-import { PNG_SIGNATURE, readPng } from './png';
+import { PNG_SIGNATURE, readPng } from './Png';
 import { ImagePreparationError, MAX_SOURCE_BYTES, type Dimensions, type ImageHeader } from './types';
 
 function invalid(): never {
