@@ -109,9 +109,17 @@ function application(error?: Error, failureExitCode: number | null = 0, failureS
 
 const collected = { code: -32000, message: 'Promise was collected' };
 
+type InspectorRequest = {
+  id: number;
+  method: string;
+  params?: { awaitPromise?: boolean; returnByValue?: boolean; objectId?: string; functionDeclaration?: string };
+};
+
 function inspectorApplication(
-  replies: Array<{ code: number; message: string } | { pid: number; backendOverride?: string; resourcesPath?: string }>,
-  { unrelatedError = false } = {}
+  replies: Array<
+    { code: number; message: string } | { pid: number; backendOverride?: string; resourcesPath?: string } | 'hang'
+  >,
+  { unrelatedError = false, beforeSyncResponse = () => {} } = {}
 ) {
   const require = createRequire(import.meta.url);
   const testRequire = createRequire(require.resolve('@playwright/test/package.json'));
@@ -126,17 +134,22 @@ function inspectorApplication(
   const { parseSerializedValue, serializeValue } = require(path.join(base, 'lib/protocol/serializers.js'));
   const { serializeAsCallArgument } = require(path.join(base, 'lib/utils/isomorphic/utilityScriptSerializers.js'));
   const { main, app } = application();
+  const synchronousReads: InspectorRequest[] = [];
 
   const launch = vi.fn(async () => {
     const transport = {
       onmessage: (_message: unknown) => {},
       onclose: () => {},
       close: () => {},
-      send: (request: { id: number; method: string }) => {
+      send: (request: InspectorRequest) => {
         const { id, method } = request;
         const reply = method === 'Runtime.evaluate' ? null : replies.shift();
         if (reply === undefined) throw new Error('Unexpected fixture evaluation');
-        queueMicrotask(() =>
+        const synchronous = request.params?.awaitPromise === false;
+        if (synchronous) synchronousReads.push(request);
+        if (reply === 'hang') return;
+        queueMicrotask(() => {
+          if (synchronous) beforeSyncResponse();
           transport.onmessage(
             reply === null
               ? { id, result: { result: { type: 'object', objectId: 'utility' } } }
@@ -147,20 +160,31 @@ function inspectorApplication(
                     result: {
                       result: {
                         type: 'object',
-                        value: serializeAsCallArgument(reply, (value: unknown) => ({ fallThrough: value })),
+                        value: synchronous
+                          ? reply
+                          : serializeAsCallArgument(reply, (value: unknown) => ({ fallThrough: value })),
                       },
                     },
                   }
-          )
-        );
+          );
+        });
       },
     };
     const sdk = createRootSdkObject();
     const connection = new CRConnection(sdk, transport, helper.debugProtocolLogger(), { recentLogs: () => [] });
     const context = new ExecutionContext(sdk, new CRExecutionContext(connection.rootSession, { id: 1 }), 'electron');
     const handle = new JSHandle(context, 'object', 'electron', 'electron-handle');
-    // Use the real client and server serializers with the same JSHandle route
-    // as ElectronApplicationDispatcher. Only the inspector transport is fake.
+    Object.assign(app, {
+      _connection: {
+        toImpl: () => ({
+          process: () => main,
+          _nodeElectronHandlePromise: Promise.resolve(handle),
+          _nodeSession: connection.rootSession,
+        }),
+      },
+    });
+    // Use the real serializers and JSHandle route with a fixture transport
+    // and in-process dispatcher lookup.
     const client = {
       _channel: {
         async evaluateExpression(params: { expression: string; isFunction: boolean; arg: { value: unknown } }) {
@@ -180,7 +204,7 @@ function inspectorApplication(
     app.evaluate.mockImplementation((fn, token) => ElectronApplication.prototype.evaluate.call(client, fn, token));
     return app;
   });
-  return { app, launch, main };
+  return { app, launch, main, synchronousReads };
 }
 
 describe('fixture callback deadlines', () => {
@@ -490,7 +514,8 @@ describe('Electron launch evidence and identity retry', () => {
     }
   });
 
-  it('persists the correlated first failure and one successful same-handle retry', async () => {
+  it('retries on the original inspector object without awaiting a promise', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-identity-retry-'));
     try {
       writeRendererResult(root, {});
@@ -500,11 +525,19 @@ describe('Electron launch evidence and identity retry', () => {
         recordLaunchEvidence(root, { mainLaunches: launches }, value);
       });
       // Windows installer artifact 14482766412 reports launcher 4888 and Electron 3016.
-      const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+      const identity = { pid: 3016, resourcesPath: '/installed/resources' };
+      const { app, launch, main, synchronousReads } = inspectorApplication([collected, identity]);
       main.pid = 4888;
-      await expect(launchWithIdentity(launch, options(record))).resolves.toEqual({ app, identity: { pid: 3016 } });
+      await expect(launchWithIdentity(launch, options(record))).resolves.toEqual({ app, identity });
       expect(launch).toHaveBeenCalledTimes(1);
-      expect(app.evaluate).toHaveBeenCalledTimes(2);
+      expect(app.evaluate).toHaveBeenCalledTimes(1);
+      expect(synchronousReads).toMatchObject([
+        {
+          method: 'Runtime.callFunctionOn',
+          params: { objectId: 'electron-handle', awaitPromise: false, returnByValue: true },
+        },
+      ]);
+      expect(log).toHaveBeenCalledWith(expect.stringContaining('retrying identity without awaiting a promise'));
       expect(app.close).not.toHaveBeenCalled();
       const text = await fs.readFile(path.join(root, 'renderer-result.json'), 'utf8');
       const firstError = {
@@ -521,16 +554,13 @@ describe('Electron launch evidence and identity retry', () => {
         firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'passed' },
         identityFailedAt: expect.any(String),
         identityProtocol: { errors: [firstError] },
-        identityRetries: [
-          {
-            startedAt: expect.any(String),
-            finishedAt: expect.any(String),
-            delayMs: 0,
-            trigger: firstError,
-            protocolError: null,
-            outcome: 'passed',
-          },
-        ],
+        identityRetry: {
+          startedAt: expect.any(String),
+          finishedAt: expect.any(String),
+          firstProtocolError: firstError,
+          method: 'synchronous-inspector',
+          outcome: 'passed',
+        },
         status: 'identified',
       });
       for (const [, token] of app.evaluate.mock.calls) expect(text).not.toContain(token);
@@ -551,7 +581,7 @@ describe('Electron launch evidence and identity retry', () => {
       await vi.advanceTimersByTimeAsync(20000);
       await result;
       expect(app.evaluate).toHaveBeenCalledTimes(1);
-      expect(record.mock.calls.some(([row]) => row.identityRetries)).toBe(false);
+      expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
     }
   );
 
@@ -570,7 +600,7 @@ describe('Electron launch evidence and identity retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
       identityProtocol: { errors: [collected, { message: 'Cannot find context with specified id' }] },
     });
-    expect(record.mock.calls.some(([row]) => row.identityRetries)).toBe(false);
+    expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
   });
 
   it('does not retry the exact message with a different CDP code', async () => {
@@ -608,151 +638,72 @@ describe('Electron launch evidence and identity retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ exitCode: 17, naturalExit: true });
   });
 
-  it('recovers after two consecutive collections using a delayed read on the original app', async () => {
-    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-    vi.useFakeTimers();
-    const identity = { pid: 3016, resourcesPath: '/installed/resources' };
-    const { app, launch } = inspectorApplication([collected, collected, identity]);
-    const result = launchWithIdentity(launch, options());
-    await vi.advanceTimersByTimeAsync(999);
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
-    await vi.advanceTimersByTimeAsync(1);
-    await expect(result).resolves.toEqual({ app, identity });
-    expect(launch).toHaveBeenCalledTimes(1);
-    expect(log).toHaveBeenCalledWith(expect.stringContaining('identity retry #2 after 1000ms (Promise was collected)'));
-  });
-
-  it('still rejects an installed backend identity mismatch after the delayed read succeeds', async () => {
-    vi.useFakeTimers();
-    const { launch } = inspectorApplication([collected, collected, { pid: 3016, backendOverride: '/dev/host' }]);
+  it('still rejects an installed backend identity mismatch after the synchronous read succeeds', async () => {
+    const { launch } = inspectorApplication([collected, { pid: 3016, backendOverride: '/dev/host' }]);
     const result = launchWithIdentity(launch, options()).then(({ identity }) => verifyInstalledBackend(identity));
-    const failure = expect(result).rejects.toMatchObject({ code: 'ERR_ASSERTION', actual: '/dev/host' });
-    await vi.advanceTimersByTimeAsync(1000);
-    await failure;
+    await expect(result).rejects.toMatchObject({ code: 'ERR_ASSERTION', actual: '/dev/host' });
   });
 
-  it('fails without another evaluation if the app exits during the retry delay', async () => {
+  it('fails at the original deadline if the synchronous read hangs', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    const { app, launch, main } = inspectorApplication([collected, collected, { pid: 3016 }]);
-    const record = vi.fn();
-    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(
-      'Studio app changed during identity retry'
+    const { app, launch, synchronousReads } = inspectorApplication([collected, 'hang']);
+    const result = expect(launchWithIdentity(launch, { ...options(), launchTimeoutMs: 1200 })).rejects.toThrow(
+      'electron-identity-retry-response: bounded wait elapsed (1200ms)'
     );
-    await vi.advanceTimersByTimeAsync(999);
-    main.exitCode = 0;
-    main.emit('exit', 0, null);
-    await vi.advanceTimersByTimeAsync(1);
-    await result;
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
-    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ exitCode: 0, naturalExit: true });
-  });
-
-  it('does not schedule the delayed read outside the original launch deadline', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([collected, collected, { pid: 3016 }]);
-    const result = expect(launchWithIdentity(launch, { ...options(), launchTimeoutMs: 999 })).rejects.toThrow(
-      destroyed.message
-    );
-    await vi.advanceTimersByTimeAsync(20000);
-    await result;
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
-  });
-
-  it('fails on a different inspector error during the first retry', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([
-      collected,
-      { code: -32000, message: 'Tearing down inspector/session/context' },
-      { pid: 3016 },
-    ]);
-    const result = expect(launchWithIdentity(launch, options())).rejects.toThrow(destroyed.message);
-    await vi.advanceTimersByTimeAsync(21000);
-    await result;
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
-  });
-
-  it('fails at the original deadline if the delayed read hangs', async () => {
-    vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([collected, collected]);
-    const result = expect(
-      launchWithIdentity(
-        async () => {
-          await launch();
-          const evaluate = app.evaluate.getMockImplementation()!;
-          app.evaluate.mockImplementation((fn, token) =>
-            app.evaluate.mock.calls.length === 3 ? new Promise(() => {}) : evaluate(fn, token)
-          );
-          return app;
-        },
-        { ...options(), launchTimeoutMs: 1200 }
-      )
-    ).rejects.toThrow('electron-identity-retry-response: bounded wait elapsed (200ms)');
     await vi.advanceTimersByTimeAsync(21200);
     await result;
-    expect(app.evaluate).toHaveBeenCalledTimes(3);
+    expect(synchronousReads).toHaveLength(1);
     expect(app.close).toHaveBeenCalledTimes(1);
   });
 
-  it('fails when all reads report collection and preserves the exit wait before one cleanup', async () => {
+  it('fails on a synchronous inspector error and preserves the exit wait before one cleanup', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([collected, collected, collected]);
+    const { app, launch, synchronousReads } = inspectorApplication([
+      collected,
+      { code: -32000, message: 'Cannot find object with given id' },
+    ]);
     const record = vi.fn();
-    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed.message);
-    await vi.advanceTimersByTimeAsync(20999);
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(
+      'Studio identity retry failed in the Electron inspector'
+    );
+    await vi.advanceTimersByTimeAsync(19999);
     expect(app.close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await result;
-    expect(launch).toHaveBeenCalledTimes(1);
-    expect(app.evaluate).toHaveBeenCalledTimes(3);
+    expect(synchronousReads).toHaveLength(1);
     expect(app.close).toHaveBeenCalledTimes(1);
-    const row = record.mock.calls.at(-1)?.[0];
-    expect(row).toMatchObject({
-      identityFailedAt: expect.any(String),
-      identityRetries: [
-        { trigger: collected, protocolError: collected, outcome: 'failed' },
-        { trigger: collected, protocolError: collected, outcome: 'failed' },
-      ],
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
+      identityRetry: { firstProtocolError: collected, outcome: 'failed' },
+      protocol: {
+        errors: [collected, { message: 'Cannot find object with given id', awaitPromise: false }],
+      },
       waits: [
         { phase: 'identity-failure-exit-observation', timeoutMs: 20000, status: 'failed' },
         { phase: 'identity-failure-cleanup', status: 'passed' },
       ],
     });
-    expect(row.identityRetries[0].protocolError.requestId).toBe(row.identityRetries[1].trigger.requestId);
   });
 
   it('rejects a retry if the app process handle changes', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([collected, { pid: 456 }]);
-    const launchWithChangedHandle = async () => {
-      await launch();
-      const evaluate = app.evaluate.getMockImplementation()!;
-      app.evaluate.mockImplementation(async (fn, token) => {
-        const identity = await evaluate(fn, token);
+    const { app, launch } = inspectorApplication([collected, { pid: 456 }], {
+      beforeSyncResponse() {
         const { main: replacement } = application();
         replacement.exitCode = 0;
         app.process = () => replacement;
-        return identity;
-      });
-      return app;
-    };
-    await expect(launchWithIdentity(launchWithChangedHandle, options())).rejects.toThrow(
-      'Studio app changed during identity retry'
-    );
+      },
+    });
+    await expect(launchWithIdentity(launch, options())).rejects.toThrow('Studio app changed during identity retry');
     expect(launch).toHaveBeenCalledTimes(1);
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
     expect(app.close).toHaveBeenCalledTimes(1);
   });
 
   it('does not start a retry if the launcher handle changed even with the same numeric PID', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const { app, launch, main, synchronousReads } = inspectorApplication([collected, { pid: 3016 }]);
     const { main: replacement } = application();
     replacement.pid = main.pid;
     replacement.exitCode = 0;
@@ -770,47 +721,39 @@ describe('Electron launch evidence and identity retry', () => {
         return app;
       }, options())
     ).rejects.toThrow(destroyed.message);
-    expect(app.evaluate).toHaveBeenCalledTimes(1);
+    expect(synchronousReads).toHaveLength(0);
   });
 
   it('rejects a valid identity reply if the original launcher exited during the retry', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    const { app, launch, main } = inspectorApplication([collected, { pid: 3016 }]);
+    const { launch, main } = inspectorApplication([collected, { pid: 3016 }], {
+      beforeSyncResponse() {
+        main.signalCode = 'SIGTERM';
+        main.emit('exit', null, 'SIGTERM');
+      },
+    });
     const record = vi.fn();
-    await expect(
-      launchWithIdentity(async () => {
-        await launch();
-        const evaluate = app.evaluate.getMockImplementation()!;
-        app.evaluate.mockImplementation(async (fn, token) => {
-          const identity = await evaluate(fn, token);
-          main.signalCode = 'SIGTERM';
-          main.emit('exit', null, 'SIGTERM');
-          return identity;
-        });
-        return app;
-      }, options(record))
-    ).rejects.toThrow('Studio app changed during identity retry');
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    await expect(launchWithIdentity(launch, options(record))).rejects.toThrow(
+      'Studio app changed during identity retry'
+    );
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
       signal: 'SIGTERM',
       naturalExit: true,
-      identityRetries: [{ outcome: 'failed' }],
+      identityRetry: { outcome: 'failed' },
     });
   });
 
   it('rejects a retry that returns an invalid Electron PID', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
-    vi.spyOn(console, 'log').mockImplementation(() => {});
     vi.useFakeTimers();
-    const { app, launch } = inspectorApplication([collected, { pid: 0 }]);
+    const { launch } = inspectorApplication([collected, { pid: 0 }]);
     const result = expect(launchWithIdentity(launch, options())).rejects.toThrow(
       'Studio identity retry returned an invalid PID'
     );
     await vi.advanceTimersByTimeAsync(20000);
     await result;
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
   });
+
   it('lets an already resolved launch enter identity protection before a previously queued batch', async () => {
     vi.useFakeTimers();
     const { app } = application();

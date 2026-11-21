@@ -208,6 +208,35 @@ export function observeProtocolFactory(helper, version, record = () => {}) {
   };
 }
 
+async function evaluateMainSynchronously(app, readIdentity) {
+  // Use the same handle and Node inspector session as ElectronApplicationDispatcher.
+  const server = app._connection?.toImpl?.(app);
+  if (server?.process?.() !== app.process()) {
+    throw new Error('Studio identity retry requires the original Electron process');
+  }
+  const handle = await server?._nodeElectronHandlePromise;
+  const session = server?._nodeSession;
+  if (typeof handle?._objectId !== 'string' || typeof session?.send !== 'function') {
+    throw new Error('Studio identity retry requires the original Electron inspector handle');
+  }
+  const response = await session
+    .send('Runtime.callFunctionOn', {
+      objectId: handle._objectId,
+      functionDeclaration: readIdentity.toString(),
+      returnByValue: true,
+      awaitPromise: false,
+    })
+    .catch(() => {
+      // The protocol observer already records the error with remote text redacted.
+      throw new Error('Studio identity retry failed in the Electron inspector');
+    });
+  const identity = response.result?.value;
+  if (response.exceptionDetails || response.result?.type !== 'object' || !identity || typeof identity !== 'object') {
+    throw new Error('Studio identity retry did not return an identity object');
+  }
+  return identity;
+}
+
 /** Use the installed test runner's pinned in-process driver, without another CDP connection. */
 export function installProtocolDiagnostics(record) {
   try {
@@ -218,7 +247,7 @@ export function installProtocolDiagnostics(record) {
     if (version !== '1.58.2') throw new Error('unsupported adapter');
     const { helper } = require(path.join(path.dirname(core), 'lib/server/helper.js'));
     if (typeof helper.debugProtocolLogger !== 'function') throw new Error('missing adapter');
-    return observeProtocolFactory(helper, version, record);
+    return { ...observeProtocolFactory(helper, version, record), evaluateMainSynchronously };
   } catch {
     return {
       snapshot: () => ({ status: 'unavailable', reason: 'protocol-adapter-unavailable' }),

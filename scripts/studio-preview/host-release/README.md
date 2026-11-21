@@ -88,23 +88,22 @@ A stopped process timeline also discards outstanding snapshots. After identity,
 the smoke selects the current first window and runs its renderer checks in their
 established order.
 
-After the first window opens, the launch helper can repeat the read-only
-identity evaluation on the same live app handle. It requires an exact unredacted CDP `Promise was collected`
-error with code −32000. Each evaluation passes a private one-use token as an
-unused argument. The pinned observer recognizes it in a single
-`Runtime.callFunctionOn` request with both evaluation flags true and matches
-the response by connection, session and request ID. On the darwin-x64 #100 failure,
-V8 reported collection for both evaluations on the main inspector while the app
-stayed alive. Playwright mapped the protocol error to its generic context-destroyed
-message. A second consecutive collection permits one final attempt after a
-one-second delay. Both retries share the original launch deadline and log their
-attempt numbers and delays. The app handle uses its original inspector session
-for every evaluation. The launcher handle must
-stay live and the result must contain a valid Electron PID. Windows can report
-different PIDs for the launcher and Electron. The token is discarded from the
-report. `mainLaunches[].identityRetries` retains the trigger and outcome of each
-retry, and `identityFailedAt` / `identityProtocol` retain the first failure even
-if a retry succeeds. A terminal failure follows the usual
+After the first window opens, Playwright's public identity evaluation passes a
+private one-use token as an unused argument. The pinned observer recognizes it
+in one `Runtime.callFunctionOn` request and matches the response by connection,
+session and request ID. On #100, the live main inspector returned the exact
+CDP error `-32000 Promise was collected` repeatedly, including after a delay.
+Playwright reports that error as a destroyed context.
+
+Only that correlated error permits one retry within the original launch
+deadline. The pinned in-process Playwright 1.58.2 adapter sends the same
+read-only identity function to the original Electron object on the existing
+Node inspector session with `awaitPromise: false`. The synchronous read avoids
+V8's promise handling. The launcher handle must stay live and the reply must
+contain a valid Electron PID. Windows can report different launcher and
+Electron PIDs. The retry logs its use and outcome. `mainLaunches[].identityRetry`
+records the trigger and outcome. The first failure is retained in
+`identityFailedAt` and `identityProtocol`. A terminal failure follows the usual
 20-second exit observation and cleanup.
 
 `renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)
