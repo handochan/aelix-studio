@@ -8,6 +8,8 @@ import {
 import { runToExit } from '../process.js';
 import type { Candidate, FlowContext } from './candidate.js';
 import { loadEnvironment } from './environment.js';
+import type { ManagedEntry } from '../launch/managedCatalog.js';
+import { ExtensionFailure } from '../types.js';
 
 /** What a change asked for, in terms the result can be checked against. */
 export type ChangeRequest =
@@ -191,6 +193,48 @@ export function checkLoaded(expected: LoadExpectation, reply: ResourceReply | un
 }
 
 export type LoadCheck = { problems: string[]; answered: boolean; cancelled: boolean; timedOut: boolean };
+
+/** Run the exact ACP module provenance check with the bundled native interpreter. */
+export async function verifyManagedCatalog(
+  context: FlowContext,
+  candidate: Candidate,
+  catalogue: ManagedEntry[]
+): Promise<void> {
+  const result = await runToExit(
+    context.spawn,
+    {
+      command: context.bundle.python,
+      args: ['-I', '-S', '-B', '-X', 'utf8', context.bundle.launcher, 'verify-managed', candidate.paths.site],
+      env: loadEnvironment(context.base, candidate.paths.agent),
+      cwd: candidate.paths.directory,
+    },
+    {
+      timeoutMs: context.timeouts.verifyMs,
+      signal: context.signal,
+      input: JSON.stringify({ generation: candidate.id, catalogue }) + '\n',
+    }
+  );
+  if (result.cancelled) throw new ExtensionFailure('CANCELLED');
+  if (result.timedOut) throw new ExtensionFailure('TIMEOUT', ['the managed extension verification took too long']);
+  const line = result.output.split('\n').findLast((value) => value.startsWith('{"managedVerification":'));
+  let reply: { managedVerification?: boolean; reason?: unknown } | undefined;
+  try {
+    if (line) reply = JSON.parse(line) as typeof reply;
+  } catch {
+    // Output from an extension is not a verifier response.
+  }
+  if (result.code !== 0 || reply?.managedVerification !== true)
+    throw new ExtensionFailure('MANAGED_EXTENSION_INVALID', [
+      redactPaths(
+        typeof reply?.reason === 'string' ? reply.reason : 'the managed extension verifier could not complete',
+        [
+          [candidate.paths.directory, '<generation>'],
+          [context.layout.root, '<extensions>'],
+          [context.bundle.root, '<runtime>'],
+        ]
+      ).slice(0, 500),
+    ]);
+}
 
 /**
  * The load check (ADR 5.5): start native the way a conversation does (see

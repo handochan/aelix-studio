@@ -172,18 +172,27 @@ Studio 사용자 데이터 디렉터리 아래에 둔다. 앱 번들, 사용자�
 ```text
 <Studio 사용자 데이터>/aelix-runtime/
   lock                         변경 작업의 프로세스 간 잠금
-  current.json                 현재 세대, 이전 세대, revision, 묶인 번들 정보 (직전 사본도 둔다)
+  current.json                 현재·이전 세대, revision, 묶인 번들, 앱 기본값(직전 사본도 둔다)
   constraints-<lock>.txt       번들에 설치된 배포판과 버전(번들에서 계산)
   artifacts/<묶음>/            파일로 반입한 wheel과 그 sha256 목록
-  leases/                      실행 중인 launcher가 쓰는 세대 표시
+  leases/                      실행 중인 launcher의 lease와 관리형 스냅샷
   generations/<id>/
     venv/                      번들 Python으로 만든 venv. 확장과 추가 의존성만 들어간다
     agent/                     native 설치 기록과 pin (세대와 함께 복제·폐기)
+    pack-inputs/               관리형 ACP에 넘기는 pack별 디렉터리
     generation.json            배포판별 이름·버전·RECORD 해시, 확장 entry, 묶인 번들. 이 파일이 있어야 완성된 세대다
 ```
 
 - 세대는 번들의 경로, `target`, Python minor 버전, `dependencyLockSha256`, native commit에 묶는다(번들
   `manifest.json`에서 읽는다). D04의 "bundled source/ABI/lock에 연결"이 이것이다.
+- 앱 기본값은 `current.json`의 선택적 `defaults`에 관리형 확장 ID와 boolean 값으로 적는다. 값이 없는 설치는
+  기본으로 켜져 있다. 세대 전환 때 배포판과 entry 이름이 같은 항목의 값을 이어받는다. 모듈과 pack 사이에서
+  형태가 달라져도 이 규칙을 적용한다. 이름이 바뀐 entry는 새 항목으로 취급한다. 같은 pack을 여는 entry
+  point들은 ID와 기본값을 공유한다. 이름이 그대로인 항목 중 하나라도 명시적으로 꺼져 있으면 pack도 꺼지고,
+  이어받을 값이 없으면 기본으로 켜진다.
+  기존 ASCII ID 형식은 모듈 `배포판:entry`와 pack `배포판:pack:plugin-id`다. 이 형식이 ACP ID 문법이나 길이 제한에
+  맞지 않는 이름에는 배포판과 원래 이름의 SHA-256을 붙인 ASCII ID를 쓴다.
+  기본값만 바꾸는 작업은 잠금 아래 현재 포인터를 원자적으로 교체하고 세대와 되돌리기 대상을 유지한다.
 - 세대 하나는 약 12MB였다. 거의 전부 세대마다 들어가는 pip이다. **[실행]**
 
 ### 5.2 두 가지 실행 형태
@@ -221,8 +230,8 @@ Studio 사용자 데이터 디렉터리 아래에 둔다. 앱 번들, 사용자�
 - entry point 경로로는 로드할 수 없다(출처 검사). ACP가 `--no-extensions`를 쓰는 동안은 해당이 없다.
 
 launcher 변경이 필요하다. `launch.py`는 `native-generation` 모드에서 세대 `site-packages` 경로를 인자로 받아
-`sys.path` 끝에 더한다. 세대를 고르고 lease를 잡아 그 경로와 `--extension` 인자를 만드는 것은 어댑터가 사는
-동안 함께 사는 `launch.py`의 `acp` 모드다(7.4). host 설정에 저장된 실행 인자에는 세대 경로를 넣지 않는다(D17).
+`sys.path` 끝에 더한다. 어댑터와 함께 실행되는 `launch.py acp`가 세대를 고르고 lease를 잡은 뒤 7.4의
+확장 인자를 구성한다. host 설정에 저장된 실행 인자에는 세대 경로를 넣지 않는다(D17).
 번들 구성 변경이라 다른 작업과 직렬로 한다. **[실행: 처음에는 같은 일을 하는 시험용 launcher로 확인했다.
 2026-11-18 launcher 조각에서 번들의 `launch.py`로 구현하고 번들 사본과 실제 어댑터로 대화를 열어 확인했다]**
 
@@ -327,6 +336,10 @@ git 주소처럼 배포판 이름을 미리 알 수 없는 설치는 변경된 �
   않는다. **[소스]**
 - 로드 검사에는 후보의 `agent/`를 agent dir로 준다. 대화와 같은 agent dir을 주면 native가
   `~/.aelix/agent/auth.json`을 만든다. **[실행]**
+- 관리형 스냅샷 검사는 기본값이 꺼진 항목을 포함한 전체 후보 목록을 검사한다. 모듈에는 ACP 관리형 로더의
+  출처 검사 코드를 번들 native 환경에서 실행한다. 현재 pin에서는 [ACP #38](https://github.com/handochan/aelix-acp/pull/38)의
+  검사 파일을 별도 동봉한다. pack은 하나의 설치 패키지를 가리키는 전용 디렉터리로 구성하고 native 로드 검사에
+  그 디렉터리를 넘긴다. 관리형 입력이나 모듈 출처 검사에 실패하면 `MANAGED_EXTENSION_INVALID`로 거절한다.
 - 검증은 확장의 `setup()`을 실행한다. 사용자가 설치를 승인한 코드다. 그 코드가 하는 접속은 막지 못한다(5.9).
   확장의 명령을 실제로 실행해 보지는 않는다. 명령 안에서 나는 오류는 잡지 못한다.
 - entry point 경로에서 지연 활성화 pack을 명령 실행 없이 확인하는 방법은 native에 없다(7.2). 대화가 그
@@ -498,19 +511,21 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   하나만 한다.
 - 화면 모듈(D20)은 아래 요청만 안다. pip, venv, 세대 경로는 모른다.
 
-| 요청                                                      | 응답                                                                                                                                                             |
-| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `list`                                                    | 현재·이전 세대 ID, 적용 시점(새 세션), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라) |
-| `install` (이름+index \| 파일·폴더 \| git, 오프라인 여부) | 작업 ID                                                                                                                                                          |
-| `update` / `remove` (이름)                                | 작업 ID                                                                                                                                                          |
-| `reconcile_bundle`                                        | 번들 교체 후 오프라인 이관을 시도한 목록과 상태                                                                                                                  |
-| `rollback`                                                | 바뀐 현재 세대                                                                                                                                                   |
-| `poll` / `cancel` (작업 ID)                               | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                          |
+| 요청                                                      | 응답                                                                                                                                                                      |
+| --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `list`                                                    | 현재·이전 세대 ID, 적용 시점(다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라) |
+| `install` (이름+index \| 파일·폴더 \| git, 오프라인 여부) | 작업 ID                                                                                                                                                                   |
+| `update` / `remove` (이름)                                | 작업 ID                                                                                                                                                                   |
+| `set_default` (`extensionId`, `enabled`)                  | 변경된 앱 기본값이 포함된 목록                                                                                                                                            |
+| `reconcile_bundle`                                        | 번들 교체 후 오프라인 이관을 시도한 목록과 상태                                                                                                                           |
+| `rollback`                                                | 바뀐 현재 세대                                                                                                                                                            |
+| `poll` / `cancel` (작업 ID)                               | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                                   |
 
 실패 코드는 지금 정보로 낼 수 있는 것만 둔다: 반입 거부(wheel 아님, 직접 URL 의존성), 설치 도구 실패, 실행
 안 됨, 시작 코드·번들 이름 겹침, 로드 오류, 변경 없음. 세부 사유는 pip 출력 문장뿐이다.
 
 `list`의 상태 이름은 `ready`(준비됨), `manifest_unbound`(manifest 미결합), `reinstall_needed`(다시 설치 필요)다.
+관리형 목록으로 검증된 확장에는 `managedId`와 `defaultEnabled`도 포함한다.
 `ready`는 대화가 받는 형태 그대로 로드 검사를 통과한 pack, 곧 링크 디렉터리로 넘겨 manifest가 결합되는
 확장이다(8.3의 B5). 모듈 참조로 넘기는 확장은 코드는 로드되지만 `manifest_unbound`다. 로드 오류 문구에서는
 세대·상태 디렉터리·번들·홈 디렉터리 경로를 이름표로 바꾼다. 설치 도구 출력의 끝부분은 그대로다.
@@ -598,9 +613,8 @@ Studio 쪽에서 우회하지 않고 ACP 변경으로 요청한다.
   reference"). Studio는 맨 모듈을 `demo:setup`으로 바꿔 넘기고 로드 검사도 그 형태로 한다. native의 `-e`
   로더는 맨 모듈을 그 모듈의 `setup`으로 읽으므로(pin의 `_factory_from_module`) 뜻이 같다. **[소스·실행]**
 - **대화의 `/extension list` 문구.** 권장한 실행 형태에서 로드된 확장을 "REFUSED … not loaded"로 적는다(5.2).
-- **켜고 끄는 권한.** launch에 넣은 확장은 세션이 끌 수 없다(3.3). Studio가 설치한 확장을 자동으로
-  launch에 넣으면 #7의 켜기/끄기는 launch 설정을 바꾸는 방식이어야 한다. 대화별로 켜고 끄게 하려면 설치한
-  확장을 launch에 넣지 않고 세션 경로를 써야 한다. 둘을 섞으려면 ACP 변경이 필요하다(8.2의 A5).
+- **켜고 끄는 권한.** 기존 `--extension`으로 넘긴 확장은 세션이 끌 수 없다(3.3). ACP #38의 관리형 입력은
+  앱 기본값과 대화별 예외를 합친다. 적용 조건은 7.4와 A5를 따른다.
 - **설치된 pack을 CLI와 같게 로드하는 정식 방법.** 지금은 모듈 참조와 링크 디렉터리뿐이고 둘 다 entry point
   로드와 다르다(3.3). 설치된 pack을 지정해 entry point와 manifest로 로드하는 인자가 있으면 pack 구조의
   제한이 없어진다. aelix-ai #624의 켜기/끄기 저장이 들어온 뒤 `--no-extensions`를 유지할지도 함께 정한다.
@@ -608,10 +622,8 @@ Studio 쪽에서 우회하지 않고 ACP 변경으로 요청한다.
 ### 7.4 Studio 패키징에서 바꿀 것
 
 - `launch.py`가 세대 `site-packages` 경로를 인자로 받아 `sys.path` 끝에 더한다.
-- `launch.py`의 `acp` 모드가 잠금 아래에서 `current.json`을 읽고(쓸 수 없으면 직전 사본), 묶인 번들이 맞는지
-  확인하고, lease를 잡고(5.6), 세대 경로와 `--extension` 인자를 붙인다. 맞는 세대가 없으면 지금 그대로
-  실행한다. 처음 설계는 `launch.cjs`였지만, lease는 어댑터가 사는 동안 잡혀 있어야 하고 그 프로세스가
-  `launch.py acp`라서 그쪽에 두었다. `launch.cjs`는 바꾸지 않는다.
+- `launch.py`의 `acp` 모드가 `current.json` 또는 직전 사본에서 번들이 맞는 세대를 골라 lease를 잡는다(5.6).
+  세대의 `site-packages`는 native worker의 import 경로에 넘긴다.
 - Studio는 관리형 Aelix ACP를 등록할 때 명령별 환경에 `AELIX_STUDIO_EXTENSION_STATE`를 넣는다. 값은 helper와
   같은 절대 경로 `<Studio 사용자 데이터>/aelix-runtime`이다. host는 로그인 셸 환경 다음에 명령별 환경을
   적용하므로 같은 키는 Studio 값이 우선한다.
@@ -620,8 +632,15 @@ Studio 쪽에서 우회하지 않고 ACP 변경으로 요청한다.
 - 별도 WebUI는 링크를 해석한 실제 DB 디렉터리로 사용자 데이터를 찾는다. 그 디렉터리가 `<프로필>/aionui`이고
   프로필의 `config`에 `aionui-config.txt` 또는 `.aionui-env` 파일이 있으면 같은 Desktop 프로필을 사용한다.
   그 밖에는 실제 DB 디렉터리 아래에 `aelix-runtime`을 둔다. [Studio PR #79](https://github.com/handochan/aelix-studio/pull/79)
-- 넘기는 형태는 helper가 세대 기록(`generation.json`, schema `/2`)의 `launch`에 적고, launcher는 그대로 쓴다:
-  pack이 있으면 세대의 `packs` 디렉터리 하나, 그 뒤 모듈 참조를 entry 이름 순서로.
+- helper는 `generation.json`의 `launch.managed`에 검증 목록을 적는다. 관리형 입력을 지원하는 ACP에는 lease가
+  가리키는 세대 ID, 시작 시 읽은 앱 기본값, 켜짐과 꺼짐을 모두 포함한 목록으로 v1 JSON을 만들어
+  `--managed-extensions`로 넘긴다. 모듈이 있으면 같은 세대의 절대 `sitePackages` 경로를 포함한다.
+  빈 세대도 빈 목록으로 넘긴다. 스냅샷은 `leases/`에 lease의 보조 파일로 두고 어댑터 종료나 만료 lease 수집 때
+  제거한다. 관리형 목록은 스냅샷으로만 넘긴다. 별도 운영자 확장은 ACP 계약의 `--extension`을 따른다.
+  [ACP v1 계약](https://github.com/handochan/aelix-acp/blob/a1a32b9afb803ecd1d57c0950882dc907b4bd68f/docs/studio-extension-overrides.md)
+- Studio ACP pin `369df4784`는 관리형 v1 입력을 지원한다. 이전 ACP에는 새로 검증한 세대의 켜진 항목을 개별
+  `--extension` 인자로 넘긴다. 관리형 검증 이전의 세대는 기존 pack 디렉터리와 모듈 참조를 사용한다.
+  대화별 예외는 v1 입력을 지원하는 ACP와 관리형 검증을 마친 세대가 함께 있을 때 적용된다.
 - 번들 Python의 자식이 번들에 `.pyc`를 쓰지 않게 한다. PR #45의 launcher 변경이 이것을 한다. 병합 전에는
   helper가 환경 변수를 준다(`NativeAuthService`가 이미 그렇게 한다).
 - native wheel, `native-site`, lock, host는 바꾸지 않는다.
@@ -720,7 +739,9 @@ ADR을 채택하면 함께 확정되는 구현 방식이다.
   - (나) 대화별. → 대화마다 켜고 끈다. 새 대화에서는 꺼져 있다.
   - (다) 앱 전체 기본값에 대화별 예외. → ACP 변경이 필요하다.
   - 권장: 첫 Beta는 (가).
-  - **결정(2026-11-19): (다) 앱 전체 기본값 + 대화별 예외.** ACP 변경이 필요하다. 1b 착수 전에 ACP 카드를 만든다.
+  - **결정(2026-11-19): (다) 앱 전체 기본값 + 대화별 예외.** 대화에서 켜기·끄기·상속을 허용한다. 열린 대화는
+    어댑터가 다시 시작될 때 바뀐 앱 기본값을 읽는다. 예외는 ACP가 대화별로 저장한다.
+    [ACP #33](https://github.com/handochan/aelix-acp/issues/33) · [ACP PR #38](https://github.com/handochan/aelix-acp/pull/38)
 - **A6. 대화창에서 `/extension install`을 입력했을 때.** ACP가 이 명령을 실행하지 않게 하는 것 자체는
   선택이 아니라 선행이다(7.3). 고를 것은 그 뒤의 동작이다.
   - (가) 막고 "확장 화면에서 설치하세요"로 안내한다. → 대화창에서는 설치할 수 없다.

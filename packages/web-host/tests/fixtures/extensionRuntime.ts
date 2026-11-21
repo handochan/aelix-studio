@@ -288,6 +288,8 @@ export type FakeRuntimeOptions = {
   unbound?: string[];
   /** Load errors by object reference. */
   loadErrors?: Record<string, string>;
+  /** Optional refusal from ACP's managed catalogue verifier. */
+  managedError?: string;
   /** Called when the load check starts, before it answers. Return false to keep native silent. */
   beforeLoad?: (child: ScriptedChild) => boolean | void | Promise<boolean | void>;
   /** Text every native run prints. */
@@ -347,7 +349,9 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
         return;
       }
       finish(child, async () => {
-        const names = await readdir(args[args.indexOf('-c') + 3]).catch(() => [] as string[]);
+        const names = (await readdir(args[args.indexOf('-c') + 3]).catch(() => [] as string[])).filter(
+          (name) => !name.endsWith('.snapshot.json')
+        );
         const live = names.filter((name) => options.heldLeases?.includes(name));
         child.print(JSON.stringify({ live, stale: names.filter((name) => !live.includes(name)) }) + '\n');
         return 0;
@@ -388,7 +392,7 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
       finish(child, async () => {
         const site = args[args.indexOf('-c') + 2];
         const wanted = JSON.parse(args[args.indexOf('-c') + 3]) as Record<string, string>;
-        const answers: Record<string, { id: string | null; python: string | null }> = {};
+        const answers: Record<string, { id: string | null; python: string | null }> = Object.create(null);
         for (const [name, relative] of Object.entries(wanted)) {
           const text = await readFile(path.join(site, ...relative.split('/')), 'utf8').catch(() => '');
           answers[name] = manifestFields(text);
@@ -396,6 +400,14 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
         child.print(JSON.stringify(answers) + '\n');
         return 0;
       });
+      return;
+    }
+    if (args.includes('verify-managed')) {
+      child.onEnd = () => {
+        const reason = options.managedError;
+        child.print(JSON.stringify({ managedVerification: !reason, reason }) + '\n');
+        child.exit(reason ? 1 : 0);
+      };
       return;
     }
     if (args.includes('native-generation')) {

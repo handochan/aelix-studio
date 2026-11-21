@@ -48,8 +48,25 @@ def _lease_file(file, flags):
         raise
 
 
+def _snapshot_path(lease):
+    return lease.with_name(lease.name + '.snapshot.json')
+
+
+def _release_lease(held):
+    file, handle = held
+    try:
+        # Keep the lease name available to the collector if the sidecar
+        # could not be removed here.
+        _snapshot_path(file).unlink(missing_ok=True)
+        file.unlink(missing_ok=True)
+    except OSError:
+        pass
+    finally:
+        os.close(handle)
+
+
 def _studio_generation(bundle, state):
-    """Site directory and ``--extension`` values of the current generation, or None.
+    """Site directory and extension arguments of the leased generation, or None.
 
     Follows the launcher contract of the helper (``store/lock.ts``): take the mutation lock,
     read the pointer in effect (``current.json``, else the copy kept from before the last
@@ -73,7 +90,17 @@ def _studio_generation(bundle, state):
     import secrets
     import time
 
-    generation_name = re.compile(r'g\d{8}-[0-9a-f]{4}')
+    managed = None
+
+    def managed_code():
+        nonlocal managed
+        if managed is None:
+            from runpy import run_path
+            managed = run_path(str(bundle / 'managedSnapshot.py'))
+        return managed
+
+    generation_name = re.compile(r'g[0-9]{8}-[0-9a-f]{4}')
+    managed_id = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}')
     # What the adapter accepts as a module reference (``extension_reference`` at the ACP pin).
     module_reference = re.compile(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*(?::[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*)?')
     nofollow = getattr(os, 'O_NOFOLLOW', 0)
@@ -114,6 +141,11 @@ def _studio_generation(bundle, state):
             return None
         if not all(isinstance(module, str) and module_reference.fullmatch(module) for module in modules):
             return None
+        if 'managed' in launch:
+            try:
+                managed_code()['validate_catalogue'](launch['managed'])
+            except (ValueError, OSError, RuntimeError):
+                return None
         return value
 
     def pointer_in_effect(root):
@@ -122,15 +154,20 @@ def _studio_generation(bundle, state):
             if not value or value.get('schema') != 'aelix.studio.extensions.current/1':
                 continue
             current, previous, revision = value.get('generation'), value.get('previous'), value.get('revision')
+            defaults = value.get('defaults', {})
             if not isinstance(current, str) or not generation_name.fullmatch(current):
                 continue
             if previous is not None and not (isinstance(previous, str) and generation_name.fullmatch(previous)):
                 continue
             if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
                 continue
+            if not isinstance(defaults, dict) or any(
+                not managed_id.fullmatch(name) or type(enabled) is not bool for name, enabled in defaults.items()
+            ):
+                continue
             found = record(root, current)
             if found:
-                return current, previous, found
+                return current, previous, found, defaults
         return None
 
     def acquire(handle, wait):
@@ -184,23 +221,29 @@ def _studio_generation(bundle, state):
         os.close(handle)
         return None
 
-    def release(held):
-        # Out of the directory first, then unlocked: clean-up never sees it unlocked under its name.
-        try:
-            os.unlink(held[0])
-        except OSError:
-            pass
-        os.close(held[1])
-
-    def arguments_of(root, generation, found):
+    def arguments_of(root, generation, found, defaults, held):
         directory = root / 'generations' / generation
         lib = ('Lib',) if os.name == 'nt' else ('lib', f"python{binding['pythonMinor']}")
         site = directory.joinpath('venv', *lib, 'site-packages')
         packs, modules = found['launch']['packs'], found['launch']['modules']
         if not own(site) or (packs and not own(directory / 'packs')):
             return None
-        extensions = [str(directory / 'packs')] * packs + modules
-        return (str(site), extensions) if extensions else None
+        if 'managed' in found['launch']:
+            code = managed_code()
+            value = code['snapshot'](generation, site, found['launch']['managed'], defaults)
+            # The current Studio pin predates ACP's v1 input. It can still
+            # launch the enabled entries using separate explicit references.
+            if (bundle / 'adapter-site/aelix_acp/runtime/managed_extensions.py').is_file():
+                sidecar = _snapshot_path(held[0])
+                raw = code['encode'](value)
+                descriptor = os.open(sidecar, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(descriptor, 'wb') as stream:
+                    stream.write(raw)
+                return str(site), ['--managed-extensions', str(sidecar)]
+            extensions = [entry['reference'] for entry in value['extensions'] if entry['defaultEnabled']]
+        else:
+            extensions = [str(directory / 'packs')] * packs + modules
+        return (str(site), [arg for extension in extensions for arg in ('--extension', extension)]) if extensions else None
 
     if binding['pythonMinor'] == '':
         return None
@@ -224,15 +267,19 @@ def _studio_generation(bundle, state):
             again = pointer_in_effect(root)
             if again and chosen[0] in (again[0], again[1]):
                 break
-            release(held)
+            _release_lease(held)
         else:
             return None
     finally:
         if mutation is not None:
             os.close(mutation)
-    result = arguments_of(root, chosen[0], chosen[2])
+    try:
+        result = arguments_of(root, chosen[0], chosen[2], chosen[3], held)
+    except BaseException:
+        _release_lease(held)
+        raise
     if result is None:
-        release(held)
+        _release_lease(held)
     else:
         _LEASES.append(held)
     return result
@@ -240,12 +287,8 @@ def _studio_generation(bundle, state):
 
 def _release_leases():
     """Give back the leases of this process when it ends normally; clean-up removes any left behind."""
-    for file, handle in _LEASES:
-        try:
-            os.unlink(file)
-        except OSError:
-            pass
-        os.close(handle)
+    for held in _LEASES:
+        _release_lease(held)
     _LEASES.clear()
 
 
@@ -289,6 +332,15 @@ elif mode == 'helper':
     if len(arguments) != 2 or arguments[0] != '-c':
         raise SystemExit('Unsupported helper invocation')
     exec(compile(arguments[1], '<studio-native-auth>', 'exec'), {'__name__': '__main__'})
+elif mode == 'verify-managed':
+    import json
+    from runpy import run_path
+    try:
+        run_path(str(root / 'managedSnapshot.py'))['verify'](root, arguments[0], json.load(sys.stdin))
+    except (ValueError, KeyError, IndexError, OSError, TypeError, RuntimeError) as error:
+        print(json.dumps({'managedVerification': False, 'reason': str(error)}), flush=True)
+        raise SystemExit(1)
+    print(json.dumps({'managedVerification': True}), flush=True)
 elif mode in ('native', 'native-generation'):
     if mode == 'native-generation':
         # The conversation form (D04 ADR 5.2): the generation's site-packages goes last, after
@@ -313,8 +365,8 @@ elif mode == 'acp':
             '--aelix-arg=native-generation', '--aelix-arg=' + generation[0]]
         prefix = ['--aelix', sys.executable, '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B',
                   '--aelix-arg=-Xutf8', '--aelix-arg=' + str(root / 'launch.py'), *native]
-        for extension in [] if generation is None else generation[1]:
-            prefix += ['--extension', extension]
+        if generation is not None:
+            prefix += generation[1]
         if _LEASES:
             import atexit
             atexit.register(_release_leases)

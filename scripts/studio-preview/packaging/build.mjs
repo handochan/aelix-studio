@@ -37,6 +37,7 @@ if (manifest.schema !== 'aelix.studio-preview.runtime/1' || manifest.target !== 
   throw new Error('Invalid Preview payload');
 const { createHash } = await import('node:crypto');
 const digest = (file) => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const managedSource = path.join(root, 'packages/web-host/src/studio-extensions/launch');
 if (
   manifest.baselineSha256 !== digest(path.join(root, 'scripts/studio-preview/baseline.json')) ||
   manifest.preparedReceiptSha256 !== digest(path.join(runtime, 'receipt.json'))
@@ -47,6 +48,11 @@ for (const [name, source] of [
     (name) => [name, path.join(import.meta.dirname, name)]
   ),
   ['launch.cjs', path.join(import.meta.dirname, '../host-release/launch.cjs')],
+  ['managedSnapshot.py', path.join(managedSource, 'managedSnapshot.py')],
+  ...['managed_module.py', 'LICENSE', 'NOTICE'].map((name) => [
+    'managed-verifier/' + name,
+    path.join(managedSource, 'upstream', name),
+  ]),
 ])
   if (manifest.recipeSha256?.[name] !== digest(source))
     throw new Error('Stale payload recipe: archive the owned .local/packaging/runtime and rebuild');

@@ -18,6 +18,7 @@ export type ExtensionCommand =
   | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
   | { action: 'update'; name: string; source: FileExtensionSource }
   | { action: 'remove'; name: string }
+  | { action: 'set_default'; extensionId: string; enabled: boolean }
   | { action: 'rollback' | 'reconcile_bundle' }
   | { action: 'poll' | 'cancel'; operationId: string };
 
@@ -53,6 +54,9 @@ export type ExtensionEntry = {
   reference: string;
   origin: ExtensionOrigin | null;
   status: ExtensionStatus;
+  /** Grouped pack aliases share one ACP ID and one app default. Legacy generations have neither. */
+  managedId?: string;
+  defaultEnabled?: boolean;
 };
 
 export type ExtensionListing = {
@@ -102,6 +106,7 @@ export type ExtensionFailureCode =
   /** The result differs from what was asked for. */
   | 'REQUEST_MISMATCH'
   | 'LOAD_ERROR'
+  | 'MANAGED_EXTENSION_INVALID'
   | 'VERIFICATION_FAILED'
   | 'NO_CHANGE'
   | 'NOT_INSTALLED'

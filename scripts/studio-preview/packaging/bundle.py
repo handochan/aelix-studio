@@ -15,6 +15,12 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[3]
+MANAGED_SOURCE = ROOT / 'packages/web-host/src/studio-extensions/launch'
+MANAGED_RECIPE = {
+    'managedSnapshot.py': MANAGED_SOURCE / 'managedSnapshot.py',
+    **{'managed-verifier/' + name: MANAGED_SOURCE / 'upstream' / name
+       for name in ('managed_module.py', 'LICENSE', 'NOTICE')},
+}
 spec = importlib.util.spec_from_file_location('preview_prepare', Path(__file__).parents[1] / 'prepare.py')
 prepare = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(prepare)
@@ -140,6 +146,10 @@ def main(args):
                 raise ValueError('Qualification site contains path injection files')
             copy_tree(site, bundle / (kind + '-site'))
         shutil.copy2(Path(__file__).with_name('launch.py'), bundle / 'launch.py')
+        for relative, source_file in MANAGED_RECIPE.items():
+            target = bundle / relative
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source_file, target)
         shutil.copy2(runtime / 'launch.cjs', bundle / 'launch.cjs')
         studio_startup = write_windows_child_bootstrap(bundle) if sys.platform == 'win32' else []
         wrappers = (('native/bin/python', 'helper'), ('native/bin/aelix', 'native'), ('adapter/bin/aelix-acp', 'acp')) if sys.platform != 'win32' else ()
@@ -160,6 +170,7 @@ def main(args):
                         entrypoints=['python/python.exe' if sys.platform == 'win32' else 'python/bin/python3', 'launch.py', 'launch.cjs'])
         manifest['recipeSha256']['launch.cjs'] = digest(runtime / 'launch.cjs')
         manifest['recipeSha256']['native-requirements.lock'] = digest(Path(__file__).with_name('native-requirements.lock'))
+        manifest['recipeSha256'].update({name: digest(source_file) for name, source_file in MANAGED_RECIPE.items()})
         (bundle / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
         checksums = {str(file.relative_to(bundle)): ('symlink:' + os.readlink(file) if file.is_symlink() else digest(file))
                      for file in sorted(bundle.rglob('*')) if file.is_file() or file.is_symlink()}
