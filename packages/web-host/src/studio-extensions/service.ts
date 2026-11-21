@@ -3,16 +3,24 @@ import path from 'node:path';
 import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
 import {
+  clearProxyCredentials,
   describe,
   mutate,
   reconcileBundle,
   rollback,
   saveSettings,
   setDefault,
+  setProxyCredentials,
   type MutationRequest,
 } from './flow/mutate.js';
 import { privateGitEnvironment } from './flow/online/credentials.js';
-import { parseSettingsChange, readSettings, type StoredSettings } from './flow/online/settings.js';
+import {
+  hasSavedCredentials,
+  MEMORY_ONLY_VAULT,
+  parseProxyCredentials,
+  type ProxyCredentialVault,
+} from './flow/online/proxyCredentials.js';
+import { parseSettingsChange, readSettings, type SettingsChange, type StoredSettings } from './flow/online/settings.js';
 import { parseOnlineSource } from './flow/online/source.js';
 import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
 import { locateLayout, resolveBundle, verifyLayout } from './store/layout.js';
@@ -23,9 +31,9 @@ import {
   type ExtensionFailureCode,
   type ExtensionOperation,
   type ExtensionReply,
-  type ExtensionSettings,
   type ExtensionSettingsState,
   type ExtensionSource,
+  type ProxyCredentials,
 } from './types.js';
 
 export type ExtensionServiceOptions = {
@@ -47,6 +55,12 @@ export type ExtensionServiceOptions = {
   timeouts?: Partial<FlowContext['timeouts']>;
   /** Where the full text of an unexpected error goes. It is never part of a reply. */
   log?: (message: string, error: unknown) => void;
+  /**
+   * Where proxy credentials can be kept. The desktop host passes its `safeStorage` vault
+   * (keychain, or memory-only where the OS has no secret store); left out, as in the
+   * standalone WebUI, nothing is kept and each online install brings its credentials.
+   */
+  proxyVault?: ProxyCredentialVault;
 };
 
 type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
@@ -58,12 +72,15 @@ const TIMEOUTS: FlowContext['timeouts'] = {
   verifyMs: 120_000,
 };
 type DirectCommand =
-  | Extract<ExtensionCommand, { action: 'rollback' | 'reconcile_bundle' | 'set_default' }>
-  | { action: 'set_settings'; settings: Partial<ExtensionSettings> };
+  | Extract<ExtensionCommand, { action: 'rollback' | 'reconcile_bundle' | 'set_default' | 'clear_proxy_credentials' }>
+  | { action: 'set_settings'; change: SettingsChange }
+  | { action: 'set_proxy_credentials'; credentials: ProxyCredentials };
 const ACTIONS = new Set([
   'list',
   'get_settings',
   'set_settings',
+  'set_proxy_credentials',
+  'clear_proxy_credentials',
   'install',
   'update',
   'remove',
@@ -105,7 +122,8 @@ const isName = (value: unknown): value is string =>
  * including when an existing conversation's adapter restarts.
  *
  * One change runs at a time. `install`, `update` and `remove` return an operation to
- * `poll`; `list`, `rollback`, `set_default`, `get_settings` and `set_settings` answer directly.
+ * `poll`; `list`, `rollback`, `set_default`, `get_settings`, `set_settings` and the proxy
+ * credential requests answer directly.
  * Saving settings is a change too: it waits for the lock and answers `BUSY` while another
  * change runs. A running install keeps the settings it started with.
  *
@@ -137,7 +155,12 @@ export class ExtensionService {
       timeouts: { ...TIMEOUTS, ...this.options.timeouts },
       signal,
       user: privateGitEnvironment(this.options.env ?? process.env, this.platform),
+      proxyVault: this.vault,
     };
+  }
+
+  private get vault(): ProxyCredentialVault {
+    return this.options.proxyVault ?? MEMORY_ONLY_VAULT;
   }
 
   /** False when Studio's own policy turns online installs off, whatever the user's setting says. */
@@ -146,8 +169,16 @@ export class ExtensionService {
     return (typeof enabled === 'function' ? enabled() : enabled) !== false;
   }
 
-  private settingsState(stored: StoredSettings): ExtensionSettingsState {
-    return { settings: stored.settings, unreadable: stored.unreadable, onlineInstallLocked: !this.onlineAllowed() };
+  /** What a screen sees of the settings: never the credentials, never their id. */
+  private async settingsState(stored: StoredSettings): Promise<ExtensionSettingsState> {
+    const layout = await locateLayout(this.options.root);
+    return {
+      settings: stored.settings,
+      unreadable: stored.unreadable,
+      onlineInstallLocked: !this.onlineAllowed(),
+      credentialMode: this.vault.mode,
+      hasSavedCredentials: await hasSavedCredentials(layout, this.vault, stored.settings.proxy, stored.credentialId),
+    };
   }
 
   /** The stored settings, read without the lock and without creating anything. */
@@ -178,23 +209,30 @@ export class ExtensionService {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
       }
-      if (command.action === 'get_settings') return { ok: true, data: this.settingsState(await this.storedSettings()) };
+      if (command.action === 'get_settings')
+        return { ok: true, data: await this.settingsState(await this.storedSettings()) };
       if (
         command.action === 'rollback' ||
         command.action === 'reconcile_bundle' ||
         command.action === 'set_default' ||
-        command.action === 'set_settings'
+        command.action === 'set_settings' ||
+        command.action === 'set_proxy_credentials' ||
+        command.action === 'clear_proxy_credentials'
       ) {
         if (
           command.action === 'set_default' &&
           (!isManagedId(command.extensionId) || typeof command.enabled !== 'boolean')
         )
           return fail('INVALID_INPUT');
-        // Checked before anything waits or is written; a refused proxy is never echoed.
+        if (command.action === 'set_proxy_credentials' && this.vault.mode !== 'keychain')
+          return fail('PROXY_CREDENTIALS_NOT_STORED');
+        // Checked before anything waits or is written; a refused proxy or credential is never echoed.
         const direct: DirectCommand =
           command.action === 'set_settings'
-            ? { action: 'set_settings', settings: parseSettingsChange(command.settings) }
-            : command;
+            ? { action: 'set_settings', change: parseSettingsChange(command.settings) }
+            : command.action === 'set_proxy_credentials'
+              ? { action: 'set_proxy_credentials', credentials: parseProxyCredentials(command.credentials) }
+              : command;
         if (this.changing) return fail('BUSY');
         this.changing = true;
         const abort = new AbortController();
@@ -212,10 +250,20 @@ export class ExtensionService {
       if (change?.action === 'install' && change.source.kind !== 'file') {
         if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
         // An early answer for the screen; the change checks the settings again under the lock.
-        const { settings, unreadable } = await this.storedSettings();
+        const stored = await this.storedSettings();
+        const { settings, unreadable } = stored;
         if (unreadable) return fail('SETTINGS_UNREADABLE');
         if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
-      }
+        if (change.proxyCredentials && settings.proxy === null)
+          return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
+        // The screen asks for credentials on this answer; nothing has started.
+        if (settings.proxy !== null && settings.proxyAuthentication && !change.proxyCredentials) {
+          const layout = await locateLayout(this.options.root);
+          if (!(await hasSavedCredentials(layout, this.vault, settings.proxy, stored.credentialId)))
+            return fail('PROXY_CREDENTIALS_REQUIRED');
+        }
+      } else if (change.action === 'install' && change.proxyCredentials)
+        return fail('INVALID_INPUT', ['a file import runs offline and takes no proxy credentials']);
       if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
         return fail('UNSUPPORTED_PLATFORM');
       if (this.changing) return fail('BUSY');
@@ -249,7 +297,11 @@ export class ExtensionService {
       if (command.action === 'set_default')
         return { ok: true, data: await setDefault(context, command.extensionId, command.enabled) };
       if (command.action === 'set_settings')
-        return { ok: true, data: this.settingsState(await saveSettings(context, command.settings)) };
+        return { ok: true, data: await this.settingsState(await saveSettings(context, command.change)) };
+      if (command.action === 'set_proxy_credentials')
+        return { ok: true, data: await this.settingsState(await setProxyCredentials(context, command.credentials)) };
+      if (command.action === 'clear_proxy_credentials')
+        return { ok: true, data: await this.settingsState(await clearProxyCredentials(context)) };
       const data = command.action === 'reconcile_bundle' ? await reconcileBundle(context) : await rollback(context);
       return { ok: true, data };
     } catch (error) {
@@ -321,9 +373,11 @@ function parseChange(command: ExtensionCommand): MutationRequest | undefined {
   if (!source) return undefined;
   if (command.action === 'install') {
     const { replaceIncompatible } = command;
-    return replaceIncompatible === undefined || typeof replaceIncompatible === 'boolean'
-      ? { action: 'install', source, replaceIncompatible }
-      : undefined;
+    if (replaceIncompatible !== undefined && typeof replaceIncompatible !== 'boolean') return undefined;
+    // Credentials of the request stay in this object, which only the running change holds.
+    const proxyCredentials =
+      command.proxyCredentials === undefined ? undefined : parseProxyCredentials(command.proxyCredentials);
+    return { action: 'install', source, replaceIncompatible, ...(proxyCredentials ? { proxyCredentials } : {}) };
   }
   return source.kind === 'file' && isName(command.name) ? { action: 'update', name: command.name, source } : undefined;
 }

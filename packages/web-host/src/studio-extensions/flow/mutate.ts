@@ -44,6 +44,7 @@ import {
   type ExtensionSource,
   type FileExtensionSource,
   type OnlineExtensionSource,
+  type ProxyCredentials,
 } from '../types.js';
 import {
   chooseForms,
@@ -71,11 +72,24 @@ import {
 import { checkImport } from './importCheck.js';
 import { checkoutSubdirectory, type GitCheckout } from './online/checkout.js';
 import { privateGitAccess } from './online/credentials.js';
-import { readSettings, writeSettings, type StoredSettings } from './online/settings.js';
+import {
+  dropProxyCredentials,
+  MEMORY_ONLY_VAULT,
+  openSavedCredentials,
+  proxyWithCredentials,
+  saveProxyCredentials,
+} from './online/proxyCredentials.js';
+import { readSettings, writeSettings, type SettingsChange, type StoredSettings } from './online/settings.js';
 import { installedCheckoutOrigin, installedGitOrigin, matchesVersion, onlineIndex } from './online/source.js';
 
 export type MutationRequest =
-  | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
+  | {
+      action: 'install';
+      source: ExtensionSource;
+      replaceIncompatible?: boolean;
+      /** For this install only; never stored. */
+      proxyCredentials?: ProxyCredentials;
+    }
   | { action: 'update'; name: string; source: FileExtensionSource }
   | { action: 'remove'; name: string };
 
@@ -258,14 +272,46 @@ async function prepare(
 async function onlineAccess(
   context: FlowContext,
   settings: ExtensionSettings,
+  proxy: string | undefined,
   source: OnlineExtensionSource,
   home: string
 ): Promise<OnlineAccess> {
   const access: OnlineAccess = {};
-  if (settings.proxy !== null) access.proxy = settings.proxy;
+  if (proxy !== undefined) access.proxy = proxy;
   if (source.kind === 'git' && settings.privateGit && context.platform !== 'win32')
     access.privateGit = await privateGitAccess(context, home, context.timeouts.verifyMs);
   return access;
+}
+
+/**
+ * The proxy URL an online install gives pip and Git: the stored proxy, with the credentials of
+ * the request or the saved ones as its user part when the proxy asks for them. They go into
+ * the installer environment only, never into an argument.
+ *
+ * @throws ExtensionFailure `PROXY_CREDENTIALS_REQUIRED` when the proxy asks for credentials
+ * and none are at hand; `INVALID_INPUT` for credentials sent without a proxy
+ */
+async function installProxy(
+  context: FlowContext,
+  stored: StoredSettings,
+  supplied: ProxyCredentials | undefined
+): Promise<string | undefined> {
+  const { proxy, proxyAuthentication } = stored.settings;
+  const vault = context.proxyVault ?? MEMORY_ONLY_VAULT;
+  if (proxy === null) {
+    if (supplied) throw new ExtensionFailure('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
+    return undefined;
+  }
+  const credentials =
+    supplied ??
+    (proxyAuthentication ? await openSavedCredentials(context.layout, vault, proxy, stored.credentialId) : undefined);
+  if (proxyAuthentication && !credentials)
+    throw new ExtensionFailure('PROXY_CREDENTIALS_REQUIRED', [
+      vault.mode === 'memory-only'
+        ? 'proxy credentials are not kept here; send them with the install'
+        : 'no saved proxy credentials could be opened; send them with the install or save them again',
+    ]);
+  return credentials ? proxyWithCredentials(proxy, credentials) : proxy;
 }
 
 /** The record of a verified candidate: what it holds and where each distribution came from. */
@@ -540,10 +586,13 @@ export async function mutate(
     if (stale && !(request.action === 'install' && request.replaceIncompatible))
       throw new ExtensionFailure('BUNDLE_CHANGED', ['the installed extensions belong to another Studio runtime']);
     // The settings this change uses: read once, under the lock, so none of them moves until it ends.
-    const { settings, unreadable } = await readSettings(layout);
+    const stored = await readSettings(layout);
+    const { settings, unreadable } = stored;
+    let proxy: string | undefined;
     if (request.action === 'install' && request.source.kind !== 'file') {
       if (unreadable) throw new ExtensionFailure('SETTINGS_UNREADABLE', ['the extension settings cannot be read']);
       if (!settings.onlineInstall) throw new ExtensionFailure('ONLINE_INSTALL_DISABLED');
+      proxy = await installProxy(guarded, stored, request.proxyCredentials);
     }
     // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
     const parent = stale ? null : base.record;
@@ -585,7 +634,7 @@ export async function mutate(
               indexUrl: onlineIndex(source),
               home,
               work: cwd,
-              access: await onlineAccess(guarded, settings, source, home),
+              access: await onlineAccess(guarded, settings, proxy, source, home),
             },
           }
         : {}),
@@ -930,14 +979,85 @@ export async function setDefault(
  * the mutation lock, like every other change, so a running install keeps the settings it
  * started with and two Studio processes cannot interleave a read and a write. When the stored
  * file could not be read, the change starts from the closed settings.
+ *
+ * Saved proxy credentials belong to one proxy: turning the proxy off, changing its host or
+ * port, or turning `proxyAuthentication` off drops them. Credentials typed into the proxy
+ * address turn `proxyAuthentication` on and, with a keychain, are saved; without one they are
+ * dropped here and asked for at each install.
+ *
+ * @throws ExtensionFailure `INVALID_INPUT` for `proxyAuthentication` without a proxy
  */
-export async function saveSettings(context: FlowContext, change: Partial<ExtensionSettings>): Promise<StoredSettings> {
+export async function saveSettings(context: FlowContext, change: SettingsChange): Promise<StoredSettings> {
+  const vault = context.proxyVault ?? MEMORY_ONLY_VAULT;
   const { lock } = await begin(context);
   try {
-    const settings: ExtensionSettings = { ...(await readSettings(context.layout)).settings, ...change };
+    const { layout } = context;
+    const current = await readSettings(layout);
+    const settings: ExtensionSettings = { ...current.settings, ...change.settings };
+    const proxyChanged = settings.proxy !== current.settings.proxy;
+    if (settings.proxy === null) {
+      if (change.settings.proxyAuthentication === true)
+        throw new ExtensionFailure('INVALID_INPUT', ['proxy authentication needs a proxy']);
+      settings.proxyAuthentication = false;
+    } else if (proxyChanged && change.settings.proxyAuthentication === undefined) settings.proxyAuthentication = false;
+    if (change.credentials && settings.proxy !== null) settings.proxyAuthentication = true;
+    let credentialId = proxyChanged || !settings.proxyAuthentication ? null : current.credentialId;
     if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
-    await writeSettings(context.layout, settings, lock);
-    return { settings, unreadable: false };
+    if (change.credentials && settings.proxy !== null && vault.mode === 'keychain')
+      credentialId = await saveProxyCredentials(layout, vault, settings.proxy, change.credentials, lock);
+    await writeSettings(layout, settings, credentialId, lock);
+    // No id, no sealed file: this also removes one left by unreadable settings or an interrupted save.
+    if (credentialId === null) await dropProxyCredentials(layout, lock);
+    return { settings, unreadable: false, credentialId };
+  } catch (error) {
+    throw outcome(error, lock);
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Save credentials for the current proxy in the keychain and turn `proxyAuthentication` on.
+ *
+ * @throws ExtensionFailure `PROXY_CREDENTIALS_NOT_STORED` without a keychain,
+ * `SETTINGS_UNREADABLE` when the stored settings cannot be read, `INVALID_INPUT` without a proxy
+ */
+export async function setProxyCredentials(
+  context: FlowContext,
+  credentials: ProxyCredentials
+): Promise<StoredSettings> {
+  const vault = context.proxyVault ?? MEMORY_ONLY_VAULT;
+  if (vault.mode !== 'keychain')
+    throw new ExtensionFailure('PROXY_CREDENTIALS_NOT_STORED', ['proxy credentials are not kept here']);
+  const { lock } = await begin(context);
+  try {
+    const current = await readSettings(context.layout);
+    if (current.unreadable)
+      throw new ExtensionFailure('SETTINGS_UNREADABLE', ['the extension settings cannot be read']);
+    if (current.settings.proxy === null)
+      throw new ExtensionFailure('INVALID_INPUT', ['set a proxy before its credentials']);
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+    const settings: ExtensionSettings = { ...current.settings, proxyAuthentication: true };
+    const credentialId = await saveProxyCredentials(context.layout, vault, current.settings.proxy, credentials, lock);
+    await writeSettings(context.layout, settings, credentialId, lock);
+    return { settings, unreadable: false, credentialId };
+  } catch (error) {
+    throw outcome(error, lock);
+  } finally {
+    await lock.release();
+  }
+}
+
+/** Drop saved proxy credentials. `proxyAuthentication` stays: the next install asks for them. */
+export async function clearProxyCredentials(context: FlowContext): Promise<StoredSettings> {
+  const { lock } = await begin(context);
+  try {
+    const current = await readSettings(context.layout);
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+    if (!current.unreadable && current.credentialId !== null)
+      await writeSettings(context.layout, current.settings, null, lock);
+    await dropProxyCredentials(context.layout, lock);
+    return { ...current, credentialId: null };
   } catch (error) {
     throw outcome(error, lock);
   } finally {

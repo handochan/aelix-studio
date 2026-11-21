@@ -143,7 +143,9 @@ export function directWriter(root: string): StateWriter {
   };
   return {
     replace: async (from, to) => {
-      const replaceable = ['current.json', 'current.previous.json', 'settings.json'].includes(to);
+      const replaceable = ['current.json', 'current.previous.json', 'settings.json', 'proxy-credentials.json'].includes(
+        to
+      );
       if (!replaceable || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
       await rename(path.join(root, from), path.join(root, to));
     },

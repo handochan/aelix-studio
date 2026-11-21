@@ -11,7 +11,7 @@ import { stateRelative, type Bundle, type Layout } from './layout.js';
  * its input closes, which also happens when this process dies.
  *
  * The same child also performs every change to state that other processes share: it renames
- * the pointer files and the settings file and it removes generations, stored wheels and leases. It can only do so
+ * the pointer files, the settings file and the sealed proxy credentials, and it removes generations, stored wheels and leases. It can only do so
  * while it is alive, which is exactly while the lock is held, so nothing shared is written
  * or removed after the lock is gone. It removes only entries that sit directly in the root
  * or in one of the dedicated directories, and only when that directory really is the
@@ -30,7 +30,7 @@ import errno, json, os, re, shutil, sys, time
 
 NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
 DEDICATED = ('generations', 'artifacts', 'leases')
-REPLACEABLE = ('current.json', 'current.previous.json', 'settings.json')
+REPLACEABLE = ('current.json', 'current.previous.json', 'settings.json', 'proxy-credentials.json')
 
 class Refused(Exception):
     pass
@@ -180,7 +180,7 @@ const interpreterArguments = (mode: string, ...rest: string[]): string[] => [
  * that holds the mutation lock.
  */
 export type StateWriter = {
-  /** Rename `<root>/<from>`, a temporary file, over a pointer file or the settings file `<root>/<to>`. */
+  /** Rename `<root>/<from>`, a temporary file, over a pointer, settings or proxy-credentials file `<root>/<to>`. */
   replace(from: string, to: string): Promise<void>;
   /**
    * Remove `<root>/<relative>`: a file, a link (never what it points at) or a directory

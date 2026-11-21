@@ -174,6 +174,7 @@ Studio 사용자 데이터 디렉터리 아래에 둔다. 앱 번들, 사용자�
   lock                         변경 작업의 프로세스 간 잠금
   current.json                 현재·이전 세대, revision, 묶인 번들, 앱 기본값(직전 사본도 둔다)
   settings.json                확장 설정: 온라인 설치, proxy, 비공개 Git(5.10)
+  proxy-credentials.json       proxy 인증 정보. OS keychain으로 암호화한 것만, 데스크톱 앱에서만(5.10)
   constraints-<lock>.txt       번들에 설치된 배포판과 버전(번들에서 계산)
   artifacts/<묶음>/            파일로 반입한 wheel과 그 sha256 목록
   leases/                      실행 중인 launcher의 lease와 관리형 스냅샷
@@ -289,20 +290,20 @@ native CLI와 로드 검증에 넘기는 환경은 Studio가 **허용 목록으�
 
 아래는 Studio가 넣는 변수다. 부모(`-I`)는 `PYTHON*`을 무시하고 pip 자식만 읽는다. **[실행]**
 
-| 환경 변수                             | 이유                                                                                                                                     |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| `AELIX_CODING_AGENT_DIR=<세대>/agent` | native가 설치 기록을 CLI와 공유하는 `~/.aelix/agent/settings.json`에 쓰지 않게 한다. 버린 후보의 기록도 함께 사라진다                    |
-| `PYTHONPATH=<번들>/native-site`       | pip이 번들에 이미 있는 패키지를 설치된 것으로 본다. 없으면 pip은 번들에 무엇이 있는지 모른다                                             |
-| `PIP_CONSTRAINT=<constraints URL>`    | 번들과 다른 버전을 요구하는 확장을 설치 단계에서 실패시킨다. 없으면 pip이 다른 버전을 세대에 깔고, 실행 때는 번들 버전이 조용히 이긴다   |
-| `PIP_CONFIG_FILE=<빈 장치>`           | 사용자의 pip 설정이 설치 위치와 접속 대상을 바꾸지 못하게 한다(3.1·3.4)                                                                  |
-| `PYTHONDONTWRITEBYTECODE=1`           | 번들 표준 라이브러리에 `.pyc`가 생기지 않게 한다(3.2). main의 launcher에서는 Studio가 주지 않으면 번들이 바뀐다                          |
-| `PIP_DISABLE_PIP_VERSION_CHECK=1`     | pip이 스스로 PyPI에 버전을 묻지 않게 한다                                                                                                |
-| `PIP_NO_INPUT=1`                      | pip이 입력을 기다리며 멈추지 않게 한다                                                                                                   |
-| 오프라인 반입일 때                    | `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=<보관소 URL>`, 죽은 proxy(5.9)                                                                         |
-| `PIP_INDEX_URL`                       | `update`에는 `--index-url`이 없어 이 변수로 내부 index를 준다                                                                            |
-| 온라인 설치에 사용자 proxy가 있을 때  | `PIP_PROXY`, `http_proxy`·`https_proxy`(대문자 포함), 빈 `no_proxy`, Git `http.proxy`. 없으면 `no_proxy=*`와 빈 `http.proxy`(5.10)       |
-| git 설치에 비공개 Git이 켜졌을 때     | `SSH_AUTH_SOCK`, 사용자 SSH 설정을 쓰는 `GIT_SSH_COMMAND`, 사용자 `credential.*` 항목, `GCM_INTERACTIVE=never`(5.10). 이름 설치에는 없다 |
-| 온라인 설치의 Git 전송 정책           | `protocol.*.allow`: 요청 저장소는 받은 scheme, submodule은 HTTPS만(비공개 Git이면 SSH도)(5.10)                                           |
+| 환경 변수                             | 이유                                                                                                                                                                               |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `AELIX_CODING_AGENT_DIR=<세대>/agent` | native가 설치 기록을 CLI와 공유하는 `~/.aelix/agent/settings.json`에 쓰지 않게 한다. 버린 후보의 기록도 함께 사라진다                                                              |
+| `PYTHONPATH=<번들>/native-site`       | pip이 번들에 이미 있는 패키지를 설치된 것으로 본다. 없으면 pip은 번들에 무엇이 있는지 모른다                                                                                       |
+| `PIP_CONSTRAINT=<constraints URL>`    | 번들과 다른 버전을 요구하는 확장을 설치 단계에서 실패시킨다. 없으면 pip이 다른 버전을 세대에 깔고, 실행 때는 번들 버전이 조용히 이긴다                                             |
+| `PIP_CONFIG_FILE=<빈 장치>`           | 사용자의 pip 설정이 설치 위치와 접속 대상을 바꾸지 못하게 한다(3.1·3.4)                                                                                                            |
+| `PYTHONDONTWRITEBYTECODE=1`           | 번들 표준 라이브러리에 `.pyc`가 생기지 않게 한다(3.2). main의 launcher에서는 Studio가 주지 않으면 번들이 바뀐다                                                                    |
+| `PIP_DISABLE_PIP_VERSION_CHECK=1`     | pip이 스스로 PyPI에 버전을 묻지 않게 한다                                                                                                                                          |
+| `PIP_NO_INPUT=1`                      | pip이 입력을 기다리며 멈추지 않게 한다                                                                                                                                             |
+| 오프라인 반입일 때                    | `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=<보관소 URL>`, 죽은 proxy(5.9)                                                                                                                   |
+| `PIP_INDEX_URL`                       | `update`에는 `--index-url`이 없어 이 변수로 내부 index를 준다                                                                                                                      |
+| 온라인 설치에 사용자 proxy가 있을 때  | `PIP_PROXY`, `http_proxy`·`https_proxy`(대문자 포함), 빈 `no_proxy`, Git `http.proxy`. 인증 정보는 이 주소의 사용자 부분으로만 넣는다. 없으면 `no_proxy=*`와 빈 `http.proxy`(5.10) |
+| git 설치에 비공개 Git이 켜졌을 때     | `SSH_AUTH_SOCK`, 사용자 SSH 설정을 쓰는 `GIT_SSH_COMMAND`, 사용자 `credential.*` 항목, `GCM_INTERACTIVE=never`(5.10). 이름 설치에는 없다                                           |
+| 온라인 설치의 Git 전송 정책           | `protocol.*.allow`: 요청 저장소는 받은 scheme, submodule은 HTTPS만(비공개 Git이면 SSH도)(5.10)                                                                                     |
 
 `PIP_CONSTRAINT`와 `PIP_FIND_LINKS`는 공백으로 값을 나눈다. "Application Support"처럼 공백이 있는 경로는
 깨졌고, `file://` URL로 주니 공백과 한글 경로에서 동작했다. **[실행]**
@@ -520,12 +521,31 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   **덮지 못하는 것:** SSH Git(`ssh://`, `git@host:`)과 `git://`은 HTTP proxy를 쓰지 않는다(비공개 Git을 켜면
   사용자 SSH 설정의 `ProxyCommand`·`ProxyJump`가 적용된다). 로드 검증과 대화의 확장 코드, 표준 변수를
   무시하는 빌드 코드도 덮지 못한다. 파일 반입은 proxy 설정과 무관하게 죽은 proxy를 유지한다(5.9).
-  사용자 이름·비밀번호가 든 주소는 지금 `PROXY_CREDENTIALS_UNSUPPORTED`로 거절한다. 저장 방식은 사용자가
-  정했다(2026-11-21). 데스크톱(Electron) 앱은 proxy 인증 정보를 Electron `safeStorage`로 암호화해 저장한다.
-  `safeStorage`가 Linux에서 `basic_text`(OS 비밀 저장소 없음)로 동작하는 경우와 별도 WebUI는 저장하지 않고,
-  설치·업데이트 때마다 묻고 그 값을 메모리에만 둔다. 이것은 #97 다음의 후속 PR에서 구현한다. 그때까지 #97은
-  인증 정보가 든 주소를 거절한다. 거절 응답과 로그에는 입력한 주소를 넣지 않는다. **[실행: 번들 pip과
-  native로 loopback proxy를 거친 이름 설치, 시스템 proxy 주입과 환경 `HTTP_PROXY` 무시, Git HTTPS CONNECT]**
+  **[실행: 번들 pip과 native로 loopback proxy를 거친 이름 설치, 시스템 proxy 주입과 환경 `HTTP_PROXY` 무시,
+  Git HTTPS CONNECT]**
+- **proxy 인증 정보.** [2026-11-21 사용자 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7056423671)대로
+  저장할지는 실행 형태가 정한다. 데스크톱(Electron) 앱은 main process에서 Electron `safeStorage`로 OS keychain
+  (macOS Keychain, Windows DPAPI, Linux libsecret·KWallet)에 묶어 암호화한 바이트만 `proxy-credentials.json`에
+  저장한다(`credentialMode: 'keychain'`). `safeStorage`가 암호화를 못 하거나 Linux에서 OS 비밀 저장소 없이
+  `basic_text`(또는 `unknown`)로 동작할 때, 그리고 별도 WebUI에서는 저장하지 않는다(`'memory-only'`). 그때는 온라인
+  설치마다 요청으로 인증 정보를 받아 그 변경 동안만 메모리에 둔다. helper는 Electron을 모른다. host가 암호화·복호화
+  함수 두 개(또는 memory-only)만 넘기고, 파일은 helper가 `settings.json`과 같은 방식(변경 잠금, 임시 파일 flush,
+  lock holder의 rename)으로 쓴다. `settings.json`에는 인증을 요구하는지(`proxyAuthentication`)와 봉인 파일을 가리키는
+  무작위 ID만 둔다. 봉인 파일은 그 ID와 proxy 주소에 묶여 있어 다른 주소나 이전 저장의 것은 쓰지 않는다. proxy를
+  끄거나 주소(scheme·host·port)를 바꾸거나 인증을 끄면 저장된 인증 정보를 지운다. keychain이 열지 못하면 없는
+  것으로 보고 다시 묻는다. 1b가 저장한 설정은 그대로 읽힌다(인증 꺼짐).
+  사용자 이름·비밀번호가 든 주소를 입력하면 나눠서 주소만 저장하고 인증을 켠다(keychain이면 인증 정보도
+  저장한다). 인증을 요구하는데 저장된 것도 요청에 든 것도 없으면 설치 도구를 시작하기 전에
+  `PROXY_CREDENTIALS_REQUIRED`로 답한다. 화면은 이 코드를 받으면 묻는다. 요청에 든 인증 정보는 저장된 것보다
+  앞서고 그 설치에만 쓴다. 파일 반입과 업데이트(파일만 받는다)는 오프라인이라 인증 정보를 받지 않는다.
+  인증 정보는 pip과 Git에 환경 변수로만 간다. 5.4의 proxy 변수에 든 주소의 사용자 부분으로 퍼센트 인코딩해
+  넣는다. 명령 인자, 설정 파일, 세대 기록, 응답, 로그, 오류 문구에는 넣지 않는다. 설치 도구 출력은 위의 가리기를
+  거친다. 사용자 이름과 비밀번호는 출력 가능한 ASCII만 받고, `%` 뒤에 16진 두 자리가 오는 값은 받지 않는다.
+  번들 pip(requests)은 Latin-1로 보내고 그 밖의 문자에서 실패하는데 Git(curl)은 UTF-8로 보낸다. 또 Git은 proxy
+  주소의 사용자 부분을 두 번 푼다(Git 2.54·curl 8.7.1에서 `%2541`이 `A`로 도착했다). pip은 한 번 푼다. 그래서 두
+  도구가 같은 값을 보내는 범위만 받는다. 거절 문구에는 입력한 값을 넣지 않는다. **[실행: 단위 시험(가짜
+  keychain과 memory-only, `safeStorage`의 `basic_text`·`unknown`·암호화 없음), 번들 pip과 Git이 인증을 요구하는
+  loopback proxy에 정확한 Basic 값으로 로그인, 설치 앱 확인(1a′)에서 실제 lock holder로 봉인 파일 저장과 삭제]**
 - **비공개 Git.** [같은 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로 기본
   꺼짐이다. 꺼져 있으면 위의 격리 그대로다. 켜도 이름 설치는 PR #77의 격리 그대로다(로그인할 저장소가 없다).
   git 설치(pip이 git source를 설치할 때와 Studio의 하위 경로 fetch)에만 다음을 더한다. 사용자의 `SSH_AUTH_SOCK`, 사용자 SSH
@@ -613,22 +633,23 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   하나만 한다.
 - 화면 모듈(D20)은 아래 요청만 안다. pip, venv, 세대 경로는 모른다.
 
-| 요청                                                                       | 응답                                                                                                                                                                                                         |
-| -------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list`                                                                     | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라) |
-| `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부) | 작업 ID                                                                                                                                                                                                      |
-| `update` / `remove` (이름)                                                 | 작업 ID                                                                                                                                                                                                      |
-| `set_default` (`extensionId`, `enabled`)                                   | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                               |
-| `get_settings`                                                             | 확장 설정(`onlineInstall`·`proxy`·`privateGit`), 읽을 수 없었는지(`unreadable`), Studio 정책이 온라인 설치를 막는지(`onlineInstallLocked`). 파일만 읽는다                                                    |
-| `set_settings` (바꿀 필드만)                                               | 저장된 확장 설정. 변경 잠금 아래에서 저장한다. 다른 변경 중이면 `BUSY`                                                                                                                                       |
-| `reconcile_bundle`                                                         | 번들 교체 후 오프라인 이관을 시도한 목록과 상태                                                                                                                                                              |
-| `rollback`                                                                 | 바뀐 현재 세대                                                                                                                                                                                               |
-| `poll` / `cancel` (작업 ID)                                                | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                                                                      |
+| 요청                                                                                                         | 응답                                                                                                                                                                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라)                                                                                                 |
+| `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`                                                                                                                                                                                                                 |
+| `update` / `remove` (이름)                                                                                   | 작업 ID                                                                                                                                                                                                                                                                                                      |
+| `set_default` (`extensionId`, `enabled`)                                                                     | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                                                                                                                               |
+| `get_settings`                                                                                               | 확장 설정(`onlineInstall`·`proxy`·`proxyAuthentication`·`privateGit`), 인증 정보를 저장할 수 있는지(`credentialMode`)와 저장돼 있는지(`hasSavedCredentials`, 값은 돌려주지 않는다), 읽을 수 없었는지(`unreadable`), Studio 정책이 온라인 설치를 막는지(`onlineInstallLocked`). 파일만 읽고 복호화하지 않는다 |
+| `set_settings` (바꿀 필드만)                                                                                 | 저장된 확장 설정. 변경 잠금 아래에서 저장한다. 다른 변경 중이면 `BUSY`                                                                                                                                                                                                                                       |
+| `set_proxy_credentials` / `clear_proxy_credentials`                                                          | 현재 proxy의 인증 정보를 저장하거나(keychain에서만, 아니면 `PROXY_CREDENTIALS_NOT_STORED`) 지운 뒤의 확장 설정                                                                                                                                                                                               |
+| `reconcile_bundle`                                                                                           | 번들 교체 후 오프라인 이관을 시도한 목록과 상태                                                                                                                                                                                                                                                              |
+| `rollback`                                                                                                   | 바뀐 현재 세대                                                                                                                                                                                                                                                                                               |
+| `poll` / `cancel` (작업 ID)                                                                                  | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                                                                                                                                                                      |
 
 실패 코드는 지금 정보로 낼 수 있는 것만 둔다: 반입 거부(wheel 아님, 직접 URL 의존성), 설치 도구 실패, 실행
 안 됨, 시작 코드·번들 이름 겹침, 로드 오류, 변경 없음. 세부 사유는 pip 출력 문장뿐이다. 확장 설정과 git 하위
-경로에는 `INVALID_PROXY`, `PROXY_CREDENTIALS_UNSUPPORTED`, `SETTINGS_UNREADABLE`, `GIT_FETCH_FAILED`,
-`SUBDIRECTORY_INVALID`가 더해졌다. 요청·응답 형태의 정본은 `packages/web-host/src/studio-extensions/types.ts`다.
+경로에는 `INVALID_PROXY`, `SETTINGS_UNREADABLE`, `GIT_FETCH_FAILED`, `SUBDIRECTORY_INVALID`가, proxy 인증
+정보에는 `PROXY_CREDENTIALS_REQUIRED`와 `PROXY_CREDENTIALS_NOT_STORED`가 더해졌다. 요청·응답 형태의 정본은 `packages/web-host/src/studio-extensions/types.ts`다.
 
 `list`의 상태 이름은 `ready`(준비됨), `manifest_unbound`(manifest 미결합), `reinstall_needed`(다시 설치 필요)다.
 관리형 목록으로 검증된 확장에는 `managedId`와 `defaultEnabled`도 포함한다.
@@ -1030,6 +1051,13 @@ branch·tag가 아니라 그 object로만 읽는다. 출력은 자르기 전에 
 **2026-11-22, 같은 리뷰어의 세 번째·네 번째 재확인.** 가리기와 64 KiB 상한을 출력 크기에 선형으로 바꿨다(상한
 정규식과 scheme 정규식의 역추적, push마다 버퍼를 다시 훑던 것). authority를 URI에 없는 문자에서도 끊던 변경은
 비밀번호에 든 `"`·`\`를 그대로 내보내 되돌렸다. 애매한 범위는 가리고 JSON 등이 함께 가려지는 것은 받아들인다.
+
+**2026-11-22, proxy 인증 정보.** 2026-11-21 사용자 결정(데스크톱은 `safeStorage`, `basic_text`·암호화 없음·별도
+WebUI는 저장하지 않고 설치마다 받는다)을 구현해 1b의 거절(`PROXY_CREDENTIALS_UNSUPPORTED`)을 바꿨다. 5.1·5.4·
+5.10·5.11에 반영했다. 저장소를 helper에 두고 host는 암호화 함수만 넘기게 한 것은 봉인 파일도 변경 잠금과 lock
+holder의 rename·정리를 따라야 해서다. 실행하면서 두 가지를 알게 됐다. 번들 pip은 proxy 인증을 Latin-1로 보내고,
+Git은 proxy 주소의 사용자 부분을 두 번 푼다. 그래서 받는 문자를 출력 가능한 ASCII로 좁히고 `%`와 16진 두 자리가
+든 값을 받지 않는다(5.10).
 
 **2026-11-18, launcher 조각(구현)과 독립 리뷰.** 대화가 설치한 확장을 받는 경로를 구현했다. 세대 선택과
 lease는 `launch.py acp`(7.4), 상태 디렉터리는 환경 변수로 알린다(7.4). 잠금 없는 lease 경로와 그 불변식,

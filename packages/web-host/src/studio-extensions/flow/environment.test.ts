@@ -7,8 +7,14 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWheel } from '../../../tests/fixtures/extensionWheels';
-import { runToExit, spawnChild } from '../process';
+import { redactUrlCredentials, runToExit, spawnChild } from '../process';
 import { baseEnvironment, loadEnvironment, managementEnvironment } from './environment';
+import { proxyWithCredentials } from './online/proxyCredentials';
+
+/** A password with the characters a proxy URL must carry encoded. */
+const PROXY_LOGIN = { username: 'ops@corp', password: "p@ss:w/rd%zz#?& !*'()100%" };
+const basic = (credentials: { username: string; password: string }): string =>
+  'Basic ' + Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
 
 /** What a user's shell might export. Only the first block may reach a child. */
 const SHELL: NodeJS.ProcessEnv = {
@@ -353,6 +359,48 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
     }
   }, 30_000);
 
+  it('signs in to a proxy that asks, with the percent-encoded credentials decoded exactly', async () => {
+    const server = httpServer();
+    const seen: (string | undefined)[] = [];
+    // CONNECT is how Git asks a proxy for HTTPS: answer 407 until the credentials come.
+    server.on('connect', (request, socket) => {
+      const authorization = request.headers['proxy-authorization'];
+      seen.push(authorization);
+      // Connection: close makes curl ask again on a new connection, which reaches this handler.
+      if (!authorization)
+        socket.end(
+          'HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: Basic realm="corp"\r\n' +
+            'Content-Length: 0\r\nConnection: close\r\n\r\n'
+        );
+      else socket.destroy();
+    });
+    const address = 'http://127.0.0.1:' + String(await port(server as unknown as ReturnType<typeof tcpServer>));
+    try {
+      const env = environment(proxyWithCredentials(address, PROXY_LOGIN));
+      for (const value of Object.values(env).filter((value) => value.includes('@127.0.0.1')))
+        expect(value).toBe(proxyWithCredentials(address, PROXY_LOGIN));
+      const result = await runToExit(
+        spawnChild,
+        {
+          command: 'git',
+          args: ['ls-remote', 'https://repo.invalid/owner/demo.git'],
+          env,
+          cwd: path.join(root, 'work'),
+        },
+        { timeoutMs: 20_000, redact: true }
+      );
+      expect(result.code).not.toBe(0);
+      expect(seen.at(-1)).toBe(basic(PROXY_LOGIN));
+      // Nothing of the credentials in the argument list or in what came back.
+      expect(redactUrlCredentials(result.output)).toBe(result.output);
+      for (const piece of ['p@ss', 'w/rd', encodeURIComponent(PROXY_LOGIN.password)])
+        expect(result.output).not.toContain(piece);
+    } finally {
+      server.closeAllConnections();
+      server.close();
+    }
+  }, 30_000);
+
   it('ignores a proxy variable that reached Git anyway when the user set no proxy', async () => {
     let contacted = 0;
     const trap = await serve((_request, response) => {
@@ -587,6 +635,31 @@ runpy.run_module("pip", run_name="__main__")`;
     } finally {
       proxy.close();
       trap.close();
+    }
+  }, 40_000);
+
+  it('signs pip in to a proxy that asks, with the percent-encoded credentials decoded exactly', async () => {
+    const wheel = buildWheel({ name: 'studio-signed-in', extension: false });
+    const seen: (string | undefined)[] = [];
+    const proxy = await serve((request, response) => {
+      seen.push(request.headers['proxy-authorization']);
+      if (request.headers['proxy-authorization'] !== basic(PROXY_LOGIN))
+        return response.writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' }).end();
+      if (request.url === 'http://127.0.0.1:9/simple/studio-signed-in/')
+        response
+          .writeHead(200, { 'content-type': 'text/html' })
+          .end(`<a href="http://127.0.0.1:9/${wheel.filename}">wheel</a>`);
+      else if (request.url === 'http://127.0.0.1:9/' + wheel.filename) response.writeHead(200).end(wheel.data);
+      else response.writeHead(404).end();
+    });
+    try {
+      const env = environment('http://127.0.0.1:9/simple/', {}, proxyWithCredentials(proxy.address, PROXY_LOGIN));
+      const result = await run(['-P', '-B', '-m', 'pip', 'install', '--retries', '0', 'studio-signed-in'], env);
+      expect(result.code, redactUrlCredentials(result.output)).toBe(0);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((header) => header === basic(PROXY_LOGIN))).toBe(true);
+    } finally {
+      proxy.close();
     }
   }, 40_000);
 
