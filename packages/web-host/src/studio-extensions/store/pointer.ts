@@ -1,5 +1,6 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseSubdirectory } from '../flow/online/source.js';
 import { isAdapterReference, isObjectReference } from '../inspect/metadata.js';
 import type { LaunchForm } from '../launch/form.js';
 import { isManagedId, managedExtensionId, parseManagedCatalog } from '../launch/managedCatalog.js';
@@ -68,7 +69,7 @@ function parseBinding(value: unknown): BundleBinding | undefined {
 
 function parseOrigin(value: unknown): ExtensionOrigin | undefined {
   if (!isObject(value)) return undefined;
-  const { kind, artifact, wheel, sha256, indexUrl, url, commit } = value;
+  const { kind, artifact, wheel, sha256, indexUrl, url, commit, subdirectory } = value;
   if (kind === 'file' && isText(artifact) && isText(wheel) && isText(sha256)) return { kind, artifact, wheel, sha256 };
   if (kind === 'index' && isText(indexUrl)) return { kind, indexUrl };
   if (
@@ -77,8 +78,11 @@ function parseOrigin(value: unknown): ExtensionOrigin | undefined {
     isText(url) &&
     typeof commit === 'string' &&
     /^[a-f0-9]{40,64}$/.test(commit)
-  )
-    return { kind, indexUrl, url, commit };
+  ) {
+    if (subdirectory === undefined) return { kind, indexUrl, url, commit };
+    const checked = parseSubdirectory(subdirectory);
+    return checked === undefined ? undefined : { kind, indexUrl, url, commit, subdirectory: checked };
+  }
   return undefined;
 }
 

@@ -27,6 +27,8 @@ export type {
   ExtensionReply,
   ExtensionRollback,
   ExtensionServiceOptions,
+  ExtensionSettings,
+  ExtensionSettingsState,
 } from './studio-extensions/index.js';
 
 // Backend launcher exports (M4)

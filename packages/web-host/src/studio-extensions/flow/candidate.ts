@@ -29,6 +29,11 @@ export type FlowContext = {
   base: Record<string, string>;
   timeouts: { lockMs: number; environmentMs: number; installerMs: number; verifyMs: number };
   signal?: AbortSignal;
+  /**
+   * The few variables of the user's environment private Git may use (`privateGitEnvironment`).
+   * Nothing of it reaches a child unless the user turned private Git on.
+   */
+  user?: Record<string, string>;
 };
 
 /** What Studio itself wrote into a generation. A scan fails when any of it changed. */

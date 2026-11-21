@@ -19,7 +19,7 @@ import {
   writeConstraints,
   type BundleFacts,
 } from '../store/layout.js';
-import { acquireMutationLock, type MutationLock } from '../store/lock.js';
+import { acquireMutationLock, removeFromState, type MutationLock } from '../store/lock.js';
 import {
   newGenerationRecord,
   newPointer,
@@ -40,6 +40,7 @@ import {
   type ExtensionOrigin,
   type ExtensionPhase,
   type ExtensionRollback,
+  type ExtensionSettings,
   type ExtensionSource,
   type FileExtensionSource,
   type OnlineExtensionSource,
@@ -55,7 +56,7 @@ import {
 } from '../launch/form.js';
 import { managedExtensionId, writeManagedCatalog } from '../launch/managedCatalog.js';
 import { createCandidate, scanGeneration, type Candidate, type FlowContext } from './candidate.js';
-import { managementEnvironment } from './environment.js';
+import { managementEnvironment, type OnlineAccess } from './environment.js';
 import {
   compareRequest,
   nativeHandle,
@@ -68,7 +69,10 @@ import {
   type LoadExpectation,
 } from './gate.js';
 import { checkImport } from './importCheck.js';
-import { installedGitOrigin, matchesVersion, onlineIndex } from './onlineSource.js';
+import { checkoutSubdirectory, type GitCheckout } from './online/checkout.js';
+import { privateGitAccess } from './online/credentials.js';
+import { readSettings, writeSettings, type StoredSettings } from './online/settings.js';
+import { installedCheckoutOrigin, installedGitOrigin, matchesVersion, onlineIndex } from './online/source.js';
 
 export type MutationRequest =
   | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
@@ -136,7 +140,8 @@ function runManagement(
       env,
       cwd,
     },
-    { timeoutMs, signal: context.signal }
+    // Git (in pip) prints remote and submodule addresses as written, which can carry a token.
+    { timeoutMs, signal: context.signal, redact: true }
   );
 }
 
@@ -242,6 +247,25 @@ async function prepare(
     await discardStage(context.layout, staged, lock).catch(() => {});
     throw error;
   }
+}
+
+/**
+ * What the user's settings give an online install: their proxy, and for a git source with
+ * private Git on, the user's SSH agent and Git credential helpers. A name install keeps the
+ * isolated Git and SSH of PR #77 whatever private Git says: it has no repository to sign in to.
+ * Windows has no git installs, so no private Git.
+ */
+async function onlineAccess(
+  context: FlowContext,
+  settings: ExtensionSettings,
+  source: OnlineExtensionSource,
+  home: string
+): Promise<OnlineAccess> {
+  const access: OnlineAccess = {};
+  if (settings.proxy !== null) access.proxy = settings.proxy;
+  if (source.kind === 'git' && settings.privateGit && context.platform !== 'win32')
+    access.privateGit = await privateGitAccess(context, home, context.timeouts.verifyMs);
+  return access;
 }
 
 /** The record of a verified candidate: what it holds and where each distribution came from. */
@@ -515,6 +539,12 @@ export async function mutate(
     const stale = base.record && !sameBinding(base.record.binding, bundle.binding);
     if (stale && !(request.action === 'install' && request.replaceIncompatible))
       throw new ExtensionFailure('BUNDLE_CHANGED', ['the installed extensions belong to another Studio runtime']);
+    // The settings this change uses: read once, under the lock, so none of them moves until it ends.
+    const { settings, unreadable } = await readSettings(layout);
+    if (request.action === 'install' && request.source.kind !== 'file') {
+      if (unreadable) throw new ExtensionFailure('SETTINGS_UNREADABLE', ['the extension settings cannot be read']);
+      if (!settings.onlineInstall) throw new ExtensionFailure('ONLINE_INSTALL_DISABLED');
+    }
     // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
     const parent = stale ? null : base.record;
     const facts = await readBundleFacts(bundle);
@@ -546,18 +576,47 @@ export async function mutate(
     const cwd = source ? path.join(candidate.paths.directory, 'install-work') : candidate.paths.directory;
     const home = path.join(candidate.paths.directory, 'install-home');
     if (source) await Promise.all([mkdir(cwd), mkdir(home, { mode: 0o700 })]);
-    const installer = await runManagement(
-      guarded,
-      candidate,
-      managementEnvironment(guarded.base, platform, {
-        ...management,
-        ...(prepared.importSet ? { offlineLinksUrl: pathToFileURL(prepared.importSet.directory).href } : {}),
-        ...(source ? { online: { indexUrl: onlineIndex(source), home, work: cwd } } : {}),
-      }),
-      prepared.native,
-      guarded.timeouts.installerMs,
-      cwd
-    );
+    const installerEnvironment = managementEnvironment(guarded.base, platform, {
+      ...management,
+      ...(prepared.importSet ? { offlineLinksUrl: pathToFileURL(prepared.importSet.directory).href } : {}),
+      ...(source
+        ? {
+            online: {
+              indexUrl: onlineIndex(source),
+              home,
+              work: cwd,
+              access: await onlineAccess(guarded, settings, source, home),
+            },
+          }
+        : {}),
+    });
+    let native = prepared.native;
+    let checkout: GitCheckout | undefined;
+    if (source?.kind === 'git' && source.subdirectory !== undefined) {
+      // Studio fetches and checks the subdirectory; native installs a checked copy of it.
+      checkout = await checkoutSubdirectory(
+        guarded,
+        lock,
+        installerEnvironment,
+        { ...source, subdirectory: source.subdirectory },
+        guarded.timeouts.installerMs
+      );
+      native = ['extension', 'install', checkout.directory, '--yes'];
+    }
+    let installer: RunResult;
+    try {
+      installer = await runManagement(
+        guarded,
+        candidate,
+        installerEnvironment,
+        native,
+        guarded.timeouts.installerMs,
+        cwd
+      );
+    } finally {
+      // The installed files are in the venv now; the lock holder removes the sources.
+      if (checkout) await removeFromState(layout, lock, checkout.staging);
+    }
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
     // native's "did not run" and "not bound", so every non-zero code is a plain failure.
     if (request.action === 'remove') requireSuccess(installer, { 1: 'INSTALLER_FAILED' }, 'the installer');
@@ -575,12 +634,9 @@ export async function mutate(
     let preparation: Preparation;
     if ('change' in prepared) preparation = prepared;
     else if (prepared.source.kind === 'git') {
-      const { distribution, origin } = await installedGitOrigin(
-        prepared.source,
-        candidate.paths.site,
-        before,
-        scan.snapshot
-      );
+      const { distribution, origin } = checkout
+        ? await installedCheckoutOrigin(prepared.source, candidate.paths.site, before, scan.snapshot, checkout)
+        : await installedGitOrigin(prepared.source, candidate.paths.site, before, scan.snapshot);
       preparation = { ...prepared, change: { action: 'install', distribution } };
       onlineOrigin = origin;
     } else {
@@ -870,6 +926,26 @@ export async function setDefault(
 }
 
 /**
+ * Change the user's extension settings: the fields of `change` replace the stored ones. Under
+ * the mutation lock, like every other change, so a running install keeps the settings it
+ * started with and two Studio processes cannot interleave a read and a write. When the stored
+ * file could not be read, the change starts from the closed settings.
+ */
+export async function saveSettings(context: FlowContext, change: Partial<ExtensionSettings>): Promise<StoredSettings> {
+  const { lock } = await begin(context);
+  try {
+    const settings: ExtensionSettings = { ...(await readSettings(context.layout)).settings, ...change };
+    if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+    await writeSettings(context.layout, settings, lock);
+    return { settings, unreadable: false };
+  } catch (error) {
+    throw outcome(error, lock);
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
  * What is installed, read from files only (ADR 5.10): no process is started and nothing
  * is contacted. Safe to call while a change is running; it shows the state before it.
  *
@@ -885,7 +961,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
       current: null,
       previous: null,
       revision: 0,
-      appliesAt: 'new_session',
+      appliesAt: 'next_adapter_start',
       rollbackAvailable: false,
       extensions: [],
     };
@@ -896,7 +972,7 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
     current: pointer.generation,
     previous: pointer.previous,
     revision: pointer.revision,
-    appliesAt: 'new_session',
+    appliesAt: 'next_adapter_start',
     rollbackAvailable: previous !== undefined,
     extensions: Object.entries(record.extensions)
       .map(([name, extension]) => {

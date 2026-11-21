@@ -126,6 +126,25 @@ describe('pointer and generation records read from disk', () => {
     });
     expect(parseGenerationRecord(text)?.distributions.demo).toEqual({ version: '1.0', recordSha256: 'hash' });
   });
+
+  it('reads back the subdirectory of a git origin and drops one that could leave the repository', () => {
+    const git = {
+      kind: 'git',
+      url: 'git+https://git.invalid/owner/demo.git@stable',
+      commit: '2'.repeat(40),
+      indexUrl: 'https://pypi.org/simple/',
+    };
+    const withOrigin = (origin: Record<string, unknown>) =>
+      parseGenerationRecord(
+        change(JSON.stringify(record(G1)), (value) => {
+          (value.distributions as Record<string, Record<string, unknown>>).demo.origin = origin;
+        })
+      )?.distributions.demo.origin;
+    expect(withOrigin({ ...git, subdirectory: 'packages/demo' })).toEqual({ ...git, subdirectory: 'packages/demo' });
+    expect(withOrigin(git)).toEqual(git);
+    for (const subdirectory of ['../outside', '/etc', 'a//b', 7])
+      expect(withOrigin({ ...git, subdirectory })).toBeUndefined();
+  });
 });
 
 describe('the pointer in effect', () => {
