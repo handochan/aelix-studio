@@ -20,6 +20,8 @@ export type {
   ExtensionPhase,
   ExtensionReply,
   ExtensionRollback,
+  ExtensionSettings,
+  ExtensionSettingsState,
   ExtensionSource,
   ExtensionStatus,
 } from './types.js';

@@ -28,7 +28,13 @@ import {
   parseExtensionEntries,
   parseRecordPaths,
 } from '../../src/studio-extensions/inspect/metadata';
-import type { Child, ChildExit, Spawn, SpawnSpec } from '../../src/studio-extensions/process';
+import {
+  spawnChild,
+  type Child,
+  type ChildExit,
+  type Spawn,
+  type SpawnSpec,
+} from '../../src/studio-extensions/process';
 import { ensureLayout, locateLayout, resolveBundle } from '../../src/studio-extensions/store/layout';
 import type { StateWriter } from '../../src/studio-extensions/store/lock';
 import { ExtensionFailure } from '../../src/studio-extensions/types';
@@ -124,7 +130,7 @@ export function scriptedSpawn(script: (spec: SpawnSpec, child: ScriptedChild) =>
 
 /**
  * What the lock holder does to shared state, done here with Node: rename a temporary file
- * over a pointer file, and remove one entry of the root or of a dedicated directory, but
+ * over a pointer file or the settings file, and remove one entry of the root or of a dedicated directory, but
  * only when that directory is a real directory where its path says it is.
  */
 export function directWriter(root: string): StateWriter {
@@ -137,8 +143,8 @@ export function directWriter(root: string): StateWriter {
   };
   return {
     replace: async (from, to) => {
-      const pointer = to === 'current.json' || to === 'current.previous.json';
-      if (!pointer || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
+      const replaceable = ['current.json', 'current.previous.json', 'settings.json'].includes(to);
+      if (!replaceable || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
       await rename(path.join(root, from), path.join(root, to));
     },
     remove: async (relative) => {
@@ -294,11 +300,13 @@ export type FakeRuntimeOptions = {
   beforeLoad?: (child: ScriptedChild) => boolean | void | Promise<boolean | void>;
   /** Text every native run prints. */
   nativeOutput?: string;
+  /** Answers `git` runs (Studio's own fetch and credential lookup). Without it the real `git` runs. */
+  git?: (spec: SpawnSpec, child: ScriptedChild) => void;
 };
 
 /**
  * A spawn function that behaves like the bundled runtime for the helper's five kinds of
- * process. `options` is read at call time, so a test can change behaviour between steps.
+ * process, and runs (or lets a test answer) the `git` Studio starts itself. `options` is read at call time, so a test can change behaviour between steps.
  */
 export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scriptedSpawn> {
   const platform = options.platform ?? process.platform;
@@ -318,6 +326,16 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
   };
   return scriptedSpawn((spec, child) => {
     const { args } = spec;
+    if (spec.command === 'git') {
+      if (options.git) return options.git(spec, child);
+      const real = spawnChild(spec);
+      real.onStdout((chunk) => child.print(chunk));
+      real.onStderr((chunk) => child.complain(chunk));
+      child.onEnd = () => real.end();
+      child.onKill = (signal) => real.kill(signal);
+      void real.exited.then((exit) => child.exit(exit.code, exit.signal, exit.failedToStart));
+      return;
+    }
     const inline = args.includes('-c') ? args[args.indexOf('-c') + 1] : '';
     if (inline.includes('try_lock')) {
       const mode = args[args.indexOf('-c') + 2];

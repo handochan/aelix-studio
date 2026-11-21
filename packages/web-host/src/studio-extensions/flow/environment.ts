@@ -1,4 +1,5 @@
 import path from 'node:path';
+import type { PrivateGitAccess } from './online/credentials.js';
 
 /**
  * The environment of every process the helper starts (D04 ADR 5.4).
@@ -72,8 +73,42 @@ export type ManagementEnvironment = {
   /** Set for a file import: `file://` address of the stored wheel set, the only place pip may look. */
   offlineLinksUrl?: string;
   /** Studio's only online index and a private directory for installer configuration and temporary files. */
-  online?: { indexUrl: string; home: string; work: string };
+  online?: { indexUrl: string; home: string; work: string; access?: OnlineAccess };
 };
+
+/** What the user configured for online installs in Studio's extension settings. */
+export type OnlineAccess = {
+  /**
+   * The proxy the user typed (normalized `http(s)://host[:port]`). pip gets it as its own
+   * `--proxy` (`PIP_PROXY`), which also keeps pip from reading environment proxies and netrc;
+   * Git and anything else that reads the standard variables get it there and as `http.proxy`.
+   */
+  proxy?: string;
+  /** Present when the user turned private Git on. */
+  privateGit?: PrivateGitAccess;
+};
+
+/** The isolated SSH command: no user configuration, keys or agent; known hosts still checked. */
+const ISOLATED_SSH =
+  '/usr/bin/ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no' +
+  ' -o IdentityFile=none -o IdentityAgent=none -o CertificateFile=none';
+
+/**
+ * The SSH command with private Git: the user's SSH configuration, keys and agent apply, but
+ * never a prompt, and only hosts already in the user's known hosts (command-line options take
+ * precedence over the configuration).
+ */
+const PRIVATE_SSH = '/usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no';
+
+/** The proxy variables every proxy-aware tool reads, and the one that keeps pip to its own. */
+function proxyVariables(proxy: string | undefined, platform: NodeJS.Platform): Record<string, string> {
+  // Without a proxy, a nonempty bypass-all keeps urllib and requests from discovering a system
+  // proxy (macOS preferences, Windows registry) and Git's curl from using an environment one.
+  if (proxy === undefined) return { no_proxy: '*' };
+  // Windows treats names without regard to case: one spelling each.
+  const variables: Record<string, string> = { PIP_PROXY: proxy, http_proxy: proxy, https_proxy: proxy, no_proxy: '' };
+  return platform === 'win32' ? variables : { ...variables, HTTP_PROXY: proxy, HTTPS_PROXY: proxy, NO_PROXY: '' };
+}
 
 /**
  * Environment of a management run (the generation's venv interpreter running the native CLI,
@@ -97,6 +132,9 @@ export function managementEnvironment(
     // pip's cache is in the user's own directories; the helper writes only under its root.
     PIP_NO_CACHE_DIR: '1',
   };
+  // A file import runs behind the dead proxy below; nothing of the online settings may reopen it.
+  if (options.offlineLinksUrl !== undefined && options.online)
+    throw new Error('an offline import has no online installer settings');
   if (options.offlineLinksUrl !== undefined) {
     Object.assign(environment, {
       PIP_NO_INDEX: '1',
@@ -112,7 +150,8 @@ export function managementEnvironment(
     });
   }
   if (options.online) {
-    const { home, work, indexUrl } = options.online;
+    const { home, work, indexUrl, access } = options.online;
+    const proxy = proxyVariables(access?.proxy, platform);
     // pip 26 overwrites GIT_SSH_COMMAND when PIP_NO_INPUT is present. Keep the
     // custom SSH command and use closed stdin, disabled keyring and askpass instead.
     if (platform === 'win32') {
@@ -138,11 +177,18 @@ export function managementEnvironment(
         PIP_INDEX_URL: indexUrl,
         PIP_KEYRING_PROVIDER: 'disabled',
         NETRC: nullDevice(platform),
-        no_proxy: '*',
+        ...proxy,
       });
       return environment;
     }
     delete environment.PIP_NO_INPUT;
+    const privateGit = access?.privateGit;
+    // The helper is reset first; with private Git the user's credential entries follow in order.
+    const gitConfig: [string, string][] = [
+      ['credential.helper', ''],
+      ['http.proxy', access?.proxy ?? ''],
+      ...(privateGit?.credentials ?? []),
+    ];
     Object.assign(environment, {
       HOME: home,
       XDG_CONFIG_HOME: home,
@@ -151,24 +197,29 @@ export function managementEnvironment(
       PIP_INDEX_URL: indexUrl,
       PIP_KEYRING_PROVIDER: 'disabled',
       NETRC: nullDevice(platform),
-      // A nonempty proxy map makes urllib skip system proxy discovery on macOS.
-      no_proxy: '*',
+      ...proxy,
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: nullDevice(platform),
       GIT_CEILING_DIRECTORIES: path.dirname(work),
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: '/usr/bin/false',
-      GIT_CONFIG_COUNT: '2',
-      GIT_CONFIG_KEY_0: 'credential.helper',
-      GIT_CONFIG_VALUE_0: '',
-      GIT_CONFIG_KEY_1: 'http.proxy',
-      GIT_CONFIG_VALUE_1: '',
+      GIT_CONFIG_COUNT: String(gitConfig.length),
+      ...Object.fromEntries(
+        gitConfig.flatMap(([name, value], index) => [
+          [`GIT_CONFIG_KEY_${index}`, name],
+          [`GIT_CONFIG_VALUE_${index}`, value],
+        ])
+      ),
       // OpenSSH resolves its default key locations through the account database,
-      // even when HOME is private. Permit host verification without ambient keys.
-      GIT_SSH_COMMAND:
-        '/usr/bin/ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no' +
-        ' -o IdentityFile=none -o IdentityAgent=none -o CertificateFile=none',
+      // even when HOME is private. Without private Git: host verification only, no ambient keys.
+      GIT_SSH_COMMAND: privateGit ? PRIVATE_SSH : ISOLATED_SSH,
     });
+    if (privateGit) {
+      // A credential manager must fail rather than open a window behind the installer.
+      environment.GCM_INTERACTIVE = 'never';
+      if (privateGit.sshAuthSock) environment.SSH_AUTH_SOCK = privateGit.sshAuthSock;
+      if (privateGit.dbusSessionBusAddress) environment.DBUS_SESSION_BUS_ADDRESS = privateGit.dbusSessionBusAddress;
+    }
   }
   return environment;
 }

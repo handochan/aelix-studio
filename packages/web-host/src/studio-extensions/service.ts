@@ -2,10 +2,20 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { FlowContext } from './flow/candidate.js';
 import { baseEnvironment } from './flow/environment.js';
-import { describe, mutate, reconcileBundle, rollback, setDefault, type MutationRequest } from './flow/mutate.js';
-import { parseOnlineSource } from './flow/onlineSource.js';
+import {
+  describe,
+  mutate,
+  reconcileBundle,
+  rollback,
+  saveSettings,
+  setDefault,
+  type MutationRequest,
+} from './flow/mutate.js';
+import { privateGitEnvironment } from './flow/online/credentials.js';
+import { parseSettingsChange, readSettings, type StoredSettings } from './flow/online/settings.js';
+import { parseOnlineSource } from './flow/online/source.js';
 import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
-import { locateLayout, resolveBundle } from './store/layout.js';
+import { locateLayout, resolveBundle, verifyLayout } from './store/layout.js';
 import { isManagedId } from './launch/managedCatalog.js';
 import {
   ExtensionFailure,
@@ -13,6 +23,8 @@ import {
   type ExtensionFailureCode,
   type ExtensionOperation,
   type ExtensionReply,
+  type ExtensionSettings,
+  type ExtensionSettingsState,
   type ExtensionSource,
 } from './types.js';
 
@@ -23,7 +35,11 @@ export type ExtensionServiceOptions = {
   root: string;
   /** Environment the allow-list is applied to. Defaults to this process's. */
   env?: NodeJS.ProcessEnv;
-  /** Read from Studio settings. False refuses name and git installs before any child starts. */
+  /**
+   * A Studio-level policy above the user's extension settings: false refuses name and git
+   * installs before any child starts, whatever `settings.onlineInstall` says. Leave it out to
+   * let the stored setting decide.
+   */
   onlineInstallEnabled?: boolean | (() => boolean);
   platform?: NodeJS.Platform;
   arch?: string;
@@ -41,9 +57,13 @@ const TIMEOUTS: FlowContext['timeouts'] = {
   installerMs: 600_000,
   verifyMs: 120_000,
 };
-type DirectCommand = Extract<ExtensionCommand, { action: 'rollback' | 'reconcile_bundle' | 'set_default' }>;
+type DirectCommand =
+  | Extract<ExtensionCommand, { action: 'rollback' | 'reconcile_bundle' | 'set_default' }>
+  | { action: 'set_settings'; settings: Partial<ExtensionSettings> };
 const ACTIONS = new Set([
   'list',
+  'get_settings',
+  'set_settings',
   'install',
   'update',
   'remove',
@@ -85,7 +105,9 @@ const isName = (value: unknown): value is string =>
  * including when an existing conversation's adapter restarts.
  *
  * One change runs at a time. `install`, `update` and `remove` return an operation to
- * `poll`; `list` and `rollback` answer directly.
+ * `poll`; `list`, `rollback`, `set_default`, `get_settings` and `set_settings` answer directly.
+ * Saving settings is a change too: it waits for the lock and answers `BUSY` while another
+ * change runs. A running install keeps the settings it started with.
  *
  * Windows runs the installer subprocess tree in a job so cancellation cannot strand
  * pip. Git sources still require a qualified Windows Git/SSH toolchain.
@@ -114,7 +136,25 @@ export class ExtensionService {
       base: baseEnvironment(this.options.env ?? process.env, this.platform),
       timeouts: { ...TIMEOUTS, ...this.options.timeouts },
       signal,
+      user: privateGitEnvironment(this.options.env ?? process.env, this.platform),
     };
+  }
+
+  /** False when Studio's own policy turns online installs off, whatever the user's setting says. */
+  private onlineAllowed(): boolean {
+    const enabled = this.options.onlineInstallEnabled;
+    return (typeof enabled === 'function' ? enabled() : enabled) !== false;
+  }
+
+  private settingsState(stored: StoredSettings): ExtensionSettingsState {
+    return { settings: stored.settings, unreadable: stored.unreadable, onlineInstallLocked: !this.onlineAllowed() };
+  }
+
+  /** The stored settings, read without the lock and without creating anything. */
+  private async storedSettings(): Promise<StoredSettings> {
+    const layout = await locateLayout(this.options.root);
+    await verifyLayout(layout);
+    return readSettings(layout);
   }
 
   /** An unexpected error: its text may hold paths, so it goes to the log and the reply carries the code only. */
@@ -138,16 +178,27 @@ export class ExtensionService {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
       }
-      if (command.action === 'rollback' || command.action === 'reconcile_bundle' || command.action === 'set_default') {
+      if (command.action === 'get_settings') return { ok: true, data: this.settingsState(await this.storedSettings()) };
+      if (
+        command.action === 'rollback' ||
+        command.action === 'reconcile_bundle' ||
+        command.action === 'set_default' ||
+        command.action === 'set_settings'
+      ) {
         if (
           command.action === 'set_default' &&
           (!isManagedId(command.extensionId) || typeof command.enabled !== 'boolean')
         )
           return fail('INVALID_INPUT');
+        // Checked before anything waits or is written; a refused proxy is never echoed.
+        const direct: DirectCommand =
+          command.action === 'set_settings'
+            ? { action: 'set_settings', settings: parseSettingsChange(command.settings) }
+            : command;
         if (this.changing) return fail('BUSY');
         this.changing = true;
         const abort = new AbortController();
-        const done = this.runDirect(command, abort.signal);
+        const done = this.runDirect(direct, abort.signal);
         this.direct = { owner, abort, done };
         try {
           return await done;
@@ -159,8 +210,11 @@ export class ExtensionService {
       const change = parseChange(command);
       if (!change) return fail('INVALID_INPUT');
       if (change?.action === 'install' && change.source.kind !== 'file') {
-        const enabled = this.options.onlineInstallEnabled;
-        if ((typeof enabled === 'function' ? enabled() : enabled) === false) return fail('ONLINE_INSTALL_DISABLED');
+        if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
+        // An early answer for the screen; the change checks the settings again under the lock.
+        const { settings, unreadable } = await this.storedSettings();
+        if (unreadable) return fail('SETTINGS_UNREADABLE');
+        if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
       }
       if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
         return fail('UNSUPPORTED_PLATFORM');
@@ -194,6 +248,8 @@ export class ExtensionService {
       if (!context) return fail('RUNTIME_UNAVAILABLE');
       if (command.action === 'set_default')
         return { ok: true, data: await setDefault(context, command.extensionId, command.enabled) };
+      if (command.action === 'set_settings')
+        return { ok: true, data: this.settingsState(await saveSettings(context, command.settings)) };
       const data = command.action === 'reconcile_bundle' ? await reconcileBundle(context) : await rollback(context);
       return { ok: true, data };
     } catch (error) {

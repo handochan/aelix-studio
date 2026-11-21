@@ -7,11 +7,47 @@
 /** A wheel on disk. `folder` names a directory whose other wheels may satisfy dependencies. */
 export type FileExtensionSource = { kind: 'file'; path: string; folder?: string };
 
+/**
+ * `subdirectory` installs the project in that directory of the repository. It is a relative
+ * path of plain names joined by `/`; Studio fetches the repository first, checks the path
+ * against the checkout and installs from there. A `#subdirectory=` URL fragment stays refused.
+ */
 export type OnlineExtensionSource =
   | { kind: 'index'; name: string; version?: string; indexUrl?: string }
-  | { kind: 'git'; url: string; indexUrl?: string };
+  | { kind: 'git'; url: string; subdirectory?: string; indexUrl?: string };
 
 export type ExtensionSource = FileExtensionSource | OnlineExtensionSource;
+
+/**
+ * What the user set in Studio's extension settings. They apply to name and git installs only;
+ * a file import always runs offline whatever they say.
+ */
+export type ExtensionSettings = {
+  /** False refuses name and git installs before any process starts. */
+  onlineInstall: boolean;
+  /**
+   * The HTTP(S) proxy the user typed, as `http://host:port` or `https://host:port`, or null to
+   * connect directly. Online installs use this proxy and no other: system and environment
+   * proxies are never followed. Addresses with credentials are refused for now.
+   */
+  proxy: string | null;
+  /**
+   * True lets git installs use the user's SSH agent, keys and SSH configuration and the Git
+   * credential helpers the user configured. False (the default) keeps them out.
+   */
+  privateGit: boolean;
+};
+
+export type ExtensionSettingsState = {
+  settings: ExtensionSettings;
+  /**
+   * The stored settings could not be read. Until settings are saved again, the values above
+   * are the closed ones (no online installs, no proxy, no private Git).
+   */
+  unreadable: boolean;
+  /** Studio itself turns online installs off; the setting cannot turn them on. */
+  onlineInstallLocked: boolean;
+};
 
 export type ExtensionCommand =
   | { action: 'list' }
@@ -20,6 +56,9 @@ export type ExtensionCommand =
   | { action: 'remove'; name: string }
   | { action: 'set_default'; extensionId: string; enabled: boolean }
   | { action: 'rollback' | 'reconcile_bundle' }
+  | { action: 'get_settings' }
+  /** Changes only the fields given. Send every field after `unreadable`. */
+  | { action: 'set_settings'; settings: Partial<ExtensionSettings> }
   | { action: 'poll' | 'cancel'; operationId: string };
 
 /** Where an installed distribution came from. Only file imports retain wheel bytes. */
@@ -28,7 +67,7 @@ export type FileExtensionOrigin = { kind: 'file'; artifact: string; wheel: strin
 export type ExtensionOrigin =
   | FileExtensionOrigin
   | { kind: 'index'; indexUrl: string }
-  | { kind: 'git'; url: string; commit: string; indexUrl: string };
+  | { kind: 'git'; url: string; commit: string; indexUrl: string; subdirectory?: string };
 
 /**
  * Every installed extension passed two load checks: once by module reference, which imports
@@ -63,8 +102,11 @@ export type ExtensionListing = {
   current: string | null;
   previous: string | null;
   revision: number;
-  /** A running conversation keeps the generation it started with. */
-  appliesAt: 'new_session';
+  /**
+   * A change applies when an adapter next starts: a new conversation, or an existing one whose
+   * adapter restarts. A running adapter keeps the generation it started with.
+   */
+  appliesAt: 'next_adapter_start';
   /** There is a previous record. A different bundle requires revalidation before it can be restored. */
   rollbackAvailable: boolean;
   extensions: ExtensionEntry[];
@@ -112,6 +154,16 @@ export type ExtensionFailureCode =
   | 'NOT_INSTALLED'
   | 'NOTHING_TO_ROLL_BACK'
   | 'ONLINE_INSTALL_DISABLED'
+  /** The stored extension settings cannot be read; online installs wait until they are saved again. */
+  | 'SETTINGS_UNREADABLE'
+  /** The proxy is not an `http://` or `https://` address of a host and an optional port. */
+  | 'INVALID_PROXY'
+  /** The proxy address carries a user name or password; storing those is not offered yet. */
+  | 'PROXY_CREDENTIALS_UNSUPPORTED'
+  /** Studio could not fetch the repository or find the requested revision. Git's text is in `output`. */
+  | 'GIT_FETCH_FAILED'
+  /** The subdirectory is not a real directory inside the fetched repository (missing, a file, a link). */
+  | 'SUBDIRECTORY_INVALID'
   /** The generation could not be used with the current bundle. */
   | 'BUNDLE_CHANGED'
   /** Another change is running, here or in another Studio process. */
@@ -141,7 +193,7 @@ export type ExtensionOperation = {
 
 export type ExtensionRollback = { current: string; previous: string | null; revision: number };
 
-export type ExtensionData = ExtensionListing | ExtensionOperation | ExtensionRollback;
+export type ExtensionData = ExtensionListing | ExtensionOperation | ExtensionRollback | ExtensionSettingsState;
 
 export type ExtensionReply =
   | { ok: true; data: ExtensionData }

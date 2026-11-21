@@ -11,7 +11,10 @@
  *     bunx vitest run tests/integration/studioExtensions.test.ts
  */
 import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { once } from 'node:events';
 import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { createServer, type RequestListener } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -23,13 +26,14 @@ import {
   type ExtensionOperation,
   type ExtensionReply,
   type ExtensionRollback,
+  type ExtensionSettingsState,
 } from '../../packages/web-host/src/studio-extensions/index';
 import { baseEnvironment } from '../../packages/web-host/src/studio-extensions/flow/environment';
 import { spawnChild } from '../../packages/web-host/src/studio-extensions/process';
 import { locateLayout, resolveBundle } from '../../packages/web-host/src/studio-extensions/store/layout';
 import { acquireMutationLock } from '../../packages/web-host/src/studio-extensions/store/lock';
 import { bundleDifferences, useBranchLauncher } from '../../packages/web-host/tests/fixtures/bundleCopy';
-import { writeWheel, type WheelSpec } from '../../packages/web-host/tests/fixtures/extensionWheels';
+import { buildWheel, writeWheel, type WheelSpec } from '../../packages/web-host/tests/fixtures/extensionWheels';
 
 const BUNDLE = process.env.AELIX_STUDIO_EXTENSION_BUNDLE;
 const run = promisify(execFile);
@@ -128,7 +132,7 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
       current: null,
       previous: null,
       revision: 0,
-      appliesAt: 'new_session',
+      appliesAt: 'next_adapter_start',
       rollbackAvailable: false,
       extensions: [],
     });
@@ -590,6 +594,151 @@ describe.skipIf(!BUNDLE || process.platform === 'win32')('Studio extension helpe
     ).toBe('UNSAFE_ROOT');
     expect(await readdir(path.join(valuable, 'keep'))).toEqual([]);
   }, 60_000);
+
+  /** A loopback proxy that records what it is asked: absolute-form requests and HTTPS tunnels. */
+  const proxyServer = async (handler: RequestListener) => {
+    const server = createServer(handler);
+    const tunnels: string[] = [];
+    server.on('connect', (request, socket) => {
+      tunnels.push(String(request.url));
+      socket.destroy();
+    });
+    server.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    return {
+      address: 'http://127.0.0.1:' + String((server.address() as AddressInfo).port),
+      tunnels,
+      close: () => {
+        server.closeAllConnections();
+        server.close();
+      },
+    };
+  };
+  const saveSettings = async (settings: Record<string, unknown>): Promise<ExtensionSettingsState> =>
+    data<ExtensionSettingsState>(await service.request(OWNER, { action: 'set_settings', settings }));
+
+  it('saves the extension settings through the lock holder of the bundled interpreter', async () => {
+    expect(await saveSettings({ proxy: 'http://127.0.0.1:9', privateGit: false })).toMatchObject({
+      settings: { onlineInstall: true, proxy: 'http://127.0.0.1:9', privateGit: false },
+    });
+    expect(JSON.parse(await readFile(path.join(root, 'settings.json'), 'utf8'))).toMatchObject({
+      proxy: 'http://127.0.0.1:9',
+    });
+    expect((await readdir(root)).filter((name) => name.endsWith('.tmp'))).toEqual([]);
+    expect(await saveSettings({ proxy: null })).toMatchObject({ settings: { proxy: null } });
+  }, 60_000);
+
+  it('installs by name through the proxy the user typed, with the real native and pip', async () => {
+    const dist = buildWheel({ name: 'fixture-proxied' });
+    const received: string[] = [];
+    // The origin is a loopback port nothing listens on: only the proxy can have answered.
+    const proxy = await proxyServer((request, response) => {
+      received.push(String(request.url));
+      if (request.url === 'http://127.0.0.1:9/simple/fixture-proxied/')
+        response
+          .writeHead(200, { 'content-type': 'text/html' })
+          .end(`<a href="http://127.0.0.1:9/${dist.filename}">wheel</a>`);
+      else if (request.url === 'http://127.0.0.1:9/' + dist.filename) response.writeHead(200).end(dist.data);
+      else response.writeHead(404).end();
+    });
+    try {
+      await saveSettings({ proxy: proxy.address });
+      const result = await finish(
+        await service.request(OWNER, {
+          action: 'install',
+          source: { kind: 'index', name: 'fixture-proxied', indexUrl: 'http://127.0.0.1:9/simple/' },
+        })
+      );
+      expect(result, JSON.stringify(result)).toMatchObject({ phase: 'switched' });
+      expect(received).toEqual(['http://127.0.0.1:9/simple/fixture-proxied/', 'http://127.0.0.1:9/' + dist.filename]);
+      expect(names(await list())).toContain('fixture-proxied');
+    } finally {
+      await saveSettings({ proxy: null });
+      proxy.close();
+    }
+  }, 180_000);
+
+  it("sends Git over HTTPS through the proxy, in pip's clone and in Studio's own fetch", async () => {
+    const before = await list();
+    const directories = await generations();
+    const proxy = await proxyServer((_request, response) => response.writeHead(502).end());
+    try {
+      await saveSettings({ proxy: proxy.address });
+      const url = 'git+https://git.invalid/owner/demo.git';
+      const plain = await finish(await service.request(OWNER, { action: 'install', source: { kind: 'git', url } }));
+      expect(plain).toMatchObject({ phase: 'failed', code: 'INSTALLER_FAILED' });
+      expect(proxy.tunnels).toContain('git.invalid:443');
+      proxy.tunnels.length = 0;
+      const sub = await finish(
+        await service.request(OWNER, { action: 'install', source: { kind: 'git', url, subdirectory: 'pkg' } })
+      );
+      expect(sub).toMatchObject({ phase: 'failed', code: 'GIT_FETCH_FAILED' });
+      expect(proxy.tunnels).toContain('git.invalid:443');
+    } finally {
+      await saveSettings({ proxy: null });
+      proxy.close();
+    }
+    await expectUntouched(before, directories);
+  }, 180_000);
+
+  it('installs a git subdirectory from Studio checkout with the real native and pip, and refuses a link', async () => {
+    const repository = path.join(sandbox, 'subdirectory repo');
+    const project = path.join(repository, 'packages', 'demo');
+    await mkdir(path.join(project, 'backend'), { recursive: true });
+    await mkdir(path.join(sandbox, 'subdirectory outside'), { recursive: true });
+    // A build backend in the tree: it hands over a prebuilt fixture wheel, so no index is needed.
+    const built = await writeWheel(path.join(project, 'dist'), { name: 'fixture-subdir' });
+    await writeFile(
+      path.join(project, 'pyproject.toml'),
+      '[build-system]\nrequires = []\nbuild-backend = "studio_backend"\nbackend-path = ["backend"]\n'
+    );
+    await writeFile(
+      path.join(project, 'backend', 'studio_backend.py'),
+      [
+        'import os, shutil',
+        `WHEEL = ${JSON.stringify(path.basename(built))}`,
+        'def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):',
+        '    shutil.copy(os.path.join(os.path.dirname(__file__), "..", "dist", WHEEL), wheel_directory)',
+        '    return WHEEL',
+        '',
+      ].join('\n')
+    );
+    await symlink(path.join(sandbox, 'subdirectory outside'), path.join(repository, 'packages', 'escape'));
+    const gitEnv = { PATH: '/usr/bin:/bin', HOME: path.join(sandbox, 'tmp'), GIT_CONFIG_NOSYSTEM: '1' };
+    const git = (...args: string[]) =>
+      run('git', ['-c', 'user.name=Studio Test', '-c', 'user.email=studio@test.invalid', ...args], {
+        cwd: repository,
+        env: gitEnv,
+      });
+    await git('init', '--quiet', '--initial-branch=main');
+    await git('add', '-A');
+    await git('commit', '--quiet', '-m', 'fixture');
+    const commit = (await git('rev-parse', 'HEAD')).stdout.trim();
+    const url = 'git+' + pathToFileURL(repository).href;
+    // A dead index: anything that tried to reach one would fail at once instead of going out.
+    const request = (subdirectory: string) => ({
+      action: 'install',
+      source: { kind: 'git', url, subdirectory, indexUrl: 'http://127.0.0.1:9/simple/' },
+    });
+
+    const before = await list();
+    const directories = await generations();
+    const refused = await finish(await service.request(OWNER, request('packages/escape')));
+    expect(refused).toMatchObject({ phase: 'failed', code: 'SUBDIRECTORY_INVALID' });
+    await expectUntouched(before, directories);
+
+    const result = await finish(await service.request(OWNER, request('packages/demo')));
+    expect(result, JSON.stringify(result)).toMatchObject({ phase: 'switched' });
+    const entry = (await list()).extensions.find((extension) => extension.name === 'fixture-subdir');
+    expect(entry?.origin).toEqual({
+      kind: 'git',
+      url,
+      commit,
+      indexUrl: 'http://127.0.0.1:9/simple/',
+      subdirectory: 'packages/demo',
+    });
+    expect(await readdir(generationFile(result.generation ?? '', 'install-work'))).toEqual([]);
+  }, 240_000);
 
   it('wrote nothing outside its root and left the bundle as it was', async () => {
     for (const name of ['target', 'site']) expect(await readdir(path.join(outside, name))).toEqual([]);

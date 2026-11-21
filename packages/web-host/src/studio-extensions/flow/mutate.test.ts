@@ -841,7 +841,7 @@ describe('changing what is installed', () => {
         current: null,
         previous: null,
         revision: 0,
-        appliesAt: 'new_session',
+        appliesAt: 'next_adapter_start',
         rollbackAvailable: false,
         extensions: [],
       });

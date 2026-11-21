@@ -23,6 +23,8 @@ control packets. No Electron upgrade or address exemption was applied.
 | 13         | Provider headers         | AionUi referral headers removed; user headers/endpoints preserved.                                                                                                                                                                                                                                                                                                         |
 | 15         | Hub build input          | Existing `dist-latest` build preparation retained. Immutable Hub input pin/offline build import remains separate follow-up; no visible feature removed.                                                                                                                                                                                                                    |
 | Additional | Browser MCP              | Exact 0.16.0 package plus already vendored dependencies copied unchanged/unpacked. Same Node binary executes an absolute local entry; no runtime npx download. Metrics opt-out remains. Exact legacy Studio-owned standalone rows migrate without changing enablement; customized user commands stay configured.                                                           |
+| Additional | Extension installs (#32) | User-specified endpoints only, and only when the user installs: listing and file imports contact nothing (file imports run behind a dead proxy whatever the settings say). Name installs use public PyPI by default or the index the user named; git installs the repository, its submodules and the build index. See [ADR 5.10](../studio-extensions/README.md).          |
+| Additional | Extension proxy and auth | User-specified proxy and credentials only. Online installs use the one HTTP(S) proxy typed in the extension settings (pip, HTTPS Git) and never a system or environment proxy. Private Git (off by default) adds the user's SSH agent, SSH configuration and Git credential helpers to git installs. Not covered: SSH/`git://` Git, extension code, build code.            |
 
 [Offline resource manifest, licenses and reproduction](../../scripts/outbound-audit/bundles/README.md)
 cover the complete official dictionary bundle and browser MCP. All 55 versioned
@@ -80,8 +82,10 @@ MCP startup/tools-list, and a real local Monaco editor/HTML worker.
 Local source/engine fixtures are distinct from installed app acceptance and exact-
 head CI. No real provider credentials are used. macOS Monaco fixture evidence
 is renderer-request/worker evidence, not a syscall-level audit; Windows local
-diagnostic export likewise does not establish whole-app outbound zero. Internal
-endpoint/CA/proxy UI, extension/Analytics offline import and complete five-target
+diagnostic export likewise does not establish whole-app outbound zero. The extension
+helper's proxy, private Git and online-install settings exist in the helper API (their
+screen comes with the extension screen); internal endpoint/CA UI elsewhere, a custom CA for
+extension installs, extension/Analytics offline import and complete five-target
 closed-network customer installation remain broader follow-up obligations.
 
 Current-head counts, controls, installer sizes and CI receipts are recorded in
