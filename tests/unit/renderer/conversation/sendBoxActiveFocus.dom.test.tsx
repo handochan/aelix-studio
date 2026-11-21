@@ -8,8 +8,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React, { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-const { layoutState } = vi.hoisted(() => ({
+const { layoutState, snippets } = vi.hoisted(() => ({
   layoutState: { isMobile: false },
+  snippets: [] as { id: string; tag: string; html: string }[],
 }));
 
 vi.mock('react-i18next', () => ({
@@ -49,7 +50,7 @@ vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({
     setSendBoxHandler: vi.fn(),
-    domSnippets: [],
+    domSnippets: snippets,
     removeDomSnippet: vi.fn(),
     clearDomSnippets: vi.fn(),
   }),
@@ -114,16 +115,12 @@ vi.mock('@/renderer/hooks/system/useLiveTranscriptInsertion', async (importOrigi
   };
 });
 
-vi.mock('@/renderer/utils/emitter', () => ({
-  emitter: { emit: vi.fn() },
-  useAddEventListener: vi.fn(),
-}));
-
 vi.mock('@/renderer/components/chat/BtwOverlay', () => ({ default: () => null }));
 vi.mock('@/renderer/components/chat/SpeechInputButton', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/UploadProgressBar', () => ({ default: () => null }));
 
 import SendBox from '@/renderer/components/chat/SendBox';
+import { emitter } from '@/renderer/utils/emitter';
 
 const SendBoxHarness = ({
   active,
@@ -132,6 +129,9 @@ const SendBoxHarness = ({
   initialValue = '',
   onSend = vi.fn().mockResolvedValue(undefined),
   onAddToDraft,
+  deferDraftClear,
+  allowAttachmentOnlySend,
+  hasPendingAttachments,
 }: {
   active?: boolean;
   onFocused?: () => void;
@@ -139,6 +139,9 @@ const SendBoxHarness = ({
   initialValue?: string;
   onSend?: (message: string) => Promise<void | false>;
   onAddToDraft?: () => void;
+  deferDraftClear?: boolean;
+  allowAttachmentOnlySend?: boolean;
+  hasPendingAttachments?: boolean;
 }) => {
   const [value, setValue] = useState(initialValue);
   return (
@@ -150,6 +153,9 @@ const SendBoxHarness = ({
       onFocused={onFocused}
       disabled={disabled}
       onAddToDraft={onAddToDraft}
+      deferDraftClear={deferDraftClear}
+      allowAttachmentOnlySend={allowAttachmentOnlySend}
+      hasPendingAttachments={hasPendingAttachments}
     />
   );
 };
@@ -168,7 +174,7 @@ describe('SendBox active-controlled focus', () => {
     const textarea = screen.getByTestId('sendbox-input');
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
-    expect(onSend).toHaveBeenCalledWith('queued draft');
+    expect(onSend).toHaveBeenCalledWith('queued draft', { slashCommand: false, hasQuote: false });
   });
 
   it('restores the input when the parent blocks sending', async () => {
@@ -179,8 +185,73 @@ describe('SendBox active-controlled focus', () => {
     const textarea = screen.getByTestId('sendbox-input') as HTMLTextAreaElement;
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
-    expect(onSend).toHaveBeenCalledWith('blocked message');
+    expect(onSend).toHaveBeenCalledWith('blocked message', { slashCommand: false, hasQuote: false });
     await waitFor(() => expect(textarea.value).toBe('blocked message'));
+  });
+
+  it('passes the original slash command through the relay-aware composer with a reply quote', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<SendBoxHarness initialValue='/compact' onSend={onSend} deferDraftClear />);
+    act(() => {
+      emitter.emit('sendbox.reply', { messageId: 'previous', content: 'Earlier answer', position: 'left' });
+    });
+    expect(screen.getByText('Earlier answer')).toBeInTheDocument();
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    });
+    expect(onSend).toHaveBeenCalledWith('> Earlier answer\n\n/compact', { slashCommand: true, hasQuote: true });
+  });
+
+  it.each([true, false])(
+    'includes the quote and DOM attachment in a slash-prefixed body (deferred %s)',
+    async (deferDraftClear) => {
+      const onSend = vi.fn().mockResolvedValue(undefined);
+      snippets.push({ id: 'snippet', tag: 'p', html: '<p>Selected</p>' });
+      try {
+        render(<SendBoxHarness initialValue='/tmp/report' onSend={onSend} deferDraftClear={deferDraftClear} />);
+        act(() => emitter.emit('sendbox.reply', { messageId: 'previous', content: 'First\nSecond', position: 'left' }));
+        await act(async () => {
+          fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+        });
+        expect(onSend).toHaveBeenCalledWith(
+          '> First\n> Second\n\n/tmp/report\n\n---\nDOM Snippet (p):\n```html\n<p>Selected</p>\n```',
+          { slashCommand: true, hasQuote: true }
+        );
+      } finally {
+        snippets.length = 0;
+      }
+    }
+  );
+
+  it('allows attachment-only sends for an opted-in composer', () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<SendBoxHarness onSend={onSend} deferDraftClear allowAttachmentOnlySend hasPendingAttachments />);
+    fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    expect(onSend).toHaveBeenCalledWith('', { slashCommand: false, hasQuote: false });
+  });
+
+  it.each([
+    { result: false, edited: true },
+    { result: undefined, edited: true },
+    { result: undefined, edited: false },
+  ])('keeps concurrent draft edits while waiting for delivery ($result, $edited)', async ({ result, edited }) => {
+    let finish!: (outcome: void | false) => void;
+    const onSend = vi.fn(
+      () =>
+        new Promise<void | false>((resolve) => {
+          finish = resolve;
+        })
+    );
+    render(<SendBoxHarness onSend={onSend} initialValue='submitted' deferDraftClear />);
+    const textarea = screen.getByTestId('sendbox-input');
+    fireEvent.click(screen.getByTestId('sendbox-send-btn'));
+    expect(textarea).toHaveValue('submitted');
+    if (edited) fireEvent.change(textarea, { target: { value: 'submitted and typed during validation' } });
+    await act(async () => {
+      finish(result);
+    });
+    expect(textarea).toHaveValue(edited ? 'submitted and typed during validation' : '');
   });
 
   it('uses the platform primary Enter shortcut for Draft box without sending', () => {

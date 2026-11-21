@@ -230,10 +230,12 @@ function extractBtwQuestion(value: string): string | null {
   return match ? match[1] || '' : null;
 }
 
+export type ComposerDraft = { slashCommand: boolean; hasQuote: boolean };
+
 const SendBox: React.FC<{
   value?: string;
   onChange?: (value: string) => void;
-  onSend: (message: string) => Promise<void | false>;
+  onSend: (message: string, draft: ComposerDraft) => Promise<void | false>;
   onStop?: () => Promise<void>;
   disabled?: boolean;
   /**
@@ -262,6 +264,10 @@ const SendBox: React.FC<{
   slash_commands?: SlashCommandItem[];
   onSlashBuiltinCommand?: (name: string) => void;
   hasPendingAttachments?: boolean;
+  /** This composer has references that can be sent without more text. */
+  allowAttachmentOnlySend?: boolean;
+  /** Keep the submitted draft visible until the caller confirms delivery. */
+  deferDraftClear?: boolean;
   enableBtw?: boolean;
   allowSendWhileLoading?: boolean;
   compactActions?: boolean;
@@ -322,6 +328,8 @@ const SendBox: React.FC<{
   slash_commands = [],
   onSlashBuiltinCommand,
   hasPendingAttachments = false,
+  allowAttachmentOnlySend = false,
+  deferDraftClear = false,
   enableBtw = false,
   allowSendWhileLoading = false,
   compactActions = false,
@@ -1546,7 +1554,7 @@ const SendBox: React.FC<{
   );
 
   const sendMessageHandler = () => {
-    if (isUploading) return;
+    if (isUploading || (deferDraftClear && isLoading)) return;
     if (enableBtw && btwQuestion !== null) {
       const normalizedQuestion = btwQuestion.trim();
       if (!normalizedQuestion) {
@@ -1578,7 +1586,7 @@ const SendBox: React.FC<{
       message.warning(t('messages.conversationInProgress'));
       return;
     }
-    if (!input.trim() && domSnippets.length === 0) {
+    if (!hasSendInput) {
       return;
     }
     console.info('[sendbox]', {
@@ -1595,7 +1603,6 @@ const SendBox: React.FC<{
 
     // 构建消息内容 / Build message content
     let finalMessage = input;
-
     // Prepend reply quote as blockquote
     if (replyQuote) {
       const quotedLines = replyQuote.content
@@ -1610,18 +1617,24 @@ const SendBox: React.FC<{
       const snippetsHtml = domSnippets
         .map((s) => `\n\n---\nDOM Snippet (${s.tag}):\n\`\`\`html\n${s.html}\n\`\`\``)
         .join('');
-      finalMessage = input + snippetsHtml;
+      finalMessage += snippetsHtml;
     }
 
-    // 立即清空输入框，避免异步 onSend 完成后覆盖用户新输入
-    // Clear input immediately to prevent async onSend completion from overwriting new user input
-    setInput('');
-    clearDomSnippets();
-    setReplyQuote(null);
+    // Ordinary sends clear immediately. Deferred sends keep the text so its mention chips stay attached.
+    if (!deferDraftClear) {
+      setInput('');
+      clearDomSnippets();
+      setReplyQuote(null);
+    }
 
-    onSend(finalMessage)
+    onSend(finalMessage, { slashCommand: input.trimStart().startsWith('/'), hasQuote: Boolean(replyQuote) })
       .then((result) => {
-        if (result === false) {
+        if (deferDraftClear) {
+          if (result === false) return;
+          if (latestInputRef.current === input) setInputRef.current('');
+          for (const snippet of domSnippets) removeDomSnippet(snippet.id);
+          setReplyQuote((current) => (current === replyQuote ? null : current));
+        } else if (result === false) {
           setInput(finalMessage);
         }
       })
@@ -1665,6 +1678,7 @@ const SendBox: React.FC<{
   const { handleLiveTranscript } = useLiveTranscriptInsertion(speechDispatch.dispatch);
 
   const hasDraftToSend = input.trim().length > 0 || domSnippets.length > 0;
+  const hasSendInput = hasDraftToSend || allowAttachmentOnlySend;
 
   const addToDraftLabel = t('conversation.commandQueue.addToQueue', { defaultValue: 'Save to Draft box' });
   const sendNowLabel = t('conversation.commandQueue.sendNow', { defaultValue: 'Send now' });
@@ -1701,7 +1715,8 @@ const SendBox: React.FC<{
     return true;
   };
 
-  const isSendActionDisabled = disabled || sendDisabled || isUploading || !hasDraftToSend;
+  const isSendActionDisabled =
+    disabled || sendDisabled || isUploading || (deferDraftClear && isLoading) || !hasSendInput;
   const isDraftActionDisabled = disabled || addToDraftDisabled || isUploading || !hasDraftToSend || !onAddToDraft;
   const hasDraftAction = Boolean(onAddToDraft);
   const sendButtonShapeStyle: React.CSSProperties = {
@@ -1776,7 +1791,7 @@ const SendBox: React.FC<{
     if (allowSendWhileLoading && (isLoading || loading)) {
       // Keep a single action slot while processing: show stop when the draft is empty,
       // and only switch back to send once the user has prepared a queued message.
-      if (compactActions || !hasDraftToSend || disabled || isUploading) {
+      if (compactActions || !hasSendInput || disabled || isUploading) {
         return stopButton;
       }
       return primaryActionButton;

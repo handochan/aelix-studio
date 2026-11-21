@@ -154,6 +154,8 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
+  /** Hide the route, request body and server error body from diagnostics. */
+  omitDiagnostics?: boolean;
   keepalive?: boolean;
   /** Total deadline for the initial request, refresh wait and optional replay. */
   timeoutMs?: number;
@@ -252,10 +254,12 @@ export async function httpRequest<T>(
     Object.assign(headers, options.headers);
   }
 
-  console.debug(
-    `[httpBridge] ${method} ${path}`,
-    body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
-  );
+  if (!options?.omitDiagnostics) {
+    console.debug(
+      `[httpBridge] ${method} ${path}`,
+      body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
+    );
+  }
 
   const deadline = options?.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
   const lifetime = options?.signal;
@@ -268,16 +272,19 @@ export async function httpRequest<T>(
   // no-op outside browser mode and single-flights concurrent 401s into one POST.
   // The auth endpoints themselves are skipped to avoid recursion.
   if (response.status === 401 && options?.refreshAuth !== false && !isAuthEndpoint(path)) {
-    console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
+    if (!options?.omitDiagnostics) console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
     const refreshed = await refreshWithinDeadline(signal);
     if (refreshed) {
-      console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
+      if (!options?.omitDiagnostics) console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
       signal?.throwIfAborted();
       response = await sendHttpRequest(method, path, headers, body, options, signal);
     }
   }
 
   if (!response.ok) {
+    if (options?.omitDiagnostics) {
+      throw new BackendHttpError({ method, path: '[private request]', status: response.status, body: undefined });
+    }
     // Response body can only be consumed once — read as text, then try JSON
     const rawText = await response.text().catch(() => '');
     let errorBody: unknown;
@@ -294,7 +301,7 @@ export async function httpRequest<T>(
     throw new BackendHttpError({ method, path, status: response.status, body: errorBody });
   }
 
-  console.debug(`[httpBridge] ${method} ${path} → ${response.status} OK`);
+  if (!options?.omitDiagnostics) console.debug(`[httpBridge] ${method} ${path} → ${response.status} OK`);
 
   const contentType = response.headers.get('Content-Type');
   if (!contentType?.includes('application/json')) {
@@ -333,13 +340,14 @@ export function withResponseMap<Raw, Mapped, Params>(
 
 export function httpGet<Data, Params = undefined>(
   path: string | ((params: Params) => string),
-  options?: HttpRequestOptions
+  options?: HttpRequestOptions | ((params: Params) => HttpRequestOptions)
 ): ProviderLike<Data, Params> {
   return {
     provider: () => {},
     invoke: (async (params?: Params) => {
       const resolvedPath = typeof path === 'function' ? path(params!) : path;
-      return httpRequest<Data>('GET', resolvedPath, undefined, options);
+      const requestOptions = typeof options === 'function' ? options(params!) : options;
+      return httpRequest<Data>('GET', resolvedPath, undefined, requestOptions);
     }) as ProviderLike<Data, Params>['invoke'],
   };
 }
@@ -501,7 +509,15 @@ function ensureWs(): void {
       };
       const eventName = msg.name ?? msg.event;
       const payload = msg.data ?? msg.payload;
-      console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
+      if (
+        eventName === 'conversation.acpExtension' ||
+        eventName === 'conversation.acpExtensionsSubscribed' ||
+        eventName === 'conversation.acpExtensionError'
+      ) {
+        console.debug('[WS:msg]', eventName);
+      } else {
+        console.debug('[WS:msg]', eventName, JSON.stringify(payload).slice(0, 200));
+      }
       if (eventName) {
         dispatchWsEvent(eventName, payload);
       }

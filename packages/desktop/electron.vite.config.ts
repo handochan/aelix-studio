@@ -213,7 +213,10 @@ export default defineConfig(({ mode }) => {
         chunkSizeWarningLimit: 1500,
         cssCodeSplit: true,
         rollupOptions: {
+          preserveEntrySignatures: 'exports-only',
           input: {
+            // S-1a ships the worker without connecting it to the composer until S-1b.
+            'running-input-images': resolve(rendererRoot, 'services/runtime/RunningInput/Images/index.ts'),
             index: resolve(rendererRoot, 'index.html'),
             pet: resolve(rendererRoot, 'pet/pet.html'),
             'pet-hit': resolve(rendererRoot, 'pet/pet-hit.html'),

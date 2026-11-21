@@ -65,5 +65,40 @@
       "ended": "Runde beendet; Endstatus nicht gemeldet"
     },
     "elapsedReported": "Zuletzt gemeldete Dauer: {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Wie die Eingabe den laufenden Durchgang erreicht",
+      "steer": "Lenken",
+      "steerHint": "Der Agent liest sie beim nächsten Schritt dieses Durchgangs.",
+      "followUp": "Nachtrag",
+      "followUpHint": "Der Agent liest sie, nachdem er diese Antwort beendet hat."
+    },
+    "queued": "In der Warteschlange · {{modes}}",
+    "queuedEnded": "In der Warteschlange · Eingaben ohne bestätigte Verarbeitung können im nächsten Prompt verarbeitet werden",
+    "queuedStopped": "In der Warteschlange · Nicht bestätigt, ob sie nach Stopp verarbeitet wurde",
+    "pending": "{{mode}} wird gesendet…",
+    "unknown": "{{mode}}: Ergebnis unbekannt. Dein Entwurf wurde behalten; prüfe ihn, bevor du ihn erneut sendest.",
+    "rejected": "{{mode}} nicht eingereiht: {{reason}}. Dein Entwurf wurde behalten.",
+    "reason": {
+      "staleTurn": "der Durchgang ist bereits beendet",
+      "dedupCapacity": "zu viele Eingaben warten",
+      "rateLimited": "zu viele Anfragen, versuche es gleich noch einmal",
+      "tooLarge": "die Eingabe ist zu groß",
+      "sessionChanged": "die Sitzung hat sich geändert",
+      "failed": "sie konnte nicht zugestellt werden"
+    },
+    "check": "Prüfen",
+    "checkPending": "Die Eingabe wird noch zugestellt.",
+    "checkUnconfirmed": "Das Ergebnis konnte nicht bestätigt werden. Die Unterhaltung wurde neu geladen.",
+    "dismiss": "Schließen",
+    "dismissAll": "Alle schließen",
+    "referencesUnverified": "Ein Anhang oder Gesprächsverweis konnte nicht geprüft werden. Dein Entwurf wurde behalten.",
+    "preparationChanged": "Der laufende Durchgang änderte sich beim Prüfen der Verweise. Dein Entwurf wurde behalten.",
+    "inputTooLarge": "Die Eingabe für den laufenden Durchgang überschreitet 64 KiB. Dein Entwurf wurde behalten.",
+    "imagesAsPaths": "Bilder werden während eines laufenden Durchgangs als Dateipfade gesendet.",
+    "previousSending": "Die vorherige Eingabe wird noch gesendet. Dein Entwurf wurde behalten.",
+    "invalidText": "Die Eingabe ist leer oder ungültig. Dein Entwurf wurde behalten.",
+    "ordinaryBusyKept": "Ein anderer Durchgang hat zuerst begonnen. Nachricht und Anhänge wurden behalten."
   }
 }

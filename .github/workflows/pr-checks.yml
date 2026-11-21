@@ -74,7 +74,8 @@ jobs:
     needs: full-verify-gate
     if: needs.full-verify-gate.outputs.run == 'true'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 10
+    # Slow x64 runners have spent over 18 minutes preparing tools in jobs that share this tracer.
+    timeout-minutes: ${{ matrix.os == 'ubuntu-24.04' && 25 || 10 }}
     strategy:
       fail-fast: false
       matrix:

@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { getBaseUrl } from '@/common/adapter/httpBridge';
+import { getBaseUrl, resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
 import { trackUpload, type UploadSource } from '@/renderer/hooks/file/useUploadState';
 
 /** Sentinel error message used when an upload is cancelled by the caller. */
@@ -13,6 +13,10 @@ export const UPLOAD_ABORTED_ERROR = 'Upload aborted';
 export interface UploadFileOptions {
   /** Cancel the upload from the outside. Closing the XHR also frees the backend connection. */
   signal?: AbortSignal;
+  /** Include the WebUI token for authenticated Studio uploads. */
+  csrf?: boolean;
+  /** Raw multipart progress and the transition to server response wait. */
+  onTransfer?: (stage: 'upload' | 'upload-response', loaded: number, total?: number) => void;
 }
 
 /**
@@ -48,6 +52,8 @@ export async function uploadFileViaHttp(
   return new Promise<string>((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', `${getBaseUrl()}/api/fs/upload`);
+    const csrf = options?.csrf ? resolveCoreCsrfToken() : '';
+    if (csrf) xhr.setRequestHeader('x-csrf-token', csrf);
 
     // Wire AbortSignal → xhr.abort. Closing the XHR tears down the underlying
     // socket; the backend (axum/multer) treats the truncated multipart body as
@@ -77,11 +83,15 @@ export async function uploadFileViaHttp(
       }
     };
 
-    if (onProgress) {
+    if (onProgress || options?.onTransfer) {
       xhr.upload.addEventListener('progress', (e) => {
         if (e.lengthComputable) {
-          onProgress(Math.round((e.loaded / e.total) * 100));
+          onProgress?.(Math.round((e.loaded / e.total) * 100));
         }
+        options?.onTransfer?.('upload', e.loaded, e.lengthComputable ? e.total : undefined);
+      });
+      xhr.upload.addEventListener('load', (e) => {
+        options?.onTransfer?.('upload-response', e.loaded, e.lengthComputable ? e.total : undefined);
       });
     }
 

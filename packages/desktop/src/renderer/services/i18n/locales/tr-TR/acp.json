@@ -65,5 +65,40 @@
       "ended": "Tur sona erdi; son durum bildirilmedi"
     },
     "elapsedReported": "Son bildirilen süre: {{value}} sn"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Girdinin çalışan tura nasıl ulaşacağı",
+      "steer": "Yönlendir",
+      "steerHint": "Ajan bunu bu turdaki bir sonraki adımında okur.",
+      "followUp": "Takip",
+      "followUpHint": "Ajan bunu bu yanıtı bitirdikten sonra okur."
+    },
+    "queued": "Kuyruğa alındı · {{modes}}",
+    "queuedEnded": "Kuyruğa alındı · İşlendiği doğrulanmayan girdi bir sonraki istemde işlenebilir",
+    "queuedStopped": "Kuyruğa alındı · Durdur'dan sonra işlenip işlenmediği doğrulanmadı",
+    "pending": "{{mode}} gönderiliyor…",
+    "unknown": "{{mode}}: sonuç bilinmiyor. Taslağınız korundu; yeniden göndermeden önce kontrol edin.",
+    "rejected": "{{mode}} kuyruğa alınmadı: {{reason}}. Taslağınız korundu.",
+    "reason": {
+      "staleTurn": "tur zaten bitti",
+      "dedupCapacity": "bekleyen girdi sayısı çok fazla",
+      "rateLimited": "çok fazla istek var, kısa süre sonra yeniden deneyin",
+      "tooLarge": "girdi çok büyük",
+      "sessionChanged": "oturum değişti",
+      "failed": "iletilemedi"
+    },
+    "check": "Kontrol et",
+    "checkPending": "Girdi hâlâ iletiliyor.",
+    "checkUnconfirmed": "Sonuç doğrulanamadı. Konuşma yeniden yüklendi.",
+    "dismiss": "Kapat",
+    "dismissAll": "Tümünü kapat",
+    "referencesUnverified": "Bir ek veya sohbet başvurusu doğrulanamadı. Taslağınız korundu.",
+    "preparationChanged": "Başvurular doğrulanırken yürütülen tur değişti. Taslağınız korundu.",
+    "inputTooLarge": "Yürütülen tura gönderilen girdi 64 KiB sınırını aşıyor. Taslağınız korundu.",
+    "imagesAsPaths": "Bir tur yürütülürken görseller dosya yolu olarak gönderilir.",
+    "previousSending": "Önceki girdi hâlâ gönderiliyor. Taslağınız korundu.",
+    "invalidText": "Girdi boş veya geçersiz. Taslağınız korundu.",
+    "ordinaryBusyKept": "Önce başka bir tur başladı. Mesajınız ve ekleriniz korundu."
   }
 }

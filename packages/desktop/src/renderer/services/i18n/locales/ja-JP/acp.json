@@ -65,5 +65,40 @@
       "ended": "ターン終了・最終状態は未報告"
     },
     "elapsedReported": "最終報告の経過: {{value}}秒"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "実行中のターンへの入力の届け方",
+      "steer": "ステア",
+      "steerHint": "このターンの次のステップでエージェントが読み取ります。",
+      "followUp": "フォローアップ",
+      "followUpHint": "この回答を終えた後にエージェントが読み取ります。"
+    },
+    "queued": "キューに受付済み · {{modes}}",
+    "queuedEnded": "キューに受付済み · 処理が確認されていない入力は次のプロンプトで処理される場合があります",
+    "queuedStopped": "キューに受付済み · 停止後に処理されたかは未確認",
+    "pending": "{{mode}}を送信中…",
+    "unknown": "{{mode}}：結果が不明です。下書きは保持しました。再送信する前に確認してください。",
+    "rejected": "{{mode}}は受け付けられませんでした：{{reason}}。下書きは保持しました。",
+    "reason": {
+      "staleTurn": "ターンはすでに終了しています",
+      "dedupCapacity": "待機中の入力が多すぎます",
+      "rateLimited": "リクエストが多すぎます。しばらくしてから再試行してください",
+      "tooLarge": "入力が大きすぎます",
+      "sessionChanged": "セッションが変わりました",
+      "failed": "届けられませんでした"
+    },
+    "check": "確認",
+    "checkPending": "入力はまだ配信中です。",
+    "checkUnconfirmed": "結果を確認できませんでした。会話を再読み込みしました。",
+    "dismiss": "閉じる",
+    "dismissAll": "すべて閉じる",
+    "referencesUnverified": "添付ファイルまたは会話参照を確認できませんでした。下書きを保持しました。",
+    "preparationChanged": "参照の確認中に実行中のターンが変わりました。下書きを保持しました。",
+    "inputTooLarge": "実行中のターンへの入力が 64 KiB を超えています。下書きを保持しました。",
+    "imagesAsPaths": "ターンの実行中、画像はファイルパスとして送信されます。",
+    "previousSending": "前の入力をまだ送信中です。下書きは保持しました。",
+    "invalidText": "入力が空か無効です。下書きを保持しました。",
+    "ordinaryBusyKept": "別のターンが先に開始されました。メッセージと添付ファイルは保持しました。"
   }
 }
