@@ -203,7 +203,7 @@ export const usePreviewLauncher = () => {
         }
       } catch (error) {
         setErrorKind(classifyPreviewError(error));
-        console.error('[usePreviewLauncher] Failed to open preview:', error);
+        console.error('[usePreviewLauncher] Failed to open preview');
       } finally {
         setLoading(false);
       }

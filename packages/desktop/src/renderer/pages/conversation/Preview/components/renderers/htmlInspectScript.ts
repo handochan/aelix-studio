@@ -119,7 +119,15 @@ export function generateInspectScript(inspectMode: boolean, messages: InspectMes
         return tagName + id + className;
       };
 
-      // 点击元素发送 HTML 到父窗口 / Click element to send HTML to parent window
+      const inspections = new Map();
+      let nextInspectionId = 0;
+      window.__aionuiTakeInspectedElement = (id) => {
+        const element = inspections.get(id);
+        inspections.delete(id);
+        return element;
+      };
+
+      // Signal the selection so the host can retrieve it from the webview.
       const handleClick = (e) => {
         e.preventDefault();
         e.stopPropagation();
@@ -129,8 +137,10 @@ export function generateInspectScript(inspectMode: boolean, messages: InspectMes
           const html = element.outerHTML;
           const tag = getSimplifiedTag(element);
 
-          // 通过 console.log 发送消息（webview 会捕获）/ Send message via console.log (webview will capture)
-          console.log('__INSPECT_ELEMENT__' + JSON.stringify({ html: html, tag: tag }));
+          const id = ++nextInspectionId;
+          inspections.set(id, { html, tag });
+          setTimeout(() => inspections.delete(id), 5000);
+          console.log('__INSPECT_ELEMENT__' + id);
 
           // 显示提示 / Show notification
           showNotification(${copySuccess});

@@ -84,7 +84,7 @@ const SelectionToolbar: React.FC<SelectionToolbarProps> = ({ selectedText, selec
   const handleOpenSystem = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    if (url) void openExternalUrl(url).catch(console.error);
+    if (url) void openExternalUrl(url).catch(() => console.error('[SelectionToolbar] Failed to open link'));
     onClear();
   };
 

@@ -31,6 +31,12 @@ plus 47 per-language/source notices and original license files. The dictionary
 archive is 34,406,377 bytes / 112,260,879 bytes unpacked; installer deltas must be
 measured on the actual resulting artifacts. macOS uses its native spellchecker.
 
+Studio Preview builds leave app-managed crash reporting disabled. The desktop
+app does not start Electron's crash reporter or initialize Sentry, so it has no
+console breadcrumb integration or `beforeBreadcrumb` hook. WebSocket receive
+diagnostics record registered event names and frame lengths. Users can explicitly
+export local diagnostics as described above.
+
 ## One blocking audit policy
 
 The app compatibility CLI directly imports main's `outboundAudit.py`; the old

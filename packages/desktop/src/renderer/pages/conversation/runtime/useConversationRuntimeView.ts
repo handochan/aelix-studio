@@ -54,20 +54,19 @@ type UseConversationRuntimeViewReturn = {
   resetLocalGate: (reason: string) => void;
 };
 
-const normalizeReason = (reason: string): string => reason.trim().slice(0, 200) || 'unknown';
-
 const logConversationRuntimeView = (entry: ConversationRuntimeViewLogEntry): void => {
   const rendererLogger = ipcBridge.application?.writeRendererLog;
   if (!rendererLogger) {
     return;
   }
+  const { reason, ...data } = entry.data;
 
   void rendererLogger
     .invoke({
       level: entry.level,
       tag: 'conversationRuntimeView',
       message: entry.event,
-      data: entry.data,
+      data: typeof reason === 'string' ? { ...data, reasonLength: reason.length } : data,
     })
     .catch(() => {});
 };
@@ -116,7 +115,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
       } catch (error: unknown) {
         if (!current()) return;
         const reason = error instanceof Error ? error.message : String(error);
-        flushRuntimeViewLogs(hydrateFailed(conversation_id, normalizeReason(reason)));
+        flushRuntimeViewLogs(hydrateFailed(conversation_id, reason));
       }
     };
 
@@ -182,12 +181,7 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
 
   const markSendFailed = useCallback(
     (failure: ConversationRuntimeSendFailure) => {
-      flushRuntimeViewLogs(
-        localSendFailed(conversation_id, {
-          ...failure,
-          reason: normalizeReason(failure.reason),
-        })
-      );
+      flushRuntimeViewLogs(localSendFailed(conversation_id, failure));
     },
     [conversation_id]
   );
@@ -219,14 +213,14 @@ export const useConversationRuntimeView = (conversation_id: string): UseConversa
 
   const markRestartFailed = useCallback(
     (runtime: TConversationRuntimeSummary | null, reason: string) => {
-      flushRuntimeViewLogs(localRestartFailed(conversation_id, runtime, normalizeReason(reason)));
+      flushRuntimeViewLogs(localRestartFailed(conversation_id, runtime, reason));
     },
     [conversation_id]
   );
 
   const resetLocalRuntimeGate = useCallback(
     (reason: string) => {
-      flushRuntimeViewLogs(resetLocalGate(conversation_id, normalizeReason(reason)));
+      flushRuntimeViewLogs(resetLocalGate(conversation_id, reason));
     },
     [conversation_id]
   );

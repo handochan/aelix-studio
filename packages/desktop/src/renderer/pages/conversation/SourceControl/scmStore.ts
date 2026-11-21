@@ -301,7 +301,7 @@ const applyRepositoriesChanged = (delta: ScmRepositoriesChanged | undefined): vo
     .filter((id) => removed.has(id));
   if (contradictory.length > 0) {
     console.warn('[scm] repositoriesChanged names these repos as both removed and added/changed; removal wins', {
-      repos: contradictory,
+      count: contradictory.length,
     });
   }
 

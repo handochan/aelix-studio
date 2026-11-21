@@ -257,11 +257,16 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
 
     const handleConsoleMessage = (event: Electron.ConsoleMessageEvent) => {
       try {
-        if (event.message.includes('__WEBVIEW_HOST_NAVIGATE__')) {
-          const match = event.message.match(/"url":"([^"]+)"/);
-          if (match && match[1]) {
-            navigateToWithHistory(match[1]);
-          }
+        const navigation = event.message.match(/^__WEBVIEW_HOST_NAVIGATE__:([0-9]+)$/);
+        if (navigation) {
+          const id = Number(navigation[1]);
+          if (!Number.isSafeInteger(id)) return;
+          void webviewEl
+            .executeJavaScript(`window.__aionuiTakeNavigationUrl?.(${id})`)
+            .then((url: unknown) => {
+              if (webviewRef.current === webviewEl && typeof url === 'string' && url) navigateToWithHistory(url);
+            })
+            .catch(() => {});
           return;
         }
 
@@ -318,11 +323,11 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
         const webContentsId = webviewEl.getWebContentsId?.();
         if (typeof webContentsId === 'number') {
           void ipcBridge.application.reportBrowserWebContentsId.invoke({ webContentsId }).then((res) => {
-            if (!res.success && res.msg) console.warn('[browser] agent control unavailable:', res.msg);
+            if (!res.success && res.msg) console.warn('[browser] agent control unavailable');
           });
         }
-      } catch (error) {
-        console.warn('[browser] could not report webContents id:', error);
+      } catch {
+        console.warn('[browser] could not report webContents id');
       }
 
       // Inject viewport meta for responsive pages
@@ -347,11 +352,23 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       webviewEl
         .executeJavaScript(
           `
-        window.addEventListener('message', function(e) {
-          if (e.data && e.data.type === '__WEBVIEW_HOST_NAVIGATE__') {
-            console.log('__WEBVIEW_HOST_NAVIGATE__', JSON.stringify(e.data));
-          }
-        });
+        (function() {
+          if (window.__aionuiTakeNavigationUrl) return;
+          const urls = new Map();
+          let nextId = 0;
+          window.__aionuiTakeNavigationUrl = (id) => {
+            const url = urls.get(id);
+            urls.delete(id);
+            return url;
+          };
+          window.addEventListener('message', function(e) {
+            if (e.data?.type !== '__WEBVIEW_HOST_NAVIGATE__' || typeof e.data.url !== 'string') return;
+            const id = ++nextId;
+            urls.set(id, e.data.url);
+            setTimeout(() => urls.delete(id), 5000);
+            console.log('__WEBVIEW_HOST_NAVIGATE__:' + id);
+          });
+        })();
         true;
       `
         )

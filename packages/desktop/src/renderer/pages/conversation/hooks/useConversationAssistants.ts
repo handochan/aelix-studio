@@ -22,8 +22,8 @@ export const useConversationAssistants = (): UseConversationAssistantsResult => 
   const { data: assistants, isLoading } = useSWR('assistants.list', async () => {
     try {
       return await ipcBridge.assistants.list.invoke();
-    } catch (error) {
-      console.error('Failed to load assistants for conversation flows:', error);
+    } catch {
+      console.error('Failed to load assistants for conversation flows');
       return [] as Assistant[];
     }
   });

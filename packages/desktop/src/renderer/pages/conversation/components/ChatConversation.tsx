@@ -68,8 +68,8 @@ const _AssociatedConversation: React.FC<{ conversation_id: string }> = ({ conver
       droplist={
         <Menu
           onClickMenuItem={(key) => {
-            Promise.resolve(navigate(`/conversation/${key}`)).catch((error) => {
-              console.error('Navigation failed:', error);
+            Promise.resolve(navigate(`/conversation/${key}`)).catch(() => {
+              console.error('Navigation failed');
             });
           }}
         >
@@ -138,7 +138,7 @@ const _AddNewConversation: React.FC<{ conversation: TChatConversation }> = ({ co
             void navigate(`/conversation/${id}`);
             emitter.emit('chat.history.refresh');
           } catch (error) {
-            console.error('Failed to create conversation:', error);
+            console.error('Failed to create conversation');
             Message.error(getConversationCreateErrorMessage(error, t));
           } finally {
             isCreatingRef.current = false;

@@ -156,8 +156,8 @@ export function useConversationExport(options: UseConversationExportOptions): Us
       setFilename(buildDefaultExportFileName(conversation.id, getDefaultExportFileNameSource(conversation, messages)));
       setActiveIndex(0);
       setStep('menu');
-    } catch (error) {
-      console.error('[useConversationExport] Failed to open export flow:', error);
+    } catch {
+      console.error('[useConversationExport] Failed to open export flow');
       messageApi.error?.(t('messages.export.prepareFailed'));
     }
   }, [conversation_id, loadConversation, messageApi, t, workspace]);
@@ -174,8 +174,8 @@ export function useConversationExport(options: UseConversationExportOptions): Us
       await copyText(transcript);
       messageApi.success?.(t('messages.export.copySuccess'));
       closeExportFlow();
-    } catch (error) {
-      console.error('[useConversationExport] Failed to copy export:', error);
+    } catch {
+      console.error('[useConversationExport] Failed to copy export');
       messageApi.error?.(t('messages.export.copyFailed'));
     } finally {
       setLoading(false);
@@ -231,8 +231,8 @@ export function useConversationExport(options: UseConversationExportOptions): Us
         duration: 5000,
       });
       closeExportFlow();
-    } catch (error) {
-      console.error('[useConversationExport] Failed to save export:', error);
+    } catch {
+      console.error('[useConversationExport] Failed to save export');
       messageApi.error?.(t('messages.export.saveFailed'));
     } finally {
       setLoading(false);

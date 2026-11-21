@@ -156,7 +156,7 @@ describe('MessageAcpToolCall image output', () => {
   it('shows an error when image download fails', async () => {
     const imagePath = '/Users/test/.codex/generated_images/session/ig_test_image.png';
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {});
-    mockDownloadFileFromPath.mockRejectedValueOnce(new Error('denied'));
+    mockDownloadFileFromPath.mockRejectedValueOnce(new Error(`denied: ${imagePath}`));
 
     render(
       <MessageAcpToolCall
@@ -176,7 +176,7 @@ describe('MessageAcpToolCall image output', () => {
     await waitFor(() => {
       expect(mockMessageError).toHaveBeenCalledWith('acp.image.download_error');
     });
-    expect(consoleError).toHaveBeenCalledWith('[MessageAcpToolCall] Failed to download image:', expect.any(Error));
+    expect(consoleError).toHaveBeenCalledExactlyOnceWith('[MessageAcpToolCall] Failed to download image');
     expect(mockMessageSuccess).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });

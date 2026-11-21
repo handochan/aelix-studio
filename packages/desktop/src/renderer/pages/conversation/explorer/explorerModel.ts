@@ -154,12 +154,13 @@ export type Change =
  * op before the frontend handles it. The cost is that the gap is invisible: `modified`
  * was being sent and dropped here for several rounds of work before anyone noticed,
  * because silently ignoring it looks exactly like it never arriving. Hence the warning
- * — still no throw, so a newer backend keeps working, but the drift says so once.
+ * with the number of skipped ops in the frame.
  */
 export function applyDelta(cache: FactCache, key: PeKey, changes: Change[]): FactCache {
   const existing = cache.get(key);
   if (!existing) return cache;
   let entries = existing.slice();
+  let unknownOps = 0;
   for (const change of changes) {
     switch (change.op) {
       case 'added': {
@@ -191,31 +192,14 @@ export function applyDelta(cache: FactCache, key: PeKey, changes: Change[]): Fac
         // preview panel is the consumer that cares (see monitorTransport's fan-out).
         break;
       default:
-        warnUnknownDeltaOp(change);
+        unknownOps++;
         break;
     }
   }
+  if (unknownOps > 0) console.warn('[explorer] ignoring unknown fs/delta ops', unknownOps);
   const next = new Map(cache);
   next.set(key, entries);
   return next;
-}
-
-/** Ops already reported, so a stream of them does not bury everything else. */
-const reportedUnknownOps = new Set<string>();
-
-/**
- * Say once, per op, that the backend sent something this build does not handle.
- *
- * Once rather than every time: an unknown op typically arrives with every delta for the
- * rest of the session, and a console full of one repeated line gets skipped as noise.
- */
-function warnUnknownDeltaOp(change: Change): void {
-  const op = String((change as { op?: unknown }).op);
-  if (reportedUnknownOps.has(op)) return;
-  reportedUnknownOps.add(op);
-  console.warn(
-    `[explorer] ignoring unknown fs/delta op "${op}" — this build does not handle it, so the change is not reflected. The frontend is behind the backend's protocol.`
-  );
 }
 
 // ── anti-stale rules (frontend.md) ──────────────────────────────────────────

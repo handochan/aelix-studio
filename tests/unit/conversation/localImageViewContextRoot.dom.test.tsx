@@ -18,6 +18,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 const hoisted = vi.hoisted(() => ({
   getImageBase64: vi.fn(() => Promise.resolve<string | null>(null)),
+  getFileMetadata: vi.fn(),
 }));
 
 vi.mock('@/common', () => ({
@@ -25,11 +26,13 @@ vi.mock('@/common', () => ({
   ipcBridge: {
     fs: {
       getImageBase64: { invoke: hoisted.getImageBase64 },
+      getFileMetadata: { invoke: hoisted.getFileMetadata },
     },
   },
 }));
 
 import LocalImageView from '@renderer/components/media/LocalImageView';
+import FilePreview from '@renderer/components/media/FilePreview';
 import { ConversationProvider } from '@/renderer/hooks/context/ConversationContext';
 
 afterEach(() => {
@@ -44,7 +47,40 @@ const renderInConversation = (workspace: string | undefined, src: string) =>
     </ConversationProvider>
   );
 
+it('keeps expired attachment paths and rejection details out of preview diagnostics', async () => {
+  const path = 'C:\\private-workspace\\expired-image.png';
+  const denied = new Error(`Access denied: ${path}`);
+  hoisted.getFileMetadata.mockRejectedValueOnce(denied);
+  hoisted.getImageBase64.mockRejectedValueOnce(denied);
+  const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+  try {
+    render(<FilePreview path={path} onRemove={vi.fn()} readonly />);
+    await waitFor(() =>
+      expect(error.mock.calls.filter(([event]) => String(event).startsWith('[FilePreview]'))).toEqual([
+        ['[FilePreview] Failed to get file metadata'],
+        ['[FilePreview] Failed to load image'],
+      ])
+    );
+    expect(hoisted.getFileMetadata).toHaveBeenCalledWith({ path });
+    expect(hoisted.getImageBase64).toHaveBeenCalledWith({ path });
+  } finally {
+    error.mockRestore();
+  }
+});
+
 describe('LocalImageView workspace root from ConversationContext', () => {
+  it('logs a fixed event when loading a conversation image fails', async () => {
+    const path = '/private/workspace/tool-image.png';
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    hoisted.getImageBase64.mockRejectedValueOnce(new Error(path));
+    try {
+      renderInConversation(undefined, path);
+      await waitFor(() => expect(error).toHaveBeenCalledExactlyOnceWith('[LocalImageView] Failed to load image'));
+    } finally {
+      error.mockRestore();
+    }
+  });
+
   it('joins a relative src onto the conversation workspace and forwards it as the fs workspace', async () => {
     renderInConversation('/workspace/demo', './material.jpeg');
     await waitFor(() => expect(hoisted.getImageBase64).toHaveBeenCalled());

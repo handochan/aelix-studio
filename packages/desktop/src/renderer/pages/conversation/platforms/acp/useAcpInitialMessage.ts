@@ -103,22 +103,12 @@ export const useAcpInitialMessage = ({
             status: busyError.status,
             code: busyError.code,
           });
-          console.info('[useAcpInitialMessage] Initial send hit conversation busy state:', {
-            conversation_id,
-            busyKind: busyError.kind,
-            status: busyError.status,
-            code: busyError.code,
-          });
+          console.info('[useAcpInitialMessage] Initial send hit conversation busy state', busyError.status);
           return;
         }
 
         markSendFailed?.({ kind: 'ordinary', reason: errorMessageText });
-        console.error('[useAcpInitialMessage] Error sending initial message:', error);
-        console.error('[useAcpInitialMessage] Error details:', {
-          name: (error as Error)?.name,
-          message: errorMessageText,
-          conversation_id,
-        });
+        console.error('[useAcpInitialMessage] Error sending initial message');
 
         const errorMessage: TMessage = {
           id: uuid(),
@@ -141,8 +131,8 @@ export const useAcpInitialMessage = ({
       }
     };
 
-    sendInitialMessage().catch((error) => {
-      console.error('Failed to send initial message:', error);
+    sendInitialMessage().catch(() => {
+      console.error('Failed to send initial message');
     });
   }, [
     addOrUpdateMessage,

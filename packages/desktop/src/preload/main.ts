@@ -33,7 +33,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
         })
       )
       .catch((error) => {
-        console.error('IPC invoke error:', error);
+        console.error('[bridge] IPC invoke failed');
         throw error;
       });
   },

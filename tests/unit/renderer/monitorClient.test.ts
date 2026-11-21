@@ -131,13 +131,20 @@ describe('MonitorClient request/response pairing', () => {
 });
 
 describe('MonitorClient notifications', () => {
-  it('routes id-less frames to onNotification', () => {
+  it.each(['fs/delta', 'scm/statusChanged'])('routes %s frames and logs only notification counts', (method) => {
     const h = makeHarness();
     const onNotification = vi.fn();
     new MonitorClient({ transport: h.transport, onNotification });
 
-    h.feed({ jsonrpc: '2.0', method: 'fs/delta', params: { target: { pe_id: 'pe1', relative_path: 'src' } } });
-    expect(onNotification).toHaveBeenCalledWith('fs/delta', { target: { pe_id: 'pe1', relative_path: 'src' } });
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const params = { target: { pe_id: 'pe1', relative_path: 'private/src' }, changes: [{ name: 'private.ts' }] };
+    try {
+      h.feed({ jsonrpc: '2.0', method, params });
+      expect(onNotification).toHaveBeenCalledWith(method, params);
+      expect(debug).toHaveBeenCalledExactlyOnceWith('[monitor] ← notify', method, { changes: 1 });
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   it('notify sends a frame without an id', () => {

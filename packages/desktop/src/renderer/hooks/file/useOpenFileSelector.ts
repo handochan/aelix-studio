@@ -30,10 +30,10 @@ export function useOpenFileSelector(options: UseOpenFileSelectorOptions): UseOpe
         }
         onFilesSelected(files);
       })
-      .catch((error) => {
+      .catch(() => {
         // In WebUI, dialog may fail if the web file picker (webFsPicker) is not
         // registered or the bridge is not properly connected. Log for debugging.
-        console.warn('[useOpenFileSelector] Failed to open file selector:', error);
+        console.warn('[useOpenFileSelector] Failed to open file selector');
       });
   }, [onFilesSelected]);
 
