@@ -41,3 +41,22 @@ node tests/fixtures/running-input-images/browserMatrix.mjs /tmp/studio-images
 node_modules/.bin/electron tests/fixtures/running-input-images/electronProtocol.cjs \
   http://127.0.0.1:45105/
 ```
+
+The live mixed batch preserves existing upload, Local and Project references
+alongside a one-time derivative upload. The Chrome LAN probe holds the actual
+Host response after the file is stored, cancels twelve queued 16 MiB Blobs and
+checks that none are still reachable before unblocking the active operation.
+It then exercises an aborted late reply and a lost response. Both leave the
+stored file in the pinned Host's `temp_dir()/aionui/<conversation-id>` scope.
+The Host multipart route has a 30 MiB request limit. S-1a limits each output
+to 3,750,000 B and a submission to 6 MiB, while Host/OS temp storage owns any
+file retained after a completed upload. The probe removes its per-conversation
+fixture uploads after checking retention.
+
+The corrupt-IDAT fixture carries valid PNG chunk CRCs and invalid zlib bytes.
+The 8000×8000 pass-through case also runs with bitmap creation disabled in the
+Chrome worker, and the browser matrix includes Adam7 and the CMYK derivative.
+
+The browser inflater expects the zlib stream to end at its checksum. PNGs with
+unused padding in the final IDAT therefore take the invalid-image path.
+[PNG IDAT](https://www.w3.org/TR/png-3/#11IDAT) · [Compression Standard](https://compression.spec.whatwg.org/#supported-formats)

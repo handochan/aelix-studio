@@ -77,7 +77,7 @@ export async function readReferencedImage(ref: ChatFileRef, signal: AbortSignal,
     const before = await metadata(ref, signal, report);
     const blob = await withNetworkDeadline(
       signal,
-      { stage: 'download', loaded: 0, total: before.size },
+      { stage: 'download-response', loaded: 0, total: before.size },
       report,
       async (downloadSignal, advance) => {
         const response = await fetchFromDesktopOrBrowser(buildFileStreamUrl(ref), {
@@ -90,6 +90,7 @@ export async function readReferencedImage(ref: ChatFileRef, signal: AbortSignal,
         const claimedSize = response.headers.get('content-length');
         if (claimedSize !== null && Number(claimedSize) !== before.size)
           throw new ImagePreparationError('source-changed');
+        advance({ stage: 'download', loaded: 0, total: before.size });
         const reader = response.body.getReader();
         // Allocate once using checked metadata. Never retain arbitrarily many small stream chunks.
         const bytes = new Uint8Array(before.size);

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { crc32, deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { encodeImage } from '@renderer/services/runtime/RunningInput/Images/codec';
 import { hashImage } from '@renderer/services/runtime/RunningInput/Images/digest';
@@ -8,6 +9,7 @@ import {
   nativeLineFits,
   verifyImageGrants,
 } from '@renderer/services/runtime/RunningInput/Images';
+import type { ImageMime } from '@renderer/services/runtime/RunningInput/Images';
 import { readImageHeader } from '@renderer/services/runtime/RunningInput/Images/headers';
 import { readReferencedImage } from '@renderer/services/runtime/RunningInput/Images/transfer';
 import {
@@ -24,7 +26,25 @@ const png = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGNgAAIAAAUAAXpeqz8AAAAASUVORK5CYII=',
   'base64'
 );
+function pngWithIdat(payload: Uint8Array, trailingIdat?: Uint8Array): Blob {
+  const chunk = (data: Uint8Array) => {
+    const result = Buffer.alloc(12 + data.length);
+    result.writeUInt32BE(data.length);
+    result.write('IDAT', 4);
+    result.set(data, 8);
+    result.writeUInt32BE(crc32(result.subarray(4, 8 + data.length)), 8 + data.length);
+    return result;
+  };
+  return new Blob([
+    png.subarray(0, 33),
+    chunk(payload),
+    ...(trailingIdat ? [chunk(trailingIdat)] : []),
+    png.subarray(-12),
+  ]);
+}
+
 const original = new Blob(['source'], { type: 'image/png' });
+const jpegOriginal = new Blob(['jpeg']);
 const derivative = new Blob(['output'], { type: 'image/png' });
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const digest = (value: string) => ({ sha256: sha(value), algorithm: 'js' as const, elapsedMs: 0 });
@@ -44,7 +64,8 @@ class FixtureWorker {
   }
   postMessage(request: WorkerRequest) {
     if (FixtureWorker.silence) return;
-    const header = { mime: 'image/png' as const, width: 8200, height: 1, orientation: 1 };
+    const mime = request.source === jpegOriginal ? 'image/jpeg' : 'image/png';
+    const header = { mime, width: 8200, height: 1, orientation: 1 } as const;
     const data: WorkerReply =
       request.kind === 'inspect'
         ? { kind: 'inspected', header }
@@ -94,6 +115,93 @@ describe('image container and digest', () => {
     const corrupted = Uint8Array.from(png);
     corrupted[44] ^= 1;
     await expect(readImageHeader(new Blob([corrupted]))).rejects.toMatchObject({ code: 'invalid-image' });
+  });
+
+  it.each([
+    ['corrupted zlib with correct PNG CRC', Uint8Array.of(0xff, 1, 2, 3, 4)],
+    ['short zlib output', deflateSync(Uint8Array.of(0, 0))],
+    ['excess zlib output', deflateSync(new Uint8Array(6))],
+    ['invalid row filter', deflateSync(Uint8Array.of(5, 0, 0, 0, 0))],
+  ])('rejects %s without opening a bitmap', async (_case, payload) => {
+    const blob = pngWithIdat(payload);
+    const header = await readImageHeader(blob);
+    const bitmap = vi.fn();
+    vi.stubGlobal('createImageBitmap', bitmap);
+    await expect(
+      encodeImage(
+        {
+          kind: 'encode',
+          source: blob,
+          header,
+          byteLimit: 3_750_000,
+          edgeLimit: 8000,
+          residentBytes: blob.size,
+        },
+        () => {}
+      )
+    ).rejects.toMatchObject({ code: 'invalid-image' });
+    expect(bitmap).not.toHaveBeenCalled();
+  });
+
+  it('validates one zlib stream split across consecutive IDAT chunks', async () => {
+    const zlib = deflateSync(new Uint8Array(5));
+    const blob = pngWithIdat(zlib.subarray(0, 1), zlib.subarray(1));
+    const header = await readImageHeader(blob);
+    const bitmap = vi.fn();
+    vi.stubGlobal('createImageBitmap', bitmap);
+    await expect(
+      encodeImage(
+        {
+          kind: 'encode',
+          source: blob,
+          header,
+          byteLimit: 3_750_000,
+          edgeLimit: 8000,
+          residentBytes: blob.size,
+        },
+        () => {}
+      )
+    ).resolves.toMatchObject({ changed: false });
+    expect(bitmap).not.toHaveBeenCalled();
+  });
+
+  it('keeps a verified derivative when thumbnail canvas initialization fails', async () => {
+    class Bitmap {
+      close = vi.fn();
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+    }
+    class Canvas {
+      static initialized = 0;
+      getContext() {
+        return ++Canvas.initialized === 1 ? { setTransform() {}, drawImage() {} } : null;
+      }
+      async convertToBlob() {
+        return new Blob([png], { type: 'image/png' });
+      }
+    }
+    const source = new Blob([png], { type: 'image/png' });
+    const decoded = new Bitmap(1, 1);
+    const verified = new Bitmap(1, 1);
+    vi.stubGlobal('ImageBitmap', Bitmap);
+    vi.stubGlobal('OffscreenCanvas', Canvas);
+    vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValueOnce(decoded).mockResolvedValueOnce(verified));
+    const result = await encodeImage(
+      {
+        kind: 'encode',
+        source,
+        header: { mime: 'image/png', width: 1, height: 1, orientation: 2 },
+        residentBytes: source.size,
+        byteLimit: 1000,
+        edgeLimit: 100,
+        forceJs: true,
+      },
+      () => {}
+    );
+    expect(result).toMatchObject({ changed: true, dimensions: { width: 1, height: 1 }, preview: undefined });
+    expect(verified.close).toHaveBeenCalledOnce();
   });
 
   it('falls back to the icon if a supplied thumbnail digest belongs to different bytes', async () => {
@@ -164,15 +272,45 @@ describe('image container and digest', () => {
 });
 
 describe('native JSONL limit', () => {
-  it.each([-1, 0, 1])('includes UTF-8, escaping, per-image padding and newline at the limit %+d', (delta) => {
-    const line = (message: string, data: string[]) => JSON.stringify({ message, data }) + '\n';
-    const bytes = [1, 2, 4];
-    const base64 = bytes.map((size) => Buffer.alloc(size, 0xab).toString('base64'));
+  it.each([-1, 0, 1])('prices identified MIME, JSON escaping, base64 and newline at the limit %+d', async (delta) => {
+    const mimes: ImageMime[] = ['image/jpeg', 'image/png'];
+    const base64 = Buffer.from('output').toString('base64');
+    const line = (id: string, message: string, mimeTypes: readonly ImageMime[], data: string) =>
+      JSON.stringify({
+        type: 'steer',
+        id,
+        message,
+        images: mimeTypes.map((mime_type) => ({ type: 'image', mime_type, data })),
+      }) + '\n';
+    const id = '00000000-0000-7000-8000-000000000000';
     const seed = '한"\n';
-    const remaining = MAX_LINE_BYTES + delta - Buffer.byteLength(line(seed, base64));
+    const remaining = MAX_LINE_BYTES + delta - Buffer.byteLength(line(id, seed, mimes, base64));
     const message = seed + 'a'.repeat(remaining);
-    expect(nativeLineBytes(line(message, ['', '', '']), bytes)).toBe(MAX_LINE_BYTES + delta);
-    expect(nativeLineFits(line(message, base64))).toBe(delta <= 0);
+    const native = line(id, message, mimes, base64);
+    const template = vi.fn((requestId: string, identified: readonly ImageMime[]) =>
+      line(requestId, message, identified, '')
+    );
+    vi.stubGlobal('Worker', FixtureWorker);
+    upload.mockResolvedValue('/managed/derived');
+    const prepared = createImagePreparation({
+      signal: new AbortController().signal,
+      conversationId: 'conversation',
+      sources: [{ blob: jpegOriginal }, { blob: original }],
+      model: { supported: true },
+      emptyNativeLine: template,
+    }).prepare();
+    if (delta <= 0) {
+      await expect(prepared).resolves.toMatchObject({ estimatedLineBytes: MAX_LINE_BYTES + delta });
+    } else {
+      await expect(prepared).rejects.toMatchObject({ code: 'limits' });
+      expect(upload).not.toHaveBeenCalled();
+    }
+    expect(template).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^[\da-f-]{36}$/), mimes);
+    expect(nativeLineFits(native)).toBe(delta <= 0);
+  });
+
+  it('counts base64 padding separately for each file', () => {
+    expect(nativeLineBytes('\n', [1, 2, 4])).toBe(17);
   });
 });
 
@@ -233,20 +371,26 @@ describe('image preparation', () => {
 
   it('cancels the upload and ignores its delayed response after a draft replacement', async () => {
     let uploadSignal: AbortSignal;
-    upload.mockImplementation(
-      (_file, _conversation, _percent, _name, options) =>
-        new Promise((_resolve, reject) => {
-          uploadSignal = options.signal;
-          uploadSignal.addEventListener('abort', () => reject(uploadSignal.reason));
-        })
-    );
+    let reply: (path: string) => void;
+    upload
+      .mockImplementationOnce(
+        (_file, _conversation, _percent, _name, options) =>
+          new Promise((resolve) => {
+            uploadSignal = options.signal;
+            reply = resolve;
+          })
+      )
+      .mockResolvedValueOnce('/managed/next.png');
     const job = preparation();
     const pending = job.prepare();
     await vi.waitFor(() => expect(upload).toHaveBeenCalledOnce());
     job.dispose();
     await expect(pending).rejects.toMatchObject({ code: 'cancelled' });
     expect(uploadSignal.aborted).toBe(true);
+    reply('/managed/late.png');
+    await expect(preparation().prepare()).resolves.toMatchObject({ images: [{ ref: { path: '/managed/next.png' } }] });
     await expect(job.prepare()).rejects.toMatchObject({ code: 'cancelled' });
+    expect(upload).toHaveBeenCalledTimes(2);
   });
 
   it('terminates the worker on Stop or draft replacement', async () => {
@@ -328,6 +472,56 @@ describe('reference download', () => {
     body.close();
     expect(new Uint8Array(await (await read).arrayBuffer())).toEqual(Uint8Array.of(1, 2));
     expect(String(fetch.mock.calls[1][0])).toContain('/api/fs/stream?kind=project&pe_id=fixture');
+  });
+
+  it('starts a new 30-second idle window when the download headers arrive', async () => {
+    vi.useFakeTimers();
+    const report = vi.fn();
+    vi.stubGlobal(
+      'fetch',
+      vi
+        .fn()
+        .mockResolvedValueOnce(metadata(2))
+        .mockImplementationOnce(
+          (_url, { signal }) =>
+            new Promise((resolve) =>
+              setTimeout(() => {
+                resolve(
+                  new Response(
+                    new ReadableStream({
+                      start(controller) {
+                        const timer = setTimeout(() => {
+                          controller.enqueue(Uint8Array.of(1, 2));
+                          controller.close();
+                        }, 29_900);
+                        signal.addEventListener(
+                          'abort',
+                          () => {
+                            clearTimeout(timer);
+                            controller.error(signal.reason);
+                          },
+                          { once: true }
+                        );
+                      },
+                    })
+                  )
+                );
+              }, 29_900)
+            )
+        )
+        .mockResolvedValueOnce(metadata(2))
+    );
+    const result = readReferencedImage(ref, new AbortController().signal, report);
+    const completed = expect(result).resolves.toMatchObject({ size: 2 });
+    await vi.advanceTimersByTimeAsync(59_800);
+    await completed;
+    expect(report.mock.calls.map(([value]) => value.stage)).toEqual([
+      'metadata',
+      'download-response',
+      'download',
+      'download',
+      'metadata',
+    ]);
   });
 
   it('rejects a changed file even when the stream has the expected length', async () => {

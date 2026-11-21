@@ -11,7 +11,15 @@ const entry = (await readdir(assets)).find((name) => /^running-input-images-.*\.
 assert.ok(entry, 'Build the production renderer first');
 const acceptance = await readFile(new URL('./acceptance.mjs', import.meta.url));
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
-const names = [...Array.from({ length: 8 }, (_, index) => `exif-${index + 1}.jpg`), 'alpha.png'];
+const names = [
+  ...Array.from({ length: 8 }, (_, index) => `exif-${index + 1}.jpg`),
+  'alpha.png',
+  'cmyk.jpg',
+  'cmyk-rotated.jpg',
+  'corrupt-idat.png',
+  'adam7.png',
+  'passthrough-8000.png',
+];
 const cases = await Promise.all(
   names.map(async (name) => ({ name, sha256: sha256(await readFile(path.join(fixtures, name))) }))
 );
@@ -34,32 +42,68 @@ const server = createServer(async (request, response) => {
         const results = [];
         const cases = ${JSON.stringify(cases)};
         const entry = ${JSON.stringify('/assets/' + entry)};
-        const b64 = (bytes) => btoa(String.fromCharCode(...bytes));
+        const b64 = (bytes) => {
+          const chunks = [];
+          for (let offset = 0; offset < bytes.length; offset += 16384) {
+            chunks.push(String.fromCharCode(...bytes.subarray(offset, offset + 16384)));
+          }
+          return btoa(chunks.join(''));
+        };
         const cornerOrder = [[0,1,2,3],[1,0,3,2],[3,2,1,0],[2,3,0,1],[0,2,1,3],[2,0,3,1],[3,1,2,0],[1,3,0,2]];
         const colors = [[235,20,20],[20,235,20],[20,20,235],[235,235,20]];
+        let cmykReference;
         for (const [index, test] of cases.entries()) {
+          let stage = 'prepare';
           try {
             const bytes = new Uint8Array(await fetch('/fixtures/' + test.name).then((response) => response.arrayBuffer()));
+            const invalid = test.name === 'corrupt-idat.png';
             const result = await exerciseImageWorker({ entry, conversationId: 'matrix', name: test.name,
-              base64: b64(bytes), edgeLimit: 2048, forceJsHash: true });
+              base64: b64(bytes), edgeLimit: test.name === 'alpha.png' ? 2048 : undefined,
+              expected: invalid ? 'invalid-image' : undefined, forceJsHash: true });
+            if (invalid) {
+              if (result.progress.some(({ stage }) => stage.startsWith('upload'))) throw new Error();
+              results.push({ fixture: test.name, result: 'passed' });
+              continue;
+            }
+            stage = 'integrity';
             const received = await fetch('/matrix-digest?path=' + encodeURIComponent(result.ref.path)).then((response) => response.text());
             if (received !== result.sent.digest.sha256 || test.sha256 !== result.original.digest.sha256) {
               throw new Error('Independent digest mismatch');
             }
-            if (index < 8) {
-              const expected = index >= 4 ? [64,96] : [96,64];
-              if (result.sent.width !== expected[0] || result.sent.height !== expected[1]) throw new Error('Dimensions');
-              const matches = result.pixels.every((pixel, corner) =>
-                colors[cornerOrder[index][corner]].every((value, channel) => Math.abs(pixel[channel] - value) < 12));
-              if (!matches) throw new Error('Corner colors');
-              if (atob(result.output).includes('Exif\\0\\0') !== (index === 0)) throw new Error('EXIF/GPS');
-            } else if (result.pixels[0][3] !== 0 || result.pixels[1][3] !== 128 ||
-                       ![133,99,88].every((value, index) => Math.abs(result.pixels[1][index] - value) <= 6)) {
-              throw new Error('sRGB/alpha sample ' + JSON.stringify(result.pixels));
+            stage = 'pixels';
+            if (index < 8 || test.name === 'cmyk-rotated.jpg') {
+              const cmyk = test.name === 'cmyk-rotated.jpg';
+              const expected = cmyk ? [32,48] : index >= 4 ? [64,96] : [96,64];
+              stage = 'dimensions';
+              if (result.sent.width !== expected[0] || result.sent.height !== expected[1]) throw new Error();
+              stage = 'colors';
+              const matches = result.pixels.every((pixel, corner) => {
+                const expectedIndex = cornerOrder[cmyk ? 5 : index][corner];
+                if (cmyk) {
+                  const distance = (reference) => reference.slice(0, 3)
+                    .reduce((sum, value, channel) => sum + (value - pixel[channel]) ** 2, 0);
+                  const expectedDistance = distance(cmykReference[expectedIndex]);
+                  return cmykReference.every((reference, candidate) => candidate === expectedIndex || expectedDistance < distance(reference));
+                }
+                return colors[expectedIndex].every((value, channel) => Math.abs(pixel[channel] - value) < 12);
+              });
+              if (!matches) throw new Error();
+              stage = 'metadata';
+              if (atob(result.output).includes('Exif\\0\\0') !== (index === 0)) throw new Error();
+            } else if (test.name === 'cmyk.jpg') {
+              if (result.changed || result.sent.width !== 48 || result.sent.height !== 32) throw new Error();
+              cmykReference = result.pixels;
+            } else if (test.name === 'alpha.png') {
+              if (result.pixels[0][3] !== 0 || result.pixels[1][3] !== 128 ||
+                  ![133,99,88].every((value, index) => Math.abs(result.pixels[1][index] - value) <= 6)) throw new Error();
+            } else if (test.name === 'passthrough-8000.png') {
+              if (result.changed || result.preview !== 'icon' || result.sent.width !== 8000 || result.sent.height !== 8000) {
+                throw new Error();
+              }
             }
             results.push({ fixture: test.name, result: 'passed' });
-          } catch (error) {
-            results.push({ fixture: test.name, result: error.message });
+          } catch {
+            results.push({ fixture: test.name, result: 'failed', stage });
           }
         }
         const report = JSON.stringify({ browser: navigator.userAgent, results });
@@ -94,7 +138,20 @@ const server = createServer(async (request, response) => {
       response.writeHead(200, { 'content-type': value.type }).end(value.content);
     } else if (url.pathname === '/matrix-report' && request.method === 'POST') {
       const report = await new Response(request).json();
-      console.log(JSON.stringify(report));
+      console.log(
+        JSON.stringify({
+          browser: /^[ -~]{1,300}$/.test(report.browser) ? report.browser : 'invalid',
+          results: report.results
+            .filter(({ fixture }) => names.includes(fixture))
+            .map(({ fixture, result, stage }) => ({
+              fixture,
+              result: result === 'passed' ? 'passed' : 'failed',
+              stage: ['prepare', 'integrity', 'pixels', 'dimensions', 'colors', 'metadata'].includes(stage)
+                ? stage
+                : undefined,
+            })),
+        })
+      );
       response.writeHead(204).end();
     } else {
       response.writeHead(404).end();

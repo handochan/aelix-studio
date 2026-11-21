@@ -1,5 +1,6 @@
 import { hashImage } from './digest';
 import { displayDimensions, readImageHeader } from './headers';
+import { PNG_INFLATE_WORKSPACE_BYTES, verifyPngData } from './png';
 import {
   ImagePreparationError,
   MAX_PLANNED_BYTES,
@@ -137,7 +138,9 @@ async function encodeDerivative(request: EncodeRequest, display: Dimensions) {
     if (!globalThis.isSecureContext) throw new ImagePreparationError('secure-context-required');
   }
 
-  const rasterBytes = full ? header.width * header.height * (header.highBitDepth ? 8 : 4) : 0;
+  // Budget both the four-channel decoder surface and its converted RGBA surface for CMYK/YCCK.
+  const extraColorBytesPerPixel = header.jpegComponents === 4 ? 4 : 0;
+  const rasterBytes = full ? header.width * header.height * (header.highBitDepth ? 8 : 4 + extraColorBytesPerPixel) : 0;
   const decoderBytes = rasterBytes + (header.jpegCoefficientBytes ?? 0);
   const baseBytes = residentBytes + CODEC_HEADROOM_BYTES + decoderBytes + (full ? 0 : source.size);
   const edge = Math.max(display.width, display.height);
@@ -148,9 +151,13 @@ async function encodeDerivative(request: EncodeRequest, display: Dimensions) {
       : Math.min(edgeLimit, INITIAL_EDGE, edge);
   const target = fit(display, targetEdge);
   // A scaled JPEG frame is no larger than the requested canvas on the verified path.
-  const plannedBytes = baseBytes + target.width * target.height * (full ? 4 : 8);
+  const plannedBytes = Math.max(
+    baseBytes + target.width * target.height * (full ? 4 : 8 + extraColorBytesPerPixel),
+    header.mime === 'image/png' ? residentBytes + source.size + PNG_INFLATE_WORKSPACE_BYTES : 0
+  );
   if (plannedBytes > MAX_PLANNED_BYTES) throw new ImagePreparationError('decode-limit');
 
+  if (header.mime === 'image/png') await verifyPngData(source);
   const { canvas, ctx } = canvas2d(target);
   const decodeSource = withoutExif(source, header);
   const bitmap = full ? await createImageBitmap(decodeSource) : await decodeScaledJpeg(decodeSource, header, target);
@@ -206,15 +213,17 @@ async function verifyOutput(output: Blob, dimensions: Dimensions): Promise<Blob 
       throw new ImagePreparationError('invalid-image');
     }
     const thumbnailSize = fit(dimensions, THUMBNAIL_EDGE);
-    const { canvas, ctx } = canvas2d(thumbnailSize);
     try {
-      ctx.drawImage(bitmap, 0, 0, thumbnailSize.width, thumbnailSize.height);
-      const thumbnail = await canvas.convertToBlob({ type: 'image/png' });
-      return thumbnail.type === 'image/png' ? thumbnail : undefined;
+      const { canvas, ctx } = canvas2d(thumbnailSize);
+      try {
+        ctx.drawImage(bitmap, 0, 0, thumbnailSize.width, thumbnailSize.height);
+        const thumbnail = await canvas.convertToBlob({ type: 'image/png' });
+        return thumbnail.type === 'image/png' ? thumbnail : undefined;
+      } finally {
+        canvas.width = canvas.height = 1;
+      }
     } catch {
       return undefined;
-    } finally {
-      canvas.width = canvas.height = 1;
     }
   } finally {
     bitmap.close();
@@ -227,7 +236,10 @@ async function boundPreview(preview: Preview | undefined, sha256: string): Promi
   }
   try {
     const header = await readImageHeader(preview.blob);
-    if (header.mime === 'image/png' && Math.max(header.width, header.height) <= THUMBNAIL_EDGE) return preview;
+    if (header.mime === 'image/png' && Math.max(header.width, header.height) <= THUMBNAIL_EDGE) {
+      await verifyPngData(preview.blob);
+      return preview;
+    }
   } catch {
     // A missing or invalid thumbnail does not prevent a safe image from being sent.
   }
@@ -242,12 +254,14 @@ export async function encodeImage(
   const { source, header, byteLimit, edgeLimit, residentBytes, forceJs } = request;
   const display = displayDimensions(header);
   const changed = header.orientation !== 1 || !fitsFile(source, header, byteLimit, edgeLimit);
+  const pngPassThrough = !changed && header.mime === 'image/png';
+  if (pngPassThrough) await verifyPngData(source);
   const { output, dimensions, plannedBytes } = changed
     ? await encodeDerivative(request, display)
     : {
         output: source.slice(0, source.size, header.mime),
         dimensions: display,
-        plannedBytes: residentBytes + source.size,
+        plannedBytes: residentBytes + source.size + (pngPassThrough ? PNG_INFLATE_WORKSPACE_BYTES : 0),
       };
   const thumbnail = changed ? await verifyOutput(output, dimensions) : undefined;
   const originalDigest = await hashImage(source, 'hash-original', report, forceJs);

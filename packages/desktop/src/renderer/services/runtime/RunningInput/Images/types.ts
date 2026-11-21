@@ -19,6 +19,7 @@ export type ImageHeader = Dimensions & {
   mime: ImageMime;
   orientation: number;
   jpegCoefficientBytes?: number;
+  jpegComponents?: number;
   highBitDepth?: boolean;
   exifSegments?: { start: number; end: number }[];
 };
@@ -58,7 +59,7 @@ export type HashProgress = {
 export type ImageProgress =
   | HashProgress
   | {
-      stage: 'metadata' | 'download' | 'upload' | 'upload-response';
+      stage: 'metadata' | 'download-response' | 'download' | 'upload' | 'upload-response';
       loaded: number;
       total?: number;
     };

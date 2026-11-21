@@ -23,8 +23,13 @@ export async function exerciseImageWorker({
     conversationId,
     model: { supported: true, maxFileBytes: byteLimit, maxEdge: edgeLimit },
     forceJsHash,
-    emptyNativeLine: (requestId) =>
-      JSON.stringify({ id: requestId, message: '한"\n', blocks: [{ type: 'image', data: '' }] }) + '\n',
+    emptyNativeLine: (requestId, mimes) =>
+      JSON.stringify({
+        type: 'steer',
+        id: requestId,
+        message: '한"\n',
+        images: mimes.map((mime_type) => ({ type: 'image', mime_type, data: '' })),
+      }) + '\n',
     onProgress: (_index, update) => {
       progress.push(update);
       if (cancelDuringHash && update.stage === 'hash-original' && update.loaded > 0 && update.loaded < update.total) {
@@ -47,7 +52,10 @@ export async function exerciseImageWorker({
     const [image] = result.images;
     const streamBase = window.__backendPort ? `http://127.0.0.1:${window.__backendPort}` : location.origin;
     const params = new URLSearchParams({ kind: image.ref.kind, path: image.ref.path });
-    const response = await fetch(`${streamBase}/api/fs/stream?${params}`, { credentials: 'same-origin' });
+    const response = await fetch(`${streamBase}/api/fs/stream?${params}`, {
+      credentials: 'same-origin',
+      cache: 'no-store',
+    });
     if (!response.ok) throw new Error(`Readback failed: ${response.status}`);
     const output = await response.blob();
     const outputBytes = new Uint8Array(await output.arrayBuffer());
@@ -63,7 +71,7 @@ export async function exerciseImageWorker({
     if (writes !== 0) throw new Error('Accepted a mismatched grant');
     api.verifyImageGrants(result, [grant]);
     let pixels;
-    if (name.startsWith('exif-') || name.startsWith('baseline-') || name === 'alpha.png') {
+    if (name.startsWith('exif-') || name.startsWith('baseline-') || name.startsWith('cmyk') || name === 'alpha.png') {
       const bitmap = await createImageBitmap(output);
       const canvas = new OffscreenCanvas(bitmap.width, bitmap.height);
       const ctx = canvas.getContext('2d', { colorSpace: 'srgb' });
@@ -101,7 +109,10 @@ export async function exerciseImageWorker({
       output: btoa(chunks.join('')),
     };
   } catch (error) {
-    if (error.code !== expected) throw new Error(`${name}: ${error.code || error.message}`);
+    if (error.code !== expected) {
+      const { stage = 'prepare', loaded = 0 } = progress.at(-1) ?? {};
+      throw new Error(`${name}: ${error.code || 'fixture-failed'} (${stage}, ${loaded} bytes)`);
+    }
     return { code: error.code, windowSecure: isSecureContext, progress, originalSize: blob.size };
   } finally {
     job.dispose();
@@ -119,7 +130,13 @@ export async function exerciseImageBatch({ entry, conversationId, references, la
     sources: [{ blob }, ...references.map((ref) => ({ ref }))],
     model: { supported: true },
     forceJsHash: true,
-    emptyNativeLine: (requestId) => JSON.stringify({ requestId, message: '한"\n', images: ['', '', '', ''] }) + '\n',
+    emptyNativeLine: (requestId, mimes) =>
+      JSON.stringify({
+        type: 'steer',
+        id: requestId,
+        message: '한"\n',
+        images: mimes.map((mime_type) => ({ type: 'image', mime_type, data: '' })),
+      }) + '\n',
   });
   const started = performance.now();
   try {
@@ -128,8 +145,9 @@ export async function exerciseImageBatch({ entry, conversationId, references, la
       codecMs: prepared.codecMs,
       wallMs: performance.now() - started,
       estimatedLineBytes: prepared.estimatedLineBytes,
-      images: prepared.images.map((image) => ({
+      images: prepared.images.map((image, index) => ({
         kind: image.ref.kind,
+        preservedRef: index === 0 || JSON.stringify(image.ref) === JSON.stringify(references[index - 1]),
         codecMs: image.codecMs,
         bytes: image.sent.bytes,
         changed: image.changed,
@@ -138,4 +156,50 @@ export async function exerciseImageBatch({ entry, conversationId, references, la
   } finally {
     job.dispose();
   }
+}
+
+/** Submit a small file. The driver can hold or fail the actual upload response. */
+export async function startUploadFixture({ entry, conversationId, base64 }) {
+  const api = await import(new URL(entry, document.baseURI).href);
+  const create = (blob) =>
+    api.createImagePreparation({
+      signal: new AbortController().signal,
+      conversationId,
+      sources: [{ blob }],
+      model: { supported: true },
+      emptyNativeLine: (id, mimes) =>
+        JSON.stringify({
+          id,
+          images: mimes.map((mime_type) => ({ type: 'image', mime_type, data: '' })),
+        }) + '\n',
+    });
+  const job = create(new Blob([Uint8Array.from(atob(base64), (char) => char.charCodeAt(0))]));
+  const first = job.prepare();
+  const outcome = first.then(
+    () => 'fulfilled',
+    (error) => error.code
+  );
+  globalThis.__imageUploadFixture = {
+    job,
+    first,
+    outcome,
+    async cancelQueuedBlobs() {
+      const handles = Array.from({ length: 12 }, () => {
+        const blob = new Blob([new Uint8Array(16 * 1024 * 1024)]);
+        return { weak: new WeakRef(blob), job: create(blob) };
+      });
+      const cancelled = await Promise.all(
+        handles.map(({ job: queued }) => {
+          const rejection = queued.prepare().then(
+            () => false,
+            (error) => error.code === 'cancelled'
+          );
+          queued.dispose();
+          return rejection;
+        })
+      );
+      globalThis.__imageCancelledBlobs = handles;
+      return cancelled.filter(Boolean).length;
+    },
+  };
 }

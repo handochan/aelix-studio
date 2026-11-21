@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { copyFile, mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { _electron, chromium, firefox, webkit } from '@playwright/test';
-import { exerciseImageBatch, exerciseImageWorker } from './acceptance.mjs';
+import { exerciseImageBatch, exerciseImageWorker, startUploadFixture } from './acceptance.mjs';
 
 const [kind, target, fixtures] = process.argv.slice(2);
 assert.ok(kind && target && fixtures, 'Usage: probe.mjs electron|chrome|edge|firefox|webkit TARGET FIXTURE_DIR');
@@ -33,6 +33,7 @@ const cornerOrder = [
 const userData = await mkdtemp(path.join(tmpdir(), 'studio-image-probe-'));
 let app;
 let browser;
+let fixtureUploadDirectory;
 try {
   let page;
   if (kind === 'electron') {
@@ -73,7 +74,7 @@ try {
     );
   }
 
-  const conversationId = await page.evaluate(async () => {
+  const fixtureContext = await page.evaluate(async () => {
     const base = window.__backendPort ? `http://127.0.0.1:${window.__backendPort}` : '';
     const csrf = document.cookie
       .split('; ')
@@ -87,8 +88,17 @@ try {
     const result = await response.json();
     if (!response.ok || !result.data?.id)
       throw new Error(`Fixture conversation failed: ${response.status} ${result.code}`);
-    return result.data.id;
+    const id = result.data.id;
+    const conversation = await fetch(base + '/api/conversations/' + encodeURIComponent(id)).then((r) => r.json());
+    const projectId = conversation.data?.project_id;
+    const workspace = conversation.data?.extra?.workspace;
+    if (!projectId || !workspace) throw new Error('Fixture conversation has no project workspace');
+    const project = await fetch(base + '/api/projects/' + encodeURIComponent(projectId)).then((r) => r.json());
+    const projectEntry = project.data?.explorer?.workspace_pe_id;
+    if (!projectEntry) throw new Error('Fixture project has no workspace entry');
+    return { id, workspace, projectEntry };
   });
+  const { id: conversationId, workspace, projectEntry } = fixtureContext;
 
   const secure = await page.evaluate(() => isSecureContext);
   const blink = /Chrome\//.test(await page.evaluate(() => navigator.userAgent));
@@ -102,6 +112,14 @@ try {
   const uploaded = [];
   page.on('request', (request) => {
     if (request.method() === 'POST' && request.url().endsWith('/api/fs/upload')) uploaded.push(request);
+  });
+
+  page.on('requestfailed', (request) => {
+    if (new URL(request.url()).pathname !== '/api/fs/stream') return;
+    const code = request.failure()?.errorText;
+    console.log(
+      JSON.stringify({ stage: 'download', code: /^net::ERR_[A-Z_]+$/.test(code ?? '') ? code : 'request-failed' })
+    );
   });
 
   async function measure(name, prepare) {
@@ -180,34 +198,56 @@ try {
     }
     const output = Buffer.from(result.output, 'base64');
     assert.equal(result.secureContext, secure);
-    assert.equal(result.original.digest.sha256, digest(input));
-    assert.equal(result.sent.digest.sha256, digest(output));
-    if (!result.changed) assert.deepEqual(input, output);
-    if (result.preview === 'thumbnail') assert.equal(result.previewDigest, digest(output));
+    assert.ok(result.original.digest.sha256 === digest(input), 'Original digest mismatch');
+    assert.ok(result.sent.digest.sha256 === digest(output), 'Sent digest mismatch');
+    if (!result.changed) assert.ok(input.equals(output), 'Pass-through bytes changed');
+    if (result.preview === 'thumbnail') assert.ok(result.previewDigest === digest(output), 'Preview digest mismatch');
     assert.equal(uploaded.length - uploadsBefore, params.useRef && !result.changed ? 0 : 1);
     assert.ok(result.codecMs < 5000);
     if (!params.useRef) assert.ok(result.uploadProgress.some((progress) => progress.stage === 'upload-response'));
-    const { output: _output, ref: _ref, uploadProgress: _upload, hashProgress, ...summary } = result;
-    assert.ok(hashProgress.some((progress) => progress.loaded === progress.total));
-    console.log(JSON.stringify({ name, ...summary }));
+    assert.ok(result.hashProgress.some((progress) => progress.loaded === progress.total));
+    const sizeAndTime = ({ width, height, bytes, digest: hash }) => ({
+      width,
+      height,
+      bytes,
+      hashMs: hash.elapsedMs,
+      hashAlgorithm: hash.algorithm,
+    });
+    console.log(
+      JSON.stringify({
+        name,
+        result: 'passed',
+        original: sizeAndTime(result.original),
+        sent: sizeAndTime(result.sent),
+        changed: result.changed,
+        preview: result.preview,
+        plannedBytes: result.plannedBytes,
+        codecMs: result.codecMs,
+        totalMs: result.totalMs,
+      })
+    );
     return { ...result, output };
   }
 
-  const oriented = (result, orientation, dimensions) => {
+  const oriented = (result, orientation, dimensions, tolerance = 12, noOriginalExif = false) => {
     assert.deepEqual([result.sent.width, result.sent.height], dimensions);
     result.pixels.forEach((pixel, index) => {
       const expected = cornerColors[cornerOrder[orientation - 1][index]];
       assert.ok(
-        expected.every((value, channel) => Math.abs(value - pixel[channel]) < 12),
-        JSON.stringify(pixel)
+        expected.every((value, channel) => Math.abs(value - pixel[channel]) < tolerance),
+        'Corner color mismatch'
       );
     });
-    assert.equal(result.output.includes(Buffer.from('Exif\0\0')), orientation === 1);
+    assert.equal(result.output.includes(Buffer.from('Exif\0\0')), orientation === 1 && !noOriginalExif);
   };
 
   for (let index = 1; index <= 8; index++) {
     oriented(await run(`exif-${index}.jpg`), index, index >= 5 ? [64, 96] : [96, 64]);
   }
+  oriented(await run('cmyk.jpg'), 1, [48, 32], 32, true);
+  const cmyk = await run('cmyk-rotated.jpg');
+  oriented(cmyk, 6, [32, 48], 32);
+  assert.ok(cmyk.plannedBytes >= 20 * 1024 * 1024 + 48 * 32 * 12 + cmyk.original.bytes);
   const alpha = await run('alpha.png', { edgeLimit: 2048 });
   assert.equal(alpha.pixels[0][3], 0);
   assert.equal(alpha.pixels[1][3], 128);
@@ -223,7 +263,31 @@ try {
   await run('truncated.png', { expected: 'invalid-image' });
   await run('truncated.jpg', { expected: 'invalid-image' });
   await run('animated.png', { expected: 'unsupported-format' });
+  await run('corrupt-idat.png', { expected: 'invalid-image' });
+  await run('adam7.png');
+  let noRasterLoads = 0;
+  const noRaster = async (route) => {
+    noRasterLoads++;
+    const response = await route.fetch();
+    await route.fulfill({
+      response,
+      body:
+        "globalThis.createImageBitmap = () => { throw new Error('unexpected-raster'); };\n" + (await response.text()),
+    });
+  };
+  const workerPattern = '**/image.worker-*.js';
+  if (kind === 'chrome') await page.route(workerPattern, noRaster);
   const huge = await run('passthrough-8000.png');
+  if (kind === 'chrome') {
+    await page.unroute(workerPattern, noRaster);
+    assert.ok(noRasterLoads > 0, 'Raster prohibition was not installed in the worker');
+  }
+  const derivativeParent = path.dirname(huge.ref.path);
+  assert.ok(
+    path.basename(derivativeParent) === conversationId && path.basename(path.dirname(derivativeParent)) === 'aionui',
+    'Upload escaped the per-conversation temp scope'
+  );
+  fixtureUploadDirectory = derivativeParent;
   assert.equal(huge.preview, 'icon');
   assert.deepEqual([huge.sent.width, huge.sent.height], [8000, 8000]);
 
@@ -232,18 +296,32 @@ try {
   const maxFile = await run('file-max.png');
   assert.equal(maxFile.sent.bytes, 3_750_000);
   await run('file-max.png', { useRef: maxFile.ref });
+  const localSource = path.join(workspace, 'studio-image-local');
+  const projectSource = path.join(workspace, 'studio-image-project');
+  await copyFile(path.join(fixtures, 'exif-1.jpg'), localSource);
+  await copyFile(path.join(fixtures, 'adam7.png'), projectSource);
   const beforeBatch = uploaded.length;
   const batch = await page.evaluate(exerciseImageBatch, {
     entry,
     conversationId,
-    references: [huge.ref, maxFile.ref, huge.ref],
+    references: [
+      huge.ref,
+      { kind: 'local', path: localSource },
+      { kind: 'project', pe_id: projectEntry, relative_path: 'studio-image-project' },
+    ],
     large: (await readFile(path.join(fixtures, 'source-max.png'))).toString('base64'),
   });
   assert.ok(batch.codecMs < 15_000 && batch.images.every((image) => image.codecMs < 5_000));
   assert.ok(batch.estimatedLineBytes <= 8 * 1024 * 1024);
   assert.equal(batch.images[0].changed, true);
-  assert.equal(batch.images[1].changed, false);
-  assert.equal(batch.images[3].changed, false);
+  assert.ok(
+    batch.images.slice(1).every((image) => image.preservedRef && !image.changed),
+    'Original reference changed'
+  );
+  assert.deepEqual(
+    batch.images.map((image) => image.kind),
+    ['upload', 'upload', 'local', 'project']
+  );
   assert.equal(uploaded.length - beforeBatch, batch.images.filter((image) => image.changed).length);
   console.log(JSON.stringify({ name: 'four-image-batch', ...batch }));
   await run('source-max.png', { expected: 'cancelled', cancelDuringHash: true });
@@ -266,10 +344,83 @@ try {
   if (secure) {
     const webCrypto = await run('source-max.png', { forceJsHash: false });
     assert.equal(webCrypto.original.digest.algorithm, 'web-crypto');
-    assert.equal(webCrypto.sent.digest.sha256, worst.sent.digest.sha256);
+    assert.ok(webCrypto.sent.digest.sha256 === worst.sent.digest.sha256, 'Hash implementations disagree');
+  }
+  if (kind === 'chrome') {
+    const session = await page.context().newCDPSession(page);
+    const base64 = (await readFile(path.join(fixtures, 'adam7.png'))).toString('base64');
+    await session.send('Fetch.enable', { patterns: [{ urlPattern: '*/api/fs/upload', requestStage: 'Response' }] });
+    try {
+      for (const fault of ['cancel', 'response-lost']) {
+        const attempts = uploaded.length;
+        let pauseDeadline;
+        const paused = new Promise((resolve, reject) => {
+          pauseDeadline = setTimeout(() => reject(new Error('Fixture upload response was not intercepted')), 15_000);
+          session.once('Fetch.requestPaused', resolve);
+        });
+        await page.evaluate(startUploadFixture, { entry, conversationId, base64 });
+        const { requestId, responseStatusCode, responseHeaders } = await paused.finally(() =>
+          clearTimeout(pauseDeadline)
+        );
+        const response = await session.send('Fetch.getResponseBody', { requestId });
+        const body = Buffer.from(response.body, response.base64Encoded ? 'base64' : 'utf8');
+        const storedPath = JSON.parse(body.toString()).data;
+        assert.ok(
+          responseStatusCode === 200 && path.dirname(storedPath) === fixtureUploadDirectory,
+          'Invalid stored upload'
+        );
+        assert.ok(/^[a-f0-9]{32}\.png$/.test(path.basename(storedPath)), 'Upload name is not opaque');
+
+        if (fault === 'cancel') {
+          assert.equal(await page.evaluate(() => globalThis.__imageUploadFixture.cancelQueuedBlobs()), 12);
+          await session.send('HeapProfiler.collectGarbage');
+          assert.equal(
+            await page.evaluate(() => globalThis.__imageCancelledBlobs.filter(({ weak }) => weak.deref()).length),
+            0
+          );
+          await page.evaluate(() => globalThis.__imageUploadFixture.job.dispose());
+          await session
+            .send('Fetch.fulfillRequest', {
+              requestId,
+              responseCode: responseStatusCode,
+              responseHeaders,
+              body: body.toString('base64'),
+            })
+            .catch(() => undefined); // Chromium may have already dropped the aborted request.
+        } else {
+          await session.send('Fetch.failRequest', { requestId, errorReason: 'Failed' });
+        }
+
+        const settled = await page.evaluate(async () => {
+          const { job, first, outcome } = globalThis.__imageUploadFixture;
+          const settled = await outcome;
+          const again = job.prepare();
+          void again.catch(() => {});
+          return { outcome: settled, repeat: again === first };
+        });
+        assert.equal(settled.outcome, fault === 'cancel' ? 'cancelled' : 'upload-outcome-unknown');
+        assert.equal(settled.repeat, fault === 'response-lost');
+        assert.equal(uploaded.length - attempts, 1);
+        const retained = await stat(storedPath).catch(() => {
+          throw new Error('Stored fixture upload missing');
+        });
+        assert.equal(retained.size, Buffer.from(base64, 'base64').length);
+        console.log(
+          JSON.stringify({
+            name: fault,
+            result: 'passed',
+            retainedUploads: 1,
+            queuedBlobReferences: fault === 'cancel' ? 0 : undefined,
+          })
+        );
+      }
+    } finally {
+      await session.detach();
+    }
   }
 } finally {
   await browser?.close();
   await app?.close();
+  if (fixtureUploadDirectory) await rm(fixtureUploadDirectory, { recursive: true, force: true });
   await rm(userData, { recursive: true, force: true });
 }

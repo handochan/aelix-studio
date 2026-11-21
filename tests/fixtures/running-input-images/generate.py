@@ -32,6 +32,15 @@ def corners(width, height):
     return image
 
 
+def png_chunk(kind, data):
+    return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data))
+
+
+def png_scanlines(width, height, interlaced, idat):
+    ihdr = struct.pack(">IIBBBBB", width, height, 8, 0, 0, 0, interlaced)
+    return b"\x89PNG\r\n\x1a\n" + png_chunk(b"IHDR", ihdr) + png_chunk(b"IDAT", idat) + png_chunk(b"IEND", b"")
+
+
 def exactly_png(image, target):
     buffer = BytesIO()
     image.save(buffer, format="PNG")
@@ -48,6 +57,9 @@ def generate(output, p3):
     image = corners(96, 64)
     for orientation in range(1, 9):
         image.save(output / f"exif-{orientation}.jpg", quality=95, exif=exif(orientation))
+    cmyk = corners(48, 32).convert("CMYK")
+    cmyk.save(output / "cmyk.jpg", quality=95)
+    cmyk.save(output / "cmyk-rotated.jpg", quality=95, exif=exif(6))
     image = corners(8064, 6048)
     image.save(output / "baseline-48mp.jpg", quality=92, exif=exif(6))
     image.save(output / "progressive-48mp.jpg", quality=92, progressive=True, exif=exif(6))
@@ -70,6 +82,10 @@ def generate(output, p3):
     (output / "file-max.png").write_bytes(exactly_png(corners(201, 173), 3_750_000))
     (output / "truncated.png").write_bytes((output / "alpha.png").read_bytes()[:27])
     (output / "truncated.jpg").write_bytes((output / "exif-1.jpg").read_bytes()[:-2])
+    (output / "corrupt-idat.png").write_bytes(png_scanlines(1, 1, 0, b"\xffinvalid zlib"))
+    passes = [(0, 0, 8, 8), (4, 0, 8, 8), (0, 4, 4, 8), (2, 0, 4, 4), (0, 2, 2, 4), (1, 0, 2, 2), (0, 1, 1, 2)]
+    rows = b"".join(bytes(1 + len(range(x, 9, step_x))) * len(range(y, 9, step_y)) for x, y, step_x, step_y in passes)
+    (output / "adam7.png").write_bytes(png_scanlines(9, 9, 1, zlib.compress(rows)))
     image = corners(32, 24)
     image.save(output / "animated.png", save_all=True, append_images=[Image.new("RGB", image.size, "white")], duration=50)
 

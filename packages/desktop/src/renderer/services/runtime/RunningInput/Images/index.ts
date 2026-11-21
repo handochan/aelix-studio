@@ -26,7 +26,7 @@ import { runImageWorker } from './workerClient';
 
 export { nativeLineBytes, nativeLineFits } from './budget';
 export { ImagePreparationError } from './types';
-export type { ImageFailureCode, Preview } from './types';
+export type { ImageFailureCode, ImageMime, Preview } from './types';
 
 type ImageSource = ({ ref: ChatFileRef; blob?: Blob } | { blob: Blob; ref?: undefined }) & { preview?: Preview };
 
@@ -45,8 +45,8 @@ export type ImagePreparationOptions = {
   conversationId: string;
   sources: readonly ImageSource[];
   model: ImageModelLimits;
-  /** Actual UTF-8 JSONL template including IDs, text/caption, empty base64 slots and final newline. */
-  emptyNativeLine: (requestId: string) => string;
+  /** UTF-8 JSONL template with IDs, text/caption, identified MIME types, empty base64 slots and final newline. */
+  emptyNativeLine: (requestId: string, mimeTypes: readonly ImageMime[]) => string;
   onProgress?: (index: number, progress: ImageProgress) => void;
   /** Acceptance can exercise the HTTP implementation on a secure origin as well. */
   forceJsHash?: boolean;
@@ -109,12 +109,10 @@ async function prepareImages(
     throw new ImagePreparationError('limits');
   }
 
-  const emptyNativeLine = options.emptyNativeLine(ids.requestId);
   const lineLimit = bounded(model.maxLineBytes, MAX_LINE_BYTES);
   const fileLimit = bounded(model.maxFileBytes, MAX_FILE_BYTES);
   const edgeLimit = bounded(model.maxEdge, MAX_FILE_EDGE);
   let raw = bounded(model.maxTotalBytes, MAX_BATCH_BYTES);
-  let encoded = lineLimit - nativeLineBytes(emptyNativeLine, []);
   const perImage = sources.map(() => 0);
   let codecMs = 0;
   const report = (index: number) => (progress: ImageProgress) => onProgress?.(index, progress);
@@ -127,7 +125,7 @@ async function prepareImages(
     return result;
   }
 
-  if (raw < sources.length || encoded < 4 * sources.length) throw new ImagePreparationError('limits');
+  if (raw < sources.length || lineLimit < 4 * sources.length) throw new ImagePreparationError('limits');
   const inputs: InspectedSource[] = [];
   for (const [index, source] of sources.entries()) {
     if (!source.blob && !source.ref) throw new ImagePreparationError('source-unavailable');
@@ -139,6 +137,13 @@ async function prepareImages(
     if (result.kind !== 'inspected') throw new ImagePreparationError('worker-failed');
     inputs.push({ index, blob, header: result.header });
   }
+
+  const emptyNativeLine = options.emptyNativeLine(
+    ids.requestId,
+    inputs.map(({ header }) => header.mime)
+  );
+  let encoded = lineLimit - nativeLineBytes(emptyNativeLine, []);
+  if (encoded < 4 * sources.length) throw new ImagePreparationError('limits');
 
   const passthroughSize = ({ blob, header }: InspectedSource) =>
     header.orientation === 1 && Math.max(header.width, header.height) <= edgeLimit && blob.size <= fileLimit
@@ -243,14 +248,16 @@ export function createImagePreparation(options: ImagePreparationOptions) {
     prepare(): Promise<PreparedImages> {
       if (signal.aborted) return Promise.reject(cancelled);
       if (!pending && snapshot) {
-        const active = snapshot;
-        snapshot = undefined;
-        pending = enqueuePreparation(signal, () =>
-          prepareImages(active, signal, {
+        pending = enqueuePreparation(signal, () => {
+          // Take ownership only when the job starts. Abort can clear all queued Blob references.
+          const active = snapshot;
+          snapshot = undefined;
+          if (!active) throw cancelled;
+          return prepareImages(active, signal, {
             prepareId: createRequestId(),
             requestId: createRequestId(),
-          })
-        ).catch((error: unknown) => {
+          });
+        }).catch((error: unknown) => {
           if (signal.aborted) throw cancelled;
           if (error instanceof ImagePreparationError) throw error;
           throw new ImagePreparationError('source-unavailable');

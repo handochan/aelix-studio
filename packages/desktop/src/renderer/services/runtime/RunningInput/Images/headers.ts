@@ -1,49 +1,8 @@
+import { PNG_SIGNATURE, readPng } from './png';
 import { ImagePreparationError, MAX_SOURCE_BYTES, type Dimensions, type ImageHeader } from './types';
-
-const PNG_SIGNATURE = [137, 80, 78, 71, 13, 10, 26, 10];
-const IHDR = 0x49484452;
-const IDAT = 0x49444154;
-const IEND = 0x49454e44;
-const ACTL = 0x6163544c;
-
-const CRC_TABLE = Uint32Array.from({ length: 256 }, (_, value) => {
-  for (let bit = 0; bit < 8; bit++) value = (value >>> 1) ^ (value & 1 ? 0xedb88320 : 0);
-  return value;
-});
 
 function invalid(): never {
   throw new ImagePreparationError('invalid-image');
-}
-
-function pngHeader(bytes: Uint8Array, view: DataView): ImageHeader {
-  if (bytes.length < 33 || view.getUint32(8) !== 13 || view.getUint32(12) !== IHDR) invalid();
-  const width = view.getUint32(16);
-  const height = view.getUint32(20);
-  if (!width || !height || Math.max(width, height) > 0x7fffffff) invalid();
-  const depth = bytes[24];
-  const colorType = bytes[25];
-  const depths: Record<number, number[]> = { 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] };
-  if (!depths[colorType]?.includes(depth) || bytes[26] || bytes[27] || bytes[28] > 1) invalid();
-  let hasData = false;
-  for (let offset = 8; offset + 12 <= bytes.length; ) {
-    const length = view.getUint32(offset);
-    const start = offset + 4;
-    const end = offset + 8 + length;
-    if (end + 4 > bytes.length) invalid();
-    const type = view.getUint32(start);
-    if (type === ACTL) throw new ImagePreparationError('unsupported-format');
-    if (type === IHDR && offset !== 8) invalid();
-    let crc = 0xffffffff;
-    for (let i = start; i < end; i++) crc = (crc >>> 8) ^ CRC_TABLE[(crc ^ bytes[i]) & 0xff];
-    if (~crc >>> 0 !== view.getUint32(end)) invalid();
-    if (type === IDAT && length > 0) hasData = true;
-    if (type === IEND) {
-      if (length !== 0 || end + 4 !== bytes.length || !hasData) invalid();
-      return { mime: 'image/png', width, height, orientation: 1, highBitDepth: depth === 16 };
-    }
-    offset = end + 4;
-  }
-  return invalid();
 }
 
 function exifOrientation(bytes: Uint8Array, start: number, end: number): number | undefined {
@@ -72,7 +31,7 @@ function jpegFrame(bytes: Uint8Array, view: DataView, start: number, end: number
   const height = view.getUint16(start + 1);
   const width = view.getUint16(start + 3);
   const components = bytes[start + 5];
-  if (!height || !width || ![1, 3].includes(components) || end - start !== 6 + 3 * components) invalid();
+  if (!height || !width || ![1, 3, 4].includes(components) || end - start !== 6 + 3 * components) invalid();
   const sampling = Array.from({ length: components }, (_, index) => {
     const entry = bytes[start + 7 + index * 3];
     const x = entry >> 4;
@@ -115,6 +74,7 @@ function jpegHeader(bytes: Uint8Array, view: DataView): ImageHeader {
         height: frame.height,
         orientation: orientation ?? 1,
         exifSegments,
+        jpegComponents: frame.components,
         jpegCoefficientBytes: progressive || scans > 1 ? frame.coefficientBytes : 0,
       };
     }
@@ -156,7 +116,7 @@ export async function readImageHeader(blob: Blob): Promise<ImageHeader> {
   const buffer = await blob.arrayBuffer();
   const bytes = new Uint8Array(buffer);
   const view = new DataView(buffer);
-  if (PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return pngHeader(bytes, view);
+  if (PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) return readPng(bytes).header;
   if (bytes[0] === 0xff && bytes[1] === 0xd8) return jpegHeader(bytes, view);
   throw new ImagePreparationError('unsupported-format');
 }
