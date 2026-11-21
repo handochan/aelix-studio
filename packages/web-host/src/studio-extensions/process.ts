@@ -75,7 +75,11 @@ export function windowsChildSpawn(python: string, launcher: string): Spawn {
     });
 }
 
-const URL_SCHEME = /\b([a-z][a-z0-9+.-]*):\/\//gi;
+/** A character that ends an authority: a URI delimiter, or one that can never appear in a URI. */
+// oxlint-disable-next-line no-control-regex -- control characters never occur in a URI.
+const AUTHORITY_END = /[\s/?#"<>\\^`{|}\x00-\x1f\x7f]/;
+const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
+const LETTER = /[a-z]/i;
 
 /**
  * Hide credentials in URLs inside tool output before it reaches a reply: Git prints remote
@@ -83,28 +87,61 @@ const URL_SCHEME = /\b([a-z][a-z0-9+.-]*):\/\//gi;
  *
  * No list of allowed characters decides where a user part ends: RFC 3986 allows quotes,
  * parentheses and the other sub-delimiters in it. After `scheme://`, the authority runs to the
- * first `/`, `?`, `#` or whitespace (or to the next `scheme://`, or the end), and everything
+ * first `/`, `?`, `#`, whitespace or character no URI holds (`"`, `<`, `>`, `\`, `^`, a
+ * backtick, `{`, `|`, `}`, a control character), or to the next URL, or the end; everything
  * before its last `@` is the user part. That is masked whole, except that a plain SSH account
  * name without a password (`ssh://git@host`) stays, since it says which account was used.
+ *
+ * Linear in the text: each `://` is found once, its scheme is read backwards no further than
+ * the previous one, and each authority is read forwards once.
  */
 export function redactUrlCredentials(text: string): string {
-  const starts = [...text.matchAll(URL_SCHEME)];
+  const urls: { scheme: number; from: number }[] = [];
+  for (let mark = text.indexOf('://'); mark >= 0; mark = text.indexOf('://', mark + 3)) {
+    const floor = urls.length > 0 ? urls[urls.length - 1].from : 0;
+    let scheme = mark;
+    while (scheme > floor && SCHEME_CHARACTER.test(text[scheme - 1])) scheme -= 1;
+    // A scheme starts with a letter.
+    while (scheme < mark && !LETTER.test(text[scheme])) scheme += 1;
+    if (scheme < mark) urls.push({ scheme, from: mark + 3 });
+  }
   let masked = '';
   let cursor = 0;
-  for (const [index, start] of starts.entries()) {
-    const from = start.index + start[0].length;
-    if (start.index < cursor) continue;
-    const bound = starts[index + 1]?.index ?? text.length;
-    let end = from;
-    while (end < bound && !/[\s/?#]/.test(text[end])) end += 1;
-    const authority = text.slice(from, end);
+  for (const [index, url] of urls.entries()) {
+    if (url.scheme < cursor) continue;
+    const bound = urls[index + 1]?.scheme ?? text.length;
+    let end = url.from;
+    while (end < bound && !AUTHORITY_END.test(text[end])) end += 1;
+    const authority = text.slice(url.from, end);
     const at = authority.lastIndexOf('@');
-    const user = authority.slice(0, at);
-    const keep = /^(?:git\+)?ssh$/i.test(start[1]) && !user.includes(':');
-    masked += text.slice(cursor, from) + (at < 0 || keep ? authority : '***' + authority.slice(at));
+    const keep = /^(?:git\+)?ssh$/i.test(text.slice(url.scheme, url.from - 3)) && !authority.slice(0, at).includes(':');
+    masked += text.slice(cursor, url.from) + (at < 0 || keep ? authority : '***' + authority.slice(at));
     cursor = end;
   }
   return masked + text.slice(cursor);
+}
+
+/** Whitespace as `\s` matches it, by character code. */
+function isWhitespace(code: number): boolean {
+  return (
+    (code >= 0x09 && code <= 0x0d) ||
+    code === 0x20 ||
+    code === 0xa0 ||
+    code === 0x1680 ||
+    (code >= 0x2000 && code <= 0x200a) ||
+    code === 0x2028 ||
+    code === 0x2029 ||
+    code === 0x202f ||
+    code === 0x205f ||
+    code === 0x3000 ||
+    code === 0xfeff
+  );
+}
+
+/** Index of the last whitespace in `text`, or -1; scans backwards once. */
+function lastWhitespace(text: string): number {
+  for (let index = text.length - 1; index >= 0; index -= 1) if (isWhitespace(text.charCodeAt(index))) return index;
+  return -1;
 }
 
 /** One stream feeding an `OutputTail`. */
@@ -118,7 +155,8 @@ export type TailStream = { push(chunk: string): void };
  * keeps its text after the last whitespace open until more arrives: a URL split across
  * chunks, or by another stream's output between them, is masked whole. A run without any
  * whitespace longer than `window` is not kept, however the chunks fall: it is replaced by
- * one marker.
+ * one marker. Work is linear in what is pushed: only new text is searched for whitespace, and
+ * runs are measured in one pass.
  */
 export class OutputTail {
   private text = '';
@@ -149,12 +187,13 @@ export class OutputTail {
           state.dropping = false;
           rest = rest.slice(boundary);
         }
-        state.open += rest;
-        // The last whitespace: what ends there is complete, since no URL goes on across it.
-        const end = state.open.search(/\s\S*$/);
-        if (end >= 0) {
-          this.keep(this.redact(this.capped(state.open.slice(0, end + 1))));
-          state.open = state.open.slice(end + 1);
+        // The last whitespace of the new text: what ends there is complete, since no URL goes on
+        // across it. Only the new text is searched, never what is held back again.
+        const last = lastWhitespace(rest);
+        if (last < 0) state.open += rest;
+        else {
+          this.keep(this.redact(this.capped(state.open + rest.slice(0, last + 1))));
+          state.open = rest.slice(last + 1);
         }
         if (state.open.length > this.window) {
           this.keep('[…]');
@@ -169,9 +208,17 @@ export class OutputTail {
     this.fallback.push(chunk);
   }
 
-  /** Every run without whitespace longer than the window, as one marker. */
+  /** Every run without whitespace longer than the window, as one marker. One pass, no regex. */
   private capped(text: string): string {
-    return text.replace(new RegExp(`\\S{${this.window + 1},}`, 'g'), '[…]');
+    let result = '';
+    let run = 0;
+    for (let index = 0; index <= text.length; index += 1) {
+      if (index < text.length && !isWhitespace(text.charCodeAt(index))) continue;
+      result += index - run > this.window ? '[…]' : text.slice(run, index);
+      if (index < text.length) result += text[index];
+      run = index + 1;
+    }
+    return result;
   }
 
   private keep(text: string): void {

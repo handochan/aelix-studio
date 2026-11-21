@@ -30,7 +30,7 @@ describe('masking credentials in output', () => {
   const whole = before + "'" + URL_TEXT + "'" + after;
   const urlStart = before.length + 1;
 
-  it('masks the user part of HTTP(S) addresses and only the password of others', () => {
+  it('masks the whole user part, and keeps only an SSH account name without a password', () => {
     expect(redactUrlCredentials(whole)).toBe(before + "'https://***@git.example.com/o/r.git'" + after);
     expect(redactUrlCredentials('ssh://git@host/x ssh://git:pw@host/y git+https://t@h/z')).toBe(
       'ssh://git@host/x ssh://***@host/y git+https://***@h/z'
@@ -61,6 +61,27 @@ describe('masking credentials in output', () => {
       'a=https://***@h1,b=ssh://***@h2/x',
     ],
   ];
+
+  it('leaves a URL without credentials and the JSON around it as they were', () => {
+    const text = JSON.stringify({ endpoint: 'https://packages.example.invalid', contact: 'ops@example.invalid' });
+    expect(redactUrlCredentials(text)).toBe(text);
+    expect(JSON.parse(redactUrlCredentials(text))).toEqual({
+      endpoint: 'https://packages.example.invalid',
+      contact: 'ops@example.invalid',
+    });
+    const secret = JSON.stringify({ remote: 'https://u:S3CRETPW@host.example', note: 'a@b' });
+    expect(redactUrlCredentials(secret)).toBe(JSON.stringify({ remote: 'https://***@host.example', note: 'a@b' }));
+    expect(JSON.parse(redactUrlCredentials(secret)).remote).toBe('https://***@host.example');
+  });
+
+  it.each(['"', '<', '>', '\\', '^', '`', '{', '|', '}', '\u0001', '\u007f'])(
+    'ends an authority at %j, which no URI holds',
+    (mark) => {
+      expect(redactUrlCredentials(`https://host.example${mark}ops@example.invalid`)).toBe(
+        `https://host.example${mark}ops@example.invalid`
+      );
+    }
+  );
 
   it.each(userinfoCases)('masks a user part with %s', (_case, text, expected) => {
     expect(redactUrlCredentials(text)).toBe(expected);
@@ -129,6 +150,54 @@ describe('masking credentials in output', () => {
       expect([split, pushed([text.slice(0, split), text.slice(split)])]).toEqual([split, expected]);
     // A run exactly as long as the window stays.
     expect(pushed(['a ' + 'z'.repeat(16) + ' b'])).toBe('a ' + 'z'.repeat(16) + ' b');
+  });
+
+  /** Wall-clock time of `work`, in milliseconds. */
+  const elapsed = (work: () => void): number => {
+    const start = performance.now();
+    work();
+    return performance.now() - start;
+  };
+
+  it.each([65_536, 65_537])('masks and caps a %i-character token in linear time, whole or split', (length) => {
+    const text = 'start ' + 'x'.repeat(length) + ' end\n';
+    const expected = length > 65_536 ? 'start […] end\n' : text;
+    const splittings: [string, string[]][] = [
+      ['one chunk', [text]],
+      ['two chunks', [text.slice(0, 40_000), text.slice(40_000)]],
+      [
+        '1 KiB chunks',
+        Array.from({ length: Math.ceil(text.length / 1024) }, (_, i) => text.slice(i * 1024, (i + 1) * 1024)),
+      ],
+    ];
+    for (const [name, chunks] of splittings) {
+      let result = '';
+      const time = elapsed(() => {
+        const tail = new OutputTail(70_000, redactUrlCredentials);
+        for (const chunk of chunks) tail.push(chunk);
+        result = tail.toString();
+      });
+      expect([name, result === expected]).toEqual([name, true]);
+      expect([name, time < 100]).toEqual([name, true]);
+    }
+  });
+
+  it('keeps a character-by-character stream linear', () => {
+    const text = 'x'.repeat(30_000) + ' done';
+    const time = elapsed(() => {
+      const tail = new OutputTail(4096, redactUrlCredentials);
+      for (const character of text) tail.push(character);
+      tail.toString();
+    });
+    expect(time).toBeLessThan(100);
+  });
+
+  it.each([
+    ['dense scheme characters', 'a.'.repeat(32_768)],
+    ['dense separators', 'a://'.repeat(16_384)],
+    ['many addresses', 'https://u:p@h/ '.repeat(4_096)],
+  ])('masks %s in linear time', (_case, text) => {
+    expect(elapsed(() => redactUrlCredentials(text))).toBeLessThan(100);
   });
 
   it('masks what a real child prints in pieces before the result is cut', async () => {
