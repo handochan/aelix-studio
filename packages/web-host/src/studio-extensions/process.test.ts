@@ -33,8 +33,47 @@ describe('masking credentials in output', () => {
   it('masks the user part of HTTP(S) addresses and only the password of others', () => {
     expect(redactUrlCredentials(whole)).toBe(before + "'https://***@git.example.com/o/r.git'" + after);
     expect(redactUrlCredentials('ssh://git@host/x ssh://git:pw@host/y git+https://t@h/z')).toBe(
-      'ssh://git@host/x ssh://git:***@host/y git+https://***@h/z'
+      'ssh://git@host/x ssh://***@host/y git+https://***@h/z'
     );
+  });
+
+  // RFC 3986 3.2.1: userinfo = *( unreserved / pct-encoded / sub-delims / ":" )
+  const SUB_DELIMS = [..."!$&'()*+,;="];
+  const userinfoCases: [string, string, string][] = [
+    ...SUB_DELIMS.map((mark): [string, string, string] => [
+      `the sub-delimiter ${mark}`,
+      `fatal: 'https://alice-user:S3C${mark}RETPW@git.example.com/o/r.git' failed`,
+      "fatal: 'https://***@git.example.com/o/r.git' failed",
+    ]),
+    [
+      'a percent-encoded @',
+      'remote: https://alice-user:S3C%40RETPW@git.example.com/x',
+      'remote: https://***@git.example.com/x',
+    ],
+    [
+      'a quote in a URL without a path',
+      "fatal: 'https://alice-user:S3C'RETPW@git.example.com'",
+      "fatal: 'https://***@git.example.com'",
+    ],
+    [
+      'two URLs without whitespace between them',
+      'a=https://alice-user:S3CRETPW@h1,b=ssh://alice-user:S3CRETPW@h2/x',
+      'a=https://***@h1,b=ssh://***@h2/x',
+    ],
+  ];
+
+  it.each(userinfoCases)('masks a user part with %s', (_case, text, expected) => {
+    expect(redactUrlCredentials(text)).toBe(expected);
+  });
+
+  it.each(userinfoCases)('masks a user part with %s split across chunks at any point', (_case, text, expected) => {
+    for (let split = 0; split <= text.length; split += 1) {
+      const tail = new OutputTail(4096, redactUrlCredentials);
+      tail.push(text.slice(0, split));
+      tail.push(text.slice(split));
+      expect([split, tail.toString()]).toEqual([split, expected]);
+      expect(leaks(tail.toString())).toEqual([]);
+    }
   });
 
   it('masks before cutting, wherever the cut lands inside the address', () => {
@@ -73,6 +112,25 @@ describe('masking credentials in output', () => {
     expect(tail.toString()).toBe('start […] end');
   });
 
+  it('caps an over-long run the same way however the chunks fall', () => {
+    const text = 'start ' + 'x'.repeat(30) + URL_TEXT + ' middle ' + 'y'.repeat(17) + ' end';
+    const expected = 'start […] middle […] end';
+    const pushed = (chunks: string[]): string => {
+      const tail = new OutputTail(4096, redactUrlCredentials, 16);
+      for (const chunk of chunks) tail.push(chunk);
+      return tail.toString();
+    };
+    // One chunk, which also puts the delimiter in the same chunk as the long run.
+    expect(pushed([text])).toBe(expected);
+    // Every character on its own.
+    expect(pushed([...text])).toBe(expected);
+    // Every two-way split.
+    for (let split = 0; split <= text.length; split += 1)
+      expect([split, pushed([text.slice(0, split), text.slice(split)])]).toEqual([split, expected]);
+    // A run exactly as long as the window stays.
+    expect(pushed(['a ' + 'z'.repeat(16) + ' b'])).toBe('a ' + 'z'.repeat(16) + ' b');
+  });
+
   it('masks what a real child prints in pieces before the result is cut', async () => {
     const script =
       'const [a, b] = [process.argv[1].slice(0, 30), process.argv[1].slice(30)];' +
@@ -97,6 +155,7 @@ describe('running a child to its end', () => {
     expect(await runToExit(spawn, SPEC, { timeoutMs: 1000 })).toEqual({
       code: 3,
       output: 'out err',
+      stdout: 'out ',
       timedOut: false,
       cancelled: false,
       failedToStart: false,

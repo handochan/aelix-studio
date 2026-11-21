@@ -75,18 +75,36 @@ export function windowsChildSpawn(python: string, launcher: string): Spawn {
     });
 }
 
+const URL_SCHEME = /\b([a-z][a-z0-9+.-]*):\/\//gi;
+
 /**
  * Hide credentials in URLs inside tool output before it reaches a reply: Git prints remote
- * and submodule addresses as the repository wrote them, and those can carry a token. The
- * whole user part of an HTTP(S) address goes (a token is often the user name); elsewhere
- * only a password goes, so `ssh://git@host` still says which account was used.
+ * and submodule addresses as the repository wrote them, and those can carry a token.
+ *
+ * No list of allowed characters decides where a user part ends: RFC 3986 allows quotes,
+ * parentheses and the other sub-delimiters in it. After `scheme://`, the authority runs to the
+ * first `/`, `?`, `#` or whitespace (or to the next `scheme://`, or the end), and everything
+ * before its last `@` is the user part. That is masked whole, except that a plain SSH account
+ * name without a password (`ssh://git@host`) stays, since it says which account was used.
  */
 export function redactUrlCredentials(text: string): string {
-  return text.replace(/\b([a-z][a-z0-9+.-]*):\/\/([^\s/?#'"<>]*)@/gi, (match, scheme: string, user: string) => {
-    if (/^(?:git\+)?https?$/i.test(scheme)) return `${scheme}://***@`;
-    const colon = user.indexOf(':');
-    return colon < 0 ? match : `${scheme}://${user.slice(0, colon)}:***@`;
-  });
+  const starts = [...text.matchAll(URL_SCHEME)];
+  let masked = '';
+  let cursor = 0;
+  for (const [index, start] of starts.entries()) {
+    const from = start.index + start[0].length;
+    if (start.index < cursor) continue;
+    const bound = starts[index + 1]?.index ?? text.length;
+    let end = from;
+    while (end < bound && !/[\s/?#]/.test(text[end])) end += 1;
+    const authority = text.slice(from, end);
+    const at = authority.lastIndexOf('@');
+    const user = authority.slice(0, at);
+    const keep = /^(?:git\+)?ssh$/i.test(start[1]) && !user.includes(':');
+    masked += text.slice(cursor, from) + (at < 0 || keep ? authority : '***' + authority.slice(at));
+    cursor = end;
+  }
+  return masked + text.slice(cursor);
 }
 
 /** One stream feeding an `OutputTail`. */
@@ -99,7 +117,8 @@ export type TailStream = { push(chunk: string): void };
  * rest of a secret that no longer looks like one. A URL holds no whitespace, so each stream
  * keeps its text after the last whitespace open until more arrives: a URL split across
  * chunks, or by another stream's output between them, is masked whole. A run without any
- * whitespace longer than `window` is not kept: it is replaced by a marker up to its end.
+ * whitespace longer than `window` is not kept, however the chunks fall: it is replaced by
+ * one marker.
  */
 export class OutputTail {
   private text = '';
@@ -134,7 +153,7 @@ export class OutputTail {
         // The last whitespace: what ends there is complete, since no URL goes on across it.
         const end = state.open.search(/\s\S*$/);
         if (end >= 0) {
-          this.keep(this.redact(state.open.slice(0, end + 1)));
+          this.keep(this.redact(this.capped(state.open.slice(0, end + 1))));
           state.open = state.open.slice(end + 1);
         }
         if (state.open.length > this.window) {
@@ -150,13 +169,18 @@ export class OutputTail {
     this.fallback.push(chunk);
   }
 
+  /** Every run without whitespace longer than the window, as one marker. */
+  private capped(text: string): string {
+    return text.replace(new RegExp(`\\S{${this.window + 1},}`, 'g'), '[…]');
+  }
+
   private keep(text: string): void {
     this.text = (this.text + text).slice(-this.limit);
   }
 
   toString(): string {
     if (!this.redact) return this.text;
-    const open = this.streams.map((state) => this.redact?.(state.open) ?? '').join('');
+    const open = this.streams.map((state) => this.redact?.(this.capped(state.open)) ?? '').join('');
     return (this.text + open).slice(-this.limit);
   }
 }
@@ -182,6 +206,8 @@ export type RunResult = {
   code: number | null;
   /** The end of stdout and stderr, in arrival order. */
   output: string;
+  /** The end of stdout alone, for answers a warning on stderr must not change. */
+  stdout: string;
   timedOut: boolean;
   cancelled: boolean;
   failedToStart: boolean;
@@ -192,10 +218,12 @@ export type RunResult = {
  * still waits for the exit, so nothing is left writing when the caller cleans up.
  */
 export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptions): Promise<RunResult> {
-  const tail = new OutputTail(options.tailLimit ?? 4096, options.redact ? redactUrlCredentials : undefined);
+  const redact = options.redact ? redactUrlCredentials : undefined;
+  const tail = new OutputTail(options.tailLimit ?? 4096, redact);
+  const answer = new OutputTail(options.tailLimit ?? 4096, redact);
   const [stdout, stderr] = [tail.stream(), tail.stream()];
   if (options.signal?.aborted)
-    return { code: null, output: '', timedOut: false, cancelled: true, failedToStart: false };
+    return { code: null, output: '', stdout: '', timedOut: false, cancelled: true, failedToStart: false };
   const child = spawn(spec);
   let timedOut = false;
   let cancelled = false;
@@ -218,6 +246,7 @@ export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptio
   let inputOpen = true;
   child.onStdout((chunk) => {
     stdout.push(chunk);
+    answer.push(chunk);
     if (!options.closeInput || !inputOpen) return;
     pending += chunk;
     let end: number;
@@ -241,7 +270,14 @@ export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptio
   if (!options.closeInput) child.end();
   try {
     const exit = await child.exited;
-    return { code: exit.code, output: tail.toString(), timedOut, cancelled, failedToStart: exit.failedToStart };
+    return {
+      code: exit.code,
+      output: tail.toString(),
+      stdout: answer.toString(),
+      timedOut,
+      cancelled,
+      failedToStart: exit.failedToStart,
+    };
   } finally {
     clearTimeout(deadline);
     if (killer) clearTimeout(killer);

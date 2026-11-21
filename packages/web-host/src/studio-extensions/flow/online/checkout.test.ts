@@ -176,6 +176,50 @@ describe.skipIf(process.platform === 'win32' || !PYTHON)('fetching a git source 
     expect(await readFile(path.join(checkout.directory, 'which'), 'utf8')).toBe('requested\n');
   });
 
+  it('takes 40 hex digits in a SHA-256 repository as an abbreviation, and 64 as the object', async () => {
+    const sha256 = path.join(scratch, 'sha256');
+    await git(scratch, 'init', '--quiet', '--object-format=sha256', '--initial-branch=main', sha256);
+    await mkdir(path.join(sha256, 'pkg'));
+    await writeFile(path.join(sha256, 'pkg', 'which'), 'sha256\n');
+    await git(sha256, 'add', '-A');
+    await git(sha256, 'commit', '--quiet', '-m', 'sha256');
+    const object = await git(sha256, 'rev-parse', 'HEAD');
+    expect(object).toHaveLength(64);
+    const url = pathToFileURL(sha256).href;
+    expect((await fetch('pkg', '@' + object.slice(0, 40), { url })).commit).toBe(object);
+    expect((await fetch('pkg', '@' + object, { url })).commit).toBe(object);
+  });
+
+  it('reads Git answers from stdout, so a late warning on stderr does not send it fetching', async () => {
+    const requested = 'a'.repeat(40);
+    const spawn = scriptedSpawn((spec, child) => {
+      const args = spec.args.join(' ');
+      if (spec.args[0] === 'clone') {
+        void mkdir(path.join(spec.args.at(-1) ?? '', 'packages', 'demo'), { recursive: true }).then(() =>
+          child.exit(0)
+        );
+        return;
+      }
+      if (args === 'rev-parse --show-object-format') child.print('sha1\n');
+      if (args === `cat-file -t ${requested}`) {
+        child.print('commit\n');
+        child.complain('warning: a late note\n');
+      }
+      // Stop after the decision, with an answer that cannot match the requested commit.
+      if (args === 'rev-parse --verify --quiet HEAD') child.print('b'.repeat(40) + '\n');
+      child.exit(0);
+    });
+    const failure = await refusal(fetch('packages/demo', '@' + requested, { spawn }));
+    expect(failure.detail).toEqual(['the checkout is not at the selected commit']);
+    expect(spawn.calls.map((call) => call.args[0])).not.toContain('fetch');
+    expect(spawn.calls.find((call) => call.args[0] === 'checkout')?.args).toEqual([
+      'checkout',
+      '--quiet',
+      '--detach',
+      requested + '^{commit}',
+    ]);
+  });
+
   it('refuses a checkout whose HEAD is not the selected commit', async () => {
     await clearStaging();
     const answers: Record<string, string> = {
@@ -317,7 +361,7 @@ except namespace['Refused'] as error:
     const failure = await refusal(fetch('packages/demo', '', { spawn }));
     expect(failure.output).not.toMatch(/ghp_secret|ghp_token|:pass@|user:/);
     expect(failure.output).toContain('https://***@git.example.com/o/r.git/');
-    expect(failure.output).toContain('ssh://git:***@host/x');
+    expect(failure.output).toContain('ssh://***@host/x');
   });
 
   describe('submodules', () => {

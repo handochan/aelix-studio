@@ -165,9 +165,9 @@ function copyRefusal(output: string): string {
   return 'the checkout could not be copied without following links';
 }
 
-/** The last line Git printed: the output mixes stdout and stderr, and a warning may come first. */
+/** The last line Git answered on stdout; a warning on stderr changes nothing. */
 const lastLine = (result: RunResult): string =>
-  result.code === 0 ? (result.output.trim().split('\n').at(-1) ?? '').trim() : '';
+  result.code === 0 ? (result.stdout.trim().split('\n').at(-1) ?? '').trim() : '';
 
 /** The commit a revision names in the clone, or undefined when it names none. */
 async function resolveCommit(git: GitRun, checkout: string, revision: string): Promise<string | undefined> {
@@ -177,19 +177,31 @@ async function resolveCommit(git: GitRun, checkout: string, revision: string): P
   return COMMIT.test(commit) ? commit : undefined;
 }
 
-/** Whether the clone has `object` as a commit. A full object name is read as that object, never as a ref. */
+/** Whether the clone has `object` as a commit, judged by the exit code and stdout alone. */
 async function isCommit(git: GitRun, checkout: string, object: string): Promise<boolean> {
   const result = await git(['cat-file', '-t', object], checkout);
   if (result.cancelled || result.timedOut) throw failure(result, 'reading the revision');
-  return lastLine(result) === 'commit';
+  return result.code === 0 && result.stdout.trim() === 'commit';
+}
+
+/** How many hex digits a full object name has in the clone: 40 for SHA-1, 64 for SHA-256. */
+async function objectNameLength(git: GitRun, checkout: string): Promise<number> {
+  const result = await git(['rev-parse', '--show-object-format'], checkout);
+  if (result.cancelled || result.timedOut) throw failure(result, 'reading the object format');
+  const format = lastLine(result);
+  if (format === 'sha1') return 40;
+  if (format === 'sha256') return 64;
+  throw new ExtensionFailure('GIT_FETCH_FAILED', ['the repository uses an object format Studio does not know']);
 }
 
 /**
  * The commit to check out.
  *
- * A full object name (40 or 64 hex digits, as pip's `looks_like_hash`) is that object and
- * nothing else: a branch or a tag may carry the same name and point at another commit, and
- * pip's order would pick it. The clone must have it as a commit, fetched by name if needed.
+ * A full object name (as many hex digits as the clone's object format has: 40 for SHA-1, 64
+ * for SHA-256) is that object and nothing else: a branch or a tag may carry the same name and
+ * point at another commit, and pip's order would pick it. The clone must have it as a commit,
+ * fetched by name if needed. Fewer digits, such as 40 in a SHA-256 repository, are an
+ * abbreviation and take the ordinary way.
  *
  * Any other revision follows pip's order (`GitVCS.resolve_revision`): a branch of that name,
  * then a tag; a `refs/` name the clone does not have is fetched; anything else is taken as a
@@ -197,7 +209,11 @@ async function isCommit(git: GitRun, checkout: string, object: string): Promise<
  * digit or `_` and has no `..`, so it can be neither an option nor a range.
  */
 async function revisionCommit(git: GitRun, checkout: string, revision: string | undefined): Promise<string> {
-  if (revision !== undefined && COMMIT.test(revision.toLowerCase())) {
+  if (
+    revision !== undefined &&
+    /^[0-9a-f]+$/i.test(revision) &&
+    revision.length === (await objectNameLength(git, checkout))
+  ) {
     const object = revision.toLowerCase();
     if (await isCommit(git, checkout, object)) return object;
     const fetched = await git(['fetch', '--quiet', 'origin', object], checkout);
@@ -310,7 +326,7 @@ async function isGitlink(git: GitRun, tree: string, relative: string): Promise<b
   if (listed.cancelled || listed.timedOut) throw failure(listed, 'reading the repository tree');
   return (
     listed.code === 0 &&
-    listed.output.split('\n').some((line) => {
+    listed.stdout.split('\n').some((line) => {
       const entry = /^(\d{6}) \w+ [0-9a-f]+\t(.*)$/.exec(line);
       return entry?.[1] === '160000' && entry[2] === relative;
     })
