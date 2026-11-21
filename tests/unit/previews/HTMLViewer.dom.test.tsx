@@ -40,6 +40,7 @@ vi.mock('react-i18next', () => ({
 
 import HTMLViewer from '@/renderer/pages/conversation/Preview/components/viewers/HTMLViewer';
 import HTMLRenderer from '@/renderer/pages/conversation/Preview/components/renderers/HTMLRenderer';
+import WebviewHost from '@/renderer/components/media/WebviewHost';
 
 function createConsoleMessageEvent({
   level,
@@ -78,6 +79,21 @@ describe('HTMLViewer', () => {
     const { container } = render(<HTMLViewer content='<h1>Test</h1>' file_path='/test/index.html' />);
     expect(container.querySelector('iframe')).toBeInTheDocument();
   });
+});
+
+it('navigates with a URL retrieved from the webview instead of the console signal', async () => {
+  const targetUrl = 'https://example.test/private-preview?grant=private-token';
+  const { container } = render(<WebviewHost url='https://example.test/' />);
+  const webview = container.querySelector('webview');
+  const executeJavaScript = vi.fn().mockResolvedValue(targetUrl);
+  Object.defineProperty(webview, 'executeJavaScript', { value: executeJavaScript });
+
+  webview?.dispatchEvent(
+    createConsoleMessageEvent({ level: 1, line: 0, message: '__WEBVIEW_HOST_NAVIGATE__:1', sourceId: 'private' })
+  );
+
+  expect(executeJavaScript).toHaveBeenCalledExactlyOnceWith('window.__aionuiTakeNavigationUrl?.(1)');
+  await waitFor(() => expect(webview).toHaveAttribute('src', targetUrl));
 });
 
 describe('HTMLRenderer', () => {
@@ -139,19 +155,18 @@ describe('HTMLRenderer', () => {
         level: 'info',
         tag: 'HTMLRenderer',
         message: 'html_preview_source_selected',
-        data: expect.objectContaining({
+        data: {
           source: 'file',
           reason: 'clean-local-file',
-          fileName: 'financial-wechat-miniapp.html',
           hasFilePath: true,
+          isDirty: false,
           contentLength: 13,
-          src: 'file://financial-wechat-miniapp.html',
-        }),
+        },
       })
     );
   });
 
-  it('writes level 2 preview console messages as renderer warnings', async () => {
+  it('writes only metadata for level 2 preview console warnings', async () => {
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
       value: electronAPI,
@@ -163,12 +178,13 @@ describe('HTMLRenderer', () => {
     await waitFor(() => expect(writeRendererLogInvoke).toHaveBeenCalled());
     vi.clearAllMocks();
 
+    const marker = 'C:\\workspace\\private-preview "body"';
     webview?.dispatchEvent(
       createConsoleMessageEvent({
         level: 2,
         line: 64,
-        message: 'cdn.tailwindcss.com should not be used in production.',
-        sourceId: 'https://cdn.tailwindcss.com/',
+        message: marker,
+        sourceId: 'file:///private/workspace/index.html',
       })
     );
 
@@ -180,10 +196,26 @@ describe('HTMLRenderer', () => {
         data: {
           level: 2,
           line: 64,
-          message: 'cdn.tailwindcss.com should not be used in production.',
-          source: 'https://cdn.tailwindcss.com/',
+          messageLength: marker.length,
         },
       })
     );
+  });
+
+  it('retrieves inspected HTML by numeric signal without logging the selected HTML', async () => {
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: electronAPI });
+    const onElementSelected = vi.fn();
+    const { container } = render(<HTMLRenderer content='<p>Example</p>' onElementSelected={onElementSelected} />);
+    const webview = container.querySelector('webview');
+    const element = { html: '<img src="/workspace/private-image.png">', tag: 'img' };
+    const executeJavaScript = vi.fn().mockResolvedValue(element);
+    Object.defineProperty(webview, 'executeJavaScript', { value: executeJavaScript });
+
+    webview?.dispatchEvent(
+      createConsoleMessageEvent({ level: 1, line: 0, message: '__INSPECT_ELEMENT__1', sourceId: 'private' })
+    );
+
+    expect(executeJavaScript).toHaveBeenCalledExactlyOnceWith('window.__aionuiTakeInspectedElement?.(1)');
+    await waitFor(() => expect(onElementSelected).toHaveBeenCalledExactlyOnceWith(element));
   });
 });

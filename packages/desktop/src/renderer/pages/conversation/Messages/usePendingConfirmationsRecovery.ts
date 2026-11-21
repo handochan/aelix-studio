@@ -69,10 +69,6 @@ export function removePermissionMessage(list: TMessage[], target: { id?: string;
   });
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 export function usePendingConfirmationsRecovery(conversation_id: string) {
   const updateMessageList = useUpdateMessageList();
 
@@ -93,11 +89,8 @@ export function usePendingConfirmationsRecovery(conversation_id: string) {
           return next;
         });
       })
-      .catch((error) => {
-        console.warn('[pending-confirmations] failed to recover pending confirmations', {
-          conversation_id,
-          error: errorMessage(error),
-        });
+      .catch(() => {
+        console.warn('[pending-confirmations] failed to recover pending confirmations');
       });
 
     const off = ipcBridge.conversation.confirmation.remove.on((event) => {

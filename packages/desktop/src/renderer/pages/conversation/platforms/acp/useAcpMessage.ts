@@ -668,7 +668,7 @@ export const useAcpMessage = (
         setHasHydratedRunningState(true);
 
         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-          console.warn('[useAcpMessage] Failed to hydrate conversation state:', error);
+          console.warn('[useAcpMessage] Failed to hydrate conversation state');
           return;
         }
 

@@ -55,9 +55,9 @@ const SkillSuggestCard: React.FC<SkillSuggestCardProps> = ({
       updateArtifactStatus(artifact_id, 'saved');
       setSaved(true);
       Message.success(t('cron.skill.saveSuccess'));
-    } catch (err) {
+    } catch {
       Message.error(t('cron.skill.saveFailed'));
-      console.error('[SkillSuggestCard] Failed to save skill:', err);
+      console.error('[SkillSuggestCard] Failed to save skill');
     } finally {
       setSaving(false);
     }
@@ -105,9 +105,9 @@ const SkillSuggestCard: React.FC<SkillSuggestCardProps> = ({
               });
               updateArtifactStatus(artifact_id, 'dismissed');
               setDismissed(true);
-            } catch (error) {
+            } catch {
               Message.error(t('cron.skill.saveFailed'));
-              console.error('[SkillSuggestCard] Failed to dismiss artifact:', error);
+              console.error('[SkillSuggestCard] Failed to dismiss artifact');
             }
           }}
         >

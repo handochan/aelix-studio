@@ -252,8 +252,8 @@ const ImageDisplay: React.FC<{
           setImageUrl(base64);
           setLoading(false);
         })
-        .catch((error) => {
-          console.error('Failed to load image:', error);
+        .catch(() => {
+          console.error('Failed to load image');
           setError(true);
           setLoading(false);
         });
@@ -280,8 +280,8 @@ const ImageDisplay: React.FC<{
           ]);
           messageApi.success(t('messages.copySuccess', { defaultValue: 'Copied' }));
           return;
-        } catch (clipboardError) {
-          console.warn('[ImageDisplay] Clipboard API failed, trying fallback:', clipboardError);
+        } catch {
+          console.warn('[ImageDisplay] Clipboard API failed, trying fallback');
         }
       }
 
@@ -316,13 +316,13 @@ const ImageDisplay: React.FC<{
             }),
           ]);
           messageApi.success(t('messages.copySuccess', { defaultValue: 'Copied' }));
-        } catch (canvasError) {
-          console.error('[ImageDisplay] Canvas fallback also failed:', canvasError);
+        } catch {
+          console.error('[ImageDisplay] Canvas fallback also failed');
           messageApi.error(t('messages.copyFailed', { defaultValue: 'Failed to copy' }));
         }
       }, 'image/png');
-    } catch (error) {
-      console.error('Failed to copy image:', error);
+    } catch {
+      console.error('Failed to copy image');
       messageApi.error(t('messages.copyFailed', { defaultValue: 'Failed to copy' }));
     }
   }, [getImageBlob, imageUrl, t, messageApi]);
@@ -343,8 +343,8 @@ const ImageDisplay: React.FC<{
       URL.revokeObjectURL(url);
 
       messageApi.success(t('messages.downloadSuccess', { defaultValue: 'Download successful' }));
-    } catch (error) {
-      console.error('Failed to download image:', error);
+    } catch {
+      console.error('Failed to download image');
       messageApi.error(t('messages.downloadFailed', { defaultValue: 'Failed to download' }));
     }
   }, [getImageBlob, relativePath, t, messageApi]);
@@ -502,8 +502,8 @@ const MessageToolGroup: React.FC<IMessageToolGroupProps> = ({ message }) => {
                   .then(() => {
                     // confirmation sent successfully
                   })
-                  .catch((error) => {
-                    console.error('Failed to confirm message:', error);
+                  .catch(() => {
+                    console.error('Failed to confirm message');
                   });
               }}
             ></ConfirmationDetails>

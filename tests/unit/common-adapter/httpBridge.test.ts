@@ -26,7 +26,7 @@ import {
   stubEmitter,
   httpRequest,
 } from '@/common/adapter/httpBridge';
-import { fs } from '@/common/adapter/ipcBridge';
+import { conversation, fs } from '@/common/adapter/ipcBridge';
 
 type FakeSocketEventMap = {
   open: () => void;
@@ -558,23 +558,68 @@ describe('httpBridge', () => {
   });
 
   describe('httpRequest', () => {
+    it('sends ordinary messages while keeping request and failure details out of diagnostics', async () => {
+      const input = 'private "conversation"\nbody';
+      const path = 'C:\\private-workspace\\image.png';
+      const files = [{ kind: 'local' as const, path }];
+      const details = { path, base64: 'c3R1ZGlvLWltYWdl', digest: 'private-digest', grant: 'private-grant' };
+      const failure = { code: 'PERMISSION_DENIED', error: input, details };
+      const rawFailure = JSON.stringify(failure);
+      const request = { content: input, files };
+      const rawRequest = JSON.stringify(request);
+      const fetchSpy = vi
+        .fn()
+        .mockResolvedValueOnce(Response.json({ data: { msg_id: 'accepted' } }))
+        .mockResolvedValueOnce(new Response(rawFailure, { status: 403 }));
+      vi.stubGlobal('fetch', fetchSpy);
+      const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      try {
+        expect(rawRequest).toContain(JSON.stringify(path).slice(1, -1));
+        expect(rawFailure).toContain(JSON.stringify(input).slice(1, -1));
+        const send = () =>
+          conversation.sendMessage.invoke({ conversation_id: 'private-conversation-id', input, files });
+        await expect(send()).resolves.toEqual({ msg_id: 'accepted' });
+        await expect(send()).rejects.toMatchObject({
+          status: 403,
+          code: failure.code,
+          backendMessage: input,
+          details,
+          body: failure,
+        });
+        expect(fetchSpy).toHaveBeenCalledTimes(2);
+        for (const [, options] of fetchSpy.mock.calls) expect(options.body).toBe(rawRequest);
+        expect(debug.mock.calls).toEqual([
+          ['[httpBridge] request', rawRequest.length],
+          ['[httpBridge] request succeeded', 200],
+          ['[httpBridge] request', rawRequest.length],
+        ]);
+        expect(error).toHaveBeenCalledExactlyOnceWith('[httpBridge] request failed', 403, rawFailure.length);
+      } finally {
+        debug.mockRestore();
+        error.mockRestore();
+      }
+    });
+
     it('keeps image lookup paths and backend error bodies out of diagnostics', async () => {
       const path = 'C:\\private-workspace\\tool-image.png';
-      const fetchSpy = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: path }), { status: 403 }));
+      const failure = JSON.stringify({ error: path });
+      const fetchSpy = vi.fn().mockResolvedValue(new Response(failure, { status: 403 }));
       vi.stubGlobal('fetch', fetchSpy);
       const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
       const error = vi.spyOn(console, 'error').mockImplementation(() => {});
       try {
         await expect(fs.getImageBase64.invoke({ path })).rejects.toMatchObject({
           status: 403,
-          backendMessage: '',
-          body: undefined,
+          backendMessage: path,
+          body: { error: path },
         });
         expect(fetchSpy).toHaveBeenCalledWith(
           expect.stringContaining('/api/fs/image-base64'),
           expect.objectContaining({ body: JSON.stringify({ path }) })
         );
-        expect([...debug.mock.calls, ...error.mock.calls]).toEqual([]);
+        expect(debug).toHaveBeenCalledExactlyOnceWith('[httpBridge] request', JSON.stringify({ path }).length);
+        expect(error).toHaveBeenCalledExactlyOnceWith('[httpBridge] request failed', 403, failure.length);
       } finally {
         debug.mockRestore();
         error.mockRestore();

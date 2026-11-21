@@ -54,9 +54,9 @@ const ImagePreview: React.FC<ImagePreviewProps> = ({ fileRef, file_path, content
         }
         if (!isMounted) return;
         setImageSrc(base64);
-      } catch (err) {
+      } catch {
         if (!isMounted) return;
-        console.error('[ImagePreview] Failed to load image:', err);
+        console.error('[ImagePreview] Failed to load image');
         setError(t('messages.imageLoadFailed', { defaultValue: 'Failed to load image' }));
       } finally {
         if (isMounted) {

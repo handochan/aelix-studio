@@ -58,7 +58,7 @@ const HTMLEditor: React.FC<HTMLEditorProps> = ({ value, onChange, containerRef, 
     (newValue: string) => {
       // 严格类型检查 / Strict type checking
       if (typeof newValue !== 'string') {
-        console.error('[HTMLEditor] onChange received non-string value:', newValue);
+        console.error('[HTMLEditor] onChange received non-string value');
         return;
       }
       onChange(newValue);

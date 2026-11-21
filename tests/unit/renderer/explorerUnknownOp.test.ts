@@ -11,11 +11,9 @@
 // invisible: the `modified` op was being sent and dropped here for several rounds of
 // work, because "silently ignored" and "never sent" look identical from the frontend.
 //
-// So the skip stays (a newer backend must keep working) and the drift says so once.
-// Once, not every time: an unknown op usually arrives with every delta for the rest of
-// the session, and a console filled with one repeated line is read as noise.
+// Keep the listing usable and report the number of skipped ops once per frame.
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyDelta, peKey, type Change, type FactCache } from '@/renderer/pages/conversation/explorer/explorerModel';
 
 const KEY = peKey('peA', 'src');
@@ -23,33 +21,24 @@ const KEY = peKey('peA', 'src');
 const cacheWith = (...names: string[]): FactCache =>
   new Map([[KEY, names.map((name) => ({ name, kind: 'file' as const }))]]);
 
-/**
- * An op from a future backend. Cast because the union deliberately excludes it.
- *
- * Each test passes its own `op` string: "already reported" is module-level state that
- * outlives a single test, so a shared name would make these results depend on execution
- * order — the second test to use it would see no warning and pass or fail for a reason
- * that has nothing to do with what it asserts.
- */
+/** An op from a future backend, outside the currently declared union. */
 const futureOp = (op: string, name: string): Change => ({ op, name }) as unknown as Change;
 
 let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  // `mockClear` matters: spying on an already-spied method hands back the existing mock
-  // rather than a fresh one, so without this a previous test's warning is still in
-  // `mock.calls` and the "says nothing" assertion below fails on someone else's call.
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-  warn.mockClear();
 });
+afterEach(() => warn.mockRestore());
 
 describe('an unrecognised fs/delta op', () => {
-  it('is reported rather than dropped in silence', () => {
-    applyDelta(cacheWith('a.ts'), KEY, [futureOp('opReported', 'a.ts')]);
+  it('reports a count while keeping raw and escaped op values private', () => {
+    const marker = 'C:\\private-workspace\\file "name"';
+    const delta = [futureOp(marker, 'a.ts')];
+    expect(JSON.stringify(delta)).toContain(JSON.stringify(marker).slice(1, -1));
+    applyDelta(cacheWith('a.ts'), KEY, delta);
 
-    expect(warn).toHaveBeenCalled();
-    // The message has to name the op, or it cannot be acted on.
-    expect(String(warn.mock.calls[0]?.[0])).toContain('opReported');
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[explorer] ignoring unknown fs/delta ops', 1);
   });
 
   it('leaves the listing untouched instead of throwing', () => {
@@ -73,16 +62,13 @@ describe('an unrecognised fs/delta op', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  // Three occurrences of one op, one warning. Scoped to a single delta on purpose: the
-  // "already reported" set is module-level, so asserting across deltas would be
-  // asserting on state this test does not own.
-  it('does not repeat itself for the same op within one delta', () => {
+  it('reports one total for all unknown ops in the delta', () => {
     applyDelta(cacheWith('a.ts'), KEY, [
       futureOp('opOnce', 'a.ts'),
       futureOp('opOnce', 'b.ts'),
       futureOp('opOnce', 'c.ts'),
     ]);
 
-    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledExactlyOnceWith('[explorer] ignoring unknown fs/delta ops', 3);
   });
 });

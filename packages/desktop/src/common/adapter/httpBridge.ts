@@ -153,7 +153,7 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
  */
 export type HttpRequestOptions = {
   silentStatuses?: number[];
-  /** Hide the route, request body and server error body from diagnostics. */
+  /** Skip diagnostics and omit private error details from the rejection. */
   omitDiagnostics?: boolean;
   keepalive?: boolean;
   /** Total deadline for the initial request, refresh wait and optional replay. */
@@ -164,24 +164,6 @@ export type HttpRequestOptions = {
   /** Extra request headers merged on top of the default `Content-Type`. */
   headers?: Record<string, string>;
 };
-
-const SENSITIVE_LOG_KEY_PATTERN = /api[_-]?key|authorization|auth[_-]?token|access[_-]?token|refresh[_-]?token|secret/i;
-
-function redactForLog(value: unknown, depth = 0): unknown {
-  if (depth > 8 || value === null || typeof value !== 'object') {
-    return value;
-  }
-  if (Array.isArray(value)) {
-    return value.map((item) => redactForLog(item, depth + 1));
-  }
-
-  return Object.fromEntries(
-    Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
-      key,
-      SENSITIVE_LOG_KEY_PATTERN.test(key) ? '[REDACTED]' : redactForLog(entry, depth + 1),
-    ])
-  );
-}
 
 const REFRESH_ENDPOINT = '/api/auth/refresh';
 
@@ -208,7 +190,7 @@ function sendHttpRequest(
   method: string,
   path: string,
   headers: Record<string, string>,
-  body?: unknown,
+  body?: string,
   options?: Pick<HttpRequestOptions, 'keepalive'>,
   signal?: AbortSignal
 ): Promise<Response> {
@@ -216,7 +198,7 @@ function sendHttpRequest(
   return fetchFromDesktopOrBrowser(url, {
     method,
     headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
+    body,
     ...(options?.keepalive ? { keepalive: true } : {}),
     ...(signal ? { signal } : {}),
   });
@@ -253,30 +235,26 @@ export async function httpRequest<T>(
     Object.assign(headers, options.headers);
   }
 
-  if (!options?.omitDiagnostics) {
-    console.debug(
-      `[httpBridge] ${method} ${path}`,
-      body !== undefined ? JSON.stringify(redactForLog(body)).slice(0, 500) : '(no body)'
-    );
-  }
+  const serializedBody = body === undefined ? undefined : JSON.stringify(body);
+  if (!options?.omitDiagnostics) console.debug('[httpBridge] request', serializedBody?.length ?? 0);
 
   const deadline = options?.timeoutMs === undefined ? undefined : AbortSignal.timeout(options.timeoutMs);
   const lifetime = options?.signal;
   const signal = deadline && lifetime ? AbortSignal.any([deadline, lifetime]) : (deadline ?? lifetime);
   signal?.throwIfAborted();
-  let response = await sendHttpRequest(method, path, headers, body, options, signal);
+  let response = await sendHttpRequest(method, path, headers, serializedBody, options, signal);
 
   // Expired access cookie → 401. Attempt one silent session refresh, then replay
   // the original request — the WebUI half of the #4124 fix. refreshSession() is a
   // no-op outside browser mode and single-flights concurrent 401s into one POST.
   // The auth endpoints themselves are skipped to avoid recursion.
   if (response.status === 401 && options?.refreshAuth !== false && !isAuthEndpoint(path)) {
-    if (!options?.omitDiagnostics) console.debug(`[httpBridge] ${method} ${path} → 401, attempting session refresh`);
+    if (!options?.omitDiagnostics) console.debug('[httpBridge] session refresh', response.status);
     const refreshed = await refreshWithinDeadline(signal);
     if (refreshed) {
-      if (!options?.omitDiagnostics) console.debug(`[httpBridge] session refreshed, replaying ${method} ${path}`);
+      if (!options?.omitDiagnostics) console.debug('[httpBridge] request replay', serializedBody?.length ?? 0);
       signal?.throwIfAborted();
-      response = await sendHttpRequest(method, path, headers, body, options, signal);
+      response = await sendHttpRequest(method, path, headers, serializedBody, options, signal);
     }
   }
 
@@ -292,15 +270,12 @@ export async function httpRequest<T>(
     } catch {
       errorBody = rawText;
     }
-    if (options?.silentStatuses?.includes(response.status)) {
-      console.debug(`[httpBridge] ${method} ${path} → ${response.status} (silenced)`, errorBody);
-    } else {
-      console.error(`[httpBridge] ${method} ${path} → ${response.status}`, errorBody);
-    }
+    const level = options?.silentStatuses?.includes(response.status) ? 'debug' : 'error';
+    console[level]('[httpBridge] request failed', response.status, rawText.length);
     throw new BackendHttpError({ method, path, status: response.status, body: errorBody });
   }
 
-  if (!options?.omitDiagnostics) console.debug(`[httpBridge] ${method} ${path} → ${response.status} OK`);
+  if (!options?.omitDiagnostics) console.debug('[httpBridge] request succeeded', response.status);
 
   const contentType = response.headers.get('Content-Type');
   if (!contentType?.includes('application/json')) {
@@ -458,11 +433,11 @@ function ensureWs(): void {
   }
 
   const url = getWsUrl();
-  console.debug('[ensureWs] connecting to', url);
+  console.debug('[ensureWs] connecting');
   try {
     ws = new WebSocket(url);
-  } catch (e) {
-    console.error('[ensureWs] WebSocket constructor threw:', e);
+  } catch {
+    console.error('[ensureWs] WebSocket construction failed');
     scheduleWsReconnect();
     return;
   }
@@ -493,8 +468,8 @@ function ensureWs(): void {
     scheduleWsReconnect();
   });
 
-  current.addEventListener('error', (e) => {
-    console.error('[ensureWs] ERROR', e);
+  current.addEventListener('error', () => {
+    console.error('[ensureWs] ERROR');
     current.close();
   });
 
@@ -562,8 +537,8 @@ export function wsSend(name: string, data: unknown): boolean {
   try {
     ws.send(JSON.stringify({ name, data }));
     return true;
-  } catch (e) {
-    console.error('[wsSend] send failed:', e);
+  } catch {
+    console.error('[wsSend] send failed');
     return false;
   }
 }

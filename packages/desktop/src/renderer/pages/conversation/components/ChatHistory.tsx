@@ -90,8 +90,8 @@ const ChatHistory: React.FC<{ onSessionClick?: () => void; collapsed?: boolean }
     blockMobileInputFocus();
     blurActiveElement();
     // ipcBridge.conversation.createWithConversation.invoke({ conversation }).then(() => {
-    Promise.resolve(navigate(`/conversation/${conversation.id}`)).catch((error) => {
-      console.error('Navigation failed:', error);
+    Promise.resolve(navigate(`/conversation/${conversation.id}`)).catch(() => {
+      console.error('Navigation failed');
     });
     // 点击session后自动隐藏sidebar
     if (onSessionClick) {
@@ -116,8 +116,8 @@ const ChatHistory: React.FC<{ onSessionClick?: () => void; collapsed?: boolean }
             setChatHistory([]);
           }
         })
-        .catch((error) => {
-          console.error('[ChatHistory] Failed to load conversations from database:', error);
+        .catch(() => {
+          console.error('[ChatHistory] Failed to load conversations from database');
           setChatHistory([]);
         });
     };
@@ -132,13 +132,13 @@ const ChatHistory: React.FC<{ onSessionClick?: () => void; collapsed?: boolean }
         if (success) {
           // Trigger refresh to reload from database
           emitter.emit('chat.history.refresh');
-          void Promise.resolve(navigate('/')).catch((error) => {
-            console.error('Navigation failed:', error);
+          void Promise.resolve(navigate('/')).catch(() => {
+            console.error('Navigation failed');
           });
         }
       })
-      .catch((error) => {
-        console.error('Failed to remove conversation:', error);
+      .catch(() => {
+        console.error('Failed to remove conversation');
       });
   };
 
@@ -161,8 +161,8 @@ const ChatHistory: React.FC<{ onSessionClick?: () => void; collapsed?: boolean }
         // Trigger refresh to reload from database
         emitter.emit('chat.history.refresh');
       }
-    } catch (error) {
-      console.error('Failed to update conversation name:', error);
+    } catch {
+      console.error('Failed to update conversation name');
     } finally {
       setEditingId(null);
       setEditingName('');

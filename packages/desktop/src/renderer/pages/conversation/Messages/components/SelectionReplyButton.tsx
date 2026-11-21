@@ -216,7 +216,7 @@ const SelectionReplyButton: React.FC<{ messages: TMessage[] }> = ({ messages }) 
           className={itemClassName}
           onMouseDown={(e) => {
             e.preventDefault();
-            void openExternalUrl(url).catch(console.error);
+            void openExternalUrl(url).catch(() => console.error('[SelectionReplyButton] Failed to open link'));
             dismiss();
           }}
         >

@@ -224,7 +224,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
 
         await navigate(`/conversation/${conversation.id}`);
       } catch (error: unknown) {
-        console.error('Failed to create Aion CLI conversation:', error);
+        console.error('[useGuidSend] Failed to create Aion CLI conversation');
         throw error;
       }
       return;
@@ -278,7 +278,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
 
       await navigate(`/conversation/${conversation.id}`);
     } catch (error: unknown) {
-      console.error('Failed to create ACP conversation:', error);
+      console.error('[useGuidSend] Failed to create ACP conversation');
       throw error;
     }
   }, [
@@ -318,7 +318,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         setDir('');
       })
       .catch((error) => {
-        console.error('Failed to send message:', error);
+        console.error('[useGuidSend] Failed to send message');
         Message.error(getConversationCreateErrorMessage(error, t));
       })
       .finally(() => {

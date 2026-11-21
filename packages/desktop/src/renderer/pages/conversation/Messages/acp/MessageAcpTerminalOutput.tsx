@@ -40,8 +40,8 @@ const MessageAcpTerminalOutput: React.FC<{ message: IMessageAcpTerminalOutput }>
         conversation_id,
         terminal_id: content.terminal_id,
       });
-    } catch (error) {
-      console.error('[MessageAcpTerminalOutput] kill failed:', error);
+    } catch {
+      console.error('[MessageAcpTerminalOutput] kill failed');
       setKilling(false);
     }
   }, [conversation_id, content?.terminal_id]);
