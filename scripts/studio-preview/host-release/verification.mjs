@@ -83,19 +83,23 @@ export function verifyConfigPreserved(file, { phase, launch, record }) {
 export async function boundedWait(
   work,
   label,
-  { timeoutMs = 20000, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
+  { timeoutMs = 20000, deadline = null, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
 ) {
   const started = performance.now();
   const startedAt = new Date().toISOString();
   let timer;
   let status = 'passed';
+  const timeoutError = () => new Error(`${label}: bounded wait elapsed (${timeoutMs}ms)`);
   try {
-    return await Promise.race([
+    const value = await Promise.race([
       work,
       new Promise((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label}: bounded wait elapsed (${timeoutMs}ms)`)), timeoutMs);
+        timer = setTimeout(() => reject(timeoutError()), timeoutMs);
       }),
     ]);
+    // A reply can be processed before an overdue timer runs.
+    if (deadline !== null && performance.now() >= deadline) throw timeoutError();
+    return value;
   } catch (error) {
     status = 'failed';
     throw error;
@@ -428,6 +432,7 @@ export async function launchWithIdentity(
             'electron-identity-retry-response',
             {
               timeoutMs,
+              deadline,
               launch: launchNumber,
               pid: main.pid,
               phase: 'identity',
@@ -443,6 +448,10 @@ export async function launchWithIdentity(
           retry.finishedAt = new Date().toISOString();
           diagnostic();
         }
+      } else if (performance.now() >= deadline) {
+        throw new Error(
+          `Studio launch #${launchNumber}: identity evaluation exceeded the ${launchTimeoutMs}ms launch timeout`
+        );
       }
       if (exited(main))
         throw new Error(`Studio launch #${launchNumber}: application exited during identity evaluation`);

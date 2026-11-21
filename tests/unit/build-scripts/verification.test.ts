@@ -657,6 +657,45 @@ describe('Electron launch evidence and identity retry', () => {
     expect(app.close).toHaveBeenCalledTimes(1);
   });
 
+  it('rejects a late inspector reply even when the deadline timer has not fired', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const { launch } = inspectorApplication([collected, { pid: 3016 }], {
+      beforeSyncResponse() {
+        // Advance only the deadline clock. The reply's microtask wins the timer race.
+        clock.mockReturnValue(1201);
+      },
+    });
+    const record = vi.fn();
+    const result = launchWithIdentity(launch, { ...options(record), launchTimeoutMs: 1200 }).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(await result).toMatchObject({
+      message: 'electron-identity-retry-response: bounded wait elapsed (1200ms)',
+    });
+    expect(record.mock.calls.find(([row]) => row.status === 'failed')?.[0].identityRetry.outcome).toBe('failed');
+    expect(record.mock.calls.some(([row]) => row.status === 'identified')).toBe(false);
+    expect(log).toHaveBeenCalledWith(
+      expect.stringMatching(/"wait":"electron-identity-retry-response".*"status":"failed"/)
+    );
+  });
+
+  it('rejects a late reply from the initial identity read', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const clock = vi.spyOn(performance, 'now').mockReturnValue(0);
+    const { app } = application();
+    app.evaluate.mockImplementationOnce(async () => {
+      clock.mockReturnValue(1201);
+      return { pid: 123 };
+    });
+    const result = launchWithIdentity(async () => app, { ...options(), launchTimeoutMs: 1200 }).catch((error) => error);
+    await vi.advanceTimersByTimeAsync(20000);
+    expect(await result).toMatchObject({ message: expect.stringContaining('identity evaluation exceeded') });
+  });
+
   it('fails on a synchronous inspector error and preserves the exit wait before one cleanup', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
