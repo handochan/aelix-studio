@@ -75,9 +75,12 @@ export function windowsChildSpawn(python: string, launcher: string): Spawn {
     });
 }
 
-/** A character that ends an authority: a URI delimiter, or one that can never appear in a URI. */
-// oxlint-disable-next-line no-control-regex -- control characters never occur in a URI.
-const AUTHORITY_END = /[\s/?#"<>\\^`{|}\x00-\x1f\x7f]/;
+/**
+ * A character that ends an authority. Only the URI delimiters `/`, `?`, `#` and whitespace:
+ * a password may hold a raw `"` or `\` (Git unescapes configuration values and prints the URL
+ * as it is), so no other character may cut it short of its `@`.
+ */
+const AUTHORITY_END = /[\s/?#]/;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 const LETTER = /[a-z]/i;
 
@@ -86,11 +89,15 @@ const LETTER = /[a-z]/i;
  * and submodule addresses as the repository wrote them, and those can carry a token.
  *
  * No list of allowed characters decides where a user part ends: RFC 3986 allows quotes,
- * parentheses and the other sub-delimiters in it. After `scheme://`, the authority runs to the
- * first `/`, `?`, `#`, whitespace or character no URI holds (`"`, `<`, `>`, `\`, `^`, a
- * backtick, `{`, `|`, `}`, a control character), or to the next URL, or the end; everything
- * before its last `@` is the user part. That is masked whole, except that a plain SSH account
- * name without a password (`ssh://git@host`) stays, since it says which account was used.
+ * parentheses and the other sub-delimiters in it, and output may hold a URL as written. After
+ * `scheme://`, the authority runs to the first `/`, `?`, `#` or whitespace, or to the next URL,
+ * or the end; everything before its last `@` is the user part. That is masked whole, except
+ * that a plain SSH account name without a password (`ssh://git@host`) stays, since it says
+ * which account was used.
+ *
+ * Fail-safe: ambiguous spans are masked; over-masking is accepted over leaking. Plain output
+ * does not say where a URL ends, so text after it up to such a delimiter (a JSON field that
+ * follows, say) can be masked with it.
  *
  * Linear in the text: each `://` is found once, its scheme is read backwards no further than
  * the previous one, and each authority is read forwards once.
