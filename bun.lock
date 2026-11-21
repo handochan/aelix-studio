@@ -174,6 +174,7 @@
       "version": "0.0.0",
       "dependencies": {
         "@aionui/web-host": "workspace:*",
+        "@aws-crypto/sha256-js": "5.2.0",
       },
     },
     "packages/shared-scripts": {
