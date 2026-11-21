@@ -74,6 +74,12 @@ function getWsUrl(): string {
 // Structured backend error
 // ---------------------------------------------------------------------------
 
+// Keep response details off the instance, including in DevTools object previews.
+const backendErrorResponses = new WeakMap<
+  BackendHttpError,
+  { code: string; backendMessage: string; details: unknown; body: unknown }
+>();
+
 /**
  * Error thrown by `httpRequest` when the backend returns a non-2xx response.
  * Carries the structured error envelope (`success: false, error, code`) so
@@ -87,17 +93,9 @@ function getWsUrl(): string {
  */
 export class BackendHttpError extends Error {
   readonly status: number;
-  /** Machine-readable error code from the backend `ErrorResponse.code`, or `''` when parse failed. */
-  readonly code: string;
-  /** Backend-provided human message from `ErrorResponse.error`, or the raw body when parse failed. */
-  readonly backendMessage: string;
-  /** Structured backend metadata from `ErrorResponse.details`, when present. */
-  readonly details: unknown;
-  /** Raw parsed body (object on JSON response, string on text/non-JSON). */
-  readonly body: unknown;
 
   constructor(params: { method: string; path: string; status: number; body: unknown }) {
-    const { method, path, status, body } = params;
+    const { status, body } = params;
     let code = '';
     let backendMessage = '';
     let details: unknown;
@@ -109,13 +107,34 @@ export class BackendHttpError extends Error {
     } else if (typeof body === 'string') {
       backendMessage = body;
     }
-    super(`Backend ${method} ${path} failed (${status}): ${JSON.stringify(body)}`);
+    super(`Backend request failed (${status})`);
     this.name = 'BackendHttpError';
     this.status = status;
-    this.code = code;
-    this.backendMessage = backendMessage;
-    this.details = details;
-    this.body = body;
+    backendErrorResponses.set(this, { code, backendMessage, details, body });
+  }
+
+  /** Machine-readable error code from the backend `ErrorResponse.code`, when present. */
+  get code(): string {
+    return backendErrorResponses.get(this)?.code ?? '';
+  }
+
+  /** Backend-provided human message, falling back to the raw body for text responses. */
+  get backendMessage(): string {
+    return backendErrorResponses.get(this)?.backendMessage ?? '';
+  }
+
+  /** Structured backend metadata from `ErrorResponse.details`, when present. */
+  get details(): unknown {
+    return backendErrorResponses.get(this)?.details;
+  }
+
+  /** Raw parsed body (object on JSON response, string on text/non-JSON). */
+  get body(): unknown {
+    return backendErrorResponses.get(this)?.body;
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return this.stack ?? this.toString();
   }
 }
 
@@ -282,7 +301,10 @@ export async function httpRequest<T>(
     return undefined as T;
   }
 
-  const json = await response.json();
+  const json: unknown = await response.json().catch((error: unknown) => {
+    if (error instanceof SyntaxError) throw new SyntaxError('Backend returned invalid JSON');
+    throw error;
+  });
   // Backend wraps in { success, data, ... } — unwrap when present
   if (json && typeof json === 'object' && 'data' in json) {
     return json.data as T;

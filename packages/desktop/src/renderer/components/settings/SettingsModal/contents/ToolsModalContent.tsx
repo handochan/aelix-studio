@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import type { ImageGenerationModelSetting } from '@/common/config/clientSettings';
 import { removeImageGenerationEnvKeys, resolveImageGenerationMcpEnv } from '@/common/config/imageGenerationMcpEnv';
 import { mcpService } from '@/common/adapter/ipcBridge';
@@ -429,7 +430,7 @@ const ToolsModalContent: React.FC = () => {
         // Sync env vars to the built-in MCP server
         void syncMcpServerEnv(newImageGenerationModel).catch((error) => {
           console.error('Failed to sync image generation MCP env:', error);
-          mcpMessage.error(error instanceof Error ? error.message : t('settings.mcpSyncError'));
+          mcpMessage.error(error instanceof Error ? parseError(error) : t('settings.mcpSyncError'));
         });
         return newImageGenerationModel;
       });
@@ -470,7 +471,7 @@ const ToolsModalContent: React.FC = () => {
         });
       } catch (error) {
         console.error('Failed to toggle image generation MCP server:', error);
-        mcpMessage.error(error instanceof Error ? error.message : t('settings.mcpSyncError'));
+        mcpMessage.error(error instanceof Error ? parseError(error) : t('settings.mcpSyncError'));
       } finally {
         setIsUpdatingImageGeneration(false);
       }

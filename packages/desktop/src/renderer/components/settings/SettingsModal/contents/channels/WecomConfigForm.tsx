@@ -7,7 +7,7 @@
 import type { IChannelPairingRequest, IChannelPluginStatus, IChannelUser } from '@/common/types/channel/channel';
 import { assistants, channel, type IWebUIStatus } from '@/common/adapter/ipcBridge';
 import { isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
-import { resolveLocaleKey } from '@/common/utils';
+import { parseError, resolveLocaleKey } from '@/common/utils';
 import { openExternalUrl } from '@/renderer/utils/platform';
 import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 import { formatDateTime } from '@/renderer/services/i18n/format';
@@ -221,7 +221,7 @@ const WecomConfigForm: React.FC<WecomConfigFormProps> = ({
         onStatusChange(wecomPlugin || null);
       }
     } catch (error: unknown) {
-      const message = error instanceof Error ? error.message : String(error);
+      const message = error instanceof Error ? parseError(error) : String(error);
       console.error('[WecomConfig] Save failed:', error);
       Message.error(message || t('settings.wecom.enableFailed', 'Failed to enable WeCom channel'));
     } finally {
@@ -241,7 +241,7 @@ const WecomConfigForm: React.FC<WecomConfigFormProps> = ({
       await loadPendingPairings();
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -252,7 +252,7 @@ const WecomConfigForm: React.FC<WecomConfigFormProps> = ({
       Message.info(t('settings.assistant.pairingRejected', 'Pairing rejected'));
       await loadPendingPairings();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -263,7 +263,7 @@ const WecomConfigForm: React.FC<WecomConfigFormProps> = ({
       Message.success(t('settings.assistant.userRevoked', 'User access revoked'));
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 

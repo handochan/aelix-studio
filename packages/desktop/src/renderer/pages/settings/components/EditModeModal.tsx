@@ -1,3 +1,4 @@
+import { parseError } from '@/common/utils';
 import type { IProvider } from '@/common/config/storage';
 import ModalHOC from '@/renderer/utils/ui/ModalHOC';
 import { Form, Input, Message, Select, Tag } from '@arco-design/web-react';
@@ -303,7 +304,7 @@ const EditModeModal = ModalHOC<{ data?: IProvider; onChange(data: IProvider): vo
               validateStatus={!isFullUrl && modelListState.error ? 'error' : undefined}
               help={
                 !isFullUrl && modelListState.error instanceof Error
-                  ? modelListState.error.message
+                  ? parseError(modelListState.error)
                   : !isFullUrl && modelListState.error
                     ? String(modelListState.error)
                     : undefined
@@ -364,7 +365,7 @@ const EditModeModal = ModalHOC<{ data?: IProvider; onChange(data: IProvider): vo
                       // Update the model list state manually
                       void modelListState.mutate({ models }, false);
                     } catch (error: any) {
-                      message.error(error.message || 'Failed to fetch models');
+                      message.error(parseError(error) || 'Failed to fetch models');
                     }
                     return;
                   }

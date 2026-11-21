@@ -1,3 +1,4 @@
+import { parseError } from '@/common/utils';
 import { useState, useEffect, useCallback } from 'react';
 import type { IHubAgentItem } from '@/common/types/agent/hub';
 import { ipcBridge } from '@/common';
@@ -19,7 +20,7 @@ export function useHubAgents() {
         setAgents(agentExtensions);
       }
     } catch (err) {
-      setError(String(err));
+      setError(parseError(err));
     } finally {
       setLoading(false);
     }

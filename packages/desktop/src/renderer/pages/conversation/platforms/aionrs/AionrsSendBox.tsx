@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import { ipcBridge } from '@/common';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
@@ -291,9 +292,7 @@ const AionrsSendBox: React.FC<{
           emitter.emit('aionrs.workspace.refresh');
         }
       } catch (error) {
-        const errorMessage =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) ||
-          (error instanceof Error ? error.message : String(error));
+        const errorMessage = getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error);
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed({

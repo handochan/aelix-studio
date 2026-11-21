@@ -6,6 +6,7 @@
 
 import type { ProtocolDetectionResponse } from '@/common/utils/protocolDetector';
 import { ipcBridge } from '@/common';
+import { parseError } from '@/common/utils';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
@@ -107,14 +108,14 @@ export function useProtocolDetection(
 
         setResult(detectionResult);
         setError(null);
-      } catch (e: any) {
+      } catch (error) {
         // 检查是否是最新的请求
         if (currentVersion !== requestVersionRef.current) {
           return;
         }
 
         setResult(null);
-        setError(e.message || String(e));
+        setError(parseError(error));
       } finally {
         // 检查是否是最新的请求
         if (currentVersion === requestVersionRef.current) {

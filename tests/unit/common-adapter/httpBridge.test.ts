@@ -9,6 +9,9 @@
  * @vitest-environment node
  */
 
+import { Console } from 'node:console';
+import { Writable } from 'node:stream';
+import { inspect } from 'node:util';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   getBaseUrl,
@@ -362,6 +365,60 @@ describe('httpBridge', () => {
   });
 
   describe('BackendHttpError', () => {
+    it('keeps request and response markers out of real console and inspection output', async () => {
+      const request = '/api/conversation/private-request/"image"';
+      const text = 'private "conversation"\nbody';
+      const path = 'C:\\private-workspace\\image.png';
+      const base64 = 'data:image/png;base64,cHJpdmF0ZS1pbWFnZQ==';
+      const code = 'private-code-with/"path"';
+      const body = { error: text, code, details: { path, base64 } };
+      const markers = [request, text, path, base64, code];
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(body, { status: 403 })));
+      const error = await httpRequest('GET', request).catch((failure: unknown) => failure);
+      expect(error).toBeInstanceOf(BackendHttpError);
+      expect(error).toMatchObject({ status: 403, code, backendMessage: text, details: body.details, body });
+
+      let output = '';
+      const stream = new Writable({
+        write(chunk: Buffer, _encoding, done) {
+          output += chunk.toString();
+          done();
+        },
+      });
+      const capturedConsole = new Console({ stdout: stream, stderr: stream, colorMode: false });
+      capturedConsole.error('error control', ...markers, body, JSON.stringify(body), JSON.stringify(request));
+      capturedConsole.warn('warn control', body, JSON.stringify(body), request, JSON.stringify(request));
+      for (const marker of markers) {
+        expect(output).toContain(marker);
+        expect(output).toContain(JSON.stringify(marker).slice(1, -1));
+      }
+
+      output = '';
+      capturedConsole.error('error instance', error);
+      capturedConsole.warn('warn instance', error);
+      const diagnostics = [
+        output,
+        String(error),
+        inspect(error, { showHidden: true, getters: true }),
+        JSON.stringify(error),
+      ];
+      expect(output).toContain('BackendHttpError: Backend request failed (403)');
+      for (const diagnostic of diagnostics) {
+        for (const marker of markers) {
+          expect(diagnostic).not.toContain(marker);
+          expect(diagnostic).not.toContain(JSON.stringify(marker).slice(1, -1));
+        }
+      }
+    });
+
+    it('rejects invalid JSON without echoing the body in a parser error', async () => {
+      const response = new Response('private-body cannot be parsed', {
+        headers: { 'Content-Type': 'application/json' },
+      });
+      vi.stubGlobal('fetch', vi.fn().mockResolvedValue(response));
+      await expect(httpRequest('GET', '/api/test')).rejects.toThrow(new SyntaxError('Backend returned invalid JSON'));
+    });
+
     it('instanceof check works', () => {
       const err = new BackendHttpError({ method: 'GET', path: '/api/x', status: 500, body: {} });
       expect(err).toBeInstanceOf(BackendHttpError);

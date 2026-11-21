@@ -22,6 +22,7 @@
  * supersede/discard/limit logic is unit-testable without a real socket.
  */
 
+import { parseError } from '@/common/utils';
 import { useSyncExternalStore } from 'react';
 
 import type { DirRef } from '../explorerModel';
@@ -187,7 +188,7 @@ export const startSearch = (nextOwner: string, roots: DirRef[], nextQuery: strin
       if (activeSearchId !== id) return; // superseded/abandoned — ignore its rejection
       activeSearchId = null; // terminal (error): reject any late match for this id
       status = 'error';
-      error = err instanceof Error ? err.message : String(err);
+      error = err instanceof Error ? parseError(err) : String(err);
       publish();
     }
   );

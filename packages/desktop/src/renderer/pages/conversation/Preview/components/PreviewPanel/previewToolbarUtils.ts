@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import type { ChatFileRef } from '@/common/types/chatFile';
 
 /**
@@ -165,7 +166,7 @@ export const classifySaveOutcome = (result: boolean | undefined, error?: unknown
     // `detail` is what produced "save failed: save failed", since the caller
     // prefixes the detail with the same sentence.
     if ((error as { name?: unknown }).name === 'SaveRefusedError') return { kind: 'failed' };
-    return { kind: 'failed', detail: error instanceof Error ? error.message : undefined };
+    return { kind: 'failed', detail: error instanceof Error ? parseError(error) : undefined };
   }
   // `false` is a refusal too, not a success — it must never fall through to 'saved'.
   if (result !== true) return { kind: 'failed' };

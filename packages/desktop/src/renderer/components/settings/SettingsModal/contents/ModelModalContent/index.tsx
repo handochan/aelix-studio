@@ -4,6 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { ipcBridge } from '@/common';
 import type { IProvider } from '@/common/config/storage';
 import { supportsOpenAiApiMode } from '@/common/utils/modelCapabilities';
@@ -148,8 +150,7 @@ const ModelModalContent: React.FC<{ onOpenConversation?: () => void }> = ({ onOp
         void mutate();
         console.error('Failed to save provider:', error);
         // 409 Conflict — duplicate id (rare pre-launch); different toast
-        const msg = error instanceof Error ? error.message : String(error);
-        if (msg.includes('409')) {
+        if (isBackendHttpError(error) ? error.status === 409 : String(error).includes('409')) {
           message.error(t('settings.providerIdConflict', { defaultValue: 'Provider id already exists, retry.' }));
         } else {
           message.error(t('settings.saveModelConfigFailed'));
@@ -253,7 +254,7 @@ const ModelModalContent: React.FC<{ onOpenConversation?: () => void }> = ({ onOp
       }
     } catch (error: unknown) {
       const latency = Date.now() - startTime;
-      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? parseError(error) : String(error);
       Message.error({
         content: `${platform.name} - ${modelName}: ${t('common.failed')} - ${errorMessage}`,
         duration: 5000,

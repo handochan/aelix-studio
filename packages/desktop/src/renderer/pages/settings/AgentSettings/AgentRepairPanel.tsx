@@ -10,7 +10,7 @@ import { useTranslation } from 'react-i18next';
 import { acpConversation } from '@/common/adapter/ipcBridge';
 import { formatManagedAgentDiagnosticMessage, type ManagedAgent } from '@/renderer/utils/model/agentTypes';
 import EnvVarEditor, { type EnvVarRow } from './EnvVarEditor';
-import { uuid } from '@/common/utils';
+import { parseError, uuid } from '@/common/utils';
 
 type AgentRepairPanelProps = {
   agent: ManagedAgent;
@@ -111,7 +111,7 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
       } catch (err) {
         if (cancelled) return;
         console.error('Failed to fetch agent overrides:', err);
-        setError(err instanceof Error ? err.message : String(err));
+        setError(err instanceof Error ? parseError(err) : String(err));
       }
     })();
     return () => {
@@ -161,7 +161,7 @@ const AgentRepairPanel: React.FC<AgentRepairPanelProps> = ({ agent, onSaved }) =
       onSaved();
     } catch (err) {
       console.error('Failed to save agent overrides:', err);
-      setError(err instanceof Error ? err.message : String(err));
+      setError(err instanceof Error ? parseError(err) : String(err));
     } finally {
       savingRef.current = false;
       setIsSaving(false);

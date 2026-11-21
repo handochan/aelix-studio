@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import React from 'react';
 
 const writeRendererLogInvoke = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -95,6 +95,42 @@ it('navigates with a URL retrieved from the webview instead of the console signa
   expect(executeJavaScript).toHaveBeenCalledExactlyOnceWith('window.__aionuiTakeNavigationUrl?.(1)');
   await waitFor(() => expect(webview).toHaveAttribute('src', targetUrl));
 });
+
+it.each(['newer lookup', 'external URL', 'main-frame navigation'])(
+  'ignores a lookup superseded by a %s',
+  async (kind) => {
+    const initialUrl = 'https://example.test/';
+    const nextUrl = 'https://example.test/new';
+    const onUrlChange = vi.fn();
+    const { container, rerender } = render(<WebviewHost url={initialUrl} onUrlChange={onUrlChange} />);
+    const webview = container.querySelector('webview')!;
+    let resolveOld!: (url: string) => void;
+    const old = new Promise<string>((resolve) => {
+      resolveOld = resolve;
+    });
+    const lookup = vi.fn().mockReturnValueOnce(old).mockResolvedValueOnce(nextUrl);
+    Object.defineProperty(webview, 'executeJavaScript', { value: lookup });
+    const signal = (id: number) =>
+      createConsoleMessageEvent({ level: 1, line: 0, message: `__WEBVIEW_HOST_NAVIGATE__:${id}`, sourceId: 'private' });
+    webview.dispatchEvent(signal(1));
+
+    if (kind === 'newer lookup') {
+      webview.dispatchEvent(signal(2));
+      await waitFor(() => expect(webview).toHaveAttribute('src', nextUrl));
+    } else if (kind === 'external URL') {
+      rerender(<WebviewHost url={nextUrl} onUrlChange={onUrlChange} />);
+      expect(webview).toHaveAttribute('src', nextUrl);
+    } else {
+      // A same-URL replacement does not change the webview element or its src.
+      webview.dispatchEvent(Object.assign(new Event('did-start-navigation'), { isMainFrame: true, url: initialUrl }));
+    }
+
+    const oldUrl = 'https://example.test/stale';
+    await act(async () => resolveOld(oldUrl));
+    expect(webview).toHaveAttribute('src', kind === 'main-frame navigation' ? initialUrl : nextUrl);
+    expect(onUrlChange).not.toHaveBeenCalledWith(oldUrl);
+  }
+);
 
 describe('HTMLRenderer', () => {
   const electronAPI = {};

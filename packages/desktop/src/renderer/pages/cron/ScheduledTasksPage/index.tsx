@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import classNames from 'classnames';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -49,7 +50,7 @@ const ScheduledTasksPage: React.FC = () => {
     } catch (err) {
       setKeepAwake(!enabled);
       configService.setLocal('system.keepAwake', !enabled);
-      Message.error(String(err));
+      Message.error(parseError(err));
     }
   }, []);
 
@@ -110,7 +111,7 @@ const ScheduledTasksPage: React.FC = () => {
           Message.success(t('cron.resumeSuccess'));
         }
       } catch (err) {
-        Message.error(String(err));
+        Message.error(parseError(err));
       }
     },
     [pauseJob, resumeJob, t]

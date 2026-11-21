@@ -29,19 +29,34 @@ export type RpcErrorShape = {
   transport?: boolean;
 };
 
-/** A JSON-RPC error surfaced to a request caller. */
+const rpcErrorResponses = new WeakMap<RpcError, RpcErrorShape>();
+
+/** A JSON-RPC error with explicit accessors for server-controlled details. */
 export class RpcError extends Error {
-  readonly code: number;
-  readonly data?: unknown;
   /** See {@link RpcErrorShape.transport}. False for any server-sent error. */
   readonly transport: boolean;
 
   constructor(shape: RpcErrorShape) {
-    super(shape.message);
+    super('Monitor request failed');
     this.name = 'RpcError';
-    this.code = shape.code;
-    this.data = shape.data;
+    rpcErrorResponses.set(this, { code: shape.code, message: shape.message, data: shape.data });
     this.transport = shape.transport === true;
+  }
+
+  get code(): number {
+    return rpcErrorResponses.get(this)!.code;
+  }
+
+  get backendMessage(): string {
+    return rpcErrorResponses.get(this)?.message ?? '';
+  }
+
+  get data(): unknown {
+    return rpcErrorResponses.get(this)?.data;
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return this.stack ?? this.toString();
   }
 }
 
@@ -235,7 +250,7 @@ export class MonitorClient {
       if (!entry) return; // unknown/duplicate id → ignore
       this.pending.delete(frame.id);
       if (frame.error) {
-        entry.reject(new RpcError(frame.error));
+        entry.reject(new RpcError({ ...frame.error, transport: false }));
       } else {
         entry.resolve(frame.result);
       }

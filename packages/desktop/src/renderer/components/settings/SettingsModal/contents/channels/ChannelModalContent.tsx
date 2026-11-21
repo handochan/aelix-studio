@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import { getStudioWebUILocalUrl } from '@aionui/web-host/webui-defaults';
 import { WEBUI_DEFAULT_PORT } from '@/common/config/constants';
 import type { IChannelPluginStatus } from '@/common/types/channel/channel';
@@ -339,7 +340,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setEnableLoading(false);
     }
@@ -375,7 +376,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setSlackEnableLoading(false);
     }
@@ -411,7 +412,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setDiscordEnableLoading(false);
     }
@@ -444,7 +445,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setLarkEnableLoading(false);
     }
@@ -477,7 +478,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setDingtalkEnableLoading(false);
     }
@@ -507,7 +508,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setWeixinEnableLoading(false);
     }
@@ -536,7 +537,7 @@ const ChannelModalContent: React.FC = () => {
         await loadPluginStatus();
       }
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     } finally {
       setWecomEnableLoading(false);
     }
@@ -602,7 +603,7 @@ const ChannelModalContent: React.FC = () => {
           await loadPluginStatus();
         }
       } catch (error: unknown) {
-        Message.error(error instanceof Error ? error.message : String(error));
+        Message.error(error instanceof Error ? parseError(error) : String(error));
       } finally {
         setExtensionLoadingMap((prev) => ({ ...prev, [pluginType]: false }));
       }

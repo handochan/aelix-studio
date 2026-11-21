@@ -16,7 +16,7 @@ import EmojiPicker from '@/renderer/components/chat/EmojiPicker';
 import CodeMirror from '@uiw/react-codemirror';
 import { json } from '@codemirror/lang-json';
 import { useThemeContext } from '@/renderer/hooks/context/ThemeContext';
-import { uuid } from '@/common/utils';
+import { parseError, uuid } from '@/common/utils';
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import EnvVarEditor, { type EnvVarRow } from './EnvVarEditor';
@@ -383,7 +383,7 @@ const InlineAgentEditor: React.FC<InlineAgentEditorProps> = ({ agent, onSave, on
       }
     } catch (error) {
       setTestStatus('fail_cli');
-      setTestErrorDetail(error instanceof Error ? error.message : String(error));
+      setTestErrorDetail(error instanceof Error ? parseError(error) : String(error));
     }
   }, [command, argsString, envVars, runtimeScopeId]);
 

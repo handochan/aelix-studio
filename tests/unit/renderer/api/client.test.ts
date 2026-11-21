@@ -65,7 +65,10 @@ describe('api/client', () => {
         expect(e).toBeInstanceOf(ApiError);
         const err = e as ApiError;
         expect(err.status).toBe(401);
+        expect(err.statusText).toBe('Unauthorized');
         expect(err.body).toBe('Unauthorized');
+        expect(String(err)).not.toContain('Unauthorized');
+        expect(JSON.stringify(err)).not.toContain('Unauthorized');
       }
     });
 

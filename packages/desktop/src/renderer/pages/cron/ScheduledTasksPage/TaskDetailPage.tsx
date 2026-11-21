@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useParams } from 'react-router-dom';
@@ -112,7 +113,7 @@ const TaskDetailPage: React.FC = () => {
       Message.success(job.enabled ? t('cron.pauseSuccess') : t('cron.resumeSuccess'));
       await fetchJob();
     } catch (err) {
-      Message.error(String(err));
+      Message.error(parseError(err));
     }
   }, [job, fetchJob, t]);
 
@@ -280,7 +281,7 @@ const TaskDetailPage: React.FC = () => {
       Message.success(t('cron.deleteSuccess'));
       navigate('/scheduled');
     } catch (err) {
-      Message.error(String(err));
+      Message.error(parseError(err));
     }
   }, [job, navigate, t]);
 
