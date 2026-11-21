@@ -1,11 +1,11 @@
 import { randomBytes } from 'node:crypto';
 import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
-import { OutputTail, runToExit, type RunResult } from '../../process.js';
+import { OutputTail, redactUrlCredentials, runToExit, type RunResult } from '../../process.js';
 import { removeFromState, type StateWriter } from '../../store/lock.js';
 import { ExtensionFailure, type OnlineExtensionSource } from '../../types.js';
 import type { FlowContext } from '../candidate.js';
-import { gitLocation, redactUrlCredentials } from './source.js';
+import { gitLocation } from './source.js';
 
 /**
  * A git subdirectory install, step one (Studio #32 1b): Studio fetches the repository itself,
@@ -20,8 +20,9 @@ import { gitLocation, redactUrlCredentials } from './source.js';
  * then a commit) and checked out detached by its object name; the checkout must then be at
  * exactly that commit.
  *
- * Only the submodules inside the requested subdirectory are initialized: the rest of the
- * repository is never built, so the hosts its other submodules name are not contacted.
+ * Only the submodules the requested subdirectory needs are initialized (those on its path and
+ * those inside it): the rest of the repository is never built, so the hosts its other
+ * submodules name are not contacted.
  *
  * The clone and the copy live in staging directories of the store (`artifacts/.staging-…`):
  * the lock holder removes them, and recovery removes what an interruption left.
@@ -47,13 +48,18 @@ type GitRun = (args: string[], cwd: string) => Promise<RunResult>;
  * copied as links, as Git checked them out; nothing they point at is read. Anything that is
  * not a directory, a regular file or a link is refused. The target must not exist.
  */
-const COPY_SOURCE = `
+export const COPY_SOURCE = `
 # aelix-studio-copy-tree
 import json, os, stat, sys
 
-NOFOLLOW = os.O_NOFOLLOW
-DIRECTORY = os.O_DIRECTORY
+# POSIX only: Windows has no dir_fd opens, so the copy refuses there (git installs are not
+# offered on Windows either). getattr keeps the module importable for that refusal.
+NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
+DIRECTORY = getattr(os, 'O_DIRECTORY', 0)
 CLOEXEC = getattr(os, 'O_CLOEXEC', 0)
+# A name that was a regular file when listed can be a FIFO by the time it is opened; without
+# O_NONBLOCK that open would wait for a writer. Reads of a regular file ignore the flag.
+NONBLOCK = getattr(os, 'O_NONBLOCK', 0)
 LIMIT = 500000
 
 class Refused(Exception):
@@ -62,8 +68,9 @@ class Refused(Exception):
 count = 0
 
 def copy_file(name, src, dst, mode):
-    s = os.open(name, os.O_RDONLY | NOFOLLOW | CLOEXEC, dir_fd=src)
+    s = os.open(name, os.O_RDONLY | NOFOLLOW | NONBLOCK | CLOEXEC, dir_fd=src)
     try:
+        # What was opened decides, not what was listed.
         if not stat.S_ISREG(os.fstat(s).st_mode):
             raise Refused('an entry of the repository changed while it was copied')
         d = os.open(name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW | CLOEXEC,
@@ -94,7 +101,7 @@ def copy_tree(src, dst, depth):
         info = os.stat(name, dir_fd=src, follow_symlinks=False)
         if stat.S_ISDIR(info.st_mode):
             os.mkdir(name, 0o755, dir_fd=dst)
-            s = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW | CLOEXEC, dir_fd=src)
+            s = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW | NONBLOCK | CLOEXEC, dir_fd=src)
             try:
                 d = os.open(name, os.O_RDONLY | DIRECTORY | NOFOLLOW | CLOEXEC, dir_fd=dst)
                 try:
@@ -110,28 +117,32 @@ def copy_tree(src, dst, depth):
         else:
             raise Refused('the repository holds an entry that is not a file, a directory or a link')
 
-source, target = sys.argv[1], sys.argv[2]
-try:
-    needed = (os.open, os.stat, os.mkdir, os.symlink, os.readlink)
-    if os.name == 'nt' or not all(call in os.supports_dir_fd for call in needed) or os.scandir not in os.supports_fd:
-        raise Refused('copying without following links is not supported here')
-    root = os.open(source, os.O_RDONLY | DIRECTORY | NOFOLLOW | CLOEXEC)
+def main(source, target):
     try:
-        os.mkdir(target, 0o700)
-        out = os.open(target, os.O_RDONLY | DIRECTORY | NOFOLLOW | CLOEXEC)
+        needed = (os.open, os.stat, os.mkdir, os.symlink, os.readlink)
+        if (os.name == 'nt' or not NOFOLLOW or not DIRECTORY
+                or not all(call in os.supports_dir_fd for call in needed) or os.scandir not in os.supports_fd):
+            raise Refused('copying without following links is not supported here')
+        root = os.open(source, os.O_RDONLY | DIRECTORY | NOFOLLOW | NONBLOCK | CLOEXEC)
         try:
-            copy_tree(root, out, 0)
+            os.mkdir(target, 0o700)
+            out = os.open(target, os.O_RDONLY | DIRECTORY | NOFOLLOW | CLOEXEC)
+            try:
+                copy_tree(root, out, 0)
+            finally:
+                os.close(out)
         finally:
-            os.close(out)
-    finally:
-        os.close(root)
-    print(json.dumps({'ok': True}), flush=True)
-except Refused as error:
-    print(json.dumps({'ok': False, 'refused': str(error)}), flush=True)
-    sys.exit(3)
-except OSError as error:
-    print(json.dumps({'ok': False, 'error': type(error).__name__}), flush=True)
-    sys.exit(4)
+            os.close(root)
+        print(json.dumps({'ok': True}), flush=True)
+    except Refused as error:
+        print(json.dumps({'ok': False, 'refused': str(error)}), flush=True)
+        sys.exit(3)
+    except OSError as error:
+        print(json.dumps({'ok': False, 'error': type(error).__name__}), flush=True)
+        sys.exit(4)
+
+if __name__ == '__main__':
+    main(sys.argv[1], sys.argv[2])
 `;
 
 function failure(result: RunResult, what: string): ExtensionFailure {
@@ -166,13 +177,34 @@ async function resolveCommit(git: GitRun, checkout: string, revision: string): P
   return COMMIT.test(commit) ? commit : undefined;
 }
 
+/** Whether the clone has `object` as a commit. A full object name is read as that object, never as a ref. */
+async function isCommit(git: GitRun, checkout: string, object: string): Promise<boolean> {
+  const result = await git(['cat-file', '-t', object], checkout);
+  if (result.cancelled || result.timedOut) throw failure(result, 'reading the revision');
+  return lastLine(result) === 'commit';
+}
+
 /**
- * pip's order (`GitVCS.resolve_revision`): a branch of that name, then a tag; a full commit or a
- * `refs/` name the clone does not have is fetched; anything else is taken as a commit-ish.
- * The revision was checked when the request was parsed: it starts with a letter, digit or `_`
- * and has no `..`, so it can be neither an option nor a range.
+ * The commit to check out.
+ *
+ * A full object name (40 or 64 hex digits, as pip's `looks_like_hash`) is that object and
+ * nothing else: a branch or a tag may carry the same name and point at another commit, and
+ * pip's order would pick it. The clone must have it as a commit, fetched by name if needed.
+ *
+ * Any other revision follows pip's order (`GitVCS.resolve_revision`): a branch of that name,
+ * then a tag; a `refs/` name the clone does not have is fetched; anything else is taken as a
+ * commit-ish. The revision was checked when the request was parsed: it starts with a letter,
+ * digit or `_` and has no `..`, so it can be neither an option nor a range.
  */
 async function revisionCommit(git: GitRun, checkout: string, revision: string | undefined): Promise<string> {
+  if (revision !== undefined && COMMIT.test(revision.toLowerCase())) {
+    const object = revision.toLowerCase();
+    if (await isCommit(git, checkout, object)) return object;
+    const fetched = await git(['fetch', '--quiet', 'origin', object], checkout);
+    if (fetched.code !== 0) throw failure(fetched, 'fetching the revision');
+    if (await isCommit(git, checkout, object)) return object;
+    throw new ExtensionFailure('GIT_FETCH_FAILED', ['the requested revision is not in the repository']);
+  }
   const found =
     revision === undefined
       ? await resolveCommit(git, checkout, 'HEAD')
@@ -180,7 +212,7 @@ async function revisionCommit(git: GitRun, checkout: string, revision: string | 
         (await resolveCommit(git, checkout, `refs/tags/${revision}`)) ??
         (revision.startsWith('refs/') ? undefined : await resolveCommit(git, checkout, revision)));
   if (found) return found;
-  if (revision !== undefined && (revision.startsWith('refs/') || COMMIT.test(revision))) {
+  if (revision?.startsWith('refs/')) {
     const fetched = await git(['fetch', '--quiet', 'origin', revision], checkout);
     if (fetched.code !== 0) throw failure(fetched, 'fetching the revision');
     const commit = await resolveCommit(git, checkout, 'FETCH_HEAD');
@@ -268,9 +300,60 @@ export async function checkSubdirectory(checkout: string, subdirectory: string):
   return real;
 }
 
+/** Whether a working tree declares submodules at all: only then can a gitlink in it be initialized. */
+const declaresSubmodules = async (tree: string): Promise<boolean> =>
+  (await lstat(path.join(tree, '.gitmodules')).catch((): undefined => undefined))?.isFile() ?? false;
+
+/** Whether `relative` is a gitlink (a submodule) in the commit checked out in `tree`. Read from Git objects. */
+async function isGitlink(git: GitRun, tree: string, relative: string): Promise<boolean> {
+  const listed = await git(['ls-tree', 'HEAD', '--', relative], tree);
+  if (listed.cancelled || listed.timedOut) throw failure(listed, 'reading the repository tree');
+  return (
+    listed.code === 0 &&
+    listed.output.split('\n').some((line) => {
+      const entry = /^(\d{6}) \w+ [0-9a-f]+\t(.*)$/.exec(line);
+      return entry?.[1] === '160000' && entry[2] === relative;
+    })
+  );
+}
+
+/**
+ * Initialize the submodules the subdirectory needs, and no other. Walking the requested names,
+ * each submodule on the way is initialized alone, one level at a time, and the path walked so
+ * far is checked on disk before the walk goes into it. Once the subdirectory itself is
+ * checked, every submodule inside it is initialized, all levels down. A submodule elsewhere in
+ * the repository is never fetched. Which transports a submodule may use is the environment's
+ * Git policy (HTTPS, and SSH with private Git).
+ */
+async function initializeSubmodules(git: GitRun, clone: string, subdirectory: string): Promise<void> {
+  const parts = subdirectory.split('/');
+  // The working tree the next names are in, and the names walked inside it.
+  let tree = clone;
+  let inside: string[] = [];
+  for (const [index, part] of parts.entries()) {
+    inside.push(part);
+    const relative = inside.join('/');
+    // oxlint-disable-next-line no-await-in-loop -- one level at a time, checked before going further
+    if (!(await declaresSubmodules(tree)) || !(await isGitlink(git, tree, relative))) continue;
+    // oxlint-disable-next-line no-await-in-loop
+    const updated = await git(['submodule', 'update', '--init', '--quiet', '--', relative], tree);
+    if (updated.code !== 0) throw failure(updated, 'fetching a submodule on the way to the subdirectory');
+    // oxlint-disable-next-line no-await-in-loop
+    await checkSubdirectory(clone, parts.slice(0, index + 1).join('/'));
+    tree = path.join(tree, ...inside);
+    inside = [];
+  }
+  // A missing or linked subdirectory is its own fault, not the submodule step's.
+  await checkSubdirectory(clone, subdirectory);
+  if (!(await declaresSubmodules(tree))) return;
+  const within = inside.length > 0 ? ['--', inside.join('/')] : [];
+  const updated = await git(['submodule', 'update', '--init', '--recursive', '--quiet', ...within], tree);
+  if (updated.code !== 0) throw failure(updated, 'fetching the submodules of the subdirectory');
+}
+
 /**
  * Fetch the repository of a git source, check out the requested revision detached and verify
- * it, initialize the submodules inside the subdirectory and check the subdirectory. Then copy
+ * it, initialize the submodules the subdirectory needs and check the subdirectory. Then copy
  * the whole checkout (with its Git metadata, which some builds read) into a new staging
  * directory without following links, remove the clone, and check the subdirectory again in
  * the copy. The copy is what native installs from: nothing that happens to the clone after
@@ -289,14 +372,14 @@ export async function checkoutSubdirectory(
   const suffix = randomBytes(6).toString('hex');
   const clone = path.join(layout.artifacts, `.staging-git-${suffix}`);
   const copy = path.join(layout.artifacts, `.staging-source-${suffix}`);
-  const transcript = new OutputTail(4096);
+  const transcript = new OutputTail(4096, redactUrlCredentials);
   const git: GitRun = async (args, cwd) => {
     const result = await runToExit(
       context.spawn,
       { command: 'git', args, env, cwd },
-      { timeoutMs, signal: context.signal }
+      { timeoutMs, signal: context.signal, redact: true }
     );
-    transcript.push(result.output);
+    transcript.push(result.output + '\n');
     return { ...result, output: result.code === 0 ? result.output : transcript.toString() };
   };
   const discard = async (directory: string): Promise<void> => {
@@ -312,18 +395,8 @@ export async function checkoutSubdirectory(
     );
     if (cloned.code !== 0) throw failure(cloned, 'fetching the repository');
     const commit = await checkoutCommit(git, clone, await revisionCommit(git, clone, revision));
-    // Checked before and after the submodules: a missing path is the subdirectory's fault, not
-    // the submodule step's, and the submodules fill in only gitlinks below a checked directory.
+    await initializeSubmodules(git, clone, source.subdirectory);
     await checkSubdirectory(clone, source.subdirectory);
-    const submodules = await lstat(path.join(clone, '.gitmodules')).catch((): undefined => undefined);
-    if (submodules?.isFile()) {
-      const updated = await git(
-        ['submodule', 'update', '--init', '--recursive', '--quiet', '--', source.subdirectory],
-        clone
-      );
-      if (updated.code !== 0) throw failure(updated, 'fetching the submodules of the subdirectory');
-      await checkSubdirectory(clone, source.subdirectory);
-    }
     await copyWithoutLinks(context, clone, copy, timeoutMs);
     await discard(clone);
     return { directory: await checkSubdirectory(copy, source.subdirectory), commit, staging: copy };

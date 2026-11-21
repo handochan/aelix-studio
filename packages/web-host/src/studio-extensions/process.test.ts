@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { scriptedSpawn } from '../../tests/fixtures/extensionRuntime';
-import { OutputTail, runToExit, spawnChild } from './process';
+import { OutputTail, redactUrlCredentials, runToExit, spawnChild } from './process';
 
 const SPEC = { command: 'python', args: ['-I'], env: {} };
 
@@ -12,6 +12,78 @@ describe('output tail', () => {
     tail.push('abc');
     tail.push('defgh');
     expect(tail.toString()).toBe('defgh');
+  });
+});
+
+describe('masking credentials in output', () => {
+  const URL_TEXT = 'https://alice-user:S3CRETPW@git.example.com/o/r.git';
+  const SECRETS = ['alice-user', 'S3CRETPW'];
+  /** No piece of a secret three characters or longer may survive. */
+  const leaks = (text: string): string[] =>
+    SECRETS.flatMap((secret) =>
+      Array.from({ length: secret.length - 2 }, (_, start) => secret.slice(start, start + 3)).filter((piece) =>
+        text.includes(piece)
+      )
+    );
+  const before = 'fatal: unable to access ';
+  const after = ': Could not resolve host\n';
+  const whole = before + "'" + URL_TEXT + "'" + after;
+  const urlStart = before.length + 1;
+
+  it('masks the user part of HTTP(S) addresses and only the password of others', () => {
+    expect(redactUrlCredentials(whole)).toBe(before + "'https://***@git.example.com/o/r.git'" + after);
+    expect(redactUrlCredentials('ssh://git@host/x ssh://git:pw@host/y git+https://t@h/z')).toBe(
+      'ssh://git@host/x ssh://git:***@host/y git+https://***@h/z'
+    );
+  });
+
+  it('masks before cutting, wherever the cut lands inside the address', () => {
+    for (let offset = 0; offset <= URL_TEXT.length; offset += 1) {
+      const tail = new OutputTail(whole.length - (urlStart + offset), redactUrlCredentials);
+      tail.push(whole);
+      expect([offset, leaks(tail.toString())]).toEqual([offset, []]);
+    }
+  });
+
+  it('masks an address split across chunks at any point, with any cut', () => {
+    for (let split = urlStart; split <= urlStart + URL_TEXT.length; split += 1)
+      for (const limit of [8, 20, 40, whole.length]) {
+        const tail = new OutputTail(limit, redactUrlCredentials);
+        tail.push(whole.slice(0, split));
+        tail.push(whole.slice(split));
+        expect([split, limit, leaks(tail.toString())]).toEqual([split, limit, []]);
+      }
+  });
+
+  it('masks an address that another stream interrupts', () => {
+    const tail = new OutputTail(4096, redactUrlCredentials);
+    const [stdout, stderr] = [tail.stream(), tail.stream()];
+    stdout.push('clone of ' + URL_TEXT.slice(0, 22));
+    stderr.push('warning: interleaved\n');
+    stdout.push(URL_TEXT.slice(22) + ' failed\n');
+    expect(leaks(tail.toString())).toEqual([]);
+    expect(tail.toString()).toContain('https://***@git.example.com/o/r.git failed');
+  });
+
+  it('drops a run without whitespace longer than its window up to the run end', () => {
+    const tail = new OutputTail(4096, redactUrlCredentials, 16);
+    tail.push('start ' + 'x'.repeat(20) + URL_TEXT.slice(0, 10));
+    tail.push(URL_TEXT.slice(10) + ' end');
+    expect(leaks(tail.toString())).toEqual([]);
+    expect(tail.toString()).toBe('start […] end');
+  });
+
+  it('masks what a real child prints in pieces before the result is cut', async () => {
+    const script =
+      'const [a, b] = [process.argv[1].slice(0, 30), process.argv[1].slice(30)];' +
+      'process.stderr.write("fatal: " + a); setTimeout(() => process.stderr.write(b + " end\\n"), 50);';
+    const result = await runToExit(
+      spawnChild,
+      { command: process.execPath, args: ['-e', script, URL_TEXT], env: {} },
+      { timeoutMs: 10_000, tailLimit: 30, redact: true }
+    );
+    expect(leaks(result.output)).toEqual([]);
+    expect(result.output).toBe('*@git.example.com/o/r.git end\n');
   });
 });
 

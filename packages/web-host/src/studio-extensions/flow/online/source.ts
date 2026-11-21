@@ -223,20 +223,6 @@ export async function installedGitOrigin(
   return { distribution, origin: { kind: 'git', url: source.url, commit, indexUrl: source.indexUrl ?? PYPI } };
 }
 
-/**
- * Hide credentials in URLs inside tool output before it reaches a reply: Git prints remote
- * and submodule addresses as the repository wrote them, and those can carry a token. The
- * whole user part of an HTTP(S) address goes (a token is often the user name); elsewhere
- * only a password goes, so `ssh://git@host` still says which account was used.
- */
-export function redactUrlCredentials(text: string): string {
-  return text.replace(/\b([a-z][a-z0-9+.-]*):\/\/([^\s/?#'"<>]*)@/gi, (match, scheme: string, user: string) => {
-    if (/^(?:git\+)?https?$/i.test(scheme)) return `${scheme}://***@`;
-    const colon = user.indexOf(':');
-    return colon < 0 ? match : `${scheme}://${user.slice(0, colon)}:***@`;
-  });
-}
-
 /** pip compares normalized PEP 440 versions and a public pin also accepts local builds. */
 export function matchesVersion(pin: string, installed: string): boolean {
   const wanted = parseVersion(pin);

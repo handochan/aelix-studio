@@ -72,13 +72,7 @@ import { checkImport } from './importCheck.js';
 import { checkoutSubdirectory, type GitCheckout } from './online/checkout.js';
 import { privateGitAccess } from './online/credentials.js';
 import { readSettings, writeSettings, type StoredSettings } from './online/settings.js';
-import {
-  installedCheckoutOrigin,
-  installedGitOrigin,
-  matchesVersion,
-  onlineIndex,
-  redactUrlCredentials,
-} from './online/source.js';
+import { installedCheckoutOrigin, installedGitOrigin, matchesVersion, onlineIndex } from './online/source.js';
 
 export type MutationRequest =
   | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
@@ -146,7 +140,8 @@ function runManagement(
       env,
       cwd,
     },
-    { timeoutMs, signal: context.signal }
+    // Git (in pip) prints remote and submodule addresses as written, which can carry a token.
+    { timeoutMs, signal: context.signal, redact: true }
   );
 }
 
@@ -622,8 +617,6 @@ export async function mutate(
       // The installed files are in the venv now; the lock holder removes the sources.
       if (checkout) await removeFromState(layout, lock, checkout.staging);
     }
-    // Git prints remote and submodule addresses as written, which can carry a token.
-    installer = { ...installer, output: redactUrlCredentials(installer.output) };
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
     // native's "did not run" and "not bound", so every non-zero code is a plain failure.
     if (request.action === 'remove') requireSuccess(installer, { 1: 'INSTALLER_FAILED' }, 'the installer');

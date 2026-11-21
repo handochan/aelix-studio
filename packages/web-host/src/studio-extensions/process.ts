@@ -75,15 +75,89 @@ export function windowsChildSpawn(python: string, launcher: string): Spawn {
     });
 }
 
-/** Keeps the end of a stream of text, cut at a character boundary. */
+/**
+ * Hide credentials in URLs inside tool output before it reaches a reply: Git prints remote
+ * and submodule addresses as the repository wrote them, and those can carry a token. The
+ * whole user part of an HTTP(S) address goes (a token is often the user name); elsewhere
+ * only a password goes, so `ssh://git@host` still says which account was used.
+ */
+export function redactUrlCredentials(text: string): string {
+  return text.replace(/\b([a-z][a-z0-9+.-]*):\/\/([^\s/?#'"<>]*)@/gi, (match, scheme: string, user: string) => {
+    if (/^(?:git\+)?https?$/i.test(scheme)) return `${scheme}://***@`;
+    const colon = user.indexOf(':');
+    return colon < 0 ? match : `${scheme}://${user.slice(0, colon)}:***@`;
+  });
+}
+
+/** One stream feeding an `OutputTail`. */
+export type TailStream = { push(chunk: string): void };
+
+/**
+ * Keeps the end of a stream of text, cut at a character boundary.
+ *
+ * With `redact`, text is masked before anything of it is cut, so a cut can never leave the
+ * rest of a secret that no longer looks like one. A URL holds no whitespace, so each stream
+ * keeps its text after the last whitespace open until more arrives: a URL split across
+ * chunks, or by another stream's output between them, is masked whole. A run without any
+ * whitespace longer than `window` is not kept: it is replaced by a marker up to its end.
+ */
 export class OutputTail {
   private text = '';
-  constructor(private readonly limit: number) {}
-  push(chunk: string): void {
-    this.text = (this.text + chunk).slice(-this.limit);
+  private readonly streams: { open: string; dropping: boolean }[] = [];
+  private readonly fallback: TailStream;
+  constructor(
+    private readonly limit: number,
+    private readonly redact?: (text: string) => string,
+    private readonly window = 64 * 1024
+  ) {
+    this.fallback = this.stream();
   }
+
+  /** A stream of its own: its open end is never mixed with another stream's. */
+  stream(): TailStream {
+    const state = { open: '', dropping: false };
+    this.streams.push(state);
+    return {
+      push: (chunk) => {
+        if (!this.redact) {
+          this.keep(chunk);
+          return;
+        }
+        let rest = chunk;
+        if (state.dropping) {
+          const boundary = rest.search(/\s/);
+          if (boundary < 0) return;
+          state.dropping = false;
+          rest = rest.slice(boundary);
+        }
+        state.open += rest;
+        // The last whitespace: what ends there is complete, since no URL goes on across it.
+        const end = state.open.search(/\s\S*$/);
+        if (end >= 0) {
+          this.keep(this.redact(state.open.slice(0, end + 1)));
+          state.open = state.open.slice(end + 1);
+        }
+        if (state.open.length > this.window) {
+          this.keep('[…]');
+          state.open = '';
+          state.dropping = true;
+        }
+      },
+    };
+  }
+
+  push(chunk: string): void {
+    this.fallback.push(chunk);
+  }
+
+  private keep(text: string): void {
+    this.text = (this.text + text).slice(-this.limit);
+  }
+
   toString(): string {
-    return this.text;
+    if (!this.redact) return this.text;
+    const open = this.streams.map((state) => this.redact?.(state.open) ?? '').join('');
+    return (this.text + open).slice(-this.limit);
   }
 }
 
@@ -92,6 +166,8 @@ export type RunOptions = {
   signal?: AbortSignal;
   /** How much of the combined output to keep. */
   tailLimit?: number;
+  /** Mask credentials in URLs (`redactUrlCredentials`) before the output is cut to its tail. */
+  redact?: boolean;
   /** Written to the child once it has started. The input stays open until `closeInput` says so. */
   input?: string;
   /** Called per complete stdout line; return true to close the input and let the child finish. */
@@ -116,7 +192,8 @@ export type RunResult = {
  * still waits for the exit, so nothing is left writing when the caller cleans up.
  */
 export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptions): Promise<RunResult> {
-  const tail = new OutputTail(options.tailLimit ?? 4096);
+  const tail = new OutputTail(options.tailLimit ?? 4096, options.redact ? redactUrlCredentials : undefined);
+  const [stdout, stderr] = [tail.stream(), tail.stream()];
   if (options.signal?.aborted)
     return { code: null, output: '', timedOut: false, cancelled: true, failedToStart: false };
   const child = spawn(spec);
@@ -140,7 +217,7 @@ export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptio
   let pending = '';
   let inputOpen = true;
   child.onStdout((chunk) => {
-    tail.push(chunk);
+    stdout.push(chunk);
     if (!options.closeInput || !inputOpen) return;
     pending += chunk;
     let end: number;
@@ -159,7 +236,7 @@ export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptio
       stop();
     }
   });
-  child.onStderr((chunk) => tail.push(chunk));
+  child.onStderr((chunk) => stderr.push(chunk));
   if (options.input !== undefined) child.write(options.input);
   if (!options.closeInput) child.end();
   try {

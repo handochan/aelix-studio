@@ -521,8 +521,10 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   사용자 SSH 설정의 `ProxyCommand`·`ProxyJump`가 적용된다). 로드 검증과 대화의 확장 코드, 표준 변수를
   무시하는 빌드 코드도 덮지 못한다. 파일 반입은 proxy 설정과 무관하게 죽은 proxy를 유지한다(5.9).
   사용자 이름·비밀번호가 든 주소는 지금 `PROXY_CREDENTIALS_UNSUPPORTED`로 거절한다. 저장 방식은 사용자가
-  정했다(2026-11-21): OS 키체인에 두고, 키체인이 없는 곳에서는 설치할 때마다 입력받아 메모리에만 둔다. 이
-  PR 다음의 후속 PR에서 구현하고 그때까지 거절한다. 거절 응답과 로그에는 입력한 주소를 넣지 않는다. **[실행: 번들 pip과
+  정했다(2026-11-21). 데스크톱(Electron) 앱은 proxy 인증 정보를 Electron `safeStorage`로 암호화해 저장한다.
+  `safeStorage`가 Linux에서 `basic_text`(OS 비밀 저장소 없음)로 동작하는 경우와 별도 WebUI는 저장하지 않고,
+  설치·업데이트 때마다 묻고 그 값을 메모리에만 둔다. 이것은 #97 다음의 후속 PR에서 구현한다. 그때까지 #97은
+  인증 정보가 든 주소를 거절한다. 거절 응답과 로그에는 입력한 주소를 넣지 않는다. **[실행: 번들 pip과
   native로 loopback proxy를 거친 이름 설치, 시스템 proxy 주입과 환경 `HTTP_PROXY` 무시, Git HTTPS CONNECT]**
 - **비공개 Git.** [같은 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로 기본
   꺼짐이다. 꺼져 있으면 위의 격리 그대로다. 켜도 이름 설치는 PR #77의 격리 그대로다(로그인할 저장소가 없다).
@@ -543,29 +545,35 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   여전히 pip 실행 전에 거절한다. 필드는 `/`로 이은 일반 이름만 받는다(`.`·`..`·빈 이름·절대 경로·드라이브·
   역슬래시·`.git`·`-`로 시작하는 이름 거절). 처리는 다음 순서다.
   1. Studio가 git source 설치 도구와 같은 환경으로 저장소를 보관소의 staging 디렉터리(`artifacts/.staging-git-…`)에
-     clone하고 pip과 같은 순서로 revision을 고른다(branch, tag, commit, 없는 전체 commit과 `refs/`는 fetch).
+     clone하고 revision을 고른다. 전체 object 이름(16진수 40·64자리)은 그 object 자체다. 같은 이름의 branch나
+     tag가 다른 commit을 가리킬 수 있으므로 ref로 읽지 않고, clone에 commit으로 있는지 보고 없으면 그 이름으로
+     fetch한다. 그 밖에는 pip과 같은 순서다(branch, tag, commit, 없는 `refs/`는 fetch).
   2. 고른 commit을 `git checkout --detach <object>^{commit}`으로 checkout한다. 일반 `git checkout <이름>`은 같은
      이름의 로컬 branch를 먼저 고르는데, 저장소가 기본 branch 이름을 다른 commit의 object 이름으로 지을 수
      있다. 그 뒤 `git rev-parse HEAD`가 고른 commit과 정확히 같아야 하고, 출처에는 이렇게 확인한 commit을 적는다.
-  3. 요청한 하위 경로 안의 submodule만 초기화한다(`git submodule update --init --recursive -- <하위 경로>`). 나머지
-     submodule은 빌드되지 않으므로 그 주소에는 접속하지 않는다. 하위 경로가 submodule 안에 있으면 초기화되지
-     않아 거절된다.
+  3. 하위 경로에 필요한 submodule만 초기화한다. 요청한 이름을 따라가며 경로 위의 submodule(Git 객체에서
+     gitlink인지 본다)을 하나씩, 한 단계씩 초기화하고, 단계마다 그때까지의 경로를 4의 방식으로 확인한 뒤 그
+     안으로 들어간다. 하위 경로를 확인한 뒤에는 그 안의 submodule을 모두 초기화한다. 경로 밖의 submodule은
+     빌드되지 않으므로 그 주소에는 접속하지 않는다.
   4. 실제 파일 시스템에서 checkout 루트가 경로대로의 실제 디렉터리인지, 경로의 이름마다 `lstat`으로 링크가 아닌
      디렉터리인지, `realpath`가 checkout 실제 루트에 요청한 이름을 이은 경로와 정확히 같은지 본다(대소문자를
      무시하는 파일 시스템의 다른 표기도 거절).
   5. checkout 전체(Git 메타데이터 포함, 저장소에서 버전을 읽는 빌드가 있다)를 새 staging 디렉터리
      (`artifacts/.staging-source-…`)에 복사한다. 복사는 번들 Python이 `openat` 방식으로 한다. 이름마다 부모의
      descriptor를 기준으로 `O_NOFOLLOW`로 열므로, 복사 중에 디렉터리나 파일이 링크로 바뀌면 따라가지 않고
-     실패한다. 링크는 Git이 checkout한 그대로 링크로 복사하고 가리키는 것은 읽지 않는다. 파일·디렉터리·링크가
-     아닌 것은 거절한다. clone은 lock holder가 지운다.
+     실패한다. 파일은 `O_NONBLOCK`으로 열고 연 descriptor를 `fstat`해 일반 파일일 때만 읽는다. 목록을 읽은 뒤
+     FIFO로 바뀐 이름도 기다리지 않고 거절한다. 링크는 Git이 checkout한 그대로 링크로 복사하고 가리키는 것은
+     읽지 않는다. 파일·디렉터리·링크가 아닌 것은 거절한다. Windows에서는 복사를 거절한다(`dir_fd` 열기가 없고
+     git 설치도 내지 않는다). clone은 lock holder가 지운다.
   6. 복사본에서 4의 확인을 다시 하고 그 디렉터리를 native에 로컬 경로로 넘긴다. 설치가 끝나면 lock holder가
      복사본을 지운다. 중단으로 남은 staging은 다음 변경의 복구가 지운다.
 
   확인한 뒤 clone이 바뀌어도 설치되는 것은 확인한 복사본이다. 출처 대조는 그 디렉터리를 기록한 PEP 610
   `dir_info`가 하나인지 보고, 출처 기록에는 저장소 URL, 확인한 commit, 하위 경로를 남긴다. 실패 코드는
   `GIT_FETCH_FAILED`와 `SUBDIRECTORY_INVALID`다. **[실행: 실제 Git과 Python으로 링크 탈출·내부 링크·중간
-  링크·파일·없음·대소문자·링크 루트·특수 파일 거절, commit 이름의 branch, HEAD 불일치, 하위 경로 안의
-  submodule만 초기화, 번들 native·pip으로 in-tree backend 설치]**
+  링크·파일·없음·대소문자·링크 루트·특수 파일 거절, 목록 뒤 FIFO로 바뀐 이름, commit 이름의 branch, 요청한
+  전체 commit 이름의 branch·tag, HEAD 불일치, 중첩 submodule 안의 하위 경로와 필요한 submodule만 초기화, 번들
+  native·pip으로 in-tree backend 설치]**
 
 - **Git 전송 정책.** 이름·git 설치 도구와 Studio fetch의 Git에 `protocol.allow=never`,
   `protocol.https.allow=always`, `protocol.ssh.allow=user`(비공개 Git이면 `always`), `protocol.git.allow=user`,
@@ -576,7 +584,10 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   거절, 켜지면 연결. `git://`·`file`은 켜져도 거절. 평문 HTTP는 요청 저장소에도 거절]**
 - **출력의 인증 정보.** Git은 원격과 submodule 주소를 저장소에 적힌 그대로 출력하고, 그 주소에 token이 있을
   수 있다. 응답에 넣는 Git·설치 도구 출력에서 HTTP(S) 주소의 사용자 부분 전체와 다른 scheme의 비밀번호를
-  `***`로 바꾼다. **[실행: 단위 시험]**
+  `***`로 바꾼다. 출력의 끝부분만 남기기 전에 먼저 가린다. 자른 뒤에 가리면 잘린 자리가 주소 안일 때 남은
+  비밀번호 조각이 주소처럼 보이지 않아 그대로 나갔다. stdout·stderr마다 마지막 공백 뒤의 내용은 다음 출력이 올
+  때까지 열어 두어, 여러 조각이나 다른 stream 사이로 나뉜 주소도 통째로 가린다. 공백 없이 64 KiB를 넘는 덩어리는
+  표시로 바꾼다. **[실행: 단위 시험. 주소 안 모든 위치에서 자르기와 나누기, 실제 자식 프로세스]**
 - 온라인 설치의 접속 대상을 제한하는 수단은 지금 없다. wheel만 받거나 받은 뒤에 검사하는 것은 접속 대상을
   제한하는 것이 아니다. 받는 동안 이미 접속한다. 어떻게 낼지는 사용자 결정이고, 내되 설정으로 끌 수
   있게 하기로 정해졌다(8.2의 A3).
@@ -994,6 +1005,12 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
 것을 링크를 따라가지 않는 복사본 설치로 닫고, checkout 정리를 lock holder로 옮겼다. submodule은 하위 경로 안의
 것만 초기화하고 Git 전송 정책으로 submodule 전송을 HTTPS(비공개 Git이면 SSH도)로 묶었다. Git 출력의 인증 정보를
 가린다. 각 지적에 회귀 시험을 더했다.
+
+**2026-11-21, 같은 리뷰어의 재확인(blocking 2, should-fix 2, nit 1).** 요청한 전체 commit 이름을 같은 이름의
+branch·tag가 아니라 그 object로만 읽는다. 출력은 자르기 전에 가리고 stream마다 이어지는 주소를 기다린다.
+복사는 파일을 `O_NONBLOCK`으로 열고 descriptor로 종류를 확인한다. submodule 안의 하위 경로를 다시 지원한다(경로
+위 submodule을 한 단계씩). proxy 인증 정보의 후속 결정(`safeStorage`, `basic_text`·별도 WebUI는 매번 묻고
+메모리만)을 적었다. commit 이름 문제는 고치기 전에 시험으로 재현했다.
 
 **2026-11-18, launcher 조각(구현)과 독립 리뷰.** 대화가 설치한 확장을 받는 경로를 구현했다. 세대 선택과
 lease는 `launch.py acp`(7.4), 상태 디렉터리는 환경 변수로 알린다(7.4). 잠금 없는 lease 경로와 그 불변식,

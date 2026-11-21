@@ -10,7 +10,7 @@ import { spawnChild, type Spawn } from '../../process';
 import { layoutOf, type Bundle, type Layout } from '../../store/layout';
 import { ExtensionFailure } from '../../types';
 import { baseEnvironment, managementEnvironment } from '../environment';
-import { checkSubdirectory, checkoutSubdirectory, copyWithoutLinks } from './checkout';
+import { checkSubdirectory, checkoutSubdirectory, COPY_SOURCE, copyWithoutLinks } from './checkout';
 
 const run = promisify(execFile);
 /** The no-follow copy is plain Python; the system interpreter runs it as the bundled one would. */
@@ -158,6 +158,24 @@ describe.skipIf(process.platform === 'win32' || !PYTHON)('fetching a git source 
     expect(await readFile(path.join(checkout.directory, 'which'), 'utf8')).toBe('selected\n');
   });
 
+  it('takes a requested full commit as that object, even when a branch and a tag carry its name', async () => {
+    const shadowed = path.join(scratch, 'shadowed');
+    await git(scratch, 'init', '--quiet', '--initial-branch=main', shadowed);
+    await mkdir(path.join(shadowed, 'pkg'));
+    await writeFile(path.join(shadowed, 'pkg', 'which'), 'requested\n');
+    await git(shadowed, 'add', '-A');
+    await git(shadowed, 'commit', '--quiet', '-m', 'requested');
+    const requested = await git(shadowed, 'rev-parse', 'HEAD');
+    await writeFile(path.join(shadowed, 'pkg', 'which'), 'impostor\n');
+    await git(shadowed, 'commit', '--quiet', '-am', 'impostor');
+    // Both names pip would look up first point at the impostor commit.
+    await git(shadowed, 'branch', requested, 'HEAD');
+    await git(shadowed, 'tag', requested, 'HEAD');
+    const checkout = await fetch('pkg', '@' + requested, { url: pathToFileURL(shadowed).href });
+    expect(checkout.commit).toBe(requested);
+    expect(await readFile(path.join(checkout.directory, 'which'), 'utf8')).toBe('requested\n');
+  });
+
   it('refuses a checkout whose HEAD is not the selected commit', async () => {
     await clearStaging();
     const answers: Record<string, string> = {
@@ -238,6 +256,43 @@ describe.skipIf(process.platform === 'win32' || !PYTHON)('fetching a git source 
     ]);
   });
 
+  it('refuses, without waiting, a name that turned into a FIFO between listing and opening', async () => {
+    const tree = path.join(scratch, 'fifo-race');
+    await mkdir(tree);
+    await run('mkfifo', [path.join(tree, 'late')]);
+    // The listing says regular file (as it did before the swap); the open must decide.
+    const harness = `
+import os, signal, stat, sys
+namespace = {'__name__': 'copy_test'}
+exec(sys.argv[1], namespace)
+real = os.stat
+def listed(name, *args, **kwargs):
+    info = real(name, *args, **kwargs)
+    if name == 'late':
+        return os.stat_result((stat.S_IFREG | 0o644,) + tuple(info)[1:])
+    return info
+namespace['os'].stat = listed
+signal.alarm(5)
+src = os.open(sys.argv[2], os.O_RDONLY | os.O_DIRECTORY)
+os.mkdir(sys.argv[3])
+dst = os.open(sys.argv[3], os.O_RDONLY | os.O_DIRECTORY)
+try:
+    namespace['copy_tree'](src, dst, 0)
+    print('copied')
+except namespace['Refused'] as error:
+    print('refused:', error)
+`;
+    const { stdout } = await run(
+      PYTHON ?? 'python3',
+      ['-I', '-S', '-B', '-c', harness, COPY_SOURCE, tree, path.join(scratch, 'fifo-copy')],
+      {
+        timeout: 15_000,
+      }
+    );
+    expect(stdout.trim()).toBe('refused: an entry of the repository changed while it was copied');
+    expect(await readdir(path.join(scratch, 'fifo-copy'))).toEqual([]);
+  });
+
   it('reports a revision the repository does not have as a fetch failure', async () => {
     expect((await refusal(fetch('packages/demo', '@no-such-branch'))).code).toBe('GIT_FETCH_FAILED');
     expect((await refusal(fetch('packages/demo', '@' + 'a'.repeat(40)))).code).toBe('GIT_FETCH_FAILED');
@@ -308,6 +363,80 @@ describe.skipIf(process.platform === 'win32' || !PYTHON)('fetching a git source 
       const checkout = await fetch('pkg', '', { env: allowFile(), url: pathToFileURL(parent).href });
       expect(await readFile(path.join(checkout.directory, 'vendor', 'lib', 'code.py'), 'utf8')).toBe('inner\n');
       expect(await readdir(path.join(checkout.staging, 'unrelated'))).toEqual([]);
+    });
+
+    describe('a subdirectory inside a submodule', () => {
+      let nested = '';
+      beforeAll(async () => {
+        // nested: vendor -> middle (pkg/, pkg/deep -> deepest, other -> other-of-middle, escape -> outside)
+        const deepest = await submodule('deepest-module', { 'code.py': 'deepest\n' });
+        const otherOfMiddle = await submodule('other-of-middle', { readme: 'not needed\n' });
+        const middle = path.join(scratch, 'middle-module');
+        await mkdir(path.join(middle, 'pkg'), { recursive: true });
+        await writeFile(path.join(middle, 'pkg', 'pyproject.toml'), '[project]\nname = "middle"\n');
+        await symlink(outside, path.join(middle, 'escape'));
+        await git(scratch, 'init', '--quiet', '--initial-branch=main', middle);
+        const addTo = (repository: string, url: string, where: string) =>
+          git(repository, '-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', url, where);
+        await addTo(middle, deepest, 'pkg/deep');
+        await addTo(middle, otherOfMiddle, 'other');
+        await git(middle, 'add', '-A');
+        await git(middle, 'commit', '--quiet', '-m', 'middle');
+        const unrelated = await submodule('unrelated-of-nested', { readme: 'not needed\n' });
+        nested = path.join(scratch, 'nested');
+        await mkdir(nested);
+        await writeFile(path.join(nested, 'README'), 'nested\n');
+        await git(scratch, 'init', '--quiet', '--initial-branch=main', nested);
+        await addTo(nested, pathToFileURL(middle).href, 'vendor');
+        await addTo(nested, unrelated, 'unrelated');
+        await git(nested, 'add', '-A');
+        await git(nested, 'commit', '--quiet', '-m', 'nested');
+      }, 60_000);
+      const fetchNested = (subdirectory: string) =>
+        fetch(subdirectory, '', { env: allowFile(), url: pathToFileURL(nested).href });
+
+      it('initializes the submodules on the way, then those inside it, and no other', async () => {
+        const checkout = await fetchNested('vendor/pkg');
+        expect(await readFile(path.join(checkout.directory, 'pyproject.toml'), 'utf8')).toContain('middle');
+        expect(await readFile(path.join(checkout.directory, 'deep', 'code.py'), 'utf8')).toBe('deepest\n');
+        expect(await readdir(path.join(checkout.staging, 'vendor', 'other'))).toEqual([]);
+        expect(await readdir(path.join(checkout.staging, 'unrelated'))).toEqual([]);
+      });
+
+      it('takes a submodule as the subdirectory with every submodule inside it', async () => {
+        const checkout = await fetchNested('vendor');
+        expect(await readFile(path.join(checkout.directory, 'pkg', 'deep', 'code.py'), 'utf8')).toBe('deepest\n');
+        expect(await readFile(path.join(checkout.directory, 'other', 'readme'), 'utf8')).toBe('not needed\n');
+        expect(await readdir(path.join(checkout.staging, 'unrelated'))).toEqual([]);
+      });
+
+      it('still refuses a link inside the submodule and a missing name in it', async () => {
+        expect((await refusal(fetchNested('vendor/escape'))).detail).toEqual([
+          'the subdirectory passes through a link',
+        ]);
+        expect((await refusal(fetchNested('vendor/missing'))).detail).toEqual([
+          'the subdirectory does not exist in the repository',
+        ]);
+      });
+
+      it('keeps the transport policy for submodules on the way', async () => {
+        const policy = managementEnvironment(
+          baseEnvironment({ PATH: '/usr/bin:/bin' }, process.platform),
+          process.platform,
+          {
+            agentDirectory: path.join(scratch, 'agent'),
+            nativeSite: '/bundle/native-site',
+            constraintsUrl: 'file:///constraints.txt',
+            online: { indexUrl: 'https://index.invalid/simple/', home: path.join(scratch, 'home'), work: scratch },
+          }
+        );
+        const failure = await refusal(fetch('vendor/pkg', '', { env: policy, url: pathToFileURL(nested).href }));
+        expect([failure.code, failure.detail]).toEqual([
+          'GIT_FETCH_FAILED',
+          ['fetching a submodule on the way to the subdirectory ended with exit code 1'],
+        ]);
+        expect(failure.output).toMatch(/transport 'file' not allowed/);
+      });
     });
 
     it('fetches no submodule over a transport the installer policy keeps from submodules', async () => {
