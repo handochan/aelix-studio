@@ -1,0 +1,26 @@
+[
+  {
+    "name": "an uploaded image without additional text",
+    "message": "",
+    "paths": ["/host/upload/그림 사진.png"],
+    "sessions": [],
+    "expected": "\n\n[[AION_FILES]]\n/host/upload/그림 사진.png",
+    "image": true
+  },
+  {
+    "name": "a conversation ref on its own",
+    "message": "",
+    "paths": [],
+    "sessions": ["same"],
+    "expected": "\n\n[[AION_SESSIONS]]\nTo deliver to the conversations below, use the session-message skill (address by conversation id); if it is unavailable, run `\"$AIONUI_HELPER_BIN\" session capabilities` for the delivery contract.\nRenamed target\tsame\tworkspace: same\n[[/AION_SESSIONS]]",
+    "image": false
+  },
+  {
+    "name": "mixed project, local, and conversation references",
+    "message": "  check these  ",
+    "paths": ["/host/자료 디렉터리", "C:\\검증 폴더\\file.txt"],
+    "sessions": ["same", "other", "unknown"],
+    "expected": "  check these  \n\n[[AION_SESSIONS]]\nTo deliver to the conversations below, use the session-message skill (address by conversation id); if it is unavailable, run `\"$AIONUI_HELPER_BIN\" session capabilities` for the delivery contract.\nRenamed target\tsame\tworkspace: same\nOther  target\tother\tworkspace: /other root (differs from yours)\nUnbound\tunknown\tworkspace: unknown (differs from yours)\n[[/AION_SESSIONS]]\n\n[[AION_FILES]]\n/host/자료 디렉터리\nC:\\검증 폴더\\file.txt",
+    "image": false
+  }
+]

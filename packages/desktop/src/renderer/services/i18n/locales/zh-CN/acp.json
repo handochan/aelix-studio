@@ -65,5 +65,40 @@
       "ended": "回合已结束，未报告最终状态"
     },
     "elapsedReported": "上次报告耗时：{{value}} 秒"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "输入如何送达正在运行的轮次",
+      "steer": "引导",
+      "steerHint": "智能体会在本轮的下一步读取它。",
+      "followUp": "后续",
+      "followUpHint": "智能体会在完成本次回答后读取它。"
+    },
+    "queued": "已进入队列 · {{modes}}",
+    "queuedEnded": "已进入队列 · 未确认已处理的输入可能会在下一条提示中处理",
+    "queuedStopped": "已进入队列 · 停止后是否处理未确认",
+    "pending": "正在发送{{mode}}…",
+    "unknown": "{{mode}}：结果未知。草稿已保留，请先确认再重新发送。",
+    "rejected": "{{mode}}未进入队列：{{reason}}。草稿已保留。",
+    "reason": {
+      "staleTurn": "该轮次已结束",
+      "dedupCapacity": "等待中的输入过多",
+      "rateLimited": "请求过多，请稍后再试",
+      "tooLarge": "输入过大",
+      "sessionChanged": "会话已变更",
+      "failed": "无法送达"
+    },
+    "check": "确认",
+    "checkPending": "输入仍在送达中。",
+    "checkUnconfirmed": "无法确认结果，已重新加载对话。",
+    "dismiss": "关闭",
+    "dismissAll": "全部关闭",
+    "referencesUnverified": "无法验证附件或会话引用，已保留草稿。",
+    "preparationChanged": "验证引用时，运行中的轮次发生了变化，已保留草稿。",
+    "inputTooLarge": "运行中输入超过 64 KiB，已保留草稿。",
+    "imagesAsPaths": "轮次运行时，图片以文件路径发送。",
+    "previousSending": "上一条输入仍在发送中。草稿已保留。",
+    "invalidText": "输入为空或无效，已保留草稿。",
+    "ordinaryBusyKept": "另一轮次已先开始。消息和附件已保留。"
   }
 }

@@ -65,5 +65,40 @@
       "ended": "Turno encerrado; estado final não informado"
     },
     "elapsedReported": "Último tempo informado: {{value}} s"
+  },
+  "runningInput": {
+    "mode": {
+      "label": "Como a entrada chega ao turno em execução",
+      "steer": "Direcionar",
+      "steerHint": "O agente lê isso no próximo passo deste turno.",
+      "followUp": "Continuação",
+      "followUpHint": "O agente lê isso depois de terminar esta resposta."
+    },
+    "queued": "Na fila · {{modes}}",
+    "queuedEnded": "Na fila · Entradas sem consumo confirmado podem ser tratadas no próximo prompt",
+    "queuedStopped": "Na fila · Não confirmado se foi tratada após Parar",
+    "pending": "Enviando {{mode}}…",
+    "unknown": "{{mode}}: resultado desconhecido. Seu rascunho foi mantido; verifique antes de enviar de novo.",
+    "rejected": "{{mode}} não entrou na fila: {{reason}}. Seu rascunho foi mantido.",
+    "reason": {
+      "staleTurn": "o turno já terminou",
+      "dedupCapacity": "há entradas demais aguardando",
+      "rateLimited": "solicitações demais, tente novamente em instantes",
+      "tooLarge": "a entrada é grande demais",
+      "sessionChanged": "a sessão mudou",
+      "failed": "não foi possível entregar"
+    },
+    "check": "Verificar",
+    "checkPending": "A entrada ainda está sendo entregue.",
+    "checkUnconfirmed": "Não foi possível confirmar o resultado. A conversa foi recarregada.",
+    "dismiss": "Dispensar",
+    "dismissAll": "Dispensar tudo",
+    "referencesUnverified": "Não foi possível verificar um anexo ou uma referência de conversa. Seu rascunho foi mantido.",
+    "preparationChanged": "O turno em andamento mudou durante a verificação das referências. Seu rascunho foi mantido.",
+    "inputTooLarge": "A entrada para o turno em andamento excede 64 KiB. Seu rascunho foi mantido.",
+    "imagesAsPaths": "Durante um turno em andamento, as imagens são enviadas como caminhos de arquivo.",
+    "previousSending": "A entrada anterior ainda está sendo enviada. Seu rascunho foi mantido.",
+    "invalidText": "A entrada está vazia ou é inválida. Seu rascunho foi mantido.",
+    "ordinaryBusyKept": "Outro turno começou antes. Sua mensagem e seus anexos foram mantidos."
   }
 }

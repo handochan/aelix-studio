@@ -215,6 +215,7 @@ export type SessionMentionableParams = {
    *  earlier message, where the chip's name may be stale and the target may have
    *  become ineligible since. */
   id?: string;
+  privateRead?: boolean;
 };
 
 export type SessionMessageRateLimitedPayload = {
@@ -233,16 +234,21 @@ export const sessionMessage = {
   rateLimited: wsEmitter<SessionMessageRateLimitedPayload>('sessionMessage.rateLimited'),
 };
 
+const privateReadOptions = { omitDiagnostics: true, refreshAuth: false, timeoutMs: 10_000 };
+
 export const sessionMention = {
-  list: httpGet<{ items: SessionMentionTarget[]; next_cursor?: string }, SessionMentionableParams>((p) => {
-    const params = new URLSearchParams({ current_conversation_id: p.current_conversation_id });
-    if (p.q) params.set('q', p.q);
-    if (p.project_id) params.set('project_id', p.project_id);
-    if (p.limit) params.set('limit', String(p.limit));
-    if (p.cursor) params.set('cursor', p.cursor);
-    if (p.id) params.set('id', p.id);
-    return `/api/session-messages/mentionable?${params.toString()}`;
-  }),
+  list: httpGet<{ items: SessionMentionTarget[]; next_cursor?: string }, SessionMentionableParams>(
+    (p) => {
+      const params = new URLSearchParams({ current_conversation_id: p.current_conversation_id });
+      if (p.q) params.set('q', p.q);
+      if (p.project_id) params.set('project_id', p.project_id);
+      if (p.limit) params.set('limit', String(p.limit));
+      if (p.cursor) params.set('cursor', p.cursor);
+      if (p.id) params.set('id', p.id);
+      return `/api/session-messages/mentionable?${params.toString()}`;
+    },
+    (p) => (p.privateRead ? privateReadOptions : {})
+  ),
 };
 
 // ---------------------------------------------------------------------------
@@ -302,7 +308,10 @@ export const conversation = {
     fromApiConversation
   ),
   get: withResponseMap(
-    httpGet<TChatConversation, { id: string }>((p) => `/api/conversations/${p.id}`, { silentStatuses: [404] }),
+    httpGet<TChatConversation, { id: string; privateRead?: boolean }>(
+      (p) => `/api/conversations/${encodeURIComponent(p.id)}`,
+      (p) => (p.privateRead ? privateReadOptions : { silentStatuses: [404] })
+    ),
     fromApiConversation
   ),
   getAssociateConversation: withResponseMap(
@@ -913,7 +922,11 @@ export const fs = {
   // Metadata for a ChatFileRef-addressed file; backend snake_case is mapped to the
   // camelCase IFileMetadata the preview layer reads. POST /api/fs/content/metadata.
   getContentMetadata: withResponseMap(
-    httpPost<RawFileMetadata, { file: ChatFileRef }>('/api/fs/content/metadata'),
+    httpPost<RawFileMetadata, { file: ChatFileRef; privateRead?: boolean }>(
+      '/api/fs/content/metadata',
+      ({ file }) => ({ file }),
+      (p) => (p.privateRead ? privateReadOptions : {})
+    ),
     fromBackendFileMetadata
   ),
   // Import OS files into a project entry's directory (A-paste). `target` is the
