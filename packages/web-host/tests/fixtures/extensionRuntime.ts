@@ -326,17 +326,21 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
   };
   return scriptedSpawn((spec, child) => {
     const { args } = spec;
-    if (spec.command === 'git') {
-      if (options.git) return options.git(spec, child);
-      const real = spawnChild(spec);
+    /** Hand the call to a real process and pass everything back. */
+    const bridge = (real: Child): void => {
       real.onStdout((chunk) => child.print(chunk));
       real.onStderr((chunk) => child.complain(chunk));
       child.onEnd = () => real.end();
       child.onKill = (signal) => real.kill(signal);
       void real.exited.then((exit) => child.exit(exit.code, exit.signal, exit.failedToStart));
-      return;
+    };
+    if (spec.command === 'git') {
+      if (options.git) return options.git(spec, child);
+      return bridge(spawnChild(spec));
     }
     const inline = args.includes('-c') ? args[args.indexOf('-c') + 1] : '';
+    // Studio's no-follow tree copy is plain Python; the system's runs it as the bundle's would.
+    if (inline.includes('aelix-studio-copy-tree')) return bridge(spawnChild({ ...spec, command: 'python3' }));
     if (inline.includes('try_lock')) {
       const mode = args[args.indexOf('-c') + 2];
       if (mode === 'hold') {

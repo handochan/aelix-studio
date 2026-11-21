@@ -187,6 +187,15 @@ export function managementEnvironment(
     const gitConfig: [string, string][] = [
       ['credential.helper', ''],
       ['http.proxy', access?.proxy ?? ''],
+      // Transports. `user` allows one only for what the user asked for (the repository of the
+      // request), never for a submodule a repository declares: Git marks submodule commands as
+      // not from the user. Submodules may use HTTPS, which goes through the proxy, and SSH only
+      // with private Git; `git://`, plain HTTP, local paths and helpers are never theirs.
+      ['protocol.allow', 'never'],
+      ['protocol.https.allow', 'always'],
+      ['protocol.ssh.allow', privateGit ? 'always' : 'user'],
+      ['protocol.git.allow', 'user'],
+      ['protocol.file.allow', 'user'],
       ...(privateGit?.credentials ?? []),
     ];
     Object.assign(environment, {

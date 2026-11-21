@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises';
+import { constants, lstat, open } from 'node:fs/promises';
 import path from 'node:path';
 import { writeTemporary, type Layout } from '../../store/layout.js';
 import type { StateWriter } from '../../store/lock.js';
@@ -16,6 +16,9 @@ import { ExtensionFailure, type ExtensionSettings } from '../../types.js';
 
 const SETTINGS_SCHEMA = 'aelix.studio.extensions.settings/1';
 const SIZE_LIMIT = 64 * 1024;
+
+/** The authority of a proxy as typed: a host name or a bracketed IPv6 address, and an optional port. */
+const PROXY_AUTHORITY = /^(?:\[[0-9a-f:.]+\]|[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?)(?::(\d{1,5}))?$/i;
 
 /** What applies until the user changes anything. */
 export const DEFAULT_SETTINGS: Readonly<ExtensionSettings> = Object.freeze({
@@ -50,17 +53,23 @@ export function normalizeProxy(value: unknown): string {
     new ExtensionFailure('INVALID_PROXY', ['the proxy must be an http:// or https:// address of a host and a port']);
   // oxlint-disable-next-line no-control-regex -- reject characters URL parsing can silently discard.
   if (typeof value !== 'string' || value.length > 2048 || /[\s\\\x00-\x1f\x7f]/.test(value)) throw invalid();
-  const scheme = /^(https?):\/\//i.exec(value);
-  if (!scheme) throw invalid();
-  // Look at the authority as typed: URL parsing drops an empty user part such as `http://@host`.
-  const authority = value.slice(scheme[0].length).split(/[/?#]/, 1)[0];
-  if (authority.includes('@'))
-    throw new ExtensionFailure('PROXY_CREDENTIALS_UNSUPPORTED', [
+  const credentials = (): ExtensionFailure =>
+    new ExtensionFailure('PROXY_CREDENTIALS_UNSUPPORTED', [
       'a proxy address with a user name or password cannot be stored yet',
     ]);
+  const scheme = /^(https?):\/\//i.exec(value);
+  if (!scheme) throw invalid();
+  // Look at the authority as typed, before URL parsing: it drops an empty user part such as
+  // `http://@host` and skips extra slashes, so `http:///user:pass@host` would lose the
+  // credentials without a trace. Only a plain host and port are taken; nothing is repaired.
+  const authority = value.slice(scheme[0].length).split(/[/?#]/, 1)[0];
+  if (authority.includes('@')) throw credentials();
+  const typed = PROXY_AUTHORITY.exec(authority);
+  if (!typed) throw invalid();
+  if (typed[1] !== undefined && (Number(typed[1]) < 1 || Number(typed[1]) > 65535)) throw invalid();
   const url = URL.parse(value);
-  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname || url.hostname.startsWith('-'))
-    throw invalid();
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw invalid();
+  if (url.username || url.password) throw credentials();
   if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) throw invalid();
   return `${url.protocol}//${url.host}`;
 }
@@ -94,16 +103,30 @@ function parseStored(text: string): ExtensionSettings | undefined {
  * Reads only; nothing is created. Safe without the lock: the file is replaced whole.
  */
 export async function readSettings(layout: Layout): Promise<StoredSettings> {
+  const closed = (): StoredSettings => ({ settings: { ...CLOSED_SETTINGS }, unreadable: true });
+  // Only a missing name means the defaults. Studio writes a regular file; a link (even one
+  // whose target is gone), a directory or anything else under that name is not its file.
+  const entry = await lstat(layout.settings).catch((error: unknown): null | undefined =>
+    (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined
+  );
+  if (entry === null) return { settings: { ...DEFAULT_SETTINGS }, unreadable: false };
+  if (!entry?.isFile()) return closed();
   let text: string;
   try {
-    text = await readFile(layout.settings, 'utf8');
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'ENOENT')
-      return { settings: { ...DEFAULT_SETTINGS }, unreadable: false };
-    return { settings: { ...CLOSED_SETTINGS }, unreadable: true };
+    // Not through a link that took the file's place after the check.
+    const handle = await open(layout.settings, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile() || stats.size > SIZE_LIMIT) return closed();
+      text = await handle.readFile('utf8');
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    return closed();
   }
   const settings = Buffer.byteLength(text) <= SIZE_LIMIT ? parseStored(text) : undefined;
-  return settings ? { settings, unreadable: false } : { settings: { ...CLOSED_SETTINGS }, unreadable: true };
+  return settings ? { settings, unreadable: false } : closed();
 }
 
 /**

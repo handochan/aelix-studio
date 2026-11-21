@@ -151,7 +151,7 @@ describe('the environment of helper children', () => {
       HTTPS_PROXY: proxy,
       no_proxy: '',
       NO_PROXY: '',
-      GIT_CONFIG_COUNT: '2',
+      GIT_CONFIG_COUNT: '7',
       GIT_CONFIG_KEY_1: 'http.proxy',
       GIT_CONFIG_VALUE_1: proxy,
     });
@@ -217,21 +217,44 @@ describe('the environment of helper children', () => {
       // The user's configuration files stay out; only the copied entries apply, after the reset.
       GIT_CONFIG_GLOBAL: '/dev/null',
       GIT_CONFIG_NOSYSTEM: '1',
-      GIT_CONFIG_COUNT: '4',
+      GIT_CONFIG_COUNT: '9',
       GIT_CONFIG_KEY_0: 'credential.helper',
       GIT_CONFIG_VALUE_0: '',
       GIT_CONFIG_KEY_1: 'http.proxy',
       GIT_CONFIG_VALUE_1: proxy,
-      GIT_CONFIG_KEY_2: 'credential.helper',
-      GIT_CONFIG_VALUE_2: 'osxkeychain',
-      GIT_CONFIG_KEY_3: 'credential.https://git.example.com.username',
-      GIT_CONFIG_VALUE_3: 'someone',
+      GIT_CONFIG_KEY_4: 'protocol.ssh.allow',
+      GIT_CONFIG_VALUE_4: 'always',
+      GIT_CONFIG_KEY_7: 'credential.helper',
+      GIT_CONFIG_VALUE_7: 'osxkeychain',
+      GIT_CONFIG_KEY_8: 'credential.https://git.example.com.username',
+      GIT_CONFIG_VALUE_8: 'someone',
       HOME: online.home,
       NETRC: '/dev/null',
       PIP_CONFIG_FILE: '/dev/null',
       PIP_KEYRING_PROVIDER: 'disabled',
     });
     expect(environment).not.toHaveProperty('DBUS_SESSION_BUS_ADDRESS');
+  });
+
+  it('lets submodules use HTTPS only, and SSH only with private Git; the requested repository any taken scheme', () => {
+    const policy = (privateGit: boolean) => {
+      const environment = managementEnvironment(baseEnvironment(SHELL, 'darwin'), 'darwin', {
+        ...management,
+        online: { ...online, access: privateGit ? { privateGit: { credentials: [] } } : {} },
+      });
+      const entries: Record<string, string> = {};
+      for (let index = 0; index < Number(environment.GIT_CONFIG_COUNT); index += 1)
+        entries[environment[`GIT_CONFIG_KEY_${index}`]] = environment[`GIT_CONFIG_VALUE_${index}`];
+      return entries;
+    };
+    const transports = {
+      'protocol.allow': 'never',
+      'protocol.https.allow': 'always',
+      'protocol.git.allow': 'user',
+      'protocol.file.allow': 'user',
+    };
+    expect(policy(false)).toMatchObject({ ...transports, 'protocol.ssh.allow': 'user' });
+    expect(policy(true)).toMatchObject({ ...transports, 'protocol.ssh.allow': 'always' });
   });
 
   it('names the null device the way pip compares it on Windows', () => {
@@ -277,9 +300,16 @@ const port = async (server: ReturnType<typeof tcpServer>): Promise<number> => {
 };
 const serve = async (handler: RequestListener) => {
   const server = httpServer(handler);
+  // A proxy is asked for HTTPS by CONNECT: record the tunnel and refuse it.
+  const tunnels: string[] = [];
+  server.on('connect', (request, socket) => {
+    tunnels.push(String(request.url));
+    socket.destroy();
+  });
   const address = 'http://127.0.0.1:' + (await port(server));
   return {
     address,
+    tunnels,
     close: () => {
       server.closeAllConnections();
       server.close();
@@ -297,7 +327,7 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
   afterAll(async () => {
     if (root) await rm(root, { recursive: true, force: true });
   });
-  const environment = (proxy?: string): Record<string, string> =>
+  const environment = (proxy?: string, privateGit = false): Record<string, string> =>
     managementEnvironment(baseEnvironment({ PATH: '/usr/bin:/bin' }, process.platform), process.platform, {
       agentDirectory: path.join(root, 'agent'),
       nativeSite: '/bundle/native-site',
@@ -306,26 +336,18 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
         indexUrl: 'https://index.invalid/simple/',
         home: path.join(root, 'home'),
         work: path.join(root, 'work'),
-        access: proxy ? { proxy } : {},
+        access: { ...(proxy ? { proxy } : {}), ...(privateGit ? { privateGit: { credentials: [] } } : {}) },
       },
     });
-  const lsRemote = (env: Record<string, string>) =>
-    runToExit(
-      spawnChild,
-      { command: 'git', args: ['ls-remote', 'http://repo.invalid/owner/demo.git'], env, cwd: path.join(root, 'work') },
-      { timeoutMs: 20_000, tailLimit: 16_000 }
-    );
+  const git = (args: string[], env: Record<string, string>, cwd = path.join(root, 'work')) =>
+    runToExit(spawnChild, { command: 'git', args, env, cwd }, { timeoutMs: 20_000, tailLimit: 16_000 });
 
-  it('sends Git over HTTP to the proxy the user typed', async () => {
-    const received: string[] = [];
-    const proxy = await serve((request, response) => {
-      received.push(String(request.url));
-      response.writeHead(404).end();
-    });
+  it('sends Git over HTTPS to the proxy the user typed', async () => {
+    const proxy = await serve((_request, response) => response.writeHead(404).end());
     try {
-      const result = await lsRemote(environment(proxy.address));
+      const result = await git(['ls-remote', 'https://repo.invalid/owner/demo.git'], environment(proxy.address));
       expect(result.code).not.toBe(0);
-      expect(received).toContain('http://repo.invalid/owner/demo.git/info/refs?service=git-upload-pack');
+      expect(proxy.tunnels).toContain('repo.invalid:443');
     } finally {
       proxy.close();
     }
@@ -338,13 +360,100 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
       response.writeHead(502).end();
     });
     try {
-      const env = { ...environment(), http_proxy: trap.address, HTTPS_PROXY: trap.address, ALL_PROXY: trap.address };
-      expect((await lsRemote(env)).code).not.toBe(0);
-      expect(contacted).toBe(0);
+      const env = {
+        ...environment(),
+        http_proxy: trap.address,
+        https_proxy: trap.address,
+        HTTPS_PROXY: trap.address,
+        ALL_PROXY: trap.address,
+      };
+      expect((await git(['ls-remote', 'https://repo.invalid/owner/demo.git'], env)).code).not.toBe(0);
+      expect(contacted + trap.tunnels.length).toBe(0);
     } finally {
       trap.close();
     }
   }, 30_000);
+
+  it('never lets Git use plain HTTP, which the request parser does not take either', async () => {
+    const proxy = await serve((_request, response) => response.writeHead(404).end());
+    try {
+      const result = await git(['ls-remote', 'http://repo.invalid/owner/demo.git'], environment(proxy.address));
+      expect(result.code).not.toBe(0);
+      expect(result.output).toMatch(/transport 'http' not allowed/);
+      expect(proxy.tunnels).toEqual([]);
+    } finally {
+      proxy.close();
+    }
+  }, 30_000);
+
+  describe('submodule transports', () => {
+    let made = 0;
+    const listeners: { count: () => number; close: () => void; port: number }[] = [];
+    const listen = async () => {
+      let connections = 0;
+      const server = tcpServer((socket) => {
+        connections += 1;
+        socket.destroy();
+      });
+      const entry = { count: () => connections, close: () => server.close(), port: await port(server) };
+      listeners.push(entry);
+      return entry;
+    };
+    afterAll(() => {
+      for (const listener of listeners) listener.close();
+    });
+    /** A repository that declares one submodule at `url`; nothing needs to answer there to make it. */
+    const declare = async (url: string): Promise<string> => {
+      made += 1;
+      const parent = path.join(root, 'parent-' + String(made));
+      const plain = { PATH: '/usr/bin:/bin', HOME: path.join(root, 'home'), GIT_CONFIG_NOSYSTEM: '1' };
+      const run = (args: string[]) =>
+        runToExit(spawnChild, { command: 'git', args, env: plain, cwd: parent }, { timeoutMs: 20_000 });
+      await mkdir(parent);
+      await run(['init', '--quiet']);
+      await writeFile(
+        path.join(parent, '.gitmodules'),
+        `[submodule "vendor"]
+	path = vendor
+	url = ${url}
+`
+      );
+      await run(['update-index', '--add', '--cacheinfo', '160000,' + 'a'.repeat(40) + ',vendor']);
+      await run(['add', '.gitmodules']);
+      await run(['-c', 'user.name=t', '-c', 'user.email=t@t.invalid', 'commit', '--quiet', '-m', 'parent']);
+      return parent;
+    };
+    const update = async (url: string, privateGit: boolean) => {
+      const repository = await declare(url);
+      const clone = repository + '-clone';
+      const env = environment(undefined, privateGit);
+      expect((await git(['clone', '--quiet', pathToFileURL(repository).href, clone], env)).code).toBe(0);
+      return git(['submodule', 'update', '--init', '--quiet'], env, clone);
+    };
+
+    it('refuses an SSH submodule without private Git, before any connection', async () => {
+      const ssh = await listen();
+      const result = await update(`ssh://git@127.0.0.1:${ssh.port}/owner/vendor.git`, false);
+      expect(result.code).not.toBe(0);
+      expect(result.output).toMatch(/transport 'ssh' not allowed/);
+      expect(ssh.count()).toBe(0);
+    }, 30_000);
+
+    it('lets private Git reach an SSH submodule', async () => {
+      const ssh = await listen();
+      expect((await update(`ssh://git@127.0.0.1:${ssh.port}/owner/vendor.git`, true)).code).not.toBe(0);
+      expect(ssh.count()).toBeGreaterThan(0);
+    }, 30_000);
+
+    it('refuses git:// and local submodules even with private Git', async () => {
+      const daemon = await listen();
+      const viaGit = await update(`git://127.0.0.1:${daemon.port}/owner/vendor.git`, true);
+      expect(viaGit.output).toMatch(/transport 'git' not allowed/);
+      expect(daemon.count()).toBe(0);
+      const local = await update(pathToFileURL(path.join(root, 'work')).href, true);
+      expect(local.output).toMatch(/transport 'file' not allowed/);
+    }, 30_000);
+  });
 });
 
 // Run against a relocatable Preview bundle assembled by packaging/bundle.py.

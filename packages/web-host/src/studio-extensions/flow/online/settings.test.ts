@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -43,6 +43,13 @@ describe('the proxy the user types', () => {
     'http://proxy corp.example',
     'http://proxy.corp.example\\x',
     'http://proxy.corp.example\n',
+    'http:///proxy.corp.example:3128',
+    'http:////proxy.corp.example',
+    'http://proxy.corp.example:0',
+    'http://proxy.corp.example:00',
+    'http://proxy.corp.example:',
+    'http://pro%78y.corp.example',
+    'http://proxy_corp.example',
     '',
     'x'.repeat(3000),
     42,
@@ -62,6 +69,17 @@ describe('the proxy the user types', () => {
     expect(failure.code).toBe('PROXY_CREDENTIALS_UNSUPPORTED');
     const reported = [failure.message, ...failure.detail].join('\n');
     for (const part of ['secret-password', 'alice', 'proxy.corp.example']) expect(reported).not.toContain(part);
+  });
+
+  it('refuses extra slashes before a user part instead of storing the address without it', () => {
+    for (const typed of [
+      'http:///alice:secret-password@proxy.corp.example',
+      'http:////alice@proxy.corp.example:3128',
+    ]) {
+      const failure = failureOf(() => normalizeProxy(typed));
+      expect(failure.code).toBe('INVALID_PROXY');
+      expect([failure.message, ...failure.detail].join('\n')).not.toMatch(/secret-password|alice|corp\.example/);
+    }
   });
 });
 
@@ -166,4 +184,29 @@ describe('the stored settings', () => {
     await mkdir(layout.settings);
     expect((await readSettings(layout)).unreadable).toBe(true);
   });
+
+  // Windows file links need a privilege CI does not have; the check is the same lstat there.
+  it.skipIf(process.platform === 'win32')(
+    'are unreadable, not the defaults, when the name is a link, even one whose target is gone',
+    async () => {
+      await symlink(path.join(scratch, 'gone.json'), layout.settings);
+      expect(await readSettings(layout)).toEqual({
+        settings: { onlineInstall: false, proxy: null, privateGit: false },
+        unreadable: true,
+      });
+      await rm(layout.settings);
+      const elsewhere = path.join(scratch, 'elsewhere.json');
+      await writeFile(
+        elsewhere,
+        JSON.stringify({
+          schema: 'aelix.studio.extensions.settings/1',
+          onlineInstall: true,
+          proxy: null,
+          privateGit: true,
+        })
+      );
+      await symlink(elsewhere, layout.settings);
+      expect((await readSettings(layout)).unreadable).toBe(true);
+    }
+  );
 });

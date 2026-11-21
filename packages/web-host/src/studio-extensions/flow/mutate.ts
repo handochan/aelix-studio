@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto';
-import { mkdir, rm } from 'node:fs/promises';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -19,7 +19,7 @@ import {
   writeConstraints,
   type BundleFacts,
 } from '../store/layout.js';
-import { acquireMutationLock, type MutationLock } from '../store/lock.js';
+import { acquireMutationLock, removeFromState, type MutationLock } from '../store/lock.js';
 import {
   newGenerationRecord,
   newPointer,
@@ -72,7 +72,13 @@ import { checkImport } from './importCheck.js';
 import { checkoutSubdirectory, type GitCheckout } from './online/checkout.js';
 import { privateGitAccess } from './online/credentials.js';
 import { readSettings, writeSettings, type StoredSettings } from './online/settings.js';
-import { installedCheckoutOrigin, installedGitOrigin, matchesVersion, onlineIndex } from './online/source.js';
+import {
+  installedCheckoutOrigin,
+  installedGitOrigin,
+  matchesVersion,
+  onlineIndex,
+  redactUrlCredentials,
+} from './online/source.js';
 
 export type MutationRequest =
   | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
@@ -249,13 +255,20 @@ async function prepare(
 }
 
 /**
- * What the user's settings give an online install: their proxy, and with private Git on, the
- * user's SSH agent and Git credential helpers. Windows has no git installs, so no private Git.
+ * What the user's settings give an online install: their proxy, and for a git source with
+ * private Git on, the user's SSH agent and Git credential helpers. A name install keeps the
+ * isolated Git and SSH of PR #77 whatever private Git says: it has no repository to sign in to.
+ * Windows has no git installs, so no private Git.
  */
-async function onlineAccess(context: FlowContext, settings: ExtensionSettings, home: string): Promise<OnlineAccess> {
+async function onlineAccess(
+  context: FlowContext,
+  settings: ExtensionSettings,
+  source: OnlineExtensionSource,
+  home: string
+): Promise<OnlineAccess> {
   const access: OnlineAccess = {};
   if (settings.proxy !== null) access.proxy = settings.proxy;
-  if (settings.privateGit && context.platform !== 'win32')
+  if (source.kind === 'git' && settings.privateGit && context.platform !== 'win32')
     access.privateGit = await privateGitAccess(context, home, context.timeouts.verifyMs);
   return access;
 }
@@ -577,34 +590,40 @@ export async function mutate(
               indexUrl: onlineIndex(source),
               home,
               work: cwd,
-              access: await onlineAccess(guarded, settings, home),
+              access: await onlineAccess(guarded, settings, source, home),
             },
           }
         : {}),
     });
     let native = prepared.native;
-    let checkout: (GitCheckout & { output: string }) | undefined;
+    let checkout: GitCheckout | undefined;
     if (source?.kind === 'git' && source.subdirectory !== undefined) {
-      // Studio fetches and checks the subdirectory; native installs that checked directory.
+      // Studio fetches and checks the subdirectory; native installs a checked copy of it.
       checkout = await checkoutSubdirectory(
         guarded,
+        lock,
         installerEnvironment,
         { ...source, subdirectory: source.subdirectory },
-        path.join(cwd, 'checkout'),
         guarded.timeouts.installerMs
       );
       native = ['extension', 'install', checkout.directory, '--yes'];
     }
-    const installer = await runManagement(
-      guarded,
-      candidate,
-      installerEnvironment,
-      native,
-      guarded.timeouts.installerMs,
-      cwd
-    );
-    // The installed files are in the venv now; the sources do not stay in the generation.
-    if (checkout) await rm(checkout.root, { recursive: true, force: true });
+    let installer: RunResult;
+    try {
+      installer = await runManagement(
+        guarded,
+        candidate,
+        installerEnvironment,
+        native,
+        guarded.timeouts.installerMs,
+        cwd
+      );
+    } finally {
+      // The installed files are in the venv now; the lock holder removes the sources.
+      if (checkout) await removeFromState(layout, lock, checkout.staging);
+    }
+    // Git prints remote and submodule addresses as written, which can carry a token.
+    installer = { ...installer, output: redactUrlCredentials(installer.output) };
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
     // native's "did not run" and "not bound", so every non-zero code is a plain failure.
     if (request.action === 'remove') requireSuccess(installer, { 1: 'INSTALLER_FAILED' }, 'the installer');

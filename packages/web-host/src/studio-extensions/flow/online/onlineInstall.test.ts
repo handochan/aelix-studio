@@ -254,20 +254,47 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       expect(installer()?.env.GIT_SSH_COMMAND).toContain('-o IdentityAgent=none');
     });
 
-    it('when on, passes the agent and the user credential helpers to the installer, and nothing else', async () => {
-      service = start({ env: { ...user, GIT_SSH_COMMAND: 'ssh -i /elsewhere', DBUS_SESSION_BUS_ADDRESS: 'x' } });
+    it('when on, still keeps a name install as isolated as before: it has no repository to sign in to', async () => {
+      service = start({ env: { ...user, DBUS_SESSION_BUS_ADDRESS: 'x' } });
       answerGitConfig();
       data(await save({ privateGit: true }));
       expect(await installFromIndex()).toMatchObject({ phase: 'switched' });
+      expect(spawn.calls.some((call) => call.command === 'git')).toBe(false);
+      const env = installer()?.env ?? {};
+      for (const name of ['SSH_AUTH_SOCK', 'GCM_INTERACTIVE', 'DBUS_SESSION_BUS_ADDRESS'])
+        expect(env).not.toHaveProperty(name);
+      expect(env.GIT_SSH_COMMAND).toContain('-o IdentityAgent=none');
+      expect(Object.values(env)).not.toContain('osxkeychain');
+      expect(env).toMatchObject({ GIT_CONFIG_KEY_4: 'protocol.ssh.allow', GIT_CONFIG_VALUE_4: 'user' });
+    });
+
+    it('when on, passes the agent and the user credential helpers to a git install, and nothing else', async () => {
+      service = start({ env: { ...user, GIT_SSH_COMMAND: 'ssh -i /elsewhere', DBUS_SESSION_BUS_ADDRESS: 'x' } });
+      answerGitConfig();
+      data(await save({ privateGit: true }));
+      const url = 'https://git.invalid/owner/demo.git';
+      const wheel = await writeWheel(path.join(scratch, 'wheels'), { name: 'demo-git' });
+      runtime.install = async (venv) => {
+        await installWheel(venv, wheel);
+        await writeFile(
+          path.join(venv.site, 'demo_git-0.1.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url, vcs_info: { vcs: 'git', commit_id: '2'.repeat(40) } })
+        );
+        return 0;
+      };
+      const request = { action: 'install', source: { kind: 'git', url: 'git+' + url } };
+      expect(await settle(await service.request(OWNER, request))).toMatchObject({ phase: 'switched' });
       const lookup = spawn.calls.find((call) => call.command === 'git');
       expect(lookup?.env.HOME).toBe('/Users/someone');
       expect(installer()?.env).toMatchObject({
         SSH_AUTH_SOCK: '/private/tmp/agent.sock',
         GCM_INTERACTIVE: 'never',
         GIT_SSH_COMMAND: '/usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no',
-        GIT_CONFIG_COUNT: '3',
-        GIT_CONFIG_KEY_2: 'credential.helper',
-        GIT_CONFIG_VALUE_2: 'osxkeychain',
+        GIT_CONFIG_COUNT: '8',
+        GIT_CONFIG_KEY_4: 'protocol.ssh.allow',
+        GIT_CONFIG_VALUE_4: 'always',
+        GIT_CONFIG_KEY_7: 'credential.helper',
+        GIT_CONFIG_VALUE_7: 'osxkeychain',
         GIT_CONFIG_GLOBAL: '/dev/null',
       });
       // The installer keeps its private home; the user's netrc and Git files stay out.
@@ -303,11 +330,13 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       source: { kind: 'git', url: 'git+' + pathToFileURL(repository).href + '@main', subdirectory },
     });
 
-    it('installs from the checked directory of Studio checkout and records repository, commit and path', async () => {
+    it('installs from a checked copy of Studio checkout and records repository, verified commit and path', async () => {
       const wheel = await writeWheel(path.join(scratch, 'wheels'), { name: 'demo-sub' });
       let target = '';
+      let stagedDuringInstall: string[] = [];
       runtime.install = async (venv, requested) => {
         target = requested;
+        stagedDuringInstall = await readdir(path.join(root, 'artifacts'));
         await installWheel(venv, wheel);
         await writeFile(
           path.join(venv.site, 'demo_sub-0.1.0.dist-info', 'direct_url.json'),
@@ -317,11 +346,20 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       };
       const state = await settle(await service.request(OWNER, request('packages/demo')));
       expect(state).toMatchObject({ phase: 'switched' });
-      const work = path.join(root, 'generations', state.generation ?? '', 'install-work');
-      expect(target).toBe(path.join(await realpath(work), 'checkout', 'packages', 'demo'));
+      // native installs from the copy; the clone is already gone by then.
+      const artifacts = await realpath(path.join(root, 'artifacts'));
+      expect(stagedDuringInstall).toEqual([expect.stringMatching(/^\.staging-source-[0-9a-f]{12}$/)]);
+      expect(target).toBe(path.join(artifacts, stagedDuringInstall[0], 'packages', 'demo'));
       expect(installer()?.args.slice(-3)).toEqual(['install', target, '--yes']);
-      // The checkout does not stay in the generation.
-      expect(await readdir(work)).toEqual([]);
+      // The lock holder removed both staging directories; nothing stays in the generation either.
+      const removals = spawn.children
+        .filter((_child, index) => spawn.calls[index].args.includes('hold'))
+        .flatMap((child) => child.written)
+        .join('');
+      expect(removals).toContain(`"path":"artifacts/${stagedDuringInstall[0]}"`);
+      expect(removals).toMatch(/"path":"artifacts\/\.staging-git-[0-9a-f]{12}"/);
+      expect(await readdir(artifacts)).toEqual([]);
+      expect(await readdir(path.join(root, 'generations', state.generation ?? '', 'install-work'))).toEqual([]);
       expect((await listing()).extensions[0].origin).toEqual({
         kind: 'git',
         url: 'git+' + pathToFileURL(repository).href + '@main',
@@ -333,6 +371,17 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
         await readFile(path.join(root, 'generations', state.generation ?? '', 'generation.json'), 'utf8')
       ) as { distributions: Record<string, { origin?: { subdirectory?: string } }> };
       expect(record.distributions['demo-sub'].origin?.subdirectory).toBe('packages/demo');
+    });
+
+    it('hides credentials in what the installer printed, such as a submodule address Git repeats', async () => {
+      runtime.nativeOutput =
+        "fatal: clone of 'https://x-token:ghp_abcdef@git.example.com/o/sub.git' into submodule path failed\n";
+      runtime.install = async () => 1;
+      const url = 'git+https://git.invalid/owner/demo.git';
+      const state = await settle(await service.request(OWNER, { action: 'install', source: { kind: 'git', url } }));
+      expect(state).toMatchObject({ phase: 'failed', code: 'INSTALLER_FAILED' });
+      expect(state.output).toContain("'https://***@git.example.com/o/sub.git'");
+      expect(JSON.stringify(state)).not.toMatch(/ghp_abcdef|x-token/);
     });
 
     it('refuses a subdirectory that is a link in the checkout before the installer starts', async () => {
@@ -347,6 +396,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       });
       expect(installer()).toBeUndefined();
       expect(await readdir(path.join(root, 'generations'))).toEqual([]);
+      expect(await readdir(path.join(root, 'artifacts'))).toEqual([]);
     });
 
     it('keeps the old generation when the installed distribution does not record the checked directory', async () => {

@@ -289,19 +289,20 @@ native CLI와 로드 검증에 넘기는 환경은 Studio가 **허용 목록으�
 
 아래는 Studio가 넣는 변수다. 부모(`-I`)는 `PYTHON*`을 무시하고 pip 자식만 읽는다. **[실행]**
 
-| 환경 변수                             | 이유                                                                                                                                   |
-| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
-| `AELIX_CODING_AGENT_DIR=<세대>/agent` | native가 설치 기록을 CLI와 공유하는 `~/.aelix/agent/settings.json`에 쓰지 않게 한다. 버린 후보의 기록도 함께 사라진다                  |
-| `PYTHONPATH=<번들>/native-site`       | pip이 번들에 이미 있는 패키지를 설치된 것으로 본다. 없으면 pip은 번들에 무엇이 있는지 모른다                                           |
-| `PIP_CONSTRAINT=<constraints URL>`    | 번들과 다른 버전을 요구하는 확장을 설치 단계에서 실패시킨다. 없으면 pip이 다른 버전을 세대에 깔고, 실행 때는 번들 버전이 조용히 이긴다 |
-| `PIP_CONFIG_FILE=<빈 장치>`           | 사용자의 pip 설정이 설치 위치와 접속 대상을 바꾸지 못하게 한다(3.1·3.4)                                                                |
-| `PYTHONDONTWRITEBYTECODE=1`           | 번들 표준 라이브러리에 `.pyc`가 생기지 않게 한다(3.2). main의 launcher에서는 Studio가 주지 않으면 번들이 바뀐다                        |
-| `PIP_DISABLE_PIP_VERSION_CHECK=1`     | pip이 스스로 PyPI에 버전을 묻지 않게 한다                                                                                              |
-| `PIP_NO_INPUT=1`                      | pip이 입력을 기다리며 멈추지 않게 한다                                                                                                 |
-| 오프라인 반입일 때                    | `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=<보관소 URL>`, 죽은 proxy(5.9)                                                                       |
-| `PIP_INDEX_URL`                       | `update`에는 `--index-url`이 없어 이 변수로 내부 index를 준다                                                                          |
-| 온라인 설치에 사용자 proxy가 있을 때  | `PIP_PROXY`, `http_proxy`·`https_proxy`(대문자 포함), 빈 `no_proxy`, Git `http.proxy`. 없으면 `no_proxy=*`와 빈 `http.proxy`(5.10)     |
-| 온라인 설치에 비공개 Git이 켜졌을 때  | `SSH_AUTH_SOCK`, 사용자 SSH 설정을 쓰는 `GIT_SSH_COMMAND`, 사용자 `credential.*` 항목, `GCM_INTERACTIVE=never`(5.10)                   |
+| 환경 변수                             | 이유                                                                                                                                     |
+| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `AELIX_CODING_AGENT_DIR=<세대>/agent` | native가 설치 기록을 CLI와 공유하는 `~/.aelix/agent/settings.json`에 쓰지 않게 한다. 버린 후보의 기록도 함께 사라진다                    |
+| `PYTHONPATH=<번들>/native-site`       | pip이 번들에 이미 있는 패키지를 설치된 것으로 본다. 없으면 pip은 번들에 무엇이 있는지 모른다                                             |
+| `PIP_CONSTRAINT=<constraints URL>`    | 번들과 다른 버전을 요구하는 확장을 설치 단계에서 실패시킨다. 없으면 pip이 다른 버전을 세대에 깔고, 실행 때는 번들 버전이 조용히 이긴다   |
+| `PIP_CONFIG_FILE=<빈 장치>`           | 사용자의 pip 설정이 설치 위치와 접속 대상을 바꾸지 못하게 한다(3.1·3.4)                                                                  |
+| `PYTHONDONTWRITEBYTECODE=1`           | 번들 표준 라이브러리에 `.pyc`가 생기지 않게 한다(3.2). main의 launcher에서는 Studio가 주지 않으면 번들이 바뀐다                          |
+| `PIP_DISABLE_PIP_VERSION_CHECK=1`     | pip이 스스로 PyPI에 버전을 묻지 않게 한다                                                                                                |
+| `PIP_NO_INPUT=1`                      | pip이 입력을 기다리며 멈추지 않게 한다                                                                                                   |
+| 오프라인 반입일 때                    | `PIP_NO_INDEX=1`, `PIP_FIND_LINKS=<보관소 URL>`, 죽은 proxy(5.9)                                                                         |
+| `PIP_INDEX_URL`                       | `update`에는 `--index-url`이 없어 이 변수로 내부 index를 준다                                                                            |
+| 온라인 설치에 사용자 proxy가 있을 때  | `PIP_PROXY`, `http_proxy`·`https_proxy`(대문자 포함), 빈 `no_proxy`, Git `http.proxy`. 없으면 `no_proxy=*`와 빈 `http.proxy`(5.10)       |
+| git 설치에 비공개 Git이 켜졌을 때     | `SSH_AUTH_SOCK`, 사용자 SSH 설정을 쓰는 `GIT_SSH_COMMAND`, 사용자 `credential.*` 항목, `GCM_INTERACTIVE=never`(5.10). 이름 설치에는 없다 |
+| 온라인 설치의 Git 전송 정책           | `protocol.*.allow`: 요청 저장소는 받은 scheme, submodule은 HTTPS만(비공개 Git이면 SSH도)(5.10)                                           |
 
 `PIP_CONSTRAINT`와 `PIP_FIND_LINKS`는 공백으로 값을 나눈다. "Application Support"처럼 공백이 있는 경로는
 깨졌고, `file://` URL로 주니 공백과 한글 경로에서 동작했다. **[실행]**
@@ -476,17 +477,17 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 
 ### 5.10 외부 접속: 보장하는 것과 하지 않는 것
 
-| 상황                               | 접속                                                                                                                                                                            | 근거                                      |
-| ---------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------- |
-| 확장 화면 열기, 목록 보기          | 하지 않는다. helper는 파일을 읽고 `extension list`·`verify`만 실행한다                                                                                                          | `verify` 추적은 실행. 화면은 아직 없다    |
-| 파일 반입                          | 설치 도구는 하지 않도록 만든다. 반입한 확장의 코드가 로드 검증 중에 하는 접속은 막지 못한다(5.9)                                                                                | 5.9                                       |
-| 이름으로 설치                      | 사용자가 실행할 때만. **접속 대상은 지정한 index로 한정되지 않는다.** index가 가리키는 파일 host, 패키지가 선언한 직접 URL, 소스 패키지면 빌드 도구를 받는 곳과 빌드 코드까지다 | 직접 URL은 실행. 나머지는 pip 동작 [추정] |
-| git 설치                           | 사용자가 실행할 때만. git 주소, 저장소가 선언한 submodule 주소, 빌드 도구 index, 빌드 코드. 하위 경로를 지정하면 Studio가 직접 가져온다(아래)                                   | 빌드 도구 내려받기는 실행                 |
-| proxy                              | 사용자가 Studio 확장 설정에 입력한 주소만 쓴다. 입력하지 않으면 직접 접속한다. 시스템·환경 proxy는 따르지 않는다                                                                | 실행(pip·Git, 아래)                       |
-| pip의 자체 버전 확인               | 끈다                                                                                                                                                                            | 설정                                      |
-| 사용자의 pip 설정 파일과 환경 변수 | 읽지 않는다(5.4, 8.3)                                                                                                                                                           | 실행                                      |
-| `aelix extension discover`         | 쓰지 않는다. 기본 catalog(`handochan.github.io/aelix-marketplace`)를 받아 온다                                                                                                  | 소스. 기본 catalog 등록은 실행            |
-| 설치한 확장이 실행 중에 하는 것    | Studio가 막지 못한다                                                                                                                                                            | —                                         |
+| 상황                               | 접속                                                                                                                                                                                                        | 근거                                                     |
+| ---------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------- |
+| 확장 화면 열기, 목록 보기          | 하지 않는다. helper는 파일을 읽고 `extension list`·`verify`만 실행한다                                                                                                                                      | `verify` 추적은 실행. 화면은 아직 없다                   |
+| 파일 반입                          | 설치 도구는 하지 않도록 만든다. 반입한 확장의 코드가 로드 검증 중에 하는 접속은 막지 못한다(5.9)                                                                                                            | 5.9                                                      |
+| 이름으로 설치                      | 사용자가 실행할 때만. **접속 대상은 지정한 index로 한정되지 않는다.** index가 가리키는 파일 host, 패키지가 선언한 직접 URL, 소스 패키지면 빌드 도구를 받는 곳과 빌드 코드까지다                             | 직접 URL은 실행. 나머지는 pip 동작 [추정]                |
+| git 설치                           | 사용자가 실행할 때만. git 주소, 저장소가 선언한 submodule 주소(HTTPS만, 비공개 Git이면 SSH도), 빌드 도구 index, 빌드 코드. 하위 경로를 지정하면 Studio가 직접 가져오고 그 안의 submodule만 초기화한다(아래) | 빌드 도구 내려받기는 실행. 전송 정책은 실제 Git으로 실행 |
+| proxy                              | 사용자가 Studio 확장 설정에 입력한 주소만 쓴다. 입력하지 않으면 직접 접속한다. 시스템·환경 proxy는 따르지 않는다                                                                                            | 실행(pip·Git, 아래)                                      |
+| pip의 자체 버전 확인               | 끈다                                                                                                                                                                                                        | 설정                                                     |
+| 사용자의 pip 설정 파일과 환경 변수 | 읽지 않는다(5.4, 8.3)                                                                                                                                                                                       | 실행                                                     |
+| `aelix extension discover`         | 쓰지 않는다. 기본 catalog(`handochan.github.io/aelix-marketplace`)를 받아 온다                                                                                                                              | 소스. 기본 catalog 등록은 실행                           |
+| 설치한 확장이 실행 중에 하는 것    | Studio가 막지 못한다                                                                                                                                                                                        | —                                                        |
 
 - helper 설정 `onlineInstallEnabled`는 기본 켜짐이다. 끄면 이름과 git 요청을 자식 프로세스를 띄우기
   전에 `ONLINE_INSTALL_DISABLED`로 거절한다. 파일 반입은 계속 쓸 수 있다. 확장 코드의 로드 검증에는
@@ -505,10 +506,13 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   내린 뒤 잠금 보유 프로세스가 rename한다. 변경 작업은 잠금을 잡은 뒤 설정을 한 번 읽고 끝까지 그 값을
   쓴다. 설정 저장도 변경이라 다른 변경이 도는 동안에는 `BUSY`다. 파일을 읽을 수 없으면 닫힌 값(온라인 설치
   꺼짐, proxy 없음, 비공개 Git 꺼짐)을 적용하고 `SETTINGS_UNREADABLE`로 알린다. 다시 저장하면 풀린다.
-  Studio 정책 옵션(`onlineInstallEnabled: false`)은 설정보다 위에서 온라인 설치를 끈다. **[실행: 단위 시험,
-  번들 lock holder]**
+  Studio 정책 옵션(`onlineInstallEnabled: false`)은 설정보다 위에서 온라인 설치를 끈다. 그 이름에 일반 파일이
+  아닌 것(링크, 대상이 없는 링크 포함, 디렉터리)이 있으면 읽을 수 없는 것으로 본다. 읽기도 링크를 따라가지
+  않는다. **[실행: 단위 시험, 번들 lock holder]**
 - **proxy.** [2026-11-19 Issue #32 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로
-  사용자가 입력한 주소만 쓴다. `http://` 또는 `https://`의 host와 선택적 port만 받아 정규화해 저장한다.
+  사용자가 입력한 주소만 쓴다. `http://` 또는 `https://`의 host와 선택적 port(1–65535)만 받아 정규화해
+  저장한다. 입력한 그대로의 authority를 먼저 검사하고 고쳐 받지 않는다. scheme 뒤의 빗금이 더 있는 주소
+  (`http:///user:pass@host`처럼 URL 해석이 인증 정보를 조용히 버리는 것)와 port 0은 `INVALID_PROXY`다.
   이름·git 설치 도구에 pip `--proxy`(`PIP_PROXY`, pip이 환경 proxy와 netrc를 읽지 않게 된다), 표준
   `http_proxy`·`https_proxy`(대문자 포함), 빈 `no_proxy`, Git `http.proxy`로 넘긴다. pip의 index·파일 host·직접
   URL·빌드 의존성 설치(자식 pip이 환경을 물려받는다), HTTPS Git(pip의 clone과 Studio의 하위 경로 fetch)이
@@ -516,11 +520,13 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   **덮지 못하는 것:** SSH Git(`ssh://`, `git@host:`)과 `git://`은 HTTP proxy를 쓰지 않는다(비공개 Git을 켜면
   사용자 SSH 설정의 `ProxyCommand`·`ProxyJump`가 적용된다). 로드 검증과 대화의 확장 코드, 표준 변수를
   무시하는 빌드 코드도 덮지 못한다. 파일 반입은 proxy 설정과 무관하게 죽은 proxy를 유지한다(5.9).
-  사용자 이름·비밀번호가 든 주소는 `PROXY_CREDENTIALS_UNSUPPORTED`로 거절한다. 저장 방식(설정 파일 또는 OS
-  키체인)은 사용자 결정으로 남겼다. 거절 응답과 로그에는 입력한 주소를 넣지 않는다. **[실행: 번들 pip과
+  사용자 이름·비밀번호가 든 주소는 지금 `PROXY_CREDENTIALS_UNSUPPORTED`로 거절한다. 저장 방식은 사용자가
+  정했다(2026-11-21): OS 키체인에 두고, 키체인이 없는 곳에서는 설치할 때마다 입력받아 메모리에만 둔다. 이
+  PR 다음의 후속 PR에서 구현하고 그때까지 거절한다. 거절 응답과 로그에는 입력한 주소를 넣지 않는다. **[실행: 번들 pip과
   native로 loopback proxy를 거친 이름 설치, 시스템 proxy 주입과 환경 `HTTP_PROXY` 무시, Git HTTPS CONNECT]**
 - **비공개 Git.** [같은 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로 기본
-  꺼짐이다. 꺼져 있으면 위의 격리 그대로다. 켜면 git 설치에 다음만 더한다. 사용자의 `SSH_AUTH_SOCK`, 사용자 SSH
+  꺼짐이다. 꺼져 있으면 위의 격리 그대로다. 켜도 이름 설치는 PR #77의 격리 그대로다(로그인할 저장소가 없다).
+  git 설치(pip이 git source를 설치할 때와 Studio의 하위 경로 fetch)에만 다음을 더한다. 사용자의 `SSH_AUTH_SOCK`, 사용자 SSH
   설정과 키(`-F /dev/null`과 `IdentityFile=none` 등을 빼고 `BatchMode=yes`·`StrictHostKeyChecking=yes`·
   `UpdateHostKeys=no`는 명령행에 남긴다. 명령행이 설정보다 우선한다), 사용자 Git 설정 중 `credential.*` 항목
   (`/usr/bin:/bin`의 `git`으로 사용자 `HOME`에서 저장소 밖 디렉터리를 기준으로 읽어 하나씩 넘긴다. 다른 Git 설정은
@@ -535,15 +541,42 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 - **Git 하위 경로.** [같은 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로
   지원한다. 요청은 URL fragment가 아니라 별도 필드(`subdirectory`)로 받는다. `#subdirectory=` 등 URL fragment는
   여전히 pip 실행 전에 거절한다. 필드는 `/`로 이은 일반 이름만 받는다(`.`·`..`·빈 이름·절대 경로·드라이브·
-  역슬래시·`.git`·`-`로 시작하는 이름 거절). 처리는 두 단계다. 먼저 Studio가 설치 도구와 같은 환경으로
-  저장소를 후보의 작업 디렉터리에 clone하고 pip과 같은 순서로 revision을 고른다(branch, tag, commit, 없는
-  전체 commit과 `refs/`는 fetch). checkout한 뒤 submodule을 초기화한다. 그다음 실제 파일 시스템에서 경로의
-  이름마다 `lstat`으로 링크가 아닌 디렉터리인지 보고, `realpath`가 checkout 실제 루트에 요청한 이름을 이은
-  경로와 정확히 같은지 본다(대소문자를 무시하는 파일 시스템의 다른 표기도 거절). 통과한 디렉터리를 native에
-  로컬 경로로 넘겨 설치하고 checkout은 지운다. 출처 대조는 그 디렉터리를 기록한 PEP 610 `dir_info`가 하나인지
-  보고, 출처 기록에는 저장소 URL, Studio가 checkout한 commit, 하위 경로를 남긴다. 실패 코드는
-  `GIT_FETCH_FAILED`와 `SUBDIRECTORY_INVALID`다. **[실행: 실제 Git으로 링크 탈출·내부 링크·중간 링크·파일·
-  없음·대소문자·submodule 안 링크 시험, 번들 native·pip으로 in-tree backend 설치]**
+  역슬래시·`.git`·`-`로 시작하는 이름 거절). 처리는 다음 순서다.
+  1. Studio가 git source 설치 도구와 같은 환경으로 저장소를 보관소의 staging 디렉터리(`artifacts/.staging-git-…`)에
+     clone하고 pip과 같은 순서로 revision을 고른다(branch, tag, commit, 없는 전체 commit과 `refs/`는 fetch).
+  2. 고른 commit을 `git checkout --detach <object>^{commit}`으로 checkout한다. 일반 `git checkout <이름>`은 같은
+     이름의 로컬 branch를 먼저 고르는데, 저장소가 기본 branch 이름을 다른 commit의 object 이름으로 지을 수
+     있다. 그 뒤 `git rev-parse HEAD`가 고른 commit과 정확히 같아야 하고, 출처에는 이렇게 확인한 commit을 적는다.
+  3. 요청한 하위 경로 안의 submodule만 초기화한다(`git submodule update --init --recursive -- <하위 경로>`). 나머지
+     submodule은 빌드되지 않으므로 그 주소에는 접속하지 않는다. 하위 경로가 submodule 안에 있으면 초기화되지
+     않아 거절된다.
+  4. 실제 파일 시스템에서 checkout 루트가 경로대로의 실제 디렉터리인지, 경로의 이름마다 `lstat`으로 링크가 아닌
+     디렉터리인지, `realpath`가 checkout 실제 루트에 요청한 이름을 이은 경로와 정확히 같은지 본다(대소문자를
+     무시하는 파일 시스템의 다른 표기도 거절).
+  5. checkout 전체(Git 메타데이터 포함, 저장소에서 버전을 읽는 빌드가 있다)를 새 staging 디렉터리
+     (`artifacts/.staging-source-…`)에 복사한다. 복사는 번들 Python이 `openat` 방식으로 한다. 이름마다 부모의
+     descriptor를 기준으로 `O_NOFOLLOW`로 열므로, 복사 중에 디렉터리나 파일이 링크로 바뀌면 따라가지 않고
+     실패한다. 링크는 Git이 checkout한 그대로 링크로 복사하고 가리키는 것은 읽지 않는다. 파일·디렉터리·링크가
+     아닌 것은 거절한다. clone은 lock holder가 지운다.
+  6. 복사본에서 4의 확인을 다시 하고 그 디렉터리를 native에 로컬 경로로 넘긴다. 설치가 끝나면 lock holder가
+     복사본을 지운다. 중단으로 남은 staging은 다음 변경의 복구가 지운다.
+
+  확인한 뒤 clone이 바뀌어도 설치되는 것은 확인한 복사본이다. 출처 대조는 그 디렉터리를 기록한 PEP 610
+  `dir_info`가 하나인지 보고, 출처 기록에는 저장소 URL, 확인한 commit, 하위 경로를 남긴다. 실패 코드는
+  `GIT_FETCH_FAILED`와 `SUBDIRECTORY_INVALID`다. **[실행: 실제 Git과 Python으로 링크 탈출·내부 링크·중간
+  링크·파일·없음·대소문자·링크 루트·특수 파일 거절, commit 이름의 branch, HEAD 불일치, 하위 경로 안의
+  submodule만 초기화, 번들 native·pip으로 in-tree backend 설치]**
+
+- **Git 전송 정책.** 이름·git 설치 도구와 Studio fetch의 Git에 `protocol.allow=never`,
+  `protocol.https.allow=always`, `protocol.ssh.allow=user`(비공개 Git이면 `always`), `protocol.git.allow=user`,
+  `protocol.file.allow=user`를 준다. `user`는 사용자가 요청한 저장소에만 허용하고 Git이 submodule 명령에는
+  허용하지 않는다. 그래서 저장소가 선언한 submodule은 HTTPS(proxy를 거친다)로만, 비공개 Git이면 SSH로도
+  가져온다. `git://`·평문 HTTP·로컬 경로·helper 전송은 submodule에 쓰이지 않는다. pip이 git source를 설치할 때
+  초기화하는 submodule에도 같은 정책이 적용된다. **[실행: 실제 Git. SSH submodule은 비공개 Git이 꺼지면 연결 전
+  거절, 켜지면 연결. `git://`·`file`은 켜져도 거절. 평문 HTTP는 요청 저장소에도 거절]**
+- **출력의 인증 정보.** Git은 원격과 submodule 주소를 저장소에 적힌 그대로 출력하고, 그 주소에 token이 있을
+  수 있다. 응답에 넣는 Git·설치 도구 출력에서 HTTP(S) 주소의 사용자 부분 전체와 다른 scheme의 비밀번호를
+  `***`로 바꾼다. **[실행: 단위 시험]**
 - 온라인 설치의 접속 대상을 제한하는 수단은 지금 없다. wheel만 받거나 받은 뒤에 검사하는 것은 접속 대상을
   제한하는 것이 아니다. 받는 동안 이미 접속한다. 어떻게 낼지는 사용자 결정이고, 내되 설정으로 끌 수
   있게 하기로 정해졌다(8.2의 A3).
@@ -953,6 +986,14 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
 기본 꺼짐, git 하위 경로는 checkout 뒤 확인)을 구현하고 5.4·5.9·5.10·5.11·8.3의 B3에 반영했다. 목록의
 `appliesAt`을 `new_session`에서 `next_adapter_start`로 바꿔 5.6·5.11과 A2 보완 결정에 맞췄다. proxy 주소에 든
 인증 정보의 저장 방식은 사용자 결정으로 남기고, 그때까지 그런 주소는 거절한다.
+
+**2026-11-21, 1b 백엔드 독립 리뷰(blocking 2, should-fix 3).** 비공개 Git을 git 설치에만 적용하도록 좁혔다(이름
+설치에도 agent와 인증 설정이 넘어갔다). 하위 경로 checkout을 object 이름의 detached checkout과 HEAD 확인으로
+바꿨다(같은 이름의 로컬 branch가 이길 수 있었다). proxy 검사가 scheme 뒤의 빗금이 더 있는 주소와 port 0을
+받던 것, 대상이 없는 링크인 설정 파일을 없는 파일로 보던 것을 고쳤다. 확인과 설치 사이에 경로가 바뀔 수 있던
+것을 링크를 따라가지 않는 복사본 설치로 닫고, checkout 정리를 lock holder로 옮겼다. submodule은 하위 경로 안의
+것만 초기화하고 Git 전송 정책으로 submodule 전송을 HTTPS(비공개 Git이면 SSH도)로 묶었다. Git 출력의 인증 정보를
+가린다. 각 지적에 회귀 시험을 더했다.
 
 **2026-11-18, launcher 조각(구현)과 독립 리뷰.** 대화가 설치한 확장을 받는 경로를 구현했다. 세대 선택과
 lease는 `launch.py acp`(7.4), 상태 디렉터리는 환경 변수로 알린다(7.4). 잠금 없는 lease 경로와 그 불변식,
