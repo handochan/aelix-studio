@@ -14,6 +14,7 @@ import {
   writeRendererResult,
   sandboxProcesses,
   verifyConfigPreserved,
+  verifyInstalledBackend,
 } from '../verification.mjs';
 
 const sandbox = process.env.RECOVERY_SANDBOX;
@@ -97,7 +98,7 @@ async function launch(conversation, marker = 'SYNTHETIC_UI_ASK_RECOVERY') {
   const { identity } = result;
   appPids.push(identity.pid);
   launchResources = identity.resourcesPath;
-  if (executablePath) assert.equal(identity.backendOverride, undefined);
+  if (executablePath) verifyInstalledBackend(identity);
   page = await app.firstWindow();
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   port = await page.evaluate(() => window.__backendPort);

@@ -89,17 +89,22 @@ the smoke selects the current first window and runs its renderer checks in their
 established order.
 
 After the first window opens, the launch helper can repeat the read-only
-identity evaluation once on the same live app handle. It requires an exact unredacted CDP `Promise was collected`
+identity evaluation on the same live app handle. It requires an exact unredacted CDP `Promise was collected`
 error with code −32000. Each evaluation passes a private one-use token as an
 unused argument. The pinned observer recognizes it in a single
 `Runtime.callFunctionOn` request with both evaluation flags true and matches
-the response by connection, session and request ID. The same app handle uses
-its original inspector session for both evaluations. The launcher handle must
+the response by connection, session and request ID. On the darwin-x64 #100 failure,
+V8 reported collection for both evaluations on the main inspector while the app
+stayed alive. Playwright mapped the protocol error to its generic context-destroyed
+message. A second consecutive collection permits one final attempt after a
+one-second delay. Both retries share the original launch deadline and log their
+attempt numbers and delays. The app handle uses its original inspector session
+for every evaluation. The launcher handle must
 stay live and the result must contain a valid Electron PID. Windows can report
 different PIDs for the launcher and Electron. The token is discarded from the
-report. `mainLaunches[].identityRetry` retains the matched first
-error and the second outcome, and `identityFailedAt`/ `identityProtocol` retain
-the first failure even if the retry succeeds. A failed retry follows the usual
+report. `mainLaunches[].identityRetries` retains the trigger and outcome of each
+retry, and `identityFailedAt` / `identityProtocol` retain the first failure even
+if a retry succeeds. A terminal failure follows the usual
 20-second exit observation and cleanup.
 
 `renderer-result.json.processTimeline` (`aelix.launch-process-timeline/1`)

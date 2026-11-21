@@ -17,6 +17,7 @@ import {
   configSummary,
   electronAppEnvironment,
   verifyConfigPreserved,
+  verifyInstalledBackend,
 } from '../../../scripts/studio-preview/host-release/verification.mjs';
 
 afterEach(() => {
@@ -109,7 +110,7 @@ function application(error?: Error, failureExitCode: number | null = 0, failureS
 const collected = { code: -32000, message: 'Promise was collected' };
 
 function inspectorApplication(
-  replies: Array<{ code: number; message: string } | { pid: number }>,
+  replies: Array<{ code: number; message: string } | { pid: number; backendOverride?: string; resourcesPath?: string }>,
   { unrelatedError = false } = {}
 ) {
   const require = createRequire(import.meta.url);
@@ -520,13 +521,16 @@ describe('Electron launch evidence and identity retry', () => {
         firstWindowWait: { startedAt: expect.any(String), finishedAt: expect.any(String), outcome: 'passed' },
         identityFailedAt: expect.any(String),
         identityProtocol: { errors: [firstError] },
-        identityRetry: {
-          startedAt: expect.any(String),
-          finishedAt: expect.any(String),
-          firstProtocolError: firstError,
-          secondProtocolError: null,
-          outcome: 'passed',
-        },
+        identityRetries: [
+          {
+            startedAt: expect.any(String),
+            finishedAt: expect.any(String),
+            delayMs: 0,
+            trigger: firstError,
+            protocolError: null,
+            outcome: 'passed',
+          },
+        ],
         status: 'identified',
       });
       for (const [, token] of app.evaluate.mock.calls) expect(text).not.toContain(token);
@@ -547,7 +551,7 @@ describe('Electron launch evidence and identity retry', () => {
       await vi.advanceTimersByTimeAsync(20000);
       await result;
       expect(app.evaluate).toHaveBeenCalledTimes(1);
-      expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
+      expect(record.mock.calls.some(([row]) => row.identityRetries)).toBe(false);
     }
   );
 
@@ -566,7 +570,7 @@ describe('Electron launch evidence and identity retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
       identityProtocol: { errors: [collected, { message: 'Cannot find context with specified id' }] },
     });
-    expect(record.mock.calls.some(([row]) => row.identityRetry)).toBe(false);
+    expect(record.mock.calls.some(([row]) => row.identityRetries)).toBe(false);
   });
 
   it('does not retry the exact message with a different CDP code', async () => {
@@ -604,33 +608,121 @@ describe('Electron launch evidence and identity retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ exitCode: 17, naturalExit: true });
   });
 
-  it('fails after the second collected response and preserves the exit wait before one cleanup', async () => {
+  it('recovers after two consecutive collections using a delayed read on the original app', async () => {
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const identity = { pid: 3016, resourcesPath: '/installed/resources' };
+    const { app, launch } = inspectorApplication([collected, collected, identity]);
+    const result = launchWithIdentity(launch, options());
+    await vi.advanceTimersByTimeAsync(999);
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(result).resolves.toEqual({ app, identity });
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(log).toHaveBeenCalledWith(expect.stringContaining('identity retry #2 after 1000ms (Promise was collected)'));
+  });
+
+  it('still rejects an installed backend identity mismatch after the delayed read succeeds', async () => {
+    vi.useFakeTimers();
+    const { launch } = inspectorApplication([collected, collected, { pid: 3016, backendOverride: '/dev/host' }]);
+    const result = launchWithIdentity(launch, options()).then(({ identity }) => verifyInstalledBackend(identity));
+    const failure = expect(result).rejects.toMatchObject({ code: 'ERR_ASSERTION', actual: '/dev/host' });
+    await vi.advanceTimersByTimeAsync(1000);
+    await failure;
+  });
+
+  it('fails without another evaluation if the app exits during the retry delay', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch, main } = inspectorApplication([collected, collected, { pid: 3016 }]);
+    const record = vi.fn();
+    const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(
+      'Studio app changed during identity retry'
+    );
+    await vi.advanceTimersByTimeAsync(999);
+    main.exitCode = 0;
+    main.emit('exit', 0, null);
+    await vi.advanceTimersByTimeAsync(1);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(record.mock.calls.at(-1)?.[0]).toMatchObject({ exitCode: 0, naturalExit: true });
+  });
+
+  it('does not schedule the delayed read outside the original launch deadline', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([collected, collected, { pid: 3016 }]);
+    const result = expect(launchWithIdentity(launch, { ...options(), launchTimeoutMs: 999 })).rejects.toThrow(
+      destroyed.message
+    );
+    await vi.advanceTimersByTimeAsync(20000);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails on a different inspector error during the first retry', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([
+      collected,
+      { code: -32000, message: 'Tearing down inspector/session/context' },
+      { pid: 3016 },
+    ]);
+    const result = expect(launchWithIdentity(launch, options())).rejects.toThrow(destroyed.message);
+    await vi.advanceTimersByTimeAsync(21000);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(2);
+  });
+
+  it('fails at the original deadline if the delayed read hangs', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.useFakeTimers();
     const { app, launch } = inspectorApplication([collected, collected]);
+    const result = expect(
+      launchWithIdentity(
+        async () => {
+          await launch();
+          const evaluate = app.evaluate.getMockImplementation()!;
+          app.evaluate.mockImplementation((fn, token) =>
+            app.evaluate.mock.calls.length === 3 ? new Promise(() => {}) : evaluate(fn, token)
+          );
+          return app;
+        },
+        { ...options(), launchTimeoutMs: 1200 }
+      )
+    ).rejects.toThrow('electron-identity-retry-response: bounded wait elapsed (200ms)');
+    await vi.advanceTimersByTimeAsync(21200);
+    await result;
+    expect(app.evaluate).toHaveBeenCalledTimes(3);
+    expect(app.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails when all reads report collection and preserves the exit wait before one cleanup', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    vi.useFakeTimers();
+    const { app, launch } = inspectorApplication([collected, collected, collected]);
     const record = vi.fn();
     const result = expect(launchWithIdentity(launch, options(record))).rejects.toThrow(destroyed.message);
-    await vi.advanceTimersByTimeAsync(19999);
+    await vi.advanceTimersByTimeAsync(20999);
     expect(app.close).not.toHaveBeenCalled();
     await vi.advanceTimersByTimeAsync(1);
     await result;
     expect(launch).toHaveBeenCalledTimes(1);
-    expect(app.evaluate).toHaveBeenCalledTimes(2);
+    expect(app.evaluate).toHaveBeenCalledTimes(3);
     expect(app.close).toHaveBeenCalledTimes(1);
     const row = record.mock.calls.at(-1)?.[0];
     expect(row).toMatchObject({
       identityFailedAt: expect.any(String),
-      identityRetry: {
-        firstProtocolError: collected,
-        secondProtocolError: collected,
-        outcome: 'failed',
-      },
+      identityRetries: [
+        { trigger: collected, protocolError: collected, outcome: 'failed' },
+        { trigger: collected, protocolError: collected, outcome: 'failed' },
+      ],
       waits: [
         { phase: 'identity-failure-exit-observation', timeoutMs: 20000, status: 'failed' },
         { phase: 'identity-failure-cleanup', status: 'passed' },
       ],
     });
-    expect(row.identityRetry.firstProtocolError.requestId).not.toBe(row.identityRetry.secondProtocolError.requestId);
+    expect(row.identityRetries[0].protocolError.requestId).toBe(row.identityRetries[1].trigger.requestId);
   });
 
   it('rejects a retry if the app process handle changes', async () => {
@@ -703,7 +795,7 @@ describe('Electron launch evidence and identity retry', () => {
     expect(record.mock.calls.at(-1)?.[0]).toMatchObject({
       signal: 'SIGTERM',
       naturalExit: true,
-      identityRetry: { outcome: 'failed' },
+      identityRetries: [{ outcome: 'failed' }],
     });
   });
 
