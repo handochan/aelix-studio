@@ -15,6 +15,7 @@ export type {
 } from './studio-auth/types.js';
 export {
   ExtensionService,
+  MEMORY_ONLY_VAULT as EXTENSION_PROXY_MEMORY_ONLY_VAULT,
   locateStudioExtensionLayout,
   resolveStandaloneStudioUserDataPath,
   STATE_DIRECTORY as EXTENSION_STATE_DIRECTORY,
@@ -29,6 +30,9 @@ export type {
   ExtensionServiceOptions,
   ExtensionSettings,
   ExtensionSettingsState,
+  ProxyCredentialMode,
+  ProxyCredentialVault,
+  ProxyCredentials,
 } from './studio-extensions/index.js';
 
 // Backend launcher exports (M4)

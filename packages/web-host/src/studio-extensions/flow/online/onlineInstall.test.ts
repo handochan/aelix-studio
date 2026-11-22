@@ -79,9 +79,11 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
   describe('settings', () => {
     it('are the defaults until saved, and reading them creates nothing', async () => {
       expect(await settings()).toEqual({
-        settings: { onlineInstall: true, proxy: null, privateGit: false },
+        settings: { onlineInstall: true, proxy: null, privateGit: false, proxyAuthentication: false },
         unreadable: false,
         onlineInstallLocked: false,
+        credentialMode: 'memory-only',
+        hasSavedCredentials: false,
       });
       expect(await readdir(scratch)).not.toContain('user data');
       expect(spawn.calls).toEqual([]);
@@ -89,15 +91,22 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
 
     it('are saved under the lock, changing only the fields given, and read back by another service', async () => {
       expect(data(await save({ proxy: 'HTTP://Proxy.Corp.Example:3128/', privateGit: true }))).toEqual({
-        settings: { onlineInstall: true, proxy: PROXY, privateGit: true },
+        settings: { onlineInstall: true, proxy: PROXY, privateGit: true, proxyAuthentication: false },
         unreadable: false,
         onlineInstallLocked: false,
+        credentialMode: 'memory-only',
+        hasSavedCredentials: false,
       });
       expect(spawn.calls.filter((call) => call.args.includes('hold'))).toHaveLength(1);
       expect(data(await save({ onlineInstall: false }))).toMatchObject({
         settings: { onlineInstall: false, proxy: PROXY, privateGit: true },
       });
-      expect((await settings(start())).settings).toEqual({ onlineInstall: false, proxy: PROXY, privateGit: true });
+      expect((await settings(start())).settings).toEqual({
+        onlineInstall: false,
+        proxy: PROXY,
+        privateGit: true,
+        proxyAuthentication: false,
+      });
       expect(data(await save({ proxy: null }))).toMatchObject({ settings: { proxy: null } });
     });
 
@@ -108,7 +117,8 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
 
     it.each([
       ['INVALID_PROXY', { proxy: 'proxy.corp.example:3128' }],
-      ['PROXY_CREDENTIALS_UNSUPPORTED', { proxy: 'http://alice:hunter2@proxy.corp.example:3128' }],
+      ['INVALID_PROXY', { proxy: 'http://:hunter2@proxy.corp.example:3128' }],
+      ['INVALID_INPUT', { proxy: null, proxyAuthentication: true }],
       ['INVALID_INPUT', { proxy: 'http://proxy.corp.example', unknown: true }],
       ['INVALID_INPUT', {}],
       ['INVALID_INPUT', 'privateGit'],
@@ -139,7 +149,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       await mkdir(root, { recursive: true });
       await writeFile(path.join(root, 'settings.json'), '{ damaged');
       expect(await settings()).toMatchObject({
-        settings: { onlineInstall: false, proxy: null, privateGit: false },
+        settings: { onlineInstall: false, proxy: null, privateGit: false, proxyAuthentication: false },
         unreadable: true,
       });
       const named = { action: 'install', source: { kind: 'index', name: 'demo-one' } };
@@ -147,7 +157,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       expect(spawn.calls).toEqual([]);
       // A change starts from the closed settings; the screen sends every field after `unreadable`.
       expect(data(await save({ proxy: PROXY }))).toMatchObject({
-        settings: { onlineInstall: false, proxy: PROXY, privateGit: false },
+        settings: { onlineInstall: false, proxy: PROXY, privateGit: false, proxyAuthentication: false },
         unreadable: false,
       });
     });

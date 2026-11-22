@@ -102,6 +102,17 @@ const LETTER = /[a-z]/i;
  * Linear in the text: each `://` is found once, its scheme is read backwards no further than
  * the previous one, and each authority is read forwards once.
  */
+/**
+ * `redactUrlCredentials`, after replacing each of `secrets` (non-empty, without whitespace)
+ * wherever it appears with `***`.
+ */
+export function masker(secrets: readonly string[]): (text: string) => string {
+  const literal = [...new Set(secrets.filter((secret) => secret.length > 0 && !/\s/.test(secret)))].sort(
+    (one, other) => other.length - one.length
+  );
+  return (text) => redactUrlCredentials(literal.reduce((masked, secret) => masked.replaceAll(secret, '***'), text));
+}
+
 export function redactUrlCredentials(text: string): string {
   const urls: { scheme: number; from: number }[] = [];
   for (let mark = text.indexOf('://'); mark >= 0; mark = text.indexOf('://', mark + 3)) {
@@ -246,6 +257,12 @@ export type RunOptions = {
   tailLimit?: number;
   /** Mask credentials in URLs (`redactUrlCredentials`) before the output is cut to its tail. */
   redact?: boolean;
+  /**
+   * With `redact`: texts masked wherever they appear, inside a URL or not (a relay token in its
+   * forms, say). Each must hold no whitespace: masking runs on text up to whitespace, so a
+   * secret split across chunks is still masked whole.
+   */
+  secrets?: readonly string[];
   /** Written to the child once it has started. The input stays open until `closeInput` says so. */
   input?: string;
   /** Called per complete stdout line; return true to close the input and let the child finish. */
@@ -272,7 +289,7 @@ export type RunResult = {
  * still waits for the exit, so nothing is left writing when the caller cleans up.
  */
 export async function runToExit(spawn: Spawn, spec: SpawnSpec, options: RunOptions): Promise<RunResult> {
-  const redact = options.redact ? redactUrlCredentials : undefined;
+  const redact = options.redact ? masker(options.secrets ?? []) : undefined;
   const tail = new OutputTail(options.tailLimit ?? 4096, redact);
   const answer = new OutputTail(options.tailLimit ?? 4096, redact);
   const [stdout, stderr] = [tail.stream(), tail.stream()];

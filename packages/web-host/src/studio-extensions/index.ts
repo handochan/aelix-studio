@@ -3,6 +3,7 @@
  * request and reply types below and nothing else from this directory.
  */
 export { ExtensionService, type ExtensionServiceOptions } from './service.js';
+export { MEMORY_ONLY_VAULT, type ProxyCredentialVault } from './flow/online/proxy/credentials.js';
 export {
   locateStudioExtensionLayout,
   resolveStandaloneStudioUserDataPath,
@@ -24,4 +25,6 @@ export type {
   ExtensionSettingsState,
   ExtensionSource,
   ExtensionStatus,
+  ProxyCredentialMode,
+  ProxyCredentials,
 } from './types.js';

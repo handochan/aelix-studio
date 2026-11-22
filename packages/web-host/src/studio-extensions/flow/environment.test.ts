@@ -1,14 +1,27 @@
+import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer as httpServer, type RequestListener } from 'node:http';
+import { createServer as tlsServer } from 'node:tls';
 import { createServer as tcpServer, type AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildWheel } from '../../../tests/fixtures/extensionWheels';
-import { runToExit, spawnChild } from '../process';
+import { redactUrlCredentials, runToExit, spawnChild } from '../process';
 import { baseEnvironment, loadEnvironment, managementEnvironment } from './environment';
+import { startProxyRelay } from './online/proxy/relay';
+
+/**
+ * A password with the characters a proxy URL must carry encoded. `%41` reaches the proxy as
+ * typed: the relay builds the Basic value, and Git never decodes it.
+ */
+const PROXY_LOGIN = { username: 'ops@corp', password: "p@ss:w/rd%41%zz#?& !*'()100%" };
+const basic = (credentials: { username: string; password: string }): string =>
+  'Basic ' + Buffer.from(`${credentials.username}:${credentials.password}`).toString('base64');
+/** Pieces of the user's credentials that must stay with the relay. */
+const SECRET_PIECES = ['p@ss', 'w/rd', encodeURIComponent(PROXY_LOGIN.password), 'ops@corp', 'ops%40corp'];
 
 /** What a user's shell might export. Only the first block may reach a child. */
 const SHELL: NodeJS.ProcessEnv = {
@@ -327,7 +340,7 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
   afterAll(async () => {
     if (root) await rm(root, { recursive: true, force: true });
   });
-  const environment = (proxy?: string, privateGit = false): Record<string, string> =>
+  const environment = (proxy?: string, privateGit: boolean | [string, string][] = false): Record<string, string> =>
     managementEnvironment(baseEnvironment({ PATH: '/usr/bin:/bin' }, process.platform), process.platform, {
       agentDirectory: path.join(root, 'agent'),
       nativeSite: '/bundle/native-site',
@@ -336,7 +349,10 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
         indexUrl: 'https://index.invalid/simple/',
         home: path.join(root, 'home'),
         work: path.join(root, 'work'),
-        access: { ...(proxy ? { proxy } : {}), ...(privateGit ? { privateGit: { credentials: [] } } : {}) },
+        access: {
+          ...(proxy ? { proxy } : {}),
+          ...(privateGit ? { privateGit: { credentials: privateGit === true ? [] : privateGit } } : {}),
+        },
       },
     });
   const git = (args: string[], env: Record<string, string>, cwd = path.join(root, 'work')) =>
@@ -350,6 +366,171 @@ describe.skipIf(process.platform === 'win32')('Git behind the proxy of the exten
       expect(proxy.tunnels).toContain('repo.invalid:443');
     } finally {
       proxy.close();
+    }
+  }, 30_000);
+
+  it('signs in to the proxy through the relay, with the credentials exactly as typed', async () => {
+    const server = httpServer();
+    const seen: (string | undefined)[] = [];
+    server.on('connect', (request, socket) => {
+      seen.push(request.headers['proxy-authorization']);
+      socket.destroy();
+    });
+    const address = 'http://127.0.0.1:' + String(await port(server as unknown as ReturnType<typeof tcpServer>));
+    const relay = await startProxyRelay(address, PROXY_LOGIN);
+    try {
+      const env = environment(relay.url);
+      // Git gets the relay and its token; the user's credentials are nowhere in its environment.
+      for (const value of Object.values(env)) for (const piece of SECRET_PIECES) expect(value).not.toContain(piece);
+      const result = await runToExit(
+        spawnChild,
+        {
+          command: 'git',
+          args: ['ls-remote', 'https://repo.invalid/owner/demo.git'],
+          env,
+          cwd: path.join(root, 'work'),
+        },
+        { timeoutMs: 20_000, redact: true }
+      );
+      expect(result.code).not.toBe(0);
+      // Git asks the relay without the token first (curl's default); only a signed-in tunnel reaches the proxy.
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((header) => header === basic(PROXY_LOGIN))).toBe(true);
+      expect(result.output).not.toContain(new URL(relay.url).password);
+      for (const piece of SECRET_PIECES) expect(result.output).not.toContain(piece);
+    } finally {
+      await relay.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  }, 30_000);
+
+  it('gets the relay answer alone when the proxy refuses the sign-in', async () => {
+    const server = httpServer();
+    server.on('connect', (request, socket) => {
+      const echo = `refused ${String(request.headers['proxy-authorization'])}`;
+      socket.end(
+        `HTTP/1.1 407 Proxy Authentication Required\r\nProxy-Authenticate: NTLM\r\nContent-Length: ${String(echo.length)}\r\n\r\n${echo}`
+      );
+    });
+    const address = 'http://127.0.0.1:' + String(await port(server as unknown as ReturnType<typeof tcpServer>));
+    const relay = await startProxyRelay(address, PROXY_LOGIN);
+    try {
+      const result = await runToExit(
+        spawnChild,
+        {
+          command: 'git',
+          args: ['ls-remote', 'https://repo.invalid/owner/demo.git'],
+          env: { ...environment(relay.url), GIT_CURL_VERBOSE: '1' },
+          cwd: path.join(root, 'work'),
+        },
+        { timeoutMs: 20_000, redact: true, secrets: relay.secrets }
+      );
+      expect(result.code).not.toBe(0);
+      expect(relay.credentialsRejected()).toBe(true);
+      expect(result.output).toMatch(/502/);
+      expect(result.output).not.toMatch(/NTLM|refused Basic/);
+      expect(result.output).not.toContain(basic(PROXY_LOGIN).slice('Basic '.length));
+    } finally {
+      await relay.close();
+      server.closeAllConnections();
+      server.close();
+    }
+  }, 30_000);
+
+  // A certificate for 127.0.0.1 needs openssl, which CI's Linux and macOS runners have.
+  it.skipIf(spawnSync('openssl', ['version']).status !== 0)(
+    'reaches nothing through an https proxy whose certificate is not trusted, even with NODE_TLS_REJECT_UNAUTHORIZED=0',
+    async () => {
+      const [key, cert] = [path.join(root, 'proxy-key.pem'), path.join(root, 'proxy-cert.pem')];
+      const made = spawnSync(
+        'openssl',
+        ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', key, '-out', cert, '-days', '1'].concat([
+          '-subj',
+          '/CN=127.0.0.1',
+          '-addext',
+          'subjectAltName=IP:127.0.0.1',
+        ]),
+        { encoding: 'utf8' }
+      );
+      expect(made.status, made.stderr).toBe(0);
+      const received: string[] = [];
+      const server = tlsServer({ key: await readFile(key), cert: await readFile(cert) }, (socket) => {
+        socket.on('error', () => socket.destroy());
+        socket.on('data', (chunk: Buffer) => received.push(chunk.toString('latin1')));
+      });
+      server.on('tlsClientError', () => {});
+      const address = 'https://127.0.0.1:' + String(await port(server as unknown as ReturnType<typeof tcpServer>));
+      const before = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      const relay = await startProxyRelay(address, PROXY_LOGIN);
+      try {
+        const result = await runToExit(
+          spawnChild,
+          {
+            command: 'git',
+            args: ['ls-remote', 'https://repo.invalid/owner/demo.git'],
+            env: environment(relay.url),
+            cwd: path.join(root, 'work'),
+          },
+          { timeoutMs: 20_000, redact: true, secrets: relay.secrets }
+        );
+        expect(result.code).not.toBe(0);
+        // The handshake failed before a byte of the request, sign-in included, was sent.
+        expect(received).toEqual([]);
+      } finally {
+        if (before === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+        else process.env.NODE_TLS_REJECT_UNAUTHORIZED = before;
+        await relay.close();
+        server.close();
+        await rm(key, { force: true });
+        await rm(cert, { force: true });
+      }
+    },
+    30_000
+  );
+
+  it('keeps the relay token from the credential helpers of private Git', async () => {
+    // The user's proxy answers a plain-HTTP repository with 200, after which Git hands the
+    // proxy's credentials to the helpers (credential_approve).
+    let answered = 0;
+    const server = httpServer((request, response) => {
+      if (request.headers['proxy-authorization'] !== basic(PROXY_LOGIN)) return void response.writeHead(407).end();
+      answered += 1;
+      response.writeHead(200, { 'content-type': 'text/plain' }).end('0000000000000000000000000000000000000000 HEAD\n');
+    });
+    const address = 'http://127.0.0.1:' + String(await port(server as unknown as ReturnType<typeof tcpServer>));
+    const relay = await startProxyRelay(address, PROXY_LOGIN);
+    const store = path.join(root, 'stored-credentials');
+    const fetch = (env: Record<string, string>) =>
+      runToExit(
+        spawnChild,
+        {
+          command: 'git',
+          // Plain HTTP only so the fake proxy can answer without TLS; Studio's own policy refuses it.
+          args: ['-c', 'protocol.http.allow=always', 'ls-remote', 'http://repo.invalid/owner/demo.git'],
+          env,
+          cwd: path.join(root, 'work'),
+        },
+        { timeoutMs: 20_000, redact: true }
+      );
+    try {
+      const env = environment(relay.url, [['credential.helper', `store --file ${store}`]]);
+      await fetch(env);
+      expect(answered).toBeGreaterThan(0);
+      expect(await readFile(store, 'utf8').catch(() => '')).toBe('');
+      // The control: without the empty helper for the relay, the user's helper stores the token.
+      const unscoped = { ...env };
+      const index = Object.entries(unscoped).find(([, value]) => value.startsWith('credential.http://127.0.0.1:'))?.[0];
+      expect(index).toBeDefined();
+      unscoped[String(index)] = 'aelix.unused';
+      await fetch(unscoped);
+      expect(await readFile(store, 'utf8')).toContain('run:');
+    } finally {
+      await rm(store, { force: true });
+      await relay.close();
+      server.closeAllConnections();
+      server.close();
     }
   }, 30_000);
 
@@ -587,6 +768,54 @@ runpy.run_module("pip", run_name="__main__")`;
     } finally {
       proxy.close();
       trap.close();
+    }
+  }, 40_000);
+
+  it('signs pip in to the proxy through the relay, with the credentials exactly as typed', async () => {
+    const wheel = buildWheel({ name: 'studio-signed-in', extension: false });
+    const seen: (string | undefined)[] = [];
+    const proxy = await serve((request, response) => {
+      seen.push(request.headers['proxy-authorization']);
+      if (request.headers['proxy-authorization'] !== basic(PROXY_LOGIN))
+        return response.writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' }).end();
+      if (request.url === 'http://127.0.0.1:9/simple/studio-signed-in/')
+        response
+          .writeHead(200, { 'content-type': 'text/html' })
+          .end(`<a href="http://127.0.0.1:9/${wheel.filename}">wheel</a>`);
+      else if (request.url === 'http://127.0.0.1:9/' + wheel.filename) response.writeHead(200).end(wheel.data);
+      else response.writeHead(404).end();
+    });
+    const relay = await startProxyRelay(proxy.address, PROXY_LOGIN);
+    try {
+      const env = environment('http://127.0.0.1:9/simple/', {}, relay.url);
+      for (const value of Object.values(env)) for (const piece of SECRET_PIECES) expect(value).not.toContain(piece);
+      const result = await run(['-P', '-B', '-m', 'pip', 'install', '--retries', '0', 'studio-signed-in'], env);
+      expect(result.code, redactUrlCredentials(result.output)).toBe(0);
+      expect(seen.length).toBeGreaterThan(0);
+      expect(seen.every((header) => header === basic(PROXY_LOGIN))).toBe(true);
+    } finally {
+      await relay.close();
+      proxy.close();
+    }
+  }, 40_000);
+
+  it('gets the relay answer alone when the proxy refuses pip the sign-in', async () => {
+    const proxy = await serve((request, response) =>
+      response
+        .writeHead(407, { 'proxy-authenticate': 'NTLM', 'x-upstream-only': 'kept' })
+        .end(`refused ${String(request.headers['proxy-authorization'])}`)
+    );
+    const relay = await startProxyRelay(proxy.address, PROXY_LOGIN);
+    try {
+      const env = environment('http://127.0.0.1:9/simple/', {}, relay.url);
+      const result = await run(['-P', '-B', '-m', 'pip', 'install', '--retries', '0', 'studio-refused'], env);
+      expect(result.code).not.toBe(0);
+      expect(relay.credentialsRejected()).toBe(true);
+      expect(result.output).not.toMatch(/NTLM|refused Basic|x-upstream-only/i);
+      expect(result.output).not.toContain(basic(PROXY_LOGIN).slice('Basic '.length));
+    } finally {
+      await relay.close();
+      proxy.close();
     }
   }, 40_000);
 

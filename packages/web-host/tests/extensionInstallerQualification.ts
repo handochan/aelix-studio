@@ -7,13 +7,19 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { ExtensionService, STATE_ENVIRONMENT } from '../src/studio-extensions';
+import { ExtensionService, STATE_ENVIRONMENT, type ProxyCredentialVault } from '../src/studio-extensions';
 import { baseEnvironment } from '../src/studio-extensions/flow/environment';
-import { runToExit, spawnChild, windowsChildSpawn, type Child } from '../src/studio-extensions/process';
+import { runToExit, spawnChild, windowsChildSpawn, type Child, type Spawn } from '../src/studio-extensions/process';
 import { generationPaths, locateLayout, resolveBundle } from '../src/studio-extensions/store/layout';
 import { acquireMutationLock } from '../src/studio-extensions/store/lock';
 import { readPointer, type GenerationRecord } from '../src/studio-extensions/store/pointer';
-import type { ExtensionCommand, ExtensionListing, ExtensionOperation } from '../src/studio-extensions/types';
+import type {
+  ExtensionCommand,
+  ExtensionListing,
+  ExtensionOperation,
+  ExtensionReply,
+  ExtensionSettingsState,
+} from '../src/studio-extensions/types';
 import { buildWheel, writeWheel } from './fixtures/extensionWheels';
 
 type Message = {
@@ -365,12 +371,144 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
   }
 }
 
+/**
+ * Online installs through a proxy that asks for a user name and password (Studio #32), with
+ * the installed Python and the real lock holder: credentials given per install (memory-only),
+ * then saved sealed and dropped again (keychain, with a stand-in for Electron `safeStorage`).
+ * pip reaches the proxy through the change's loopback relay, which signs in: the credentials
+ * are never in an argument, an environment, a reply or a file.
+ */
+async function qualifyProxyCredentials(payload: string, scratch: string, checks: string[]): Promise<void> {
+  const bundle = await resolveBundle(payload);
+  assert(bundle, 'installed Preview bundle did not resolve');
+  const env = { ...baseEnvironment(process.env, process.platform), HOME: scratch, USERPROFILE: scratch };
+  const login = { username: 'ops@corp', password: "p@ss:w/rd%zz#?& !*'()100%" };
+  const secrets = ['p@ss:w/rd', encodeURIComponent(login.password), 'ops@corp', 'ops%40corp'];
+  const signedIn = 'Basic ' + Buffer.from(login.username + ':' + login.password).toString('base64');
+  const index = 'http://127.0.0.1:9/simple/';
+  const wheels = new Map(
+    ['studio-os-proxied-memory', 'studio-os-proxied-keychain'].map((name) => [name, buildWheel({ name })])
+  );
+  const headers: (string | undefined)[] = [];
+  // pip asks a plain HTTP proxy for the absolute index URL; the proxy answers it itself.
+  const proxy = createServer((request, response) => {
+    headers.push(request.headers['proxy-authorization']);
+    if (request.headers['proxy-authorization'] !== signedIn)
+      return void response.writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' }).end();
+    for (const [name, wheel] of wheels) {
+      if (request.url === index + name + '/')
+        return void response
+          .writeHead(200, { 'content-type': 'text/html' })
+          .end('<a href="http://127.0.0.1:9/' + wheel.filename + '">' + wheel.filename + '</a>');
+      if (request.url === 'http://127.0.0.1:9/' + wheel.filename) return void response.writeHead(200).end(wheel.data);
+    }
+    response.writeHead(404).end();
+  });
+  proxy.listen(0, '127.0.0.1');
+  await once(proxy, 'listening');
+  const address = 'http://127.0.0.1:' + (proxy.address() as AddressInfo).port;
+  const typed =
+    'http://' + encodeURIComponent(login.username) + ':' + encodeURIComponent(login.password) + '@127.0.0.1:';
+  const argv: string[] = [];
+  const relays = new Set<string>();
+  const base = windows ? windowsChildSpawn(bundle.python, bundle.launcher) : spawnChild;
+  const spawn: Spawn = (spec) => {
+    argv.push([spec.command, ...spec.args, ...Object.values(spec.env)].join(' '));
+    if (spec.env.PIP_PROXY) relays.add(spec.env.PIP_PROXY);
+    return base(spec);
+  };
+  const vault: ProxyCredentialVault = {
+    mode: 'keychain',
+    seal: (text) => Buffer.from([...text].reverse().join(''), 'utf8'),
+    open: (sealed) => [...sealed.toString('utf8')].reverse().join(''),
+  };
+  const roots = [path.join(scratch, 'proxy memory'), path.join(scratch, 'proxy keychain')];
+  const memory = new ExtensionService({ runtime: payload, root: roots[0], env, spawn });
+  const keychain = new ExtensionService({ runtime: payload, root: roots[1], env, spawn, proxyVault: vault });
+  const owner = 'installer-qualification';
+  const replies: ExtensionReply[] = [];
+  const ask = async (service: ExtensionService, command: ExtensionCommand): Promise<ExtensionReply> => {
+    const reply = await service.request(owner, command);
+    replies.push(reply);
+    return reply;
+  };
+  const settings = async (service: ExtensionService, command: ExtensionCommand): Promise<ExtensionSettingsState> => {
+    const reply = await ask(service, command);
+    assert(reply.ok && 'credentialMode' in reply.data, JSON.stringify(reply));
+    return reply.data;
+  };
+  const install = async (service: ExtensionService, command: ExtensionCommand): Promise<void> => {
+    const started = await ask(service, command);
+    assert(started.ok && 'operationId' in started.data, JSON.stringify(started));
+    const operationId = started.data.operationId;
+    const done = await until('proxied install', async () => {
+      const reply = await ask(service, { action: 'poll', operationId });
+      assert(reply.ok && 'phase' in reply.data, JSON.stringify(reply));
+      return ['switched', 'failed', 'cancelled'].includes(reply.data.phase) ? reply.data : undefined;
+    });
+    assert.equal(done.phase, 'switched', JSON.stringify(done));
+  };
+  const files = async (directory: string): Promise<string[]> => {
+    const found: string[] = [];
+    for (const entry of await readdir(directory, { withFileTypes: true, recursive: true }))
+      if (entry.isFile()) found.push(await readFile(path.join(entry.parentPath, entry.name), 'latin1'));
+    return found;
+  };
+  try {
+    const memorySettings = await settings(memory, {
+      action: 'set_settings',
+      settings: { proxy: address, proxyAuthentication: true },
+    });
+    assert.equal(memorySettings.credentialMode, 'memory-only');
+    const asked = await ask(memory, {
+      action: 'install',
+      source: { kind: 'index', name: 'studio-os-proxied-memory', indexUrl: index },
+    });
+    assert.deepEqual(asked, { ok: false, code: 'PROXY_CREDENTIALS_REQUIRED' });
+    await install(memory, {
+      action: 'install',
+      source: { kind: 'index', name: 'studio-os-proxied-memory', indexUrl: index },
+      proxyCredentials: login,
+    });
+    assert(headers.includes(signedIn), 'pip never signed in to the proxy');
+
+    const port = (proxy.address() as AddressInfo).port;
+    const saved = await settings(keychain, { action: 'set_settings', settings: { proxy: typed + port } });
+    assert.equal(saved.settings.proxy, address);
+    assert(saved.settings.proxyAuthentication && saved.hasSavedCredentials, JSON.stringify(saved));
+    const sealedFiles = async (): Promise<string[]> =>
+      (await readdir(roots[1])).filter((name) => /^proxy-credentials-[0-9a-f]{32}\.json$/.test(name));
+    assert.equal((await sealedFiles()).length, 1);
+    assert((await lstat(path.join(roots[1], (await sealedFiles())[0]))).isFile());
+    const before = headers.length;
+    await install(keychain, {
+      action: 'install',
+      source: { kind: 'index', name: 'studio-os-proxied-keychain', indexUrl: index },
+    });
+    assert(headers.slice(before).includes(signedIn), 'pip did not sign in with the saved credentials');
+    for (const text of [...(await files(roots[0])), ...(await files(roots[1])), JSON.stringify(replies), ...argv])
+      for (const secret of secrets) assert(!text.includes(secret), 'a proxy credential left the environment');
+    const dropped = await settings(keychain, { action: 'set_settings', settings: { proxy: null } });
+    assert(!dropped.hasSavedCredentials && !dropped.settings.proxyAuthentication, JSON.stringify(dropped));
+    assert.deepEqual(await sealedFiles(), [], 'the lock holder kept dropped credentials');
+    // Every installer had a relay of its own change, never the user's proxy itself.
+    assert(relays.size >= 2, 'the installers had no relay');
+    for (const relay of relays) assert.match(relay, /^http:\/\/run:[0-9a-f]{64}@127\.0\.0\.1:[0-9]+$/);
+    checks.push('proxy credentials: per install, sealed and dropped by the lock holder, through the relay only');
+  } finally {
+    await Promise.all([memory.dispose(), keychain.dispose()]);
+    proxy.closeAllConnections();
+    proxy.close();
+  }
+}
+
 const [payload, report] = process.argv.slice(2);
 assert(payload && report, 'usage: extensionInstallerQualification.ts INSTALLED_PAYLOAD REPORT');
 const scratch = await realpath(await mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', 'studio-ext-')));
 const evidence: Evidence = { checks: [] };
 try {
   await qualify(payload, scratch, evidence);
+  await qualifyProxyCredentials(payload, scratch, evidence.checks);
   await writeFile(report, JSON.stringify({ status: 'passed', ...evidence }, null, 2) + '\n');
 } catch (error) {
   await writeFile(report, JSON.stringify({ status: 'failed', ...evidence, error: String(error) }, null, 2) + '\n');

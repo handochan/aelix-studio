@@ -143,7 +143,9 @@ export function directWriter(root: string): StateWriter {
   };
   return {
     replace: async (from, to) => {
-      const replaceable = ['current.json', 'current.previous.json', 'settings.json'].includes(to);
+      const replaceable =
+        ['current.json', 'current.previous.json', 'settings.json'].includes(to) ||
+        /^proxy-credentials-[0-9a-f]{32}\.json$/.test(to);
       if (!replaceable || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
       await rename(path.join(root, from), path.join(root, to));
     },
@@ -284,8 +286,10 @@ export type FakeRuntimeOptions = {
   heldLeases?: string[];
   /** What the lock holder prints: `held` unless a test says otherwise. */
   lock?: (child: ScriptedChild) => void;
-  /** Replaces `extension install`: return the native exit code. */
-  install?: (venv: Venv, wheel: string, spec: SpawnSpec) => Promise<number>;
+  /** A request the lock holder fails, as an interruption would: true answers an `OSError`. */
+  holderFails?: (request: { op: string; from?: string; to?: string; path?: string }) => boolean;
+  /** Replaces `extension install`: return the native exit code. `print` writes to its stdout. */
+  install?: (venv: Venv, wheel: string, spec: SpawnSpec, print: (text: string) => void) => Promise<number>;
   /** Replaces `extension remove`: return the native exit code. */
   remove?: (venv: Venv, entry: string) => Promise<number>;
   /** Replaces `pip check` when revalidating a generation against a new bundle. */
@@ -352,9 +356,12 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
           for (const line of text.split('\n').filter(Boolean)) {
             const request = JSON.parse(line) as { op: string; from: string; to: string; path: string };
             last = last
-              .then(() =>
-                request.op === 'replace' ? writer.replace(request.from, request.to) : writer.remove(request.path)
-              )
+              .then(() => {
+                if (options.holderFails?.(request)) throw new Error('interrupted');
+                return request.op === 'replace'
+                  ? writer.replace(request.from, request.to)
+                  : writer.remove(request.path);
+              })
               .then(
                 () => child.print('{"ok": true}\n'),
                 (error: unknown) =>
@@ -479,7 +486,9 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
     finish(child, async () => {
       if (options.nativeOutput) child.print(options.nativeOutput);
       if (native[1] === 'install')
-        return options.install ? options.install(venv, native[2], spec) : (await installWheel(venv, native[2]), 0);
+        return options.install
+          ? options.install(venv, native[2], spec, (text) => child.print(text))
+          : (await installWheel(venv, native[2]), 0);
       if (native[1] === 'remove') {
         if (options.remove) return options.remove(venv, native[2]);
         // native compares names loosely (case, `_` as `-`) and takes the first entry that matches.

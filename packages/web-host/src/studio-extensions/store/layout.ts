@@ -16,6 +16,7 @@ import { ExtensionFailure } from '../types.js';
  *   current.json              current and previous generation, revision, bundle binding
  *   current.previous.json     the pointer before the last switch
  *   settings.json             the user's extension settings: online installs, proxy, private Git
+ *   proxy-credentials-<id>.json  proxy user name and password, sealed by the OS keychain (desktop only)
  *   constraints-<lock>.txt    distributions and versions the bundle ships
  *   artifacts/<set>/          imported wheels and their sha256 list
  *   leases/                   one file per running launcher, named <generation>.<suffix>

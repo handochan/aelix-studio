@@ -2,7 +2,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { scriptedSpawn } from '../../tests/fixtures/extensionRuntime';
-import { OutputTail, redactUrlCredentials, runToExit, spawnChild } from './process';
+import { masker, OutputTail, redactUrlCredentials, runToExit, spawnChild } from './process';
 
 const SPEC = { command: 'python', args: ['-I'], env: {} };
 
@@ -250,6 +250,62 @@ describe('masking credentials in output', () => {
     );
     expect(leaks(result.output)).toEqual([]);
     expect(result.output).toBe('*@git.example.com/o/r.git end\n');
+  });
+});
+
+describe('masking the relay token of a change in output', () => {
+  const token = '0123456789abcdef'.repeat(4);
+  // As is, with every byte escaped (the relay's percent form of a hex token), and in the Basic value.
+  const escaped = [...token].map((char) => '%' + char.charCodeAt(0).toString(16)).join('');
+  const forms = [token, escaped, Buffer.from(`run:${token}`).toString('base64')];
+  const secrets = [...forms, Buffer.from('ops:p@ss').toString('base64')];
+
+  it('masks three distinct forms of the token', () => {
+    expect(new Set(forms).size).toBe(3);
+  });
+
+  it.each([
+    ['as is', `debug: token=${token} sent`],
+    ['percent-escaped outside a URL', `debug: user=run%3A${escaped}`],
+    ['in an error', `ProxyError: 407 for run:${token}`],
+    ['in a Basic header', `> Proxy-Authorization: Basic ${forms[2]}\n`],
+    ['in the user part of a URL', `via http://run:${token}@127.0.0.1:50123/`],
+    ['the Basic value of the user credentials', `echo: Basic ${secrets[3]}`],
+  ])('hides it %s', (_case, text) => {
+    const masked = masker(secrets)(text);
+    for (const secret of secrets) expect(masked).not.toContain(secret);
+    expect(masked).toContain('***');
+  });
+
+  it('hides it however the chunks fall, on either stream, and in what a run reports', async () => {
+    const text = `x Proxy-Authorization: Basic ${forms[2]} token=${token} escaped=${escaped} end\n`;
+    for (let cut = 1; cut < text.length; cut += 7) {
+      const tail = new OutputTail(4096, masker(secrets));
+      const [one, two] = [tail.stream(), tail.stream()];
+      one.push(text.slice(0, cut));
+      two.push('other ');
+      one.push(text.slice(cut));
+      for (const secret of secrets) expect(tail.toString()).not.toContain(secret);
+    }
+    const spawn = scriptedSpawn((_spec, child) => {
+      child.print(text.slice(0, 40));
+      child.complain(text.slice(40));
+      child.exit(1);
+    });
+    const result = await runToExit(spawn, SPEC, { timeoutMs: 1000, redact: true, secrets });
+    for (const secret of secrets) {
+      expect(result.output).not.toContain(secret);
+      expect(result.stdout).not.toContain(secret);
+    }
+  });
+
+  it('ignores secrets that are empty or hold whitespace, and masks nothing without redact', async () => {
+    expect(masker(['', 'a b'])('a b and more')).toBe('a b and more');
+    const spawn = scriptedSpawn((_spec, child) => {
+      child.print(token);
+      child.exit(0);
+    });
+    expect((await runToExit(spawn, SPEC, { timeoutMs: 1000, secrets })).output).toBe(token);
   });
 });
 
