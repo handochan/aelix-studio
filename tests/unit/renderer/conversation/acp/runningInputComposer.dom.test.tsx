@@ -853,90 +853,185 @@ describe('running input in the composer', () => {
   });
 
   it.each([
-    ['binding-1', 'turn-2'],
-    ['binding-2', 'turn-1'],
-    ['binding-2', 'turn-2'],
-  ])('keeps an earlier image ACK ended after Stop on %s/%s', async (nextBinding, nextTurn) => {
-    const held = hold();
-    const offer = (bindingId: string) =>
-      success({ version: 1, bindingId, hostBytes: true, requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES] });
-    server.discovery = () => offer('binding-1');
-    server.write.mockImplementation(({ method }) =>
-      method === IMAGE_STATE
-        ? result({
-            available: true,
-            model: 'fixture/vision',
-            turnId: server.turn.turnId,
-            remaining: {
-              count: 4,
-              rawBytes: 6 << 20,
-              imageBytes: 3_750_000,
-              sidePixels: 8000,
-              nativeLineBytes: 8 << 20,
-            },
-          })
-        : held.pending
-    );
-    const digest = { sha256: 'a'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
-    const size = { width: 1, height: 1, bytes: 64, digest };
-    vi.spyOn(runningImages, 'createImagePreparation').mockImplementation(({ requestId }) => ({
-      prepare: async () => ({
-        requestId: requestId!,
-        prepareId: requestId!,
-        recipeVersion: 1,
-        images: [
-          {
-            ref: IMAGE_REFERENCE.files[0],
-            original: size,
-            sent: { ...size, mime: 'image/png' },
-            preview: { kind: 'icon', dimensions: size },
-            changed: false,
-            orientationOnly: false,
-            secureContext: false,
-            plannedBytes: 64,
-            codecMs: 0,
-          },
-        ],
-        estimatedLineBytes: 256,
-        codecMs: 0,
-      }),
-      dispose() {},
-    }));
-    const fetchHost = fetchMock.getMockImplementation()!;
-    fetchMock.mockImplementation((url, init) =>
-      url.endsWith('/byte-grants')
-        ? Promise.resolve(
-            success({ expiresInMs: 60_000, grants: [{ id: 'grant', byteLength: 64, sha256: digest.sha256 }] })
-          )
-        : fetchHost(url, init)
-    );
-
-    const view = await mount();
-    let route: Promise<RunningInputRoute> | undefined;
-    act(() => {
-      route = controller.submit('late pixels', IMAGE_REFERENCE, TEXT_DRAFT);
-    });
-    await waitFor(() => expect(controller.images.receipts[0]?.receipt.status).toBe('pending'));
-    const { requestId, bindingId, turnId } = controller.images.receipts[0].receipt;
-
-    server.discovery = () => offer(nextBinding);
-    server.turn = { active: true, turnId: nextTurn };
-    view.rerender(<Harness hostTurnId='host-turn-2' />);
-    await waitFor(() => expect(controller.images.receipts[0]?.phase).toBe('ended'));
-    act(() => controller.beginStop()('done'));
-    await act(async () => {
-      held.reply(
-        result({ accepted: true, delivery: 'native-queue', turnId, inputKind: 'pixels', captionAdded: false })
+    {
+      label: 'normal discovery on another ACP turn',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on a new binding with a reused turn ID',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-1',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on a new binding and turn',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery after a Host turn change with the same ACP tuple',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on the original Host and ACP turn',
+      discovery: 'ready',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stopped',
+    },
+    {
+      label: 'pending discovery after a Host turn change',
+      discovery: 'pending',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'pending discovery on the original Host turn',
+      discovery: 'pending',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stop-unconfirmed',
+    },
+    {
+      label: 'failed discovery on the original Host turn',
+      discovery: 'failed',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stop-unconfirmed',
+    },
+  ])(
+    'attributes Stop on a late image ACK with $label',
+    async ({ discovery, newHost, nextBinding, nextTurn, phase }) => {
+      const held = hold();
+      const offer = (bindingId: string) =>
+        success({ version: 1, bindingId, hostBytes: true, requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES] });
+      server.discovery = () => offer('binding-1');
+      server.write.mockImplementation(({ method }) =>
+        method === IMAGE_STATE
+          ? result({
+              available: true,
+              model: 'fixture/vision',
+              turnId: server.turn.turnId,
+              remaining: {
+                count: 4,
+                rawBytes: 6 << 20,
+                imageBytes: 3_750_000,
+                sidePixels: 8000,
+                nativeLineBytes: 8 << 20,
+              },
+            })
+          : held.pending
       );
-      await route;
-    });
+      const digest = { sha256: 'a'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
+      const size = { width: 1, height: 1, bytes: 64, digest };
+      vi.spyOn(runningImages, 'createImagePreparation').mockImplementation(({ requestId }) => ({
+        prepare: async () => ({
+          requestId: requestId!,
+          prepareId: requestId!,
+          recipeVersion: 1,
+          images: [
+            {
+              ref: IMAGE_REFERENCE.files[0],
+              original: size,
+              sent: { ...size, mime: 'image/png' },
+              preview: { kind: 'icon', dimensions: size },
+              changed: false,
+              orientationOnly: false,
+              secureContext: false,
+              plannedBytes: 64,
+              codecMs: 0,
+            },
+          ],
+          estimatedLineBytes: 256,
+          codecMs: 0,
+        }),
+        dispose() {},
+      }));
+      const fetchHost = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation((url, init) =>
+        url.endsWith('/byte-grants')
+          ? Promise.resolve(
+              success({ expiresInMs: 60_000, grants: [{ id: 'grant', byteLength: 64, sha256: digest.sha256 }] })
+            )
+          : fetchHost(url, init)
+      );
 
-    expect(controller.images.receipts).toMatchObject([
-      { phase: 'ended', receipt: { requestId, bindingId, turnId, status: 'queued' } },
-    ]);
-    await expect(route).resolves.toBe('kept');
-    expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
-  });
+      const reconnect = new Set<() => void>();
+      vi.mocked(httpBridge.wsEmitter).mockImplementation((event) => ({
+        on(listener) {
+          if (event === 'realtime.reconnected') reconnect.add(listener);
+          return () => reconnect.delete(listener);
+        },
+        emit: () => {},
+      }));
+      const view = await mount();
+      let route: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        route = controller.submit('late pixels', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      await waitFor(() => expect(controller.images.receipts[0]?.receipt.status).toBe('pending'));
+      const { requestId, bindingId, turnId, hostTurnId } = controller.images.receipts[0].receipt;
+      expect(hostTurnId).toBe('host-turn-1');
+
+      const heldDiscovery = hold();
+      const readDiscovery = vi.fn(() => {
+        if (discovery === 'pending') return heldDiscovery.pending;
+        return discovery === 'failed' ? failure(503, 'EXT_UNAVAILABLE') : offer(nextBinding);
+      });
+      server.discovery = readDiscovery;
+      server.turn = { active: true, turnId: nextTurn };
+      const stopHostTurnId = newHost ? 'host-turn-2' : 'host-turn-1';
+      if (newHost) view.rerender(<Harness hostTurnId={stopHostTurnId} />);
+      else
+        act(() => {
+          for (const listener of reconnect) listener();
+        });
+      await waitFor(() => expect(readDiscovery).toHaveBeenCalled());
+      if (discovery !== 'pending') await settle();
+
+      act(() => controller.beginStop(stopHostTurnId)('done'));
+      await act(async () => {
+        held.reply(
+          result({ accepted: true, delivery: 'native-queue', turnId, inputKind: 'pixels', captionAdded: false })
+        );
+      });
+      if (discovery === 'pending') {
+        expect(controller.images.receipts[0]?.receipt.status).toBe('pending');
+        await act(async () => {
+          heldDiscovery.reply(offer(nextBinding));
+          await route;
+        });
+      } else {
+        await expect(route).resolves.toBe('kept');
+      }
+
+      expect(controller.images.receipts).toMatchObject([
+        { phase, receipt: { requestId, bindingId, turnId, hostTurnId, status: 'queued' } },
+      ]);
+      expect(notices()[0]).toHaveTextContent(
+        phase === 'ended' ? 'acp.runningInput.queuedEnded' : 'acp.runningInput.queuedStopped'
+      );
+      expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+    }
+  );
 
   it('keeps the submitted draft when Stop precedes the receipt and the native turn is still active', async () => {
     const held = hold();

@@ -30,6 +30,8 @@ export type RunningInputReceipt = Readonly<
   RunningInputTarget & {
     requestId: string;
     mode: RunningInputMode;
+    /** Host turn observed at the original click. Local metadata for Stop attribution. */
+    hostTurnId?: string | null;
     /** Present for a pixel write. Receipt and preview can be inspected on the original binding and turn. */
     pixels?: RunningImageBatch;
   } & (RunningInputOutcome | { status: 'pending' })
@@ -74,6 +76,8 @@ export type RunningInputSnapshot = Readonly<{
     | {
         status: 'ready';
         bindingId: string;
+        /** Host turn ID that stayed current across this successful ACP discovery. */
+        hostTurnId: string | null;
         turn: RunningInputTurn;
         modes: readonly RunningInputMode[];
         canLookup: boolean;

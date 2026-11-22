@@ -39,6 +39,7 @@ const MODES = ['steer', 'follow-up'] as const;
 const IMAGE_METHODS = { steer: INPUT_METHODS.steerImages, 'follow-up': INPUT_METHODS.followUpImages } as const;
 
 type PixelSubmission = RunningInputTarget & {
+  hostTurnId?: string | null;
   mode: RunningInputMode;
   requestId: string;
   message: string;
@@ -95,7 +96,7 @@ function failureOutcome(failure: RelayFailure): RunningInputOutcome {
  * Own one client per mounted conversation. Refresh after standard host turn changes and dispose on exit.
  * Ordinary sends still require both the host turn and the native turn to be idle.
  */
-export function createRunningInputClient(conversationId: string) {
+export function createRunningInputClient(conversationId: string, getHostTurnId: () => string | null = () => null) {
   const scope = '/api/conversations/' + encodeURIComponent(conversationId);
   const path = scope + '/acp-extensions';
   const previews = createRunningImagePreviews();
@@ -141,6 +142,7 @@ export function createRunningInputClient(conversationId: string) {
   }
 
   async function discover(current: number): Promise<void> {
+    const hostTurnId = getHostTurnId();
     const isCurrent = () => !disposed && current === generation;
     let reply = await requestRelay(path);
     if (
@@ -209,6 +211,7 @@ export function createRunningInputClient(conversationId: string) {
         channel: {
           status: 'ready',
           bindingId,
+          hostTurnId: getHostTurnId() === hostTurnId ? hostTurnId : null,
           turn,
           modes,
           canLookup: requests.includes(INPUT_METHODS.lookup),
@@ -270,14 +273,14 @@ export function createRunningInputClient(conversationId: string) {
     // eslint-disable-next-line no-await-in-loop -- a reconnect may supersede the operation being awaited
     while (discovery) await discovery.done;
 
-    const { requestId, bindingId, turnId, mode, pixels } = original;
+    const { requestId, bindingId, turnId, mode, hostTurnId, pixels } = original;
     const visible = snapshot.receipts.find((entry) => entry.requestId === requestId);
     const inFlight = inFlightReceipt?.requestId === requestId ? inFlightReceipt : undefined;
     const current = inFlight ?? visible ?? original;
     // A definitive lookup result survives transport uncertainty and dismissal of the notice.
     if (current.status === 'queued' || current.status === 'rejected') return current;
 
-    const receipt = { requestId, bindingId, turnId, mode, ...(pixels && { pixels }), ...outcome };
+    const receipt = { requestId, bindingId, turnId, mode, hostTurnId, ...(pixels && { pixels }), ...outcome };
     if (inFlight) inFlightReceipt = receipt;
     if (visible && (pixels || binding === bindingId)) {
       update({ receipts: snapshot.receipts.map((entry) => (entry.requestId === requestId ? receipt : entry)) });
@@ -363,6 +366,7 @@ export function createRunningInputClient(conversationId: string) {
   async function submitImages({
     bindingId,
     turnId,
+    hostTurnId,
     mode,
     requestId,
     message,
@@ -490,7 +494,7 @@ export function createRunningInputClient(conversationId: string) {
 
         previews.retain(identity, requestId, prepared.images);
         return dispatch(
-          { ...identity, status: 'pending', pixels: batch },
+          { ...identity, hostTurnId, status: 'pending', pixels: batch },
           makeBody(verified.map(({ id }) => id)),
           () => !signal.aborted && isCurrent()
         );
@@ -564,7 +568,7 @@ export function createRunningInputClient(conversationId: string) {
       mode: RunningInputMode,
       target: RunningInputTarget,
       message: string,
-      requestId?: string
+      { requestId, hostTurnId }: { requestId?: string; hostTurnId?: string | null } = {}
     ): Promise<RunningInputSendResult> {
       if (snapshot.sending || snapshot.imageSubmission?.status === 'preparing')
         return { status: 'skipped', reason: 'busy', preserveDraft: true };
@@ -590,7 +594,7 @@ export function createRunningInputClient(conversationId: string) {
       if (new TextEncoder().encode(body).length > MAX_RELAY_BODY_BYTES) {
         return { status: 'skipped', reason: 'too-large', preserveDraft: true };
       }
-      return dispatch({ bindingId, turnId, requestId, mode, status: 'pending' }, body);
+      return dispatch({ bindingId, turnId, requestId, mode, hostTurnId, status: 'pending' }, body);
     },
 
     /** Recheck one receipt on its original binding. A refreshHistory result asks the UI to refresh its existing history. */

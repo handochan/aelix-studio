@@ -48,7 +48,7 @@ const RunningInputNotices: React.FC<RunningInputNoticesProps> = ({ notices, onDi
       case 'queued':
         return notice.phase === 'active'
           ? t('acp.runningInput.queued', { modes: notice.modes.map(modeLabel).join(', ') })
-          : t(notice.phase === 'stopped' ? 'acp.runningInput.queuedStopped' : 'acp.runningInput.queuedEnded');
+          : t(notice.phase === 'ended' ? 'acp.runningInput.queuedEnded' : 'acp.runningInput.queuedStopped');
       case 'pending':
         return t('acp.runningInput.pending', { mode: modeLabel(notice.mode) });
       case 'unknown':

@@ -25,11 +25,13 @@ import { decideSend, type HostTurnState, type StopState } from '@/renderer/servi
 import type { ComposerDraft } from '@/renderer/components/chat/SendBox';
 import { emitter } from '@/renderer/utils/emitter';
 import {
+  attributeStop,
   buildRunningInputNotices,
   phaseOf,
   turnKey,
   type RunningInputChannel,
   type RunningInputNotice,
+  type RunningInputStopPhases,
   type RunningInputTurnPhase,
 } from './notices';
 
@@ -101,7 +103,7 @@ export type RunningInputController = {
   images: RunningImageController;
   submit: Submit;
   /** Record a Stop so late acceptances for the stopped turn say so. */
-  beginStop: () => (outcome: 'failed' | 'done') => void;
+  beginStop: (hostTurnId?: string | null) => (outcome: 'failed' | 'done') => void;
   dismiss: (requestIds?: readonly string[]) => void;
   check: (requestId: string) => Promise<void>;
 };
@@ -115,12 +117,12 @@ const NO_SNAPSHOT: RunningInputSnapshot = {
   receipts: [],
   sending: false,
 };
-const NO_RECEIPTS: ReadonlySet<string> = new Set();
+const NO_STOPS: RunningInputStopPhases = new Map();
 const subscribeNothing = () => () => {};
 const readNothing = () => NO_SNAPSHOT;
 
-function openSession(conversationId: string): Session {
-  const client = createRunningInputClient(conversationId);
+function openSession(conversationId: string, getHostTurnId: () => string | null): Session {
+  const client = createRunningInputClient(conversationId, getHostTurnId);
   return { client, stopRevision: 0, stop: { status: 'none' }, conversationId, disposed: false };
 }
 
@@ -149,13 +151,14 @@ export function useRunningInput({
   const { t } = useTranslation();
   const [session, setSession] = useState<Session | null>(null);
   const [lastReady, setLastReady] = useState<RunningInputChannel>();
-  const [stoppedRequests, setStoppedRequests] = useState<ReadonlySet<string>>(NO_RECEIPTS);
+  const [stopPhases, setStopPhases] = useState<RunningInputStopPhases>(NO_STOPS);
+  const observedHostTurnId = useLatestRef(hostTurnId);
   const [requestedMode, setMode] = useState<RunningInputMode>(DEFAULT_RUNNING_INPUT_MODE);
   const submitting = useRef<Session | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
-    const next = openSession(conversationId);
+    const next = openSession(conversationId, () => observedHostTurnId.current);
     setSession(next);
     return () => {
       next.disposed = true;
@@ -163,9 +166,9 @@ export function useRunningInput({
       next.client.dispose();
       setSession((current) => (current === next ? null : current));
       setLastReady(undefined);
-      setStoppedRequests(NO_RECEIPTS);
+      setStopPhases(NO_STOPS);
     };
-  }, [conversationId, enabled]);
+  }, [conversationId, enabled, observedHostTurnId]);
 
   const client = session?.conversationId === conversationId ? session.client : undefined;
   const snapshot = useSyncExternalStore(client?.subscribe ?? subscribeNothing, client?.getSnapshot ?? readNothing);
@@ -237,29 +240,29 @@ export function useRunningInput({
     modelVersion,
   });
 
-  const beginStop = useCallback(() => {
-    const { session: currentSession, known, hostTurnId } = latest.current;
-    if (!currentSession) return () => {};
-    const revision = ++currentSession.stopRevision;
-    currentSession.preparation?.abort();
-    const { channel, receipts } = currentSession.client.getSnapshot();
-    const active = channel.status === 'checking' ? known : channel.status === 'ready' ? channel : undefined;
-    const key = active?.turn.active ? turnKey(active.bindingId, active.turn.turnId) : null;
-    currentSession.stop = { status: 'pending', turnKey: key, hostTurnId };
-    // Mark only existing receipts on the stopped binding and turn. A fresh
-    // send after a failed Stop gets its own notice.
-    setStoppedRequests(
-      (previous) =>
-        new Set(
-          receipts
-            .filter((receipt) => previous.has(receipt.requestId) || turnKey(receipt.bindingId, receipt.turnId) === key)
-            .map((receipt) => receipt.requestId)
-        )
-    );
-    return (status: 'failed' | 'done') => {
-      if (currentSession.stopRevision === revision) currentSession.stop = { status, turnKey: key, hostTurnId };
-    };
-  }, [latest]);
+  const beginStop = useCallback(
+    (hostTurnId = latest.current.hostTurnId) => {
+      const { session: currentSession } = latest.current;
+      if (!currentSession) return () => {};
+      const revision = ++currentSession.stopRevision;
+      currentSession.preparation?.abort();
+      const observation = currentSession.client.getSnapshot();
+      const { channel, receipts } = observation;
+      // Cached discovery is useful for rendering controls. Stop attribution
+      // requires a successful observation for the exact Host cancellation ID.
+      const target =
+        hostTurnId !== null && channel.status === 'ready' && channel.hostTurnId === hostTurnId
+          ? activeTarget(observation)
+          : undefined;
+      const key = target ? turnKey(target.bindingId, target.turnId) : null;
+      currentSession.stop = { status: 'pending', turnKey: key, hostTurnId };
+      if (hostTurnId !== null) setStopPhases((previous) => attributeStop(receipts, previous, hostTurnId, target));
+      return (status: 'failed' | 'done') => {
+        if (currentSession.stopRevision === revision) currentSession.stop = { status, turnKey: key, hostTurnId };
+      };
+    },
+    [latest]
+  );
 
   useEffect(() => {
     // A host cancellation can originate in another window. A local Stop already
@@ -419,6 +422,7 @@ export function useRunningInput({
             const result = await relay.submitImages({
               ...target,
               mode: chosen,
+              hostTurnId: initial.hostTurnId,
               requestId,
               message: resolved.format(({ kind }) => kind === 'file'),
               sources: images.map(({ ref }) => ({ ref })),
@@ -440,7 +444,7 @@ export function useRunningInput({
           }
           prepared = { text: resolved.format(), hasImage: images.length > 0 };
         }
-        const result = await relay.send(chosen, target, prepared.text, requestId);
+        const result = await relay.send(chosen, target, prepared.text, { requestId, hostTurnId: initial.hostTurnId });
         if (result.status === 'skipped') {
           if (result.reason === 'invalid-text') Message.warning(t('acp.runningInput.invalidText'));
           else if (result.reason === 'too-large') Message.warning(t('acp.runningInput.inputTooLarge'));
@@ -499,9 +503,10 @@ export function useRunningInput({
     [session, t]
   );
 
+  const receiptChannel = known?.hostTurnId === hostTurnId ? known : undefined;
   const notices = useMemo(
-    () => buildRunningInputNotices(receipts, known, stoppedRequests),
-    [receipts, known, stoppedRequests]
+    () => buildRunningInputNotices(receipts, receiptChannel, stopPhases),
+    [receipts, receiptChannel, stopPhases]
   );
   const handlesSubmit =
     enabled &&
@@ -524,7 +529,7 @@ export function useRunningInput({
           ? [
               {
                 receipt: { ...receipt, pixels: receipt.pixels },
-                phase: phaseOf(receipt, known, stoppedRequests),
+                phase: phaseOf(receipt, receiptChannel, stopPhases),
                 canLookup: channel.status === 'ready' && channel.canLookup && channel.bindingId === receipt.bindingId,
               },
             ]

@@ -859,7 +859,7 @@ Please check your local CLI tool authentication status`,
     // connected → 409) so they don't bubble up as unhandled rejections.
     // UI state is still reset via finally.
     const turnId = runtimeView.activeTurnId;
-    const finishStop = runningInput.beginStop();
+    const finishStop = runningInput.beginStop(turnId);
     if (!turnId) {
       // The click still interrupts pending preflight, but there is no host Stop to acknowledge.
       finishStop('failed');

@@ -8,13 +8,16 @@ import type {
   RunningInputMode,
   RunningInputReceipt,
   RunningInputSnapshot,
+  RunningInputTarget,
 } from '@/renderer/services/runtime/RunningInput';
 
 /** A discovered channel. The composer keeps the last one while a refresh is in flight. */
 export type RunningInputChannel = Extract<RunningInputSnapshot['channel'], { status: 'ready' }>;
 
 /** Where the turn that accepted an input stands now. */
-export type RunningInputTurnPhase = 'active' | 'ended' | 'stopped';
+type StopPhase = 'stopped' | 'stop-unconfirmed';
+export type RunningInputTurnPhase = 'active' | 'ended' | StopPhase;
+export type RunningInputStopPhases = ReadonlyMap<string, StopPhase>;
 
 export type RunningInputRejectReason =
   | 'stale-turn'
@@ -36,12 +39,40 @@ export type RunningInputNotice =
 /** Identify a turn on its binding. A new binding never continues an old turn. */
 export const turnKey = (bindingId: string, turnId: string): string => JSON.stringify([bindingId, turnId]);
 
+/** Attribute one Host Stop to the receipts visible when it was requested. */
+export function attributeStop(
+  receipts: readonly RunningInputReceipt[],
+  previous: RunningInputStopPhases,
+  hostTurnId: string,
+  target?: RunningInputTarget
+): RunningInputStopPhases {
+  const phases = new Map<string, StopPhase>();
+  for (const receipt of receipts) {
+    const previousPhase = previous.get(receipt.requestId);
+    if (previousPhase) phases.set(receipt.requestId, previousPhase);
+    if (previousPhase === 'stopped') continue;
+    if (receipt.hostTurnId != null && receipt.hostTurnId !== hostTurnId) continue;
+
+    const sameNativeTurn = target?.bindingId === receipt.bindingId && target.turnId === receipt.turnId;
+    if (target && !sameNativeTurn) continue;
+    // When the receipt has no Host ID, only an overlapping write or the
+    // matching native tuple is evidence of a possible relationship.
+    if (receipt.hostTurnId == null && receipt.status !== 'pending' && !sameNativeTurn) continue;
+    phases.set(receipt.requestId, sameNativeTurn && receipt.hostTurnId === hostTurnId ? 'stopped' : 'stop-unconfirmed');
+  }
+  return phases;
+}
+
 export function phaseOf(
   receipt: RunningInputReceipt,
   channel: RunningInputChannel | undefined,
-  stoppedRequests: ReadonlySet<string>
+  stopPhases: RunningInputStopPhases
 ): RunningInputTurnPhase {
-  if (stoppedRequests.has(receipt.requestId)) return 'stopped';
+  const stop = stopPhases.get(receipt.requestId);
+  if (stop) return stop;
+  if (channel?.hostTurnId != null && receipt.hostTurnId != null && channel.hostTurnId !== receipt.hostTurnId) {
+    return 'ended';
+  }
   const { turn } = channel ?? {};
   if (channel?.bindingId === receipt.bindingId && turn?.active && turn.turnId === receipt.turnId) return 'active';
   return 'ended';
@@ -70,14 +101,14 @@ function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected'
 export function buildRunningInputNotices(
   receipts: readonly RunningInputReceipt[],
   channel: RunningInputChannel | undefined,
-  stoppedRequests: ReadonlySet<string>
+  stopPhases: RunningInputStopPhases
 ): RunningInputNotice[] {
   const notices: RunningInputNotice[] = [];
   const turns = new Map<string, Extract<RunningInputNotice, { kind: 'queued' }>>();
   for (const receipt of receipts) {
     const { requestId, mode } = receipt;
     if (receipt.status === 'queued') {
-      const phase = phaseOf(receipt, channel, stoppedRequests);
+      const phase = phaseOf(receipt, channel, stopPhases);
       const key = turnKey(receipt.bindingId, receipt.turnId) + ':' + phase;
       const group = turns.get(key);
       if (group) {
