@@ -29,9 +29,10 @@ from auditedSessions import AuditedSessions
 WINDOWS_INSTALL_TIMEOUT = 600
 INSTALL_PROGRESS_INTERVAL = 30
 INSTALL_PROBE_TIMEOUT = 5
-# Installer traces completed well inside this capture budget. Keep one bounded
-# recapture for incomplete measurements, without extending the smoke budget.
+# Keep one bounded recapture for incomplete Linux measurements. macOS Intel
+# hit the qualifier's 180s deadline in PR Checks run 44986691773 (Studio #116).
 EXTENSIONS_CAPTURE_TIMEOUT = 180
+DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 300
 EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
 INSTALL_PROGRESS_PROBE = r"""
@@ -228,13 +229,13 @@ def runtime_inventory(payload):
     return inventory
 
 
-def qualify_extensions(audits, env, payload, app, kind, installed_python, report_path):
+def qualify_extensions(audits, env, payload, app, kind, installed_python, report_path, *, capture_timeout):
     before = runtime_inventory(payload)
     try:
         audits.run('extensions', [
             'node', '--import', 'tsx', str(ROOT / 'packages/web-host/tests/extensionInstallerQualification.ts'),
             str(payload), str(report_path),
-        ], env=env, timeout=EXTENSIONS_CAPTURE_TIMEOUT, roots=(installed_python,), required=(installed_python,))
+        ], env=env, timeout=capture_timeout, roots=(installed_python,), required=(installed_python,))
         if audits.enabled:
             audit = audits.sessions[-1]
             if any(audit[field] for field in ('wholeAppExternalAttempts', 'wholeAppUnparsedRecords',
@@ -256,8 +257,10 @@ def record_extension_qualification(report, output, audits, verify, *, signature=
     smoke_status = report['status']
     report['smokeStatus'] = smoke_status
     report['status'] = 'running'
-    verdict = dict(status='running', captureTimeoutSeconds=EXTENSIONS_CAPTURE_TIMEOUT,
-                   totalTimeoutSeconds=audits.time_budget(EXTENSIONS_CAPTURE_TIMEOUT),
+    capture_timeout = (DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT if report['target'] == 'darwin-x64'
+                       else EXTENSIONS_CAPTURE_TIMEOUT)
+    verdict = dict(status='running', captureTimeoutSeconds=capture_timeout,
+                   totalTimeoutSeconds=audits.time_budget(capture_timeout),
                    timeoutScope='audit-supervisor' if audits.enabled else 'qualifier-command',
                    bundleInventoryOutsideTimeout=True,
                    signatureTimeoutSeconds=EXTENSIONS_SIGNATURE_TIMEOUT if signature else None)
@@ -267,7 +270,7 @@ def record_extension_qualification(report, output, audits, verify, *, signature=
     started = time.monotonic()
     try:
         extension_report.unlink(missing_ok=True)
-        verify(extension_report)
+        verify(extension_report, capture_timeout)
         verdict['status'] = 'passed'
         report['status'] = smoke_status
     except BaseException as error:
@@ -672,8 +675,11 @@ def main(args):
                 report.update(dmgSha256=report['artifactSha256'], dmgBytes=report['artifactBytes'], mountedDmgCopy=True)
             extensions = AuditedSessions(core, installed_python, audits.directory,
                                          ledger='outbound-extensions-sessions.json')
-            record_extension_qualification(report, output, extensions, lambda receipt: qualify_extensions(
-                extensions, environment, payload, app, kind, installed_python, receipt), signature=kind == 'dmg')
+            record_extension_qualification(
+                report, output, extensions,
+                lambda receipt, timeout: qualify_extensions(
+                    extensions, environment, payload, app, kind, installed_python, receipt, capture_timeout=timeout),
+                signature=kind == 'dmg')
         finally:
             try:
                 remove_install(app, kind, package)
