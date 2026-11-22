@@ -136,6 +136,8 @@ export function createRunningInputClient(
    * direct reply or by original-key lookup. Released when its receipt leaves the notices.
    */
   const pixelClicks = new Map<string, PixelClick>();
+  /** The most recent write this client dispatched, of any kind and in any later state. */
+  let latestDispatch: string | undefined;
 
   function update(change: Partial<RunningInputSnapshot>): void {
     if (disposed) return;
@@ -322,6 +324,7 @@ export function createRunningInputClient(
     stillCurrent = () => true
   ): Promise<RunningInputSendResult> {
     const { bindingId, turnId } = pending;
+    latestDispatch = pending.requestId;
     inFlightReceipt = pending;
     update({
       sending: true,
@@ -394,8 +397,10 @@ export function createRunningInputClient(
   /**
    * One transition for a pre-write ACP rejection, whether it came as the direct reply or from
    * the original-key lookup: the click becomes a blocked submission so the same unchanged draft
-   * can be sent as paths. A receipt the user already dismissed stays dismissed, and a newer
-   * click's preparation or block is never replaced.
+   * can be sent as paths. A receipt the user already dismissed stays dismissed. Once a newer
+   * click is preparing, blocked or dispatched (pending, unknown, being checked or settled),
+   * an older answer only settles its own receipt: offering its draft again could duplicate
+   * the newer input.
    */
   function blockRejectedPixels(receipt: RunningInputReceipt): boolean {
     const click = pixelClicks.get(receipt.requestId);
@@ -404,7 +409,9 @@ export function createRunningInputClient(
       return false;
     }
     const { identity, batch, measurements, isCurrent, signal } = click;
-    const newer = snapshot.imageSubmission && snapshot.imageSubmission.requestId !== identity.requestId;
+    const newer =
+      latestDispatch !== identity.requestId ||
+      (snapshot.imageSubmission && snapshot.imageSubmission.requestId !== identity.requestId);
     if (
       disposed ||
       newer ||
@@ -740,6 +747,7 @@ export function createRunningInputClient(
       discovery?.finish();
       discovery = undefined;
       inFlightReceipt = undefined;
+      latestDispatch = undefined;
       pixelClicks.clear();
       binding = undefined;
       snapshot = { channel: { status: 'unavailable' }, negotiated: false, receipts: [], sending: false };

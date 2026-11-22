@@ -723,6 +723,32 @@ describe('running input in the composer', () => {
     await expectPathOnlyAfter('native-line-limit');
   });
 
+  it('settles only the older receipt when its lookup lands after a newer unknown send', async () => {
+    await mountVisionTurn(
+      () => {
+        throw new DOMException('Timeout', 'TimeoutError');
+      },
+      () => result({ status: 'completed', result: { accepted: false, reason: 'native-line-limit' } })
+    );
+    // A: the rejection reply is lost.
+    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
+    // B: the same draft again; the native queue takes it, but this reply is lost too.
+    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
+    const [older, newer] = controller.images.receipts.map(({ receipt }) => receipt);
+    expect([older.status, newer.status]).toEqual(['unknown', 'unknown']);
+
+    await act(async () => {
+      await controller.check(older.requestId);
+    });
+    expect(controller.images.receipts.map(({ receipt }) => receipt)).toMatchObject([
+      { requestId: older.requestId, status: 'rejected', reason: 'native-line-limit' },
+      { requestId: newer.requestId, status: 'unknown' },
+    ]);
+    expect(controller.images.submission).toBeUndefined();
+    expect(screen.queryByText('acp.runningInput.images.sendPaths')).toBeNull();
+    expect(writes().filter((method) => method === STEER)).toEqual([]);
+  });
+
   it.each(['dismiss-all', 'lookup-after-dismiss'] as const)(
     'does not resurrect a dismissed request when its rejection arrives (%s)',
     async (variant) => {
