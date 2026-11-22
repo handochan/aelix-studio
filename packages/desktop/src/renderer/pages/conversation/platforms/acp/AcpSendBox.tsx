@@ -329,6 +329,13 @@ const AcpSendBox: React.FC<{
     const view = await refreshMissingRuntime();
     return { host: hostTurnState(view), hostTurnId: view.activeTurnId };
   }, [refreshMissingRuntime]);
+  // `@@` session references the user picked. Declared before the handlers that
+  // read it — every send path has to both forward and release it.
+  const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
+  const runningInputDraftVersion = useMemo(
+    () => ({ content, uploadFile, atPath, selectedSessions }),
+    [content, uploadFile, atPath, selectedSessions]
+  );
   const runningInput = useRunningInput({
     conversationId: conversation_id,
     enabled: !teamRuntime && !teamSendMessage && !teamPermission,
@@ -336,6 +343,8 @@ const AcpSendBox: React.FC<{
     hostTurnId: runtimeView.activeTurnId,
     refreshHost,
     stopping: isCancelling,
+    draftVersion: runningInputDraftVersion,
+    modelVersion: runtimeConfig.model?.currentValue ?? model_info?.current_model_id,
     paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
   });
   const runningInputSendable = runningInput.available && !supportsMidturnDelivery;
@@ -533,9 +542,6 @@ Please check your local CLI tool authentication status`,
     onExecute: executeCommand,
   });
 
-  // `@@` session references the user picked. Declared before the handlers that
-  // read it — every send path has to both forward and release it.
-  const [selectedSessions, setSelectedSessions] = useState<SessionRef[]>([]);
   const { enabled: crossSessionEnabled } = useCrossSessionMessageEnabled();
 
   const deferDraftClear = runningInput.handlesSubmit && !supportsMidturnDelivery;
@@ -853,7 +859,7 @@ Please check your local CLI tool authentication status`,
     // connected → 409) so they don't bubble up as unhandled rejections.
     // UI state is still reset via finally.
     const turnId = runtimeView.activeTurnId;
-    const finishStop = runningInput.beginStop();
+    const finishStop = runningInput.beginStop(turnId);
     if (!turnId) {
       // The click still interrupts pending preflight, but there is no host Stop to acknowledge.
       finishStop('failed');

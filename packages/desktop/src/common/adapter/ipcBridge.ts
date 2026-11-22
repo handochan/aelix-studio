@@ -216,6 +216,7 @@ export type SessionMentionableParams = {
    *  become ineligible since. */
   id?: string;
   privateRead?: boolean;
+  signal?: AbortSignal;
 };
 
 export type SessionMessageRateLimitedPayload = {
@@ -247,7 +248,7 @@ export const sessionMention = {
       if (p.id) params.set('id', p.id);
       return `/api/session-messages/mentionable?${params.toString()}`;
     },
-    (p) => (p.privateRead ? privateReadOptions : {})
+    (p) => ({ ...(p.privateRead && privateReadOptions), signal: p.signal })
   ),
 };
 
@@ -308,9 +309,9 @@ export const conversation = {
     fromApiConversation
   ),
   get: withResponseMap(
-    httpGet<TChatConversation, { id: string; privateRead?: boolean }>(
+    httpGet<TChatConversation, { id: string; privateRead?: boolean; signal?: AbortSignal }>(
       (p) => `/api/conversations/${encodeURIComponent(p.id)}`,
-      (p) => (p.privateRead ? privateReadOptions : { silentStatuses: [404] })
+      (p) => ({ ...(p.privateRead ? privateReadOptions : { silentStatuses: [404] }), signal: p.signal })
     ),
     fromApiConversation
   ),
@@ -922,10 +923,10 @@ export const fs = {
   // Metadata for a ChatFileRef-addressed file; backend snake_case is mapped to the
   // camelCase IFileMetadata the preview layer reads. POST /api/fs/content/metadata.
   getContentMetadata: withResponseMap(
-    httpPost<RawFileMetadata, { file: ChatFileRef; privateRead?: boolean }>(
+    httpPost<RawFileMetadata, { file: ChatFileRef; privateRead?: boolean; signal?: AbortSignal }>(
       '/api/fs/content/metadata',
       ({ file }) => ({ file }),
-      (p) => (p.privateRead ? privateReadOptions : {})
+      (p) => ({ ...(p.privateRead && privateReadOptions), signal: p.signal })
     ),
     fromBackendFileMetadata
   ),

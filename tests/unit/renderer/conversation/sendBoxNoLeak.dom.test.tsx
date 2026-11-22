@@ -68,7 +68,6 @@ vi.mock('@/renderer/hooks/context/LayoutContext', () => ({ useLayoutContext: () 
 vi.mock('@/renderer/hooks/file/useOpenFileSelector', () => ({
   useOpenFileSelector: () => ({ openFileSelector: vi.fn(), onSlashBuiltinCommand: vi.fn() }),
 }));
-vi.mock('@/renderer/hooks/ui/useLatestRef', () => ({ useLatestRef: <T,>(v: T) => ({ current: v }) }));
 vi.mock('@/renderer/pages/conversation/Messages/hooks', () => ({ useAddOrUpdateMessage: () => vi.fn() }));
 vi.mock('@/renderer/pages/conversation/platforms/useConversationCommandQueue', () => ({
   shouldEnqueueConversationCommand: () => false,
