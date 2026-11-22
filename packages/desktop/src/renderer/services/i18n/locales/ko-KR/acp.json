@@ -76,7 +76,7 @@
     },
     "queued": "큐에 접수됨 · {{modes}}",
     "queuedEnded": "큐에 접수됨 · 소비가 확인되지 않은 입력은 다음 프롬프트에서 처리될 수 있음",
-    "queuedStopped": "큐에 접수됨 · Stop 이후 처리 여부 미확인",
+    "queuedStopped": "큐에 접수됨 · Stop 후 처리 미확인",
     "pending": "{{mode}} 보내는 중…",
     "unknown": "{{mode}}: 결과를 알 수 없습니다. 초안은 유지했습니다. 다시 보내기 전에 확인하세요.",
     "rejected": "{{mode}} 접수 안 됨: {{reason}}. 초안은 유지했습니다.",

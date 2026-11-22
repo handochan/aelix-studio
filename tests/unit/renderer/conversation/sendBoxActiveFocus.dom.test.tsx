@@ -8,9 +8,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React, { useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 
-const { layoutState, snippets } = vi.hoisted(() => ({
+const { layoutState, previewState } = vi.hoisted(() => ({
   layoutState: { isMobile: false },
-  snippets: [] as { id: string; tag: string; html: string }[],
+  previewState: { snippets: [] as { id: string; tag: string; html: string }[] },
 }));
 
 vi.mock('react-i18next', () => ({
@@ -50,7 +50,7 @@ vi.mock('@/renderer/hooks/context/LayoutContext', () => ({
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({
     setSendBoxHandler: vi.fn(),
-    domSnippets: snippets,
+    domSnippets: previewState.snippets,
     removeDomSnippet: vi.fn(),
     clearDomSnippets: vi.fn(),
   }),
@@ -119,7 +119,7 @@ vi.mock('@/renderer/components/chat/BtwOverlay', () => ({ default: () => null })
 vi.mock('@/renderer/components/chat/SpeechInputButton', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/UploadProgressBar', () => ({ default: () => null }));
 
-import SendBox from '@/renderer/components/chat/SendBox';
+import SendBox, { type ComposerDraft } from '@/renderer/components/chat/SendBox';
 import { emitter } from '@/renderer/utils/emitter';
 
 const SendBoxHarness = ({
@@ -137,7 +137,7 @@ const SendBoxHarness = ({
   onFocused?: () => void;
   disabled?: boolean;
   initialValue?: string;
-  onSend?: (message: string) => Promise<void | false>;
+  onSend?: (message: string, draft: ComposerDraft) => Promise<void | false>;
   onAddToDraft?: () => void;
   deferDraftClear?: boolean;
   allowAttachmentOnlySend?: boolean;
@@ -200,14 +200,18 @@ describe('SendBox active-controlled focus', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('sendbox-send-btn'));
     });
-    expect(onSend).toHaveBeenCalledWith('> Earlier answer\n\n/compact', { slashCommand: true, hasQuote: true });
+    expect(onSend).toHaveBeenCalledWith('> Earlier answer\n\n/compact', {
+      slashCommand: true,
+      hasQuote: true,
+      decorationSignal: expect.any(AbortSignal),
+    });
   });
 
   it.each([true, false])(
     'includes the quote and DOM attachment in a slash-prefixed body (deferred %s)',
     async (deferDraftClear) => {
       const onSend = vi.fn().mockResolvedValue(undefined);
-      snippets.push({ id: 'snippet', tag: 'p', html: '<p>Selected</p>' });
+      previewState.snippets.push({ id: 'snippet', tag: 'p', html: '<p>Selected</p>' });
       try {
         render(<SendBoxHarness initialValue='/tmp/report' onSend={onSend} deferDraftClear={deferDraftClear} />);
         act(() => emitter.emit('sendbox.reply', { messageId: 'previous', content: 'First\nSecond', position: 'left' }));
@@ -216,11 +220,36 @@ describe('SendBox active-controlled focus', () => {
         });
         expect(onSend).toHaveBeenCalledWith(
           '> First\n> Second\n\n/tmp/report\n\n---\nDOM Snippet (p):\n```html\n<p>Selected</p>\n```',
-          { slashCommand: true, hasQuote: true }
+          { slashCommand: true, hasQuote: true, ...(deferDraftClear && { decorationSignal: expect.any(AbortSignal) }) }
         );
       } finally {
-        snippets.length = 0;
+        previewState.snippets = [];
       }
+    }
+  );
+
+  it.each(['quote', 'DOM fragment'] as const)(
+    'aborts the submitted decoration signal when a %s is removed',
+    async (kind) => {
+      previewState.snippets =
+        kind === 'DOM fragment' ? [{ id: 'dom-1', tag: 'article', html: '<article>snapshot</article>' }] : [];
+      const onSend = vi.fn<(message: string, draft: ComposerDraft) => Promise<false>>().mockResolvedValue(false);
+      const draft = () => <SendBoxHarness initialValue='draft' deferDraftClear onSend={onSend} />;
+      const view = render(draft());
+      if (kind === 'quote') {
+        act(() => emitter.emit('sendbox.reply', { messageId: 'm1', position: 'left', content: 'quoted snapshot' }));
+      }
+      await act(async () => fireEvent.click(screen.getByTestId('sendbox-send-btn')));
+      const [message, submitted] = onSend.mock.lastCall!;
+      expect(message).toContain(kind === 'quote' ? 'quoted snapshot' : '<article>snapshot</article>');
+      expect(submitted.decorationSignal?.aborted).toBe(false);
+
+      if (kind === 'quote') act(() => emitter.emit('sendbox.reply.clear'));
+      else {
+        previewState.snippets = [];
+        view.rerender(draft());
+      }
+      expect(submitted.decorationSignal?.aborted).toBe(true);
     }
   );
 
@@ -228,7 +257,11 @@ describe('SendBox active-controlled focus', () => {
     const onSend = vi.fn().mockResolvedValue(undefined);
     render(<SendBoxHarness onSend={onSend} deferDraftClear allowAttachmentOnlySend hasPendingAttachments />);
     fireEvent.click(screen.getByTestId('sendbox-send-btn'));
-    expect(onSend).toHaveBeenCalledWith('', { slashCommand: false, hasQuote: false });
+    expect(onSend).toHaveBeenCalledWith('', {
+      slashCommand: false,
+      hasQuote: false,
+      decorationSignal: expect.any(AbortSignal),
+    });
   });
 
   it.each([

@@ -6,6 +6,9 @@ export const INPUT_METHODS = {
   steer: '_aelix/session/input/steer',
   'follow-up': '_aelix/session/input/follow-up',
   lookup: '_aelix/session/requests/lookup',
+  imageState: '_aelix/session/input/image-state',
+  steerImages: '_aelix/session/input/steer-images',
+  followUpImages: '_aelix/session/input/follow-up-images',
 } as const;
 
 const RELAY_CODES = [
@@ -35,7 +38,7 @@ type RelayReply = { kind: 'success'; data: unknown } | { kind: 'failure'; failur
 export type RelayCall = {
   bindingId: string;
   method: (typeof INPUT_METHODS)[keyof typeof INPUT_METHODS];
-  payload: Record<string, string>;
+  payload: Record<string, string | readonly string[]>;
 };
 
 export function isRecord(value: unknown): value is Record<string, unknown> {
@@ -43,7 +46,7 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Use the normal desktop credential or WebUI cookie without the generic bridge's logging and replay. */
-export async function requestRelay(path: string, body?: string): Promise<RelayReply> {
+export async function requestRelay(path: string, body?: string, lifetime?: AbortSignal): Promise<RelayReply> {
   const headers: Record<string, string> = {};
   if (body !== undefined) {
     headers['content-type'] = 'application/json';
@@ -59,7 +62,7 @@ export async function requestRelay(path: string, body?: string): Promise<RelayRe
       cache: 'no-store',
       redirect: 'error',
       body,
-      signal: AbortSignal.timeout(125_000),
+      signal: lifetime ? AbortSignal.any([lifetime, AbortSignal.timeout(125_000)]) : AbortSignal.timeout(125_000),
     });
     const responseBody: unknown = await response.json().catch((): undefined => undefined);
     if (response.ok && isRecord(responseBody) && responseBody.success === true) {

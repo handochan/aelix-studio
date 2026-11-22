@@ -62,6 +62,25 @@ describe('running input renderer client', () => {
     document.cookie = 'aelix-studio-csrf-token=; Max-Age=0; Path=/';
   });
 
+  it('confirms the ACP mapping only for the Host turn observed throughout discovery', async () => {
+    let hostTurnId = 'host-turn-1';
+    client.dispose();
+    client = createRunningInputClient('space / id', { getHostTurnId: () => hostTurnId });
+    const state = holdReply();
+    fetchMock.mockResolvedValueOnce(discovery()).mockReturnValueOnce(state.pending);
+
+    const reading = client.refresh();
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    hostTurnId = 'host-turn-2';
+    state.reply(active());
+    await reading;
+    expect(client.getSnapshot().channel).toMatchObject({ status: 'ready', hostTurnId: null });
+
+    offer();
+    await client.refresh();
+    expect(client.getSnapshot().channel).toMatchObject({ status: 'ready', hostTurnId: 'host-turn-2' });
+  });
+
   it('discovers an encoded conversation, sends text once with the CSRF token, and records the native receipt', async () => {
     document.cookie = 'aelix-studio-csrf-token=fixture-csrf; Path=/';
     offer();

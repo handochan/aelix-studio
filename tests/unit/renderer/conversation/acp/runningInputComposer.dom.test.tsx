@@ -27,6 +27,7 @@ import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import type { UseRunningInputOptions } from '@/renderer/pages/conversation/runtime/RunningInput/useRunningInput';
 import { emitter } from '@/renderer/utils/emitter';
 import type { RunningInputReferences } from '@/renderer/services/runtime/RunningInput';
+import * as runningImages from '@/renderer/services/runtime/RunningInput/Images';
 import referencesFixture from './runningInputReferences.fixture.json';
 
 vi.mock('react-i18next', () => ({
@@ -40,6 +41,8 @@ const STATE = PREFIX + 'input/state';
 const STEER = PREFIX + 'input/steer';
 const FOLLOW_UP = PREFIX + 'input/follow-up';
 const LOOKUP = PREFIX + 'requests/lookup';
+const IMAGE_STATE = PREFIX + 'input/image-state';
+const STEER_IMAGES = PREFIX + 'input/steer-images';
 const ALL_METHODS = [STATE, STEER, FOLLOW_UP, LOOKUP];
 const TEXT_DRAFT = { slashCommand: false, hasQuote: false };
 const NO_REFERENCES: RunningInputReferences = { files: [], sessions: [] };
@@ -58,7 +61,8 @@ type Turn = { active: true; turnId: string } | { active: false; turnId: null };
 type Write = { method: string; payload: Record<string, string> };
 
 const server = {
-  discovery: (): Response => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
+  discovery: (): Response | Promise<Response> =>
+    success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
   turn: { active: true, turnId: 'turn-1' } as Turn,
   readState: vi.fn<() => Response | Promise<Response>>(),
   write: vi.fn<(call: Write) => Response | Promise<Response>>(),
@@ -538,6 +542,203 @@ describe('running input in the composer', () => {
     expect(writes()).toEqual([FOLLOW_UP]);
   });
 
+  it.each([
+    { type: 'image/png', file: 'input.png', imageHint: true },
+    { type: 'application/octet-stream', file: 'input.heic', imageHint: false },
+  ])('keeps text and original path sends with the default gate for $file', async ({ type, file, imageHint }) => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(({ method, payload }) =>
+      method === IMAGE_STATE
+        ? result({ status: 'unavailable', available: false, reason: 'model-unverified', turnId: 'turn-1' })
+        : accepted(payload.turnId)
+    );
+    const original = { kind: 'upload', path: '/client/' + file } as const;
+    const resolved = '/host/private/' + file;
+    server.metadata.mockReturnValueOnce(success({ path: resolved, type }));
+    const prepare = vi.spyOn(runningImages, 'createImagePreparation');
+    await mount();
+
+    expect(await submit('plain text')).toBe('sent');
+    expect(await submit('', { files: [original], sessions: [] })).toBe('sent');
+    expect(server.metadata).toHaveBeenCalledExactlyOnceWith(original);
+    expect(server.write.mock.calls.map(([call]) => [call.method, call.payload.message])).toEqual([
+      [STEER, 'plain text'],
+      [STEER, '\n\n[[AION_FILES]]\n' + resolved],
+    ]);
+    expect(controller.images).toMatchObject({ modes: [], receipts: [] });
+    expect(Message.info).toHaveBeenCalledTimes(imageHint ? 1 : 0);
+    if (imageHint) expect(Message.info).toHaveBeenCalledWith('acp.runningInput.imagesAsPaths');
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
+  it('waits for explicit path-only input on a text-only model and resolves its original ref', async () => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(({ method, payload }) =>
+      method === IMAGE_STATE
+        ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: 'turn-1' })
+        : accepted(payload.turnId)
+    );
+    await mount({ enablePixels: true });
+    expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+    expect(controller.images.submission).toMatchObject({
+      status: 'blocked',
+      reason: 'model-text-only',
+      allowPathOnly: true,
+    });
+    expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+
+    await act(async () => {
+      expect(await controller.images.submitPaths('', IMAGE_REFERENCE, TEXT_DRAFT)).toBe('sent');
+    });
+    expect(server.metadata.mock.calls.map(([ref]) => ref)).toEqual([
+      IMAGE_REFERENCE.files[0],
+      IMAGE_REFERENCE.files[0],
+    ]);
+    expect(server.write.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: STEER,
+      payload: { message: expect.stringContaining(CONFIRMED_IMAGE), turnId: 'turn-1' },
+    });
+  });
+
+  it.each(['binding', 'turn', 'mode'] as const)(
+    'keeps a path-only click on its original target if reconnect changes the %s',
+    async (change) => {
+      const reconnect = new Set<() => void>();
+      vi.mocked(httpBridge.wsEmitter).mockImplementation((event) => ({
+        on(listener) {
+          if (event === 'realtime.reconnected') reconnect.add(listener);
+          return () => reconnect.delete(listener);
+        },
+        emit: () => {},
+      }));
+      const offer = (bindingId: string, requests: string[]) =>
+        success({ version: 1, bindingId, hostBytes: true, requests });
+      server.discovery = () => offer('binding-1', [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES]);
+      server.write.mockImplementation(({ method, payload }) =>
+        method === IMAGE_STATE
+          ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: server.turn.turnId })
+          : accepted(payload.turnId)
+      );
+      await mount({ enablePixels: true });
+      expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+
+      const discovery = hold();
+      server.discovery = () => discovery.pending;
+      act(() => {
+        for (const listener of reconnect) listener();
+      });
+      let pathOnly: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        pathOnly = controller.images.submitPaths('', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      if (change === 'turn') server.turn = { active: true, turnId: 'turn-2' };
+      server.discovery = () =>
+        offer(change === 'binding' ? 'binding-2' : 'binding-1', change === 'mode' ? [STATE, FOLLOW_UP] : ALL_METHODS);
+      await act(async () => {
+        discovery.reply(await server.discovery());
+        expect(await pathOnly).toBe('kept');
+      });
+      expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+      expect(server.metadata).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('publishes reference preparation and aborts both pending private reads on cancel', async () => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(() => result({ available: false, reason: 'model-text-only', turnId: 'turn-1' }));
+    const dispatch = fetchMock.getMockImplementation()!;
+    const signals = new Map<string, AbortSignal>();
+    fetchMock.mockImplementation((url, init) => {
+      if (url !== '/api/fs/content/metadata' && url !== '/api/conversations/same') return dispatch(url, init);
+      const signal = init.signal!;
+      signals.set(url, signal);
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    await mount({ enablePixels: true });
+    let click: Promise<RunningInputRoute> | undefined;
+    act(() => {
+      click = controller.submit('snapshot', { ...IMAGE_REFERENCE, sessions: [{ id: 'same' }] }, TEXT_DRAFT);
+    });
+    await waitFor(() => expect(signals.size).toBe(2));
+    expect(controller.images.submission).toMatchObject({
+      bindingId: 'binding-1',
+      turnId: 'turn-1',
+      mode: 'steer',
+      status: 'preparing',
+      stage: 'references',
+      fileCount: 1,
+    });
+    await act(async () => {
+      controller.images.cancelPreparation();
+      expect(await click).toBe('kept');
+    });
+    expect([...signals.values()].every((signal) => signal.aborted)).toBe(true);
+    expect(controller.images.submission).toMatchObject({ status: 'blocked', reason: 'cancelled' });
+    expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+  });
+
+  it.each(['cancel', 'replace-draft', 'decorations'] as const)(
+    'aborts image reference preparation on %s before handoff',
+    async (action) => {
+      server.discovery = () =>
+        success({
+          version: 1,
+          bindingId: 'binding-1',
+          hostBytes: true,
+          requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+        });
+      server.write.mockImplementation(() =>
+        result({
+          status: 'unavailable',
+          available: false,
+          reason: 'model-unverified',
+          turnId: 'turn-1',
+        })
+      );
+      const firstDraft = {};
+      const decorations = new AbortController();
+      const view = await mount({ draftVersion: firstDraft, enablePixels: true });
+      const metadata = hold();
+      server.metadata.mockReturnValueOnce(metadata.pending);
+      let submission: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        submission = controller.submit('snapshot', IMAGE_REFERENCE, {
+          ...TEXT_DRAFT,
+          decorationSignal: decorations.signal,
+        });
+      });
+      await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
+      if (action === 'cancel') act(() => controller.images.cancelPreparation());
+      else if (action === 'replace-draft') view.rerender(<Harness draftVersion={{}} enablePixels />);
+      else act(() => decorations.abort());
+      await act(async () => {
+        metadata.reply(success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
+        expect(await submission).toBe('kept');
+      });
+      expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+    }
+  );
+
   it.each(referencesFixture)('matches the host text format for $name', async (fixture) => {
     for (const path of fixture.paths) {
       server.metadata.mockReturnValueOnce(success({ path, type: fixture.image ? 'image/png' : 'text/plain' }));
@@ -685,6 +886,187 @@ describe('running input in the composer', () => {
     await expect(route).resolves.toBe('kept');
     expect(notices()[0]).toHaveTextContent('acp.runningInput.queuedEnded');
   });
+
+  it.each([
+    {
+      label: 'normal discovery on another ACP turn',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on a new binding with a reused turn ID',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-1',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on a new binding and turn',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery after a Host turn change with the same ACP tuple',
+      discovery: 'ready',
+      newHost: true,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'ended',
+    },
+    {
+      label: 'normal discovery on the original Host and ACP turn',
+      discovery: 'ready',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stopped',
+    },
+    {
+      label: 'pending discovery after a Host turn change',
+      discovery: 'pending',
+      newHost: true,
+      nextBinding: 'binding-2',
+      nextTurn: 'turn-2',
+      phase: 'ended',
+    },
+    {
+      label: 'pending discovery on the original Host turn',
+      discovery: 'pending',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stop-unconfirmed',
+    },
+    {
+      label: 'failed discovery on the original Host turn',
+      discovery: 'failed',
+      newHost: false,
+      nextBinding: 'binding-1',
+      nextTurn: 'turn-1',
+      phase: 'stop-unconfirmed',
+    },
+  ])(
+    'attributes Stop on a late image ACK with $label',
+    async ({ discovery, newHost, nextBinding, nextTurn, phase }) => {
+      const held = hold();
+      const offer = (bindingId: string) =>
+        success({ version: 1, bindingId, hostBytes: true, requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES] });
+      server.discovery = () => offer('binding-1');
+      server.write.mockImplementation(({ method }) =>
+        method === IMAGE_STATE
+          ? result({
+              available: true,
+              model: 'fixture/vision',
+              turnId: server.turn.turnId,
+              remaining: {
+                count: 4,
+                rawBytes: 6 << 20,
+                imageBytes: 3_750_000,
+                sidePixels: 8000,
+                nativeLineBytes: 8 << 20,
+              },
+            })
+          : held.pending
+      );
+      const digest = { sha256: 'a'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
+      const size = { width: 1, height: 1, bytes: 64, digest };
+      vi.spyOn(runningImages, 'createImagePreparation').mockImplementation(({ requestId }) => ({
+        prepare: async () => ({
+          requestId: requestId!,
+          prepareId: requestId!,
+          recipeVersion: 1,
+          images: [
+            {
+              ref: IMAGE_REFERENCE.files[0],
+              original: size,
+              sent: { ...size, mime: 'image/png' },
+              preview: { kind: 'icon', dimensions: size },
+              changed: false,
+              orientationOnly: false,
+              secureContext: false,
+              plannedBytes: 64,
+              codecMs: 0,
+            },
+          ],
+          estimatedLineBytes: 256,
+          codecMs: 0,
+        }),
+        dispose() {},
+      }));
+      const fetchHost = fetchMock.getMockImplementation()!;
+      fetchMock.mockImplementation((url, init) =>
+        url.endsWith('/byte-grants')
+          ? Promise.resolve(
+              success({ expiresInMs: 60_000, grants: [{ id: 'grant', byteLength: 64, sha256: digest.sha256 }] })
+            )
+          : fetchHost(url, init)
+      );
+
+      const reconnect = new Set<() => void>();
+      vi.mocked(httpBridge.wsEmitter).mockImplementation((event) => ({
+        on(listener) {
+          if (event === 'realtime.reconnected') reconnect.add(listener);
+          return () => reconnect.delete(listener);
+        },
+        emit: () => {},
+      }));
+      const view = await mount({ enablePixels: true });
+      let route: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        route = controller.submit('late pixels', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      await waitFor(() => expect(controller.images.receipts[0]?.receipt.status).toBe('pending'));
+      const { requestId, bindingId, turnId, hostTurnId } = controller.images.receipts[0].receipt;
+      expect(hostTurnId).toBe('host-turn-1');
+
+      const heldDiscovery = hold();
+      const readDiscovery = vi.fn(() => {
+        if (discovery === 'pending') return heldDiscovery.pending;
+        return discovery === 'failed' ? failure(503, 'EXT_UNAVAILABLE') : offer(nextBinding);
+      });
+      server.discovery = readDiscovery;
+      server.turn = { active: true, turnId: nextTurn };
+      const stopHostTurnId = newHost ? 'host-turn-2' : 'host-turn-1';
+      if (newHost) view.rerender(<Harness hostTurnId={stopHostTurnId} enablePixels />);
+      else
+        act(() => {
+          for (const listener of reconnect) listener();
+        });
+      await waitFor(() => expect(readDiscovery).toHaveBeenCalled());
+      if (discovery !== 'pending') await settle();
+
+      act(() => controller.beginStop(stopHostTurnId)('done'));
+      await act(async () => {
+        held.reply(
+          result({ accepted: true, delivery: 'native-queue', turnId, inputKind: 'pixels', captionAdded: false })
+        );
+      });
+      if (discovery === 'pending') {
+        expect(controller.images.receipts[0]?.receipt.status).toBe('pending');
+        await act(async () => {
+          heldDiscovery.reply(offer(nextBinding));
+          await route;
+        });
+      } else {
+        await expect(route).resolves.toBe('kept');
+      }
+
+      expect(controller.images.receipts).toMatchObject([
+        { phase, receipt: { requestId, bindingId, turnId, hostTurnId, status: 'queued' } },
+      ]);
+      expect(notices()[0]).toHaveTextContent(
+        phase === 'ended' ? 'acp.runningInput.queuedEnded' : 'acp.runningInput.queuedStopped'
+      );
+      expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+    }
+  );
 
   it('keeps the submitted draft when Stop precedes the receipt and the native turn is still active', async () => {
     const held = hold();
