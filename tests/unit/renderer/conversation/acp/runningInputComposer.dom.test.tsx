@@ -33,6 +33,7 @@ import referencesFixture from './runningInputReferences.fixture.json';
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string, options?: Record<string, string>) => (options ? `${key} ${JSON.stringify(options)}` : key),
+    i18n: { language: 'en-US' },
   }),
 }));
 
@@ -95,6 +96,7 @@ const Harness: React.FC<Partial<UseRunningInputOptions>> = (props) => {
         notices={controller.notices}
         onDismiss={controller.dismiss}
         onCheck={(requestId) => void controller.check(requestId)}
+        images={controller.images}
       />
     </>
   );
@@ -1062,7 +1064,7 @@ describe('running input in the composer', () => {
         { phase, receipt: { requestId, bindingId, turnId, hostTurnId, status: 'queued' } },
       ]);
       expect(notices()[0]).toHaveTextContent(
-        phase === 'ended' ? 'acp.runningInput.queuedEnded' : 'acp.runningInput.queuedStopped'
+        phase === 'ended' ? 'acp.runningInput.images.queuedEnded' : 'acp.runningInput.images.queuedStopped'
       );
       expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
     }

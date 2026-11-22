@@ -78,7 +78,7 @@ export function phaseOf(
   return 'ended';
 }
 
-function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected' }>): RunningInputRejectReason {
+export function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected' }>): RunningInputRejectReason {
   if ('reason' in receipt) {
     if (receipt.reason === 'stale-turn' || receipt.reason === 'dedup-capacity') return receipt.reason;
     if (receipt.reason === 'native-line-limit' || receipt.reason === 'image-bytes') return 'too-large';
@@ -96,7 +96,7 @@ function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected'
 /**
  * Build the notice rows in receipt order. A receipt stays with the turn it was sent to:
  * a late acceptance after that turn ended or was stopped is shown as such, and never as
- * part of a newer turn.
+ * part of a newer turn. Pixel receipts have their own rows with image details.
  */
 export function buildRunningInputNotices(
   receipts: readonly RunningInputReceipt[],
@@ -107,6 +107,7 @@ export function buildRunningInputNotices(
   const turns = new Map<string, Extract<RunningInputNotice, { kind: 'queued' }>>();
   for (const receipt of receipts) {
     const { requestId, mode } = receipt;
+    if (receipt.pixels) continue;
     if (receipt.status === 'queued') {
       const phase = phaseOf(receipt, channel, stopPhases);
       const key = turnKey(receipt.bindingId, receipt.turnId) + ':' + phase;

@@ -23,6 +23,7 @@ const {
   resetStateMock,
   emitterEmitMock,
   setSendBoxHandlerMock,
+  clearDomSnippetsMock,
   useAcpConfigOptionsMock,
   useTeamPermissionMock,
   teamGetConfigMock,
@@ -51,6 +52,7 @@ const {
   resetStateMock: vi.fn(),
   emitterEmitMock: vi.fn(),
   setSendBoxHandlerMock: vi.fn(),
+  clearDomSnippetsMock: vi.fn(),
   useAcpConfigOptionsMock: vi.fn(),
   useTeamPermissionMock: vi.fn(),
   teamGetConfigMock: vi.fn(),
@@ -91,23 +93,32 @@ const {
   getConversationOrNullMock: vi.fn(),
 }));
 
-const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock } = vi.hoisted(() => ({
-  runningInputMock: {
-    available: false,
-    handlesSubmit: false,
-    modes: ['steer', 'follow-up'],
-    mode: 'follow-up',
-    setMode: vi.fn(),
-    notices: [],
-    submit: vi.fn(),
-    beginStop: vi.fn(),
-    finishStop: vi.fn(),
-    dismiss: vi.fn(),
-    check: vi.fn(),
-  },
-  useRunningInputSpy: vi.fn(),
-  collectChatFileRefsMock: vi.fn((): object[] => []),
-}));
+const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock, imagePathsMock, noticesPropsSpy } = vi.hoisted(
+  () => ({
+    runningInputMock: {
+      available: false,
+      handlesSubmit: false,
+      modes: ['steer', 'follow-up'],
+      mode: 'follow-up',
+      setMode: vi.fn(),
+      notices: [],
+      submit: vi.fn(),
+      beginStop: vi.fn(),
+      finishStop: vi.fn(),
+      dismiss: vi.fn(),
+      check: vi.fn(),
+      images: { modes: ['steer'], receipts: [] },
+    },
+    useRunningInputSpy: vi.fn(),
+    collectChatFileRefsMock: vi.fn((): object[] => []),
+    imagePathsMock: {
+      remember: vi.fn(),
+      available: false,
+      send: vi.fn(async () => ({ sent: false, decorationsCurrent: false })),
+    },
+    noticesPropsSpy: vi.fn(),
+  })
+);
 
 vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
   useRunningInput: (options: unknown) => {
@@ -115,7 +126,11 @@ vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
     return runningInputMock;
   },
   RunningInputModeSwitch: () => <div data-testid='running-input-mode' />,
-  RunningInputNotices: () => null,
+  RunningInputNotices: (props: unknown) => {
+    noticesPropsSpy(props);
+    return null;
+  },
+  useRunningImagePaths: () => imagePathsMock,
 }));
 
 vi.mock('@/common', () => ({
@@ -345,6 +360,7 @@ vi.mock('@/renderer/pages/conversation/utils/conversationCache', () => ({
 vi.mock('@/renderer/pages/conversation/Preview', () => ({
   usePreviewContext: () => ({
     setSendBoxHandler: setSendBoxHandlerMock,
+    clearDomSnippets: clearDomSnippetsMock,
   }),
 }));
 vi.mock('@/renderer/pages/team/hooks/TeamPermissionContext', async (importOriginal) => {
@@ -436,6 +452,7 @@ describe('AcpSendBox', () => {
     runningInputMock.available = false;
     runningInputMock.handlesSubmit = false;
     runningInputMock.submit.mockResolvedValue('ordinary');
+    imagePathsMock.available = false;
     useTeamPermissionMock.mockReturnValue(null);
     useAcpConfigOptionsMock.mockReturnValue({
       setStatus: { state: 'idle' },
@@ -1286,6 +1303,43 @@ describe('AcpSendBox', () => {
       ]);
     });
 
+    it('sends a blocked image draft as paths with its original refs and clears what it sent', async () => {
+      const file = { kind: 'upload', path: '/tmp/image.png' };
+      const draft = { slashCommand: false, hasQuote: false };
+      runningInputMock.submit.mockResolvedValue('kept');
+      imagePathsMock.available = true;
+      imagePathsMock.send.mockResolvedValueOnce({ sent: true, decorationsCurrent: true });
+      draftContentRef.current = 'Hello';
+      renderRunning();
+      await act(async () => {
+        await expect(lastSendBoxProps().onSend('Hello', draft)).resolves.toBe(false);
+      });
+      expect(imagePathsMock.remember).toHaveBeenCalledWith('Hello', draft);
+      expect(noticesPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ images: runningInputMock.images });
+
+      const { onSendPaths } = noticesPropsSpy.mock.calls[noticesPropsSpy.mock.calls.length - 1][0] as {
+        onSendPaths: () => void;
+      };
+      collectChatFileRefsMock.mockReturnValueOnce([file]);
+      draftMutateMock.mockClear();
+      await act(async () => onSendPaths());
+      expect(imagePathsMock.send).toHaveBeenCalledWith({ files: [file], sessions: [] });
+      const updates = draftMutateMock.mock.calls.map(([update]) =>
+        (update as (draft: object) => object)({ uploadFile: [file.path], atPath: [], content: 'Hello' })
+      );
+      expect(updates).toContainEqual(expect.objectContaining({ uploadFile: [] }));
+      expect(updates).toContainEqual(expect.objectContaining({ content: '' }));
+      expect(emitterEmitMock).toHaveBeenCalledWith('sendbox.reply.clear');
+      expect(clearDomSnippetsMock).toHaveBeenCalledTimes(1);
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('offers no path-only action unless the blocked draft is still current', () => {
+      imagePathsMock.available = false;
+      renderRunning();
+      expect(noticesPropsSpy.mock.calls.at(-1)?.[0]).toMatchObject({ onSendPaths: undefined });
+    });
+
     it('keeps the existing busy block when the relay is not negotiated', async () => {
       runtimeViewMock.isProcessing = true;
       runtimeViewMock.state = 'running';
@@ -1421,7 +1475,7 @@ describe('AcpSendBox', () => {
       expect(runningInputMock.finishStop).toHaveBeenCalledWith('done');
       expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-1' });
       expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: true, host: 'busy' });
-      expect(useRunningInputSpy.mock.calls.at(-1)?.[0].enablePixels).toBeUndefined();
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0].enablePixels).toBe(true);
 
       render(
         <AcpSendBox
