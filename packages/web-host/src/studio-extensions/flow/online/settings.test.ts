@@ -100,13 +100,17 @@ describe('the proxy the user types', () => {
     'http://ops:pa\u00a0ss@proxy.corp.example',
     'http://ops:%00secret@proxy.corp.example',
     'http://op%3As:secret@proxy.corp.example',
-    'http://ops:secret%2541@proxy.corp.example',
   ])('refuses %s as credentials, with the fixed answer of every entry point', (typed) => {
     const failure = failureOf(() => parseProxyInput(typed));
     expect(failure.code).toBe('INVALID_INPUT');
-    expect(failure.detail).toEqual([
-      'proxy credentials need a user name without a colon, both in printable ASCII and without a % followed by two hex digits',
-    ]);
+    expect(failure.detail).toEqual(['proxy credentials need a user name without a colon, and both in printable ASCII']);
+  });
+
+  it('decodes the user part once, as a URL does, so an encoded % stays a %', () => {
+    expect(parseProxyInput('http://ops:secret%2541@proxy.corp.example')).toEqual({
+      proxy: 'http://proxy.corp.example',
+      credentials: { username: 'ops', password: 'secret%41' },
+    });
   });
 
   it('refuses credentials typed with authentication turned off in the same change', () => {

@@ -537,7 +537,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
     권한이 있거나 소유자가 다른 파일도 쓰지 않고 다시 묻는다. keychain이 열지 못할 때도 다시 묻는다.
   - **저장 순서와 복구.** 새 봉인 파일을 먼저 쓰고, 그 ID로 `settings.json`을 바꾼 뒤, 예전 봉인 파일을 지운다.
     중간에 끊겨도 설정은 열리는 파일을 가리킨다. 모든 변경은 잠금을 잡은 직후 설정이 가리키지 않는 봉인 파일을
-    지운다(읽을 수 없는 설정은 아무것도 가리키지 않는다).
+    지운다. 설정을 읽을 수 없으면 어느 봉인 파일도 건드리지 않는다. 설정이 복구되면 저장된 인증 정보가 다시
+    열린다.
   - **지우는 조건.** proxy를 끄거나 주소(scheme·host·port)를 바꾸거나 인증을 끄면 지운다. 주소에 새 인증 정보를
     입력하면 바꾼다. memory-only에서 입력하거나 설치 요청으로 보내면 keychain이 저장해 둔 것도 지운다. 나중에
     keychain이 돌아왔을 때 예전 비밀번호를 다시 쓰지 않게 하려는 것이다. 1b가 저장한 설정은 그대로 읽힌다(인증
@@ -553,24 +554,42 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
     127.0.0.1의 임의 port에서 변경마다 새로 만든 무작위 token을 Basic proxy 인증으로 요구한다(상수 시간 비교, 그
     밖에는 407). pip·Git과 pip이 띄우는 빌드 코드는 `http://run:<token>@127.0.0.1:<port>`만 받는다. relay는
     CONNECT 터널과 절대 형식 `http:` 요청을 사용자의 proxy로 넘기면서 `Proxy-Authorization: Basic <user:pass>`를
-    붙인다. `https:` proxy에는 TLS로 접속하고 Node와 시스템의 인증서를 믿는다. port가 없는 주소는 scheme의 기본
-    port(80·443)다. 사용자 proxy의 응답 중 상태 코드만 돌려주고, 그 proxy의 헤더(`Proxy-Authenticate` 등)는
-    넘기지 않는다. 사용자 proxy에는 Basic 인증만 쓴다. Git은 요청이 성공하면 proxy 인증 정보를 credential
-    helper에 넘기므로(`credential_approve`), Git 설정에 relay 주소의 helper를 비우는 항목을 사용자 항목 뒤에 둔다.
-    그래서 비공개 Git의 `credential-store`도 token을 저장하지 않는다. **남는 위험:** 설치 중에 도는 코드(빌드
-    backend 등)는 token을 읽고 그 변경이 끝날 때까지 relay를 쓸 수 있다. 사용자 비밀번호는 볼 수 없다. relay가
-    응답·로그·오류에 인증 정보나 token을 넣지 않고, 설치 도구 출력은 위의 가리기를 거친다.
-  - **받는 문자.** 사용자 이름과 비밀번호는 출력 가능한 ASCII(0x20–0x7E)만 받는다(2026-11-22 사용자 결정). 번들
-    pip(requests)은 proxy Basic 인증을 Latin-1로 보내고 그 밖의 문자에서 실패하는데 Git(curl)은 UTF-8로 보낸다.
-    `%` 뒤에 16진 두 자리가 오는 값도 받지 않는다. Git이 proxy 주소의 사용자 부분을 두 번 풀기 때문이다(Git
-    2.54·curl 8.7.1에서 `%2541`이 `A`로 도착했다. pip은 한 번 푼다). 사용자 이름에는 `:`를 받지 않는다. Basic
-    인증이 첫 `:`에서 나누기 때문이다(RFC 7617 2절). 주소에 입력할 때(그대로든 퍼센트 인코딩이든), 저장할 때,
-    설치 요청에 들어올 때 모두 `INVALID_INPUT`과 같은 고정 문구로 거절하고 값을 되풀이하지 않는다.
+    붙인다. `https:` proxy에는 TLS로 접속하고 Node와 시스템의 인증서를 믿는다. 인증서 확인(`rejectUnauthorized`,
+    host 이름 확인)은 relay가 직접 켜므로 `NODE_TLS_REJECT_UNAUTHORIZED=0`으로도 꺼지지 않는다. 확인에 실패하면
+    아무것도 보내지 않는다. 회사 CA를 따로 지정하는 설정은 #99에서 다룬다. port가 없는 주소는 scheme의 기본
+    port(80·443)다. 사용자 proxy에는 Basic 인증만 쓴다.
+    - **relay 자신의 답.** 로그인에 대한 사용자 proxy의 답은 설치 도구에 넘기지 않는다. 407, 열리지 않은 터널,
+      접속 실패, 인증서 확인 실패에는 relay가 직접 `502`와 고정 사유(`Proxy Credentials Rejected`,
+      `Proxy Refused Tunnel`, `Proxy Unreachable`, `Proxy Certificate Rejected`)로 답하고, 그 proxy의 헤더와 본문은
+      버린다. 넘기는 응답에서도 `Proxy-Authenticate`, `Proxy-Authentication-Info`, `Proxy-Connection`과
+      hop-by-hop 헤더를 뺀다. 407을 받은 설치가 실패하면 `PROXY_CREDENTIALS_REJECTED`로 끝나고 저장된 인증
+      정보는 그대로 둔다. 화면은 이 코드를 받으면 다시 묻는다.
+    - **제한.** token을 아직 보이지 않은 연결은 동시에 16개까지 받고, 각각 5초 안에 token을 보여야 한다. 사용자
+      proxy로의 연결은 동시에 32개까지다(넘으면 `503 Relay Busy`). 접속부터 첫 답까지는 모두 합쳐 30초이고,
+      idle만 재는 것이 아니다. 터널이 열린 뒤에는 idle 300초다.
+    - **Git credential helper.** Git은 요청이 성공하면 proxy 인증 정보를 credential helper에
+      넘기므로(`credential_approve`), Git 설정에 relay 주소의 helper를 비우는 항목을 사용자 항목 뒤에 둔다. 그래서
+      비공개 Git의 `credential-store`도 token을 저장하지 않는다.
+    - **출력.** token은 주소 밖에도 찍힐 수 있다. 그 변경 동안 token 그대로, 퍼센트 인코딩한 것, `run:<token>`의
+      base64, 사용자 인증 정보의 Basic 값을 설치 도구 출력의 가리기에 문자열로 더한다. relay는 응답·로그·오류에
+      인증 정보나 token을 넣지 않는다.
+    - **남는 위험.** 설치 중에 도는 코드(빌드 backend 등)는 token을 읽고 그 변경이 끝날 때까지 relay를 쓸 수 있다.
+      사용자 비밀번호는 볼 수 없다.
+  - **받는 문자.** 사용자 이름과 비밀번호는 출력 가능한 ASCII(0x20–0x7E)만 받는다(2026-11-22 사용자 결정). relay는
+    입력한 값으로 Basic 값을 만든다. RFC 7617은 문자 집합을 `charset` 매개변수에 맡기는데, 그 밖의 문자를 읽는
+    방식은 proxy 서버마다 다르다. 그래서 어디서나 같게 읽히는 범위인 ASCII만 받는다(처음 확인할 때는 번들 pip이
+    Latin-1로 보내고 그 밖에서 실패하며 Git은 UTF-8로 보냈다). 사용자 이름에는 `:`를 받지 않는다. Basic 인증이 첫
+    `:`에서 나누기 때문이다(RFC 7617 2절). 주소에 입력한 사용자 부분은 보통의 URL 규칙대로 한 번 퍼센트 디코딩한
+    뒤 검사하고, 따로 보낸 필드 값은 그대로 받는다. `%41` 같은 값도 그대로다. 주소에 입력할 때(그대로든 퍼센트
+    인코딩이든), 저장할 때, 설치 요청에 들어올 때 모두 `INVALID_INPUT`과 같은 고정 문구로 거절하고 값을 되풀이하지
+    않는다.
     **[실행: 단위 시험(가짜 keychain과 memory-only, `safeStorage`의 `basic_text`·`unknown`·암호화 없음, 두 중단
-    지점, 주소 변경 경합), relay 단위 시험(token 없음·다른 token, CONNECT와 절대 형식, 사용자 proxy의 407과 접속
-    실패, TLS proxy), 실제 Git과 번들 pip이 relay를 거쳐 인증을 요구하는 loopback proxy에 정확한 Basic 값으로 로그인,
-    비공개 Git의 `credential-store`가 token을 쓰지 않음(빈 helper 항목을 빼면 쓰는 것도 확인), 설치 앱 확인(1a′)에서
-    실제 lock holder로 봉인 파일 저장과 삭제]**
+    지점, 주소 변경 경합, 읽을 수 없는 설정과 복구, 거절된 인증 정보, 출력의 token), relay 단위 시험(token 없음·다른
+    token, CONNECT와 절대 형식, 사용자 proxy의 407·403과 접속 실패, 제한과 기한, TLS proxy와
+    `NODE_TLS_REJECT_UNAUTHORIZED=0`), 실제 Git과 번들 pip이 relay를 거쳐 인증을 요구하는 loopback proxy에 정확한
+    Basic 값으로 로그인하는 것과 407에 relay의 답만 받는 것, 실제 Git이 믿지 않는 인증서의 https proxy에 아무것도 보내지
+    않음, 비공개 Git의 `credential-store`가 token을 쓰지 않음(빈 helper 항목을 빼면 쓰는 것도 확인), 설치 앱
+    확인(1a′)에서 실제 lock holder로 봉인 파일 저장과 삭제]**
 - **비공개 Git.** [같은 결정](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7011959904)대로 기본
   꺼짐이다. 꺼져 있으면 위의 격리 그대로다. 켜도 이름 설치는 PR #77의 격리 그대로다(로그인할 저장소가 없다).
   git 설치(pip이 git source를 설치할 때와 Studio의 하위 경로 fetch)에만 다음을 더한다. 사용자의 `SSH_AUTH_SOCK`, 사용자 SSH
@@ -661,7 +680,7 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 | 요청                                                                                                         | 응답                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라)                                                                                                 |
-| `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`, 요청을 확인한 뒤 proxy가 바뀌었으면 `PROXY_CHANGED`                                                                                                                                                            |
+| `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`, 요청을 확인한 뒤 proxy가 바뀌었으면 `PROXY_CHANGED`, proxy가 인증 정보를 거절해 실패했으면 `PROXY_CREDENTIALS_REJECTED`                                                                                        |
 | `update` (이름, 파일 `source`) / `remove` (이름)                                                             | 작업 ID. 오프라인이라 proxy 인증 정보를 받지 않는다                                                                                                                                                                                                                                                          |
 | `set_default` (`extensionId`, `enabled`)                                                                     | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                                                                                                                               |
 | `get_settings`                                                                                               | 확장 설정(`onlineInstall`·`proxy`·`proxyAuthentication`·`privateGit`), 인증 정보를 저장할 수 있는지(`credentialMode`)와 저장돼 있는지(`hasSavedCredentials`, 값은 돌려주지 않는다), 읽을 수 없었는지(`unreadable`), Studio 정책이 온라인 설치를 막는지(`onlineInstallLocked`). 파일만 읽고 복호화하지 않는다 |
@@ -674,7 +693,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 실패 코드는 지금 정보로 낼 수 있는 것만 둔다: 반입 거부(wheel 아님, 직접 URL 의존성), 설치 도구 실패, 실행
 안 됨, 시작 코드·번들 이름 겹침, 로드 오류, 변경 없음. 세부 사유는 pip 출력 문장뿐이다. 확장 설정과 git 하위
 경로에는 `INVALID_PROXY`, `SETTINGS_UNREADABLE`, `GIT_FETCH_FAILED`, `SUBDIRECTORY_INVALID`가, proxy 인증
-정보에는 `PROXY_CREDENTIALS_REQUIRED`, `PROXY_CREDENTIALS_NOT_STORED`, `PROXY_CHANGED`가 더해졌다. 요청·응답 형태의 정본은 `packages/web-host/src/studio-extensions/types.ts`다.
+정보에는 `PROXY_CREDENTIALS_REQUIRED`, `PROXY_CREDENTIALS_NOT_STORED`, `PROXY_CHANGED`,
+`PROXY_CREDENTIALS_REJECTED`가 더해졌다. 요청·응답 형태의 정본은 `packages/web-host/src/studio-extensions/types.ts`다.
 
 `list`의 상태 이름은 `ready`(준비됨), `manifest_unbound`(manifest 미결합), `reinstall_needed`(다시 설치 필요)다.
 관리형 목록으로 검증된 확장에는 `managedId`와 `defaultEnabled`도 포함한다.
@@ -1094,6 +1114,15 @@ ID·주소를 확인한다. 함께 보낸 `proxyAuthentication: false`는 거절
 저장해 둔 것을 지운다. 사용자 이름의 `:`는 받지 않는다. 주소의 사용자 부분에 든 비 ASCII는 어느 형태로 들어와도
 `INVALID_INPUT`이다. 각 지적은 실제 Git·pip 시험과 고친 것을 되돌리면 실패하는 시험으로 확인했다(`credential-store`
 재현 포함).
+
+**2026-11-22, 같은 리뷰어의 재확인(blocking 2, should-fix 3, 결정 1).** 앞의 지적은 모두 풀렸다. relay가
+`https:` proxy의 인증서 확인을 직접 켜게 했다. 이전에는 `NODE_TLS_REJECT_UNAUTHORIZED=0`이면 믿지 않는 인증서에도
+로그인을 보냈다. 사용자 proxy의 407과 터널 실패를 relay 자신의 `502` 답으로 바꿨다. 이전에는 절대 형식 요청에서 그
+proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIALS_REJECTED`로 알린다. 읽을 수 없는 설정에서는 봉인
+파일을 지우지 않는다. 출력의 token을 주소 밖에서도 가린다. 기다리는 연결과 사용자 proxy 연결의 수, token 기한,
+접속 기한(합계)을 정했다. 결정: `%` 뒤 16진 두 자리 거절을 없앴다. relay가 입력값으로 Basic 값을 만들어 Git의 이중
+디코딩이 더는 관계없다. ASCII만 받는 규칙과 사용자 이름의 `:` 거절은 그대로다. 각 지적은 고친 것을 되돌리면 실패하는
+시험으로 확인했다.
 
 **2026-11-18, launcher 조각(구현)과 독립 리뷰.** 대화가 설치한 확장을 받는 경로를 구현했다. 세대 선택과
 lease는 `launch.py acp`(7.4), 상태 디렉터리는 환경 변수로 알린다(7.4). 잠금 없는 lease 경로와 그 불변식,

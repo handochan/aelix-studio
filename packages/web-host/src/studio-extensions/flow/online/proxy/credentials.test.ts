@@ -87,6 +87,11 @@ describe('proxy credentials from a request', () => {
   it('keeps them as typed, and refuses what cannot be a user name and password without repeating it', async () => {
     expect(parseProxyCredentials({ username: 'alice', password: '' })).toEqual({ username: 'alice', password: '' });
     expect(parseProxyCredentials(CREDENTIALS)).toEqual(CREDENTIALS);
+    // Sent as fields they are taken as they are: a `%` is a `%`.
+    expect(parseProxyCredentials({ username: 'al%2Fice', password: 'secret%41' })).toEqual({
+      username: 'al%2Fice',
+      password: 'secret%41',
+    });
     for (const value of [
       null,
       'alice:secret',
@@ -96,12 +101,9 @@ describe('proxy credentials from a request', () => {
       { username: 'al\u0000ice', password: 'secret' },
       { username: 'alice', password: 'secret', extra: 1 },
       { username: 'a'.repeat(300), password: 'secret' },
-      // pip sends Latin-1 and Git UTF-8: past ASCII they disagree, so it is refused at entry.
+      // Proxies read what is past ASCII differently: it is refused at entry.
       { username: 'alice', password: 'secrét' },
       { username: 'alice', password: '비밀secret' },
-      // Git decodes a proxy's user part twice and pip once: %41 would reach them differently.
-      { username: 'alice', password: 'secret%41' },
-      { username: 'al%2Fice', password: 'secret' },
       // Basic authentication splits at the first colon (RFC 7617).
       { username: 'ali:ce', password: 'secret' },
     ]) {
@@ -235,6 +237,7 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
   let proxy = '';
   let signIns: (string | undefined)[] = [];
   let closeProxy = (): void => {};
+  let refuseSignIn = false;
   /** Runs once, just before the next change takes the lock: another Studio process, say. */
   let beforeLock: (() => void) | undefined;
   const interleaved: Spawn = (spec) => {
@@ -261,9 +264,18 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
     spawn = fakeRuntime(runtime);
     logged = [];
     signIns = [];
+    refuseSignIn = false;
+    printed = [];
     beforeLock = undefined;
     const server = createServer((request, response) => {
       signIns.push(request.headers['proxy-authorization']);
+      // A proxy that refuses the sign-in, and echoes it, as a careless one might.
+      if (refuseSignIn) {
+        response
+          .writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' })
+          .end(`refused ${String(request.headers['proxy-authorization'])}`);
+        return;
+      }
       response.writeHead(200).end('index');
     });
     server.listen(0, '127.0.0.1');
@@ -298,9 +310,12 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
   const installer = () => spawn.calls.findLast((call) => call.args.includes('install') && call.args.includes('native'));
   const seals = async (): Promise<string[]> =>
     (await readdir(root).catch(() => [])).filter((name) => SEALED.test(name));
-  /** What pip does first: ask the index through the proxy it was given, signed in as its URL says. */
-  const throughProxy = (env: Record<string, string>): Promise<void> => {
-    if (!env.PIP_PROXY) return Promise.resolve();
+  /**
+   * What pip does first: ask the index through the proxy it was given, signed in as its URL
+   * says, and print what came back, as pip prints an error page. Resolves to the status.
+   */
+  const throughProxy = (env: Record<string, string>): Promise<number> => {
+    if (!env.PIP_PROXY) return Promise.resolve(200);
     const url = new URL(env.PIP_PROXY);
     const user = url.username ? `${decodeURIComponent(url.username)}:${decodeURIComponent(url.password)}` : '';
     return new Promise((resolve, reject) => {
@@ -314,14 +329,20 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
           agent: false,
         },
         (response) => {
-          response.resume();
-          response.on('end', () => resolve());
+          let body = '';
+          response.on('data', (chunk: Buffer) => (body += chunk.toString()));
+          response.on('end', () => {
+            printed.push(`${String(response.statusCode)} ${String(response.statusMessage)} ${body}`);
+            resolve(response.statusCode ?? 0);
+          });
         }
       );
       outgoing.on('error', reject);
       outgoing.end();
     });
   };
+  /** What the fake installer got back from the proxy it was given. */
+  let printed: string[] = [];
   let installs = 0;
   /** A name install of a package of its own, so each one changes something. */
   const nameInstall = async (extra: Record<string, unknown> = {}): Promise<ExtensionReply> => {
@@ -329,7 +350,7 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
     const name = `demo-${String(installs)}`;
     const wheel = await writeWheel(path.join(scratch, 'wheels'), { name });
     runtime.install = async (venv, _wheel, spec) => {
-      await throughProxy(spec.env);
+      if ((await throughProxy(spec.env)) !== 200) return 1;
       await installWheel(venv, wheel);
       return 0;
     };
@@ -446,23 +467,68 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
       expect(await seals()).toEqual([]);
     });
 
-    it('refuses to save credentials without a proxy or readable settings, and removes a stray sealed file', async () => {
+    it('refuses to save credentials without a proxy or readable settings, and keeps the sealed file for them', async () => {
       expect(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS })).toMatchObject({
         ok: false,
         code: 'INVALID_INPUT',
       });
       data(await request({ action: 'set_settings', settings: { proxy } }));
       data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
+      const good = await readFile(path.join(root, 'settings.json'), 'utf8');
       expect(await seals()).toHaveLength(1);
       await writeFile(path.join(root, 'settings.json'), '{ not json');
-      // Unreadable settings name no sealed file: the next change removes it, then refuses.
+      // Changes under the lock while the settings cannot be read leave the sealed file alone.
       expect(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS })).toMatchObject({
         ok: false,
         code: 'SETTINGS_UNREADABLE',
       });
-      expect(await seals()).toEqual([]);
-      data(await request({ action: 'set_settings', settings: { onlineInstall: true, proxy, privateGit: false } }));
-      expect(await settings()).toMatchObject({ hasSavedCredentials: false, settings: { proxyAuthentication: false } });
+      const wheel = await writeWheel(path.join(scratch, 'files'), { name: 'demo-file' });
+      runtime.install = async (venv) => {
+        await installWheel(venv, wheel);
+        return 0;
+      };
+      expect(await settle(await request({ action: 'install', source: { kind: 'file', path: wheel } }))).toMatchObject({
+        phase: 'switched',
+      });
+      expect(await seals()).toHaveLength(1);
+      // Settings restored: the saved credentials open again.
+      await writeFile(path.join(root, 'settings.json'), good);
+      expect(await settings()).toMatchObject({ hasSavedCredentials: true });
+      expect(await settle(await nameInstall())).toMatchObject({ phase: 'switched' });
+      expect(signIns).toEqual([basic(CREDENTIALS)]);
+    });
+
+    it('masks the relay token in what a failed installer printed, in or outside a URL', async () => {
+      data(await request({ action: 'set_settings', settings: { proxy } }));
+      data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
+      let token = '';
+      runtime.install = async (_venv, _wheel, spec, print) => {
+        const url = new URL(spec.env.PIP_PROXY);
+        token = url.password;
+        print(`proxy ${spec.env.PIP_PROXY}\ntoken=${token}\n`);
+        print(`> Proxy-Authorization: ${'Basic ' + Buffer.from(`run:${token}`).toString('base64')}\n`);
+        return 1;
+      };
+      const state = await settle(await request({ action: 'install', source: { kind: 'index', name: 'demo-masked' } }));
+      expect(state).toMatchObject({ phase: 'failed', code: 'INSTALLER_FAILED' });
+      expect(token).toMatch(/^[0-9a-f]{64}$/);
+      expect(state.output).toContain('token=***');
+      for (const secret of [token, Buffer.from(`run:${token}`).toString('base64')])
+        expect(JSON.stringify(state)).not.toContain(secret);
+    });
+
+    it('reports credentials the proxy refused, with nothing of its answer, and keeps them saved', async () => {
+      data(await request({ action: 'set_settings', settings: { proxy } }));
+      data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
+      refuseSignIn = true;
+      const state = await settle(await nameInstall());
+      expect(state).toMatchObject({ phase: 'failed', code: 'PROXY_CREDENTIALS_REJECTED' });
+      expect(signIns).toEqual([basic(CREDENTIALS)]);
+      // The installer got the relay's own answer, not the proxy's echo of the sign-in.
+      expect(printed).toEqual(['502 Proxy Credentials Rejected aelix-studio relay: proxy credentials rejected\n']);
+      expect(await settings()).toMatchObject({ hasSavedCredentials: true });
+      expectNowhere([state, printed]);
+      expect(JSON.stringify(state)).not.toContain(basic(CREDENTIALS).slice('Basic '.length));
     });
 
     it('clears saved credentials and then asks for them, before anything starts', async () => {

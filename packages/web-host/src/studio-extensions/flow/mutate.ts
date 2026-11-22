@@ -160,7 +160,7 @@ function runManagement(
       cwd,
     },
     // Git (in pip) prints remote and submodule addresses as written, which can carry a token.
-    { timeoutMs, signal: context.signal, redact: true }
+    { timeoutMs, signal: context.signal, redact: true, secrets: context.secrets }
   );
 }
 
@@ -321,6 +321,12 @@ async function installProxy(
   return credentials ? { proxy, credentials } : { proxy };
 }
 
+/** `PROXY_CREDENTIALS_REJECTED` for a failed run during which the user's proxy answered the relay with 407. */
+function rejectedCredentials(relay: ProxyRelay | undefined, output: string | undefined): ExtensionFailure | undefined {
+  if (!relay?.credentialsRejected()) return undefined;
+  return new ExtensionFailure('PROXY_CREDENTIALS_REJECTED', ['the proxy refused the credentials'], output);
+}
+
 /** The record of a verified candidate: what it holds and where each distribution came from. */
 function describeMutation(
   context: FlowContext,
@@ -422,8 +428,11 @@ async function begin(context: FlowContext): Promise<{ lock: MutationLock; base: 
   try {
     await recover(context.layout, lock);
     // Sealed proxy credentials the settings do not name: what a save or a clearing left when
-    // it was interrupted between writing the settings and removing the older file.
-    await dropProxyCredentials(context.layout, lock, (await readSettings(context.layout)).credentialId);
+    // it was interrupted between writing the settings and removing the older file. Settings
+    // that cannot be read name nothing we can trust: then no sealed file is touched, so the
+    // credentials still open once the settings are restored.
+    const named = await readSettings(context.layout);
+    if (!named.unreadable) await dropProxyCredentials(context.layout, lock, named.credentialId);
     return { lock, base: await readPointer(context.layout) };
   } catch (error) {
     await lock.release();
@@ -614,6 +623,8 @@ export async function mutate(
       if (upstream?.credentials) relay = await startProxyRelay(upstream.proxy, upstream.credentials);
       proxy = relay?.url ?? upstream?.proxy;
     }
+    // What the installers print is masked for the relay token too, in or outside a URL.
+    const online: FlowContext = relay ? { ...guarded, secrets: relay.secrets } : guarded;
     // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
     const parent = stale ? null : base.record;
     const facts = await readBundleFacts(bundle);
@@ -663,19 +674,23 @@ export async function mutate(
     let checkout: GitCheckout | undefined;
     if (source?.kind === 'git' && source.subdirectory !== undefined) {
       // Studio fetches and checks the subdirectory; native installs a checked copy of it.
-      checkout = await checkoutSubdirectory(
-        guarded,
-        lock,
-        installerEnvironment,
-        { ...source, subdirectory: source.subdirectory },
-        guarded.timeouts.installerMs
-      );
+      try {
+        checkout = await checkoutSubdirectory(
+          online,
+          lock,
+          installerEnvironment,
+          { ...source, subdirectory: source.subdirectory },
+          guarded.timeouts.installerMs
+        );
+      } catch (error) {
+        throw rejectedCredentials(relay, error instanceof ExtensionFailure ? error.output : undefined) ?? error;
+      }
       native = ['extension', 'install', checkout.directory, '--yes'];
     }
     let installer: RunResult;
     try {
       installer = await runManagement(
-        guarded,
+        online,
         candidate,
         installerEnvironment,
         native,
@@ -687,6 +702,11 @@ export async function mutate(
       await relay?.close();
       // The installed files are in the venv now; the lock holder removes the sources.
       if (checkout) await removeFromState(layout, lock, checkout.staging);
+    }
+    // An install the user's proxy refused to sign in is reported as that, so the screen can ask again.
+    if (installer.code !== 0 && installer.code !== INSTALLED_NOT_BOUND) {
+      const refused = rejectedCredentials(relay, installer.output);
+      if (refused) throw refused;
     }
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not
     // native's "did not run" and "not bound", so every non-zero code is a plain failure.

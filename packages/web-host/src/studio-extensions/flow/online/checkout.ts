@@ -378,7 +378,7 @@ async function initializeSubmodules(git: GitRun, clone: string, subdirectory: st
  * @throws ExtensionFailure `GIT_FETCH_FAILED`, `SUBDIRECTORY_INVALID`, `CANCELLED`, `TIMEOUT`
  */
 export async function checkoutSubdirectory(
-  context: Pick<FlowContext, 'spawn' | 'signal' | 'bundle' | 'layout' | 'base'>,
+  context: Pick<FlowContext, 'spawn' | 'signal' | 'bundle' | 'layout' | 'base' | 'secrets'>,
   writer: StateWriter,
   env: Record<string, string>,
   source: Extract<OnlineExtensionSource, { kind: 'git' }> & { subdirectory: string },
@@ -393,7 +393,7 @@ export async function checkoutSubdirectory(
     const result = await runToExit(
       context.spawn,
       { command: 'git', args, env, cwd },
-      { timeoutMs, signal: context.signal, redact: true }
+      { timeoutMs, signal: context.signal, redact: true, secrets: context.secrets }
     );
     transcript.push(result.output + '\n');
     return { ...result, output: result.code === 0 ? result.output : transcript.toString() };

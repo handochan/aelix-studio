@@ -37,6 +37,8 @@ export type FlowContext = {
   user?: Record<string, string>;
   /** Where proxy credentials can be kept; memory-only unless the desktop host gives a keychain. */
   proxyVault?: ProxyCredentialVault;
+  /** Texts masked in what installers print: the relay token of the running change, in its forms. */
+  secrets?: readonly string[];
 };
 
 /** What Studio itself wrote into a generation. A scan fails when any of it changed. */

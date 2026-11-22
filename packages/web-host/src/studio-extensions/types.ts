@@ -60,8 +60,9 @@ export type ProxyCredentialMode = 'keychain' | 'memory-only';
 
 /**
  * A user name and password for the proxy, as the user typed them (not percent-encoded).
- * Printable ASCII only, without a `%` followed by two hex digits, and a user name without `:`;
- * anything else is `INVALID_INPUT`.
+ * Printable ASCII only, and a user name without `:`; anything else is `INVALID_INPUT`. Sent as
+ * these fields they are taken as they are; typed into a proxy address they are percent-decoded
+ * once, as a URL's user part.
  */
 export type ProxyCredentials = { username: string; password: string };
 
@@ -220,6 +221,11 @@ export type ExtensionFailureCode =
   | 'PROXY_CREDENTIALS_REQUIRED'
   /** Credentials cannot be saved here (`memory-only` mode); send them with each install instead. */
   | 'PROXY_CREDENTIALS_NOT_STORED'
+  /**
+   * The user's proxy refused the credentials (407) and the install failed. Saved credentials
+   * stay as they were; the screen asks again and sends `proxyCredentials` or saves new ones.
+   */
+  | 'PROXY_CREDENTIALS_REJECTED'
   /**
    * The proxy changed (another Studio process saved settings) after the install was checked.
    * The credentials it carried were for the earlier address and were not used: ask again.

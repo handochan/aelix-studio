@@ -53,31 +53,24 @@ export const isCredentialId = (value: unknown): value is string =>
 const sealedFile = (layout: Layout, id: string): string => path.join(layout.root, `proxy-credentials-${id}.json`);
 
 /**
- * Printable ASCII only (2026-11-22 user decision). pip (requests) encodes proxy credentials as
- * Latin-1 and fails on anything outside it, while Git (curl) sends UTF-8: past ASCII the same
- * password reaches the proxy as different bytes, or not at all. Refusing it at entry is
- * clearer than a 407 later.
+ * Printable ASCII only (2026-11-22 user decision). The relay sends the credentials as they
+ * were entered in the Basic value, and proxies differ in how they read anything past ASCII
+ * (RFC 7617 leaves the charset to a parameter many ignore): ASCII is what every proxy reads
+ * alike. Refusing the rest at entry is clearer than a 407 later.
  */
 const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 
-/**
- * A `%` and two hex digits. Git decodes the user part of a proxy URL once and curl decodes it
- * again, so a password holding `%41` would reach a proxy from Git as `A` (seen with Git 2.54
- * and curl 8.7.1), while pip decodes once. The relay signs in itself now, but a value both
- * tools read alike stays the rule, so the same password also works typed into either tool.
- */
-const PERCENT_ESCAPE = /%[0-9A-Fa-f]{2}/;
-
-const acceptable = (text: string): boolean => PRINTABLE_ASCII.test(text) && !PERCENT_ESCAPE.test(text);
+const acceptable = (text: string): boolean => PRINTABLE_ASCII.test(text);
 
 /** The one answer to unusable credentials, wherever they come from. It never repeats them. */
 export const invalidCredentials = (): ExtensionFailure =>
   new ExtensionFailure('INVALID_INPUT', [
-    'proxy credentials need a user name without a colon, both in printable ASCII and without a % followed by two hex digits',
+    'proxy credentials need a user name without a colon, and both in printable ASCII',
   ]);
 
 /**
- * Check credentials from a request or a typed proxy address. They are kept as typed (decoded).
+ * Check credentials from a request (taken as they are) or a typed proxy address (decoded
+ * once, as a URL's user part).
  * The user name may not hold a colon: Basic authentication splits at the first one (RFC 7617
  * section 2). Nothing of them appears in a failure.
  *
