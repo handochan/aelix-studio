@@ -11,8 +11,9 @@ import { build } from 'esbuild';
 import { createGenerator } from 'unocss';
 import unoConfig from '../../../../../uno.config';
 
-// Renders the real notices and status bar in the composer order with the app's CSS, then
-// hit-tests every action at its center. jsdom has no layout, so this runs in Chromium.
+// Renders the real notices and status bar through RunningInputStack, the layout AcpSendBox
+// uses, with the app's CSS, then hit-tests every action at its center. jsdom has no layout,
+// so this runs in Chromium.
 const ENTRY = `
 import React from 'react';
 import { createRoot } from 'react-dom/client';
@@ -23,7 +24,7 @@ import '@arco-design/web-react/dist/css/arco.css';
 import '@/renderer/styles/arco-override.css';
 import '@/renderer/styles/themes/index.css';
 import ThoughtDisplay from '@/renderer/components/chat/ThoughtDisplay';
-import { RunningInputNotices } from '@/renderer/pages/conversation/runtime/RunningInput';
+import { RunningInputNotices, RunningInputStack } from '@/renderer/pages/conversation/runtime/RunningInput';
 
 const clicks = (window.__clicks = []);
 const record = (name) => () => clicks.push(name);
@@ -63,7 +64,8 @@ createRoot(document.getElementById('root')).render(
   React.createElement(
     'div',
     { className: 'flex flex-col', style: { width: 720, margin: '160px auto 0' } },
-    ...(legacy ? [status, notices, composer] : [notices, status, composer])
+    // The control case places the notices after the bar to prove the hit test detects covering.
+    ...(legacy ? [status, notices, composer] : [React.createElement(RunningInputStack, { notices }, status), composer])
   )
 );
 `;

@@ -6,6 +6,7 @@
 
 export { default as RunningInputModeSwitch } from './RunningInputModeSwitch';
 export { default as RunningInputNotices } from './RunningInputNotices';
+export { default as RunningInputStack } from './RunningInputStack';
 export { useRunningImagePaths, type RunningImagePaths } from './RunningImages';
 export {
   DEFAULT_RUNNING_INPUT_MODE,

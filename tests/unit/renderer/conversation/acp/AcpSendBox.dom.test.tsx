@@ -120,7 +120,13 @@ const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock, imagePath
   })
 );
 
-vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
+vi.mock('@/renderer/pages/conversation/runtime/RunningInput', async () => ({
+  // The real layout, so the order test below checks what the composer renders.
+  RunningInputStack: (
+    await vi.importActual<typeof import('@/renderer/pages/conversation/runtime/RunningInput/RunningInputStack')>(
+      '@/renderer/pages/conversation/runtime/RunningInput/RunningInputStack'
+    )
+  ).default,
   useRunningInput: (options: unknown) => {
     useRunningInputSpy(options);
     return runningInputMock;

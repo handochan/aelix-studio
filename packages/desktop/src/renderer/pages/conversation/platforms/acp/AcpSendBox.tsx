@@ -40,6 +40,7 @@ import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import {
   RunningInputModeSwitch,
   RunningInputNotices,
+  RunningInputStack,
   useRunningImagePaths,
   useRunningInput,
 } from '@/renderer/pages/conversation/runtime/RunningInput';
@@ -971,22 +972,26 @@ Please check your local CLI tool authentication status`,
         onRemove={remove}
         onClear={clear}
       />
-      {/* Above the status bar: it tucks under the composer with a negative margin and would cover the notices. */}
-      <RunningInputNotices
-        notices={runningInput.notices}
-        onDismiss={runningInput.dismiss}
-        onCheck={(requestId) => void runningInput.check(requestId)}
-        images={runningInput.images}
-        onSendPaths={runningImagePaths.available ? () => void sendRunningImagePaths() : undefined}
-      />
-      <ThoughtDisplay
-        running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
-        statusText={teamRuntime?.statusText}
-        externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
-        startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
-        onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
-        onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
-      />
+      <RunningInputStack
+        notices={
+          <RunningInputNotices
+            notices={runningInput.notices}
+            onDismiss={runningInput.dismiss}
+            onCheck={(requestId) => void runningInput.check(requestId)}
+            images={runningInput.images}
+            onSendPaths={runningImagePaths.available ? () => void sendRunningImagePaths() : undefined}
+          />
+        }
+      >
+        <ThoughtDisplay
+          running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
+          statusText={teamRuntime?.statusText}
+          externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
+          startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
+          onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
+          onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
+        />
+      </RunningInputStack>
       <CrossSessionDisabledBanner />
       <SendBox
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}

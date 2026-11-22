@@ -614,11 +614,8 @@ describe('running input in the composer', () => {
     });
   });
 
-  it.each([
-    ['native-line-limit', true],
-    ['provider-body-limit', true],
-    ['stale-turn', false],
-  ] as const)('turns an ACP %s rejection into a path-only choice when it applies', async (reason, pathOnly) => {
+  /** A vision turn whose image write answer comes from `steerImages`; lookups answer from `lookup`. */
+  async function mountVisionTurn(steerImages: () => Response | Promise<Response>, lookup?: () => Response) {
     server.discovery = () =>
       success({
         version: 1,
@@ -634,7 +631,9 @@ describe('running input in the composer', () => {
           turnId: server.turn.turnId,
           remaining: { count: 4, rawBytes: 6 << 20, imageBytes: 3_750_000, sidePixels: 8000, nativeLineBytes: 8 << 20 },
         });
-      return method === STEER_IMAGES ? result({ accepted: false, reason }) : accepted(payload.turnId);
+      if (method === STEER_IMAGES) return steerImages();
+      if (method === LOOKUP && lookup) return lookup();
+      return accepted(payload.turnId);
     });
     const digest = { sha256: 'b'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
     const size = { width: 64, height: 1, bytes: 64, digest };
@@ -670,15 +669,11 @@ describe('running input in the composer', () => {
         : fetchHost(url, init)
     );
     await mount({ enablePixels: true });
+  }
 
-    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
-    expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+  async function expectPathOnlyAfter(reason: string) {
     const [{ receipt }] = controller.images.receipts;
     expect(receipt).toMatchObject({ status: 'rejected', reason });
-    if (!pathOnly) {
-      expect(controller.images.submission).toBeUndefined();
-      return;
-    }
     expect(controller.images.submission).toMatchObject({
       requestId: receipt.requestId,
       status: 'blocked',
@@ -694,7 +689,78 @@ describe('running input in the composer', () => {
       payload: { message: expect.stringContaining(CONFIRMED_IMAGE), turnId: 'turn-1' },
     });
     expect(writes().filter((method) => method === STEER_IMAGES)).toHaveLength(1);
+  }
+
+  it.each([
+    ['native-line-limit', true],
+    ['provider-body-limit', true],
+    ['stale-turn', false],
+  ] as const)('turns an ACP %s rejection into a path-only choice when it applies', async (reason, pathOnly) => {
+    await mountVisionTurn(() => result({ accepted: false, reason }));
+    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
+    expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+    if (pathOnly) await expectPathOnlyAfter(reason);
+    else {
+      expect(controller.images.receipts[0].receipt).toMatchObject({ status: 'rejected', reason });
+      expect(controller.images.submission).toBeUndefined();
+    }
   });
+
+  it('offers the same path-only choice when the original-key lookup confirms the rejection', async () => {
+    await mountVisionTurn(
+      () => {
+        throw new DOMException('Timeout', 'TimeoutError');
+      },
+      () => result({ status: 'completed', result: { accepted: false, reason: 'native-line-limit' } })
+    );
+    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
+    expect(controller.images.receipts[0].receipt.status).toBe('unknown');
+    expect(controller.images.submission).toBeUndefined();
+    await act(async () => {
+      fireEvent.click(screen.getByText('acp.runningInput.images.checkResult'));
+    });
+    expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES, LOOKUP]);
+    await expectPathOnlyAfter('native-line-limit');
+  });
+
+  it.each(['dismiss-all', 'lookup-after-dismiss'] as const)(
+    'does not resurrect a dismissed request when its rejection arrives (%s)',
+    async (variant) => {
+      const reply = hold();
+      await mountVisionTurn(
+        () => (variant === 'dismiss-all' ? reply.pending : Promise.reject(new DOMException('Timeout', 'TimeoutError'))),
+        () => result({ status: 'completed', result: { accepted: false, reason: 'native-line-limit' } })
+      );
+      let route: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        route = controller.submit('caption', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      await waitFor(() =>
+        expect(controller.images.receipts[0]?.receipt.status).toBe(variant === 'dismiss-all' ? 'pending' : 'unknown')
+      );
+      const { requestId } = controller.images.receipts[0].receipt;
+      if (variant === 'dismiss-all') {
+        // The pending row has no close button; "dismiss all" clears it.
+        act(() => controller.dismiss());
+        await act(async () => {
+          reply.reply(result({ accepted: false, reason: 'native-line-limit' }));
+          expect(await route).toBe('kept');
+        });
+      } else {
+        await act(async () => {
+          await route;
+        });
+        const check = controller.check;
+        act(() => controller.dismiss([requestId]));
+        await act(async () => {
+          await check(requestId);
+        });
+      }
+      expect(controller.images.receipts).toEqual([]);
+      expect(controller.images.submission).toBeUndefined();
+      expect(screen.queryByTestId('running-image-submission')).toBeNull();
+    }
+  );
 
   it.each(['binding', 'turn', 'mode'] as const)(
     'keeps a path-only click on its original target if reconnect changes the %s',

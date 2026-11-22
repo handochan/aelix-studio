@@ -40,6 +40,15 @@ const MAX_VISIBLE_RECEIPTS = 256;
 const MODES = ['steer', 'follow-up'] as const;
 const IMAGE_METHODS = { steer: INPUT_METHODS.steerImages, 'follow-up': INPUT_METHODS.followUpImages } as const;
 
+/** What a pixel click needs to offer path-only delivery after its final ACP answer. */
+type PixelClick = {
+  identity: ImageSubmissionIdentity;
+  batch?: RunningImageSubmission['batch'];
+  measurements?: RunningImageSubmission['measurements'];
+  isCurrent: () => boolean;
+  signal: AbortSignal;
+};
+
 type PixelSubmission = RunningInputTarget & {
   hostTurnId?: string | null;
   mode: RunningInputMode;
@@ -122,10 +131,20 @@ export function createRunningInputClient(
   let generation = 0;
   let imageObservation = 0;
   let disposed = false;
+  /**
+   * The composer context of each pixel write whose final ACP answer can still arrive, by
+   * direct reply or by original-key lookup. Released when its receipt leaves the notices.
+   */
+  const pixelClicks = new Map<string, PixelClick>();
 
   function update(change: Partial<RunningInputSnapshot>): void {
     if (disposed) return;
-    if (change.receipts) previews.prune(change.receipts);
+    if (change.receipts) {
+      previews.prune(change.receipts);
+      for (const requestId of pixelClicks.keys()) {
+        if (!change.receipts.some((receipt) => receipt.requestId === requestId)) pixelClicks.delete(requestId);
+      }
+    }
     snapshot = { ...snapshot, ...change };
     for (const listener of listeners) listener();
   }
@@ -372,6 +391,41 @@ export function createRunningInputClient(
     return state;
   }
 
+  /**
+   * One transition for a pre-write ACP rejection, whether it came as the direct reply or from
+   * the original-key lookup: the click becomes a blocked submission so the same unchanged draft
+   * can be sent as paths. A receipt the user already dismissed stays dismissed, and a newer
+   * click's preparation or block is never replaced.
+   */
+  function blockRejectedPixels(receipt: RunningInputReceipt): boolean {
+    const click = pixelClicks.get(receipt.requestId);
+    if (receipt.status !== 'pending' && receipt.status !== 'unknown') pixelClicks.delete(receipt.requestId);
+    if (!click || receipt.status !== 'rejected' || !('reason' in receipt) || !isPathRejection(receipt.reason)) {
+      return false;
+    }
+    const { identity, batch, measurements, isCurrent, signal } = click;
+    const newer = snapshot.imageSubmission && snapshot.imageSubmission.requestId !== identity.requestId;
+    if (
+      disposed ||
+      newer ||
+      binding !== identity.bindingId ||
+      !snapshot.receipts.some((entry) => entry.requestId === identity.requestId)
+    ) {
+      return false;
+    }
+    update({
+      imageSubmission: {
+        ...identity,
+        status: 'blocked',
+        reason: receipt.reason,
+        batch,
+        measurements,
+        allowPathOnly: !!currentTarget(identity)?.modes.includes(identity.mode) && isCurrent() && !signal.aborted,
+      },
+    });
+    return true;
+  }
+
   /** ACP answers these before the native write, so the same draft can still be sent as paths. */
   const PATH_REJECTIONS: ReadonlySet<RunningImageRejection> = new Set<RunningImagePathRejection>([
     'native-line-limit',
@@ -518,19 +572,15 @@ export function createRunningInputClient(
           return blocked('model-changed');
 
         previews.retain(identity, requestId, prepared.images);
+        pixelClicks.set(requestId, { identity, batch, measurements, isCurrent, signal });
         const sent = await dispatch(
           { ...identity, hostTurnId, status: 'pending', pixels: batch },
           makeBody(verified.map(({ id }) => id)),
           () => !signal.aborted && isCurrent()
         );
         // The receipt stays as the record of this write attempt. The composer shows the block instead.
-        if (
-          sent.status === 'sent' &&
-          sent.receipt.status === 'rejected' &&
-          'reason' in sent.receipt &&
-          isPathRejection(sent.receipt.reason)
-        )
-          return blocked(sent.receipt.reason);
+        if (sent.status === 'sent' && blockRejectedPixels(sent.receipt))
+          return { status: 'blocked', preserveDraft: true };
         return sent;
       } finally {
         preparation.dispose();
@@ -659,6 +709,7 @@ export function createRunningInputClient(
               const receipt = await settleReceipt(original, outcome);
               if (disposed || binding !== original.bindingId)
                 return { status: 'binding-changed', refreshHistory: true };
+              blockRejectedPixels(receipt);
               return { status: 'completed', receipt };
             }
           }
@@ -689,6 +740,7 @@ export function createRunningInputClient(
       discovery?.finish();
       discovery = undefined;
       inFlightReceipt = undefined;
+      pixelClicks.clear();
       binding = undefined;
       snapshot = { channel: { status: 'unavailable' }, negotiated: false, receipts: [], sending: false };
       listeners.clear();
