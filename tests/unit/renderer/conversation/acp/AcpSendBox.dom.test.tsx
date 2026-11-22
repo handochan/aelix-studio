@@ -1421,6 +1421,7 @@ describe('AcpSendBox', () => {
       expect(runningInputMock.finishStop).toHaveBeenCalledWith('done');
       expect(stopInvokeMock).toHaveBeenCalledWith({ conversation_id: 'conv-1', turn_id: 'turn-1' });
       expect(useRunningInputSpy.mock.calls.at(-1)?.[0]).toMatchObject({ enabled: true, host: 'busy' });
+      expect(useRunningInputSpy.mock.calls.at(-1)?.[0].enablePixels).toBeUndefined();
 
       render(
         <AcpSendBox

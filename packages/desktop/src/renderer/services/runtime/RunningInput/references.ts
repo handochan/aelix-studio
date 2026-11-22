@@ -26,7 +26,7 @@ async function resolveSessionRow(
   conversationId: string,
   senderWorkspace: string | undefined,
   ref: SessionRef,
-  signal: AbortSignal
+  signal?: AbortSignal
 ) {
   if (!ref.id || ref.id === conversationId || LINE_CONTROLS.test(ref.id))
     throw new Error('Invalid conversation reference');
@@ -50,7 +50,7 @@ async function resolveSessionRow(
   return `${title}\t${target.id}\tworkspace: ${workspaceField}`;
 }
 
-async function resolveFile(ref: ChatFileRef, signal: AbortSignal) {
+async function resolveFile(ref: ChatFileRef, signal?: AbortSignal) {
   const metadata = await fs.getContentMetadata.invoke({ file: ref, privateRead: true, signal });
   if (typeof metadata?.path !== 'string' || !ABSOLUTE_PATH.test(metadata.path) || LINE_CONTROLS.test(metadata.path)) {
     throw new Error('File reference unavailable');
@@ -75,8 +75,8 @@ export async function resolveRunningInputReferences(
   { files, sessions }: RunningInputReferences,
   lifetime?: AbortSignal
 ) {
-  const reads = new AbortController();
-  const signal = lifetime ? AbortSignal.any([lifetime, reads.signal]) : reads.signal;
+  const reads = lifetime ? new AbortController() : undefined;
+  const signal = lifetime && reads ? AbortSignal.any([lifetime, reads.signal]) : undefined;
   const [metadata, sessionRows] = await Promise.all([
     Promise.all(files.map((file) => resolveFile(file, signal))),
     sessions.length === 0
@@ -86,7 +86,7 @@ export async function resolveRunningInputReferences(
           const workspace = workspaceFromExtra(sender.extra);
           return Promise.all(sessions.map((ref) => resolveSessionRow(conversationId, workspace, ref, signal)));
         }),
-  ]).finally(() => reads.abort());
+  ]).finally(() => reads?.abort());
   lifetime?.throwIfAborted();
   const resolvedFiles = metadata.map(({ path, type }, index) => ({
     ref: files[index],
@@ -98,6 +98,7 @@ export async function resolveRunningInputReferences(
   }
   return {
     files: resolvedFiles,
+    hasImage: metadata.some(({ type }) => type?.startsWith('image/')),
     format(include: (file: (typeof resolvedFiles)[number]) => boolean = () => true) {
       const paths = resolvedFiles.filter(include).map(({ path }) => path);
       return paths.length ? message + '\n\n' + [AIONUI_FILES_MARKER, ...paths].join('\n') : message;
@@ -112,5 +113,5 @@ export async function prepareRunningInputMessage(
   references: RunningInputReferences
 ): Promise<{ text: string; hasImage: boolean }> {
   const resolved = await resolveRunningInputReferences(conversationId, message, references);
-  return { text: resolved.format(), hasImage: resolved.files.some(({ kind }) => kind !== 'file') };
+  return { text: resolved.format(), hasImage: resolved.hasImage };
 }

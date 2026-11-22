@@ -542,6 +542,41 @@ describe('running input in the composer', () => {
     expect(writes()).toEqual([FOLLOW_UP]);
   });
 
+  it.each([
+    { type: 'image/png', file: 'input.png', imageHint: true },
+    { type: 'application/octet-stream', file: 'input.heic', imageHint: false },
+  ])('keeps text and original path sends with the default gate for $file', async ({ type, file, imageHint }) => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(({ method, payload }) =>
+      method === IMAGE_STATE
+        ? result({ status: 'unavailable', available: false, reason: 'model-unverified', turnId: 'turn-1' })
+        : accepted(payload.turnId)
+    );
+    const original = { kind: 'upload', path: '/client/' + file } as const;
+    const resolved = '/host/private/' + file;
+    server.metadata.mockReturnValueOnce(success({ path: resolved, type }));
+    const prepare = vi.spyOn(runningImages, 'createImagePreparation');
+    await mount();
+
+    expect(await submit('plain text')).toBe('sent');
+    expect(await submit('', { files: [original], sessions: [] })).toBe('sent');
+    expect(server.metadata).toHaveBeenCalledExactlyOnceWith(original);
+    expect(server.write.mock.calls.map(([call]) => [call.method, call.payload.message])).toEqual([
+      [STEER, 'plain text'],
+      [STEER, '\n\n[[AION_FILES]]\n' + resolved],
+    ]);
+    expect(controller.images).toMatchObject({ modes: [], receipts: [] });
+    expect(Message.info).toHaveBeenCalledTimes(imageHint ? 1 : 0);
+    if (imageHint) expect(Message.info).toHaveBeenCalledWith('acp.runningInput.imagesAsPaths');
+    expect(prepare).not.toHaveBeenCalled();
+  });
+
   it('waits for explicit path-only input on a text-only model and resolves its original ref', async () => {
     server.discovery = () =>
       success({
@@ -555,7 +590,7 @@ describe('running input in the composer', () => {
         ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: 'turn-1' })
         : accepted(payload.turnId)
     );
-    await mount();
+    await mount({ enablePixels: true });
     expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
     expect(controller.images.submission).toMatchObject({
       status: 'blocked',
@@ -596,7 +631,7 @@ describe('running input in the composer', () => {
           ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: server.turn.turnId })
           : accepted(payload.turnId)
       );
-      await mount();
+      await mount({ enablePixels: true });
       expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
 
       const discovery = hold();
@@ -639,7 +674,7 @@ describe('running input in the composer', () => {
         signal.addEventListener('abort', () => reject(signal.reason), { once: true });
       });
     });
-    await mount();
+    await mount({ enablePixels: true });
     let click: Promise<RunningInputRoute> | undefined;
     act(() => {
       click = controller.submit('snapshot', { ...IMAGE_REFERENCE, sessions: [{ id: 'same' }] }, TEXT_DRAFT);
@@ -682,7 +717,7 @@ describe('running input in the composer', () => {
       );
       const firstDraft = {};
       const decorations = new AbortController();
-      const view = await mount({ draftVersion: firstDraft });
+      const view = await mount({ draftVersion: firstDraft, enablePixels: true });
       const metadata = hold();
       server.metadata.mockReturnValueOnce(metadata.pending);
       let submission: Promise<RunningInputRoute> | undefined;
@@ -694,7 +729,7 @@ describe('running input in the composer', () => {
       });
       await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
       if (action === 'cancel') act(() => controller.images.cancelPreparation());
-      else if (action === 'replace-draft') view.rerender(<Harness draftVersion={{}} />);
+      else if (action === 'replace-draft') view.rerender(<Harness draftVersion={{}} enablePixels />);
       else act(() => decorations.abort());
       await act(async () => {
         metadata.reply(success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
@@ -982,7 +1017,7 @@ describe('running input in the composer', () => {
         },
         emit: () => {},
       }));
-      const view = await mount();
+      const view = await mount({ enablePixels: true });
       let route: Promise<RunningInputRoute> | undefined;
       act(() => {
         route = controller.submit('late pixels', IMAGE_REFERENCE, TEXT_DRAFT);
@@ -999,7 +1034,7 @@ describe('running input in the composer', () => {
       server.discovery = readDiscovery;
       server.turn = { active: true, turnId: nextTurn };
       const stopHostTurnId = newHost ? 'host-turn-2' : 'host-turn-1';
-      if (newHost) view.rerender(<Harness hostTurnId={stopHostTurnId} />);
+      if (newHost) view.rerender(<Harness hostTurnId={stopHostTurnId} enablePixels />);
       else
         act(() => {
           for (const listener of reconnect) listener();

@@ -65,7 +65,7 @@ describe('running input renderer client', () => {
   it('confirms the ACP mapping only for the Host turn observed throughout discovery', async () => {
     let hostTurnId = 'host-turn-1';
     client.dispose();
-    client = createRunningInputClient('space / id', () => hostTurnId);
+    client = createRunningInputClient('space / id', { getHostTurnId: () => hostTurnId });
     const state = holdReply();
     fetchMock.mockResolvedValueOnce(discovery()).mockReturnValueOnce(state.pending);
 

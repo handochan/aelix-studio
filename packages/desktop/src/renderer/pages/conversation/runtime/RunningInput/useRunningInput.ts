@@ -56,6 +56,8 @@ export type UseRunningInputOptions = {
   conversationId: string;
   /** False keeps today's composer exactly (no discovery, no relay). */
   enabled: boolean;
+  /** Part 2/2 opts in when the composer can show the image states and actions. */
+  enablePixels?: boolean;
   /** Most recent host turn observation. */
   host: HostTurnState;
   hostTurnId: string | null;
@@ -121,8 +123,8 @@ const NO_STOPS: RunningInputStopPhases = new Map();
 const subscribeNothing = () => () => {};
 const readNothing = () => NO_SNAPSHOT;
 
-function openSession(conversationId: string, getHostTurnId: () => string | null): Session {
-  const client = createRunningInputClient(conversationId, getHostTurnId);
+function openSession(conversationId: string, getHostTurnId: () => string | null, enablePixels?: boolean): Session {
+  const client = createRunningInputClient(conversationId, { getHostTurnId, enablePixels });
   return { client, stopRevision: 0, stop: { status: 'none' }, conversationId, disposed: false };
 }
 
@@ -140,6 +142,7 @@ function activeTarget({ channel }: RunningInputSnapshot) {
 export function useRunningInput({
   conversationId,
   enabled,
+  enablePixels,
   host,
   hostTurnId,
   refreshHost,
@@ -158,7 +161,7 @@ export function useRunningInput({
 
   useEffect(() => {
     if (!enabled) return;
-    const next = openSession(conversationId, () => observedHostTurnId.current);
+    const next = openSession(conversationId, () => observedHostTurnId.current, enablePixels);
     setSession(next);
     return () => {
       next.disposed = true;
@@ -168,7 +171,7 @@ export function useRunningInput({
       setLastReady(undefined);
       setStopPhases(NO_STOPS);
     };
-  }, [conversationId, enabled, observedHostTurnId]);
+  }, [conversationId, enabled, enablePixels, observedHostTurnId]);
 
   const client = session?.conversationId === conversationId ? session.client : undefined;
   const snapshot = useSyncExternalStore(client?.subscribe ?? subscribeNothing, client?.getSnapshot ?? readNothing);
@@ -379,17 +382,23 @@ export function useRunningInput({
         let prepared = { text: message, hasImage: false };
         if (decision.reason === 'references') {
           let resolved: Awaited<ReturnType<typeof resolveRunningInputReferences>>;
-          const finishReferences = currentSession.imageDraft
+          const imageDraft = currentSession.imageDraft;
+          const finishReferences = imageDraft
             ? relay.beginImageReferences(
                 { bindingId: target.bindingId, turnId: target.turnId, mode: chosen, requestId },
                 references.files.length
               )
             : undefined;
           try {
-            resolved = await resolveRunningInputReferences(conversationId, message, references, controller.signal);
-            if (!interrupted()) await relay.refresh();
+            resolved = await resolveRunningInputReferences(
+              conversationId,
+              message,
+              references,
+              imageDraft ? controller.signal : undefined
+            );
+            if (!imageDraft || !interrupted()) await relay.refresh();
           } catch {
-            const cancelled = interrupted();
+            const cancelled = imageDraft && interrupted();
             finishReferences?.(cancelled ? 'cancelled' : 'references-unverified');
             if (!cancelled) Message.warning(t('acp.runningInput.referencesUnverified'));
             return 'kept';
@@ -400,7 +409,7 @@ export function useRunningInput({
             active.turnId !== target.turnId ||
             decide(true).route !== decision.route
           ) {
-            const cancelled = interrupted();
+            const cancelled = imageDraft && interrupted();
             finishReferences?.(cancelled ? 'cancelled' : 'turn-changed');
             if (!cancelled) Message.warning(t('acp.runningInput.preparationChanged'));
             return 'kept';
@@ -442,7 +451,7 @@ export function useRunningInput({
               ? 'sent'
               : 'kept';
           }
-          prepared = { text: resolved.format(), hasImage: images.length > 0 };
+          prepared = { text: resolved.format(), hasImage: resolved.hasImage };
         }
         const result = await relay.send(chosen, target, prepared.text, { requestId, hostTurnId: initial.hostTurnId });
         if (result.status === 'skipped') {

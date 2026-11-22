@@ -1,13 +1,17 @@
 // Run with Bun and the local Host, ACP source and unchanged native runtime (see README).
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { crc32, deflateSync } from 'node:zlib';
 import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
-import { createRunningInputClient, IMAGE_ONLY_CAPTION } from '@renderer/services/runtime/RunningInput';
+import {
+  createRunningInputClient,
+  IMAGE_ONLY_CAPTION,
+  prepareRunningInputMessage,
+} from '@renderer/services/runtime/RunningInput';
 import { INPUT_METHODS, createRequestId } from '@renderer/services/runtime/RunningInput/transport';
 import { emptyNativeImageLine } from '@renderer/services/runtime/RunningInput/imageProtocol';
 import { nativeLineBytes } from '@renderer/services/runtime/RunningInput/Images/budget';
@@ -50,6 +54,8 @@ function deferred() {
 let heldResponse: ReturnType<typeof deferred> | undefined = deferred();
 const providerImages: { digest: string; text: string }[] = [];
 let providerRequests = 0;
+let expectedLegacyText: string | undefined;
+let legacyTextSeen = false;
 const provider = Bun.serve({
   hostname: '127.0.0.1',
   port: 0,
@@ -58,11 +64,14 @@ const provider = Bun.serve({
     providerRequests++;
     await heldResponse?.promise;
     for (const message of messages) {
-      if (message.role !== 'user' || !Array.isArray(message.content)) continue;
+      if (message.role !== 'user') continue;
+      if (typeof message.content === 'string' && message.content === expectedLegacyText) legacyTextSeen = true;
+      if (!Array.isArray(message.content)) continue;
       const text = message.content
         .filter((part) => part.type === 'text')
         .map((part) => part.text)
         .join('');
+      if (text === expectedLegacyText) legacyTextSeen = true;
       for (const part of message.content.filter((part) => part.type === 'image_url')) {
         const bytes = Buffer.from(part.image_url.url.split(',')[1], 'base64');
         providerImages.push({ digest: createHash('sha256').update(bytes).digest('hex'), text });
@@ -281,16 +290,30 @@ server.main()
   });
   const scope = '/api/conversations/' + conversation.id;
   await api(scope + '/runtime/ensure', {});
+  let imageStateReads = 0;
+  let imageStateStatus: number | undefined;
+  let nextRelayAt = 0;
   let loseGrant = false;
   let loseAck = false;
   let beforeGrant: (() => Promise<void>) | undefined;
   let writing = deferred();
   registerDesktopBackendFetcher(async (url, init) => {
     const path = new URL(url).pathname;
+    // Pace the fixture within the pinned Host's shared ten-requests-per-second budget.
+    if (path.endsWith('/acp-extensions') || path.endsWith('/byte-grants')) {
+      const now = performance.now();
+      const start = Math.max(now, nextRelayAt);
+      nextRelayAt = start + 110;
+      if (start > now) await Bun.sleep(start - now);
+    }
     const body = typeof init?.body === 'string' ? JSON.parse(init.body) : {};
     const headers = new Headers(init?.headers);
     headers.set('x-aionui-studio-auth', auth);
     const response = await fetch(base + new URL(url).pathname + new URL(url).search, { ...init, headers });
+    if (body.method === INPUT_METHODS.imageState) {
+      imageStateReads++;
+      imageStateStatus = response.status;
+    }
     if (path.endsWith('/byte-grants')) {
       const descriptor = await response.clone().json();
       calls.push({
@@ -320,7 +343,7 @@ server.main()
     return response;
   });
 
-  client = createRunningInputClient(conversation.id);
+  client = createRunningInputClient(conversation.id, { enablePixels: true });
   await api(scope + '/messages', { content: 'hold the first provider request' });
   await until(() => providerRequests);
   const target = await until(async () => {
@@ -350,6 +373,39 @@ server.main()
       signal: controller.signal,
       isCurrent: () => !controller.signal.aborted,
     });
+
+  const legacy = createRunningInputClient(conversation.id);
+  try {
+    await legacy.refresh();
+    const { channel } = legacy.getSnapshot();
+    assert.ok(channel.status === 'ready' && channel.turn.active && !channel.pixelModes, 'Pixel gate opened by default');
+    await legacy.refreshImageState();
+    const original = ref(path);
+    const message = 'inspect this original';
+    const prepared = await prepareRunningInputMessage(conversation.id, message, {
+      files: [original.ref],
+      sessions: [],
+    });
+    expectedLegacyText = message + '\n\n[[AION_FILES]]\n' + (await realpath(path));
+    assert.ok(prepared.text === expectedLegacyText && prepared.hasImage, 'Legacy path formatting changed');
+    const attempted = await legacy.submitImages({
+      ...target,
+      mode: 'steer',
+      requestId: createRequestId(),
+      message,
+      sources: [original],
+      signal: new AbortController().signal,
+      isCurrent: () => true,
+    });
+    assert.equal(attempted.status, 'blocked');
+    const legacyAck = await legacy.send('steer', target, prepared.text);
+    assert.ok(legacyAck.status === 'sent' && legacyAck.receipt.status === 'queued' && !legacyAck.receipt.pixels);
+    assert.equal(imageStateReads, 0);
+    assert.equal(calls.length, 0);
+    assert.equal((await writes()).length, 0);
+  } finally {
+    legacy.dispose();
+  }
 
   loseGrant = true;
   const result = await submit('');
@@ -411,6 +467,7 @@ server.main()
   ]) {
     await until(() => providerImages.some((entry) => entry.digest === expectedDigest && entry.text === expectedText));
   }
+  await until(() => legacyTextSeen);
   await until(async () => !(await api(scope)).runtime?.is_processing);
 
   async function newTurn() {
@@ -468,8 +525,12 @@ server.main()
       assert.equal(outcome.status, 'blocked');
       assert.equal(observed.length, previous);
     } else {
+      const submission = client.getSnapshot().imageSubmission;
+      const status = outcome.status === 'sent' ? outcome.receipt.status : outcome.status;
+      const reason = submission?.status === 'blocked' ? submission.reason : undefined;
       assert.ok(
-        outcome.status === 'sent' && outcome.receipt.status === 'queued' && outcome.receipt.captionAdded === false
+        outcome.status === 'sent' && outcome.receipt.status === 'queued' && outcome.receipt.captionAdded === false,
+        `Native line offset ${offset} returned ${status}${reason ? ' (' + reason + ')' : ''}, image-state HTTP ${imageStateStatus}`
       );
       assert.equal(observed.length, previous + 1);
       assert.equal(observed.at(-1)?.bytes, nativeLineLimit + offset);
@@ -571,7 +632,7 @@ server.main()
     }
   }
   console.log(
-    'Real Host/ACP: PNG and Chromium derivative bytes, both caption origins, exact line boundary, original-key recovery, late ACK after Stop and clean diagnostics'
+    'Real Host/ACP: default path queue, opted-in PNG and Chromium derivative bytes, both caption origins, exact line boundary, original-key recovery, late ACK after Stop and clean diagnostics'
   );
 } finally {
   heldResponse?.release();

@@ -99,12 +99,25 @@ describe('running image submissions', () => {
         revokeObjectURL: revokeURL,
       })
     );
-    client = createRunningInputClient('image-test');
+    client = createRunningInputClient('image-test', { enablePixels: true });
   });
 
   afterEach(() => {
     client.dispose();
     vi.unstubAllGlobals();
+  });
+
+  it('requires an explicit pixel opt-in even when Host and ACP advertise the image contract', async () => {
+    client.dispose();
+    client = createRunningInputClient('image-test');
+    offer();
+    await client.refresh();
+
+    expect(await submit()).toMatchObject({ status: 'blocked', preserveDraft: true });
+    expect(client.getSnapshot().channel).not.toHaveProperty('pixelModes');
+    await client.refreshImageState();
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(prepare).not.toHaveBeenCalled();
   });
 
   it.each([

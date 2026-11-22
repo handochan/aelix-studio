@@ -95,7 +95,7 @@ export async function probeDerivative(fixture: BrowserFixture) {
           identity
         )) as typeof import('@renderer/services/runtime/RunningInput/transport');
         const requestId = createRequestId();
-        const client = createRunningInputClient(id);
+        const client = createRunningInputClient(id, { enablePixels: true });
         try {
           await client.refresh();
           const { channel } = client.getSnapshot();

@@ -96,7 +96,13 @@ function failureOutcome(failure: RelayFailure): RunningInputOutcome {
  * Own one client per mounted conversation. Refresh after standard host turn changes and dispose on exit.
  * Ordinary sends still require both the host turn and the native turn to be idle.
  */
-export function createRunningInputClient(conversationId: string, getHostTurnId: () => string | null = () => null) {
+export function createRunningInputClient(
+  conversationId: string,
+  {
+    getHostTurnId = () => null,
+    enablePixels = false,
+  }: { getHostTurnId?: () => string | null; enablePixels?: boolean } = {}
+) {
   const scope = '/api/conversations/' + encodeURIComponent(conversationId);
   const path = scope + '/acp-extensions';
   const previews = createRunningImagePreviews();
@@ -201,6 +207,7 @@ export function createRunningInputClient(conversationId: string, getHostTurnId: 
     const turn = state.kind === 'success' && isRecord(state.data) ? parseTurn(state.data.result) : undefined;
     if (turn) {
       const pixelModes =
+        enablePixels &&
         data.hostBytes === true &&
         requests.includes(INPUT_METHODS.imageState) &&
         requests.includes(INPUT_METHODS.lookup)

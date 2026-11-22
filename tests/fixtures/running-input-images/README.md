@@ -83,8 +83,9 @@ bun tests/fixtures/running-input-images/realHost.ts \
   /path/to/adapter/bin/python /path/to/native/bin/aelix
 ```
 
-The fixture qualifies only its synthetic endpoint. It counts native image
-write edges, compares Chromium derivative, stored upload, grant and provider
+The fixture qualifies only its synthetic endpoint. It checks that the default
+gate queues original file paths through the text method, then opts in and counts
+native image write edges, compares Chromium derivative, stored upload, grant and provider
 digests, checks exact native JSONL
 sizes and exercises lost responses, lookup, turn change and late ACK after
 Stop. It records sizes and counts at the native edge and checks that the
