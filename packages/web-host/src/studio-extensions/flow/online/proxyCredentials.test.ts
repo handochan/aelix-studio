@@ -446,7 +446,34 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
       expect(await nameInstall()).toEqual({ ok: false, code: 'PROXY_CREDENTIALS_REQUIRED' });
     });
 
-    it('refuses credentials sent without a proxy or with a file import', async () => {
+    it('refuses credentials past printable ASCII, typed, saved or sent, without repeating them', async () => {
+      // pip sends proxy Basic auth as Latin-1 and fails past it; Git sends UTF-8 (user decision 2026-11-22).
+      const keychain = start({ proxyVault: fakeKeychain() });
+      try {
+        data(await keychain.request('window:1', { action: 'set_settings', settings: { proxy: PROXY } }));
+        data(await request({ action: 'set_settings', settings: { proxy: PROXY, proxyAuthentication: true } }));
+        const refused = [
+          await keychain.request('window:1', {
+            action: 'set_settings',
+            settings: { proxy: 'http://ops:p%C3%A4ssw%C3%B6rt@proxy.corp.example:3128' },
+          }),
+          await keychain.request('window:1', {
+            action: 'set_proxy_credentials',
+            credentials: { username: 'ops', password: 'pässwört' },
+          }),
+          await nameInstall({ proxyCredentials: { username: 'ops', password: '비밀번호' } }),
+          await nameInstall({ proxyCredentials: { username: 'öps', password: 'secret' } }),
+        ];
+        for (const reply of refused) expect(reply).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+        expect(JSON.stringify(refused)).not.toMatch(/ops|pässwört|p%C3%A4ssw|비밀번호|öps|secret/);
+        expect(await readdir(root)).not.toContain('proxy-credentials.json');
+        expect(installer()).toBeUndefined();
+      } finally {
+        await keychain.dispose();
+      }
+    });
+
+    it('refuses credentials sent without a proxy, with a file import or with an update', async () => {
       const noProxy = await nameInstall({ proxyCredentials: CREDENTIALS });
       expect(noProxy).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
       data(await request({ action: 'set_settings', settings: { proxy: PROXY } }));
@@ -457,7 +484,14 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
         proxyCredentials: CREDENTIALS,
       });
       expect(file).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
-      expectOnlyInEnvironment([noProxy, file]);
+      const update = await request({
+        action: 'update',
+        name: 'demo-file',
+        source: { kind: 'file', path: wheel },
+        proxyCredentials: CREDENTIALS,
+      });
+      expect(update).toMatchObject({ ok: false, code: 'INVALID_INPUT' });
+      expectOnlyInEnvironment([noProxy, file, update]);
     });
 
     it('keeps a proxy without authentication working as before, and no proxy isolated as before', async () => {

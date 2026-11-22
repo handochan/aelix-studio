@@ -379,5 +379,8 @@ function parseChange(command: ExtensionCommand): MutationRequest | undefined {
       command.proxyCredentials === undefined ? undefined : parseProxyCredentials(command.proxyCredentials);
     return { action: 'install', source, replaceIncompatible, ...(proxyCredentials ? { proxyCredentials } : {}) };
   }
+  // An update installs a file offline: it has no proxy to sign in to.
+  if ((command as Record<string, unknown>).proxyCredentials !== undefined)
+    throw new ExtensionFailure('INVALID_INPUT', ['an update runs offline and takes no proxy credentials']);
   return source.kind === 'file' && isName(command.name) ? { action: 'update', name: command.name, source } : undefined;
 }
