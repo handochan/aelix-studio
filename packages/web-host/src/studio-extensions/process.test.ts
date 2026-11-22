@@ -255,11 +255,18 @@ describe('masking credentials in output', () => {
 
 describe('masking the relay token of a change in output', () => {
   const token = '0123456789abcdef'.repeat(4);
-  const forms = [token, encodeURIComponent(token), Buffer.from(`run:${token}`).toString('base64')];
+  // As is, with every byte escaped (the relay's percent form of a hex token), and in the Basic value.
+  const escaped = [...token].map((char) => '%' + char.charCodeAt(0).toString(16)).join('');
+  const forms = [token, escaped, Buffer.from(`run:${token}`).toString('base64')];
   const secrets = [...forms, Buffer.from('ops:p@ss').toString('base64')];
+
+  it('masks three distinct forms of the token', () => {
+    expect(new Set(forms).size).toBe(3);
+  });
 
   it.each([
     ['as is', `debug: token=${token} sent`],
+    ['percent-escaped outside a URL', `debug: user=run%3A${escaped}`],
     ['in an error', `ProxyError: 407 for run:${token}`],
     ['in a Basic header', `> Proxy-Authorization: Basic ${forms[2]}\n`],
     ['in the user part of a URL', `via http://run:${token}@127.0.0.1:50123/`],
@@ -271,7 +278,7 @@ describe('masking the relay token of a change in output', () => {
   });
 
   it('hides it however the chunks fall, on either stream, and in what a run reports', async () => {
-    const text = `x Proxy-Authorization: Basic ${forms[2]} token=${token} end\n`;
+    const text = `x Proxy-Authorization: Basic ${forms[2]} token=${token} escaped=${escaped} end\n`;
     for (let cut = 1; cut < text.length; cut += 7) {
       const tail = new OutputTail(4096, masker(secrets));
       const [one, two] = [tail.stream(), tail.stream()];

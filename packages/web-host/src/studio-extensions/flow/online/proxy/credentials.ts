@@ -54,9 +54,10 @@ const sealedFile = (layout: Layout, id: string): string => path.join(layout.root
 
 /**
  * Printable ASCII only (2026-11-22 user decision). The relay sends the credentials as they
- * were entered in the Basic value, and proxies differ in how they read anything past ASCII
- * (RFC 7617 leaves the charset to a parameter many ignore): ASCII is what every proxy reads
- * alike. Refusing the rest at entry is clearer than a 407 later.
+ * were entered in the Basic value. RFC 7617 leaves the default encoding unspecified, beyond
+ * being compatible with ASCII, and defines only `UTF-8` as a value of its optional `charset`
+ * parameter (section 2.1): past ASCII, proxies read the same bytes differently. Refusing the
+ * rest at entry is clearer than a 407 later.
  */
 const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
 

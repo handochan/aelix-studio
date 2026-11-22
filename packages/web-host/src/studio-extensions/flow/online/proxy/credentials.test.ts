@@ -517,6 +517,33 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
         expect(JSON.stringify(state)).not.toContain(secret);
     });
 
+    it('keeps CANCELLED and TIMEOUT over a refused sign-in met on the way', async () => {
+      data(await request({ action: 'set_settings', settings: { proxy } }));
+      data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
+      refuseSignIn = true;
+      let refusals = 0;
+      // The installer meets the refusal, then hangs until it is stopped.
+      runtime.install = async (_venv, _wheel, spec) => {
+        await throughProxy(spec.env);
+        refusals += 1;
+        return new Promise<number>(() => {});
+      };
+      const started = data<ExtensionOperation>(
+        await request({ action: 'install', source: { kind: 'index', name: 'demo-cancelled' } })
+      );
+      await expect.poll(() => refusals, { timeout: 5000 }).toBe(1);
+      data(await request({ action: 'cancel', operationId: started.operationId }));
+      expect(await settle({ ok: true, data: started })).toMatchObject({ phase: 'cancelled', code: 'CANCELLED' });
+
+      await service.dispose();
+      service = start({ proxyVault: vault, timeouts: { installerMs: 1000 } });
+      const timed = await settle(
+        await request({ action: 'install', source: { kind: 'index', name: 'demo-timed-out' } })
+      );
+      expect(refusals).toBe(2);
+      expect(timed).toMatchObject({ phase: 'failed', code: 'TIMEOUT' });
+    });
+
     it('reports credentials the proxy refused, with nothing of its answer, and keeps them saved', async () => {
       data(await request({ action: 'set_settings', settings: { proxy } }));
       data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));

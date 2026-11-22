@@ -38,8 +38,9 @@ export type ProxyRelay = {
   /** The address the installers get, with the token as its user part. */
   url: string;
   /**
-   * The token in the forms it can take in output (as is, percent-encoded, in the Basic value
-   * clients send) and the Basic value of the user's credentials: for the output masker.
+   * The token in the forms it can take in output (as is, with every byte percent-escaped, in
+   * the Basic value clients send) and the Basic value of the user's credentials: for the
+   * output masker. Each distinct.
    */
   secrets: readonly string[];
   /** The user's proxy answered 407 to the credentials at least once. */
@@ -95,6 +96,16 @@ const FAILURE = {
 type Failure = keyof typeof FAILURE;
 
 const digest = (text: string): Buffer => createHash('sha256').update(text).digest();
+
+/**
+ * Every byte of `text` as `%XX`. `encodeURIComponent` leaves a hex token as it is, so this is
+ * the form a tool that escapes everything would print. For a hex token both cases coincide
+ * (its bytes are 0x30–0x39 and 0x61–0x66); both are kept so another alphabet stays covered.
+ */
+const percentEscaped = (text: string, letters: 'upper' | 'lower'): string =>
+  [...Buffer.from(text, 'utf8')]
+    .map((byte) => '%' + (letters === 'upper' ? byte.toString(16).toUpperCase() : byte.toString(16)).padStart(2, '0'))
+    .join('');
 const basic = (user: string, password: string): string =>
   'Basic ' + Buffer.from(`${user}:${password}`, 'latin1').toString('base64');
 
@@ -347,19 +358,25 @@ export async function startProxyRelay(
     response.on('close', () => {
       if (!response.writableFinished) outgoing.destroy();
     });
+    // Once the relay has answered (its own refusal, say), what happens upstream no longer matters.
     outgoing.on('error', (error: NodeJS.ErrnoException) => {
+      if (response.writableEnded) return;
       failure = classify(error);
       answerResponse(response, failure);
     });
     outgoing.on('response', (incoming) => {
       clearTimeout(deadline);
       outgoing.setTimeout(idleMs, () => outgoing.destroy());
-      incoming.on('error', () => response.destroy());
+      incoming.on('error', () => {
+        if (!response.writableEnded) response.destroy();
+      });
       // A refusal of the sign-in stays here: its headers and body are the user's proxy's own.
+      // Not a byte more of it is read: the connection goes at once, and its place with it.
       if (incoming.statusCode === 407) {
         rejected = true;
-        incoming.resume();
-        return answerResponse(response, 'rejected');
+        answerResponse(response, 'rejected');
+        outgoing.destroy();
+        return;
       }
       response.writeHead(incoming.statusCode ?? 502, forwardedHeaders(incoming.headers));
       incoming.pipe(response);
@@ -375,7 +392,15 @@ export async function startProxyRelay(
   let closed: Promise<void> | undefined;
   return {
     url: `http://run:${token}@127.0.0.1:${String(local)}`,
-    secrets: [token, encodeURIComponent(token), clientSignIn.slice('Basic '.length), signIn.slice('Basic '.length)],
+    secrets: [
+      ...new Set([
+        token,
+        percentEscaped(token, 'upper'),
+        percentEscaped(token, 'lower'),
+        clientSignIn.slice('Basic '.length),
+        signIn.slice('Basic '.length),
+      ]),
+    ],
     credentialsRejected: () => rejected,
     close: () => {
       closed ??= new Promise<void>((resolve) => {

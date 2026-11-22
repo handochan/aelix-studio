@@ -321,10 +321,18 @@ async function installProxy(
   return credentials ? { proxy, credentials } : { proxy };
 }
 
-/** `PROXY_CREDENTIALS_REJECTED` for a failed run during which the user's proxy answered the relay with 407. */
-function rejectedCredentials(relay: ProxyRelay | undefined, output: string | undefined): ExtensionFailure | undefined {
-  if (!relay?.credentialsRejected()) return undefined;
-  return new ExtensionFailure('PROXY_CREDENTIALS_REJECTED', ['the proxy refused the credentials'], output);
+/**
+ * `PROXY_CREDENTIALS_REJECTED` for a run that failed on its own while the user's proxy had
+ * answered the relay with 407. A cancelled or timed-out change, or one that lost its lock,
+ * keeps that outcome: the refusal is only what the installer met on the way.
+ */
+function rejectedCredentials(
+  context: FlowContext,
+  relay: ProxyRelay | undefined,
+  failed: { cancelled?: boolean; timedOut?: boolean; output?: string }
+): ExtensionFailure | undefined {
+  if (!relay?.credentialsRejected() || failed.cancelled || failed.timedOut || context.signal?.aborted) return undefined;
+  return new ExtensionFailure('PROXY_CREDENTIALS_REJECTED', ['the proxy refused the credentials'], failed.output);
 }
 
 /** The record of a verified candidate: what it holds and where each distribution came from. */
@@ -683,7 +691,9 @@ export async function mutate(
           guarded.timeouts.installerMs
         );
       } catch (error) {
-        throw rejectedCredentials(relay, error instanceof ExtensionFailure ? error.output : undefined) ?? error;
+        // Only a fetch that failed is the proxy's refusal; CANCELLED, TIMEOUT and the rest stay.
+        const fetchFailed = error instanceof ExtensionFailure && error.code === 'GIT_FETCH_FAILED';
+        throw (fetchFailed && rejectedCredentials(guarded, relay, { output: error.output })) || error;
       }
       native = ['extension', 'install', checkout.directory, '--yes'];
     }
@@ -705,7 +715,7 @@ export async function mutate(
     }
     // An install the user's proxy refused to sign in is reported as that, so the screen can ask again.
     if (installer.code !== 0 && installer.code !== INSTALLED_NOT_BOUND) {
-      const refused = rejectedCredentials(relay, installer.output);
+      const refused = rejectedCredentials(guarded, relay, installer);
       if (refused) throw refused;
     }
     // `extension remove` hands pip's own exit code through: there 2 and 3 are pip's, not

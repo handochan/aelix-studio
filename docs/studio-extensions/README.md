@@ -561,24 +561,26 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
     - **relay 자신의 답.** 로그인에 대한 사용자 proxy의 답은 설치 도구에 넘기지 않는다. 407, 열리지 않은 터널,
       접속 실패, 인증서 확인 실패에는 relay가 직접 `502`와 고정 사유(`Proxy Credentials Rejected`,
       `Proxy Refused Tunnel`, `Proxy Unreachable`, `Proxy Certificate Rejected`)로 답하고, 그 proxy의 헤더와 본문은
-      버린다. 넘기는 응답에서도 `Proxy-Authenticate`, `Proxy-Authentication-Info`, `Proxy-Connection`과
-      hop-by-hop 헤더를 뺀다. 407을 받은 설치가 실패하면 `PROXY_CREDENTIALS_REJECTED`로 끝나고 저장된 인증
-      정보는 그대로 둔다. 화면은 이 코드를 받으면 다시 묻는다.
+      버린다. 407에 답하면 그 연결은 바로 끊어 본문을 더 읽지 않고 자리도 돌려준다. 넘기는 응답에서도
+      `Proxy-Authenticate`, `Proxy-Authentication-Info`, `Proxy-Connection`과 hop-by-hop 헤더를 뺀다. 407을 받은
+      설치가 실패하면 `PROXY_CREDENTIALS_REJECTED`로 끝나고 저장된 인증 정보는 그대로 둔다. 화면은 이 코드를 받으면
+      다시 묻는다. 취소, 시간 초과, 잠금을 잃은 변경은 407을 만났어도 `CANCELLED`·`TIMEOUT`·`CONFLICT`로 끝난다.
     - **제한.** token을 아직 보이지 않은 연결은 동시에 16개까지 받고, 각각 5초 안에 token을 보여야 한다. 사용자
       proxy로의 연결은 동시에 32개까지다(넘으면 `503 Relay Busy`). 접속부터 첫 답까지는 모두 합쳐 30초이고,
       idle만 재는 것이 아니다. 터널이 열린 뒤에는 idle 300초다.
     - **Git credential helper.** Git은 요청이 성공하면 proxy 인증 정보를 credential helper에
       넘기므로(`credential_approve`), Git 설정에 relay 주소의 helper를 비우는 항목을 사용자 항목 뒤에 둔다. 그래서
       비공개 Git의 `credential-store`도 token을 저장하지 않는다.
-    - **출력.** token은 주소 밖에도 찍힐 수 있다. 그 변경 동안 token 그대로, 퍼센트 인코딩한 것, `run:<token>`의
+    - **출력.** token은 주소 밖에도 찍힐 수 있다. 그 변경 동안 token 그대로, 모든 바이트를 `%XX`로 쓴 것, `run:<token>`의
       base64, 사용자 인증 정보의 Basic 값을 설치 도구 출력의 가리기에 문자열로 더한다. relay는 응답·로그·오류에
       인증 정보나 token을 넣지 않는다.
     - **남는 위험.** 설치 중에 도는 코드(빌드 backend 등)는 token을 읽고 그 변경이 끝날 때까지 relay를 쓸 수 있다.
       사용자 비밀번호는 볼 수 없다.
   - **받는 문자.** 사용자 이름과 비밀번호는 출력 가능한 ASCII(0x20–0x7E)만 받는다(2026-11-22 사용자 결정). relay는
-    입력한 값으로 Basic 값을 만든다. RFC 7617은 문자 집합을 `charset` 매개변수에 맡기는데, 그 밖의 문자를 읽는
-    방식은 proxy 서버마다 다르다. 그래서 어디서나 같게 읽히는 범위인 ASCII만 받는다(처음 확인할 때는 번들 pip이
-    Latin-1로 보내고 그 밖에서 실패하며 Git은 UTF-8로 보냈다). 사용자 이름에는 `:`를 받지 않는다. Basic 인증이 첫
+    입력한 값으로 Basic 값을 만든다. RFC 7617은 기본 인코딩을 ASCII와 호환된다는 것 말고는 정하지 않고, 선택적인
+    `charset` 매개변수의 값으로는 `UTF-8` 하나만 정의한다(2.1절). 그래서 ASCII 밖의 같은 바이트를 proxy 서버마다
+    다르게 읽는다. 어디서나 같게 읽히는 범위인 ASCII만 받는다(처음 확인할 때는 번들 pip이 Latin-1로 보내고 그 밖에서
+    실패했고, Git은 UTF-8로 보냈다). 사용자 이름에는 `:`를 받지 않는다. Basic 인증이 첫
     `:`에서 나누기 때문이다(RFC 7617 2절). 주소에 입력한 사용자 부분은 보통의 URL 규칙대로 한 번 퍼센트 디코딩한
     뒤 검사하고, 따로 보낸 필드 값은 그대로 받는다. `%41` 같은 값도 그대로다. 주소에 입력할 때(그대로든 퍼센트
     인코딩이든), 저장할 때, 설치 요청에 들어올 때 모두 `INVALID_INPUT`과 같은 고정 문구로 거절하고 값을 되풀이하지
@@ -1123,6 +1125,12 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 접속 기한(합계)을 정했다. 결정: `%` 뒤 16진 두 자리 거절을 없앴다. relay가 입력값으로 Basic 값을 만들어 Git의 이중
 디코딩이 더는 관계없다. ASCII만 받는 규칙과 사용자 이름의 `:` 거절은 그대로다. 각 지적은 고친 것을 되돌리면 실패하는
 시험으로 확인했다.
+
+**2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
+사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.
+407 뒤의 취소와 시간 초과는 `PROXY_CREDENTIALS_REJECTED`가 아니라 `CANCELLED`·`TIMEOUT`으로 끝난다. hex token에는
+`encodeURIComponent`가 아무것도 바꾸지 않으므로, 모든 바이트를 `%XX`로 쓴 형태를 가리기에 더했다. RFC 7617의 문자
+집합 설명을 2.1절에 맞게 고쳤다. origin/main(#114·#110)을 merge했다.
 
 **2026-11-18, launcher 조각(구현)과 독립 리뷰.** 대화가 설치한 확장을 받는 경로를 구현했다. 세대 선택과
 lease는 `launch.py acp`(7.4), 상태 디렉터리는 환경 변수로 알린다(7.4). 잠금 없는 lease 경로와 그 불변식,

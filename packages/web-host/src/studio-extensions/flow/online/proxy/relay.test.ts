@@ -177,9 +177,13 @@ describe('the loopback relay of an online install', () => {
     expect(new URL(one.url).password).not.toBe(new URL(two.url).password);
     for (const piece of ['ops', 'p@ss', encodeURIComponent(LOGIN.password)]) expect(one.url).not.toContain(piece);
     const token = new URL(one.url).password;
+    // Every byte escaped: what a tool that escapes everything prints (encodeURIComponent leaves hex alone).
+    const escaped = [...token].map((char) => '%' + char.charCodeAt(0).toString(16)).join('');
+    expect(escaped).toMatch(/^(%[36][0-9a-f]){64}$/);
     expect(one.secrets).toEqual(
-      expect.arrayContaining([token, tokenOf(one).slice('Basic '.length), SIGNED_IN.slice('Basic '.length)])
+      expect.arrayContaining([token, escaped, tokenOf(one).slice('Basic '.length), SIGNED_IN.slice('Basic '.length)])
     );
+    expect(new Set(one.secrets).size).toBe(one.secrets.length);
     for (const secret of one.secrets) expect(secret).not.toMatch(/\s/);
     expect(one.credentialsRejected()).toBe(false);
   });
@@ -253,6 +257,45 @@ describe('the loopback relay of an online install', () => {
       expect(text).not.toMatch(/NTLM|X-Upstream-Only|refused Basic|Basic realm/i);
       expect(text).not.toContain(SIGNED_IN.slice('Basic '.length));
     }
+  });
+
+  it('lets go of a refused sign-in at once, however long the proxy goes on talking', async () => {
+    // The first answer on each path is a 407 whose body never ends; then the proxy behaves.
+    let refuseRequest = true;
+    let refuseTunnel = true;
+    const server = createServer((_request, response) => {
+      if (!refuseRequest) return void response.writeHead(200).end('index');
+      refuseRequest = false;
+      response.writeHead(407, { 'proxy-authenticate': 'Basic realm="corp"' });
+      const timer = setInterval(() => response.write('x'.repeat(1024)), 10);
+      response.on('close', () => clearInterval(timer));
+    });
+    server.on('connect', (_request, socket: Socket) => {
+      socket.on('error', () => socket.destroy());
+      if (!refuseTunnel) return void socket.write('HTTP/1.1 200 Connection established\r\n\r\n');
+      refuseTunnel = false;
+      socket.write('HTTP/1.1 407 Proxy Authentication Required\r\nContent-Length: 1000000000\r\n\r\n');
+      const timer = setInterval(() => socket.write('x'.repeat(1024)), 10);
+      socket.on('close', () => clearInterval(timer));
+    });
+    const address = 'http://' + (await listen(server));
+    later(() => {
+      server.closeAllConnections();
+      server.close();
+    });
+    // One connection to the user's proxy at a time: a refusal that kept its place would block the next.
+    const relay = await start(address, { maxUpstream: 1 });
+    expect(await get(relay, 'http://index.example/', tokenOf(relay))).toMatchObject({
+      status: 502,
+      reason: 'Proxy Credentials Rejected',
+    });
+    expect(await get(relay, 'http://index.example/', tokenOf(relay))).toMatchObject({ status: 200, body: 'index' });
+    const refused = await rawConnect(relay, 'repo.example:443', tokenOf(relay));
+    refused.socket.destroy();
+    expect(refused.head).toMatch(/^HTTP\/1\.1 502 Proxy Credentials Rejected\r\n/);
+    const next = await rawConnect(relay, 'repo.example:443', tokenOf(relay));
+    next.socket.destroy();
+    expect(next.head).toMatch(/^HTTP\/1\.1 200 /);
   });
 
   it('answers 502 when the user proxy cannot be reached or refuses the tunnel, and 400 for what is not a proxy request', async () => {
