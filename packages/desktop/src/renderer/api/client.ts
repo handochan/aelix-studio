@@ -6,13 +6,28 @@
  *   const data = await api.get<Foo>('/api/foo')
  */
 
+const apiErrorResponses = new WeakMap<ApiError, { statusText: string; body: unknown }>();
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
-    public readonly statusText: string,
-    public readonly body: unknown
+    statusText: string,
+    body: unknown
   ) {
-    super(`API error ${status}: ${statusText}`);
+    super(`API error ${status}`);
+    apiErrorResponses.set(this, { statusText, body });
+  }
+
+  get statusText(): string {
+    return apiErrorResponses.get(this)?.statusText ?? '';
+  }
+
+  get body(): unknown {
+    return apiErrorResponses.get(this)?.body;
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return this.stack ?? this.toString();
   }
 }
 

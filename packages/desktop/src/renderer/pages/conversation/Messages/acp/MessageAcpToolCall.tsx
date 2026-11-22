@@ -119,8 +119,8 @@ const MessageAcpToolCall: React.FC<{ message: IMessageAcpToolCall }> = ({ messag
       try {
         await downloadFileFromPath(path, getAcpImageFileName(path));
         messageApi.success(t('acp.image.download_success'));
-      } catch (error) {
-        console.error('[MessageAcpToolCall] Failed to download image:', error);
+      } catch {
+        console.error('[MessageAcpToolCall] Failed to download image');
         messageApi.error(t('acp.image.download_error'));
       }
     },

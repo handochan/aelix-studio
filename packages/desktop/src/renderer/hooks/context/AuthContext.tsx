@@ -122,7 +122,7 @@ async function fetchCurrentUser(signal?: AbortSignal): Promise<AuthUser | null> 
     if ((error as Error).name === 'AbortError') {
       return null;
     }
-    console.error('Failed to fetch current user:', error);
+    console.error('Failed to fetch current user');
   }
 
   return null;
@@ -245,7 +245,7 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
 
       return { success: true };
     } catch (error) {
-      console.error('Login request failed:', error);
+      console.error('Login request failed');
 
       // Check if error is related to CSRF token parsing
       const errorMessage = (error as Error).message;
@@ -286,8 +286,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
         credentials: 'include',
         body: JSON.stringify(withCsrfToken({})),
       });
-    } catch (error) {
-      console.error('Logout request failed:', error);
+    } catch {
+      console.error('Logout request failed');
     } finally {
       setUser(null);
       setStatus('unauthenticated');

@@ -355,7 +355,7 @@ class FileServiceClass {
           // User-initiated abort: drop this file silently (the UI already reflects it).
           continue;
         }
-        console.error('Failed to upload file:', error);
+        console.error('Failed to upload file');
         continue;
       } finally {
         tracker.finish();

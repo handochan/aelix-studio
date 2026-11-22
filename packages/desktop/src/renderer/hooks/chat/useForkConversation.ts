@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { parseError } from '@/common/utils';
 import { Message } from '@arco-design/web-react';
 import { useCallback, useRef } from 'react';
@@ -20,12 +21,14 @@ import type { TFunction } from 'i18next';
  */
 export function getForkErrorMessage(error: unknown, t: TFunction): string {
   const raw = parseError(error);
-  if (raw.includes('FORK_TURN_IN_FLIGHT')) return t('messages.fork.errorTurnInFlight');
-  if (raw.includes('FORK_PARENT_UNBOUND')) return t('messages.fork.errorParentUnbound');
-  if (raw.includes('FORK_HEAD_CHANGED')) return t('messages.fork.errorHeadChanged');
-  if (raw.includes('FORK_HEAD_UNAVAILABLE')) return t('messages.fork.errorHeadUnavailable');
-  if (raw.includes('FORK_POINT_UNSUPPORTED')) return t('messages.fork.errorPointUnsupported');
-  if (raw.includes('FORK_UNSUPPORTED')) return t('messages.fork.errorUnsupported');
+  const backendCode = isBackendHttpError(error) ? error.code : undefined;
+  const matches = (code: string) => backendCode === code || raw.includes(code);
+  if (matches('FORK_TURN_IN_FLIGHT')) return t('messages.fork.errorTurnInFlight');
+  if (matches('FORK_PARENT_UNBOUND')) return t('messages.fork.errorParentUnbound');
+  if (matches('FORK_HEAD_CHANGED')) return t('messages.fork.errorHeadChanged');
+  if (matches('FORK_HEAD_UNAVAILABLE')) return t('messages.fork.errorHeadUnavailable');
+  if (matches('FORK_POINT_UNSUPPORTED')) return t('messages.fork.errorPointUnsupported');
+  if (matches('FORK_UNSUPPORTED')) return t('messages.fork.errorUnsupported');
   return t('messages.fork.errorGeneric', { message: raw });
 }
 

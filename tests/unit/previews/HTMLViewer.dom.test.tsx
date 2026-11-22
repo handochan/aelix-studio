@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { render, waitFor } from '@testing-library/react';
+import { act, render, waitFor } from '@testing-library/react';
 import React from 'react';
 
 const writeRendererLogInvoke = vi.hoisted(() => vi.fn(() => Promise.resolve()));
@@ -40,6 +40,7 @@ vi.mock('react-i18next', () => ({
 
 import HTMLViewer from '@/renderer/pages/conversation/Preview/components/viewers/HTMLViewer';
 import HTMLRenderer from '@/renderer/pages/conversation/Preview/components/renderers/HTMLRenderer';
+import WebviewHost from '@/renderer/components/media/WebviewHost';
 
 function createConsoleMessageEvent({
   level,
@@ -79,6 +80,57 @@ describe('HTMLViewer', () => {
     expect(container.querySelector('iframe')).toBeInTheDocument();
   });
 });
+
+it('navigates with a URL retrieved from the webview instead of the console signal', async () => {
+  const targetUrl = 'https://example.test/private-preview?grant=private-token';
+  const { container } = render(<WebviewHost url='https://example.test/' />);
+  const webview = container.querySelector('webview');
+  const executeJavaScript = vi.fn().mockResolvedValue(targetUrl);
+  Object.defineProperty(webview, 'executeJavaScript', { value: executeJavaScript });
+
+  webview?.dispatchEvent(
+    createConsoleMessageEvent({ level: 1, line: 0, message: '__WEBVIEW_HOST_NAVIGATE__:1', sourceId: 'private' })
+  );
+
+  expect(executeJavaScript).toHaveBeenCalledExactlyOnceWith('window.__aionuiTakeNavigationUrl?.(1)');
+  await waitFor(() => expect(webview).toHaveAttribute('src', targetUrl));
+});
+
+it.each(['newer lookup', 'external URL', 'main-frame navigation'])(
+  'ignores a lookup superseded by a %s',
+  async (kind) => {
+    const initialUrl = 'https://example.test/';
+    const nextUrl = 'https://example.test/new';
+    const onUrlChange = vi.fn();
+    const { container, rerender } = render(<WebviewHost url={initialUrl} onUrlChange={onUrlChange} />);
+    const webview = container.querySelector('webview')!;
+    let resolveOld!: (url: string) => void;
+    const old = new Promise<string>((resolve) => {
+      resolveOld = resolve;
+    });
+    const lookup = vi.fn().mockReturnValueOnce(old).mockResolvedValueOnce(nextUrl);
+    Object.defineProperty(webview, 'executeJavaScript', { value: lookup });
+    const signal = (id: number) =>
+      createConsoleMessageEvent({ level: 1, line: 0, message: `__WEBVIEW_HOST_NAVIGATE__:${id}`, sourceId: 'private' });
+    webview.dispatchEvent(signal(1));
+
+    if (kind === 'newer lookup') {
+      webview.dispatchEvent(signal(2));
+      await waitFor(() => expect(webview).toHaveAttribute('src', nextUrl));
+    } else if (kind === 'external URL') {
+      rerender(<WebviewHost url={nextUrl} onUrlChange={onUrlChange} />);
+      expect(webview).toHaveAttribute('src', nextUrl);
+    } else {
+      // A same-URL replacement does not change the webview element or its src.
+      webview.dispatchEvent(Object.assign(new Event('did-start-navigation'), { isMainFrame: true, url: initialUrl }));
+    }
+
+    const oldUrl = 'https://example.test/stale';
+    await act(async () => resolveOld(oldUrl));
+    expect(webview).toHaveAttribute('src', kind === 'main-frame navigation' ? initialUrl : nextUrl);
+    expect(onUrlChange).not.toHaveBeenCalledWith(oldUrl);
+  }
+);
 
 describe('HTMLRenderer', () => {
   const electronAPI = {};
@@ -139,19 +191,18 @@ describe('HTMLRenderer', () => {
         level: 'info',
         tag: 'HTMLRenderer',
         message: 'html_preview_source_selected',
-        data: expect.objectContaining({
+        data: {
           source: 'file',
           reason: 'clean-local-file',
-          fileName: 'financial-wechat-miniapp.html',
           hasFilePath: true,
+          isDirty: false,
           contentLength: 13,
-          src: 'file://financial-wechat-miniapp.html',
-        }),
+        },
       })
     );
   });
 
-  it('writes level 2 preview console messages as renderer warnings', async () => {
+  it('writes only metadata for level 2 preview console warnings', async () => {
     Object.defineProperty(window, 'electronAPI', {
       configurable: true,
       value: electronAPI,
@@ -163,12 +214,13 @@ describe('HTMLRenderer', () => {
     await waitFor(() => expect(writeRendererLogInvoke).toHaveBeenCalled());
     vi.clearAllMocks();
 
+    const marker = 'C:\\workspace\\private-preview "body"';
     webview?.dispatchEvent(
       createConsoleMessageEvent({
         level: 2,
         line: 64,
-        message: 'cdn.tailwindcss.com should not be used in production.',
-        sourceId: 'https://cdn.tailwindcss.com/',
+        message: marker,
+        sourceId: 'file:///private/workspace/index.html',
       })
     );
 
@@ -180,10 +232,26 @@ describe('HTMLRenderer', () => {
         data: {
           level: 2,
           line: 64,
-          message: 'cdn.tailwindcss.com should not be used in production.',
-          source: 'https://cdn.tailwindcss.com/',
+          messageLength: marker.length,
         },
       })
     );
+  });
+
+  it('retrieves inspected HTML by numeric signal without logging the selected HTML', async () => {
+    Object.defineProperty(window, 'electronAPI', { configurable: true, value: electronAPI });
+    const onElementSelected = vi.fn();
+    const { container } = render(<HTMLRenderer content='<p>Example</p>' onElementSelected={onElementSelected} />);
+    const webview = container.querySelector('webview');
+    const element = { html: '<img src="/workspace/private-image.png">', tag: 'img' };
+    const executeJavaScript = vi.fn().mockResolvedValue(element);
+    Object.defineProperty(webview, 'executeJavaScript', { value: executeJavaScript });
+
+    webview?.dispatchEvent(
+      createConsoleMessageEvent({ level: 1, line: 0, message: '__INSPECT_ELEMENT__1', sourceId: 'private' })
+    );
+
+    expect(executeJavaScript).toHaveBeenCalledExactlyOnceWith('window.__aionuiTakeInspectedElement?.(1)');
+    await waitFor(() => expect(onElementSelected).toHaveBeenCalledExactlyOnceWith(element));
   });
 });

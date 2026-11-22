@@ -283,8 +283,8 @@ const readPersistedQueueState = (conversation_id: string): ConversationCommandQu
       isPaused: normalized.isPaused,
     });
     return normalized;
-  } catch (error) {
-    console.warn('[conversation-command-queue] Failed to read persisted queue state:', error);
+  } catch {
+    console.warn('[conversation-command-queue] Failed to read persisted queue state');
     return createDefaultQueueState();
   }
 };
@@ -294,8 +294,8 @@ const removePersistedQueueState = (conversation_id: string): void => {
   if (typeof window !== 'undefined') {
     try {
       window.sessionStorage.removeItem(getStorageKey(conversation_id));
-    } catch (error) {
-      console.warn('[conversation-command-queue] Failed to remove persisted queue state:', error);
+    } catch {
+      console.warn('[conversation-command-queue] Failed to remove persisted queue state');
     }
   }
 };
@@ -312,8 +312,8 @@ const persistQueueState = (conversation_id: string, state: ConversationCommandQu
   if (typeof window !== 'undefined') {
     try {
       window.sessionStorage.setItem(getStorageKey(conversation_id), JSON.stringify(normalized));
-    } catch (error) {
-      console.warn('[conversation-command-queue] Failed to persist queue state:', error);
+    } catch {
+      console.warn('[conversation-command-queue] Failed to persist queue state');
     }
   }
 };
@@ -563,10 +563,9 @@ const drainBackgroundCommandQueue = async (runner: BackgroundCommandQueueRunner)
       shouldContinueDrain = false;
       return;
     }
-    console.error('[conversation-command-queue] Failed to execute background queued command:', error);
+    console.error('[conversation-command-queue] Failed to execute background queued command');
     logCommandQueue(runner.conversation_id, 'background-execute-failed', {
       item: summarizeQueuedCommand(nextCommand),
-      error: error instanceof Error ? error.message : String(error),
     });
     persistQueueState(runner.conversation_id, { ...failedState, items: restoredItems, isPaused: true });
     Message.warning('The next queued command could not start. Edit, reorder, or remove it to continue.');
@@ -957,10 +956,9 @@ export const useConversationCommandQueue = ({
           }));
           return;
         }
-        console.error('[conversation-command-queue] Failed to send queued command now:', error);
+        console.error('[conversation-command-queue] Failed to send queued command now');
         logCommandQueue(conversation_id, 'send-now-failed', {
           item: summarizeQueuedCommand(target),
-          error: error instanceof Error ? error.message : String(error),
         });
         waitingForTurnStartRef.current = false;
         waitingForTurnCompletionRef.current = false;
@@ -1152,10 +1150,9 @@ export const useConversationCommandQueue = ({
           }));
           return;
         }
-        console.error('[conversation-command-queue] Failed to execute queued command:', error);
+        console.error('[conversation-command-queue] Failed to execute queued command');
         logCommandQueue(conversation_id, 'execute-failed', {
           item: summarizeQueuedCommand(nextCommand),
-          error: error instanceof Error ? error.message : String(error),
         });
         waitingForTurnStartRef.current = false;
         waitingForTurnCompletionRef.current = false;

@@ -122,8 +122,8 @@ export const useConversationActions = ({
           } else {
             Message.error(t('conversation.history.archiveFailed'));
           }
-        } catch (error) {
-          console.error('Failed to batch archive conversations:', error);
+        } catch {
+          console.error('Failed to batch archive conversations');
           Message.error(t('conversation.history.archiveFailed'));
         } finally {
           setSelectedConversationIds(new Set());
@@ -162,8 +162,8 @@ export const useConversationActions = ({
       } else {
         Message.error(t('conversation.history.renameFailed'));
       }
-    } catch (error) {
-      console.error('Failed to update conversation name:', error);
+    } catch {
+      console.error('Failed to update conversation name');
       Message.error(t('conversation.history.renameFailed'));
     } finally {
       setRenameLoading(false);
@@ -197,8 +197,8 @@ export const useConversationActions = ({
         } else {
           Message.error(t('conversation.history.pinFailed'));
         }
-      } catch (error) {
-        console.error('Failed to toggle pin conversation:', error);
+      } catch {
+        console.error('Failed to toggle pin conversation');
         Message.error(t('conversation.history.pinFailed'));
       }
     },
@@ -289,8 +289,8 @@ export const useConversationActions = ({
         Message.error(t('conversation.history.archiveFailed'));
       }
       setArchiveProjectTarget(null);
-    } catch (error) {
-      console.error('Failed to archive project:', error);
+    } catch {
+      console.error('Failed to archive project');
       Message.error(t('conversation.history.archiveFailed'));
     } finally {
       setArchiveProjectLoading(false);
@@ -308,8 +308,8 @@ export const useConversationActions = ({
         await ipcBridge.sidebar.archive.invoke({ item_type: 'conversation', item_id: conversation.id });
         emitter.emit('chat.history.refresh');
         Message.success(t('conversation.history.archiveSuccess'));
-      } catch (error) {
-        console.error('Failed to archive conversation:', error);
+      } catch {
+        console.error('Failed to archive conversation');
         Message.error(t('conversation.history.archiveFailed'));
       }
     },

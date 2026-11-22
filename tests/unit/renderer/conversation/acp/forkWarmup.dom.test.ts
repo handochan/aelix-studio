@@ -1,5 +1,6 @@
 import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
 
 const mocks = vi.hoisted(() => ({
   fork: vi.fn(),
@@ -34,9 +35,15 @@ describe('ACP fork runtime preparation', () => {
     expect(mocks.ensure).not.toHaveBeenCalled();
   });
 
-  it('surfaces a guarded fork materialization failure before navigating', async () => {
+  it.each([
+    ['legacy message', new Error('FORK_HEAD_CHANGED')],
+    [
+      'structured code',
+      new BackendHttpError({ method: 'POST', path: '/api/fork', status: 409, body: { code: 'FORK_HEAD_CHANGED' } }),
+    ],
+  ])('surfaces a guarded fork materialization failure from a %s before navigating', async (_kind, failure) => {
     mocks.fork.mockResolvedValue({ id: 'child', type: 'acp' });
-    mocks.ensure.mockRejectedValue(new Error('FORK_HEAD_CHANGED'));
+    mocks.ensure.mockRejectedValue(failure);
     const log = vi.spyOn(console, 'error').mockImplementation(() => {});
     try {
       const hook = renderHook(() => useForkConversation('parent', true));

@@ -1,3 +1,4 @@
+import { parseError } from '@/common/utils';
 import { useState, useCallback } from 'react';
 import { mcpService } from '@/common/adapter/ipcBridge';
 import type { IMcpServer } from '@/common/config/storage';
@@ -65,7 +66,7 @@ export const useMcpOAuth = () => {
             isAuthenticated: false,
             needsLogin: false,
             isChecking: false,
-            error: error instanceof Error ? error.message : 'Unknown error',
+            error: error instanceof Error ? parseError(error) : 'Unknown error',
           },
         }));
       }
@@ -109,7 +110,7 @@ export const useMcpOAuth = () => {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: error instanceof Error ? parseError(error) : 'Unknown error',
         };
       } finally {
         setLoggingIn((prev) => ({ ...prev, [server.id]: false }));
@@ -145,7 +146,7 @@ export const useMcpOAuth = () => {
       } catch (error) {
         return {
           success: false,
-          error: error instanceof Error ? error.message : 'Unknown error',
+          error: error instanceof Error ? parseError(error) : 'Unknown error',
         };
       }
     },

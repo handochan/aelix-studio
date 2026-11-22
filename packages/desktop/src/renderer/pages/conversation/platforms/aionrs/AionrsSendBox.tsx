@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import { ipcBridge } from '@/common';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import AgentModeSelector from '@/renderer/components/agent/AgentModeSelector';
@@ -291,9 +292,7 @@ const AionrsSendBox: React.FC<{
           emitter.emit('aionrs.workspace.refresh');
         }
       } catch (error) {
-        const errorMessage =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) ||
-          (error instanceof Error ? error.message : String(error));
+        const errorMessage = getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error);
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed({
@@ -372,8 +371,8 @@ const AionrsSendBox: React.FC<{
           ? initialFiles.map((f: unknown) => (typeof f === 'string' ? uploadFileRef(f) : f)).filter(isChatFileRef)
           : [];
         await executeCommand({ input, files: initialRefs });
-      } catch (error) {
-        console.error('[AionrsSendBox] Failed to send initial message:', error);
+      } catch {
+        console.error('[AionrsSendBox] Failed to send initial message');
         sessionStorage.removeItem(processedKey);
       }
     };
@@ -506,7 +505,7 @@ const AionrsSendBox: React.FC<{
           Message.success(t('agentMode.switchSuccess'));
         }
       } catch (error) {
-        console.error('[AionrsSendBox] Failed to switch mode via sheet:', error);
+        console.error('[AionrsSendBox] Failed to switch mode via sheet');
         Message.error(t(configErrorMessageKey(error)));
       }
     },
@@ -716,8 +715,8 @@ const AionrsSendBox: React.FC<{
     try {
       const result = await ipcBridge.conversation.stop.invoke({ conversation_id, turn_id: turnId });
       runtimeView.markStopAcknowledged(turnId, result.runtime);
-    } catch (error) {
-      console.warn('[AionrsSendBox] stop request failed', error);
+    } catch {
+      console.warn('[AionrsSendBox] stop request failed');
       runtimeView.resetLocalGate('stop_failed');
     } finally {
       resetState();

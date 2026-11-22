@@ -769,8 +769,8 @@ const PreviewPanel: React.FC = () => {
       const hasSameExt = rawFileName.toLowerCase().endsWith(`.${normalizedExt}`);
       const file_name = hasSameExt ? rawFileName : `${rawFileName}.${ext}`;
       downloadTextContent(content, file_name, mimeType);
-    } catch (error) {
-      console.error('[PreviewPanel] Failed to download file:', error);
+    } catch {
+      console.error('[PreviewPanel] Failed to download file');
       messageApi.error(t('messages.downloadFailed', { defaultValue: 'Failed to download' }));
     }
   }, [

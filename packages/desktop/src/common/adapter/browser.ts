@@ -64,8 +64,8 @@ if (win.electronAPI) {
           const { value } = event;
           const { name, data } = JSON.parse(value);
           emitter.emit(name, data);
-        } catch (e) {
-          console.warn('JSON parsing error:', e);
+        } catch {
+          console.warn('[bridge] Failed to dispatch IPC event');
         }
       });
     },

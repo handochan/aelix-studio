@@ -4,6 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { parseError } from '@/common/utils';
 import { ipcBridge } from '@/common';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import { getBaseUrl, isBackendHttpError } from '@/common/adapter/httpBridge';
@@ -229,7 +230,7 @@ const OfficeWatchViewer: React.FC<OfficeWatchViewerProps> = ({ docType, fileRef,
             setLoading(false);
             return;
           }
-          const msg = err instanceof Error ? err.message : t(keys.startFailed);
+          const msg = err instanceof Error ? parseError(err) : t(keys.startFailed);
           setError({ message: msg });
           setLoading(false);
         }

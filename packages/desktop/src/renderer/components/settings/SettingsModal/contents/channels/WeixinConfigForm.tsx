@@ -7,7 +7,7 @@
 import type { IChannelPairingRequest, IChannelPluginStatus, IChannelUser } from '@/common/types/channel/channel';
 import { assistants, channel } from '@/common/adapter/ipcBridge';
 import { isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
-import { resolveLocaleKey } from '@/common/utils';
+import { parseError, resolveLocaleKey } from '@/common/utils';
 import { getBaseUrl } from '@/common/adapter/httpBridge';
 import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 import { formatDateTime } from '@/renderer/services/i18n/format';
@@ -165,7 +165,7 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
       await loadPendingPairings();
       await loadAuthorizedUsers();
     } catch (error) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -175,7 +175,7 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
       Message.info(t('settings.assistant.pairingRejected', 'Pairing rejected'));
       await loadPendingPairings();
     } catch (error) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -185,7 +185,7 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
       Message.success(t('settings.assistant.userRevoked', 'User access revoked'));
       await loadAuthorizedUsers();
     } catch (error) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -269,7 +269,7 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
       es.close();
       const { accountId, botToken } = JSON.parse(e.data) as { accountId: string; botToken: string };
       enableWeixinPlugin(accountId, botToken).catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = err instanceof Error ? parseError(err) : String(err);
         Message.error(msg || t('settings.weixin.enableFailed', 'Failed to enable WeChat plugin'));
         setLoginState('idle');
         setQrcodeDataUrl(null);
@@ -313,7 +313,7 @@ const WeixinConfigForm: React.FC<WeixinConfigFormProps> = ({ pluginStatus, model
       setLoginState('idle');
       setQrcodeDataUrl(null);
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 

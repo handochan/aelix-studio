@@ -41,7 +41,7 @@ export const registerTabReloader = (tabId: string, reload: () => void): (() => v
   const displaced = reloaders.get(tabId);
   if (displaced && displaced !== reload) {
     console.warn(
-      `[preview] two viewers registered a reloader for tab "${tabId}"; the earlier one is now unreachable and its refresh would do nothing.`
+      '[preview] two viewers registered a reloader for the same tab; only the latest registration is reachable'
     );
   }
   reloaders.set(tabId, reload);

@@ -1,3 +1,4 @@
+import { parseError } from '@/common/utils';
 import { Button, Dropdown, Menu, Message, Modal, Spin, Tooltip } from '@arco-design/web-react';
 import { FullScreen, Left, MoreOne, OffScreen, Peoples, Right } from '@icon-park/react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -974,7 +975,7 @@ const TeamPage: React.FC<Props> = ({ team }) => {
           await removeAssistant(slot_id);
           Message.success(t('common.deleteSuccess'));
         } catch (error) {
-          Message.error(String(error));
+          Message.error(parseError(error));
         }
       };
       // 移除成员一律二次确认；成员正在工作中时用更强的措辞提示会打断其工作。

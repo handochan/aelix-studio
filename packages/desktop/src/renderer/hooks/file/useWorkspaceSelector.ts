@@ -54,8 +54,8 @@ export const useWorkspaceSelector = (conversation_id: string, eventPrefix: Works
       emitter.emit(`${eventPrefix}.workspace.refresh`);
       emitter.emit('chat.history.refresh');
       Message.success(t('common.saveSuccess'));
-    } catch (error) {
-      console.error('Failed to select workspace:', error);
+    } catch {
+      console.error('Failed to select workspace');
       Message.error(t('common.saveFailed'));
     }
   }, [conversation_id, eventPrefix, mutate, t]);

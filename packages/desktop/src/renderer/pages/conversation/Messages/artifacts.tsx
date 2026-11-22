@@ -74,8 +74,8 @@ export const ConversationArtifactProvider: React.FC<React.PropsWithChildren<{ co
         if (!alive) return;
         setArtifacts(upsertArtifacts([], items));
       })
-      .catch((error) => {
-        console.error('[ConversationArtifactProvider] Failed to load artifacts:', error);
+      .catch(() => {
+        console.error('[ConversationArtifactProvider] Failed to load artifacts');
       });
 
     return () => {

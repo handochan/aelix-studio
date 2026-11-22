@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Left, Right, Refresh, Loading } from '@icon-park/react';
 import { ipcBridge } from '@/common';
@@ -75,6 +75,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const contentRef = useRef<HTMLDivElement | null>(null);
   const webviewRef = useRef<Electron.WebviewTag | null>(null);
+  const navigationVersion = useRef(0);
   const autoFitPendingRef = useRef(false);
 
   // Callbacks are mirrored into refs so the listener effect does not re-subscribe
@@ -136,7 +137,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
   }, [currentUrl]);
 
   // Reset when props.url changes
-  useEffect(() => {
+  useLayoutEffect(() => {
     // 只有「外部」换址才该清空历史（换 tab、换预览文件）。判断逻辑抽到
     // shouldResetHistoryForUrlProp，那里有完整的回环说明与单测。
     //
@@ -144,6 +145,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
     // preview targets). The decision lives in shouldResetHistoryForUrlProp, which
     // carries the full explanation of the loop and its unit tests.
     if (!shouldResetHistoryForUrlProp(url, internalNavRef.current)) return;
+    navigationVersion.current++;
     internalNavRef.current.clear();
     setCanGoBack(false);
     setCanGoForward(false);
@@ -177,6 +179,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       const webviewEl = webviewRef.current;
       if (!webviewEl || !targetUrl) return;
       if (targetUrl === currentUrl) return;
+      navigationVersion.current++;
 
       // 标记为内部导航，避免 url prop 回环触发历史重置
       // Mark as internal so the url-prop echo cannot trigger a history reset.
@@ -257,11 +260,23 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
 
     const handleConsoleMessage = (event: Electron.ConsoleMessageEvent) => {
       try {
-        if (event.message.includes('__WEBVIEW_HOST_NAVIGATE__')) {
-          const match = event.message.match(/"url":"([^"]+)"/);
-          if (match && match[1]) {
-            navigateToWithHistory(match[1]);
-          }
+        const navigation = event.message.match(/^__WEBVIEW_HOST_NAVIGATE__:([0-9]+)$/);
+        if (navigation) {
+          const id = Number(navigation[1]);
+          if (!Number.isSafeInteger(id)) return;
+          const version = ++navigationVersion.current;
+          void webviewEl
+            .executeJavaScript(`window.__aionuiTakeNavigationUrl?.(${id})`)
+            .then((url: unknown) => {
+              if (
+                version === navigationVersion.current &&
+                webviewRef.current === webviewEl &&
+                typeof url === 'string'
+              ) {
+                navigateToWithHistory(url);
+              }
+            })
+            .catch(() => {});
           return;
         }
 
@@ -286,7 +301,12 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       }
     };
 
-    const handleDidNavigate = (event: Event & { url?: string }) => {
+    const handleDidStartNavigation = (event: Electron.DidStartNavigationEvent) => {
+      if (event.isMainFrame) navigationVersion.current++;
+    };
+
+    const handleDidNavigate = (event: Event & { url?: string; isMainFrame?: boolean }) => {
+      if (event.isMainFrame !== false) navigationVersion.current++;
       const newUrl = event.url;
       if (newUrl && newUrl !== currentUrl) {
         internalNavRef.current.record(newUrl);
@@ -318,11 +338,11 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
         const webContentsId = webviewEl.getWebContentsId?.();
         if (typeof webContentsId === 'number') {
           void ipcBridge.application.reportBrowserWebContentsId.invoke({ webContentsId }).then((res) => {
-            if (!res.success && res.msg) console.warn('[browser] agent control unavailable:', res.msg);
+            if (!res.success && res.msg) console.warn('[browser] agent control unavailable');
           });
         }
-      } catch (error) {
-        console.warn('[browser] could not report webContents id:', error);
+      } catch {
+        console.warn('[browser] could not report webContents id');
       }
 
       // Inject viewport meta for responsive pages
@@ -347,11 +367,23 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       webviewEl
         .executeJavaScript(
           `
-        window.addEventListener('message', function(e) {
-          if (e.data && e.data.type === '__WEBVIEW_HOST_NAVIGATE__') {
-            console.log('__WEBVIEW_HOST_NAVIGATE__', JSON.stringify(e.data));
-          }
-        });
+        (function() {
+          if (window.__aionuiTakeNavigationUrl) return;
+          const urls = new Map();
+          let nextId = 0;
+          window.__aionuiTakeNavigationUrl = (id) => {
+            const url = urls.get(id);
+            urls.delete(id);
+            return url;
+          };
+          window.addEventListener('message', function(e) {
+            if (e.data?.type !== '__WEBVIEW_HOST_NAVIGATE__' || typeof e.data.url !== 'string') return;
+            const id = ++nextId;
+            urls.set(id, e.data.url);
+            setTimeout(() => urls.delete(id), 5000);
+            console.log('__WEBVIEW_HOST_NAVIGATE__:' + id);
+          });
+        })();
         true;
       `
         )
@@ -439,6 +471,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
     webviewEl.addEventListener('did-start-loading', handleStartLoading);
     webviewEl.addEventListener('did-stop-loading', handleStopLoading);
     webviewEl.addEventListener('dom-ready', handleDomReady);
+    webviewEl.addEventListener('did-start-navigation', handleDidStartNavigation);
     webviewEl.addEventListener('did-navigate', handleDidNavigate as EventListener);
     webviewEl.addEventListener('did-navigate-in-page', handleDidNavigate as EventListener);
     webviewEl.addEventListener('console-message', handleConsoleMessage as EventListener);
@@ -451,6 +484,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       webviewEl.removeEventListener('did-start-loading', handleStartLoading);
       webviewEl.removeEventListener('did-stop-loading', handleStopLoading);
       webviewEl.removeEventListener('dom-ready', handleDomReady);
+      webviewEl.removeEventListener('did-start-navigation', handleDidStartNavigation);
       webviewEl.removeEventListener('did-navigate', handleDidNavigate as EventListener);
       webviewEl.removeEventListener('did-navigate-in-page', handleDidNavigate as EventListener);
       webviewEl.removeEventListener('console-message', handleConsoleMessage as EventListener);
@@ -547,17 +581,20 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
   const handleGoBack = useCallback(() => {
     const webviewEl = webviewRef.current;
     if (!webviewEl?.canGoBack?.()) return;
+    navigationVersion.current++;
     webviewEl.goBack();
   }, []);
 
   const handleGoForward = useCallback(() => {
     const webviewEl = webviewRef.current;
     if (!webviewEl?.canGoForward?.()) return;
+    navigationVersion.current++;
     webviewEl.goForward();
   }, []);
 
   // Refresh
   const handleRefresh = useCallback(() => {
+    navigationVersion.current++;
     webviewRef.current?.reload();
   }, []);
 

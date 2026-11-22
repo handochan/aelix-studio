@@ -95,20 +95,21 @@ export function hasObservedValue(
 
 export function classifyConfigSetError(error: unknown): AcpConfigSetErrorKind {
   if (error instanceof AcpModelChangeObservedError) return 'model_change_observed_with_error';
-  if (error instanceof Error) {
-    if (error.message.includes('command_ack')) return 'command_ack';
-    if (error.message.includes('config_update_in_progress')) return 'config_update_in_progress';
-    if (error.message.includes('config_not_observed')) return 'config_not_observed';
-  }
-  if (isBackendHttpError(error)) {
-    if (error.code === 'confirmation_timeout') return 'confirmation_timeout';
+  const backendError = isBackendHttpError(error) ? error : undefined;
+  const detail = backendError?.backendMessage ?? (error instanceof Error ? error.message : '');
+  if (backendError?.code === 'command_ack' || detail.includes('command_ack')) return 'command_ack';
+  if (backendError?.code === 'config_update_in_progress' || detail.includes('config_update_in_progress'))
+    return 'config_update_in_progress';
+  if (backendError?.code === 'config_not_observed' || detail.includes('config_not_observed'))
+    return 'config_not_observed';
+  if (backendError) {
+    if (backendError.code === 'confirmation_timeout') return 'confirmation_timeout';
     // These codes mean the runtime cannot take this change yet: an update in
     // flight, a busy agent, or a member runtime starting or restarting.
     if (
-      error.code === 'config_update_in_progress' ||
-      error.code === 'USER_AGENT_BUSY' ||
-      error.code === 'TEAM_MEMBER_RUNTIME_STARTING' ||
-      error.code === 'runtime_restarting'
+      backendError.code === 'USER_AGENT_BUSY' ||
+      backendError.code === 'TEAM_MEMBER_RUNTIME_STARTING' ||
+      backendError.code === 'runtime_restarting'
     ) {
       return 'config_update_in_progress';
     }

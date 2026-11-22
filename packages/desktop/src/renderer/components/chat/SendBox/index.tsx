@@ -963,10 +963,10 @@ const SendBox: React.FC<{
         const files = result.map(workspaceMentionItemFromListing);
         setWorkspaceMentionItems(files);
       })
-      .catch((error) => {
+      .catch(() => {
         if (!cancelled) {
           fetchedAtFileSessionKeyRef.current = null;
-          console.warn('[SendBox] Failed to load workspace file mentions:', error);
+          console.warn('[SendBox] Failed to load workspace file mentions');
           setWorkspaceMentionItems([]);
         }
       })

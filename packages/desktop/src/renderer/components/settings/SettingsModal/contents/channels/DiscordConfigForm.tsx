@@ -7,7 +7,7 @@
 import type { IChannelPairingRequest, IChannelPluginStatus, IChannelUser } from '@/common/types/channel/channel';
 import { assistants, channel } from '@/common/adapter/ipcBridge';
 import { isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
-import { resolveLocaleKey } from '@/common/utils';
+import { parseError, resolveLocaleKey } from '@/common/utils';
 import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 import { formatDateTime } from '@/renderer/services/i18n/format';
 import GoogleModelSelector from '@/renderer/pages/conversation/platforms/gemini/GoogleModelSelector';
@@ -264,7 +264,7 @@ const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({
       await loadPendingPairings();
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -275,7 +275,7 @@ const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({
       Message.info(t('settings.assistant.pairingRejected', 'Pairing rejected'));
       await loadPendingPairings();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -286,7 +286,7 @@ const DiscordConfigForm: React.FC<DiscordConfigFormProps> = ({
       Message.success(t('settings.assistant.userRevoked', 'User access revoked'));
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 

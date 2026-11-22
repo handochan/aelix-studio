@@ -237,11 +237,11 @@ class PasteServiceClass {
               if (error instanceof Error && error.message === 'FILE_TOO_LARGE') {
                 throw error;
               }
-              console.error('创建临时文件失败:', error);
+              console.error('创建临时文件失败');
             }
           } else {
             // 不支持的文件类型，跳过但不报错（让后续过滤处理）
-            console.warn(`Unsupported image type: ${file.type}, extension: ${fileExt}`);
+            console.warn('[PasteService] Unsupported image type');
           }
         } else if (file_path) {
           // 有文件路径的文件（从文件管理器复制/拖拽粘贴的文件）
@@ -289,11 +289,11 @@ class PasteServiceClass {
               if (error instanceof Error && error.message === 'FILE_TOO_LARGE') {
                 throw error;
               }
-              console.error('上传粘贴文件失败:', error);
+              console.error('上传粘贴文件失败');
             }
           } else {
             // 不支持的文件类型
-            console.warn(`Unsupported file type: ${file.name}, extension: ${fileExt}`);
+            console.warn('[PasteService] Unsupported file type');
           }
         } else if (!file.type.startsWith('image/')) {
           // 没有文件路径的非图片文件（从文件管理器复制粘贴的文件）
@@ -339,10 +339,10 @@ class PasteServiceClass {
               if (error instanceof Error && error.message === 'FILE_TOO_LARGE') {
                 throw error;
               }
-              console.error('创建临时文件失败:', error);
+              console.error('创建临时文件失败');
             }
           } else {
-            console.warn(`Unsupported file type: ${file.name}, extension: ${fileExt}`);
+            console.warn('[PasteService] Unsupported file type');
           }
         }
       }
