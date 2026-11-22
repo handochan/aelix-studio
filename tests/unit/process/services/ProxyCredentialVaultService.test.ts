@@ -54,7 +54,7 @@ describe('the desktop proxy-credential vault', () => {
   });
 
   it.each([
-    ['no encryption at all', 'darwin', false, undefined],
+    ['Windows with no encryption', 'win32', false, undefined],
     ['Linux without a secret store (basic_text)', 'linux', true, 'basic_text'],
     ['Linux before a backend is chosen', 'linux', true, 'unknown'],
     ['Linux without a backend report', 'linux', true, undefined],
@@ -65,6 +65,16 @@ describe('the desktop proxy-credential vault', () => {
     expect(storage.calls).toEqual([]);
   });
 
+  it('asks nothing of the macOS Keychain until credentials are sealed or opened', () => {
+    // Even the availability check reads the Keychain on the main thread and can wait for a prompt.
+    const storage = fakeSafeStorage(false);
+    const isEncryptionAvailable = vi.spyOn(storage, 'isEncryptionAvailable');
+    const vault = createProxyCredentialVault(storage, 'darwin');
+    expect(vault.mode).toBe('keychain');
+    expect(isEncryptionAvailable).not.toHaveBeenCalled();
+    expect(storage.calls).toEqual([]);
+  });
+
   it('lets a decryption failure reach the helper, which then asks again', () => {
     const vault = createProxyCredentialVault(fakeSafeStorage(true), 'darwin');
     if (vault.mode !== 'keychain') throw new Error('expected a keychain');
@@ -72,6 +82,6 @@ describe('the desktop proxy-credential vault', () => {
   });
 
   it('reads Electron safeStorage by default', () => {
-    expect(createProxyCredentialVault()).toEqual({ mode: 'memory-only' });
+    expect(createProxyCredentialVault(undefined, 'win32')).toEqual({ mode: 'memory-only' });
   });
 });

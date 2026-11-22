@@ -25,10 +25,10 @@ const REQUEST_LIMIT = 60000;
  * WebUI this process may serve share the one service. Unexpected errors are logged by name
  * and message only.
  */
-export function startStudioExtensions(storage?: SafeStorageLike): ExtensionService {
+export function startStudioExtensions(storage?: SafeStorageLike, platform?: NodeJS.Platform): ExtensionService {
   const service = configureStudioExtensions({
     userDataPath: app.getPath('userData'),
-    proxyVault: createProxyCredentialVault(storage),
+    proxyVault: createProxyCredentialVault(storage, platform),
     log: (message, error) =>
       console.error(
         `[StudioExtensions] ${message}`,

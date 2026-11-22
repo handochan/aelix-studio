@@ -680,7 +680,10 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   같은 방식(`AELIX_STUDIO_RUNTIME`, 설치 앱의 `resources/studio-preview`, checkout의 `.local/studio-preview`)으로
   찾는다. 설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다.
   - **데스크톱.** app `ready` 뒤에 `safeStorage` vault로 설정한다(Linux는 이때 비밀 저장소를 알린다). 실패해도 앱은
-    뜬다. 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다(preload
+    뜬다. macOS에서는 시작할 때 `safeStorage`를 부르지 않는다. 사용 가능 여부를 묻는 것만으로도 main thread에서
+    Keychain을 읽어 Keychain 창을 기다릴 수 있다(CI에서 앱 시작이 멈췄다). 모든 macOS 사용자에게 Keychain이 있으므로
+    `keychain`으로 두고, 인증 정보를 봉인하거나 열 때만 Keychain을 쓴다. Keychain이 거절하면 저장은
+    `PROXY_CREDENTIALS_NOT_STORED`로 끝나고, 열기는 다시 묻는다. 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다(preload
     `__studioExtensions` → `ipcMain` `studio:extensions`). native auth와 같은 검사(등록한 Studio 창의 main frame,
     그 창의 페이지 URL)를 통과한 창에만 답하고, 60 kB를 넘는 요청은 거절한다. 창마다 owner(`desktop:<webContents>`)가
     다르다. 창이 사라지거나 main frame이 다른 페이지로 가면 그 창이 시작한 변경을 취소한다.

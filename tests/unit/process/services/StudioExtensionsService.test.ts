@@ -97,7 +97,7 @@ describe('the desktop channel of the extension helper', () => {
   });
 
   it('is memory-only where safeStorage cannot encrypt', async () => {
-    startStudioExtensions();
+    startStudioExtensions(undefined, 'win32');
     const reply = await studioExtensionsIpcHandler(() => true)(event(7), { action: 'get_settings' });
     expect(reply).toMatchObject({ ok: true, data: { credentialMode: 'memory-only' } });
   });

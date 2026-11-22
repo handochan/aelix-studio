@@ -161,6 +161,21 @@ describe('the sealed credential store', () => {
     expect(await readdir(layout.root)).toEqual([]);
   });
 
+  it('keeps nothing, and says so, when the keychain refuses to seal', async () => {
+    const refusing: ProxyCredentialVault = {
+      mode: 'keychain',
+      seal: () => {
+        throw new Error('Encryption is not available.');
+      },
+      open: () => '',
+    };
+    const failure = await failureOf(
+      saveProxyCredentials(layout, refusing, STORE_PROXY, CREDENTIALS, directWriter(layout.root))
+    );
+    expect(failure.code).toBe('PROXY_CREDENTIALS_NOT_STORED');
+    expect(await readdir(layout.root)).toEqual([]);
+  });
+
   it('stores nothing without a keychain', async () => {
     const failure = await failureOf(
       saveProxyCredentials(layout, MEMORY_ONLY_VAULT, STORE_PROXY, CREDENTIALS, directWriter(layout.root))
