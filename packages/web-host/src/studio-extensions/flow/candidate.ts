@@ -17,7 +17,7 @@ import { runToExit, type Spawn } from '../process.js';
 import { hashFile } from '../store/artifacts.js';
 import { generationPaths, type Bundle, type BundleFacts, type GenerationPaths, type Layout } from '../store/layout.js';
 import type { GenerationRecord } from '../store/pointer.js';
-import type { ProxyCredentialVault } from './online/proxyCredentials.js';
+import type { ProxyCredentialVault } from './online/proxy/credentials.js';
 import { ExtensionFailure, type ExtensionFailureCode } from '../types.js';
 
 /** What a flow step needs to start processes and find files. */

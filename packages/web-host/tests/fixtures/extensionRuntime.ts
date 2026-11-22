@@ -143,9 +143,9 @@ export function directWriter(root: string): StateWriter {
   };
   return {
     replace: async (from, to) => {
-      const replaceable = ['current.json', 'current.previous.json', 'settings.json', 'proxy-credentials.json'].includes(
-        to
-      );
+      const replaceable =
+        ['current.json', 'current.previous.json', 'settings.json'].includes(to) ||
+        /^proxy-credentials-[0-9a-f]{32}\.json$/.test(to);
       if (!replaceable || !plain(from) || !from.endsWith('.tmp') || !(await own(root))) throw refused();
       await rename(path.join(root, from), path.join(root, to));
     },
@@ -286,6 +286,8 @@ export type FakeRuntimeOptions = {
   heldLeases?: string[];
   /** What the lock holder prints: `held` unless a test says otherwise. */
   lock?: (child: ScriptedChild) => void;
+  /** A request the lock holder fails, as an interruption would: true answers an `OSError`. */
+  holderFails?: (request: { op: string; from?: string; to?: string; path?: string }) => boolean;
   /** Replaces `extension install`: return the native exit code. */
   install?: (venv: Venv, wheel: string, spec: SpawnSpec) => Promise<number>;
   /** Replaces `extension remove`: return the native exit code. */
@@ -354,9 +356,12 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
           for (const line of text.split('\n').filter(Boolean)) {
             const request = JSON.parse(line) as { op: string; from: string; to: string; path: string };
             last = last
-              .then(() =>
-                request.op === 'replace' ? writer.replace(request.from, request.to) : writer.remove(request.path)
-              )
+              .then(() => {
+                if (options.holderFails?.(request)) throw new Error('interrupted');
+                return request.op === 'replace'
+                  ? writer.replace(request.from, request.to)
+                  : writer.remove(request.path);
+              })
               .then(
                 () => child.print('{"ok": true}\n'),
                 (error: unknown) =>

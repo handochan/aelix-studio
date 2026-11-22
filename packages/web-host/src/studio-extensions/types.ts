@@ -58,7 +58,11 @@ export type ExtensionSettings = {
  */
 export type ProxyCredentialMode = 'keychain' | 'memory-only';
 
-/** A user name and password for the proxy, as the user typed them (not percent-encoded). */
+/**
+ * A user name and password for the proxy, as the user typed them (not percent-encoded).
+ * Printable ASCII only, without a `%` followed by two hex digits, and a user name without `:`;
+ * anything else is `INVALID_INPUT`.
+ */
 export type ProxyCredentials = { username: string; password: string };
 
 export type ExtensionSettingsState = {
@@ -80,8 +84,11 @@ export type ExtensionCommand =
   | { action: 'list' }
   /**
    * `proxyCredentials` are used for this install only and never saved: required in
-   * `memory-only` mode when the proxy asks for credentials, and they take the place of saved
-   * ones in `keychain` mode. File imports run offline and take none.
+   * `memory-only` mode when the proxy asks for credentials (where they also drop credentials a
+   * keychain saved), and they take the place of saved ones in `keychain` mode. They are for the
+   * proxy of the settings when the request arrives (`PROXY_CHANGED` otherwise). No installer
+   * sees them: a loopback proxy of the change signs in for pip and Git. File imports and
+   * updates run offline and take none.
    */
   | {
       action: 'install';
@@ -97,8 +104,10 @@ export type ExtensionCommand =
   /**
    * Changes only the fields given. Send every field after `unreadable`. A proxy typed with a
    * user name and password is split: the address is stored without them, `proxyAuthentication`
-   * turns on and, in `keychain` mode, the credentials are saved. Turning the proxy off or
-   * changing its host or port drops saved credentials and turns `proxyAuthentication` off.
+   * turns on (sending it false with them is `INVALID_INPUT`) and the credentials replace saved
+   * ones: saved in `keychain` mode, dropped with the old ones in `memory-only` mode. Turning the
+   * proxy off or changing its scheme, host or port drops saved credentials and turns
+   * `proxyAuthentication` off.
    */
   | { action: 'set_settings'; settings: Partial<ExtensionSettings> }
   /** Save credentials for the current proxy (`keychain` mode only) and turn `proxyAuthentication` on. */
@@ -211,6 +220,11 @@ export type ExtensionFailureCode =
   | 'PROXY_CREDENTIALS_REQUIRED'
   /** Credentials cannot be saved here (`memory-only` mode); send them with each install instead. */
   | 'PROXY_CREDENTIALS_NOT_STORED'
+  /**
+   * The proxy changed (another Studio process saved settings) after the install was checked.
+   * The credentials it carried were for the earlier address and were not used: ask again.
+   */
+  | 'PROXY_CHANGED'
   /** Studio could not fetch the repository or find the requested revision. Git's text is in `output`. */
   | 'GIT_FETCH_FAILED'
   /** The subdirectory is not a real directory inside the fetched repository (missing, a file, a link). */

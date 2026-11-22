@@ -93,6 +93,30 @@ describe('the proxy the user types', () => {
     for (const part of ['secret', 'alice', 'proxy.corp.example']) expect(reported).not.toContain(part);
   });
 
+  it.each([
+    'http://ops:p%C3%A4ss@proxy.corp.example',
+    'http://ops:pässwört@proxy.corp.example',
+    'http://ops:p%E4ss@proxy.corp.example',
+    'http://ops:pa\u00a0ss@proxy.corp.example',
+    'http://ops:%00secret@proxy.corp.example',
+    'http://op%3As:secret@proxy.corp.example',
+    'http://ops:secret%2541@proxy.corp.example',
+  ])('refuses %s as credentials, with the fixed answer of every entry point', (typed) => {
+    const failure = failureOf(() => parseProxyInput(typed));
+    expect(failure.code).toBe('INVALID_INPUT');
+    expect(failure.detail).toEqual([
+      'proxy credentials need a user name without a colon, both in printable ASCII and without a % followed by two hex digits',
+    ]);
+  });
+
+  it('refuses credentials typed with authentication turned off in the same change', () => {
+    const failure = failureOf(() =>
+      parseSettingsChange({ proxy: 'http://ops:secret@proxy.corp.example', proxyAuthentication: false })
+    );
+    expect(failure.code).toBe('INVALID_INPUT');
+    expect([failure.message, ...failure.detail].join(' ')).not.toMatch(/ops|secret/);
+  });
+
   it('keeps the stored form free of credentials', () => {
     expect(failureOf(() => normalizeProxy('http://alice:secret@proxy.corp.example')).code).toBe('INVALID_PROXY');
   });

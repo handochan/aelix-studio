@@ -79,9 +79,11 @@ export type ManagementEnvironment = {
 /** What the user configured for online installs in Studio's extension settings. */
 export type OnlineAccess = {
   /**
-   * The proxy the user typed (normalized `http(s)://host[:port]`). pip gets it as its own
-   * `--proxy` (`PIP_PROXY`), which also keeps pip from reading environment proxies and netrc;
-   * Git and anything else that reads the standard variables get it there and as `http.proxy`.
+   * The proxy the user typed (normalized `http(s)://host[:port]`), or, when it asks for
+   * credentials, the change's loopback relay with its token (`http://run:<token>@127.0.0.1:<port>`).
+   * pip gets it as its own `--proxy` (`PIP_PROXY`), which also keeps pip from reading
+   * environment proxies and netrc; Git and anything else that reads the standard variables get
+   * it there and as `http.proxy`.
    */
   proxy?: string;
   /** Present when the user turned private Git on. */
@@ -99,6 +101,12 @@ const ISOLATED_SSH =
  * precedence over the configuration).
  */
 const PRIVATE_SSH = '/usr/bin/ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UpdateHostKeys=no';
+
+/** For a proxy URL with a user part: the Git setting that keeps every credential helper away from it. */
+function proxyCredentialScope(proxy: string | undefined): [string, string][] {
+  const url = proxy === undefined ? null : URL.parse(proxy);
+  return url && (url.username || url.password) ? [[`credential.${url.protocol}//${url.host}.helper`, '']] : [];
+}
 
 /** The proxy variables every proxy-aware tool reads, and the one that keeps pip to its own. */
 function proxyVariables(proxy: string | undefined, platform: NodeJS.Platform): Record<string, string> {
@@ -197,6 +205,11 @@ export function managementEnvironment(
       ['protocol.git.allow', 'user'],
       ['protocol.file.allow', 'user'],
       ...(privateGit?.credentials ?? []),
+      // Git hands a proxy's credentials to the credential helpers once a request succeeds
+      // (`credential_approve`). With private Git those are the user's own, and one may store
+      // the relay's token. An empty helper for the proxy, after the user's entries, clears them
+      // for that address only.
+      ...proxyCredentialScope(access?.proxy),
     ];
     Object.assign(environment, {
       HOME: home,

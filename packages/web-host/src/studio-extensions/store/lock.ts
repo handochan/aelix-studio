@@ -30,7 +30,8 @@ import errno, json, os, re, shutil, sys, time
 
 NOFOLLOW = getattr(os, 'O_NOFOLLOW', 0)
 DEDICATED = ('generations', 'artifacts', 'leases')
-REPLACEABLE = ('current.json', 'current.previous.json', 'settings.json', 'proxy-credentials.json')
+REPLACEABLE = ('current.json', 'current.previous.json', 'settings.json')
+SEALED = re.compile(r'proxy-credentials-[0-9a-f]{32}[.]json')
 
 class Refused(Exception):
     pass
@@ -98,7 +99,8 @@ def remove(root, relative):
         remove_entry(target)
 
 def replace(root, source, target):
-    if target not in REPLACEABLE or not plain(source) or not source.endswith('.tmp') or not own(root):
+    if ((target not in REPLACEABLE and not SEALED.fullmatch(target)) or not plain(source)
+            or not source.endswith('.tmp') or not own(root)):
         raise Refused()
     os.replace(os.path.join(root, source), os.path.join(root, target))
     if os.name != 'nt':

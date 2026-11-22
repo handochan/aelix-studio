@@ -19,7 +19,7 @@ import {
   MEMORY_ONLY_VAULT,
   parseProxyCredentials,
   type ProxyCredentialVault,
-} from './flow/online/proxyCredentials.js';
+} from './flow/online/proxy/credentials.js';
 import { parseSettingsChange, readSettings, type SettingsChange, type StoredSettings } from './flow/online/settings.js';
 import { parseOnlineSource } from './flow/online/source.js';
 import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
@@ -256,6 +256,8 @@ export class ExtensionService {
         if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
         if (change.proxyCredentials && settings.proxy === null)
           return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
+        // The credentials are for this address; the change ends if the settings name another by then.
+        if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
         // The screen asks for credentials on this answer; nothing has started.
         if (settings.proxy !== null && settings.proxyAuthentication && !change.proxyCredentials) {
           const layout = await locateLayout(this.options.root);

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { writeTemporary, type Layout } from '../../store/layout.js';
 import type { StateWriter } from '../../store/lock.js';
 import { ExtensionFailure, type ExtensionSettings, type ProxyCredentials } from '../../types.js';
-import { isCredentialId, parseProxyCredentials } from './proxyCredentials.js';
+import { invalidCredentials, isCredentialId, parseProxyCredentials } from './proxy/credentials.js';
 
 /**
  * The user's extension settings (Studio #32 1b, ADR 5.10): whether online installs are on,
@@ -16,7 +16,7 @@ import { isCredentialId, parseProxyCredentials } from './proxyCredentials.js';
  *
  * Proxy credentials are not settings: `settings.json` holds only `proxyAuthentication` (the
  * proxy asks for them) and the id of the sealed copy, if the desktop saved one
- * (`proxyCredentials.ts`). A file written before credentials existed has neither and reads as
+ * (`proxy/credentials.ts`). A file written before credentials existed has neither and reads as
  * a proxy without authentication.
  */
 
@@ -67,8 +67,7 @@ const invalidProxy = (): ExtensionFailure =>
  * @throws ExtensionFailure `INVALID_PROXY`, or `INVALID_INPUT` for credentials that cannot be used
  */
 export function parseProxyInput(value: unknown): { proxy: string; credentials?: ProxyCredentials } {
-  // oxlint-disable-next-line no-control-regex -- reject characters URL parsing can silently discard.
-  if (typeof value !== 'string' || value.length > 2048 || /[\s\\\x00-\x1f\x7f]/.test(value)) throw invalidProxy();
+  if (typeof value !== 'string' || value.length > 2048) throw invalidProxy();
   const scheme = /^(https?):\/\//i.exec(value);
   if (!scheme) throw invalidProxy();
   // Look at the authority as typed, before URL parsing: it drops an empty user part such as
@@ -76,6 +75,10 @@ export function parseProxyInput(value: unknown): { proxy: string; credentials?: 
   // credentials without a trace. Only a plain host and port are taken; nothing is repaired.
   const authority = value.slice(scheme[0].length).split(/[/?#]/, 1)[0];
   const at = authority.lastIndexOf('@');
+  // The user part is checked as credentials below; the rest as an address.
+  // oxlint-disable-next-line no-control-regex -- reject characters URL parsing can silently discard.
+  if (/[\s\\\x00-\x1f\x7f]/.test(value.slice(0, scheme[0].length) + value.slice(scheme[0].length + at + 1)))
+    throw invalidProxy();
   const typed = PROXY_AUTHORITY.exec(authority.slice(at + 1));
   if (!typed) throw invalidProxy();
   if (typed[1] !== undefined && (Number(typed[1]) < 1 || Number(typed[1]) > 65535)) throw invalidProxy();
@@ -84,21 +87,42 @@ export function parseProxyInput(value: unknown): { proxy: string; credentials?: 
   if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:') || !url.hostname) throw invalidProxy();
   if ((url.pathname !== '' && url.pathname !== '/') || url.search || url.hash) throw invalidProxy();
   const proxy = `${url.protocol}//${url.host}`;
-  if (at < 0) return { proxy };
-  const user = authority.slice(0, at);
-  // An empty user part (`http://@host`) is not credentials, and not a plain address either.
+  return at < 0 ? { proxy } : { proxy, credentials: parseUserPart(authority.slice(0, at)) };
+}
+
+/**
+ * The `user:password` part of a typed proxy address, decoded. What breaks the credentials
+ * rule (past printable ASCII, typed as is or percent-encoded) is answered as credentials,
+ * `INVALID_INPUT`, like everywhere else; what breaks the address (an empty user name, a
+ * space or backslash typed as is, a `%` without two hex digits) as `INVALID_PROXY`.
+ */
+function parseUserPart(user: string): ProxyCredentials {
   if (user === '' || user.startsWith(':')) throw invalidProxy();
+  if (!/^[\x20-\x7e]*$/.test(user)) throw invalidCredentials();
+  if (/[ \\]/.test(user)) throw invalidProxy();
   const colon = user.indexOf(':');
-  let decoded: { username: string; password: string };
-  try {
-    decoded = {
-      username: decodeURIComponent(colon < 0 ? user : user.slice(0, colon)),
-      password: colon < 0 ? '' : decodeURIComponent(user.slice(colon + 1)),
-    };
-  } catch {
-    throw invalidProxy();
+  return parseProxyCredentials({
+    username: percentDecoded(colon < 0 ? user : user.slice(0, colon)),
+    password: colon < 0 ? '' : percentDecoded(user.slice(colon + 1)),
+  });
+}
+
+/** Percent-decode byte by byte: an encoded byte past printable ASCII is refused as credentials. */
+function percentDecoded(text: string): string {
+  let decoded = '';
+  for (let index = 0; index < text.length; index += 1) {
+    if (text[index] !== '%') {
+      decoded += text[index];
+      continue;
+    }
+    const hex = text.slice(index + 1, index + 3);
+    if (!/^[0-9A-Fa-f]{2}$/.test(hex)) throw invalidProxy();
+    const byte = Number.parseInt(hex, 16);
+    if (byte < 0x20 || byte > 0x7e) throw invalidCredentials();
+    decoded += String.fromCharCode(byte);
+    index += 2;
   }
-  return { proxy, credentials: parseProxyCredentials(decoded) };
+  return decoded;
 }
 
 /**
@@ -205,6 +229,8 @@ export function parseSettingsChange(value: unknown): SettingsChange {
   // Answered before any lock; a change that only turns authentication on is checked against the stored proxy.
   if (change.settings.proxy === null && change.settings.proxyAuthentication === true)
     throw new ExtensionFailure('INVALID_INPUT', ['proxy authentication needs a proxy']);
+  if (change.credentials && change.settings.proxyAuthentication === false)
+    throw new ExtensionFailure('INVALID_INPUT', ['a proxy typed with credentials needs proxy authentication on']);
   return change;
 }
 

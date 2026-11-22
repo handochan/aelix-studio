@@ -375,7 +375,8 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
  * Online installs through a proxy that asks for a user name and password (Studio #32), with
  * the installed Python and the real lock holder: credentials given per install (memory-only),
  * then saved sealed and dropped again (keychain, with a stand-in for Electron `safeStorage`).
- * The credentials reach pip in its environment only: never an argument, a reply or a file.
+ * pip reaches the proxy through the change's loopback relay, which signs in: the credentials
+ * are never in an argument, an environment, a reply or a file.
  */
 async function qualifyProxyCredentials(payload: string, scratch: string, checks: string[]): Promise<void> {
   const bundle = await resolveBundle(payload);
@@ -409,9 +410,11 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
   const typed =
     'http://' + encodeURIComponent(login.username) + ':' + encodeURIComponent(login.password) + '@127.0.0.1:';
   const argv: string[] = [];
+  const relays = new Set<string>();
   const base = windows ? windowsChildSpawn(bundle.python, bundle.launcher) : spawnChild;
   const spawn: Spawn = (spec) => {
-    argv.push([spec.command, ...spec.args].join(' '));
+    argv.push([spec.command, ...spec.args, ...Object.values(spec.env)].join(' '));
+    if (spec.env.PIP_PROXY) relays.add(spec.env.PIP_PROXY);
     return base(spec);
   };
   const vault: ProxyCredentialVault = {
@@ -473,7 +476,10 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
     const saved = await settings(keychain, { action: 'set_settings', settings: { proxy: typed + port } });
     assert.equal(saved.settings.proxy, address);
     assert(saved.settings.proxyAuthentication && saved.hasSavedCredentials, JSON.stringify(saved));
-    assert((await lstat(path.join(roots[1], 'proxy-credentials.json'))).isFile());
+    const sealedFiles = async (): Promise<string[]> =>
+      (await readdir(roots[1])).filter((name) => /^proxy-credentials-[0-9a-f]{32}\.json$/.test(name));
+    assert.equal((await sealedFiles()).length, 1);
+    assert((await lstat(path.join(roots[1], (await sealedFiles())[0]))).isFile());
     const before = headers.length;
     await install(keychain, {
       action: 'install',
@@ -484,8 +490,11 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
       for (const secret of secrets) assert(!text.includes(secret), 'a proxy credential left the environment');
     const dropped = await settings(keychain, { action: 'set_settings', settings: { proxy: null } });
     assert(!dropped.hasSavedCredentials && !dropped.settings.proxyAuthentication, JSON.stringify(dropped));
-    assert(!(await readdir(roots[1])).includes('proxy-credentials.json'), 'the lock holder kept dropped credentials');
-    checks.push('proxy credentials: per install, sealed and dropped by the lock holder, environment only');
+    assert.deepEqual(await sealedFiles(), [], 'the lock holder kept dropped credentials');
+    // Every installer had a relay of its own change, never the user's proxy itself.
+    assert(relays.size >= 2, 'the installers had no relay');
+    for (const relay of relays) assert.match(relay, /^http:\/\/run:[0-9a-f]{64}@127\.0\.0\.1:[0-9]+$/);
+    checks.push('proxy credentials: per install, sealed and dropped by the lock holder, through the relay only');
   } finally {
     await Promise.all([memory.dispose(), keychain.dispose()]);
     proxy.closeAllConnections();

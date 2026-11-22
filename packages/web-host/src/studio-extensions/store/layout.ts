@@ -16,7 +16,7 @@ import { ExtensionFailure } from '../types.js';
  *   current.json              current and previous generation, revision, bundle binding
  *   current.previous.json     the pointer before the last switch
  *   settings.json             the user's extension settings: online installs, proxy, private Git
- *   proxy-credentials.json    proxy user name and password, sealed by the OS keychain (desktop only)
+ *   proxy-credentials-<id>.json  proxy user name and password, sealed by the OS keychain (desktop only)
  *   constraints-<lock>.txt    distributions and versions the bundle ships
  *   artifacts/<set>/          imported wheels and their sha256 list
  *   leases/                   one file per running launcher, named <generation>.<suffix>
@@ -33,8 +33,6 @@ export type Layout = {
   previousPointer: string;
   /** The user's extension settings. Replaced only by the lock holder, like the pointer. */
   settings: string;
-  /** Saved proxy credentials, sealed by the desktop's OS keychain. Replaced like the settings. */
-  proxyCredentials: string;
   generations: string;
   artifacts: string;
   leases: string;
@@ -79,7 +77,6 @@ export function layoutOf(root: string): Layout {
     pointer: path.join(root, 'current.json'),
     previousPointer: path.join(root, 'current.previous.json'),
     settings: path.join(root, 'settings.json'),
-    proxyCredentials: path.join(root, 'proxy-credentials.json'),
     generations: path.join(root, 'generations'),
     artifacts: path.join(root, 'artifacts'),
     leases: path.join(root, 'leases'),
