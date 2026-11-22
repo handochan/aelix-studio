@@ -67,3 +67,21 @@ validates the exact zlib frame and passes the original PNG bytes through.
 [Microsoft sample](https://support.microsoft.com/en-us/windows/media/snipping-tool-opened-png.png)
 · [PNG IDAT](https://www.w3.org/TR/png-3/#11IDAT)
 · [Compression Standard](https://compression.spec.whatwg.org/#supported-formats)
+
+## S-1b running-input core
+
+Use the H-1 Host binary, the A-1 adapter source and the unchanged pinned native
+runtime. The Bun probe runs Studio's renderer client and dedicated worker
+against the protected Host listener, real ACP and a loopback model endpoint.
+
+```sh
+bun tests/fixtures/running-input-images/realHost.ts \
+  /path/to/aelix-studio-host /path/to/aelix-acp/src \
+  /path/to/adapter/bin/python /path/to/native/bin/aelix
+```
+
+The fixture qualifies only its synthetic endpoint. It counts native image
+write edges, compares grant and provider digests, checks exact native JSONL
+sizes and exercises lost responses, lookup, turn change and late ACK after
+Stop. It records sizes and counts at the native edge and checks that the
+Host's diagnostic output omits private image fixture markers.

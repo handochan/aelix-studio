@@ -9,6 +9,7 @@ export { default as RunningInputNotices } from './RunningInputNotices';
 export {
   DEFAULT_RUNNING_INPUT_MODE,
   useRunningInput,
+  type RunningImageController,
   type RunningInputController,
   type RunningInputRoute,
 } from './useRunningInput';

@@ -1,6 +1,6 @@
 import { conversation, fs, sessionMention, type SessionRef } from '@/common/adapter/ipcBridge';
 import { AIONUI_FILES_MARKER, AIONUI_SESSIONS_END_MARKER, AIONUI_SESSIONS_MARKER } from '@/common/config/constants';
-import type { ChatFileRef } from '@/common/types/chatFile';
+import { chatFileRefPath, type ChatFileRef } from '@/common/types/chatFile';
 
 export type RunningInputReferences = {
   files: readonly ChatFileRef[];
@@ -52,13 +52,23 @@ async function resolveFile(ref: ChatFileRef) {
   return metadata;
 }
 
-/** Resolve every reference through the host and append its ordinary-send text blocks in wire order. */
-export async function prepareRunningInputMessage(
+function imageKind(ref: ChatFileRef, mime: string | undefined): 'pixels' | 'unsupported-image' | 'file' {
+  if (mime === 'image/png' || mime === 'image/jpeg') return 'pixels';
+  const name = chatFileRefPath(ref);
+  if (/\.(?:png|jpe?g)$/i.test(name) && (!mime || mime === 'application/octet-stream')) return 'pixels';
+  if (mime?.startsWith('image/') || /\.(?:gif|apng|webp|svgz?|heic|heif|avif|bmp)$/i.test(name)) {
+    return 'unsupported-image';
+  }
+  return 'file';
+}
+
+/** Verify every original ref before either queue path, then format the chosen text refs in wire order. */
+export async function resolveRunningInputReferences(
   conversationId: string,
   message: string,
   { files, sessions }: RunningInputReferences
-): Promise<{ text: string; hasImage: boolean }> {
-  const [resolvedFiles, sessionRows] = await Promise.all([
+) {
+  const [metadata, sessionRows] = await Promise.all([
     Promise.all(files.map(resolveFile)),
     sessions.length === 0
       ? []
@@ -68,12 +78,29 @@ export async function prepareRunningInputMessage(
           return Promise.all(sessions.map((ref) => resolveSessionRow(conversationId, workspace, ref)));
         }),
   ]);
-  let text = message;
+  const resolvedFiles = metadata.map(({ path, type }, index) => ({
+    ref: files[index],
+    path,
+    kind: imageKind(files[index], type),
+  }));
   if (sessionRows.length > 0) {
-    text += '\n\n' + [AIONUI_SESSIONS_MARKER, SESSION_HINT, ...sessionRows, AIONUI_SESSIONS_END_MARKER].join('\n');
+    message += '\n\n' + [AIONUI_SESSIONS_MARKER, SESSION_HINT, ...sessionRows, AIONUI_SESSIONS_END_MARKER].join('\n');
   }
-  if (resolvedFiles.length > 0) {
-    text += '\n\n' + [AIONUI_FILES_MARKER, ...resolvedFiles.map(({ path }) => path)].join('\n');
-  }
-  return { text, hasImage: resolvedFiles.some(({ type }) => type?.startsWith('image/')) };
+  return {
+    files: resolvedFiles,
+    format(include: (file: (typeof resolvedFiles)[number]) => boolean = () => true) {
+      const paths = resolvedFiles.filter(include).map(({ path }) => path);
+      return paths.length ? message + '\n\n' + [AIONUI_FILES_MARKER, ...paths].join('\n') : message;
+    },
+  };
+}
+
+/** Format an explicit path-only send with the original refs. */
+export async function prepareRunningInputMessage(
+  conversationId: string,
+  message: string,
+  references: RunningInputReferences
+): Promise<{ text: string; hasImage: boolean }> {
+  const resolved = await resolveRunningInputReferences(conversationId, message, references);
+  return { text: resolved.format(), hasImage: resolved.files.some(({ kind }) => kind !== 'file') };
 }

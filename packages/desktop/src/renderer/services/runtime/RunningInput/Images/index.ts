@@ -39,15 +39,24 @@ type ImageModelLimits = {
   maxLineBytes?: number;
 };
 
+/** Bounded measurements are available progressively, including on pre-dispatch failure. */
+export type ImagePreparationMeasurements = Readonly<{
+  originals: readonly (Readonly<Partial<Dimensions> & { bytes: number }> | undefined)[];
+  originalLineBytes?: number;
+}>;
+
 export type ImagePreparationOptions = {
   /** Must describe the current turn and model. Abort on Stop, draft/model or turn replacement. */
   signal: AbortSignal;
   conversationId: string;
+  /** The composer allocates this at click time and uses it for both H-1 and A-1. */
+  requestId?: string;
   sources: readonly ImageSource[];
   model: ImageModelLimits;
   /** UTF-8 JSONL template with IDs, text/caption, identified MIME types, empty base64 slots and final newline. */
   emptyNativeLine: (requestId: string, mimeTypes: readonly ImageMime[]) => string;
   onProgress?: (index: number, progress: ImageProgress) => void;
+  onMeasurements?: (measurements: ImagePreparationMeasurements) => void;
   /** Acceptance can exercise the HTTP implementation on a secure origin as well. */
   forceJsHash?: boolean;
 };
@@ -59,6 +68,7 @@ export type PreparedImage = {
   sent: Dimensions & { bytes: number; digest: CodecResult['outputDigest']; mime: ImageMime };
   preview: { kind: 'icon'; dimensions: Dimensions } | { kind: 'thumbnail'; value: Preview };
   changed: boolean;
+  orientationOnly: boolean;
   secureContext: boolean;
   plannedBytes: number;
   codecMs: number;
@@ -103,7 +113,7 @@ async function prepareImages(
   ids: Pick<PreparedImages, 'prepareId' | 'requestId'>
 ): Promise<PreparedImages> {
   signal.throwIfAborted();
-  const { conversationId, model, sources, onProgress, forceJsHash } = options;
+  const { conversationId, model, sources, onProgress, onMeasurements, forceJsHash } = options;
   if (!model.supported) throw new ImagePreparationError('unsupported-model');
   if (!conversationId || sources.length === 0 || sources.length > bounded(model.maxImages, MAX_IMAGES)) {
     throw new ImagePreparationError('limits');
@@ -127,21 +137,33 @@ async function prepareImages(
 
   if (raw < sources.length || lineLimit < 4 * sources.length) throw new ImagePreparationError('limits');
   const inputs: InspectedSource[] = [];
+  const originals: (Partial<Dimensions> & { bytes: number })[] = [];
   for (const [index, source] of sources.entries()) {
     if (!source.blob && !source.ref) throw new ImagePreparationError('source-unavailable');
     // eslint-disable-next-line no-await-in-loop -- download and inspect one bounded original at a time
     const blob = source.blob ?? (await readReferencedImage(source.ref, signal, report(index)));
+    originals[index] = { bytes: blob.size };
+    onMeasurements?.({ originals: [...originals] });
     if (blob.size > MAX_SOURCE_BYTES) throw new ImagePreparationError('source-too-large');
     // eslint-disable-next-line no-await-in-loop -- accumulate the shared codec budget serially
     const result = await work(index, { kind: 'inspect', source: blob });
     if (result.kind !== 'inspected') throw new ImagePreparationError('worker-failed');
     inputs.push({ index, blob, header: result.header });
+    originals[index] = { bytes: blob.size, ...displayDimensions(result.header) };
+    onMeasurements?.({ originals: [...originals] });
   }
 
   const emptyNativeLine = options.emptyNativeLine(
     ids.requestId,
     inputs.map(({ header }) => header.mime)
   );
+  onMeasurements?.({
+    originals,
+    originalLineBytes: nativeLineBytes(
+      emptyNativeLine,
+      originals.map(({ bytes }) => bytes)
+    ),
+  });
   let encoded = lineLimit - nativeLineBytes(emptyNativeLine, []);
   if (encoded < 4 * sources.length) throw new ImagePreparationError('limits');
 
@@ -175,12 +197,17 @@ async function prepareImages(
     encoded -= base64Bytes(output.size);
     residentBytes += (changed ? output.size : 0) + (response.result.preview?.blob.size ?? 0);
     outputs[index] = output;
+    const originalDimensions = displayDimensions(header);
     images[index] = {
       originalRef: source.ref,
-      original: { ...displayDimensions(header), bytes: blob.size, digest: originalDigest },
+      original: { ...originalDimensions, bytes: blob.size, digest: originalDigest },
       sent: { ...dimensions, bytes: output.size, digest: outputDigest, mime: header.mime },
       preview: preview ? { kind: 'thumbnail', value: preview } : { kind: 'icon', dimensions },
       changed,
+      orientationOnly:
+        header.orientation !== 1 &&
+        dimensions.width === originalDimensions.width &&
+        dimensions.height === originalDimensions.height,
       secureContext,
       plannedBytes,
       codecMs: perImage[index],
@@ -232,6 +259,7 @@ export function createImagePreparation(options: ImagePreparationOptions) {
         model: { ...options.model },
         sources: options.sources.map((source) => ({ ...source, ref: source.ref && { ...source.ref } })),
       };
+  const requestId = options.requestId ?? createRequestId();
   let pending: Promise<PreparedImages> | undefined;
   const cancelled = new ImagePreparationError('cancelled');
   signal.addEventListener(
@@ -254,8 +282,8 @@ export function createImagePreparation(options: ImagePreparationOptions) {
           snapshot = undefined;
           if (!active) throw cancelled;
           return prepareImages(active, signal, {
-            prepareId: createRequestId(),
-            requestId: createRequestId(),
+            prepareId: requestId,
+            requestId,
           });
         }).catch((error: unknown) => {
           if (signal.aborted) throw cancelled;

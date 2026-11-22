@@ -11,15 +11,27 @@ import { useTranslation } from 'react-i18next';
 import { useLatestRef } from '@/renderer/hooks/ui/useLatestRef';
 import {
   createRunningInputClient,
-  prepareRunningInputMessage,
+  resolveRunningInputReferences,
+  type RunningImageBatch,
+  type RunningImageState,
+  type RunningImageSubmission,
+  type RunningInputReceipt,
   type RunningInputReferences,
   type RunningInputMode,
   type RunningInputSnapshot,
 } from '@/renderer/services/runtime/RunningInput';
+import { createRequestId } from '@/renderer/services/runtime/RunningInput/transport';
 import { decideSend, type HostTurnState, type StopState } from '@/renderer/services/runtime/RunningInput/decideSend';
 import type { ComposerDraft } from '@/renderer/components/chat/SendBox';
 import { emitter } from '@/renderer/utils/emitter';
-import { buildRunningInputNotices, turnKey, type RunningInputChannel, type RunningInputNotice } from './notices';
+import {
+  buildRunningInputNotices,
+  phaseOf,
+  turnKey,
+  type RunningInputChannel,
+  type RunningInputNotice,
+  type RunningInputTurnPhase,
+} from './notices';
 
 type Session = {
   client: ReturnType<typeof createRunningInputClient>;
@@ -27,6 +39,8 @@ type Session = {
   stop: StopState;
   conversationId: string;
   disposed: boolean;
+  preparation?: AbortController;
+  imageDraft?: boolean;
 };
 
 /**
@@ -48,6 +62,29 @@ export type UseRunningInputOptions = {
   stopping: boolean;
   /** Sending is held elsewhere (session check, manual compaction). */
   paused: boolean;
+  /** Changes when the composer replaces or edits the input being prepared. */
+  draftVersion?: object;
+  /** A local model change can cancel preparation before the next ACP state read. */
+  modelVersion?: string;
+};
+
+type Submit = (message: string, references: RunningInputReferences, draft: ComposerDraft) => Promise<RunningInputRoute>;
+
+/** State consumed by the S-1b composer and its notices. All strings are wire values or i18n reason keys. */
+export type RunningImageController = {
+  modes: readonly RunningInputMode[];
+  state?: RunningImageState;
+  submission?: RunningImageSubmission;
+  receipts: readonly {
+    receipt: RunningInputReceipt & { pixels: RunningImageBatch };
+    phase: RunningInputTurnPhase;
+  }[];
+  /** Only queued receipts can expose a URL. Render icon + sent dimensions when absent. */
+  preview: (requestId: string, sha256: string) => string | undefined;
+  dismissSubmission: () => void;
+  cancelPreparation: () => void;
+  /** Call on a new explicit path-only click using the current composer draft and original refs. */
+  submitPaths: Submit;
 };
 
 export type RunningInputController = {
@@ -59,7 +96,8 @@ export type RunningInputController = {
   mode: RunningInputMode;
   setMode: (mode: RunningInputMode) => void;
   notices: RunningInputNotice[];
-  submit: (message: string, references: RunningInputReferences, draft: ComposerDraft) => Promise<RunningInputRoute>;
+  images: RunningImageController;
+  submit: Submit;
   /** Record a Stop so late acceptances for the stopped turn say so. */
   beginStop: () => (outcome: 'failed' | 'done') => void;
   dismiss: (requestIds?: readonly string[]) => void;
@@ -103,13 +141,15 @@ export function useRunningInput({
   refreshHost,
   stopping,
   paused,
+  draftVersion,
+  modelVersion,
 }: UseRunningInputOptions): RunningInputController {
   const { t } = useTranslation();
   const [session, setSession] = useState<Session | null>(null);
   const [lastReady, setLastReady] = useState<RunningInputChannel>();
   const [stoppedRequests, setStoppedRequests] = useState<ReadonlySet<string>>(NO_RECEIPTS);
   const [requestedMode, setMode] = useState<RunningInputMode>(DEFAULT_RUNNING_INPUT_MODE);
-  const preparing = useRef<Session | null>(null);
+  const submitting = useRef<Session | null>(null);
 
   useEffect(() => {
     if (!enabled) return;
@@ -117,6 +157,7 @@ export function useRunningInput({
     setSession(next);
     return () => {
       next.disposed = true;
+      next.preparation?.abort();
       next.client.dispose();
       setSession((current) => (current === next ? null : current));
       setLastReady(undefined);
@@ -124,7 +165,7 @@ export function useRunningInput({
     };
   }, [conversationId, enabled]);
 
-  const client = session?.client;
+  const client = session?.conversationId === conversationId ? session.client : undefined;
   const snapshot = useSyncExternalStore(client?.subscribe ?? subscribeNothing, client?.getSnapshot ?? readNothing);
   const { channel, receipts } = snapshot;
 
@@ -139,6 +180,38 @@ export function useRunningInput({
   useEffect(() => {
     void session?.client.refresh();
   }, [session, host, hostTurnId]);
+
+  const imageBinding = channel.status === 'ready' && channel.pixelModes?.length ? channel.bindingId : undefined;
+  const imageTurn = channel.status === 'ready' ? channel.turn.turnId : null;
+  useEffect(() => {
+    if (!client || !imageBinding) return;
+    let reading = false;
+    async function observe() {
+      if (reading) return;
+      reading = true;
+      try {
+        await client?.refreshImageState();
+      } finally {
+        reading = false;
+      }
+    }
+    void observe();
+    if (imageTurn === null) return;
+    const timer = setInterval(() => void observe(), 2_000);
+    return () => clearInterval(timer);
+  }, [client, imageBinding, imageTurn]);
+
+  useEffect(() => {
+    return () => session?.preparation?.abort();
+  }, [session, hostTurnId, paused]);
+
+  const cancelPreparation = useCallback(() => {
+    if (session?.imageDraft && !session.client.getSnapshot().sending) session.preparation?.abort();
+  }, [session]);
+
+  useEffect(() => {
+    return cancelPreparation;
+  }, [cancelPreparation, draftVersion, modelVersion]);
 
   useEffect(() => {
     if (!enabled || host !== 'unknown') return;
@@ -158,12 +231,15 @@ export function useRunningInput({
     stopping,
     paused,
     mode,
+    draftVersion,
+    modelVersion,
   });
 
   const beginStop = useCallback(() => {
     const { session: currentSession, known, hostTurnId } = latest.current;
     if (!currentSession) return () => {};
     const revision = ++currentSession.stopRevision;
+    currentSession.preparation?.abort();
     const { channel, receipts } = currentSession.client.getSnapshot();
     const active = channel.status === 'checking' ? known : channel.status === 'ready' ? channel : undefined;
     const key = active?.turn.active ? turnKey(active.bindingId, active.turn.turnId) : null;
@@ -194,15 +270,44 @@ export function useRunningInput({
     if (stopping && session && session.stop.status !== 'pending') beginStop()('done');
   }, [session, stopping, beginStop]);
 
-  const submit = useCallback(
-    async (message: string, references: RunningInputReferences, draft: ComposerDraft): Promise<RunningInputRoute> => {
+  const submitDraft = useCallback(
+    async (
+      message: string,
+      references: RunningInputReferences,
+      draft: ComposerDraft,
+      pathOnly: boolean
+    ): Promise<RunningInputRoute> => {
       const initial = latest.current;
       const currentSession = initial.session;
-      if (!currentSession) return 'kept';
+      if (!currentSession || currentSession.disposed || !initial.enabled) return 'kept';
+      if (submitting.current === currentSession) {
+        Message.info(t('acp.runningInput.previousSending'));
+        return 'kept';
+      }
+      // Take ownership before any discovery or reference I/O. The current composer may continue editing.
+      references = {
+        files: references.files.map((file) => ({ ...file })),
+        sessions: references.sessions.map((ref) => ({ ...ref })),
+      };
+      draft = { ...draft };
+      const clicked = initial.known;
+      let requestId: string;
+      try {
+        requestId = createRequestId();
+      } catch {
+        Message.warning(t('acp.runningInput.invalidText'));
+        return 'kept';
+      }
+      const controller = new AbortController();
+      currentSession.preparation = controller;
+      currentSession.imageDraft = !pathOnly && references.files.length > 0 && !!clicked?.pixelModes?.length;
+      submitting.current = currentSession;
       const { client: relay, stopRevision } = currentSession;
+      relay.dismissImageSubmission();
       const interrupted = () => {
         const current = latest.current;
         return (
+          controller.signal.aborted ||
           currentSession.disposed ||
           !current.enabled ||
           currentSession.conversationId !== current.conversationId ||
@@ -230,7 +335,7 @@ export function useRunningInput({
           turnKey: target ? turnKey(target.bindingId, target.turnId) : null,
           stop: currentSession.stop,
           interrupted: interrupted() || hostTurnId !== initial.hostTurnId,
-          inFlight: sending || preparing.current === currentSession,
+          inFlight: sending,
           refreshed,
           negotiated: observation.negotiated,
           draft: { ...draft, files: references.files.length > 0, sessions: references.sessions.length > 0 },
@@ -238,61 +343,115 @@ export function useRunningInput({
         });
       };
 
-      let decision = decide(false);
-      if (decision.reason === 'refresh-host') {
-        const recovered = await initial.refreshHost();
-        if (recovered.host !== 'unknown') await relay.refresh();
-        decision = decide(true, latest.current.host === 'unknown' ? recovered : latest.current);
-      } else if (decision.reason === 'refresh') {
-        await relay.refresh();
-        decision = decide(true);
-      }
-      if (decision.route === 'ordinary') return 'ordinary';
-      if (decision.route === 'keep') {
-        if (decision.reason === 'in-flight') Message.info(t('acp.runningInput.previousSending'));
-        else if (decision.reason !== 'interrupted') Message.warning(t('conversation.commandQueue.midturnBlocked'));
-        return 'kept';
-      }
-
-      const target = activeTarget(relay.getSnapshot());
-      if (!target) return 'kept';
-      let prepared = { text: message, hasImage: false };
-      if (decision.reason === 'references') {
-        preparing.current = currentSession;
-        try {
-          prepared = await prepareRunningInputMessage(conversationId, message, references);
+      try {
+        let decision = decide(false);
+        if (decision.reason === 'refresh-host') {
+          const recovered = await initial.refreshHost();
+          if (recovered.host !== 'unknown') await relay.refresh();
+          decision = decide(true, latest.current.host === 'unknown' ? recovered : latest.current);
+        } else if (decision.reason === 'refresh') {
           await relay.refresh();
-        } catch {
-          Message.warning(t('acp.runningInput.referencesUnverified'));
-          return 'kept';
-        } finally {
-          if (preparing.current === currentSession) preparing.current = null;
+          decision = decide(true);
         }
-        const active = activeTarget(relay.getSnapshot());
-        if (
-          active?.bindingId !== target.bindingId ||
-          active.turnId !== target.turnId ||
-          decide(true).route !== decision.route
-        ) {
-          Message.warning(t('acp.runningInput.preparationChanged'));
+        if (decision.route === 'ordinary') return pathOnly ? 'kept' : 'ordinary';
+        if (decision.route === 'keep') {
+          if (decision.reason === 'in-flight') Message.info(t('acp.runningInput.previousSending'));
+          else if (decision.reason !== 'interrupted') Message.warning(t('conversation.commandQueue.midturnBlocked'));
           return 'kept';
         }
+
+        const target = activeTarget(relay.getSnapshot());
+        if (!target) return 'kept';
+        const chosen = decision.route === 'relay-steer' ? 'steer' : 'follow-up';
+        let prepared = { text: message, hasImage: false };
+        if (decision.reason === 'references') {
+          let resolved: Awaited<ReturnType<typeof resolveRunningInputReferences>>;
+          try {
+            resolved = await resolveRunningInputReferences(conversationId, message, references);
+            await relay.refresh();
+          } catch {
+            Message.warning(t('acp.runningInput.referencesUnverified'));
+            return 'kept';
+          }
+          const active = activeTarget(relay.getSnapshot());
+          if (
+            active?.bindingId !== target.bindingId ||
+            active.turnId !== target.turnId ||
+            decide(true).route !== decision.route
+          ) {
+            Message.warning(t('acp.runningInput.preparationChanged'));
+            return 'kept';
+          }
+          const images = resolved.files.filter(({ kind }) => kind !== 'file');
+          const currentChannel = relay.getSnapshot().channel;
+          const pixelContract =
+            !!clicked?.pixelModes?.length || (currentChannel.status === 'ready' && !!currentChannel.pixelModes?.length);
+          if (!pathOnly && images.length > 0 && pixelContract) {
+            if (
+              !clicked?.turn.active ||
+              clicked.bindingId !== target.bindingId ||
+              clicked.turn.turnId !== target.turnId ||
+              initial.mode !== chosen ||
+              latest.current.draftVersion !== initial.draftVersion ||
+              latest.current.modelVersion !== initial.modelVersion
+            ) {
+              Message.warning(t('acp.runningInput.preparationChanged'));
+              return 'kept';
+            }
+            const result = await relay.submitImages({
+              ...target,
+              mode: chosen,
+              requestId,
+              message: resolved.format(({ kind }) => kind === 'file'),
+              sources: images.map(({ ref }) => ({ ref })),
+              unsupportedFormat: images.some(({ kind }) => kind === 'unsupported-image'),
+              signal: controller.signal,
+              isCurrent: () =>
+                !interrupted() &&
+                (relay.getSnapshot().sending ||
+                  (latest.current.draftVersion === initial.draftVersion &&
+                    latest.current.modelVersion === initial.modelVersion)),
+            });
+            // The S-1b visual pass renders blocked/preparing details and path-only actions from images.
+            return result.status === 'sent' &&
+              result.receipt.status === 'queued' &&
+              !result.preserveDraft &&
+              !interrupted()
+              ? 'sent'
+              : 'kept';
+          }
+          prepared = { text: resolved.format(), hasImage: images.length > 0 };
+        }
+        const result = await relay.send(chosen, target, prepared.text, requestId);
+        if (result.status === 'skipped') {
+          if (result.reason === 'invalid-text') Message.warning(t('acp.runningInput.invalidText'));
+          else if (result.reason === 'too-large') Message.warning(t('acp.runningInput.inputTooLarge'));
+          else if (result.reason === 'busy') Message.info(t('acp.runningInput.previousSending'));
+          else Message.warning(t('conversation.commandQueue.midturnBlocked'));
+          return 'kept';
+        }
+        if (result.status === 'blocked') return 'kept';
+        if (result.receipt.status !== 'queued') void relay.refresh();
+        else if (prepared.hasImage) Message.info(t('acp.runningInput.imagesAsPaths'));
+        return result.receipt.status === 'queued' && !result.preserveDraft && !interrupted() ? 'sent' : 'kept';
+      } finally {
+        if (submitting.current === currentSession) submitting.current = null;
+        if (currentSession.preparation === controller) {
+          currentSession.preparation = undefined;
+          currentSession.imageDraft = false;
+        }
       }
-      const chosen = decision.route === 'relay-steer' ? 'steer' : 'follow-up';
-      const result = await relay.send(chosen, target, prepared.text);
-      if (result.status === 'skipped') {
-        if (result.reason === 'invalid-text') Message.warning(t('acp.runningInput.invalidText'));
-        else if (result.reason === 'too-large') Message.warning(t('acp.runningInput.inputTooLarge'));
-        else if (result.reason === 'busy') Message.info(t('acp.runningInput.previousSending'));
-        else Message.warning(t('conversation.commandQueue.midturnBlocked'));
-        return 'kept';
-      }
-      if (result.receipt.status !== 'queued') void relay.refresh();
-      else if (prepared.hasImage) Message.info(t('acp.runningInput.imagesAsPaths'));
-      // A receipt can reach the original turn while the host is still cancelling it.
-      return result.receipt.status === 'queued' && !result.preserveDraft && !interrupted() ? 'sent' : 'kept';
     },
     [conversationId, latest, t]
+  );
+
+  const submit: Submit = useCallback(
+    (message, references, draft) => submitDraft(message, references, draft, false),
+    [submitDraft]
+  );
+  const submitPaths: Submit = useCallback(
+    (message, references, draft) => submitDraft(message, references, draft, true),
+    [submitDraft]
   );
 
   const dismiss = useCallback(
@@ -337,6 +496,20 @@ export function useRunningInput({
     mode,
     setMode,
     notices,
+    images: {
+      modes: known?.pixelModes ?? [],
+      state: snapshot.imageState,
+      submission: snapshot.imageSubmission,
+      receipts: receipts.flatMap((receipt) =>
+        receipt.pixels
+          ? [{ receipt: { ...receipt, pixels: receipt.pixels }, phase: phaseOf(receipt, known, stoppedRequests) }]
+          : []
+      ),
+      preview: client?.getImagePreview ?? (() => undefined),
+      dismissSubmission: client?.dismissImageSubmission ?? (() => {}),
+      cancelPreparation,
+      submitPaths,
+    },
     submit,
     beginStop,
     dismiss,

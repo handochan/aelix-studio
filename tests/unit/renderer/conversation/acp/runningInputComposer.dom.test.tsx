@@ -40,6 +40,8 @@ const STATE = PREFIX + 'input/state';
 const STEER = PREFIX + 'input/steer';
 const FOLLOW_UP = PREFIX + 'input/follow-up';
 const LOOKUP = PREFIX + 'requests/lookup';
+const IMAGE_STATE = PREFIX + 'input/image-state';
+const STEER_IMAGES = PREFIX + 'input/steer-images';
 const ALL_METHODS = [STATE, STEER, FOLLOW_UP, LOOKUP];
 const TEXT_DRAFT = { slashCommand: false, hasQuote: false };
 const NO_REFERENCES: RunningInputReferences = { files: [], sessions: [] };
@@ -537,6 +539,78 @@ describe('running input in the composer', () => {
     expect(await submit('use the advertised mode')).toBe('sent');
     expect(writes()).toEqual([FOLLOW_UP]);
   });
+
+  it('waits for explicit path-only input on a text-only model and resolves its original ref', async () => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(({ method, payload }) =>
+      method === IMAGE_STATE
+        ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: 'turn-1' })
+        : accepted(payload.turnId)
+    );
+    await mount();
+    expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+    expect(controller.images.submission).toMatchObject({
+      status: 'blocked',
+      reason: 'model-text-only',
+      allowPathOnly: true,
+    });
+    expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+
+    await act(async () => {
+      expect(await controller.images.submitPaths('', IMAGE_REFERENCE, TEXT_DRAFT)).toBe('sent');
+    });
+    expect(server.metadata.mock.calls.map(([ref]) => ref)).toEqual([
+      IMAGE_REFERENCE.files[0],
+      IMAGE_REFERENCE.files[0],
+    ]);
+    expect(server.write.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: STEER,
+      payload: { message: expect.stringContaining(CONFIRMED_IMAGE), turnId: 'turn-1' },
+    });
+  });
+
+  it.each(['cancel', 'replace-draft'] as const)(
+    'aborts image reference preparation on %s before handoff',
+    async (action) => {
+      server.discovery = () =>
+        success({
+          version: 1,
+          bindingId: 'binding-1',
+          hostBytes: true,
+          requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+        });
+      server.write.mockImplementation(() =>
+        result({
+          status: 'unavailable',
+          available: false,
+          reason: 'model-unverified',
+          turnId: 'turn-1',
+        })
+      );
+      const firstDraft = {};
+      const view = await mount({ draftVersion: firstDraft });
+      const metadata = hold();
+      server.metadata.mockReturnValueOnce(metadata.pending);
+      let submission: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        submission = controller.submit('snapshot', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
+      if (action === 'cancel') act(() => controller.images.cancelPreparation());
+      else view.rerender(<Harness draftVersion={{}} />);
+      await act(async () => {
+        metadata.reply(success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
+        expect(await submission).toBe('kept');
+      });
+      expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+    }
+  );
 
   it.each(referencesFixture)('matches the host text format for $name', async (fixture) => {
     for (const path of fixture.paths) {

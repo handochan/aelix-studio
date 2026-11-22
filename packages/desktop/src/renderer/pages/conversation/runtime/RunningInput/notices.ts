@@ -36,7 +36,7 @@ export type RunningInputNotice =
 /** Identify a turn on its binding. A new binding never continues an old turn. */
 export const turnKey = (bindingId: string, turnId: string): string => JSON.stringify([bindingId, turnId]);
 
-function phaseOf(
+export function phaseOf(
   receipt: RunningInputReceipt,
   channel: RunningInputChannel | undefined,
   stoppedRequests: ReadonlySet<string>
@@ -48,7 +48,11 @@ function phaseOf(
 }
 
 function rejectReason(receipt: Extract<RunningInputReceipt, { status: 'rejected' }>): RunningInputRejectReason {
-  if ('reason' in receipt) return receipt.reason;
+  if ('reason' in receipt) {
+    if (receipt.reason === 'stale-turn' || receipt.reason === 'dedup-capacity') return receipt.reason;
+    if (receipt.reason === 'native-line-limit' || receipt.reason === 'image-bytes') return 'too-large';
+    return 'failed';
+  }
   const { status, code } = receipt.failure;
   if (status === 429 || code === 'EXT_RATE_LIMITED') return 'rate-limited';
   if (status === 413 || code === 'EXT_TOO_LARGE') return 'too-large';
