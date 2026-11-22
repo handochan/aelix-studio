@@ -246,18 +246,13 @@ export function useRunningInput({
     const active = channel.status === 'checking' ? known : channel.status === 'ready' ? channel : undefined;
     const key = active?.turn.active ? turnKey(active.bindingId, active.turn.turnId) : null;
     currentSession.stop = { status: 'pending', turnKey: key, hostTurnId };
-    // Attribute the Stop to submissions already made. A new send after a failed Stop
-    // can reach the same turn without inheriting the old submission's notice.
+    // Mark only existing receipts on the stopped binding and turn. A fresh
+    // send after a failed Stop gets its own notice.
     setStoppedRequests(
       (previous) =>
         new Set(
           receipts
-            .filter(
-              (receipt) =>
-                previous.has(receipt.requestId) ||
-                receipt.status === 'pending' ||
-                turnKey(receipt.bindingId, receipt.turnId) === key
-            )
+            .filter((receipt) => previous.has(receipt.requestId) || turnKey(receipt.bindingId, receipt.turnId) === key)
             .map((receipt) => receipt.requestId)
         )
     );
