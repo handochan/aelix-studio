@@ -70,8 +70,8 @@ export const useInitialMessage = (
   }, [conversation_id, acpStatus, onSend]);
 
   useEffect(() => {
-    processInitialMessage().catch((err) => {
-      console.error('Failed to process initial message:', err);
+    processInitialMessage().catch(() => {
+      console.error('[useInitialMessage] Failed to process initial message');
     });
   }, [processInitialMessage]);
 
@@ -81,8 +81,8 @@ export const useInitialMessage = (
     retry: () => {
       processedRef.current = false;
       setError(null);
-      processInitialMessage().catch((error) => {
-        console.error('Failed to retry initial message:', error);
+      processInitialMessage().catch(() => {
+        console.error('[useInitialMessage] Failed to retry initial message');
       });
     },
   };

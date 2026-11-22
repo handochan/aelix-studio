@@ -1,34 +1,7 @@
-import { fetchFromDesktopOrBrowser } from '../adapter/desktopBackendFetch';
-import { getBaseUrl } from '../adapter/httpBridge';
+import { httpRequest } from '../adapter/httpBridge';
 import type { ConfigKey, ConfigKeyMap } from './configKeys';
 
 type Subscriber = (value: unknown) => void;
-
-async function fetchJson<T>(method: string, path: string, body?: unknown): Promise<T> {
-  const url = `${getBaseUrl()}${path}`;
-  const headers: Record<string, string> = {};
-  if (body !== undefined) {
-    headers['Content-Type'] = 'application/json';
-  }
-  const response = await fetchFromDesktopOrBrowser(url, {
-    method,
-    headers,
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-  });
-  if (!response.ok) {
-    const errorBody = await response.text();
-    throw new Error(`ConfigService ${method} ${path} failed (${response.status}): ${errorBody}`);
-  }
-  const contentType = response.headers.get('Content-Type');
-  if (!contentType?.includes('application/json')) {
-    return undefined as T;
-  }
-  const json = await response.json();
-  if (json && typeof json === 'object' && 'data' in json) {
-    return json.data as T;
-  }
-  return json as T;
-}
 
 class ConfigServiceImpl {
   private cache = new Map<string, unknown>();
@@ -42,7 +15,9 @@ class ConfigServiceImpl {
   initialize(): Promise<void> {
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
-      const data = await fetchJson<Record<string, unknown>>('GET', '/api/settings/client');
+      const data = await httpRequest<Record<string, unknown>>('GET', '/api/settings/client', undefined, {
+        refreshAuth: false,
+      });
       this.cache.clear();
       if (data) {
         for (const [key, value] of Object.entries(data)) {
@@ -69,7 +44,7 @@ class ConfigServiceImpl {
   async set<K extends ConfigKey>(key: K, value: ConfigKeyMap[K]): Promise<void> {
     this.cache.set(key, value);
     this.notify(key, value);
-    await fetchJson<void>('PUT', '/api/settings/client', { [key]: value });
+    await httpRequest<void>('PUT', '/api/settings/client', { [key]: value }, { refreshAuth: false });
   }
 
   setLocal<K extends ConfigKey>(key: K, value: ConfigKeyMap[K]): void {
@@ -80,7 +55,7 @@ class ConfigServiceImpl {
   async remove(key: ConfigKey): Promise<void> {
     this.cache.delete(key);
     this.notify(key, undefined);
-    await fetchJson<void>('PUT', '/api/settings/client', { [key]: null });
+    await httpRequest<void>('PUT', '/api/settings/client', { [key]: null }, { refreshAuth: false });
   }
 
   async setBatch(entries: Partial<{ [K in ConfigKey]: ConfigKeyMap[K] }>): Promise<void> {
@@ -88,7 +63,7 @@ class ConfigServiceImpl {
       this.cache.set(key, value);
       this.notify(key as ConfigKey, value);
     }
-    await fetchJson<void>('PUT', '/api/settings/client', entries);
+    await httpRequest<void>('PUT', '/api/settings/client', entries, { refreshAuth: false });
   }
 
   subscribe(key: ConfigKey, callback: Subscriber): () => void {

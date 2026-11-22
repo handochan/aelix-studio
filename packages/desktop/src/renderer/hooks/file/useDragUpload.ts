@@ -95,8 +95,8 @@ export const useDragUpload = ({ supportedExts = [], onFilesAdded, conversation_i
             onFilesAdded(processedFiles);
           }
         }
-      } catch (err) {
-        console.error('Failed to process dropped files:', err);
+      } catch {
+        console.error('Failed to process dropped files');
         Message.error(t('conversation.workspace.dragFailed', 'Failed to process dropped files'));
       }
     },

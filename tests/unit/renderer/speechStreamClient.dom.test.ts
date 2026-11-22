@@ -221,21 +221,27 @@ describe('server message dispatch', () => {
     expect(callbacks.onError).not.toHaveBeenCalled();
   });
 
-  it('ignores unknown/unparseable frames with a warning and keeps working', () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const callbacks = makeCallbacks();
-    startSpeechStream({ callbacks, createSocket });
-    const sock = lastSocket();
-    sock.open();
-    sock.message({ type: 'ready' });
-    sock.raw('not json at all');
-    sock.message({ type: 'mystery' });
-    sock.message({ type: 'partial', text: 'still alive' });
+  it.each(['{"type":"unknown","text":"private transcript"}', 'not JSON: private transcript'])(
+    'warns with the length of an unrecognized frame and keeps working',
+    (frame) => {
+      const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const callbacks = makeCallbacks();
+      startSpeechStream({ callbacks, createSocket });
+      const sock = lastSocket();
+      sock.open();
+      sock.message({ type: 'ready' });
+      sock.raw(frame);
+      sock.message({ type: 'mystery' });
+      sock.message({ type: 'partial', text: 'still alive' });
 
-    expect(warn).toHaveBeenCalled();
-    expect(callbacks.onPartial).toHaveBeenCalledWith('still alive');
-    expect(callbacks.onError).not.toHaveBeenCalled();
-  });
+      expect(warn).toHaveBeenCalledExactlyOnceWith(
+        '[SpeechStreamClient] ignoring unrecognized server frame',
+        frame.length
+      );
+      expect(callbacks.onPartial).toHaveBeenCalledWith('still alive');
+      expect(callbacks.onError).not.toHaveBeenCalled();
+    }
+  );
 });
 
 // ---------------------------------------------------------------------------

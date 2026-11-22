@@ -11,4 +11,17 @@ describe('telemetry-free release preparation', () => {
       );
     }
   });
+
+  it('does not start crash reporting or collect console breadcrumbs in desktop entry points', () => {
+    for (const name of [
+      'packages/desktop/electron.vite.config.ts',
+      'packages/desktop/src/index.ts',
+      'packages/desktop/src/preload/main.ts',
+      'packages/desktop/src/renderer/main.tsx',
+    ]) {
+      expect(readFileSync(path.join(root, name), 'utf8'), name).not.toMatch(
+        /@sentry\/|\bbeforeBreadcrumb\b|\bcrashReporter\b/
+      );
+    }
+  });
 });

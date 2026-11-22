@@ -273,7 +273,7 @@ const AcpSendBox: React.FC<{
           Message.success(t('agentMode.switchSuccess'));
         }
       } catch (error) {
-        console.error('[AcpSendBox] Failed to switch mode via sheet:', error);
+        console.error('[AcpSendBox] Failed to switch mode via sheet');
         Message.error(t(configErrorMessageKey(error)));
       }
     },

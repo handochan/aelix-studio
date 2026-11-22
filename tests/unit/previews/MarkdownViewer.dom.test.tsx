@@ -270,6 +270,21 @@ describe('MarkdownViewer', () => {
     });
     expect(previewMocks.openPreview).not.toHaveBeenCalled();
   });
+
+  it('logs a fixed event when access to a Markdown image is denied', async () => {
+    const path = '/workspace/private-image-denied.png';
+    vi.mocked(ipcBridge.fs.getImageBase64.invoke).mockRejectedValue(new Error(`Access denied: ${path}`));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    try {
+      render(<MarkdownViewer content={`![image](${path})`} file_path='/workspace/test.md' />);
+      await waitFor(() =>
+        expect(error).toHaveBeenCalledExactlyOnceWith('[MarkdownPreview] Failed to load local image')
+      );
+      expect(ipcBridge.fs.getImageBase64.invoke).toHaveBeenCalledWith(expect.objectContaining({ path }));
+    } finally {
+      error.mockRestore();
+    }
+  });
 });
 
 describe('remote image host boundary', () => {

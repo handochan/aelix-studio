@@ -7,7 +7,7 @@
 import type { IChannelPairingRequest, IChannelPluginStatus, IChannelUser } from '@/common/types/channel/channel';
 import { assistants, channel } from '@/common/adapter/ipcBridge';
 import { isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
-import { resolveLocaleKey } from '@/common/utils';
+import { parseError, resolveLocaleKey } from '@/common/utils';
 import { openExternalUrl } from '@/renderer/utils/platform';
 import { resolveAssistantName } from '@/renderer/utils/model/assistantDisplay';
 import { formatDateTime } from '@/renderer/services/i18n/format';
@@ -248,7 +248,7 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
     } catch (error: unknown) {
       console.error('[DingTalkConfig] Auto-enable failed:', error);
       Message.error(
-        (error instanceof Error ? error.message : String(error)) ||
+        (error instanceof Error ? parseError(error) : String(error)) ||
           t('settings.dingtalk.enableFailed', 'Failed to enable DingTalk plugin')
       );
     }
@@ -267,7 +267,7 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
       await loadPendingPairings();
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -278,7 +278,7 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
       Message.info(t('settings.assistant.pairingRejected', 'Pairing rejected'));
       await loadPendingPairings();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 
@@ -289,7 +289,7 @@ const DingTalkConfigForm: React.FC<DingTalkConfigFormProps> = ({ pluginStatus, m
       Message.success(t('settings.assistant.userRevoked', 'User access revoked'));
       await loadAuthorizedUsers();
     } catch (error: unknown) {
-      Message.error(error instanceof Error ? error.message : String(error));
+      Message.error(error instanceof Error ? parseError(error) : String(error));
     }
   };
 

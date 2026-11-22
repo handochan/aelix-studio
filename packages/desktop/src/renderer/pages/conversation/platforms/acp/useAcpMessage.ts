@@ -147,13 +147,7 @@ export const useAcpMessage = (
   const [hasThinkingMessage, setHasThinkingMessage] = useState(false);
   const activeThinkingRef = useRef<{ msgId: string; startedAt: number } | null>(null);
 
-  // Track request trace state for displaying complete request lifecycle
-  const requestTraceRef = useRef<{
-    startTime: number;
-    backend: string;
-    model_id: string;
-    session_mode?: string;
-  } | null>(null);
+  const requestStartedAtRef = useRef<number | null>(null);
 
   // Throttle thought updates to reduce render frequency
   const thoughtThrottleRef = useRef<{
@@ -382,14 +376,9 @@ export const useAcpMessage = (
             activeThinkingRef.current = null;
             setHasThinkingMessage(false);
             // Log request completion
-            if (requestTraceRef.current) {
-              const duration = Date.now() - requestTraceRef.current.startTime;
-              console.log(
-                `%c[RequestTrace]%c FINISH | ${requestTraceRef.current.backend} → ${requestTraceRef.current.model_id} | ${duration}ms | ${new Date().toISOString()}`,
-                'color: #52c41a; font-weight: bold',
-                'color: inherit'
-              );
-              requestTraceRef.current = null;
+            if (requestStartedAtRef.current !== null) {
+              console.log('[RequestTrace] FINISH', { durationMs: Date.now() - requestStartedAtRef.current });
+              requestStartedAtRef.current = null;
             }
           }
           break;
@@ -544,18 +533,8 @@ export const useAcpMessage = (
         case 'request_trace':
           {
             const trace = message.data as Record<string, unknown>;
-            requestTraceRef.current = {
-              startTime: Number(trace.timestamp) || Date.now(),
-              backend: String(trace.backend || 'unknown'),
-              model_id: String(trace.model_id || 'unknown'),
-              session_mode: trace.session_mode as string | undefined,
-            };
-            console.log(
-              `%c[RequestTrace]%c START | ${trace.backend} → ${trace.model_id} | ${new Date().toISOString()}`,
-              'color: #1890ff; font-weight: bold',
-              'color: inherit',
-              trace
-            );
+            requestStartedAtRef.current = Number(trace.timestamp) || Date.now();
+            console.log('[RequestTrace] START');
           }
           break;
         case 'error':
@@ -570,15 +549,9 @@ export const useAcpMessage = (
           activeThinkingRef.current = null;
           mergeLiveMessage(transformedMessage);
           // Log request error
-          if (requestTraceRef.current) {
-            const duration = Date.now() - requestTraceRef.current.startTime;
-            console.log(
-              `%c[RequestTrace]%c ERROR | ${requestTraceRef.current.backend} → ${requestTraceRef.current.model_id} | ${duration}ms | ${new Date().toISOString()}`,
-              'color: #ff4d4f; font-weight: bold',
-              'color: inherit',
-              message.data
-            );
-            requestTraceRef.current = null;
+          if (requestStartedAtRef.current !== null) {
+            console.log('[RequestTrace] ERROR', { durationMs: Date.now() - requestStartedAtRef.current });
+            requestStartedAtRef.current = null;
           }
           break;
         default:
@@ -695,7 +668,7 @@ export const useAcpMessage = (
         setHasHydratedRunningState(true);
 
         if (error instanceof TypeError && error.message.includes('Failed to fetch')) {
-          console.warn('[useAcpMessage] Failed to hydrate conversation state:', error);
+          console.warn('[useAcpMessage] Failed to hydrate conversation state');
           return;
         }
 

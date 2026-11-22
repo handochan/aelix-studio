@@ -29,19 +29,34 @@ export type RpcErrorShape = {
   transport?: boolean;
 };
 
-/** A JSON-RPC error surfaced to a request caller. */
+const rpcErrorResponses = new WeakMap<RpcError, RpcErrorShape>();
+
+/** A JSON-RPC error with explicit accessors for server-controlled details. */
 export class RpcError extends Error {
-  readonly code: number;
-  readonly data?: unknown;
   /** See {@link RpcErrorShape.transport}. False for any server-sent error. */
   readonly transport: boolean;
 
   constructor(shape: RpcErrorShape) {
-    super(shape.message);
+    super('Monitor request failed');
     this.name = 'RpcError';
-    this.code = shape.code;
-    this.data = shape.data;
+    rpcErrorResponses.set(this, { code: shape.code, message: shape.message, data: shape.data });
     this.transport = shape.transport === true;
+  }
+
+  get code(): number {
+    return rpcErrorResponses.get(this)!.code;
+  }
+
+  get backendMessage(): string {
+    return rpcErrorResponses.get(this)?.message ?? '';
+  }
+
+  get data(): unknown {
+    return rpcErrorResponses.get(this)?.data;
+  }
+
+  [Symbol.for('nodejs.util.inspect.custom')](): string {
+    return this.stack ?? this.toString();
   }
 }
 
@@ -95,31 +110,23 @@ type MaybeFrame = {
   error?: RpcErrorShape;
 };
 
-// ── dev debug logging (metadata only — never file contents) ─────────────────
+const NOTIFICATION_METHODS = new Set([
+  'fs/snapshot',
+  'fs/delta',
+  'fs/searchMatch',
+  'scm/statusChanged',
+  'scm/repositoriesChanged',
+]);
 
-/** `pe_id:relative_path` identity string for a resource ref, for debug logs. */
-const refStr = (r: unknown): string | undefined => {
-  const ref = r as { pe_id?: string; relative_path?: string } | undefined;
-  return ref?.pe_id !== undefined ? `${ref.pe_id}:${ref.relative_path ?? ''}` : undefined;
-};
-
-/** Safe metadata for an outbound frame: identities + counts, no content bodies. */
+/** Metadata for outbound frames. Keep resource identities and contents out of logs. */
 function outboundMeta(method: string, params: unknown): unknown {
   const p = params as Record<string, unknown> | undefined;
   if (!p) return undefined;
   switch (method) {
     case 'fs/subscribe':
+    case 'fs/remount':
     case 'fs/unsubscribe':
       return { targets: Array.isArray(p.targets) ? p.targets.length : 0 };
-    case 'fs/read':
-    case 'fs/write':
-      return { file: refStr(p.file) }; // NB: never log p.content
-    case 'fs/mkdir':
-      return { dir: refStr(p.dir) };
-    case 'fs/remove':
-      return { target: refStr(p.target) };
-    case 'fs/rename':
-      return { from: refStr(p.from), to: refStr(p.to) };
     case 'fs/search':
       return {
         roots: Array.isArray(p.roots) ? p.roots.length : 0,
@@ -135,11 +142,11 @@ function outboundMeta(method: string, params: unknown): unknown {
   }
 }
 
-/** Safe metadata for an inbound notification: target + entry/change counts. */
+/** Entry and change counts for an inbound notification. */
 function notifMeta(params: unknown): unknown {
-  const p = params as { target?: unknown; entries?: unknown[]; changes?: unknown[] } | undefined;
+  const p = params as { entries?: unknown[]; changes?: unknown[] } | undefined;
   if (!p) return undefined;
-  const meta: Record<string, unknown> = { target: refStr(p.target) };
+  const meta: Record<string, number> = {};
   if (Array.isArray(p.entries)) meta.entries = p.entries.length;
   if (Array.isArray(p.changes)) meta.changes = p.changes.length;
   return meta;
@@ -238,12 +245,12 @@ export class MonitorClient {
 
     // Response: carries a numeric id + result/error → settle the pending request.
     if (typeof frame.id === 'number' && ('result' in frame || 'error' in frame)) {
-      console.debug('[monitor] ← response', `#${frame.id}`, frame.error ? `error ${frame.error.code}` : 'ok');
+      console.debug('[monitor] ← response', `#${frame.id}`, frame.error ? 'error' : 'ok');
       const entry = this.pending.get(frame.id);
       if (!entry) return; // unknown/duplicate id → ignore
       this.pending.delete(frame.id);
       if (frame.error) {
-        entry.reject(new RpcError(frame.error));
+        entry.reject(new RpcError({ ...frame.error, transport: false }));
       } else {
         entry.resolve(frame.result);
       }
@@ -254,7 +261,12 @@ export class MonitorClient {
     // carries both id and method is not part of this protocol; treat method as
     // the discriminator here.
     if (typeof frame.method === 'string') {
-      console.debug('[monitor] ← notify', frame.method, notifMeta(frame.params));
+      const { method } = frame;
+      console.debug(
+        '[monitor] ← notify',
+        NOTIFICATION_METHODS.has(method) ? method : 'unknown',
+        notifMeta(frame.params)
+      );
       this.onNotification(frame.method, frame.params);
       return;
     }

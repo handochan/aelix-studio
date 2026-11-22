@@ -428,7 +428,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
           <div
             className='px-12px py-6px text-13px text-t-primary hover:bg-bg-2 cursor-pointer transition-colors'
             onClick={() => {
-              console.log('[HTMLPreview] Element info:', contextMenu.element);
+              console.log('[HTMLPreview] Element selected', contextMenu.element.html.length);
               messageApi.info(t('preview.html.printedToConsole'));
               setContextMenu(null);
             }}

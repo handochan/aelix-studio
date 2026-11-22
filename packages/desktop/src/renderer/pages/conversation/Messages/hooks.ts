@@ -78,12 +78,7 @@ export function logDroppedToolCallWithoutCallId(message: TMessage | undefined): 
   if (!message) return false;
   if (message.type !== 'tool_call' || message.content?.call_id) return false;
 
-  console.warn('[tool-call] dropped tool_call without call_id', {
-    conversation_id: message.conversation_id,
-    msg_id: message.msg_id,
-    name: message.content?.name,
-    status: message.content?.status,
-  });
+  console.warn('[tool-call] dropped tool_call without call_id');
   return true;
 }
 
@@ -219,10 +214,6 @@ export function composeMessageWithIndex(
     const status = (message.content as { status?: string } | undefined)?.status;
     if (status === 'completed' || status === 'error' || status === 'canceled') {
       console.warn('[tool-call] terminal frame found no card to settle; appending a new one', {
-        conversation_id: message.conversation_id,
-        msg_id: message.msg_id,
-        call_id: message.content.call_id,
-        status,
         indexed_call_ids: index.call_idIndex.size,
         list_len: list.length,
       });
@@ -881,8 +872,8 @@ export const useLoadPreviousMessagePage = (conversationId?: string) => {
         isLoadingBefore: false,
       }));
       return true;
-    } catch (error) {
-      console.error('[useLoadPreviousMessagePage] Failed to load previous messages:', error);
+    } catch {
+      console.error('[useLoadPreviousMessagePage] Failed to load previous messages');
       setPagination((current) => ({ ...current, isLoadingBefore: false }));
       return false;
     }
@@ -920,8 +911,8 @@ export const useLoadAnchorMessageWindow = (conversationId?: string) => {
           isLoadingAnchor: false,
         });
         return true;
-      } catch (error) {
-        console.error('[useLoadAnchorMessageWindow] Failed to load anchor messages:', error);
+      } catch {
+        console.error('[useLoadAnchorMessageWindow] Failed to load anchor messages');
         setPagination((current) => ({ ...current, isLoadingAnchor: false }));
         return false;
       }
@@ -970,8 +961,8 @@ export const useMessageLstCache = (key: string) => {
     setLoading(true);
     setPagination({ ...EMPTY_MESSAGE_PAGINATION_STATE });
     void loadMessages()
-      .catch((error) => {
-        console.error('[useMessageLstCache] Failed to load messages from database:', error);
+      .catch(() => {
+        console.error('[useMessageLstCache] Failed to load messages from database');
       })
       .finally(() => {
         if (!cancelled) {
@@ -1061,8 +1052,8 @@ export const useMessageLstCache = (key: string) => {
       );
 
       if (hasPendingDelivery) {
-        void loadMessages().catch((error) => {
-          console.error('[useMessageLstCache] Failed to reconcile pending messages after turn completion:', error);
+        void loadMessages().catch(() => {
+          console.error('[useMessageLstCache] Failed to reconcile pending messages after turn completion');
         });
       }
     });

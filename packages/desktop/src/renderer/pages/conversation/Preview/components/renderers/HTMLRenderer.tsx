@@ -34,7 +34,7 @@ interface HTMLRendererProps {
 // Electron webview 元素的类型定义 / Type definition for Electron webview element
 interface ElectronWebView extends HTMLElement {
   src: string;
-  executeJavaScript: (code: string) => Promise<void>;
+  executeJavaScript: (code: string) => Promise<unknown>;
 }
 
 type HtmlPreviewSourceKind = 'file' | 'data';
@@ -51,24 +51,9 @@ function logHtmlPreview(level: HtmlPreviewLogLevel, message: string, data?: unkn
       message,
       data,
     })
-    .catch((error: unknown) => {
-      console.warn('[HTMLRenderer] Failed to write renderer log:', error);
+    .catch(() => {
+      console.warn('[HTMLRenderer] Failed to write renderer log');
     });
-}
-
-function getFileNameFromPath(filePath?: string): string | undefined {
-  return filePath?.split(/[\\/]/).pop() || undefined;
-}
-
-function summarizePreviewUrl(url?: string): string | undefined {
-  if (!url) return undefined;
-  if (url.startsWith('data:')) {
-    return `data:text/html (${url.length} chars)`;
-  }
-  if (url.startsWith('file://')) {
-    return `file://${getFileNameFromPath(url) ?? ''}`;
-  }
-  return url;
 }
 
 /**
@@ -184,8 +169,8 @@ async function inlineRelativeResources(html: string, basePath: string, workspace
         const newTag = `<img${before} src="${dataUrl}"${after}>`;
         result = result.replace(fullMatch, newTag);
       }
-    } catch (e) {
-      console.warn('[HTMLRenderer] Failed to inline image:', src, e);
+    } catch {
+      console.warn('[HTMLRenderer] Failed to inline image');
     }
   }
 
@@ -218,16 +203,16 @@ async function inlineRelativeResources(html: string, basePath: string, workspace
                 // getImageBase64 已经返回完整的 data URL / getImageBase64 already returns complete data URL
                 processedCss = processedCss.replace(urlFullMatch, `url("${dataUrl}")`);
               }
-            } catch (e) {
-              console.warn('[HTMLRenderer] Failed to inline CSS resource:', urlPath, e);
+            } catch {
+              console.warn('[HTMLRenderer] Failed to inline CSS resource');
             }
           }
 
           const styleTag = `<style>${processedCss}</style>`;
           result = result.replace(fullMatch, styleTag);
         }
-      } catch (e) {
-        console.warn('[HTMLRenderer] Failed to inline CSS:', href, e);
+      } catch {
+        console.warn('[HTMLRenderer] Failed to inline CSS');
       }
     }
   }
@@ -248,8 +233,8 @@ async function inlineRelativeResources(html: string, basePath: string, workspace
         const scriptTag = `<script${attrsToKeep}>${scriptContent}</script>`;
         result = result.replace(fullMatch, scriptTag);
       }
-    } catch (e) {
-      console.warn('[HTMLRenderer] Failed to inline script:', src, e);
+    } catch {
+      console.warn('[HTMLRenderer] Failed to inline script');
     }
   }
 
@@ -359,8 +344,8 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
           setInlinedHtmlContent(inlined);
         }
       })
-      .catch((e) => {
-        console.warn('[HTMLRenderer] Failed to inline resources:', e);
+      .catch(() => {
+        console.warn('[HTMLRenderer] Failed to inline resources');
         if (!cancelled) {
           setInlinedHtmlContent(content); // 回退到原始内容 / Fallback to original content
         }
@@ -434,11 +419,9 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     logHtmlPreview('info', 'html_preview_source_selected', {
       source: webviewSourceKind,
       reason: webviewSourceReason,
-      fileName: getFileNameFromPath(file_path),
       hasFilePath: Boolean(file_path),
       isDirty: Boolean(isDirty),
       contentLength: content.length,
-      src: summarizePreviewUrl(webviewSrc),
     });
   }, [content.length, file_path, isDirty, isElectron, webviewSourceKind, webviewSourceReason, webviewSrc]);
 
@@ -461,16 +444,12 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     const handleDidFailLoad = (event: Event) => {
       const loadEvent = event as Event & {
         errorCode?: number;
-        errorDescription?: string;
-        validatedURL?: string;
         isMainFrame?: boolean;
       };
 
       logHtmlPreview('error', 'html_preview_webview_failed_load', {
         errorCode: loadEvent.errorCode,
-        errorDescription: loadEvent.errorDescription,
         isMainFrame: loadEvent.isMainFrame,
-        url: summarizePreviewUrl(loadEvent.validatedURL || webviewSrc),
       });
     };
 
@@ -536,25 +515,29 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     const webview = webviewRef.current;
     if (!webview) return;
 
+    let active = true;
     const handleConsoleMessage = (event: Event) => {
       const consoleEvent = event as Event & {
         level?: number;
         line?: number;
         message?: string;
-        sourceId?: string;
       };
       const message = consoleEvent.message;
 
       if (typeof message === 'string') {
         // 处理检查元素消息 / Handle inspect element message
         if (message.startsWith('__INSPECT_ELEMENT__') && onElementSelected) {
-          try {
-            const jsonStr = message.slice('__INSPECT_ELEMENT__'.length);
-            const data = JSON.parse(jsonStr) as InspectedElement;
-            onElementSelected(data);
-          } catch (e) {
-            console.warn('[HTMLRenderer] Failed to parse inspect element message:', e);
-          }
+          const id = Number(message.slice('__INSPECT_ELEMENT__'.length));
+          if (!Number.isSafeInteger(id) || id <= 0) return;
+          void webview
+            .executeJavaScript(`window.__aionuiTakeInspectedElement?.(${id})`)
+            .then((result) => {
+              const element = result as InspectedElement | undefined;
+              if (active && typeof element?.html === 'string' && typeof element.tag === 'string') {
+                onElementSelected(element);
+              }
+            })
+            .catch(() => console.warn('[HTMLRenderer] Failed to retrieve inspected element'));
         }
         // 处理滚动消息 / Handle scroll message
         else if (message.startsWith('__SCROLL_SYNC__') && onScroll) {
@@ -563,8 +546,8 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
             const jsonStr = message.slice('__SCROLL_SYNC__'.length);
             const data = JSON.parse(jsonStr) as { scrollTop: number; scrollHeight: number; clientHeight: number };
             onScroll(data.scrollTop, data.scrollHeight, data.clientHeight);
-          } catch (e) {
-            console.warn('[HTMLRenderer] Failed to parse scroll message:', e);
+          } catch {
+            console.warn('[HTMLRenderer] Failed to parse scroll message');
           }
         }
         // 处理内容高度消息 / Handle content height message
@@ -574,8 +557,8 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
             if (!isNaN(height) && height > 0) {
               setWebviewContentHeight(height);
             }
-          } catch (e) {
-            console.warn('[HTMLRenderer] Failed to parse content height message:', e);
+          } catch {
+            console.warn('[HTMLRenderer] Failed to parse content height message');
           }
         } else if ((consoleEvent.level ?? 0) >= 2) {
           const isError = (consoleEvent.level ?? 0) >= 3;
@@ -585,8 +568,7 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
             {
               level: consoleEvent.level,
               line: consoleEvent.line,
-              message,
-              source: summarizePreviewUrl(consoleEvent.sourceId),
+              messageLength: message.length,
             }
           );
         }
@@ -596,9 +578,10 @@ const HTMLRenderer: React.FC<HTMLRendererProps> = ({
     webview.addEventListener('console-message', handleConsoleMessage);
 
     return () => {
+      active = false;
       webview.removeEventListener('console-message', handleConsoleMessage);
     };
-  }, [onElementSelected, onScroll]);
+  }, [onElementSelected, onScroll, webviewSrc]);
 
   // 注入滚动监听脚本 / Inject scroll listener script
   const scrollSyncScript = useMemo(

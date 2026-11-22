@@ -37,7 +37,7 @@ interface FilePreviewProps {
 const FilePreview: React.FC<FilePreviewProps> = ({ path, onRemove, readonly = false, hint }) => {
   // Defensive check: ensure path is a string
   if (typeof path !== 'string') {
-    console.error('[FilePreview] Invalid path type:', typeof path, path);
+    console.error('[FilePreview] Invalid path type');
     return null;
   }
 
@@ -57,8 +57,8 @@ const FilePreview: React.FC<FilePreviewProps> = ({ path, onRemove, readonly = fa
       .then((metadata) => {
         setFileSize(formatByteSize(metadata.size, i18n.language));
       })
-      .catch((error) => {
-        console.error('[FilePreview] Failed to get file metadata:', { path, error });
+      .catch(() => {
+        console.error('[FilePreview] Failed to get file metadata');
       });
 
     // 如果是图片，获取图片的base64
@@ -85,9 +85,9 @@ const FilePreview: React.FC<FilePreviewProps> = ({ path, onRemove, readonly = fa
               setImageUrl(base64);
             }
           })
-          .catch((error) => {
+          .catch(() => {
             if (cancelled) return;
-            console.error('[FilePreview] Failed to load image:', { path, error });
+            console.error('[FilePreview] Failed to load image');
           });
       };
 

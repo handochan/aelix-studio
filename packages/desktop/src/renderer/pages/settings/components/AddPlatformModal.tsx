@@ -7,7 +7,7 @@ import {
 } from '@/common/utils/modelCapabilities';
 import type { ProtocolDetectionResponse, ProtocolType } from '@/common/utils/protocolDetector';
 import { ipcBridge } from '@/common';
-import { uuid } from '@/common/utils';
+import { parseError, uuid } from '@/common/utils';
 import { isGoogleApisHost } from '@/common/utils/urlValidation';
 import ModalHOC from '@/renderer/utils/ui/ModalHOC';
 import { Form, Input, Message, Select, Switch } from '@arco-design/web-react';
@@ -627,7 +627,7 @@ const AddPlatformModal = ModalHOC<{
             validateStatus={!isFullUrl && modelListState.error ? 'error' : 'success'}
             help={
               !isFullUrl && modelListState.error instanceof Error
-                ? modelListState.error.message
+                ? parseError(modelListState.error)
                 : !isFullUrl && modelListState.error
                   ? String(modelListState.error)
                   : undefined
@@ -695,7 +695,7 @@ const AddPlatformModal = ModalHOC<{
                           // Update the model list state manually
                           void modelListState.mutate({ models }, false);
                         } catch (error: any) {
-                          message.error(error.message || 'Failed to fetch models');
+                          message.error(parseError(error) || 'Failed to fetch models');
                         }
                         return;
                       }

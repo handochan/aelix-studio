@@ -362,8 +362,8 @@ const refreshConversations = () => {
       projectIdByIdState = new Map();
       emitStoreChange();
     })
-    .catch((error) => {
-      console.error('[WorkspaceGroupedHistory] Failed to load conversations:', error);
+    .catch(() => {
+      console.error('[WorkspaceGroupedHistory] Failed to load conversations');
       conversationsState = [];
       conversation_idsState = new Set();
       projectIdByIdState = new Map();

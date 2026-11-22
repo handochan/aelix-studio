@@ -79,8 +79,8 @@ const WorkspaceOpenButton: React.FC<WorkspaceOpenButtonProps> = ({ workspacePath
       try {
         const installed = await ipcBridge.shell.checkToolInstalled.invoke({ tool: 'vscode' });
         setVscodeInstalled(installed);
-      } catch (error) {
-        console.warn('[WorkspaceOpenButton] Failed to check VS Code:', error);
+      } catch {
+        console.warn('[WorkspaceOpenButton] Failed to check VS Code');
         setVscodeInstalled(false);
       }
     };
@@ -99,8 +99,8 @@ const WorkspaceOpenButton: React.FC<WorkspaceOpenButtonProps> = ({ workspacePath
         // Save preference
         localStorage.setItem(STORAGE_KEY, tool);
         setPreferredTool(tool);
-      } catch (error) {
-        console.error(`[WorkspaceOpenButton] Failed to open folder with ${tool}:`, error);
+      } catch {
+        console.error(`[WorkspaceOpenButton] Failed to open folder with ${tool}:`);
       }
       setDropdownOpen(false);
     },

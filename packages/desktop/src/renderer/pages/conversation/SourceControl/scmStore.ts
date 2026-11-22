@@ -26,6 +26,7 @@
  * reconnect releases the subscription.
  */
 
+import { parseError } from '@/common/utils';
 import { useSyncExternalStore } from 'react';
 
 import { RPC_DISCONNECTED, RpcError } from '../explorer/monitorClient';
@@ -301,7 +302,7 @@ const applyRepositoriesChanged = (delta: ScmRepositoriesChanged | undefined): vo
     .filter((id) => removed.has(id));
   if (contradictory.length > 0) {
     console.warn('[scm] repositoriesChanged names these repos as both removed and added/changed; removal wins', {
-      repos: contradictory,
+      count: contradictory.length,
     });
   }
 
@@ -381,7 +382,7 @@ export const openScmProject = async (id: string): Promise<void> => {
   } catch (e) {
     if (projectId !== id) return;
     loadState = 'error';
-    error = e instanceof Error ? e.message : String(e);
+    error = e instanceof Error ? parseError(e) : String(e);
     commit();
   }
 };

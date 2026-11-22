@@ -194,8 +194,8 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
           .then((dataUrl) => {
             if (!cancelled) setResolvedSrc(dataUrl);
           })
-          .catch((error) => {
-            console.error('[MarkdownPreview] Failed to load project image:', { src, imgRel, error });
+          .catch(() => {
+            console.error('[MarkdownPreview] Failed to load project image');
             if (!cancelled) setResolvedSrc(src);
           });
         return;
@@ -222,8 +222,8 @@ const MarkdownImage: React.FC<MarkdownImageProps> = ({ src, alt, baseDir, worksp
             setResolvedSrc(dataUrl);
           }
         })
-        .catch((error) => {
-          console.error('[MarkdownPreview] Failed to load local image:', { src, absolutePath, error });
+        .catch(() => {
+          console.error('[MarkdownPreview] Failed to load local image');
           if (!cancelled) {
             setResolvedSrc(src);
           }

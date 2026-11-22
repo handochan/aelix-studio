@@ -1,3 +1,4 @@
+import { inspect } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
 
 import type { MonitorTransport } from '@/renderer/pages/conversation/explorer/monitorClient';
@@ -77,8 +78,25 @@ describe('MonitorClient request/response pairing', () => {
     await expect(promise).rejects.toBeInstanceOf(RpcError);
     await promise.catch((e: RpcError) => {
       expect(e.code).toBe(-32002);
-      expect(e.message).toBe('resource_not_found');
+      expect(e.message).toBe('Monitor request failed');
+      expect(e.backendMessage).toBe('resource_not_found');
     });
+  });
+
+  it('keeps wire error details available without printing them on inspection', async () => {
+    const h = makeHarness();
+    const client = new MonitorClient({ transport: h.transport, onNotification: () => {} });
+    const promise = client.request('fs/read');
+    const path = 'C:\\private-workspace\\image.png';
+    const data = { path, base64: 'data:image/png;base64,cHJpdmF0ZQ==' };
+    h.feed({ jsonrpc: '2.0', id: 1, error: { code: -32002, message: path, data, transport: true } });
+    const error = await promise.catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: -32002, backendMessage: path, data, transport: false });
+    const output = inspect(error, { showHidden: true, getters: true });
+    for (const marker of Object.values(data)) {
+      expect(output).not.toContain(marker);
+      expect(output).not.toContain(JSON.stringify(marker).slice(1, -1));
+    }
   });
 
   it('gives each request a distinct monotonic id', () => {
@@ -131,13 +149,20 @@ describe('MonitorClient request/response pairing', () => {
 });
 
 describe('MonitorClient notifications', () => {
-  it('routes id-less frames to onNotification', () => {
+  it.each(['fs/delta', 'scm/statusChanged'])('routes %s frames and logs only notification counts', (method) => {
     const h = makeHarness();
     const onNotification = vi.fn();
     new MonitorClient({ transport: h.transport, onNotification });
 
-    h.feed({ jsonrpc: '2.0', method: 'fs/delta', params: { target: { pe_id: 'pe1', relative_path: 'src' } } });
-    expect(onNotification).toHaveBeenCalledWith('fs/delta', { target: { pe_id: 'pe1', relative_path: 'src' } });
+    const debug = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const params = { target: { pe_id: 'pe1', relative_path: 'private/src' }, changes: [{ name: 'private.ts' }] };
+    try {
+      h.feed({ jsonrpc: '2.0', method, params });
+      expect(onNotification).toHaveBeenCalledWith(method, params);
+      expect(debug).toHaveBeenCalledExactlyOnceWith('[monitor] ← notify', method, { changes: 1 });
+    } finally {
+      debug.mockRestore();
+    }
   });
 
   it('notify sends a frame without an id', () => {
