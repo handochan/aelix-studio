@@ -12,10 +12,18 @@ import {
   type RunningImageState,
 } from '@/renderer/services/runtime/RunningInput';
 import type { RunningImageRejection } from '@/renderer/services/runtime/RunningInput/imageProtocol';
-import type { ImageProgress } from '@/renderer/services/runtime/RunningInput/Images/types';
-import { formatByteSize, formatNumber } from '@/renderer/services/i18n/format';
+import {
+  MAX_PLANNED_BYTES,
+  MAX_RASTER_EDGE,
+  MAX_RASTER_PIXELS,
+  MAX_SOURCE_BYTES,
+  type ImageProgress,
+} from '@/renderer/services/runtime/RunningInput/Images/types';
+import { formatNumber } from '@/renderer/services/i18n/format';
 
 const MIB = 1024 * 1024;
+/** From this share of a limit, sizes are compared in exact bytes so a 1 B difference stays visible. */
+const NEAR_LIMIT = 0.95;
 const REASON = 'acp.runningInput.images.reason.';
 
 /** One literal key per block reason so the i18n check validates every message. */
@@ -46,6 +54,14 @@ export const BLOCK_REASON_KEY = {
   'model-changed': `${REASON}modelChanged`,
   'turn-changed': `${REASON}turnChanged`,
   'invalid-text': `${REASON}invalidText`,
+  'native-line-limit': `${REASON}lineLimit`,
+  'provider-body-limit': `${REASON}providerBodyLimit`,
+  'provider-context-limit': `${REASON}contextFull`,
+  'image-bytes': `${REASON}imageBytes`,
+  'image-dimensions': `${REASON}imageDimensions`,
+  'animated-image': `${REASON}unsupportedFormat`,
+  'unsupported-image': `${REASON}unsupportedFormat`,
+  'invalid-image-header': `${REASON}invalidImage`,
 } as const satisfies Record<RunningImageBlockReason, string>;
 
 /** ACP rejections of a pixel write, grouped into the same user-facing causes. */
@@ -58,10 +74,10 @@ export const REJECTION_KEY = {
   'model-unverified': `${REASON}modelUnverified`,
   'image-acquisition-busy': `${REASON}busy`,
   'image-count': `${REASON}imageCount`,
-  'image-bytes': `${REASON}limits`,
-  'image-dimensions': `${REASON}limits`,
-  'native-line-limit': `${REASON}limits`,
-  'provider-body-limit': `${REASON}limits`,
+  'image-bytes': `${REASON}imageBytes`,
+  'image-dimensions': `${REASON}imageDimensions`,
+  'native-line-limit': `${REASON}lineLimit`,
+  'provider-body-limit': `${REASON}providerBodyLimit`,
   'invalid-image-header': `${REASON}invalidImage`,
   'animated-image': `${REASON}unsupportedFormat`,
   'unsupported-image': `${REASON}unsupportedFormat`,
@@ -71,7 +87,13 @@ export const REJECTION_KEY = {
 } as const satisfies Record<RunningImageRejection, string>;
 
 /** Reasons whose message benefits from the actual numeric limits. */
-const LIMIT_REASONS: ReadonlySet<RunningImageBlockReason> = new Set(['limits', 'image-count']);
+const LIMIT_REASONS: ReadonlySet<RunningImageBlockReason> = new Set([
+  'limits',
+  'image-count',
+  'native-line-limit',
+  'image-bytes',
+  'image-dimensions',
+]);
 export const showsLimits = (reason: RunningImageBlockReason): boolean => LIMIT_REASONS.has(reason);
 
 export type ImageLimits = { [Key in keyof typeof RUNNING_IMAGE_LIMITS]: number };
@@ -87,12 +109,54 @@ export const windowSampleKey = (sample: { workerGeneration: string; requestSeque
 
 /** Limits are user decisions in exact units: whole MiB values stay in MiB, others in grouped bytes. */
 export function formatLimitBytes(bytes: number, language: string): string {
-  return bytes % MIB === 0 ? `${formatNumber(bytes / MIB, language)} MiB` : `${formatNumber(bytes, language)} B`;
+  return bytes % MIB === 0 ? `${formatNumber(bytes / MIB, language)} MiB` : formatExactBytes(bytes, language);
 }
 
-/** Measured sizes use the app's byte format; the exact count is available as a tooltip. */
-export function formatMeasuredBytes(bytes: number, language: string): { text: string; exact: string } {
-  return { text: formatByteSize(bytes, language), exact: `${formatNumber(bytes, language)} B` };
+export function formatExactBytes(bytes: number, language: string): string {
+  return `${formatNumber(bytes, language)} B`;
+}
+
+/** Binary units, the same family as the MiB limits. */
+export function formatBytes(bytes: number, language: string): string {
+  if (bytes < 1024) return formatExactBytes(bytes, language);
+  if (bytes < MIB) return `${formatNumber(bytes / 1024, language, { maximumFractionDigits: 1 })} KiB`;
+  return `${formatNumber(bytes / MIB, language, { maximumFractionDigits: 2 })} MiB`;
+}
+
+/** A measured size against its limit in one unit: binary units, or exact bytes near or over the limit. */
+export function formatAgainst(
+  bytes: number,
+  limit: number,
+  language: string
+): { size: string; limit: string; over?: string } {
+  if (bytes < limit * NEAR_LIMIT) return { size: formatBytes(bytes, language), limit: formatBytes(limit, language) };
+  return {
+    size: formatExactBytes(bytes, language),
+    limit: formatExactBytes(limit, language),
+    over: bytes > limit ? formatExactBytes(bytes - limit, language) : undefined,
+  };
+}
+
+type SizeKey =
+  | 'acp.runningInput.images.sizes.lineSent'
+  | 'acp.runningInput.images.sizes.lineOriginal'
+  | 'acp.runningInput.images.sizes.sent';
+
+/** "Estimated input line 8,388,609 B of 8,388,608 B · 1 B over". */
+export function describeAgainst(t: TFunction, key: SizeKey, bytes: number, limit: number, language: string): string {
+  const { over, ...values } = formatAgainst(bytes, limit, language);
+  const text = t(key, values);
+  return over ? t('acp.runningInput.images.sizes.over', { text, over }) : text;
+}
+
+/** Bounds applied before an image is decoded for conversion. */
+export function conversionLimits(language: string) {
+  return {
+    limit: formatLimitBytes(MAX_SOURCE_BYTES, language),
+    edge: formatNumber(MAX_RASTER_EDGE, language),
+    pixels: formatNumber(MAX_RASTER_PIXELS, language),
+    memory: formatLimitBytes(MAX_PLANNED_BYTES, language),
+  };
 }
 
 export function formatLimits(t: TFunction, limits: ImageLimits, language: string): string {
@@ -110,8 +174,11 @@ export function formatDimensions(t: TFunction, size: { width?: number; height?: 
   return t('acp.runningInput.images.dimensions', { width: size.width, height: size.height });
 }
 
-function formatSize(t: TFunction, size: { width?: number; height?: number; bytes: number }, language: string) {
-  const bytes = formatByteSize(size.bytes, language);
+type Sized = { width?: number; height?: number; bytes: number };
+
+/** Dimensions and size. Near or over the per-image byte limit, the size is exact. */
+function formatSize(t: TFunction, size: Sized, fileLimit: number, language: string) {
+  const bytes = formatAgainst(size.bytes, fileLimit, language).size;
   const dimensions = formatDimensions(t, size);
   return dimensions ? t('acp.runningInput.images.size', { dimensions, bytes }) : bytes;
 }
@@ -120,20 +187,23 @@ function formatSize(t: TFunction, size: { width?: number; height?: number; bytes
  * Describe what was transmitted. A downscaled image states both sizes, an
  * orientation-only normalization says so separately, and a passthrough has no label.
  */
-export function describeImage(t: TFunction, image: RunningImageDetails, language: string): string {
-  const from = formatSize(t, image.original, language);
-  const to = formatSize(t, image.sent, language);
+export function describeImage(t: TFunction, image: RunningImageDetails, fileLimit: number, language: string): string {
+  const from = formatSize(t, image.original, fileLimit, language);
+  const to = formatSize(t, image.sent, fileLimit, language);
   if (image.downscaled) return t('acp.runningInput.images.downscaled', { from, to });
   if (image.orientationOnly) return t('acp.runningInput.images.orientation', { from, to });
   return to;
 }
 
-export function describeOriginal(
-  t: TFunction,
-  original: { width?: number; height?: number; bytes: number },
-  language: string
-): string {
-  return formatSize(t, original, language);
+export function describeOriginal(t: TFunction, original: Sized, fileLimit: number, language: string): string {
+  return formatSize(t, original, fileLimit, language);
+}
+
+/** Exact bytes for the tooltip: original → transmitted when they differ. */
+export function exactImageBytes(t: TFunction, image: RunningImageDetails, language: string): string {
+  const sent = formatExactBytes(image.sent.bytes, language);
+  if (!image.downscaled && !image.orientationOnly) return sent;
+  return t('acp.runningInput.images.bytesChange', { from: formatExactBytes(image.original.bytes, language), to: sent });
 }
 
 const STAGE_KEY = {

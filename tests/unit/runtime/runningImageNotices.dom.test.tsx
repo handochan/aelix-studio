@@ -108,7 +108,11 @@ describe('running image submission', () => {
     // No preview exists before a write: every image is an icon with the transmitted W×H.
     expect(within(row).getAllByTestId('running-image-icon')).toHaveLength(3);
     expect(within(row).queryByTestId('running-image-thumbnail')).toBeNull();
-    expect(row).toHaveTextContent('acp.runningInput.images.line');
+    const sizes = within(row).getAllByTestId('running-image-size');
+    expect(sizes.map((line) => line.textContent)).toEqual([
+      'acp.runningInput.images.sizes.sent {"size":"3 MiB","limit":"6 MiB"}',
+      'acp.runningInput.images.sizes.lineSent {"size":"1.62 MiB","limit":"8 MiB"}',
+    ]);
   });
 
   it.each([
@@ -159,8 +163,80 @@ describe('running image submission', () => {
     );
     expect(within(row).getAllByTestId('running-image-tile')).toHaveLength(2);
     expect(row).toHaveTextContent(/images\.dimensions \W+width\W+9000\W+height\W+7000/);
-    expect(within(row).getAllByTestId('running-image-tile')[0]).toHaveAttribute('title', '3,750,001 B');
-    expect(row).toHaveTextContent('acp.runningInput.images.line {"size":"8 MB","limit":"8 MiB"}');
+    const [first] = within(row).getAllByTestId('running-image-tile');
+    expect(first).toHaveAttribute('title', '3,750,001 B');
+    // Over the per-image limit, the visible size is exact as well.
+    expect(first).toHaveTextContent('3,750,001 B');
+    expect(
+      within(row)
+        .getAllByTestId('running-image-size')
+        .map((line) => line.textContent)
+    ).toEqual([
+      'acp.runningInput.images.sizes.originals {"size":"3.58 MiB"}',
+      'acp.runningInput.images.sizes.over {"text":"acp.runningInput.images.sizes.lineOriginal {\\"size\\":\\"8,388,609 B\\",\\"limit\\":\\"8,388,608 B\\"}","over":"1 B"}',
+    ]);
+  });
+
+  it.each([
+    [8 * 1024 * 1024 - 1, '"size":"8,388,607 B","limit":"8,388,608 B"', false],
+    [8 * 1024 * 1024, '"size":"8,388,608 B","limit":"8,388,608 B"', false],
+    [8 * 1024 * 1024 + 1, '"size":"8,388,609 B","limit":"8,388,608 B"', true],
+    [2_000_000, '"size":"1.91 MiB","limit":"8 MiB"', false],
+  ])('compares an estimated line of %i B against the limit in one unit', (bytes, text, over) => {
+    renderNotices(
+      controller({
+        receipts: [
+          {
+            receipt: receipt({ status: 'queued', pixels: { images: [PASSTHROUGH], estimatedLineBytes: bytes } }),
+            phase: 'active',
+            canLookup: true,
+          },
+        ],
+      })
+    );
+    const row = screen.getByTestId('running-input-notice');
+    expect(row).toHaveTextContent(text.replaceAll('"', over ? '\\"' : '"'));
+    if (over) expect(row).toHaveTextContent('"over":"1 B"');
+    else expect(row).not.toHaveTextContent('acp.runningInput.images.sizes.over');
+  });
+
+  it('states the conversion limits that a decode-limit block applied', () => {
+    renderNotices(
+      controller({ submission: submission({ status: 'blocked', reason: 'decode-limit', allowPathOnly: true }) })
+    );
+    expect(screen.getByTestId('running-image-submission')).toHaveTextContent(
+      /reason\.decodeLimit .*edge\W+16,384\W+pixels\W+16,777,216\W+memory\W+160 MiB/
+    );
+  });
+
+  it('shows one block with path-only delivery for an ACP line-limit rejection of the same click', () => {
+    const images = controller({
+      submission: submission({ status: 'blocked', reason: 'native-line-limit', allowPathOnly: true, batch: BATCH }),
+      receipts: [
+        { receipt: receipt({ status: 'rejected', reason: 'native-line-limit' }), phase: 'active', canLookup: true },
+        {
+          receipt: receipt({ status: 'rejected', reason: 'provider-body-limit', requestId: 'request-2' }),
+          phase: 'active',
+          canLookup: true,
+        },
+      ],
+    });
+    const view = renderNotices(images);
+    const block = screen.getByTestId('running-image-submission');
+    expect(block).toHaveTextContent('acp.runningInput.images.reason.lineLimit');
+    expect(block).toHaveTextContent('\\"lineLimit\\":\\"8 MiB\\"');
+    expect(block).toHaveTextContent('acp.runningInput.images.limits');
+    // The superseded rejection row is not repeated; the unrelated body-limit rejection stays distinct.
+    const rows = screen.getAllByTestId('running-input-notice');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toHaveTextContent('acp.runningInput.images.reason.providerBodyLimit');
+    expect(rows[0]).not.toHaveTextContent('reason.lineLimit');
+
+    fireEvent.click(within(block).getByText('acp.runningInput.images.sendPaths'));
+    expect(view.onSendPaths).toHaveBeenCalledOnce();
+    fireEvent.click(within(block).getByLabelText('acp.runningInput.dismiss'));
+    expect(images.dismissSubmission).toHaveBeenCalledOnce();
+    expect(view.onDismiss).toHaveBeenCalledWith(['request-1']);
   });
 
   it('uses the remaining model limits when the image state reports them', () => {
@@ -340,7 +416,7 @@ describe('provider image window', () => {
   it('states omitted images and reasons until that sample is dismissed', () => {
     const view = renderNotices(controller({ state: windowState(1) }));
     const row = screen.getByTestId('running-image-window');
-    expect(row).toHaveTextContent('acp.runningInput.images.window {"omitted":3,"kept":20,"bytes":"8 MB"}');
+    expect(row).toHaveTextContent('acp.runningInput.images.window {"omitted":3,"kept":20,"bytes":"8 MiB"}');
     expect(row).toHaveTextContent('acp.runningInput.images.windowReason.count');
     expect(row).toHaveTextContent('acp.runningInput.images.windowReason.bytes');
     fireEvent.click(within(row).getByLabelText('acp.runningInput.dismiss'));

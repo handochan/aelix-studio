@@ -9,17 +9,20 @@ import { Attention, CloseSmall, Loading } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunningImageSubmission } from '@/renderer/services/runtime/RunningInput';
-import { MAX_SOURCE_BYTES } from '@/renderer/services/runtime/RunningInput/Images/types';
 import { RUNNING_INPUT_MODE_KEY } from '../RunningInputModeSwitch';
 import RunningImageTile from './RunningImageTile';
 import {
   BLOCK_REASON_KEY,
+  conversionLimits,
+  describeAgainst,
   describeImage,
   describeOriginal,
   describeProgress,
+  exactImageBytes,
+  formatBytes,
+  formatExactBytes,
   formatLimitBytes,
   formatLimits,
-  formatMeasuredBytes,
   showsLimits,
   type ImageLimits,
 } from './format';
@@ -34,22 +37,26 @@ type RunningImageSubmissionNoticeProps = {
   onDismiss: () => void;
 };
 
-/** Sizes known so far: transmitted details after preparation, otherwise the measured originals. */
+/**
+ * Sizes known so far, kept apart: measured originals, transmitted images after preparation,
+ * and the estimated serialized native line for whichever of the two would be sent.
+ */
 const Measurements: React.FC<{ submission: RunningImageSubmission; limits: ImageLimits }> = ({
   submission,
   limits,
 }) => {
   const { t, i18n } = useTranslation();
+  const { language } = i18n;
   const { batch, measurements } = submission;
-  const lineBytes = batch?.estimatedLineBytes ?? measurements?.originalLineBytes;
+  const originals = (measurements?.originals ?? []).flatMap((original) => (original ? [original] : []));
   const tiles = batch
     ? batch.images.map((image, index) => (
         <RunningImageTile
           key={index}
           index={index + 1}
           size={image.sent}
-          description={describeImage(t, image, i18n.language)}
-          detail={formatMeasuredBytes(image.sent.bytes, i18n.language).exact}
+          description={describeImage(t, image, limits.maxFileBytes, language)}
+          detail={exactImageBytes(t, image, language)}
         />
       ))
     : (measurements?.originals ?? []).flatMap((original, index) =>
@@ -59,24 +66,49 @@ const Measurements: React.FC<{ submission: RunningImageSubmission; limits: Image
                 key={index}
                 index={index + 1}
                 size={original}
-                description={describeOriginal(t, original, i18n.language)}
-                detail={formatMeasuredBytes(original.bytes, i18n.language).exact}
+                description={describeOriginal(t, original, limits.maxFileBytes, language)}
+                detail={formatExactBytes(original.bytes, language)}
               />,
             ]
           : []
       );
-  if (!tiles.length && lineBytes === undefined) return null;
+  const lines: string[] = [];
+  if (originals.length) {
+    const total = originals.reduce((sum, { bytes }) => sum + bytes, 0);
+    lines.push(t('acp.runningInput.images.sizes.originals', { size: formatBytes(total, language) }));
+  }
+  if (batch) {
+    const sent = batch.images.reduce((sum, { sent: { bytes } }) => sum + bytes, 0);
+    lines.push(describeAgainst(t, 'acp.runningInput.images.sizes.sent', sent, limits.maxTotalBytes, language));
+    lines.push(
+      describeAgainst(
+        t,
+        'acp.runningInput.images.sizes.lineSent',
+        batch.estimatedLineBytes,
+        limits.maxLineBytes,
+        language
+      )
+    );
+  } else if (measurements?.originalLineBytes !== undefined) {
+    lines.push(
+      describeAgainst(
+        t,
+        'acp.runningInput.images.sizes.lineOriginal',
+        measurements.originalLineBytes,
+        limits.maxLineBytes,
+        language
+      )
+    );
+  }
+  if (!tiles.length && !lines.length) return null;
   return (
     <>
       {tiles.length > 0 && <div className='flex flex-wrap gap-x-12px gap-y-4px min-w-0'>{tiles}</div>}
-      {lineBytes !== undefined && (
-        <span className='text-11px text-t-tertiary'>
-          {t('acp.runningInput.images.line', {
-            size: formatMeasuredBytes(lineBytes, i18n.language).text,
-            limit: formatLimitBytes(limits.maxLineBytes, i18n.language),
-          })}
+      {lines.map((line) => (
+        <span key={line} className='text-11px text-t-tertiary' data-testid='running-image-size'>
+          {line}
         </span>
-      )}
+      ))}
     </>
   );
 };
@@ -122,7 +154,8 @@ const RunningImageSubmissionNotice: React.FC<RunningImageSubmissionNoticeProps> 
 
   const reason = t(BLOCK_REASON_KEY[submission.reason], {
     max: limits.maxImages,
-    limit: formatLimitBytes(MAX_SOURCE_BYTES, i18n.language),
+    lineLimit: formatLimitBytes(limits.maxLineBytes, i18n.language),
+    ...conversionLimits(i18n.language),
   });
   return (
     <div

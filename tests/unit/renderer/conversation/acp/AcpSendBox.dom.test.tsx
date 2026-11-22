@@ -128,7 +128,7 @@ vi.mock('@/renderer/pages/conversation/runtime/RunningInput', () => ({
   RunningInputModeSwitch: () => <div data-testid='running-input-mode' />,
   RunningInputNotices: (props: unknown) => {
     noticesPropsSpy(props);
-    return null;
+    return <div data-testid='running-input-notices' />;
   },
   useRunningImagePaths: () => imagePathsMock,
 }));
@@ -268,7 +268,7 @@ vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
   },
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
 }));
-vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({ default: () => null }));
+vi.mock('@/renderer/components/chat/ThoughtDisplay', () => ({ default: () => <div data-testid='thought-display' /> }));
 vi.mock('@/renderer/components/media/FileAttachButton', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/FilePreview', () => ({ default: () => null }));
 vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
@@ -1332,6 +1332,14 @@ describe('AcpSendBox', () => {
       expect(emitterEmitMock).toHaveBeenCalledWith('sendbox.reply.clear');
       expect(clearDomSnippetsMock).toHaveBeenCalledTimes(1);
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    });
+
+    it('places the running notices above the status bar that overlaps the composer', () => {
+      renderRunning();
+      const notices = screen.getByTestId('running-input-notices');
+      const status = screen.getByTestId('thought-display');
+      // ThoughtDisplay pulls the next sibling under itself (z-1, negative bottom margin).
+      expect(notices.compareDocumentPosition(status) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     });
 
     it('offers no path-only action unless the blocked draft is still current', () => {

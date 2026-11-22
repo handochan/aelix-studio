@@ -115,7 +115,6 @@
       "blocked": "Images non envoyées : {{reason}}. Le brouillon et les pièces jointes d’origine ont été conservés.",
       "sendPaths": "Envoyer les chemins uniquement",
       "limits": "Limites : {{fileBytes}} et {{edge}} px par image ; {{images}} images et {{totalBytes}} par envoi ; ligne d’entrée de {{lineBytes}}.",
-      "line": "Ligne d’entrée {{size}} sur {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "Réduite ({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "une image d’origine a changé pendant la préparation",
         "limits": "les images dépassent les limites même après réduction",
         "imageCount": "vous pouvez envoyer au maximum {{max}} images à la fois",
-        "decodeLimit": "une image est trop grande pour être réduite sur cet appareil",
+        "decodeLimit": "une image est trop grande pour être convertie sur cet appareil (jusqu’à {{edge}} px par côté, {{pixels}} px et {{memory}} de mémoire de travail)",
         "secureContext": "la réduction de cette image nécessite une connexion sécurisée (HTTPS ou localhost)",
         "codecFailed": "la conversion de l’image a échoué",
         "codecTimeout": "la conversion de l’image a pris trop de temps",
@@ -162,7 +161,18 @@
         "turnChanged": "le tour en cours a changé pendant la préparation",
         "invalidText": "le texte est invalide ou trop long",
         "busy": "une autre image est encore en cours de lecture",
-        "contextFull": "la requête au modèle n’a pas de place pour ces images"
+        "contextFull": "la requête au modèle n’a pas de place pour ces images",
+        "lineLimit": "la ligne d’entrée sérialisée dépasserait la limite d’entrée native de {{lineLimit}}",
+        "providerBodyLimit": "le corps de la requête au modèle dépasserait la limite de taille du fournisseur",
+        "imageBytes": "une image dépasse la limite de taille par image du modèle",
+        "imageDimensions": "une image dépasse la limite de pixels par image du modèle"
+      },
+      "sizes": {
+        "originals": "Originaux : {{size}}",
+        "sent": "Images à envoyer : {{size}} sur {{limit}} par envoi",
+        "lineSent": "Ligne d’entrée estimée : {{size}} sur {{limit}}",
+        "lineOriginal": "Ligne d’entrée estimée avec les originaux : {{size}} sur {{limit}}",
+        "over": "{{text}} · {{over}} de trop"
       }
     }
   }

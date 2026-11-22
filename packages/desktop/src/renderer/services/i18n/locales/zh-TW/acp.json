@@ -115,7 +115,6 @@
       "blocked": "圖片未傳送：{{reason}}。草稿與原始附件已保留。",
       "sendPaths": "僅傳送路徑",
       "limits": "限制：每張圖片 {{fileBytes}}、{{edge}}px；每次傳送 {{images}} 張、{{totalBytes}}；輸入行 {{lineBytes}}",
-      "line": "輸入行 {{size}} / 上限 {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "已縮小（{{from}} → {{to}}）",
@@ -150,7 +149,7 @@
         "sourceChanged": "準備期間原始圖片已變更",
         "limits": "縮小後仍超出限制",
         "imageCount": "一次最多可傳送 {{max}} 張圖片",
-        "decodeLimit": "圖片過大，無法在此裝置上縮小",
+        "decodeLimit": "圖片過大，無法在此裝置上轉換（單邊最多 {{edge}}px、{{pixels}} 像素、工作記憶體 {{memory}}）",
         "secureContext": "縮小此圖片需要安全連線（HTTPS 或 localhost）",
         "codecFailed": "圖片轉換失敗",
         "codecTimeout": "圖片轉換逾時",
@@ -162,7 +161,18 @@
         "turnChanged": "準備期間執行中的回合已變更",
         "invalidText": "文字無效或過長",
         "busy": "另一張圖片仍在讀取中",
-        "contextFull": "模型請求中沒有空間容納這些圖片"
+        "contextFull": "模型請求中沒有空間容納這些圖片",
+        "lineLimit": "序列化後的輸入行將超過原生輸入上限 {{lineLimit}}",
+        "providerBodyLimit": "模型請求本文將超過提供者的大小上限",
+        "imageBytes": "圖片超過模型的單張大小上限",
+        "imageDimensions": "圖片超過模型的單張像素上限"
+      },
+      "sizes": {
+        "originals": "原始圖片合計 {{size}}",
+        "sent": "待傳送圖片 {{size}} / 每次上限 {{limit}}",
+        "lineSent": "預計輸入行 {{size}} / 上限 {{limit}}",
+        "lineOriginal": "以原圖傳送時預計輸入行 {{size}} / 上限 {{limit}}",
+        "over": "{{text}} · 超出 {{over}}"
       }
     }
   }

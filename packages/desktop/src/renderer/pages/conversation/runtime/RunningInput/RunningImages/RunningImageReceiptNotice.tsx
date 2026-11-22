@@ -13,7 +13,14 @@ import type { RunningImageController } from '../useRunningInput';
 import { RUNNING_INPUT_MODE_KEY } from '../RunningInputModeSwitch';
 import { rejectReason, type RunningInputRejectReason } from '../notices';
 import RunningImageTile from './RunningImageTile';
-import { describeImage, formatLimitBytes, formatMeasuredBytes, REJECTION_KEY, type ImageLimits } from './format';
+import {
+  describeAgainst,
+  describeImage,
+  exactImageBytes,
+  formatLimitBytes,
+  REJECTION_KEY,
+  type ImageLimits,
+} from './format';
 
 type Entry = RunningImageController['receipts'][number];
 
@@ -69,7 +76,8 @@ const RunningImageReceiptNotice: React.FC<RunningImageReceiptNoticeProps> = ({
         return t('acp.runningInput.images.unknown', { mode });
       case 'rejected': {
         const key = 'reason' in receipt ? REJECTION_KEY[receipt.reason] : RELAY_REASON_KEY[rejectReason(receipt)];
-        return t('acp.runningInput.images.rejected', { mode, reason: t(key, { max: limits.maxImages }) });
+        const params = { max: limits.maxImages, lineLimit: formatLimitBytes(limits.maxLineBytes, i18n.language) };
+        return t('acp.runningInput.images.rejected', { mode, reason: t(key, params) });
       }
     }
   };
@@ -93,31 +101,26 @@ const RunningImageReceiptNotice: React.FC<RunningImageReceiptNoticeProps> = ({
           </span>
         )}
         <div className='flex flex-wrap gap-x-12px gap-y-4px min-w-0'>
-          {images.map((image, index) => {
-            const original = formatMeasuredBytes(image.original.bytes, i18n.language);
-            const sent = formatMeasuredBytes(image.sent.bytes, i18n.language);
-            return (
-              <RunningImageTile
-                key={image.sent.sha256 + ':' + index}
-                index={index + 1}
-                size={image.sent}
-                url={receipt.status === 'queued' ? preview(receipt.requestId, image.sent.sha256) : undefined}
-                description={describeImage(t, image, i18n.language)}
-                detail={
-                  image.downscaled || image.orientationOnly
-                    ? t('acp.runningInput.images.bytesChange', { from: original.exact, to: sent.exact })
-                    : sent.exact
-                }
-              />
-            );
-          })}
+          {images.map((image, index) => (
+            <RunningImageTile
+              key={image.sent.sha256 + ':' + index}
+              index={index + 1}
+              size={image.sent}
+              url={receipt.status === 'queued' ? preview(receipt.requestId, image.sent.sha256) : undefined}
+              description={describeImage(t, image, limits.maxFileBytes, i18n.language)}
+              detail={exactImageBytes(t, image, i18n.language)}
+            />
+          ))}
         </div>
         {(receipt.status === 'pending' || receipt.status === 'queued') && (
           <span className='text-11px text-t-tertiary'>
-            {t('acp.runningInput.images.line', {
-              size: formatMeasuredBytes(estimatedLineBytes, i18n.language).text,
-              limit: formatLimitBytes(limits.maxLineBytes, i18n.language),
-            })}
+            {describeAgainst(
+              t,
+              'acp.runningInput.images.sizes.lineSent',
+              estimatedLineBytes,
+              limits.maxLineBytes,
+              i18n.language
+            )}
           </span>
         )}
       </div>

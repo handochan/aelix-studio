@@ -115,7 +115,6 @@
       "blocked": "Bilder nicht gesendet: {{reason}}. Entwurf und Originalanhänge wurden beibehalten.",
       "sendPaths": "Nur Pfade senden",
       "limits": "Limits: {{fileBytes}} und {{edge}} px pro Bild; {{images}} Bilder und {{totalBytes}} pro Sendung; Eingabezeile {{lineBytes}}.",
-      "line": "Eingabezeile {{size}} von {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "Verkleinert ({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "ein Originalbild hat sich während der Vorbereitung geändert",
         "limits": "die Bilder überschreiten die Limits auch nach dem Verkleinern",
         "imageCount": "es können höchstens {{max}} Bilder auf einmal gesendet werden",
-        "decodeLimit": "ein Bild ist zu groß, um auf diesem Gerät verkleinert zu werden",
+        "decodeLimit": "ein Bild ist zu groß, um auf diesem Gerät konvertiert zu werden (bis {{edge}} px pro Seite, {{pixels}} px und {{memory}} Arbeitsspeicher)",
         "secureContext": "das Verkleinern dieses Bildes erfordert eine sichere Verbindung (HTTPS oder localhost)",
         "codecFailed": "die Bildkonvertierung ist fehlgeschlagen",
         "codecTimeout": "die Bildkonvertierung hat zu lange gedauert",
@@ -162,7 +161,18 @@
         "turnChanged": "der laufende Turn hat sich während der Vorbereitung geändert",
         "invalidText": "der Text ist ungültig oder zu lang",
         "busy": "ein anderes Bild wird noch gelesen",
-        "contextFull": "die Modellanfrage hat keinen Platz für diese Bilder"
+        "contextFull": "die Modellanfrage hat keinen Platz für diese Bilder",
+        "lineLimit": "die serialisierte Eingabezeile würde das native Eingabelimit von {{lineLimit}} überschreiten",
+        "providerBodyLimit": "der Anfragetext an das Modell würde das Größenlimit des Anbieters überschreiten",
+        "imageBytes": "ein Bild überschreitet das Größenlimit des Modells pro Bild",
+        "imageDimensions": "ein Bild überschreitet das Pixellimit des Modells pro Bild"
+      },
+      "sizes": {
+        "originals": "Originale: {{size}}",
+        "sent": "Zu sendende Bilder: {{size}} von {{limit}} pro Sendung",
+        "lineSent": "Geschätzte Eingabezeile: {{size}} von {{limit}}",
+        "lineOriginal": "Geschätzte Eingabezeile mit den Originalen: {{size}} von {{limit}}",
+        "over": "{{text}} · {{over}} zu viel"
       }
     }
   }

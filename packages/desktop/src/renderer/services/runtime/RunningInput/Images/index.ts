@@ -13,6 +13,8 @@ import {
   MAX_IMAGES,
   MAX_LINE_BYTES,
   MAX_SOURCE_BYTES,
+  PASSTHROUGH_PREVIEW_MS,
+  PASSTHROUGH_PREVIEW_PIXELS,
   RECIPE_VERSION,
   type CodecResult,
   type Dimensions,
@@ -176,6 +178,30 @@ async function prepareImages(
   const images: Omit<PreparedImage, 'ref'>[] = [];
   const outputs: Blob[] = [];
   let residentBytes = inputs.reduce((sum, { blob }) => sum + blob.size, 0);
+  let previewBudget = PASSTHROUGH_PREVIEW_MS;
+
+  /** Best-effort receipt thumbnail for unchanged bytes. Outside the codec budgets; never fails the send. */
+  async function passthroughPreview(output: Blob, header: ImageHeader, sha256: string): Promise<Preview | undefined> {
+    if (header.orientation !== 1 || header.width * header.height > PASSTHROUGH_PREVIEW_PIXELS || previewBudget <= 0) {
+      return undefined;
+    }
+    const started = performance.now();
+    try {
+      const { result } = await runImageWorker(
+        { kind: 'preview', source: output, header, sha256, residentBytes },
+        signal,
+        previewBudget,
+        () => {}
+      );
+      return result.kind === 'previewed' && result.preview?.forSha256 === sha256 ? result.preview : undefined;
+    } catch {
+      signal.throwIfAborted();
+      return undefined;
+    } finally {
+      previewBudget -= performance.now() - started;
+    }
+  }
+
   for (const [position, { index, blob, header }] of inputs.entries()) {
     const byteLimit = nextImageByteLimit(raw, encoded, inputs.length - position, fileLimit);
     // eslint-disable-next-line no-await-in-loop -- each output consumes the remaining shared raw/base64 budget
@@ -192,10 +218,15 @@ async function prepareImages(
     if (response.kind !== 'encoded') throw new ImagePreparationError('worker-failed');
     const { output, originalDigest, outputDigest, dimensions, changed, secureContext, plannedBytes } = response.result;
     const source = sources[index];
-    const { preview } = response.result;
+    const preview =
+      response.result.preview ??
+      (changed
+        ? undefined
+        : // eslint-disable-next-line no-await-in-loop -- bounded by the shared preview budget
+          await passthroughPreview(output, header, outputDigest.sha256));
     raw -= output.size;
     encoded -= base64Bytes(output.size);
-    residentBytes += (changed ? output.size : 0) + (response.result.preview?.blob.size ?? 0);
+    residentBytes += (changed ? output.size : 0) + (preview?.blob.size ?? 0);
     outputs[index] = output;
     const originalDimensions = displayDimensions(header);
     images[index] = {

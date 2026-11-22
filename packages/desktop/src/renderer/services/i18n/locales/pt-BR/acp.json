@@ -115,7 +115,6 @@
       "blocked": "Imagens não enviadas: {{reason}}. O rascunho e os anexos originais foram mantidos.",
       "sendPaths": "Enviar só os caminhos",
       "limits": "Limites: {{fileBytes}} e {{edge}} px por imagem; {{images}} imagens e {{totalBytes}} por envio; linha de entrada de {{lineBytes}}.",
-      "line": "Linha de entrada {{size}} de {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "Reduzida ({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "uma imagem original mudou durante a preparação",
         "limits": "as imagens excedem os limites mesmo após a redução",
         "imageCount": "é possível enviar no máximo {{max}} imagens por vez",
-        "decodeLimit": "uma imagem é grande demais para ser reduzida neste dispositivo",
+        "decodeLimit": "uma imagem é grande demais para ser convertida neste dispositivo (até {{edge}} px por lado, {{pixels}} px e {{memory}} de memória de trabalho)",
         "secureContext": "reduzir esta imagem requer uma conexão segura (HTTPS ou localhost)",
         "codecFailed": "a conversão da imagem falhou",
         "codecTimeout": "a conversão da imagem demorou demais",
@@ -162,7 +161,18 @@
         "turnChanged": "o turno em execução mudou durante a preparação",
         "invalidText": "o texto é inválido ou longo demais",
         "busy": "outra imagem ainda está sendo lida",
-        "contextFull": "a solicitação ao modelo não tem espaço para estas imagens"
+        "contextFull": "a solicitação ao modelo não tem espaço para estas imagens",
+        "lineLimit": "a linha de entrada serializada excederia o limite de entrada nativo de {{lineLimit}}",
+        "providerBodyLimit": "o corpo da solicitação ao modelo excederia o limite de tamanho do provedor",
+        "imageBytes": "uma imagem excede o limite de tamanho por imagem do modelo",
+        "imageDimensions": "uma imagem excede o limite de pixels por imagem do modelo"
+      },
+      "sizes": {
+        "originals": "Originais: {{size}}",
+        "sent": "Imagens a enviar: {{size}} de {{limit}} por envio",
+        "lineSent": "Linha de entrada estimada: {{size}} de {{limit}}",
+        "lineOriginal": "Linha de entrada estimada com os originais: {{size}} de {{limit}}",
+        "over": "{{text}} · {{over}} acima"
       }
     }
   }

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { constants, crc32, deflateSync } from 'node:zlib';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { encodeImage } from '@renderer/services/runtime/RunningInput/Images/codec';
+import { encodeImage, previewPassthrough } from '@renderer/services/runtime/RunningInput/Images/codec';
 import { hashImage } from '@renderer/services/runtime/RunningInput/Images/digest';
 import {
   createImagePreparation,
@@ -50,14 +50,18 @@ function pngWithIdat(payload: Uint8Array, trailingIdat?: Uint8Array, following: 
 const original = new Blob(['source'], { type: 'image/png' });
 const jpegOriginal = new Blob(['jpeg']);
 const derivative = new Blob(['output'], { type: 'image/png' });
+const thumbnail = new Blob(['thumbnail'], { type: 'image/png' });
 const sha = (value: string) => createHash('sha256').update(value).digest('hex');
 const digest = (value: string) => ({ sha256: sha(value), algorithm: 'js' as const, elapsedMs: 0 });
 const ref = { kind: 'project', pe_id: 'fixture', relative_path: 'original.png' } as const;
 
 class FixtureWorker {
   static instances: FixtureWorker[] = [];
+  static requests: WorkerRequest['kind'][] = [];
   static silence = false;
   static budgetElapsed = 0;
+  /** Pass-through mode: inspect reports this size and encode returns the original bytes. */
+  static passthrough?: { width: number; height: number; silentPreview?: boolean };
   message: (event: { data: WorkerReply }) => void;
   addEventListener(type: string, handler: (event: { data: WorkerReply }) => void) {
     if (type === 'message') this.message = handler;
@@ -67,24 +71,47 @@ class FixtureWorker {
     FixtureWorker.instances.push(this);
   }
   postMessage(request: WorkerRequest) {
+    FixtureWorker.requests.push(request.kind);
     if (FixtureWorker.silence) return;
     const mime = request.source === jpegOriginal ? 'image/jpeg' : 'image/png';
-    const header = { mime, width: 8200, height: 1, orientation: 1 } as const;
+    const passthrough = FixtureWorker.passthrough;
+    const header = {
+      mime,
+      width: passthrough?.width ?? 8200,
+      height: passthrough?.height ?? 1,
+      orientation: 1,
+    } as const;
+    if (request.kind === 'preview' && passthrough?.silentPreview) return;
     const data: WorkerReply =
       request.kind === 'inspect'
         ? { kind: 'inspected', header }
-        : {
-            kind: 'encoded',
-            result: {
-              output: derivative,
-              originalDigest: digest('source'),
-              outputDigest: digest('output'),
-              dimensions: { width: 2048, height: 1 },
-              changed: true,
-              secureContext: false,
-              plannedBytes: 4096,
-            },
-          };
+        : request.kind === 'preview'
+          ? { kind: 'previewed', preview: { blob: thumbnail, forSha256: request.sha256 } }
+          : passthrough
+            ? {
+                kind: 'encoded',
+                result: {
+                  output: request.source,
+                  originalDigest: digest('source'),
+                  outputDigest: digest('source'),
+                  dimensions: { width: passthrough.width, height: passthrough.height },
+                  changed: false,
+                  secureContext: false,
+                  plannedBytes: 64,
+                },
+              }
+            : {
+                kind: 'encoded',
+                result: {
+                  output: derivative,
+                  originalDigest: digest('source'),
+                  outputDigest: digest('output'),
+                  dimensions: { width: 2048, height: 1 },
+                  changed: true,
+                  secureContext: false,
+                  plannedBytes: 4096,
+                },
+              };
     setTimeout(() => this.message({ data }), FixtureWorker.budgetElapsed);
   }
 }
@@ -103,6 +130,8 @@ function preparation(signal: AbortSignal = new AbortController().signal, count =
 
 afterEach(() => {
   FixtureWorker.instances = [];
+  FixtureWorker.requests = [];
+  FixtureWorker.passthrough = undefined;
   FixtureWorker.silence = false;
   FixtureWorker.budgetElapsed = 0;
   upload.mockReset();
@@ -289,6 +318,62 @@ describe('image container and digest', () => {
     expect(matching.preview?.blob).toBe(blob);
   });
 
+  describe('pass-through thumbnail', () => {
+    class Bitmap {
+      close = vi.fn();
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+    }
+    class Canvas {
+      constructor(
+        readonly width: number,
+        readonly height: number
+      ) {}
+      getContext() {
+        return { drawImage() {} };
+      }
+      async convertToBlob() {
+        return new Blob([png], { type: 'image/png' });
+      }
+    }
+    const header = { mime: 'image/png', width: 64, height: 1, orientation: 1 } as const;
+    const source = new Blob([png], { type: 'image/png' });
+
+    it('binds a small pass-through thumbnail to the transmitted digest', async () => {
+      const bitmap = new Bitmap(64, 1);
+      const decode = vi.fn().mockResolvedValue(bitmap);
+      vi.stubGlobal('OffscreenCanvas', Canvas);
+      vi.stubGlobal('createImageBitmap', decode);
+      const preview = await previewPassthrough(source, header, sha('sent'), source.size);
+      expect(preview).toMatchObject({ forSha256: sha('sent'), blob: { type: 'image/png' } });
+      expect(decode).toHaveBeenCalledExactlyOnceWith(source);
+      expect(bitmap.close).toHaveBeenCalledOnce();
+    });
+
+    it.each([
+      ['the 8000×8000 class', { ...header, width: 8000, height: 8000 }],
+      ['just over the pixel threshold', { ...header, width: 4097, height: 2048 }],
+      ['an EXIF-oriented image', { ...header, orientation: 6 }],
+    ])('skips the extra decode for %s', async (_name, large) => {
+      const decode = vi.fn();
+      vi.stubGlobal('createImageBitmap', decode);
+      expect(await previewPassthrough(source, large, sha('sent'), source.size)).toBeUndefined();
+      expect(decode).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the icon when decoding fails or reports other dimensions', async () => {
+      vi.stubGlobal('OffscreenCanvas', Canvas);
+      vi.stubGlobal('createImageBitmap', vi.fn().mockRejectedValue(new Error('decode')));
+      expect(await previewPassthrough(source, header, sha('sent'), source.size)).toBeUndefined();
+      const other = new Bitmap(32, 1);
+      vi.stubGlobal('createImageBitmap', vi.fn().mockResolvedValue(other));
+      expect(await previewPassthrough(source, header, sha('sent'), source.size)).toBeUndefined();
+      expect(other.close).toHaveBeenCalledOnce();
+    });
+  });
+
   it('rejects a browser that returns PNG when JPEG encoding was requested', async () => {
     class Bitmap {
       width = 2;
@@ -427,6 +512,39 @@ describe('image preparation', () => {
       'grant-mismatch'
     );
     expect(write).not.toHaveBeenCalled();
+  });
+
+  it('adds a digest-bound thumbnail for a small pass-through image without uploading', async () => {
+    FixtureWorker.passthrough = { width: 64, height: 1 };
+    const result = await preparation().prepare();
+    expect(FixtureWorker.requests).toEqual(['inspect', 'encode', 'preview']);
+    expect(result.images[0]).toMatchObject({
+      ref,
+      changed: false,
+      preview: { kind: 'thumbnail', value: { blob: thumbnail, forSha256: sha('source') } },
+    });
+    expect(upload).not.toHaveBeenCalled();
+  });
+
+  it('keeps icon + W×H for the 8000×8000 class with no extra decode', async () => {
+    FixtureWorker.passthrough = { width: 8000, height: 8000 };
+    const result = await preparation().prepare();
+    expect(FixtureWorker.requests).toEqual(['inspect', 'encode']);
+    expect(result.images[0].preview).toEqual({ kind: 'icon', dimensions: { width: 8000, height: 8000 } });
+  });
+
+  it('sends without a thumbnail when the preview worker exceeds its own budget', async () => {
+    vi.useFakeTimers({ toFake: ['performance', 'setTimeout', 'clearTimeout'] });
+    FixtureWorker.passthrough = { width: 64, height: 1, silentPreview: true };
+    const pending = preparation(undefined, 2).prepare();
+    // Step the clock so each worker reply can schedule the next worker before time passes.
+    // eslint-disable-next-line no-await-in-loop -- each step depends on the previous reply
+    for (let step = 0; step < 20; step++) await vi.advanceTimersByTimeAsync(100);
+    const result = await pending;
+    // The first thumbnail spent the shared budget; the second image did not start a preview.
+    expect(FixtureWorker.requests).toEqual(['inspect', 'inspect', 'encode', 'preview', 'encode']);
+    expect(result.images.map(({ preview }) => preview.kind)).toEqual(['icon', 'icon']);
+    expect(result.codecMs).toBeLessThan(1_500);
   });
 
   it('does not re-upload after an ambiguous upload failure', async () => {

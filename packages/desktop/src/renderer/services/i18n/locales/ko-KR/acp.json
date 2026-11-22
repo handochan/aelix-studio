@@ -115,7 +115,6 @@
       "blocked": "이미지를 보내지 않았습니다: {{reason}}. 초안과 원본 첨부는 유지했습니다.",
       "sendPaths": "경로만 보내기",
       "limits": "한도: 이미지당 {{fileBytes}}·{{edge}}px, 제출당 {{images}}장·{{totalBytes}}, 입력 줄 {{lineBytes}}",
-      "line": "입력 줄 {{size}} / 한도 {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "축소됨({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "준비하는 동안 원본 이미지가 바뀌었습니다",
         "limits": "축소한 뒤에도 한도를 넘습니다",
         "imageCount": "한 번에 최대 {{max}}장까지 보낼 수 있습니다",
-        "decodeLimit": "이 기기에서 축소하기에는 이미지가 너무 큽니다",
+        "decodeLimit": "이 기기에서 변환하기에는 이미지가 너무 큽니다(한 변 {{edge}}px, {{pixels}}픽셀, 작업 메모리 {{memory}}까지)",
         "secureContext": "이 이미지를 축소하려면 보안 연결(HTTPS 또는 localhost)이 필요합니다",
         "codecFailed": "이미지 변환에 실패했습니다",
         "codecTimeout": "이미지 변환 시간이 초과되었습니다",
@@ -162,7 +161,18 @@
         "turnChanged": "준비하는 동안 실행 중인 턴이 바뀌었습니다",
         "invalidText": "텍스트가 유효하지 않거나 너무 깁니다",
         "busy": "다른 이미지를 아직 읽는 중입니다",
-        "contextFull": "모델 요청에 이 이미지를 넣을 공간이 없습니다"
+        "contextFull": "모델 요청에 이 이미지를 넣을 공간이 없습니다",
+        "lineLimit": "직렬화한 입력 줄이 네이티브 입력 한도 {{lineLimit}}를 넘습니다",
+        "providerBodyLimit": "모델 요청 본문이 provider 크기 한도를 넘습니다",
+        "imageBytes": "이미지가 모델의 이미지당 크기 한도를 넘습니다",
+        "imageDimensions": "이미지가 모델의 이미지당 픽셀 한도를 넘습니다"
+      },
+      "sizes": {
+        "originals": "원본 합계 {{size}}",
+        "sent": "전송본 합계 {{size}} / 제출 한도 {{limit}}",
+        "lineSent": "예상 입력 줄 {{size}} / 한도 {{limit}}",
+        "lineOriginal": "원본 그대로일 때 예상 입력 줄 {{size}} / 한도 {{limit}}",
+        "over": "{{text}} · {{over}} 초과"
       }
     }
   }

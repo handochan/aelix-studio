@@ -971,6 +971,14 @@ Please check your local CLI tool authentication status`,
         onRemove={remove}
         onClear={clear}
       />
+      {/* Above the status bar: it tucks under the composer with a negative margin and would cover the notices. */}
+      <RunningInputNotices
+        notices={runningInput.notices}
+        onDismiss={runningInput.dismiss}
+        onCheck={(requestId) => void runningInput.check(requestId)}
+        images={runningInput.images}
+        onSendPaths={runningImagePaths.available ? () => void sendRunningImagePaths() : undefined}
+      />
       <ThoughtDisplay
         running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
         statusText={teamRuntime?.statusText}
@@ -980,13 +988,6 @@ Please check your local CLI tool authentication status`,
         onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
       />
       <CrossSessionDisabledBanner />
-      <RunningInputNotices
-        notices={runningInput.notices}
-        onDismiss={runningInput.dismiss}
-        onCheck={(requestId) => void runningInput.check(requestId)}
-        images={runningInput.images}
-        onSendPaths={runningImagePaths.available ? () => void sendRunningImagePaths() : undefined}
-      />
       <SendBox
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}
         value={content}

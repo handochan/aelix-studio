@@ -115,7 +115,6 @@
       "blocked": "画像を送信しませんでした: {{reason}}。下書きと元の添付はそのまま残しました。",
       "sendPaths": "パスのみ送信",
       "limits": "上限: 画像ごとに {{fileBytes}}・{{edge}}px、1 回の送信で {{images}} 枚・{{totalBytes}}、入力行 {{lineBytes}}",
-      "line": "入力行 {{size}} / 上限 {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "縮小済み（{{from}} → {{to}}）",
@@ -150,7 +149,7 @@
         "sourceChanged": "準備中に元の画像が変更されました",
         "limits": "縮小後も上限を超えています",
         "imageCount": "一度に送信できる画像は最大 {{max}} 枚です",
-        "decodeLimit": "この画像はこのデバイスで縮小するには大きすぎます",
+        "decodeLimit": "この画像はこのデバイスで変換するには大きすぎます（1 辺 {{edge}}px、{{pixels}} ピクセル、作業メモリ {{memory}} まで）",
         "secureContext": "この画像の縮小には安全な接続（HTTPS または localhost）が必要です",
         "codecFailed": "画像の変換に失敗しました",
         "codecTimeout": "画像の変換がタイムアウトしました",
@@ -162,7 +161,18 @@
         "turnChanged": "準備中に実行中のターンが変わりました",
         "invalidText": "テキストが無効か長すぎます",
         "busy": "別の画像をまだ読み込み中です",
-        "contextFull": "モデルリクエストにこれらの画像を入れる余地がありません"
+        "contextFull": "モデルリクエストにこれらの画像を入れる余地がありません",
+        "lineLimit": "シリアライズした入力行がネイティブ入力の上限 {{lineLimit}} を超えます",
+        "providerBodyLimit": "モデルリクエスト本文がプロバイダーのサイズ上限を超えます",
+        "imageBytes": "画像がモデルの画像ごとのサイズ上限を超えています",
+        "imageDimensions": "画像がモデルの画像ごとのピクセル上限を超えています"
+      },
+      "sizes": {
+        "originals": "元画像の合計 {{size}}",
+        "sent": "送信する画像 {{size}} / 1 回の上限 {{limit}}",
+        "lineSent": "推定入力行 {{size}} / 上限 {{limit}}",
+        "lineOriginal": "元画像のままの推定入力行 {{size}} / 上限 {{limit}}",
+        "over": "{{text}} · {{over}} 超過"
       }
     }
   }

@@ -9,7 +9,7 @@ import { CloseSmall, Info } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import type { RunningImageState } from '@/renderer/services/runtime/RunningInput';
-import { formatMeasuredBytes } from './format';
+import { formatBytes } from './format';
 
 export type RunningImageWindow = NonNullable<RunningImageState['window']>;
 type WindowReason = keyof RunningImageWindow['reasons'];
@@ -53,7 +53,7 @@ const RunningImageWindowNotice: React.FC<{ sample: RunningImageWindow; onDismiss
           {t('acp.runningInput.images.window', {
             omitted: sample.omittedCount,
             kept: sample.keptCount,
-            bytes: formatMeasuredBytes(sample.keptRawBytes, i18n.language).text,
+            bytes: formatBytes(sample.keptRawBytes, i18n.language),
           })}
         </span>
         {reasons && (

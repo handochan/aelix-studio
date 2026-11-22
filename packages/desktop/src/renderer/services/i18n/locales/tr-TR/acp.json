@@ -115,7 +115,6 @@
       "blocked": "Görseller gönderilmedi: {{reason}}. Taslak ve özgün ekler korundu.",
       "sendPaths": "Yalnızca yolları gönder",
       "limits": "Sınırlar: görsel başına {{fileBytes}} ve {{edge}} px; gönderim başına {{images}} görsel ve {{totalBytes}}; {{lineBytes}} giriş satırı.",
-      "line": "Giriş satırı {{size}} / {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "Küçültüldü ({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "hazırlık sırasında özgün bir görsel değişti",
         "limits": "görseller küçültüldükten sonra da sınırları aşıyor",
         "imageCount": "tek seferde en fazla {{max}} görsel gönderilebilir",
-        "decodeLimit": "görsel bu cihazda küçültülemeyecek kadar büyük",
+        "decodeLimit": "görsel bu cihazda dönüştürülemeyecek kadar büyük (kenar başına {{edge}} px, {{pixels}} piksel ve {{memory}} çalışma belleğine kadar)",
         "secureContext": "bu görseli küçültmek için güvenli bağlantı (HTTPS veya localhost) gerekiyor",
         "codecFailed": "görsel dönüştürme başarısız oldu",
         "codecTimeout": "görsel dönüştürme çok uzun sürdü",
@@ -162,7 +161,18 @@
         "turnChanged": "hazırlık sırasında çalışan tur değişti",
         "invalidText": "metin geçersiz veya çok uzun",
         "busy": "başka bir görsel hâlâ okunuyor",
-        "contextFull": "model isteğinde bu görseller için yer yok"
+        "contextFull": "model isteğinde bu görseller için yer yok",
+        "lineLimit": "serileştirilmiş giriş satırı {{lineLimit}} yerel giriş sınırını aşar",
+        "providerBodyLimit": "model isteği gövdesi sağlayıcının boyut sınırını aşar",
+        "imageBytes": "bir görsel modelin görsel başına boyut sınırını aşıyor",
+        "imageDimensions": "bir görsel modelin görsel başına piksel sınırını aşıyor"
+      },
+      "sizes": {
+        "originals": "Özgün görseller: {{size}}",
+        "sent": "Gönderilecek görseller: {{size}} / gönderim başına {{limit}}",
+        "lineSent": "Tahmini giriş satırı: {{size}} / {{limit}}",
+        "lineOriginal": "Özgün görsellerle tahmini giriş satırı: {{size}} / {{limit}}",
+        "over": "{{text}} · {{over}} fazla"
       }
     }
   }

@@ -115,7 +115,6 @@
       "blocked": "Images not sent: {{reason}}. Your draft and original attachments were kept.",
       "sendPaths": "Send paths only",
       "limits": "Limits: {{fileBytes}} and {{edge}} px per image; {{images}} images and {{totalBytes}} per send; {{lineBytes}} input line.",
-      "line": "Input line {{size}} of {{limit}}",
       "dimensions": "{{width}}×{{height}}",
       "size": "{{dimensions}} · {{bytes}}",
       "downscaled": "Downscaled ({{from}} → {{to}})",
@@ -150,7 +149,7 @@
         "sourceChanged": "an original image changed during preparation",
         "limits": "the images exceed the limits even after downscaling",
         "imageCount": "up to {{max}} images can be sent at once",
-        "decodeLimit": "an image is too large to downscale on this device",
+        "decodeLimit": "an image is too large to convert on this device (up to {{edge}} px per side, {{pixels}} px and {{memory}} of working memory)",
         "secureContext": "downscaling this image needs a secure connection (HTTPS or localhost)",
         "codecFailed": "image conversion failed",
         "codecTimeout": "image conversion took too long",
@@ -162,7 +161,18 @@
         "turnChanged": "the running turn changed during preparation",
         "invalidText": "the text is invalid or too long",
         "busy": "another image is still being read",
-        "contextFull": "the model request has no room for these images"
+        "contextFull": "the model request has no room for these images",
+        "lineLimit": "the serialized input line would exceed the {{lineLimit}} native input limit",
+        "providerBodyLimit": "the model request body would exceed the provider's size limit",
+        "imageBytes": "an image exceeds the model's per-image size limit",
+        "imageDimensions": "an image exceeds the model's per-image pixel limit"
+      },
+      "sizes": {
+        "originals": "Originals: {{size}}",
+        "sent": "Images to send: {{size}} of {{limit}} per send",
+        "lineSent": "Estimated input line: {{size}} of {{limit}}",
+        "lineOriginal": "Estimated input line with the originals: {{size}} of {{limit}}",
+        "over": "{{text}} · {{over}} over"
       }
     }
   }

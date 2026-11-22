@@ -58,8 +58,13 @@ const RunningInputNotices: React.FC<RunningInputNoticesProps> = ({
   onSendPaths,
 }) => {
   const { t } = useTranslation();
-  const imageReceipts = images?.receipts ?? [];
   const submission = images?.submission;
+  // A pre-write ACP limit rejection becomes a blocked submission for the same click. Show it once.
+  const superseded = submission?.status === 'blocked' ? submission.requestId : undefined;
+  const imageReceipts = (images?.receipts ?? []).filter(
+    ({ receipt }) => receipt.status !== 'rejected' || receipt.requestId !== superseded
+  );
+  const hasSuperseded = imageReceipts.length !== (images?.receipts.length ?? 0);
   const [dismissedWindow, setDismissedWindow] = useState<string>();
   const sample = images?.state?.window;
   const providerWindow =
@@ -98,7 +103,10 @@ const RunningInputNotices: React.FC<RunningInputNoticesProps> = ({
               canSendPaths={!!onSendPaths && submission.status === 'blocked' && submission.allowPathOnly}
               onSendPaths={() => onSendPaths?.()}
               onCancel={images.cancelPreparation}
-              onDismiss={images.dismissSubmission}
+              onDismiss={() => {
+                images.dismissSubmission();
+                if (hasSuperseded && superseded) onDismiss([superseded]);
+              }}
             />
           )}
           {notices.map((notice) => (

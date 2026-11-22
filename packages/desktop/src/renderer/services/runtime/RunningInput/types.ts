@@ -37,8 +37,27 @@ export type RunningInputReceipt = Readonly<
   } & (RunningInputOutcome | { status: 'pending' })
 >;
 
+/**
+ * ACP rejections answered before any native write for which the original paths remain a
+ * valid explicit choice. The composer turns them into a blocked submission on the same draft.
+ */
+export type RunningImagePathRejection = Extract<
+  RunningImageRejection,
+  | 'native-line-limit'
+  | 'provider-body-limit'
+  | 'provider-context-limit'
+  | 'image-bytes'
+  | 'image-dimensions'
+  | 'image-count'
+  | 'animated-image'
+  | 'unsupported-image'
+  | 'invalid-image-header'
+  | 'model-unverified'
+>;
+
 export type RunningImageBlockReason =
   | ImageFailureCode
+  | RunningImagePathRejection
   | 'contract-unavailable'
   | 'model-text-only'
   | 'model-unverified'

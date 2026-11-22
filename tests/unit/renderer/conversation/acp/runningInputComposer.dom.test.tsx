@@ -614,6 +614,88 @@ describe('running input in the composer', () => {
     });
   });
 
+  it.each([
+    ['native-line-limit', true],
+    ['provider-body-limit', true],
+    ['stale-turn', false],
+  ] as const)('turns an ACP %s rejection into a path-only choice when it applies', async (reason, pathOnly) => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(({ method, payload }) => {
+      if (method === IMAGE_STATE)
+        return result({
+          available: true,
+          model: 'fixture/vision',
+          turnId: server.turn.turnId,
+          remaining: { count: 4, rawBytes: 6 << 20, imageBytes: 3_750_000, sidePixels: 8000, nativeLineBytes: 8 << 20 },
+        });
+      return method === STEER_IMAGES ? result({ accepted: false, reason }) : accepted(payload.turnId);
+    });
+    const digest = { sha256: 'b'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
+    const size = { width: 64, height: 1, bytes: 64, digest };
+    vi.spyOn(runningImages, 'createImagePreparation').mockImplementation(({ requestId }) => ({
+      prepare: async () => ({
+        requestId: requestId!,
+        prepareId: requestId!,
+        recipeVersion: 1,
+        images: [
+          {
+            ref: IMAGE_REFERENCE.files[0],
+            original: size,
+            sent: { ...size, mime: 'image/png' },
+            preview: { kind: 'icon', dimensions: size },
+            changed: false,
+            orientationOnly: false,
+            secureContext: false,
+            plannedBytes: 64,
+            codecMs: 0,
+          },
+        ],
+        estimatedLineBytes: (8 << 20) + 1,
+        codecMs: 0,
+      }),
+      dispose() {},
+    }));
+    const fetchHost = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation((url, init) =>
+      url.endsWith('/byte-grants')
+        ? Promise.resolve(
+            success({ expiresInMs: 60_000, grants: [{ id: 'grant', byteLength: 64, sha256: digest.sha256 }] })
+          )
+        : fetchHost(url, init)
+    );
+    await mount({ enablePixels: true });
+
+    expect(await submit('caption', IMAGE_REFERENCE)).toBe('kept');
+    expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+    const [{ receipt }] = controller.images.receipts;
+    expect(receipt).toMatchObject({ status: 'rejected', reason });
+    if (!pathOnly) {
+      expect(controller.images.submission).toBeUndefined();
+      return;
+    }
+    expect(controller.images.submission).toMatchObject({
+      requestId: receipt.requestId,
+      status: 'blocked',
+      reason,
+      allowPathOnly: true,
+      batch: { estimatedLineBytes: (8 << 20) + 1 },
+    });
+    await act(async () => {
+      expect(await controller.images.submitPaths('caption', IMAGE_REFERENCE, TEXT_DRAFT)).toBe('sent');
+    });
+    expect(server.write.mock.calls.at(-1)?.[0]).toMatchObject({
+      method: STEER,
+      payload: { message: expect.stringContaining(CONFIRMED_IMAGE), turnId: 'turn-1' },
+    });
+    expect(writes().filter((method) => method === STEER_IMAGES)).toHaveLength(1);
+  });
+
   it.each(['binding', 'turn', 'mode'] as const)(
     'keeps a path-only click on its original target if reconnect changes the %s',
     async (change) => {

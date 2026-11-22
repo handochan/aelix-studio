@@ -11,6 +11,7 @@ import {
   parseImageGrants,
   parseImageState,
   RUNNING_IMAGE_LIMITS,
+  type RunningImageRejection,
 } from './imageProtocol';
 import { wsEmitter } from '@/common/adapter/httpBridge';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
@@ -18,6 +19,7 @@ import { createRequestId, INPUT_METHODS, isRecord, requestRelay, type RelayCall,
 import type {
   ImageSubmissionIdentity,
   RunningImageBlockReason,
+  RunningImagePathRejection,
   RunningImageSubmission,
   RunningInputLookupResult,
   RunningInputMode,
@@ -370,6 +372,22 @@ export function createRunningInputClient(
     return state;
   }
 
+  /** ACP answers these before the native write, so the same draft can still be sent as paths. */
+  const PATH_REJECTIONS: ReadonlySet<RunningImageRejection> = new Set<RunningImagePathRejection>([
+    'native-line-limit',
+    'provider-body-limit',
+    'provider-context-limit',
+    'image-bytes',
+    'image-dimensions',
+    'image-count',
+    'animated-image',
+    'unsupported-image',
+    'invalid-image-header',
+    'model-unverified',
+  ]);
+  const isPathRejection = (reason: RunningImageRejection): reason is RunningImagePathRejection =>
+    PATH_REJECTIONS.has(reason);
+
   async function submitImages({
     bindingId,
     turnId,
@@ -500,11 +518,20 @@ export function createRunningInputClient(
           return blocked('model-changed');
 
         previews.retain(identity, requestId, prepared.images);
-        return dispatch(
+        const sent = await dispatch(
           { ...identity, hostTurnId, status: 'pending', pixels: batch },
           makeBody(verified.map(({ id }) => id)),
           () => !signal.aborted && isCurrent()
         );
+        // The receipt stays as the record of this write attempt. The composer shows the block instead.
+        if (
+          sent.status === 'sent' &&
+          sent.receipt.status === 'rejected' &&
+          'reason' in sent.receipt &&
+          isPathRejection(sent.receipt.reason)
+        )
+          return blocked(sent.receipt.reason);
+        return sent;
       } finally {
         preparation.dispose();
       }
