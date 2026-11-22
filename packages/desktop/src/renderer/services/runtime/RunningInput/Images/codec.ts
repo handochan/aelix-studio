@@ -7,6 +7,7 @@ import {
   MAX_RASTER_EDGE,
   MAX_RASTER_PIXELS,
   MIB,
+  PASSTHROUGH_PREVIEW_PIXELS,
   type CodecResult,
   type Dimensions,
   type HashProgress,
@@ -196,6 +197,66 @@ async function encodeDerivative(request: EncodeRequest, display: Dimensions) {
   }
 }
 
+/** Draw a decoded image into a PNG no larger than THUMBNAIL_EDGE. Returns undefined on any canvas failure. */
+async function thumbnailOf(bitmap: ImageBitmap, dimensions: Dimensions): Promise<Blob | undefined> {
+  const thumbnailSize = fit(dimensions, THUMBNAIL_EDGE);
+  try {
+    const { canvas, ctx } = canvas2d(thumbnailSize);
+    try {
+      ctx.drawImage(bitmap, 0, 0, thumbnailSize.width, thumbnailSize.height);
+      const thumbnail = await canvas.convertToBlob({ type: 'image/png' });
+      return thumbnail.type === 'image/png' ? thumbnail : undefined;
+    } finally {
+      canvas.width = canvas.height = 1;
+    }
+  } catch {
+    return undefined;
+  }
+}
+
+/** Whether a pass-through image may spend one extra decode on its receipt thumbnail. */
+export function passthroughPreviewAllowed(header: ImageHeader, residentBytes: number): boolean {
+  const pixels = header.width * header.height;
+  const rasterBytes = pixels * (header.highBitDepth ? 8 : 4 + (header.jpegComponents === 4 ? 4 : 0));
+  const planned =
+    residentBytes +
+    CODEC_HEADROOM_BYTES +
+    rasterBytes +
+    (header.jpegCoefficientBytes ?? 0) +
+    (header.mime === 'image/png' ? PNG_INFLATE_WORKSPACE_BYTES : 0);
+  return (
+    header.orientation === 1 &&
+    pixels <= PASSTHROUGH_PREVIEW_PIXELS &&
+    fullRasterAllowed(header) &&
+    planned <= MAX_PLANNED_BYTES
+  );
+}
+
+/**
+ * Thumbnail for a pass-through image. The caller passes the transmitted Blob and the
+ * SHA-256 the encode step computed for it; Blobs are immutable, so the preview shows those
+ * exact bytes. Never throws: a missing thumbnail falls back to icon + W×H.
+ */
+export async function previewPassthrough(
+  source: Blob,
+  header: ImageHeader,
+  sha256: string,
+  residentBytes: number
+): Promise<Preview | undefined> {
+  if (!passthroughPreviewAllowed(header, residentBytes)) return undefined;
+  let bitmap: ImageBitmap | undefined;
+  try {
+    bitmap = await createImageBitmap(source);
+    if (bitmap.width !== header.width || bitmap.height !== header.height) return undefined;
+    const thumbnail = await thumbnailOf(bitmap, header);
+    return thumbnail && thumbnail.size <= 512 * 1024 ? { blob: thumbnail, forSha256: sha256 } : undefined;
+  } catch {
+    return undefined;
+  } finally {
+    bitmap?.close();
+  }
+}
+
 async function verifyOutput(output: Blob, dimensions: Dimensions): Promise<Blob | undefined> {
   const header = await readImageHeader(output);
   if (
@@ -212,19 +273,7 @@ async function verifyOutput(output: Blob, dimensions: Dimensions): Promise<Blob 
     if (bitmap.width !== dimensions.width || bitmap.height !== dimensions.height) {
       throw new ImagePreparationError('invalid-image');
     }
-    const thumbnailSize = fit(dimensions, THUMBNAIL_EDGE);
-    try {
-      const { canvas, ctx } = canvas2d(thumbnailSize);
-      try {
-        ctx.drawImage(bitmap, 0, 0, thumbnailSize.width, thumbnailSize.height);
-        const thumbnail = await canvas.convertToBlob({ type: 'image/png' });
-        return thumbnail.type === 'image/png' ? thumbnail : undefined;
-      } finally {
-        canvas.width = canvas.height = 1;
-      }
-    } catch {
-      return undefined;
-    }
+    return await thumbnailOf(bitmap, dimensions);
   } finally {
     bitmap.close();
   }

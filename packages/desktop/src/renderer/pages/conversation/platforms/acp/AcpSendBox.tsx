@@ -40,6 +40,8 @@ import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import {
   RunningInputModeSwitch,
   RunningInputNotices,
+  RunningInputStack,
+  useRunningImagePaths,
   useRunningInput,
 } from '@/renderer/pages/conversation/runtime/RunningInput';
 import {
@@ -286,7 +288,7 @@ const AcpSendBox: React.FC<{
     },
     [setContent]
   );
-  const { setSendBoxHandler } = usePreviewContext();
+  const { setSendBoxHandler, clearDomSnippets } = usePreviewContext();
 
   // Use useLatestRef to keep latest setters to avoid re-registering handler
   const setContentRef = useLatestRef(setContent);
@@ -339,6 +341,7 @@ const AcpSendBox: React.FC<{
   const runningInput = useRunningInput({
     conversationId: conversation_id,
     enabled: !teamRuntime && !teamSendMessage && !teamPermission,
+    enablePixels: true,
     host: hostTurnState(getConversationRuntimeViewSnapshot(conversation_id)),
     hostTurnId: runtimeView.activeTurnId,
     refreshHost,
@@ -348,6 +351,7 @@ const AcpSendBox: React.FC<{
     paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
   });
   const runningInputSendable = runningInput.available && !supportsMidturnDelivery;
+  const runningImagePaths = useRunningImagePaths(runningInput.images, runningInputDraftVersion);
 
   // Register handler for adding text from preview panel to sendbox
   useEffect(() => {
@@ -546,16 +550,34 @@ Please check your local CLI tool authentication status`,
 
   const deferDraftClear = runningInput.handlesSubmit && !supportsMidturnDelivery;
 
+  const removeSubmittedReferences = (files: ChatFileRef[], sessions: SessionRef[]) => {
+    removeSubmittedFiles(files);
+    if (sessions.length) {
+      setSelectedSessions((current) => current.filter((ref) => !sessions.some((sent) => sent.id === ref.id)));
+    }
+  };
+
+  // Explicit path-only delivery of a blocked running image draft (S-1b). Uses the original refs.
+  const sendRunningImagePaths = async () => {
+    const files = collectChatFileRefs(uploadFile, atPath);
+    const sessions = selectedSessions;
+    const text = content;
+    const { sent, decorationsCurrent } = await runningImagePaths.send({ files, sessions });
+    if (!sent) return;
+    removeSubmittedReferences(files, sessions);
+    if (contentRef.current === text) setContent('');
+    if (decorationsCurrent) {
+      emitter.emit('sendbox.reply.clear');
+      clearDomSnippets();
+    }
+  };
+
   const onSendHandler = async (message: string, draft: ComposerDraft): Promise<void | false> => {
     const files = collectChatFileRefs(uploadFile, atPath);
     const sessions = selectedSessions;
-    const removeSubmitted = () => {
-      removeSubmittedFiles(files);
-      if (sessions.length) {
-        setSelectedSessions((current) => current.filter((ref) => !sessions.some((sent) => sent.id === ref.id)));
-      }
-    };
+    const removeSubmitted = () => removeSubmittedReferences(files, sessions);
     if (deferDraftClear) {
+      runningImagePaths.remember(message, draft);
       const route = await runningInput.submit(message, { files, sessions }, draft);
       if (route === 'kept') return false;
       if (route === 'sent') {
@@ -950,20 +972,27 @@ Please check your local CLI tool authentication status`,
         onRemove={remove}
         onClear={clear}
       />
-      <ThoughtDisplay
-        running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
-        statusText={teamRuntime?.statusText}
-        externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
-        startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
-        onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
-        onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
-      />
+      <RunningInputStack
+        notices={
+          <RunningInputNotices
+            notices={runningInput.notices}
+            onDismiss={runningInput.dismiss}
+            onCheck={(requestId) => void runningInput.check(requestId)}
+            images={runningInput.images}
+            onSendPaths={runningImagePaths.available ? () => void sendRunningImagePaths() : undefined}
+          />
+        }
+      >
+        <ThoughtDisplay
+          running={teamRuntime?.loading ?? (aiProcessing && !hasThinkingMessage)}
+          statusText={teamRuntime?.statusText}
+          externalElapsedSource={Boolean(teamRuntime) || turnStartedAtMs != null}
+          startedAtMs={teamRuntime ? (teamRuntime.startedAtMs ?? null) : turnStartedAtMs}
+          onStop={compactionStopBlocked ? undefined : effectiveHandleStop}
+          onRetryStart={teamRuntime?.onRetryStart ? () => void teamRuntime.onRetryStart?.() : undefined}
+        />
+      </RunningInputStack>
       <CrossSessionDisabledBanner />
-      <RunningInputNotices
-        notices={runningInput.notices}
-        onDismiss={runningInput.dismiss}
-        onCheck={(requestId) => void runningInput.check(requestId)}
-      />
       <SendBox
         onMobilePlusClick={isMobile ? () => setIsMobileSheetOpen(true) : undefined}
         value={content}

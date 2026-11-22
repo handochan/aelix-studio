@@ -1,4 +1,4 @@
-import { encodeImage } from './codec';
+import { encodeImage, previewPassthrough } from './codec';
 import { readImageHeader } from './headers';
 import { ImagePreparationError, type WorkerReply, type WorkerRequest } from './types';
 
@@ -17,6 +17,11 @@ scope.addEventListener('message', ({ data }) => {
     try {
       if (data.kind === 'inspect') {
         reply({ kind: 'inspected', header: await readImageHeader(data.source) });
+      } else if (data.kind === 'preview') {
+        reply({
+          kind: 'previewed',
+          preview: await previewPassthrough(data.source, data.header, data.sha256, data.residentBytes),
+        });
       } else {
         const result = await encodeImage(data, (progress) => reply({ kind: 'progress', progress }));
         reply({ kind: 'encoded', result });

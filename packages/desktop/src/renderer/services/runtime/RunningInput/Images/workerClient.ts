@@ -1,6 +1,6 @@
 import { ImagePreparationError, type HashProgress, type WorkerReply, type WorkerRequest } from './types';
 
-type Result = Extract<WorkerReply, { kind: 'inspected' | 'encoded' }>;
+type Result = Extract<WorkerReply, { kind: 'inspected' | 'encoded' | 'previewed' }>;
 
 /** Each command owns its worker and releases all native state on completion or cancellation. */
 export function runImageWorker(

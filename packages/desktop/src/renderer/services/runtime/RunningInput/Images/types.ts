@@ -11,6 +11,15 @@ export const MAX_IMAGES = 4;
 export const IMAGE_CODEC_MS = 5_000;
 export const BATCH_CODEC_MS = 15_000;
 export const NETWORK_IDLE_MS = 30_000;
+/**
+ * A pass-through image is sent without opening a raster. Its receipt thumbnail costs one
+ * extra decode in a separate worker, so it is made only up to 8,388,608 px (32 MiB of RGBA,
+ * e.g. 3840×2160 or a full-screen Retina capture), within the planned-memory cap and this
+ * shared per-submission time budget. A failed or skipped thumbnail never blocks the send.
+ * Larger images, including the 8000×8000 class, keep icon + W×H with zero extra decodes.
+ */
+export const PASSTHROUGH_PREVIEW_PIXELS = 8 * MIB;
+export const PASSTHROUGH_PREVIEW_MS = 1_500;
 export const RECIPE_VERSION = 1;
 
 export type ImageMime = 'image/png' | 'image/jpeg';
@@ -88,10 +97,13 @@ export type WorkerRequest =
       residentBytes: number;
       forceJs?: boolean;
       safePreview?: Preview;
-    };
+    }
+  /** Thumbnail of the exact pass-through bytes whose SHA-256 the encode step reported. */
+  | { kind: 'preview'; source: Blob; header: ImageHeader; sha256: string; residentBytes: number };
 
 export type WorkerReply =
   | { kind: 'inspected'; header: ImageHeader }
   | { kind: 'encoded'; result: CodecResult }
+  | { kind: 'previewed'; preview?: Preview }
   | { kind: 'progress'; progress: HashProgress }
   | { kind: 'error'; code: ImageFailureCode };
