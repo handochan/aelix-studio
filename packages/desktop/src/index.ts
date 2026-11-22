@@ -31,6 +31,7 @@ import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGa
 import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
+import { startStudioExtensions } from '@process/services/StudioExtensionsService';
 import { pathToFileURL } from 'node:url';
 import { BackendLifecycleManager, fetchStudioBackend } from '@aionui/web-host';
 import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
@@ -749,6 +750,14 @@ const handleAppReady = async (): Promise<void> => {
     console.error('Failed to initialize process:', error);
     app.exit(1);
     return;
+  }
+  // After ready: the extension helper's vault reads the OS secret store (Studio #32). The
+  // helper is optional to the rest of the app: without it, its channel answers RUNTIME_UNAVAILABLE.
+  try {
+    startStudioExtensions();
+    mark('studioExtensions');
+  } catch (error) {
+    console.error('[StudioExtensions] not started:', error instanceof Error ? error.name : typeof error);
   }
 
   /**

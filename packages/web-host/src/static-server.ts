@@ -27,6 +27,8 @@ import {
 import { toHostCookieHeader, toStudioSetCookie, usesSharedLoopbackHost } from './studio-auth/cookies.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
+import { handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './studio-extensions/host/facade.js';
+import { getStudioExtensionService } from './studio-extensions/host/shared.js';
 import {
   MAX_UPGRADE_HEADER_BYTES,
   proxyWebSocket,
@@ -275,6 +277,12 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
 
+      if (req.url.startsWith(STUDIO_EXTENSIONS_ROUTE)) {
+        if (!cookieAuthority) delete req.headers.cookie;
+        await handleStudioExtensions(req, res, { backendPort: opts.backendPort, origins: [req.headers.origin ?? ''] });
+        return;
+      }
+
       // /api/* — reverse proxy to backend (includes /api/auth/*).
       // /login and /logout are aionui-auth's top-level auth endpoints: proxy them too
       // so WebUI browser clients reach the backend without a path-rewrite.
@@ -419,6 +427,8 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     },
     stop: async () => {
       getNativeAuthService().cancelOwner('web:', true);
+      // WebUI users' extension changes end with the listener that started them.
+      getStudioExtensionService()?.cancelOwner('web:', true);
       await closeListeners();
     },
   };

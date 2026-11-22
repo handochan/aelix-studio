@@ -270,6 +270,24 @@ export type ExtensionReply =
   | { ok: true; data: ExtensionData }
   | { ok: false; code: ExtensionFailureCode; detail?: string[] };
 
+/**
+ * What the Studio host's own channel to the helper answers before the helper sees a request
+ * (the desktop `studio:extensions` IPC channel and the WebUI `/api/studio/extensions` route):
+ * `FORBIDDEN` for a caller that is not the Studio window or not a same-origin request,
+ * `UNAUTHENTICATED` without a real WebUI login, `FRAME_LIMIT` for a request over 60 kB,
+ * `UNAVAILABLE` when the host could not answer, and `CONNECTION_LOST` when the screen lost the
+ * answer. A lost answer may follow a change that was made; the screen never sends it again.
+ */
+export type StudioExtensionsTransportCode =
+  | 'FORBIDDEN'
+  | 'UNAUTHENTICATED'
+  | 'FRAME_LIMIT'
+  | 'UNAVAILABLE'
+  | 'CONNECTION_LOST';
+
+/** A reply as the screen receives it: the helper's, or the channel's own refusal. */
+export type StudioExtensionsReply = ExtensionReply | { ok: false; code: StudioExtensionsTransportCode };
+
 /** A failure with a code the caller can show. Anything else is reported as `INTERNAL`. */
 export class ExtensionFailure extends Error {
   constructor(

@@ -13,6 +13,11 @@ contextBridge.exposeInMainWorld('__studioNativeAuth', {
   request: (command: unknown) => ipcRenderer.invoke('studio:native-auth', command),
 });
 
+// The extension helper's channel carries proxy credentials too: kept as dedicated as the one above.
+contextBridge.exposeInMainWorld('__studioExtensions', {
+  request: (command: unknown) => ipcRenderer.invoke('studio:extensions', command),
+});
+
 /**
  * @description 注入到renderer进程中, 用于与main进程通信
  * */

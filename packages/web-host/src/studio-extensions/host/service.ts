@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { FlowContext } from './flow/candidate.js';
-import { baseEnvironment } from './flow/environment.js';
+import type { FlowContext } from '../flow/candidate.js';
+import { baseEnvironment } from '../flow/environment.js';
 import {
   clearProxyCredentials,
   describe,
@@ -12,19 +12,24 @@ import {
   setDefault,
   setProxyCredentials,
   type MutationRequest,
-} from './flow/mutate.js';
-import { privateGitEnvironment } from './flow/online/credentials.js';
+} from '../flow/mutate.js';
+import { privateGitEnvironment } from '../flow/online/credentials.js';
 import {
   hasSavedCredentials,
   MEMORY_ONLY_VAULT,
   parseProxyCredentials,
   type ProxyCredentialVault,
-} from './flow/online/proxy/credentials.js';
-import { parseSettingsChange, readSettings, type SettingsChange, type StoredSettings } from './flow/online/settings.js';
-import { parseOnlineSource } from './flow/online/source.js';
-import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
-import { locateLayout, resolveBundle, verifyLayout } from './store/layout.js';
-import { isManagedId } from './launch/managedCatalog.js';
+} from '../flow/online/proxy/credentials.js';
+import {
+  parseSettingsChange,
+  readSettings,
+  type SettingsChange,
+  type StoredSettings,
+} from '../flow/online/settings.js';
+import { parseOnlineSource } from '../flow/online/source.js';
+import { spawnChild, windowsChildSpawn, type Spawn } from '../process.js';
+import { locateLayout, resolveBundle, verifyLayout } from '../store/layout.js';
+import { isManagedId } from '../launch/managedCatalog.js';
 import {
   ExtensionFailure,
   type ExtensionCommand,
@@ -34,7 +39,7 @@ import {
   type ExtensionSettingsState,
   type ExtensionSource,
   type ProxyCredentials,
-} from './types.js';
+} from '../types.js';
 
 export type ExtensionServiceOptions = {
   /** The bundled Studio runtime: the directory holding `manifest.json`. */

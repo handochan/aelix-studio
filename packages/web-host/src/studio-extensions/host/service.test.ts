@@ -7,10 +7,10 @@ import {
   fakeRuntime,
   installWheel,
   type FakeRuntimeOptions,
-} from '../../tests/fixtures/extensionRuntime';
-import { writeWheel, type WheelSpec } from '../../tests/fixtures/extensionWheels';
+} from '../../../tests/fixtures/extensionRuntime';
+import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
 import { ExtensionService } from './service';
-import type { ExtensionListing, ExtensionOperation, ExtensionReply } from './types';
+import type { ExtensionListing, ExtensionOperation, ExtensionReply } from '../types';
 
 // These fixtures assert POSIX paths and installer environment. Preview installer CI runs real Windows.
 describe.skipIf(process.platform === 'win32')('the extension helper service', () => {

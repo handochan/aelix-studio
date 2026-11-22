@@ -153,6 +153,17 @@ try {
   await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
     timeout: 60000,
   });
+  // The extension helper answers the installed app's window over its own channel (Studio #32):
+  // the settings without the bundle, the list with the installed bundle and lock holder.
+  trace('extension_channel');
+  const extensionSettings = await page.evaluate(() => window.__studioExtensions.request({ action: 'get_settings' }));
+  assert.equal(extensionSettings.ok, true, `extension settings: ${JSON.stringify(extensionSettings)}`);
+  assert.ok(['keychain', 'memory-only'].includes(extensionSettings.data.credentialMode));
+  assert.equal(extensionSettings.data.hasSavedCredentials, false);
+  const extensionList = await page.evaluate(() => window.__studioExtensions.request({ action: 'list' }));
+  assert.equal(extensionList.ok, true, `extension list: ${JSON.stringify(extensionList)}`);
+  assert.equal(extensionList.data.appliesAt, 'next_adapter_start');
+  assert.ok(Array.isArray(extensionList.data.extensions));
   await page.evaluate(() => {
     window.location.hash = '/settings/model';
   });

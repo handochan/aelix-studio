@@ -25,7 +25,7 @@ import {
 } from '../../../../../tests/fixtures/extensionRuntime';
 import { writeWheel } from '../../../../../tests/fixtures/extensionWheels';
 import { redactUrlCredentials, type Spawn } from '../../../process';
-import { ExtensionService, type ExtensionServiceOptions } from '../../../service';
+import { ExtensionService, type ExtensionServiceOptions } from '../../../host/service';
 import { layoutOf, type Layout } from '../../../store/layout';
 import {
   ExtensionFailure,

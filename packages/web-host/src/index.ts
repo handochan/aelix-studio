@@ -14,7 +14,10 @@ export type {
   NativeAuthSelection,
 } from './studio-auth/types.js';
 export {
+  configureStudioExtensions,
+  disposeStudioExtensions,
   ExtensionService,
+  getStudioExtensionService,
   MEMORY_ONLY_VAULT as EXTENSION_PROXY_MEMORY_ONLY_VAULT,
   locateStudioExtensionLayout,
   resolveStandaloneStudioUserDataPath,
@@ -23,16 +26,26 @@ export {
 } from './studio-extensions/index.js';
 export type {
   ExtensionCommand,
+  ExtensionData,
+  ExtensionEntry,
+  ExtensionFailureCode,
   ExtensionListing,
   ExtensionOperation,
+  ExtensionOrigin,
+  ExtensionPhase,
   ExtensionReply,
   ExtensionRollback,
   ExtensionServiceOptions,
+  ExtensionSource,
+  ExtensionStatus,
   ExtensionSettings,
   ExtensionSettingsState,
   ProxyCredentialMode,
   ProxyCredentialVault,
   ProxyCredentials,
+  StudioExtensionsConfig,
+  StudioExtensionsReply,
+  StudioExtensionsTransportCode,
 } from './studio-extensions/index.js';
 
 // Backend launcher exports (M4)

@@ -675,6 +675,24 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 - 설치는 **Studio helper 서비스**가 한다. Provider 설정이 쓰는 `NativeAuthService`
   (`packages/web-host/src/studio-auth/`)와 같은 자리, 같은 방식이다. 데스크톱은 IPC로, WebUI는 로그인한
   사용자의 요청으로 부른다. 세대 interpreter를 argv로 직접 실행하고 shell을 쓰지 않는다.
+- **host 조립(2026-11-22).** 프로세스마다 서비스는 하나다(`configureStudioExtensions`). 데스크톱 IPC와 그
+  프로세스가 띄운 WebUI가 같은 서비스를 쓴다. 상태는 `<Studio 사용자 데이터>/aelix-runtime`, 번들은 native auth와
+  같은 방식(`AELIX_STUDIO_RUNTIME`, 설치 앱의 `resources/studio-preview`, checkout의 `.local/studio-preview`)으로
+  찾는다. 설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다.
+  - **데스크톱.** app `ready` 뒤에 `safeStorage` vault로 설정한다(Linux는 이때 비밀 저장소를 알린다). 실패해도 앱은
+    뜬다. 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다(preload
+    `__studioExtensions` → `ipcMain` `studio:extensions`). native auth와 같은 검사(등록한 Studio 창의 main frame,
+    그 창의 페이지 URL)를 통과한 창에만 답하고, 60 kB를 넘는 요청은 거절한다. 창마다 owner(`desktop:<webContents>`)가
+    다르다. 창이 사라지거나 main frame이 다른 페이지로 가면 그 창이 시작한 변경을 취소한다.
+  - **WebUI.** 같은 listener의 `POST /api/studio/extensions`이다. native auth facade와 같은 입장 검사를 같은 코드로
+    한다(JSON POST, `X-Studio-Extensions: 1`, 페이지 자신의 origin, cross-site 아님, 실제 WebUI 로그인, 60 kB, 10초).
+    로그인한 사용자가 owner(`web:<user>`)다. listener가 멈추면 WebUI 사용자의 변경을 취소한다. 별도 WebUI는 vault 없이
+    설정되어 memory-only다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할 수 있다(2026-11-22 사용자
+    결정, 저장한 값은 돌려주지 않는다).
+  - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 답을 잃으면 `CONNECTION_LOST`로 끝내고
+    다시 보내지 않는다. 이미 바뀐 뒤일 수 있기 때문이다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`,
+    `UNAVAILABLE`, `CONNECTION_LOST`)은 `types.ts`의 `StudioExtensionsReply`다. **[실행: facade·채널·client 단위 시험,
+    static server route 시험, 설치 앱 smoke에서 실제 IPC로 `get_settings`·`list`]**
 - host와 ACP를 거치지 않는다. 실행 중인 worker를 건드리지 않는다(D05·D17). 변경은 5.6의 잠금으로 한 번에
   하나만 한다.
 - 화면 모듈(D20)은 아래 요청만 안다. pip, venv, 세대 경로는 모른다.
@@ -1125,6 +1143,10 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 접속 기한(합계)을 정했다. 결정: `%` 뒤 16진 두 자리 거절을 없앴다. relay가 입력값으로 Basic 값을 만들어 Git의 이중
 디코딩이 더는 관계없다. ASCII만 받는 규칙과 사용자 이름의 `:` 거절은 그대로다. 각 지적은 고친 것을 되돌리면 실패하는
 시험으로 확인했다.
+
+**2026-11-22, host 조립과 IPC(1b 화면의 PR A).** #112가 미룬 조립을 했다. 데스크톱 전용 채널, WebUI route, 프로세스
+하나의 서비스, 화면 client를 5.11에 적었다. native auth와 WebUI 입장 검사를 한 코드로 나눠 쓴다. 서비스 파일은 디렉터리
+한도 때문에 `studio-extensions/host/`로 옮겼다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

@@ -7,7 +7,8 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { CookieJar } from 'jsdom';
-import { startWebHost } from '../src/index.js';
+import { configureStudioExtensions, disposeStudioExtensions, startWebHost } from '../src/index.js';
+import { createFakeBundle, fakeRuntime } from './fixtures/extensionRuntime.js';
 import { startStaticServer, type StaticServerHandle } from '../src/static-server.js';
 
 vi.mock('node:os', async (importOriginal) => {
@@ -526,6 +527,55 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const json = (await r.json()) as { user: { username: string } };
     expect(json.user.username).toBe('from-backend');
+  });
+
+  it('answers the extension helper route itself, as the signed-in user, and stops WebUI changes with it', async () => {
+    const forwarded: string[] = [];
+    const backend = await startMockBackend((req, res) => {
+      if (req.url === '/api/auth/user') {
+        res.writeHead(req.headers.cookie === 'aionui-session=valid' ? 200 : 401, {
+          'content-type': 'application/json',
+        });
+        res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
+        return;
+      }
+      forwarded.push(String(req.url));
+      res.writeHead(404).end();
+    });
+    stopBackend = backend.close;
+    const scratch = await fs.mkdtemp(join(os.tmpdir(), 'studio-static-extensions-'));
+    try {
+      const bundle = await createFakeBundle(join(scratch, 'bundle'));
+      const service = configureStudioExtensions({
+        userDataPath: join(scratch, 'user data'),
+        runtime: bundle,
+        service: { spawn: fakeRuntime({ bundle }) },
+      });
+      const request = vi.spyOn(service, 'request');
+      const cancel = vi.spyOn(service, 'cancelOwner');
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const origin = handle.localUrl;
+      const response = await fetch(`${origin}/api/studio/extensions`, {
+        method: 'POST',
+        headers: {
+          origin,
+          'content-type': 'application/json',
+          'x-studio-extensions': '1',
+          cookie: 'aelix-studio-session=valid',
+        },
+        body: JSON.stringify({ action: 'get_settings' }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, data: { credentialMode: 'memory-only' } });
+      expect(request).toHaveBeenCalledWith('web:operator', { action: 'get_settings' });
+      expect(forwarded).toEqual([]);
+      await handle.stop();
+      handle = null;
+      expect(cancel).toHaveBeenCalledWith('web:', true);
+    } finally {
+      await disposeStudioExtensions();
+      await fs.rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it('/logout reverse-proxies to backend (no local handler)', async () => {
