@@ -78,6 +78,8 @@ export type RunningImageController = {
   receipts: readonly {
     receipt: RunningInputReceipt & { pixels: RunningImageBatch };
     phase: RunningInputTurnPhase;
+    /** Lookup is available only on the receipt's original live binding. */
+    canLookup: boolean;
   }[];
   /** Only queued receipts can expose a URL. Render icon + sent dimensions when absent. */
   preview: (requestId: string, sha256: string) => string | undefined;
@@ -300,10 +302,16 @@ export function useRunningInput({
       }
       const controller = new AbortController();
       currentSession.preparation = controller;
-      currentSession.imageDraft = !pathOnly && references.files.length > 0 && !!clicked?.pixelModes?.length;
+      currentSession.imageDraft = references.files.length > 0 && (pathOnly || !!clicked?.pixelModes?.length);
       submitting.current = currentSession;
       const { client: relay, stopRevision } = currentSession;
       relay.dismissImageSubmission();
+      const decorations = currentSession.imageDraft ? draft.decorationSignal : undefined;
+      const cancelDecorations = () => {
+        if (!relay.getSnapshot().sending) controller.abort();
+      };
+      decorations?.addEventListener('abort', cancelDecorations);
+      if (decorations?.aborted) cancelDecorations();
       const interrupted = () => {
         const current = latest.current;
         return (
@@ -363,14 +371,29 @@ export function useRunningInput({
         const target = activeTarget(relay.getSnapshot());
         if (!target) return 'kept';
         const chosen = decision.route === 'relay-steer' ? 'steer' : 'follow-up';
+        const matchesClick =
+          clicked?.turn.active &&
+          clicked.bindingId === target.bindingId &&
+          clicked.turn.turnId === target.turnId &&
+          initial.mode === chosen;
+        if ((pathOnly || currentSession.imageDraft) && !matchesClick) return 'kept';
+
         let prepared = { text: message, hasImage: false };
         if (decision.reason === 'references') {
           let resolved: Awaited<ReturnType<typeof resolveRunningInputReferences>>;
+          const finishReferences = currentSession.imageDraft
+            ? relay.beginImageReferences(
+                { bindingId: target.bindingId, turnId: target.turnId, mode: chosen, requestId },
+                references.files.length
+              )
+            : undefined;
           try {
-            resolved = await resolveRunningInputReferences(conversationId, message, references);
-            await relay.refresh();
+            resolved = await resolveRunningInputReferences(conversationId, message, references, controller.signal);
+            if (!interrupted()) await relay.refresh();
           } catch {
-            Message.warning(t('acp.runningInput.referencesUnverified'));
+            const cancelled = interrupted();
+            finishReferences?.(cancelled ? 'cancelled' : 'references-unverified');
+            if (!cancelled) Message.warning(t('acp.runningInput.referencesUnverified'));
             return 'kept';
           }
           const active = activeTarget(relay.getSnapshot());
@@ -379,19 +402,19 @@ export function useRunningInput({
             active.turnId !== target.turnId ||
             decide(true).route !== decision.route
           ) {
-            Message.warning(t('acp.runningInput.preparationChanged'));
+            const cancelled = interrupted();
+            finishReferences?.(cancelled ? 'cancelled' : 'turn-changed');
+            if (!cancelled) Message.warning(t('acp.runningInput.preparationChanged'));
             return 'kept';
           }
+          finishReferences?.();
           const images = resolved.files.filter(({ kind }) => kind !== 'file');
           const currentChannel = relay.getSnapshot().channel;
           const pixelContract =
             !!clicked?.pixelModes?.length || (currentChannel.status === 'ready' && !!currentChannel.pixelModes?.length);
           if (!pathOnly && images.length > 0 && pixelContract) {
             if (
-              !clicked?.turn.active ||
-              clicked.bindingId !== target.bindingId ||
-              clicked.turn.turnId !== target.turnId ||
-              initial.mode !== chosen ||
+              !matchesClick ||
               latest.current.draftVersion !== initial.draftVersion ||
               latest.current.modelVersion !== initial.modelVersion
             ) {
@@ -435,6 +458,7 @@ export function useRunningInput({
         else if (prepared.hasImage) Message.info(t('acp.runningInput.imagesAsPaths'));
         return result.receipt.status === 'queued' && !result.preserveDraft && !interrupted() ? 'sent' : 'kept';
       } finally {
+        decorations?.removeEventListener('abort', cancelDecorations);
         if (submitting.current === currentSession) submitting.current = null;
         if (currentSession.preparation === controller) {
           currentSession.preparation = undefined;
@@ -502,7 +526,13 @@ export function useRunningInput({
       submission: snapshot.imageSubmission,
       receipts: receipts.flatMap((receipt) =>
         receipt.pixels
-          ? [{ receipt: { ...receipt, pixels: receipt.pixels }, phase: phaseOf(receipt, known, stoppedRequests) }]
+          ? [
+              {
+                receipt: { ...receipt, pixels: receipt.pixels },
+                phase: phaseOf(receipt, known, stoppedRequests),
+                canLookup: channel.status === 'ready' && channel.canLookup && channel.bindingId === receipt.bindingId,
+              },
+            ]
           : []
       ),
       preview: client?.getImagePreview ?? (() => undefined),

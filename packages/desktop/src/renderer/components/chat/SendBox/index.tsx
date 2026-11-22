@@ -230,7 +230,12 @@ function extractBtwQuestion(value: string): string | null {
   return match ? match[1] || '' : null;
 }
 
-export type ComposerDraft = { slashCommand: boolean; hasQuote: boolean };
+export type ComposerDraft = {
+  slashCommand: boolean;
+  hasQuote: boolean;
+  /** Aborts when the captured reply quote or DOM fragments change. */
+  decorationSignal?: AbortSignal;
+};
 
 const SendBox: React.FC<{
   value?: string;
@@ -403,6 +408,13 @@ const SendBox: React.FC<{
 
   // 集成预览面板的"添加到聊天"功能 / Integrate preview panel's "Add to chat" functionality
   const { setSendBoxHandler, domSnippets, removeDomSnippet, clearDomSnippets } = usePreviewContext();
+  const decorations = useRef<AbortController>(null);
+  useLayoutEffect(() => {
+    if (!deferDraftClear) return;
+    const current = new AbortController();
+    decorations.current = current;
+    return () => current.abort();
+  }, [deferDraftClear, replyQuote, domSnippets]);
 
   // 注册处理器以接收来自预览面板的文本 / Register handler to receive text from preview panel
   useEffect(() => {
@@ -1627,7 +1639,11 @@ const SendBox: React.FC<{
       setReplyQuote(null);
     }
 
-    onSend(finalMessage, { slashCommand: input.trimStart().startsWith('/'), hasQuote: Boolean(replyQuote) })
+    onSend(finalMessage, {
+      slashCommand: input.trimStart().startsWith('/'),
+      hasQuote: Boolean(replyQuote),
+      ...(deferDraftClear && { decorationSignal: decorations.current?.signal }),
+    })
       .then((result) => {
         if (deferDraftClear) {
           if (result === false) return;

@@ -58,12 +58,12 @@ describe('running image submissions', () => {
   const mockPreparation = vi.mocked(createImagePreparation);
   let client: ReturnType<typeof createRunningInputClient>;
 
-  function offer(hostBytes = true, requested = methods) {
+  function offer(hostBytes = true, requested = methods, bindingId = target.bindingId) {
     fetcher
       .mockResolvedValueOnce(
         success({
           version: 1,
-          bindingId: target.bindingId,
+          bindingId,
           hostBytes,
           requests: requested.map((method) => '_aelix/session/' + method),
         })
@@ -160,6 +160,33 @@ describe('running image submissions', () => {
       expect(revokeURL).toHaveBeenCalledWith('blob:preview');
     }
   );
+
+  it('retains the original unknown receipt when its write discovers a replacement binding', async () => {
+    offer();
+    await client.refresh();
+    fetcher
+      .mockResolvedValueOnce(result(eligible))
+      .mockResolvedValueOnce(success({ expiresInMs: 50_000, grants: [grant] }))
+      .mockResolvedValueOnce(result(eligible))
+      .mockResolvedValueOnce(Response.json({ success: false, code: 'EXT_OUTCOME_UNKNOWN' }, { status: 409 }));
+    offer(true, methods, 'replacement');
+
+    const sent = await submit();
+    expect(sent).toMatchObject({
+      status: 'sent',
+      preserveDraft: true,
+      receipt: { ...target, requestId, status: 'unknown' },
+    });
+    expect(client.getSnapshot()).toMatchObject({
+      channel: { status: 'ready', bindingId: 'replacement' },
+      receipts: [{ ...target, requestId, status: 'unknown' }],
+    });
+    const requests = fetcher.mock.calls.length;
+    expect(await client.lookup(requestId)).toEqual({ status: 'binding-changed', refreshHistory: true });
+    expect(fetcher).toHaveBeenCalledTimes(requests);
+    client.dismiss(requestId);
+    expect(client.getSnapshot().receipts).toHaveLength(0);
+  });
 
   it.each(['model', 'turn', 'grant'] as const)(
     'keeps the draft and emits zero writes when the %s changes',

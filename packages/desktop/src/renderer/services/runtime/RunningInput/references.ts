@@ -22,18 +22,24 @@ function workspaceFromExtra(extra: unknown): string | undefined {
   return workspace || undefined;
 }
 
-async function resolveSessionRow(conversationId: string, senderWorkspace: string | undefined, ref: SessionRef) {
+async function resolveSessionRow(
+  conversationId: string,
+  senderWorkspace: string | undefined,
+  ref: SessionRef,
+  signal: AbortSignal
+) {
   if (!ref.id || ref.id === conversationId || LINE_CONTROLS.test(ref.id))
     throw new Error('Invalid conversation reference');
   const response = await sessionMention.list.invoke({
     current_conversation_id: conversationId,
     id: ref.id,
     privateRead: true,
+    signal,
   });
   const target = response.items.find((item) => item.id === ref.id);
   if (!target || typeof target.name !== 'string') throw new Error('Conversation reference unavailable');
 
-  const detail = await conversation.get.invoke({ id: target.id, privateRead: true });
+  const detail = await conversation.get.invoke({ id: target.id, privateRead: true, signal });
   if (detail?.id !== target.id || (detail.extra && 'teamId' in detail.extra && detail.extra.teamId)) {
     throw new Error('Conversation reference unavailable');
   }
@@ -44,8 +50,8 @@ async function resolveSessionRow(conversationId: string, senderWorkspace: string
   return `${title}\t${target.id}\tworkspace: ${workspaceField}`;
 }
 
-async function resolveFile(ref: ChatFileRef) {
-  const metadata = await fs.getContentMetadata.invoke({ file: ref, privateRead: true });
+async function resolveFile(ref: ChatFileRef, signal: AbortSignal) {
+  const metadata = await fs.getContentMetadata.invoke({ file: ref, privateRead: true, signal });
   if (typeof metadata?.path !== 'string' || !ABSOLUTE_PATH.test(metadata.path) || LINE_CONTROLS.test(metadata.path)) {
     throw new Error('File reference unavailable');
   }
@@ -66,18 +72,22 @@ function imageKind(ref: ChatFileRef, mime: string | undefined): 'pixels' | 'unsu
 export async function resolveRunningInputReferences(
   conversationId: string,
   message: string,
-  { files, sessions }: RunningInputReferences
+  { files, sessions }: RunningInputReferences,
+  lifetime?: AbortSignal
 ) {
+  const reads = new AbortController();
+  const signal = lifetime ? AbortSignal.any([lifetime, reads.signal]) : reads.signal;
   const [metadata, sessionRows] = await Promise.all([
-    Promise.all(files.map(resolveFile)),
+    Promise.all(files.map((file) => resolveFile(file, signal))),
     sessions.length === 0
       ? []
-      : conversation.get.invoke({ id: conversationId, privateRead: true }).then((sender) => {
+      : conversation.get.invoke({ id: conversationId, privateRead: true, signal }).then((sender) => {
           if (sender?.id !== conversationId) throw new Error('Sender conversation unavailable');
           const workspace = workspaceFromExtra(sender.extra);
-          return Promise.all(sessions.map((ref) => resolveSessionRow(conversationId, workspace, ref)));
+          return Promise.all(sessions.map((ref) => resolveSessionRow(conversationId, workspace, ref, signal)));
         }),
-  ]);
+  ]).finally(() => reads.abort());
+  lifetime?.throwIfAborted();
   const resolvedFiles = metadata.map(({ path, type }, index) => ({
     ref: files[index],
     path,

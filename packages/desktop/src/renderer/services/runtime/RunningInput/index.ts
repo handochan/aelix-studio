@@ -16,6 +16,7 @@ import { wsEmitter } from '@/common/adapter/httpBridge';
 import { refreshSession } from '@/common/adapter/sessionRefresh';
 import { createRequestId, INPUT_METHODS, isRecord, requestRelay, type RelayCall, type RelayFailure } from './transport';
 import type {
+  ImageSubmissionIdentity,
   RunningImageBlockReason,
   RunningImageSubmission,
   RunningInputLookupResult,
@@ -123,7 +124,13 @@ export function createRunningInputClient(conversationId: string) {
   function setBinding(next?: string): void {
     if (binding === next) return;
     binding = next;
-    update({ receipts: [], imageState: undefined, imageSubmission: undefined });
+    // Keep this conversation's pixel receipts tied to their original binding,
+    // including pending writes whose result can no longer be looked up.
+    update({
+      receipts: snapshot.receipts.filter((receipt) => receipt.pixels),
+      imageState: undefined,
+      imageSubmission: undefined,
+    });
   }
 
   function observeMissingTask(failure: RelayFailure): boolean {
@@ -272,7 +279,7 @@ export function createRunningInputClient(conversationId: string) {
 
     const receipt = { requestId, bindingId, turnId, mode, ...(pixels && { pixels }), ...outcome };
     if (inFlight) inFlightReceipt = receipt;
-    if (binding === bindingId && visible) {
+    if (visible && (pixels || binding === bindingId)) {
       update({ receipts: snapshot.receipts.map((entry) => (entry.requestId === requestId ? receipt : entry)) });
     }
     return receipt;
@@ -411,11 +418,12 @@ export function createRunningInputClient(conversationId: string) {
       return blocked('invalid-text');
     }
 
-    const preparing = (progress?: Extract<RunningImageSubmission, { status: 'preparing' }>['progress']) =>
+    const preparing = (progress?: Extract<RunningImageSubmission, { stage: 'images' }>['progress']) =>
       update({
         imageSubmission: {
           ...identity,
           status: 'preparing',
+          stage: 'images',
           imageCount: sources.length,
           progress,
           batch,
@@ -507,6 +515,23 @@ export function createRunningInputClient(conversationId: string) {
       };
     },
 
+    /** Publish private reference verification as part of the same click's preparation. */
+    beginImageReferences(identity: ImageSubmissionIdentity, fileCount: number) {
+      update({ imageSubmission: { ...identity, status: 'preparing', stage: 'references', fileCount } });
+      return (reason?: 'cancelled' | 'references-unverified' | 'turn-changed') => {
+        const current = snapshot.imageSubmission;
+        if (
+          current?.status !== 'preparing' ||
+          current.stage !== 'references' ||
+          current.requestId !== identity.requestId
+        )
+          return;
+        update({
+          imageSubmission: reason ? { ...identity, status: 'blocked', reason, allowPathOnly: false } : undefined,
+        });
+      };
+    },
+
     submitImages,
 
     /** Poll only on a negotiated active turn. Keep provider window observations separate from queue ACKs. */
@@ -572,7 +597,7 @@ export function createRunningInputClient(conversationId: string) {
     async lookup(requestId: string): Promise<RunningInputLookupResult> {
       const original = snapshot.receipts.find((entry) => entry.requestId === requestId);
       const { channel } = snapshot;
-      if (disposed || !original || (channel.status === 'ready' && original.bindingId !== channel.bindingId)) {
+      if (disposed || !original || original.bindingId !== binding) {
         return { status: 'binding-changed', refreshHistory: true };
       }
       if (channel.status === 'ready' && channel.canLookup) {

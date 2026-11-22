@@ -1,9 +1,9 @@
 // Run with Bun and the local Host, ACP source and unchanged native runtime (see README).
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdtemp, mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, open, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 import { Database } from 'bun:sqlite';
 import { crc32, deflateSync } from 'node:zlib';
 import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
@@ -11,13 +11,30 @@ import { createRunningInputClient, IMAGE_ONLY_CAPTION } from '@renderer/services
 import { INPUT_METHODS, createRequestId } from '@renderer/services/runtime/RunningInput/transport';
 import { emptyNativeImageLine } from '@renderer/services/runtime/RunningInput/imageProtocol';
 import { nativeLineBytes } from '@renderer/services/runtime/RunningInput/Images/budget';
+import { probeDerivative } from './realHostBrowser';
 
 const [hostBinary, acpSource, python, aelix] = process.argv.slice(2).map((path) => resolve(path));
 assert.ok(aelix, 'Usage: bun realHost.ts HOST ACP_SRC ACP_PYTHON AELIX');
-const root = await mkdtemp(join(tmpdir(), 'studio-image-core-'));
+// Keep the isolated ACP Unix socket path within Darwin's sockaddr_un limit.
+const root = await mkdtemp(join(process.platform === 'darwin' ? '/tmp' : tmpdir(), 'studio-image-core-'));
 const workspace = join(root, 'workspace');
 const hostData = join(root, 'host');
 const agent = join(root, 'agent');
+const home = join(root, 'home');
+const tmp = join(root, 'tmp');
+const isolatedEnv = {
+  ...Object.fromEntries(
+    ['PATH', 'SYSTEMROOT', 'WINDIR'].flatMap((name) => (process.env[name] ? [[name, process.env[name]]] : []))
+  ),
+  HOME: home,
+  USERPROFILE: home,
+  XDG_CONFIG_HOME: join(home, 'config'),
+  XDG_DATA_HOME: join(home, 'data'),
+  XDG_CACHE_HOME: join(home, 'cache'),
+  TMPDIR: tmp,
+  TMP: tmp,
+  TEMP: tmp,
+};
 const wire = join(root, 'wire.jsonl');
 const auth = randomBytes(32).toString('hex');
 const calls: { key: string; kind: 'grant' | 'write' | 'lookup'; bindingId: string; digest?: string }[] = [];
@@ -100,11 +117,6 @@ async function until<T>(read: () => T | Promise<T>): Promise<NonNullable<T>> {
 async function start() {
   const output = await open(join(root, 'host.log'), 'a');
   try {
-    const env = Object.fromEntries(
-      ['PATH', 'SYSTEMROOT', 'WINDIR', 'TMP', 'TEMP'].flatMap((name) =>
-        process.env[name] ? [[name, process.env[name]]] : []
-      )
-    );
     processHost = Bun.spawn(
       [
         hostBinary,
@@ -125,9 +137,7 @@ async function start() {
         stdout: output.fd,
         stderr: output.fd,
         env: {
-          ...env,
-          HOME: join(root, 'home'),
-          USERPROFILE: join(root, 'home'),
+          ...isolatedEnv,
           AELIX_CODING_AGENT_DIR: agent,
           AELIX_SETTINGS_PATH: join(agent, 'settings.json'),
           AIONUI_DISABLE_AUTO_UPDATE: '1',
@@ -172,7 +182,7 @@ const writes = async (): Promise<{ bytes: number; caption: boolean; count: numbe
     .map((line) => JSON.parse(line));
 
 try {
-  await Promise.all([workspace, hostData, agent, join(root, 'home')].map((path) => mkdir(path)));
+  await Promise.all([workspace, hostData, agent, home, tmp].map((path) => mkdir(path)));
   await writeFile(wire, '');
   await writeFile(
     join(agent, 'models.json'),
@@ -363,44 +373,44 @@ server.main()
   assert.equal((await writes()).length, 1);
   assert.equal(calls.length, 3);
 
-  const nativeLineLimit = 8 << 20;
-  const first = join(workspace, 'file-at-limit.png');
-  const second = join(workspace, 'batch-at-line-limit.png');
-  const sizes = [3_750_000, (6 << 20) - 3_750_000 - 2048];
-  await writeFile(first, png(8000, sizes[0]));
-  await writeFile(second, png(1, sizes[1]));
-  const message = '한"\\\n';
-  const pad =
-    nativeLineLimit - nativeLineBytes(emptyNativeImageLine('steer', message, ['image/png', 'image/png']), sizes);
-  for (const offset of [1, -1, 0]) {
-    const previous = (await writes()).length;
-    const outcome = await submit(message + 'x'.repeat(pad + offset), [ref(first), ref(second)]);
-    const observed = await writes();
-    if (offset === 1) {
-      assert.equal(outcome.status, 'blocked');
-      assert.equal(observed.length, previous);
-    } else {
-      assert.ok(
-        outcome.status === 'sent' && outcome.receipt.status === 'queued' && outcome.receipt.captionAdded === false
-      );
-      assert.equal(observed.length, previous + 1);
-      assert.equal(observed.at(-1)?.bytes, nativeLineLimit + offset);
-    }
-  }
+  const typedCaptionPath = join(workspace, 'typed-caption.png');
+  const typedCaptionBytes = png(65);
+  const typedDigest = createHash('sha256').update(typedCaptionBytes).digest('hex');
+  await writeFile(typedCaptionPath, typedCaptionBytes);
 
   loseAck = true;
-  const uncertain = await submit(IMAGE_ONLY_CAPTION);
+  const uncertain = await submit(IMAGE_ONLY_CAPTION, [ref(typedCaptionPath)]);
   assert.ok(uncertain.status === 'sent' && uncertain.receipt.status === 'unknown' && uncertain.preserveDraft);
   const lookup = await client.lookup(uncertain.receipt.requestId);
   assert.ok(
     lookup.status === 'completed' && lookup.receipt.status === 'queued' && lookup.receipt.captionAdded === false
   );
   assert.equal(calls.at(-1)?.key, uncertain.receipt.requestId);
-  assert.equal((await writes()).length, 4);
+  assert.equal((await writes()).length, 2);
+
+  const derivativePath = join(workspace, 'studio-derivative-문.png');
+  const derivativeSource = png(8001, 3_750_001);
+  await writeFile(derivativePath, derivativeSource);
+  const derivativeMessage = 'private-image-body-문-"\\\n';
+  const derivative = await probeDerivative({
+    id: conversation.id,
+    source: derivativePath,
+    message: derivativeMessage,
+    host: base,
+    auth,
+    env: isolatedEnv,
+  });
+  assert.equal((await writes()).length, 3);
 
   heldResponse?.release();
   heldResponse = undefined;
-  await until(() => providerImages.find((entry) => entry.digest === digest && entry.text === IMAGE_ONLY_CAPTION));
+  for (const [expectedDigest, expectedText] of [
+    [digest, IMAGE_ONLY_CAPTION],
+    [typedDigest, IMAGE_ONLY_CAPTION],
+    [derivative.digest, derivativeMessage],
+  ]) {
+    await until(() => providerImages.some((entry) => entry.digest === expectedDigest && entry.text === expectedText));
+  }
   await until(async () => !(await api(scope)).runtime?.is_processing);
 
   async function newTurn() {
@@ -438,11 +448,34 @@ server.main()
   beforeGrant = undefined;
   assert.equal(preDispatch.status, 'blocked');
   assert.equal(client.getSnapshot().imageSubmission?.status, 'blocked');
-  assert.equal((await writes()).length, 4);
+  assert.equal((await writes()).length, 3);
 
-  // Hold the HTTP reply after ACP has acknowledged the native follow-up. Stop
-  // before the composer sees that reply, and keep its original receipt identity.
   const boundaryTurn = await newTurn();
+  const nativeLineLimit = 8 << 20;
+  const first = join(workspace, 'file-at-limit.png');
+  const second = join(workspace, 'batch-at-line-limit.png');
+  const sizes = [3_750_000, (6 << 20) - 3_750_000 - 2048];
+  await writeFile(first, png(8000, sizes[0]));
+  await writeFile(second, png(1, sizes[1]));
+  const message = '한"\\\n';
+  const pad =
+    nativeLineLimit - nativeLineBytes(emptyNativeImageLine('steer', message, ['image/png', 'image/png']), sizes);
+  for (const offset of [1, -1, 0]) {
+    const previous = (await writes()).length;
+    const outcome = await submit(message + 'x'.repeat(pad + offset), [ref(first), ref(second)]);
+    const observed = await writes();
+    if (offset === 1) {
+      assert.equal(outcome.status, 'blocked');
+      assert.equal(observed.length, previous);
+    } else {
+      assert.ok(
+        outcome.status === 'sent' && outcome.receipt.status === 'queued' && outcome.receipt.captionAdded === false
+      );
+      assert.equal(observed.length, previous + 1);
+      assert.equal(observed.at(-1)?.bytes, nativeLineLimit + offset);
+    }
+  }
+
   const boundary = join(workspace, 'file-boundary.png');
   for (const [width, byteLength, shouldQueue] of [
     [7999, 3_749_999, true],
@@ -480,6 +513,7 @@ server.main()
   await stop(boundaryTurn);
   await until(async () => !(await api(scope)).runtime?.is_processing);
 
+  // Stop before the composer observes ACP's acknowledged native follow-up.
   const beforeLate = (await writes()).length;
   const active = await newTurn();
   const controller = new AbortController();
@@ -506,12 +540,38 @@ server.main()
   assert.equal(late.receipt.bindingId, target.bindingId);
   assert.equal((await writes()).length, beforeLate + 1);
 
-  const log = await readFile(join(root, 'host.log'), 'utf8');
-  for (const marker of ['synthetic-private-png.png', digest, bytes.toString('base64').slice(0, 76)]) {
-    assert.ok(!log.includes(marker), 'private fixture data in Host diagnostics');
+  const hostLog = await readFile(join(root, 'host.log'), 'utf8');
+  const logDirectory = join(hostData, 'logs');
+  const logEntries = await readdir(logDirectory, { withFileTypes: true }).catch(() => []);
+  const files = await Promise.all(
+    logEntries.filter((file) => file.isFile()).map((file) => readFile(join(logDirectory, file.name), 'utf8'))
+  );
+  assert.ok(
+    hostLog.includes('TRACE') && derivative.diagnostics.some((line) => line.includes('[ensureWs]')),
+    'Diagnostic capture did not observe both Host trace and renderer console'
+  );
+  const diagnostics = [hostLog, ...files, ...derivative.diagnostics].join('\n');
+  const markers = [
+    path,
+    basename(path),
+    digest,
+    bytes.toString('base64').slice(0, 76),
+    derivativePath,
+    basename(derivativePath),
+    derivativeMessage,
+    createHash('sha256').update(derivativeSource).digest('hex'),
+    ...derivative.markers,
+  ];
+  for (const marker of markers) {
+    const escaped = JSON.stringify(marker).slice(1, -1);
+    const ascii = escaped.replace(/[^\x20-\x7e]/g, (char) => '\\u' + char.charCodeAt(0).toString(16).padStart(4, '0'));
+    const doubleEscaped = [escaped, ascii].map((value) => JSON.stringify(value).slice(1, -1));
+    for (const variant of new Set([marker, escaped, ascii, ...doubleEscaped])) {
+      assert.ok(!diagnostics.includes(variant), 'Private image fixture data in Host or renderer diagnostics');
+    }
   }
   console.log(
-    'Real Host/ACP: immutable PNG, one write per click, zero writes on conversion failure, exact line boundary, original-key recovery, turn replacement and late ACK after Stop'
+    'Real Host/ACP: PNG and Chromium derivative bytes, both caption origins, exact line boundary, original-key recovery, late ACK after Stop and clean diagnostics'
   );
 } finally {
   heldResponse?.release();

@@ -60,7 +60,8 @@ type Turn = { active: true; turnId: string } | { active: false; turnId: null };
 type Write = { method: string; payload: Record<string, string> };
 
 const server = {
-  discovery: (): Response => success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
+  discovery: (): Response | Promise<Response> =>
+    success({ version: 1, bindingId: 'binding-1', notifications: [], requests: ALL_METHODS }),
   turn: { active: true, turnId: 'turn-1' } as Turn,
   readState: vi.fn<() => Response | Promise<Response>>(),
   write: vi.fn<(call: Write) => Response | Promise<Response>>(),
@@ -575,7 +576,92 @@ describe('running input in the composer', () => {
     });
   });
 
-  it.each(['cancel', 'replace-draft'] as const)(
+  it.each(['binding', 'turn', 'mode'] as const)(
+    'keeps a path-only click on its original target if reconnect changes the %s',
+    async (change) => {
+      const reconnect = new Set<() => void>();
+      vi.mocked(httpBridge.wsEmitter).mockImplementation((event) => ({
+        on(listener) {
+          if (event === 'realtime.reconnected') reconnect.add(listener);
+          return () => reconnect.delete(listener);
+        },
+        emit: () => {},
+      }));
+      const offer = (bindingId: string, requests: string[]) =>
+        success({ version: 1, bindingId, hostBytes: true, requests });
+      server.discovery = () => offer('binding-1', [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES]);
+      server.write.mockImplementation(({ method, payload }) =>
+        method === IMAGE_STATE
+          ? result({ status: 'unavailable', available: false, reason: 'model-text-only', turnId: server.turn.turnId })
+          : accepted(payload.turnId)
+      );
+      await mount();
+      expect(await submit('', IMAGE_REFERENCE)).toBe('kept');
+
+      const discovery = hold();
+      server.discovery = () => discovery.pending;
+      act(() => {
+        for (const listener of reconnect) listener();
+      });
+      let pathOnly: Promise<RunningInputRoute> | undefined;
+      act(() => {
+        pathOnly = controller.images.submitPaths('', IMAGE_REFERENCE, TEXT_DRAFT);
+      });
+      if (change === 'turn') server.turn = { active: true, turnId: 'turn-2' };
+      server.discovery = () =>
+        offer(change === 'binding' ? 'binding-2' : 'binding-1', change === 'mode' ? [STATE, FOLLOW_UP] : ALL_METHODS);
+      await act(async () => {
+        discovery.reply(await server.discovery());
+        expect(await pathOnly).toBe('kept');
+      });
+      expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+      expect(server.metadata).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('publishes reference preparation and aborts both pending private reads on cancel', async () => {
+    server.discovery = () =>
+      success({
+        version: 1,
+        bindingId: 'binding-1',
+        hostBytes: true,
+        requests: [...ALL_METHODS, IMAGE_STATE, STEER_IMAGES],
+      });
+    server.write.mockImplementation(() => result({ available: false, reason: 'model-text-only', turnId: 'turn-1' }));
+    const dispatch = fetchMock.getMockImplementation()!;
+    const signals = new Map<string, AbortSignal>();
+    fetchMock.mockImplementation((url, init) => {
+      if (url !== '/api/fs/content/metadata' && url !== '/api/conversations/same') return dispatch(url, init);
+      const signal = init.signal!;
+      signals.set(url, signal);
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    await mount();
+    let click: Promise<RunningInputRoute> | undefined;
+    act(() => {
+      click = controller.submit('snapshot', { ...IMAGE_REFERENCE, sessions: [{ id: 'same' }] }, TEXT_DRAFT);
+    });
+    await waitFor(() => expect(signals.size).toBe(2));
+    expect(controller.images.submission).toMatchObject({
+      bindingId: 'binding-1',
+      turnId: 'turn-1',
+      mode: 'steer',
+      status: 'preparing',
+      stage: 'references',
+      fileCount: 1,
+    });
+    await act(async () => {
+      controller.images.cancelPreparation();
+      expect(await click).toBe('kept');
+    });
+    expect([...signals.values()].every((signal) => signal.aborted)).toBe(true);
+    expect(controller.images.submission).toMatchObject({ status: 'blocked', reason: 'cancelled' });
+    expect(writes().every((method) => method === IMAGE_STATE)).toBe(true);
+  });
+
+  it.each(['cancel', 'replace-draft', 'decorations'] as const)(
     'aborts image reference preparation on %s before handoff',
     async (action) => {
       server.discovery = () =>
@@ -594,16 +680,21 @@ describe('running input in the composer', () => {
         })
       );
       const firstDraft = {};
+      const decorations = new AbortController();
       const view = await mount({ draftVersion: firstDraft });
       const metadata = hold();
       server.metadata.mockReturnValueOnce(metadata.pending);
       let submission: Promise<RunningInputRoute> | undefined;
       act(() => {
-        submission = controller.submit('snapshot', IMAGE_REFERENCE, TEXT_DRAFT);
+        submission = controller.submit('snapshot', IMAGE_REFERENCE, {
+          ...TEXT_DRAFT,
+          decorationSignal: decorations.signal,
+        });
       });
       await waitFor(() => expect(server.metadata).toHaveBeenCalledTimes(1));
       if (action === 'cancel') act(() => controller.images.cancelPreparation());
-      else view.rerender(<Harness draftVersion={{}} />);
+      else if (action === 'replace-draft') view.rerender(<Harness draftVersion={{}} />);
+      else act(() => decorations.abort());
       await act(async () => {
         metadata.reply(success({ path: CONFIRMED_IMAGE, type: 'image/png' }));
         expect(await submission).toBe('kept');

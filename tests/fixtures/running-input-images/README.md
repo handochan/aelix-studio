@@ -73,6 +73,9 @@ validates the exact zlib frame and passes the original PNG bytes through.
 Use the H-1 Host binary, the A-1 adapter source and the unchanged pinned native
 runtime. The Bun probe runs Studio's renderer client and dedicated worker
 against the protected Host listener, real ACP and a loopback model endpoint.
+Install Playwright Chromium for the successful resize and multipart upload
+case. Set `PLAYWRIGHT_BROWSERS_PATH` to its cache if running with an isolated
+HOME.
 
 ```sh
 bun tests/fixtures/running-input-images/realHost.ts \
@@ -81,7 +84,9 @@ bun tests/fixtures/running-input-images/realHost.ts \
 ```
 
 The fixture qualifies only its synthetic endpoint. It counts native image
-write edges, compares grant and provider digests, checks exact native JSONL
+write edges, compares Chromium derivative, stored upload, grant and provider
+digests, checks exact native JSONL
 sizes and exercises lost responses, lookup, turn change and late ACK after
 Stop. It records sizes and counts at the native edge and checks that the
-Host's diagnostic output omits private image fixture markers.
+Host and Chromium diagnostic output omit raw and escaped private image fixture
+markers.

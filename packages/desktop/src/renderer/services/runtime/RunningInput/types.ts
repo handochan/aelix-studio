@@ -45,9 +45,10 @@ export type RunningImageBlockReason =
   | 'turn-changed'
   | 'grant-unavailable'
   | 'image-count'
-  | 'invalid-text';
+  | 'invalid-text'
+  | 'references-unverified';
 
-type ImageSubmissionIdentity = RunningInputTarget & { mode: RunningInputMode; requestId: string };
+export type ImageSubmissionIdentity = RunningInputTarget & { mode: RunningInputMode; requestId: string };
 
 /**
  * Local pre-dispatch state for the composer. Pending, queued, rejected and unknown
@@ -55,7 +56,13 @@ type ImageSubmissionIdentity = RunningInputTarget & { mode: RunningInputMode; re
  */
 export type RunningImageSubmission = Readonly<
   ImageSubmissionIdentity & { batch?: RunningImageBatch; measurements?: ImagePreparationMeasurements } & (
-      | { status: 'preparing'; imageCount: number; progress?: Readonly<{ index: number; image: ImageProgress }> }
+      | { status: 'preparing'; stage: 'references'; fileCount: number }
+      | {
+          status: 'preparing';
+          stage: 'images';
+          imageCount: number;
+          progress?: Readonly<{ index: number; image: ImageProgress }>;
+        }
       | { status: 'blocked'; reason: RunningImageBlockReason; allowPathOnly: boolean }
     )
 >;
