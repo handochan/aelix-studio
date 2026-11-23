@@ -83,6 +83,7 @@ const ACTIONS = new Set([
   'clear_proxy_credentials',
   'install',
   'update',
+  'upgrade',
   'remove',
   'set_default',
   'rollback',
@@ -90,7 +91,7 @@ const ACTIONS = new Set([
   'poll',
   'cancel',
 ]);
-const FINISHED = new Set(['switched', 'failed', 'cancelled']);
+const FINISHED = new Set(['switched', 'already_latest', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
   ok: false,
   code,
@@ -121,7 +122,7 @@ const isName = (value: unknown): value is string =>
  * running conversation. Each adapter reads the current generation when it starts,
  * including when an existing conversation's adapter restarts.
  *
- * One change runs at a time. `install`, `update` and `remove` return an operation to
+ * One change runs at a time. `install`, `update`, `upgrade` and `remove` return an operation to
  * `poll`; `list`, `rollback`, `set_default`, `get_settings`, `set_settings` and the proxy
  * credential requests answer directly.
  * Saving settings is a change too: it waits for the lock and answers `BUSY` while another
@@ -247,7 +248,7 @@ export class ExtensionService {
       }
       const change = parseChange(command);
       if (!change) return fail('INVALID_INPUT');
-      if (change?.action === 'install' && change.source.kind !== 'file') {
+      if (change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file')) {
         if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
         // An early answer for the screen; the change checks the settings again under the lock.
         const stored = await this.storedSettings();
@@ -266,7 +267,7 @@ export class ExtensionService {
         }
       } else if (change.action === 'install' && change.proxyCredentials)
         return fail('INVALID_INPUT', ['a file import runs offline and takes no proxy credentials']);
-      if (this.platform === 'win32' && change?.action === 'install' && change.source.kind === 'git')
+      if (this.platform === 'win32' && change.action === 'install' && change.source.kind === 'git')
         return fail('UNSUPPORTED_PLATFORM');
       if (this.changing) return fail('BUSY');
       this.changing = true;
@@ -339,7 +340,10 @@ export class ExtensionService {
         suffix: () => randomBytes(2).toString('hex'),
         now: () => new Date(),
       });
-      tracked.state = { ...tracked.state, phase: 'switched', generation: outcome.generation };
+      tracked.state =
+        'alreadyLatest' in outcome
+          ? { ...tracked.state, phase: 'already_latest' }
+          : { ...tracked.state, phase: 'switched', generation: outcome.generation };
     } catch (error) {
       if (error instanceof ExtensionFailure) finish(error.code, error.detail, error.output);
       else {
@@ -370,6 +374,17 @@ export class ExtensionService {
 
 function parseChange(command: ExtensionCommand): MutationRequest | undefined {
   if (command.action === 'remove') return isName(command.name) ? { action: 'remove', name: command.name } : undefined;
+  if (command.action === 'upgrade') {
+    const { name, allowUnpin, proxyCredentials } = command;
+    if (!isName(name) || (allowUnpin !== undefined && typeof allowUnpin !== 'boolean') || 'source' in command)
+      return undefined;
+    return {
+      action: 'upgrade',
+      name,
+      allowUnpin,
+      ...(proxyCredentials === undefined ? {} : { proxyCredentials: parseProxyCredentials(proxyCredentials) }),
+    };
+  }
   if (command.action !== 'install' && command.action !== 'update') return undefined;
   const source = parseSource(command.source);
   if (!source) return undefined;

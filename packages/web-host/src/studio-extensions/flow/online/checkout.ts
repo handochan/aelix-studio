@@ -368,8 +368,8 @@ async function initializeSubmodules(git: GitRun, clone: string, subdirectory: st
 }
 
 /**
- * Fetch the repository of a git source, check out the requested revision detached and verify
- * it, initialize the submodules the subdirectory needs and check the subdirectory. Then copy
+ * Fetch the repository of a Git source and resolve its ref. For a subdirectory, check out
+ * that commit detached, initialize only the relevant submodules and validate the path. Copy
  * the whole checkout (with its Git metadata, which some builds read) into a new staging
  * directory without following links, remove the clone, and check the subdirectory again in
  * the copy. The copy is what native installs from: nothing that happens to the clone after
@@ -377,13 +377,13 @@ async function initializeSubmodules(git: GitRun, clone: string, subdirectory: st
  *
  * @throws ExtensionFailure `GIT_FETCH_FAILED`, `SUBDIRECTORY_INVALID`, `CANCELLED`, `TIMEOUT`
  */
-export async function checkoutSubdirectory(
+export async function fetchGitSource(
   context: Pick<FlowContext, 'spawn' | 'signal' | 'bundle' | 'layout' | 'base' | 'secrets'>,
   writer: StateWriter,
   env: Record<string, string>,
-  source: Extract<OnlineExtensionSource, { kind: 'git' }> & { subdirectory: string },
+  source: Extract<OnlineExtensionSource, { kind: 'git' }>,
   timeoutMs: number
-): Promise<GitCheckout> {
+): Promise<{ commit: string; checkout?: GitCheckout }> {
   const { layout } = context;
   const suffix = randomBytes(6).toString('hex');
   const clone = path.join(layout.artifacts, `.staging-git-${suffix}`);
@@ -410,12 +410,20 @@ export async function checkoutSubdirectory(
       layout.artifacts
     );
     if (cloned.code !== 0) throw failure(cloned, 'fetching the repository');
-    const commit = await checkoutCommit(git, clone, await revisionCommit(git, clone, revision));
+    const commit = await revisionCommit(git, clone, revision);
+    if (source.subdirectory === undefined) {
+      await discard(clone);
+      return { commit };
+    }
+    await checkoutCommit(git, clone, commit);
     await initializeSubmodules(git, clone, source.subdirectory);
     await checkSubdirectory(clone, source.subdirectory);
     await copyWithoutLinks(context, clone, copy, timeoutMs);
     await discard(clone);
-    return { directory: await checkSubdirectory(copy, source.subdirectory), commit, staging: copy };
+    return {
+      commit,
+      checkout: { directory: await checkSubdirectory(copy, source.subdirectory), commit, staging: copy },
+    };
   } catch (error) {
     await discard(clone);
     await discard(copy);

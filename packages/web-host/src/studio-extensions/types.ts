@@ -14,6 +14,8 @@ export type FileExtensionSource = { kind: 'file'; path: string; folder?: string 
  */
 export type OnlineExtensionSource =
   | { kind: 'index'; name: string; version?: string; indexUrl?: string }
+  /** A package name with optional comma-separated version clauses, saved as entered. */
+  | { kind: 'index'; requirement: string; indexUrl?: string }
   | { kind: 'git'; url: string; subdirectory?: string; indexUrl?: string };
 
 export type ExtensionSource = FileExtensionSource | OnlineExtensionSource;
@@ -98,6 +100,8 @@ export type ExtensionCommand =
       proxyCredentials?: ProxyCredentials;
     }
   | { action: 'update'; name: string; source: FileExtensionSource }
+  /** Re-resolve the installed source. allowUnpin confirms a legacy index origin with no saved requirement. */
+  | { action: 'upgrade'; name: string; allowUnpin?: boolean; proxyCredentials?: ProxyCredentials }
   | { action: 'remove'; name: string }
   | { action: 'set_default'; extensionId: string; enabled: boolean }
   | { action: 'rollback' | 'reconcile_bundle' }
@@ -122,7 +126,8 @@ export type FileExtensionOrigin = { kind: 'file'; artifact: string; wheel: strin
 
 export type ExtensionOrigin =
   | FileExtensionOrigin
-  | { kind: 'index'; indexUrl: string }
+  /** Missing requirement means the original version constraint is unknown (legacy generation). */
+  | { kind: 'index'; indexUrl: string; requirement?: string }
   | { kind: 'git'; url: string; commit: string; indexUrl: string; subdirectory?: string };
 
 /**
@@ -149,6 +154,8 @@ export type ExtensionEntry = {
   reference: string;
   origin: ExtensionOrigin | null;
   status: ExtensionStatus;
+  /** Availability based on the source, platform and current generation. Combine with get_settings. */
+  upgrade?: 'available' | 'pinned' | 'confirmation_required';
   /** Grouped pack aliases share one ACP ID and one app default. Legacy generations have neither. */
   managedId?: string;
   defaultEnabled?: boolean;
@@ -174,6 +181,7 @@ export type ExtensionPhase =
   | 'installing'
   | 'verifying'
   | 'switched'
+  | 'already_latest'
   | 'failed'
   | 'cancelled';
 
@@ -208,6 +216,12 @@ export type ExtensionFailureCode =
   | 'VERIFICATION_FAILED'
   | 'NO_CHANGE'
   | 'NOT_INSTALLED'
+  /** A file or an unrecorded source cannot be upgraded online. */
+  | 'UPGRADE_UNAVAILABLE'
+  /** The saved requirement names an exact version or the Git ref names a full commit SHA. */
+  | 'PINNED'
+  /** A legacy index record lost the requirement. Retry only after the user confirms allowUnpin. */
+  | 'PIN_UNKNOWN'
   | 'NOTHING_TO_ROLL_BACK'
   | 'ONLINE_INSTALL_DISABLED'
   /** The stored extension settings cannot be read; online installs wait until they are saved again. */
@@ -251,7 +265,7 @@ export type ExtensionFailureCode =
 
 export type ExtensionOperation = {
   operationId: string;
-  action: 'install' | 'update' | 'remove';
+  action: 'install' | 'update' | 'upgrade' | 'remove';
   phase: ExtensionPhase;
   code?: ExtensionFailureCode;
   /** Reasons in plain English, for logs and support. The screen maps `code` to its own text. */

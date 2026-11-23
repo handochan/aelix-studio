@@ -66,6 +66,30 @@ export function compareVersions(left: Version, right: Version): number {
   return (left.dev ?? Infinity) === (right.dev ?? Infinity) ? 0 : (left.dev ?? Infinity) - (right.dev ?? Infinity);
 }
 
+/** Full PEP 440 order, including normalized local version segments. */
+export function compareInstalledVersions(left: Version, right: Version): number {
+  const publicOrder = compareVersions(left, right);
+  if (publicOrder !== 0 || left.local === right.local) return publicOrder;
+  if (left.local === null) return -1;
+  if (right.local === null) return 1;
+  const a = left.local.split(/[-_.]/);
+  const b = right.local.split(/[-_.]/);
+  for (let index = 0; index < Math.min(a.length, b.length); index += 1) {
+    const l = a[index];
+    const r = b[index];
+    if (l === r) continue;
+    const lNumeric = /^\d+$/.test(l);
+    const rNumeric = /^\d+$/.test(r);
+    if (lNumeric !== rNumeric) return lNumeric ? 1 : -1;
+    if (lNumeric) {
+      const x = BigInt(l);
+      const y = BigInt(r);
+      if (x !== y) return x < y ? -1 : 1;
+    } else return l < r ? -1 : 1;
+  }
+  return a.length - b.length;
+}
+
 const sameRelease = (left: Version, right: Version): boolean =>
   left.epoch === right.epoch && compareReleases(left.release, right.release) === 0;
 const isPreRelease = (version: Version): boolean => version.pre !== null || version.dev !== null;

@@ -31,8 +31,9 @@ INSTALL_PROGRESS_INTERVAL = 30
 INSTALL_PROBE_TIMEOUT = 5
 # Keep one bounded recapture for incomplete Linux measurements. macOS Intel
 # hit the qualifier's 180s deadline in PR Checks run 44986691773 (Studio #116).
-EXTENSIONS_CAPTURE_TIMEOUT = 180
-DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 300
+# The upgrade qualification adds real pip installs, an index lookup and Git fetches.
+EXTENSIONS_CAPTURE_TIMEOUT = 300
+DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 420
 EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
 INSTALL_PROGRESS_PROBE = r"""

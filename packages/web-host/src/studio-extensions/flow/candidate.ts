@@ -274,9 +274,11 @@ export async function createCandidate(
   context: FlowContext,
   id: string,
   parent: GenerationRecord | null,
-  requireCompleteFiles = false
+  requireCompleteFiles = false,
+  staging?: string
 ): Promise<Candidate> {
-  const paths = generationPaths(context.layout, id, context.bundle.binding.pythonMinor, context.platform);
+  const location = staging === undefined ? context.layout : { ...context.layout, generations: staging };
+  const paths = generationPaths(location, id, context.bundle.binding.pythonMinor, context.platform);
   await mkdir(paths.directory);
   const result = await runToExit(
     context.spawn,

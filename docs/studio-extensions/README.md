@@ -308,6 +308,31 @@ native CLI와 로드 검증에 넘기는 환경은 Studio가 **허용 목록으�
 `PIP_CONSTRAINT`와 `PIP_FIND_LINKS`는 공백으로 값을 나눈다. "Application Support"처럼 공백이 있는 경로는
 깨졌고, `file://` URL로 주니 공백과 한글 경로에서 동작했다. **[실행]**
 
+#### 5.4.1 설치한 온라인 출처에서 최신으로 올리기 (1b, PR C)
+
+사용자가 `upgrade`를 요청하면 잠금 아래에서 현재 세대의 출처와 온라인 설정을 읽는다.
+이름 설치의 `origin.requirement`에는 입력한 패키지 이름과 PEP 440 버전 제약을 원문 그대로 저장한다.
+기존 `name`과 `version` 필드는 `name==version`으로 기록한다. 저장된 단일 index와 requirement를
+다시 사용하며, 버전 범위 안에서 pip이 선택한 최신 호환 버전을 적용한다. `==1.2.*`는 범위이고,
+정확한 `==` 또는 `===` 절은 `PINNED`로 거절한다. 사용자는 다른 버전으로 다시 설치할 수 있다.
+requirement 필드가 없던 개발·시험 세대는 `PIN_UNKNOWN`으로 답한다. 사용자가 명시적으로 확인해
+`allowUnpin: true`를 보내면 이름만으로 해석하고, 전환에 성공한 세대부터 그 이름을 requirement로 남긴다.
+
+- 이름 출처는 잠금 아래의 임시 venv에서 같은 번들 제약·index로 pip의
+  `--dry-run --ignore-installed --no-deps --report`를 실행한다. 설치된 패키지를 무시하므로 index 접속에
+  실패했을 때 이미 설치된 버전으로 조회를 대신할 수 없다. 조회한 버전이 더 새로우면 그 버전과 의존성을
+  후보에 설치하고, 설치된 버전과 요청 범위를 확인한다. 번들 native의 설치 기록에는 이름의 버전 제약이
+  남지 않으므로 Studio 기록을 쓴다.
+- Git은 원래 URL의 ref를 다시 해석한다. 저장한 commit과 같은 길이의 full SHA ref는 `PINNED`다.
+  일반 Git은 후보에서 해당 배포판만 제거하고 같은 ref를 설치한다. 실제 pip에서 Git의 `--upgrade`는
+  배포판 버전이 같으면 commit이 움직여도 다시 설치하지 않았다. 다시 설치한 배포판과 PEP 610의 commit이
+  각각 원래 배포판과 사전 확인한 commit에 맞아야 한다. 그 사이 ref가 또 움직이면 후보를 거절한다.
+- Git 하위 경로는 설치와 같은 fetch·경로 및 submodule 검사·staging 사본을 사용한다. 로컬 디렉터리
+  설치는 배포판 버전이 같아도 pip이 다시 설치한다. 사본의 설치 기록과 체크아웃 commit을 검증한다.
+- index가 새 버전을 고르지 않거나 Git commit이 같으면 `already_latest`로 끝낸다. 임시 파일은 잠금
+  holder가 지우고 새 세대나 포인터 전환은 없다. 변경이 있으면 5.5의 검증을 통과한 후보만 전환한다.
+  파일 출처의 새 wheel 반입은 기존 오프라인 `update`를 사용한다.
+
 ### 5.5 전환 전 검증
 
 | 검사                                                                                                                                                               | 잡는 것                                                                   | 실행한 실패 예                                                                                                             |
@@ -497,7 +522,10 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   `files.pythonhosted.org`에서 받을 수 있다. 내부 index를 지정하면 그 index를 쓰며 Studio는 추가 index를
   설정하지 않는다. git 주소, index의 파일 주소와 redirect, 패키지가 선언한 직접 URL 및 빌드 의존성·코드의
   접속은 위 표와 같은 범위다.
-- 1a의 별도 `update` 요청은 파일 반입만 받는다.
+- 온라인 `upgrade`는 명시적으로 요청할 때만 기존 출처를 다시 확인한다. 설정이 꺼지면 이름·Git 설치와
+  함께 `ONLINE_INSTALL_DISABLED`로 거절한다. 조회나 목록을 표시할 때는 확인 요청을 보내지 않는다.
+  사용자의 proxy·private Git 설정은 설치와 같다. 인증이 필요한 경우 확인과 설치가 그 작업의 loopback
+  relay 하나를 사용하고, 작업이 끝나면 닫는다.
 - 온라인 설치 도구에는 후보 전용 홈·임시 디렉터리와 시스템 실행 경로를 준다. pip와 Git의 사용자·시스템
   설정, 환경·시스템 프록시, netrc·credential helper·SSH 사용자 설정·키는 적용하지 않는다. 예외는 사용자가
   Studio 확장 설정에서 직접 정한 두 가지뿐이다(아래의 proxy와 비공개 Git). SSH는 기존 known-hosts 파일로
@@ -547,8 +575,9 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
     `proxyAuthentication: false`는 `INVALID_INPUT`). 인증을 요구하는데 저장된 것도 요청에 든 것도 없으면 설치
     도구를 시작하기 전에 `PROXY_CREDENTIALS_REQUIRED`로 답한다. 화면은 이 코드를 받으면 묻는다. 요청에 든 인증
     정보는 저장된 것보다 앞서고 그 설치에만 쓴다. 요청을 확인할 때의 proxy 주소에 묶이므로, 잠금을 잡기 전에 다른
-    Studio 프로세스가 주소를 바꿨으면 아무 데도 보내지 않고 `PROXY_CHANGED`로 끝난다. 파일 반입과 업데이트(파일만
-    받는다)는 오프라인이라 인증 정보를 받지 않고, 보내면 `INVALID_INPUT`이다.
+    Studio 프로세스가 주소를 바꿨으면 아무 데도 보내지 않고 `PROXY_CHANGED`로 끝난다. 파일 반입과
+    wheel 업데이트는 오프라인이라 인증 정보를 받지 않고, 보내면 `INVALID_INPUT`이다. 온라인 업그레이드에도
+    같은 인증 정보 확인, 마스킹, 오류 우선순위가 적용된다.
   - **relay.** 설치 도구는 인증 정보를 받지 않는다. 인증이 필요한 온라인 설치는 잠금 아래에서 마지막 설정 확인
     뒤에 helper 프로세스 안에 그 변경 전용 loopback proxy(relay)를 열고 설치 도구가 끝나면 닫는다. relay는
     127.0.0.1의 임의 port에서 변경마다 새로 만든 무작위 token을 Basic proxy 인증으로 요구한다(상수 시간 비교, 그
@@ -683,6 +712,7 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라)                                                                                                 |
 | `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`, 요청을 확인한 뒤 proxy가 바뀌었으면 `PROXY_CHANGED`, proxy가 인증 정보를 거절해 실패했으면 `PROXY_CREDENTIALS_REJECTED`                                                                                        |
+| `upgrade` (이름, 선택적 `allowUnpin`·이번 요청의 proxy 인증 정보)                                            | 작업 ID. 새 버전이나 commit이 없으면 `already_latest`. `PINNED`는 재설치 안내, `PIN_UNKNOWN`은 사용자 확인 뒤 재시도. 파일·출처 미상은 `UPGRADE_UNAVAILABLE`.                                                                                                                                                |
 | `update` (이름, 파일 `source`) / `remove` (이름)                                                             | 작업 ID. 오프라인이라 proxy 인증 정보를 받지 않는다                                                                                                                                                                                                                                                          |
 | `set_default` (`extensionId`, `enabled`)                                                                     | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                                                                                                                               |
 | `get_settings`                                                                                               | 확장 설정(`onlineInstall`·`proxy`·`proxyAuthentication`·`privateGit`), 인증 정보를 저장할 수 있는지(`credentialMode`)와 저장돼 있는지(`hasSavedCredentials`, 값은 돌려주지 않는다), 읽을 수 없었는지(`unreadable`), Studio 정책이 온라인 설치를 막는지(`onlineInstallLocked`). 파일만 읽고 복호화하지 않는다 |
@@ -690,7 +720,7 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 | `set_proxy_credentials` / `clear_proxy_credentials`                                                          | 현재 proxy의 인증 정보를 저장하거나(keychain에서만, 아니면 `PROXY_CREDENTIALS_NOT_STORED`) 지운 뒤의 확장 설정                                                                                                                                                                                               |
 | `reconcile_bundle`                                                                                           | 번들 교체 후 오프라인 이관을 시도한 목록과 상태                                                                                                                                                                                                                                                              |
 | `rollback`                                                                                                   | 바뀐 현재 세대                                                                                                                                                                                                                                                                                               |
-| `poll` / `cancel` (작업 ID)                                                                                  | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                                                                                                                                                                      |
+| `poll` / `cancel` (작업 ID)                                                                                  | 단계(검사 / 준비 / 설치 / 검증 / 전환됨 / 이미 최신 / 실패 / 취소됨), 실패 코드, 설치 도구 출력의 끝부분(길이 제한)                                                                                                                                                                                          |
 
 실패 코드는 지금 정보로 낼 수 있는 것만 둔다: 반입 거부(wheel 아님, 직접 URL 의존성), 설치 도구 실패, 실행
 안 됨, 시작 코드·번들 이름 겹침, 로드 오류, 변경 없음. 세부 사유는 pip 출력 문장뿐이다. 확장 설정과 git 하위
@@ -699,7 +729,9 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 `PROXY_CREDENTIALS_REJECTED`가 더해졌다. 요청·응답 형태의 정본은 `packages/web-host/src/studio-extensions/types.ts`다.
 
 `list`의 상태 이름은 `ready`(준비됨), `manifest_unbound`(manifest 미결합), `reinstall_needed`(다시 설치 필요)다.
-관리형 목록으로 검증된 확장에는 `managedId`와 `defaultEnabled`도 포함한다.
+관리형 목록으로 검증된 확장에는 `managedId`와 `defaultEnabled`도 포함한다. 출처와 플랫폼이 온라인
+업그레이드를 지원하는 항목에 `upgrade`(`available` / `pinned` / `confirmation_required`)가 있다.
+화면은 이 값과 `get_settings`의 `onlineInstall`·`onlineInstallLocked`·`unreadable`을 함께 본다.
 `ready`는 대화가 받는 형태 그대로 로드 검사를 통과한 pack, 곧 링크 디렉터리로 넘겨 manifest가 결합되는
 확장이다(8.3의 B5). 모듈 참조로 넘기는 확장은 코드는 로드되지만 `manifest_unbound`다. 로드 오류 문구에서는
 세대·상태 디렉터리·번들·홈 디렉터리 경로를 이름표로 바꾼다. 설치 도구 출력의 끝부분은 그대로다.
@@ -1138,3 +1170,7 @@ lease 반납, 전환 뒤 실패의 후보 보존을 5.6에 적었다. 상태 이
 로드 검사를 8.3에, 맨 모듈 참조와 대화창 설치의 재확인을 7.3에, 1b의 선행 두 가지를 9절에 더했다. 리뷰의
 should-fix 두 건(잠금 없이 잡은 lease가 정리에 지워질 수 있음, 맨 모듈 참조가 대화 시작을 막음)은 고치기
 전에 재현되고 고친 뒤 통과하는 시험으로 고정했다.
+
+**2026-11-23, 1b PR C.** 이름 출처의 원래 requirement를 기록하고 잠금 아래에서 같은 index 또는 Git ref를
+다시 해석한다. 정확 고정과 제약 기록이 없는 개발 세대에 다른 응답을 주고, 최신인 세대는 그대로 쓴다
+(5.4.1·5.11). 사용자 요청으로 시작하는 온라인 조회를 Studio #15 외부 접속 목록에 추가했다(5.10).

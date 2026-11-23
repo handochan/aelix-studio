@@ -1,7 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { canonicalName } from '../../inspect/metadata.js';
+import { parseRequirement } from '../../inspect/requirement.js';
 import type { SiteSnapshot } from '../../inspect/site.js';
 import { compareVersions, parseVersion } from '../../inspect/version.js';
 import { ExtensionFailure, type ExtensionOrigin, type OnlineExtensionSource } from '../../types.js';
@@ -70,19 +70,62 @@ export function parseSubdirectory(value: unknown): string | undefined {
     : undefined;
 }
 
+export type IndexSource = Extract<OnlineExtensionSource, { kind: 'index' }>;
+type GitSource = Extract<OnlineExtensionSource, { kind: 'git' }>;
+
+/** A name and version clauses only. pip remains the authority on PEP 440 resolution. */
+export function parseIndexRequirement(text: unknown) {
+  if (typeof text !== 'string' || text.length > 512 || /[^a-z0-9._ +*!<>=~,()\t-]/i.test(text)) return undefined;
+  const parsed = parseRequirement(text);
+  if (!parsed || parsed.name.length > 200 || (text.includes('(') && !parsed.specifier)) return undefined;
+  const clauses = parsed.specifier.split(',').map((clause) => clause.trim());
+  const exact = clauses.find(
+    (clause) => clause.startsWith('===') || (clause.startsWith('==') && !clause.endsWith('.*'))
+  );
+  return { ...parsed, text, exact };
+}
+
+export function indexRequirement(source: IndexSource) {
+  const text =
+    'requirement' in source
+      ? source.requirement
+      : source.version === undefined
+        ? source.name
+        : `${source.name}==${source.version}`;
+  const requirement = parseIndexRequirement(text);
+  if (!requirement) throw new ExtensionFailure('INVALID_INPUT');
+  return requirement;
+}
+
 /** Parse only the documented package-name and git install forms. A request cannot supply extra indexes or flags. */
 export function parseOnlineSource(source: Record<string, unknown>): OnlineExtensionSource | undefined {
   const index = source.indexUrl === undefined ? new URL(PYPI) : address(source.indexUrl, ['http:', 'https:']);
   if (!index || index.hash || index.search) return undefined;
   if (source.kind === 'index') {
-    const { name, version } = source;
+    const { name, version, requirement } = source;
+    if (requirement !== undefined) {
+      if (
+        name !== undefined ||
+        version !== undefined ||
+        typeof requirement !== 'string' ||
+        !parseIndexRequirement(requirement)
+      )
+        return undefined;
+      return { kind: 'index', requirement, indexUrl: index.href };
+    }
     if (typeof name !== 'string' || name.length > 200 || !PACKAGE.test(name)) return undefined;
-    if (version !== undefined && (typeof version !== 'string' || version.length > 128 || !parseVersion(version)))
+    if (
+      version !== undefined &&
+      (typeof version !== 'string' ||
+        version.length > 128 ||
+        !parseVersion(version) ||
+        !parseIndexRequirement(`${name}==${version}`))
+    )
       return undefined;
     return {
       kind: 'index',
-      name: canonicalName(name),
-      version: typeof version === 'string' ? version.trim() : undefined,
+      name,
+      version: typeof version === 'string' ? version : undefined,
       indexUrl: index.href,
     };
   }
@@ -103,7 +146,7 @@ export function parseOnlineSource(source: Record<string, unknown>): OnlineExtens
 }
 
 /** The repository address and the revision of a parsed git source, split the way pip splits them. */
-export function gitLocation(source: Extract<OnlineExtensionSource, { kind: 'git' }>): {
+export function gitLocation(source: GitSource): {
   repository: string;
   revision: string | undefined;
 } {
@@ -112,6 +155,25 @@ export function gitLocation(source: Extract<OnlineExtensionSource, { kind: 'git'
   const revision = at < 0 ? undefined : decodeURIComponent(requested.pathname.slice(at + 1));
   if (at >= 0) requested.pathname = requested.pathname.slice(0, at);
   return { repository: requested.href, revision };
+}
+
+/** A full object name for the repository's hash format records an immutable Git ref. */
+export function pinnedGit(source: GitSource, installedCommit: string): boolean {
+  const { revision } = gitLocation(source);
+  return revision !== undefined && revision.length === installedCommit.length && COMMIT.test(revision.toLowerCase());
+}
+
+/** Revalidate a persisted endpoint before using it again. */
+export function upgradeSource(
+  origin: ExtensionOrigin | undefined,
+  distribution: string
+): OnlineExtensionSource | undefined {
+  if (origin?.kind === 'index') {
+    const source = parseOnlineSource({ ...origin, requirement: origin.requirement ?? distribution });
+    if (source?.kind === 'index' && indexRequirement(source).name === distribution) return source;
+  }
+  if (origin?.kind === 'git') return parseOnlineSource(origin);
+  return undefined;
 }
 
 /** PEP 610 provenance of one distribution in a site, or undefined when it has none that parses. */
