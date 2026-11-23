@@ -20,7 +20,6 @@ import type { CredentialsReason } from '../dialogs/CredentialsPrompt';
 import { failureCode, useExtensionsChannel, type SendResult } from './channel';
 import { createFlow, runFlow, type Flow, type Sender } from './flow';
 import {
-  changeHasSecret,
   isCurrent,
   isLatestChange,
   isOperation,
@@ -90,11 +89,6 @@ export function useAgentExtensions(asks: Asks, owner: string) {
   const [terminal, setTerminal] = useState<Load<TerminalCliListing>>({ loading: true });
   const [savingSettings, setSavingSettings] = useState(false);
   const settingsRef = useRef<ExtensionSettingsState | undefined>(undefined);
-  /**
-   * The online change sent in this visit, to send again after a refusal. Only one without a
-   * secret: a change whose URL may carry a user part is sent once and kept nowhere.
-   */
-  const [visitChange, setVisitChange] = useState<Change | undefined>(undefined);
   /** The screen was left: its flows go no further. */
   const left = useRef(false);
 
@@ -172,16 +166,12 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     });
   }, [startFlow, refreshSettings, refreshList, refreshTerminal]);
 
-  const {
-    operation,
-    change: keptChange,
-    retried: lastRetried,
-    start,
-    cancel,
-    dismiss,
-  } = useOperation(send, () => void runFlow(() => refreshList(startFlow())), owner);
-  /** The change a follow-up sends again: this visit's, or the one kept from an earlier visit. */
-  const lastChange = visitChange ?? keptChange;
+  // What sends an operation again is kept with that operation (`retryOf`), never shared.
+  const { operation, start, cancel, dismiss, retryOf } = useOperation(
+    send,
+    () => void runFlow(() => refreshList(startFlow())),
+    owner
+  );
 
   /** A settings reply: shown, or its code told. Whether it was ok. */
   const applySettings = (reply: SendResult): boolean => {
@@ -225,7 +215,6 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     retried = false
   ): Promise<void> => {
     if (!flow.valid()) return;
-    setVisitChange(changeHasSecret(change) ? undefined : change);
     const online = change.action === 'upgrade' || change.source.kind !== 'file';
     const credentials = online ? await credentialsFor(flow, reason) : null;
     if (credentials === undefined) return;
@@ -281,7 +270,6 @@ export function useAgentExtensions(asks: Asks, owner: string) {
 
   /** An offline change (update from a file, remove) in `flow`: started, or its code told. */
   const sendChange = async (flow: ScreenFlow, command: StudioExtensionsRequest): Promise<void> => {
-    setVisitChange(undefined);
     const reply = await flow.answer(send(command, flow));
     if (reply === 'declined') return;
     const code = failureCode(reply);
@@ -303,19 +291,29 @@ export function useAgentExtensions(asks: Asks, owner: string) {
 
   const actions = {
     install: (source: ExtensionSource) => runFlow(() => sendOnline(startFlow(true), { action: 'install', source })),
-    /** After `BUNDLE_CHANGED` on an install: install anyway, replacing the other runtime's extensions. */
-    installReplacing: () =>
+    /** What sends operation `operationId` again, if anything (see `retryOf`). */
+    retryOf,
+    /**
+     * After `BUNDLE_CHANGED` on operation `operationId`, an install: install the same again,
+     * replacing the other runtime's extensions. The operation is dismissed.
+     */
+    installReplacing: (operationId: string) =>
       runFlow(async () => {
-        if (lastChange?.action === 'install')
-          await sendOnline(startFlow(true), { ...lastChange, replaceIncompatible: true });
+        const again = retryOf(operationId);
+        dismiss();
+        if (again?.change.action === 'install')
+          await sendOnline(startFlow(true), { ...again.change, replaceIncompatible: true });
       }),
     /**
-     * After a change ended with a code that asks the user something (the proxy refused or
-     * changed, a version constraint is unknown or pinned): ask, and send it again.
+     * After operation `operationId` ended with a code that asks the user something (the proxy
+     * refused or changed, a version constraint is unknown or pinned): ask, and send the change
+     * that started that operation again. The operation is dismissed.
      */
-    retryAfter: (code: string) =>
+    retryAfter: (operationId: string, code: string) =>
       runFlow(async () => {
-        if (lastChange) await followUp(startFlow(true), code, lastChange, lastRetried);
+        const again = retryOf(operationId);
+        dismiss();
+        if (again) await followUp(startFlow(true), code, again.change, again.retried);
       }),
     upgrade: (entry: ExtensionEntry) =>
       runFlow(async () => {
@@ -387,5 +385,5 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     dismiss,
   };
 
-  return { transport, list, settings, terminal, operation, savingSettings, lastChange, lastRetried, actions };
+  return { transport, list, settings, terminal, operation, savingSettings, actions };
 }

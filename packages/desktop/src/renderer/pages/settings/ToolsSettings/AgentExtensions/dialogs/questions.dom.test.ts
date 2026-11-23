@@ -63,4 +63,37 @@ describe('the questions of the screen’s dialogs', () => {
     expect(await credentials).toBeUndefined();
     expect(await insecure).toBe(false);
   });
+
+  it('opens one question at a time on the whole screen, whatever dialog asks', async () => {
+    const { result } = renderHook(() => useQuestions());
+    let credentials: Promise<unknown> | undefined;
+    let insecure: Promise<boolean> | undefined;
+    act(() => {
+      credentials = result.current.asks.credentials('save', 'http://proxy:3128');
+    });
+    act(() => {
+      insecure = result.current.asks.confirmInsecure();
+    });
+    // The credentials question ended as stopped; only the new one is open.
+    expect(await credentials).toBeUndefined();
+    expect(result.current.open.credentials).toBeUndefined();
+    expect(result.current.open.insecure).toBeDefined();
+    act(() => {
+      void result.current.asks.pinned(entry);
+    });
+    expect(await insecure).toBe(false);
+    expect(Object.keys(result.current.open)).toEqual(['pinned']);
+  });
+
+  it('gives every question its own id', () => {
+    const { result } = renderHook(() => useQuestions());
+    act(() => {
+      void result.current.asks.credentials('required', 'http://a:1');
+    });
+    const first = result.current.open.credentials?.id;
+    act(() => {
+      void result.current.asks.credentials('changed', 'http://b:2');
+    });
+    expect(result.current.open.credentials?.id).not.toBe(first);
+  });
 });

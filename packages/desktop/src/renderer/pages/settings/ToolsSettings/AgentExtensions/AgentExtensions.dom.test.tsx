@@ -999,6 +999,28 @@ describe('the agent extensions screen', () => {
       expect(screen.getByTestId('operation-cancel')).toBeInTheDocument();
     });
 
+    it(
+      'sends again only the change that started the failed operation, not a later refused one',
+      async () => {
+        host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], { code: 'BUSY' });
+        let open: (() => void) | undefined;
+        host.gate = new Promise((resolve) => (open = resolve));
+        render(<AgentExtensionsSettings />);
+        await startInstall();
+        await waitFor(() => expect(sent('install')).toHaveLength(1));
+        // Another install while the first start is out: refused as BUSY.
+        fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+        fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'other-pack' } });
+        fireEvent.click(screen.getByTestId('install-submit'));
+        await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.BUSY']));
+        open?.();
+        fireEvent.click(await screen.findByTestId('operation-retry'));
+        await waitFor(() => expect(sent('install')).toHaveLength(3));
+        expect(sent('install')[2]).toMatchObject({ source: { kind: 'index', name: 'aelix-notes' } });
+      },
+      LONG
+    );
+
     it('is forgotten when its user signs out', async () => {
       auth.user = { id: 'alice', username: 'alice' };
       host.changes.push(long);

@@ -241,7 +241,20 @@ export function useOperation(
     show(undefined, { owner: ownerId, epoch });
   }, [show, ownerId]);
 
-  return { operation, change: current?.change, retried: current?.retried ?? false, start, cancel, dismiss };
+  /**
+   * What sends operation `operationId` again: the change that started it (never one that held a
+   * secret) and whether it was already sent again. Only for that operation, while it is kept.
+   */
+  const retryOf = useCallback(
+    (asked: string): { change: Change; retried: boolean } | undefined => {
+      const held = owner === ownerId ? keptNow() : undefined;
+      if (!held?.change || held.operation.operationId !== asked) return undefined;
+      return { change: held.change, retried: held.retried };
+    },
+    [ownerId]
+  );
+
+  return { operation, start, cancel, dismiss, retryOf };
 }
 
 /** For tests: forget every change kept across visits, and the owner. */

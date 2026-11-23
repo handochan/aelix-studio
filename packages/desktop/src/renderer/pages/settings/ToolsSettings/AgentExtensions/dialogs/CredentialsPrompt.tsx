@@ -23,6 +23,11 @@ export const credentialsProblem = (username: string, password: string): 'empty' 
 };
 
 type Props = {
+  /**
+   * The question shown (`useQuestions`): what is typed belongs to it, and is gone as soon as
+   * another question (another proxy, say) takes its place.
+   */
+  question: { id: number } | undefined;
   visible: boolean;
   reason: CredentialsReason;
   proxy: string;
@@ -33,25 +38,32 @@ type Props = {
 
 /**
  * Asks for the proxy's user name and password. They live only in this dialog's state until sent,
- * and are cleared when it closes. "Keep in the keychain" shows only where Studio can keep them.
+ * tied to the question they were typed for: cleared when it closes, and never shown for another
+ * question (a new proxy, a new ask). "Keep in the keychain" shows only where Studio can keep them.
  */
-const CredentialsPrompt: React.FC<Props> = ({ visible, reason, proxy, mode, onDone }) => {
+const CredentialsPrompt: React.FC<Props> = ({ question, visible, reason, proxy, mode, onDone }) => {
   const { t } = useTranslation();
-  const [username, setUsername] = useState('');
-  const [password, setPassword] = useState('');
+  const [typed, setTyped] = useState<{ question?: number; username: string; password: string }>({
+    username: '',
+    password: '',
+  });
   const [save, setSave] = useState(reason === 'save');
+  // What was typed for another question is not this question's, from the first render on.
+  const own = visible && question !== undefined && typed.question === question.id;
+  const username = own ? typed.username : '';
+  const password = own ? typed.password : '';
+  const typeInto = (field: 'username' | 'password') => (value: string) =>
+    setTyped({ question: question?.id, username, password, [field]: value });
 
   useEffect(() => {
     if (visible) return;
-    setUsername('');
-    setPassword('');
+    setTyped({ username: '', password: '' });
   }, [visible]);
-  useEffect(() => setSave(reason === 'save'), [reason, visible]);
+  useEffect(() => setSave(reason === 'save'), [reason, visible, question]);
 
   const problem = credentialsProblem(username, password);
   const close = (result?: { credentials: ProxyCredentials; save: boolean }): void => {
-    setUsername('');
-    setPassword('');
+    setTyped({ username: '', password: '' });
     onDone(result);
   };
 
@@ -81,7 +93,7 @@ const CredentialsPrompt: React.FC<Props> = ({ visible, reason, proxy, mode, onDo
         {reason === 'changed' && <Alert type='warning' content={t('settings.agentExtensions.credentials.changed')} />}
         <Input
           value={username}
-          onChange={setUsername}
+          onChange={typeInto('username')}
           autoComplete='off'
           placeholder={t('settings.agentExtensions.credentials.username')}
           aria-label={t('settings.agentExtensions.credentials.username')}
@@ -89,7 +101,7 @@ const CredentialsPrompt: React.FC<Props> = ({ visible, reason, proxy, mode, onDo
         />
         <Input.Password
           value={password}
-          onChange={setPassword}
+          onChange={typeInto('password')}
           autoComplete='new-password'
           placeholder={t('settings.agentExtensions.credentials.password')}
           aria-label={t('settings.agentExtensions.credentials.password')}

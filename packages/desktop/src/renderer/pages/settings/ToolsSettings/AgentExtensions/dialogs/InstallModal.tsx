@@ -70,7 +70,8 @@ const InstallModal: React.FC<Props> = ({
     runFlow(async () => {
       const mine = opening.current;
       const picked = await gateWhile(() => opening.current === mine)(pickWheel());
-      if (picked) setWheel(picked);
+      // Checked again right where it is used: the dialog may have closed and opened since.
+      if (picked && opening.current === mine) setWheel(picked);
     });
 
   useEffect(() => {

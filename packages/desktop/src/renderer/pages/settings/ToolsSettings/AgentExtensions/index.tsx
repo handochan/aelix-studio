@@ -83,8 +83,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
     }),
     [questions.asks, t]
   );
-  const { transport, list, settings, terminal, operation, savingSettings, lastChange, lastRetried, actions } =
-    useAgentExtensions(asks, owner);
+  const { transport, list, settings, terminal, operation, savingSettings, actions } = useAgentExtensions(asks, owner);
 
   useEffect(() => {
     // The host's platform (the backend runs there, in the app and the WebUI alike), taken only
@@ -115,12 +114,13 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
 
   const followUps = (() => {
     if (!operation || operation.phase !== 'failed') return null;
-    const code = operation.code;
+    const { code, operationId } = operation;
+    // What sends this operation again: the change that started it, kept with it.
+    const again = actions.retryOf(operationId);
     const retry = (label: string) => (
       <Button
         onClick={() => {
-          actions.dismiss();
-          if (code) void actions.retryAfter(code);
+          if (code) void actions.retryAfter(operationId, code);
         }}
         data-testid='operation-retry'
       >
@@ -128,9 +128,9 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
       </Button>
     );
     // One retry per change: a change already sent again ends with its failure.
-    if (lastChange && code && PROXY_CODES.has(code))
-      return lastRetried ? null : retry(t('settings.agentExtensions.actions.enterCredentials'));
-    if (lastChange?.action === 'upgrade' && (code === 'PIN_UNKNOWN' || code === 'PINNED'))
+    if (again && code && PROXY_CODES.has(code))
+      return again.retried ? null : retry(t('settings.agentExtensions.actions.enterCredentials'));
+    if (again?.change.action === 'upgrade' && (code === 'PIN_UNKNOWN' || code === 'PINNED'))
       return retry(t('settings.agentExtensions.actions.continue'));
     if (code === 'BUNDLE_CHANGED')
       return (
@@ -143,16 +143,13 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
           >
             {t('settings.agentExtensions.actions.reconcile')}
           </Button>
-          {lastChange?.action === 'install' && (
+          {again?.change.action === 'install' && (
             <Popconfirm
               title={t('settings.agentExtensions.replace.title')}
               content={t('settings.agentExtensions.replace.body')}
               okText={t('settings.agentExtensions.actions.install')}
               cancelText={t('settings.agentExtensions.actions.cancel')}
-              onOk={() => {
-                actions.dismiss();
-                void actions.installReplacing();
-              }}
+              onOk={() => void actions.installReplacing(operationId)}
             >
               <Button status='warning'>{t('settings.agentExtensions.actions.replaceAndInstall')}</Button>
             </Popconfirm>
@@ -298,6 +295,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         onClose={actions.dismiss}
       />
       <CredentialsPrompt
+        question={open.credentials}
         visible={open.credentials !== undefined}
         reason={open.credentials?.reason ?? 'required'}
         proxy={open.credentials?.proxy ?? ''}

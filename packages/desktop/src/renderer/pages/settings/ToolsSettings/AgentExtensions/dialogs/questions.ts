@@ -11,15 +11,17 @@ import type { CredentialsReason } from './CredentialsPrompt';
 /** What the credentials dialog gives back; undefined when the user stopped. */
 export type CredentialsAnswer = { credentials: ProxyCredentials; save: boolean } | undefined;
 
-export type InsecureQuestion = { answer: (yes: boolean) => void };
+/** Every question has its own id: what is typed for one belongs to no other. */
+export type InsecureQuestion = { id: number; answer: (yes: boolean) => void };
 export type CredentialsQuestion = {
+  id: number;
   reason: CredentialsReason;
   proxy: string;
   answer: (result: CredentialsAnswer) => void;
 };
-export type EntryQuestion = { entry: ExtensionEntry; answer: (yes: boolean) => void };
+export type EntryQuestion = { id: number; entry: ExtensionEntry; answer: (yes: boolean) => void };
 
-/** The question each dialog shows, if any. */
+/** The question open on the screen, if any: at most one of these is set. */
 export type OpenQuestions = {
   insecure?: InsecureQuestion;
   credentials?: CredentialsQuestion;
@@ -27,40 +29,42 @@ export type OpenQuestions = {
   pinned?: EntryQuestion;
 };
 
+type Kind = keyof OpenQuestions;
+type Pending = { kind: Kind; question: NonNullable<OpenQuestions[Kind]> };
+
+let nextId = 0;
+
 /**
- * The questions the screen's dialogs ask, one open per dialog. Asking again while one is open
- * ends the open one with its "no" (stopped) first, so no earlier question waits for ever; leaving
- * the screen ends every open question the same way. A question is answered once: a later answer
- * to one already ended does nothing.
+ * The questions the screen's dialogs ask, one at a time on the whole screen, whatever dialog
+ * asks. A new question ends the open one with its "no" (stopped) first, so no earlier question
+ * waits for ever; leaving the screen ends the open question the same way. A question is answered
+ * once: an answer to one already ended does nothing.
  */
 export function useQuestions() {
   const [open, setOpen] = useState<OpenQuestions>({});
-  const pending = useRef<OpenQuestions>({});
+  const pending = useRef<Pending | undefined>(undefined);
 
-  /** Show `question` in its dialog, ending the one it replaces first. */
-  const show = useCallback(<K extends keyof OpenQuestions>(kind: K, question: NonNullable<OpenQuestions[K]>) => {
-    const previous = pending.current[kind];
-    // `answer` of the one shown before checks that it is still the open one: end it first.
-    if (previous) endWithNo(kind, previous);
-    pending.current[kind] = question;
-    setOpen((current) => ({ ...current, [kind]: question }));
+  /** Show `question`, ending the open one, of any kind, first. */
+  const show = useCallback((kind: Kind, question: NonNullable<OpenQuestions[Kind]>) => {
+    const previous = pending.current;
+    // Its `answer` checks that it is still the open one: end it before this one takes its place.
+    if (previous) endWithNo(previous);
+    pending.current = { kind, question };
+    setOpen({ [kind]: question });
   }, []);
 
-  /** Take `question` off its dialog; false when it was already answered or replaced. */
-  const settle = useCallback(<K extends keyof OpenQuestions>(kind: K, question: OpenQuestions[K]): boolean => {
-    if (pending.current[kind] !== question) return false;
-    pending.current[kind] = undefined;
-    setOpen((current) => (current[kind] === question ? { ...current, [kind]: undefined } : current));
+  /** Take `question` off the screen; false when it was already answered or replaced. */
+  const settle = useCallback((question: NonNullable<OpenQuestions[Kind]>): boolean => {
+    if (pending.current?.question !== question) return false;
+    pending.current = undefined;
+    setOpen((current) => (Object.values(current).includes(question) ? {} : current));
     return true;
   }, []);
 
   useEffect(
     () => () => {
       const still = pending.current;
-      for (const kind of Object.keys(still) as (keyof OpenQuestions)[]) {
-        const question = still[kind];
-        if (question) endWithNo(kind, question);
-      }
+      if (still) endWithNo(still);
     },
     []
   );
@@ -69,9 +73,10 @@ export function useQuestions() {
     const entryQuestion = (kind: 'unpin' | 'pinned', entry: ExtensionEntry): Promise<boolean> =>
       new Promise<boolean>((resolve) => {
         const question: EntryQuestion = {
+          id: (nextId += 1),
           entry,
           answer: (yes) => {
-            if (settle(kind, question)) resolve(yes);
+            if (settle(question)) resolve(yes);
           },
         };
         show(kind, question);
@@ -80,8 +85,9 @@ export function useQuestions() {
       confirmInsecure: (): Promise<boolean> =>
         new Promise<boolean>((resolve) => {
           const question: InsecureQuestion = {
+            id: (nextId += 1),
             answer: (yes) => {
-              if (settle('insecure', question)) resolve(yes);
+              if (settle(question)) resolve(yes);
             },
           };
           show('insecure', question);
@@ -89,10 +95,11 @@ export function useQuestions() {
       credentials: (reason: CredentialsReason, proxy: string): Promise<CredentialsAnswer> =>
         new Promise<CredentialsAnswer>((resolve) => {
           const question: CredentialsQuestion = {
+            id: (nextId += 1),
             reason,
             proxy,
             answer: (result) => {
-              if (settle('credentials', question)) resolve(result);
+              if (settle(question)) resolve(result);
             },
           };
           show('credentials', question);
@@ -106,7 +113,7 @@ export function useQuestions() {
 }
 
 /** End an open question with its "no": stopped, or not confirmed. */
-function endWithNo<K extends keyof OpenQuestions>(kind: K, question: NonNullable<OpenQuestions[K]>): void {
+function endWithNo({ kind, question }: Pending): void {
   if (kind === 'credentials') (question as CredentialsQuestion).answer(undefined);
   else (question as InsecureQuestion | EntryQuestion).answer(false);
 }
