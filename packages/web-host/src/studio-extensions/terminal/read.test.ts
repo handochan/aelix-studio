@@ -13,22 +13,70 @@ import { parseExtensionEntries } from '../inspect/metadata';
 
 const fsSpy = vi.hoisted(() => ({
   opened: [] as string[],
+  listed: [] as string[],
+  looked: [] as string[],
+  reads: 0,
+  openDelayMs: 0,
   swap: undefined as { from: string; to: string } | undefined,
 }));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
+  const looked =
+    (call: (...args: unknown[]) => Promise<unknown>) =>
+    (file: string, ...rest: unknown[]) => {
+      fsSpy.looked.push(String(file));
+      return call(file, ...rest);
+    };
   return {
     ...actual,
-    open: (file: string, ...rest: unknown[]) => {
+    open: async (file: string, ...rest: unknown[]) => {
       fsSpy.opened.push(String(file));
+      if (fsSpy.openDelayMs) await new Promise((resolve) => setTimeout(resolve, fsSpy.openDelayMs));
       const target = fsSpy.swap && String(file) === fsSpy.swap.from ? fsSpy.swap.to : file;
-      return (actual.open as (...args: unknown[]) => unknown)(target, ...rest);
+      const handle = (await (actual.open as (...args: unknown[]) => Promise<import('node:fs/promises').FileHandle>)(
+        target,
+        ...rest
+      )) as import('node:fs/promises').FileHandle;
+      const read = handle.read.bind(handle);
+      return Object.assign(handle, {
+        read: (...args: unknown[]) => {
+          fsSpy.reads += 1;
+          return (read as (...inner: unknown[]) => unknown)(...args);
+        },
+      });
     },
+    opendir: async (directory: string, ...rest: unknown[]) => {
+      fsSpy.listed.push(String(directory));
+      if (fsSpy.openDelayMs) await new Promise((resolve) => setTimeout(resolve, fsSpy.openDelayMs));
+      const dir = (await (actual.opendir as (...args: unknown[]) => Promise<import('node:fs').Dir>)(
+        directory,
+        ...rest
+      )) as import('node:fs').Dir;
+      return {
+        close: () => dir.close(),
+        [Symbol.asyncIterator]: () => {
+          fsSpy.reads += 1;
+          return dir[Symbol.asyncIterator]();
+        },
+      };
+    },
+    lstat: looked(actual.lstat as (...args: unknown[]) => Promise<unknown>),
+    stat: looked(actual.stat as (...args: unknown[]) => Promise<unknown>),
+    readlink: looked(actual.readlink as (...args: unknown[]) => Promise<unknown>),
   };
 });
 
-import { createScan, isUncOrDevice, listDirectory, mapLimited, readBounded, type Scan } from './files';
-import { readDeclaredExtensions, readGlobalExtensions } from './globalDirectory';
+import {
+  createScan,
+  isUncOrDevice,
+  listDirectory,
+  lstatEntry,
+  mapLimited,
+  readBounded,
+  statEntry,
+  type Scan,
+} from './files';
+import { DECLARED_LIMIT, readDeclaredExtensions, readGlobalExtensions } from './globalDirectory';
 import { HEAD_LIMIT, launcherInterpreter, readLauncherInterpreter } from './launcher';
 import { METADATA_LIMIT, readCliVenv } from './venv';
 
@@ -39,8 +87,7 @@ let scan: Scan;
 beforeEach(async () => {
   scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-terminal-')));
   scan = createScan(Date.now() + 30_000, process.platform);
-  fsSpy.opened = [];
-  fsSpy.swap = undefined;
+  Object.assign(fsSpy, { opened: [], listed: [], looked: [], reads: 0, openDelayMs: 0, swap: undefined });
 });
 afterEach(() => rm(scratch, { recursive: true, force: true }));
 
@@ -71,6 +118,36 @@ describe('limits on work at once', () => {
     expect(result).toEqual(Array.from({ length: 500 }, (_, index) => index * 2));
     expect(peak).toBe(8);
     expect(started).toBe(500);
+  });
+
+  it('ends a mapping only when every worker has finished, even after one failed', async () => {
+    let slowDone = false;
+    const mapping = mapLimited([0, 1], 2, async (item) => {
+      if (item === 0) throw new Error('first');
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      slowDone = true;
+      return item;
+    });
+    await expect(mapping).rejects.toThrow('first');
+    expect(slowDone).toBe(true);
+  });
+
+  it('gives nothing from a call that came back after the deadline, so nothing follows it', async () => {
+    const soon = createScan(Date.now() + 30, process.platform);
+    const late = soon.fs(() => new Promise((resolve) => setTimeout(() => resolve('late'), 80)));
+    await expect(late).rejects.toThrow('time limit');
+  });
+
+  it('says when every file system call of a scan has settled', async () => {
+    const tracked = createScan(Date.now() + 10_000, process.platform);
+    let done = false;
+    void tracked.fs(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      done = true;
+    });
+    await tracked.settled();
+    expect(done).toBe(true);
+    await tracked.settled();
   });
 
   it('runs no more file system calls at once than its cap, whoever asks', async () => {
@@ -157,6 +234,35 @@ describe('bounded reads', () => {
     }
   });
 
+  it('starts no read after an open that came back past the deadline', async () => {
+    await write(path.join(scratch, 'file'), 'x'.repeat(100));
+    fsSpy.openDelayMs = 200;
+    const soon = createScan(Date.now() + 50, process.platform);
+    await expect(readBounded(soon, path.join(scratch, 'file'), 1000)).rejects.toThrow('time limit');
+    expect(fsSpy.opened).toHaveLength(1);
+    expect(fsSpy.reads).toBe(0);
+  });
+
+  it('reads no entry of a directory opened past the deadline', async () => {
+    await write(path.join(scratch, 'dir', 'a'));
+    fsSpy.openDelayMs = 200;
+    const soon = createScan(Date.now() + 50, process.platform);
+    await expect(listDirectory(soon, path.join(scratch, 'dir'), 10)).rejects.toThrow('time limit');
+    expect(fsSpy.listed).toHaveLength(1);
+    expect(fsSpy.reads).toBe(0);
+  });
+
+  it('follows no link to a UNC path on Windows: the target is read before it is followed', async () => {
+    await symlink('//server/share', path.join(scratch, 'to-unc'));
+    const windows = createScan(Date.now() + 10_000, 'win32');
+    expect(await readBounded(windows, path.join(scratch, 'to-unc', 'x'), 100)).toBe('unreadable');
+    expect(await listDirectory(windows, path.join(scratch, 'to-unc'), 10)).toBe('unreadable');
+    expect(await statEntry(windows, path.join(scratch, 'to-unc'))).toBe('unreadable');
+    expect(await lstatEntry(windows, path.join(scratch, 'to-unc', 'aelix'))).toBe('unreadable');
+    expect(fsSpy.looked.some((entry) => entry.startsWith('//server'))).toBe(false);
+    expect(fsSpy.listed).toEqual([]);
+  });
+
   it('stops at its deadline instead of reading on', async () => {
     const late = createScan(Date.now() - 1, process.platform);
     await write(path.join(scratch, 'file'), 'x');
@@ -229,6 +335,8 @@ describe('linear time on hostile input', () => {
     fast(() => readDeclaredExtensions('[tool.aelix]\nextensions = [\n' + '"a",\n'.repeat(40_000) + ']\n'));
     fast(() => readDeclaredExtensions('[' + ' '.repeat(4000) + '\n'.repeat(60_000)));
     fast(() => readDeclaredExtensions(' \n'.repeat(100_000) + '[tool.aelix]'));
+    // A deep table and many assignments under it: no copying of the table per line.
+    fast(() => readDeclaredExtensions('[' + 'a.'.repeat(2000) + 'b]\n' + 'k=1\n'.repeat(400_000)));
     expect(readDeclaredExtensions('x = "' + 'y'.repeat(5000) + '"\n')).toBe('unknown');
   });
 });
@@ -253,6 +361,17 @@ describe('pyproject tables', () => {
     ['[tool.aelix]\nextensions = [["a.py"]]\n', 'unknown'],
     ['[tool.aelix]\nextensions = ["a\\u0041.py"]\n', 'unknown'],
     ['[tool.aelix]\nextensions = ["a.py"\n', 'unknown'],
+    // A table inside a multi-line string is text, not a table.
+    ['[project]\ndescription = """\n[tool.aelix]\nextensions = ["a.py"]\n"""\n', 'none'],
+    ["[project]\nreadme = '''\n[tool.aelix]\n'''\n[tool.aelix]\nextensions = ['b.py']\n", { paths: ['b.py'] }],
+    ['[[tool.aelix]]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[tool.aelix]\nextensions = ["a.py"]\n[tool.aelix]\nname = "x"\n', 'unknown'],
+    ['[tool.aelix]\nextensions = ["a.py"]\nextensions = ["b.py"]\n', 'unknown'],
+    // Deep tables elsewhere, or under `tool.aelix` but not its `extensions`, change nothing.
+    ['[' + Array.from({ length: 20 }, () => 'a').join('.') + '.aelix]\nx = 1\n', 'none'],
+    ['[tool.aelix.' + Array.from({ length: 20 }, () => 'a').join('.') + ']\nx = 1\n', 'none'],
+    ['[tool.aelix.extensions]\nx = 1\n', 'unknown'],
+    ['[tool]\naelix = "x"\n', 'unknown'],
   ])('reads %j', (text, expected) => {
     expect(readDeclaredExtensions(text)).toEqual(expected);
   });
@@ -335,6 +454,35 @@ describe('the terminal CLI virtual environment', () => {
     expect(fsSpy.opened).not.toContain(path.join(scratch, 'outside', 'entry_points.txt'));
   });
 
+  it.runIf(posix)('does not list a lib directory that a link takes out of the environment', async () => {
+    const root = path.join(scratch, 'venv');
+    await cliVenv(path.join(scratch, 'elsewhere'), scratch);
+    await write(path.join(root, 'pyvenv.cfg'), 'home = /opt/python/bin\n');
+    await symlink(path.join(scratch, 'elsewhere', 'lib'), path.join(root, 'lib'));
+    expect(await readCliVenv(scan, root)).toBe('no_cli');
+    expect(fsSpy.listed.some((entry) => entry.startsWith(path.join(scratch, 'elsewhere')))).toBe(false);
+  });
+
+  it.runIf(posix)(
+    'names a distribution whose suffix is not in lower case by its metadata, as CPython does',
+    async () => {
+      const root = path.join(scratch, 'venv');
+      await cliVenv(root, scratch);
+      const site = posixSite(root);
+      // Sorted first; CPython keys it by its METADATA Name, which the next directory shares.
+      await write(path.join(site, 'Twice-1.0.DIST-INFO', 'METADATA'), 'Name: other-name\nVersion: 1.0\n');
+      await write(
+        path.join(site, 'Twice-1.0.DIST-INFO', 'entry_points.txt'),
+        '[aelix.extensions]\nkept = twice:setup\n'
+      );
+      await distribution(site, 'other-name', '2.0', '[aelix.extensions]\ndropped = other:setup\n');
+      expect(await readCliVenv(scan, root)).toMatchObject({
+        extensions: [{ name: 'kept', distribution: 'other-name' }],
+        issues: ['DUPLICATE_DISTRIBUTION'],
+      });
+    }
+  );
+
   it('reads the Windows layout only on Windows', async () => {
     const root = path.join(scratch, 'pipx', 'venvs', 'aelix');
     await cliVenv(root, scratch, { 'aelix-notes': 'notes' }, { windows: true });
@@ -390,5 +538,16 @@ describe('the global extension directory', () => {
       truncated: false,
     });
     expect(await readGlobalExtensions(scan, path.join(scratch, 'absent'))).toBe('absent');
+  });
+
+  it('says it stopped short when a pyproject declares more paths than are checked', async () => {
+    const directory = path.join(scratch, 'agent', 'extensions');
+    const declared = Array.from({ length: DECLARED_LIMIT + 1 }, (_, index) => `"p${index}.py"`).join(', ');
+    await write(path.join(directory, 'many', 'pyproject.toml'), `[tool.aelix]\nextensions = [${declared}]\n`);
+    await write(path.join(directory, 'many', `p${DECLARED_LIMIT}.py`));
+    expect(await readGlobalExtensions(scan, directory)).toEqual({
+      extensions: [{ name: 'many', kind: 'unknown' }],
+      truncated: true,
+    });
   });
 });

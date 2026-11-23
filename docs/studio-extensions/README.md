@@ -1082,26 +1082,35 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
 
 8.2의 A9 결정에 따라 `list_terminal`이 사용자의 터미널 `aelix`에 설치된 확장을 읽기 전용으로 돌려준다. 요청·응답의
 정본은 `types.ts`의 `TerminalCliListing`이고, 구현은 `packages/web-host/src/studio-extensions/terminal/`이다.
-2026-11-24 리드 결정(권장안 1–6과 아래 제약)과 같은 날 독립 리뷰(blocking 5, should-fix 6)의 방향을 따른다.
+2026-11-24 리드 결정(권장안 1–6과 아래 제약), 같은 날 독립 리뷰 두 번(blocking 5·should-fix 6, 재확인의 blocking 5·
+should-fix 7)의 방향, 재확인 뒤 리드가 한계로 수용한 것(아래 "한계로 수용한 것")을 따른다.
 
 - **실행 금지.** `aelix`, Python, 셸을 실행하지 않는다. 자식 프로세스를 띄우지 않고, 코드를 불러오지 않고, 네트워크를
   쓰지 않으며, 아무것도 쓰지 않는다. 파일을 읽기만 한다. 시험은 읽은 실행 파일이 실행되면 남길 표시 파일이 없는지
   본다. 또 이 디렉터리의 소스에 프로세스·동적 `import()`·`require`·네트워크·쓰기 API가 없는지 확인한다.
 - **스캔 하나, 시간 한도.** 프로세스 전체에서 스캔은 하나다. 서비스 구성 전이든 후든 동시 요청과 후속 요청이 그
-  스캔을 나눠 받는다. 시간이 다 된 스캔도 끝날 때까지는 새 스캔을 시작하지 않고 같은 답을 준다. 시계는 첫 파일 시스템
-  호출(홈의 realpath)보다 먼저 시작한다. 모든 호출은 한도(5초)를 먼저 확인하므로, 시간이 다 되면 답만 끝내지 않고
-  스캔도 멈춘다. 그때까지 읽은 것으로 답하고 `timedOut`을 붙인다. 답은 그 시점의 사본이다. 동시에 도는 파일 시스템
-  호출은 8개까지이고, 긴 목록도 한꺼번에 예약하지 않는다.
+  스캔을 나눠 받는다. 시계는 첫 파일 시스템 호출(홈의 realpath)보다 먼저 시작한다.
+  - **답:** 한도(5초)에 닿으면 그때까지 읽은 것으로 답하고 `timedOut`을 붙인다. 답은 그 시점의 사본이다.
+  - **새 호출:** 모든 파일 시스템 호출은 시작하기 전과 돌아온 직후에 한도를 확인한다. 파일을 연 뒤, 디렉터리를 연
+    뒤, 읽기마다 다시 확인한다. 그래서 한도 뒤에 돌아온 `open`·`opendir` 다음에는 읽기를 시작하지 않는다.
+  - **이미 시작한 호출:** 끊을 수 없다. 동시에 도는 호출은 8개까지이므로 한도 뒤에 남는 것도 8개까지다. 스캔은 그
+    호출이 모두 돌아온 뒤에야 끝난다. 그때까지 온 요청은 같은 답(`timedOut`)을 받고, 새 스캔은 시작하지 않는다.
+    병렬로 도는 작업은 실패가 있어도 나머지가 끝날 때까지 기다린다. 긴 목록도 한꺼번에 예약하지 않는다.
 - **찾는 곳.** Studio 프로세스의 환경 변수로 정한다. **셸 설정 파일에만 둔 변수는 보지 못한다.** GUI 앱은 사용자
   셸의 PATH도 받지 못한다. 그래서 터미널이 실제로 어느 `aelix`를 쓰는지 알 수 없다. 찾은 환경을 실제 경로로 중복을
   없애 모두 돌려주고, 각각 찾은 방법(`uv_tool`, `pipx`, `launcher`)을 붙인다. 하나도 없으면 빈 목록과 찾아본 위치
   (`searched`)를 돌려준다. 상대 경로 값은 쓰지 않는다. uv·pipx는 그것을 자기 실행 디렉터리 기준으로 읽는데, Studio는
-  그 디렉터리를 모른다. Windows UNC·장치 경로(`\\server\…`, `\\?\`, `\\.\`)는 환경 변수, PATH, shebang, 링크
-  대상 어디에서 와도 건드리지 않는다.
+  그 디렉터리를 모른다. Windows에서는 드라이브 문자와 구분자로 시작하는 값(`C:\…`)만 절대 경로로 본다. `C:foo`와
+  `\foo`는 현재 드라이브나 디렉터리에 따라 달라지므로 쓰지 않는다. Windows UNC·장치 경로(`\\server\…`, `\\?\`,
+  `\\.\`)는 환경 변수, PATH, shebang 어디에서 와도 건드리지 않는다. Windows에서는 경로를 한 단계씩 따라간다. 단계마다
+  `lstat`으로 링크인지 보고, 링크면 대상을 먼저 읽어 UNC·장치 경로면 따라가기 전에 거절한다. 실제 경로 결과도 다시
+  확인한다. `stat`, 디렉터리 나열, 실행 파일의 `lstat`(그 디렉터리)도 이렇게 푼 경로로만 한다. 네트워크 공유에 연결한
+  드라이브 문자(`Z:\`)는 구별하지 않는다.
   - uv tool(uv 0.13.9 `uv-dirs`·`uv-tool`·`uv-state` 소스): `UV_TOOL_DIR`. 없으면 `$XDG_DATA_HOME/uv/tools`
     또는 `~/.local/share/uv/tools`, macOS의 예전 `~/Library/Application Support/uv/tools`, Windows의
     `%APPDATA%\uv\data\tools`와 `%APPDATA%\uv\tools`다. 그 아래 도구마다 `pyvenv.cfg`와 `aelix` 배포판이 있는
-    것만 읽는다(디렉터리 이름으로 먼저 거른다).
+    것만 읽는다(디렉터리 이름으로 먼저 거른다). 도구의 `pyvenv.cfg`나 디렉터리를 읽지 못하면 건너뛰지 않고
+    `unreadable`로 낸다. 도구 안에서 보는 한도(`lib` 16개, site 항목)를 넘으면 `truncated`다.
   - pipx(pipx 1.19.0 `paths.py`, platformdirs 4.14.8 소스): `PIPX_HOME`. 없으면 사용자 데이터 디렉터리
     (`$XDG_DATA_HOME/pipx`, Linux `~/.local/share/pipx`, macOS `~/Library/Application Support/pipx`, Windows
     `%LOCALAPPDATA%\pipx\pipx`)와 예전 `~/.local/pipx`(Windows는 `~\pipx`도)의 `venvs`다.
@@ -1109,7 +1118,8 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
     platformdirs는 Windows에 알려진 폴더를 묻지만, Studio는 API 호출이나 명령 없이 할 수 있는 데까지만 한다.
   - `aelix` 실행 파일(Windows 제외): `UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`, `$XDG_DATA_HOME/../bin`, `PIPX_BIN_DIR`,
     `~/.local/bin`, Homebrew와 시스템 bin, macOS `--user`의 `~/Library/Python/<버전>/bin`(16개), Studio 프로세스
-    PATH(앞 64개)다. 한도를 넘으면 `truncated`다. 링크는 실제 경로로 따라간다. `<환경>/bin/aelix`에 닿으면 그
+    PATH(앞 64개)다. 한도를 넘거나 `--user` 폴더를 읽지 못하면 `truncated`다. 실행 파일이 있는 디렉터리를 읽지
+    못하면(`EACCES`) 그 실행 파일을 `unreadable`로 낸다. 링크는 실제 경로로 따라간다. `<환경>/bin/aelix`에 닿으면 그
     환경이다. 아니면 앞 4 KiB에서 interpreter를 읽는다. 해석하는 형태는 `#!/경로/python [인자]`와, pip(distlib)·uv가
     쓰는 `/bin/sh` + `'''exec' <경로> [인자] "$0" "$@"`(따옴표 `'`·`"` 또는 없음)뿐이다. 상대 경로, `env`, 4 KiB에서
     잘린 줄은 `unresolved_launcher`다. 작업 디렉터리 기준으로 찾지 않는다.
@@ -1118,16 +1128,26 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
     규칙대로 한 단계만 본다. `*.py`는 `file`이다. 하위 디렉터리는 `aelix-plugin.toml`이면 `manifest`, `pyproject.toml`의
     `[tool.aelix] extensions` 배열에 실제로 있는 경로가 하나라도 있으면 `pyproject`, `__init__.py`면 `package`다.
     이름과 종류만 낸다. TOML 파서 의존성(lockfile 변경)을 더하지 않으려고 manifest를 해석하지 않는다. 그래서 깨진
-    manifest도 목록에 나오고 native에서 실패한다. `pyproject.toml`은 줄 단위의 선형 판독기로 표준 형태만 읽는다. 같은
-    표를 인용 키·점 표기·인라인 표로 쓰거나, 줄이 4,096자를 넘거나, 파일이 256 KiB를 넘으면 `unknown`이다. native는
-    받을 수 있지만 Studio는 파서 없이 판단하지 못하는 경우다. 프로젝트 `.aelix/extensions`는 6절대로 다루지 않는다.
+    manifest도 목록에 나오고 native에서 실패한다. `pyproject.toml`은 줄 단위의 선형 판독기로 표준 형태만 읽는다.
+    여러 줄 문자열(`"""`, `'''`) 안의 줄은 건너뛴다. 다음은 `unknown`이다. native는 다르게 판단할 수 있지만 Studio는
+    파서 없이 판단하지 못하는 경우다.
+    - 같은 표를 인용 키·점 표기·인라인 표로 쓴 것, 배열 표(`[[tool.aelix]]`), `[tool.aelix.extensions]` 같은 하위 표.
+    - 같은 표나 `extensions` 키가 두 번 나오는 것. TOML 오류라 native는 아무것도 읽지 않는다.
+    - 줄이 4,096자를 넘거나 파일이 256 KiB를 넘는 것.
+    - 선언 경로가 64개를 넘는데 앞 64개 중에는 있는 것이 없는 것. 앞 64개만 존재를 확인하므로 `truncated`도 붙인다.
+
+    표 이름과 점 키는 앞 16부분만 본다. 대입문마다 표 이름을 복사하지 않는다. 프로젝트 `.aelix/extensions`는 6절대로
+    다루지 않는다.
+
 - **읽는 것.** `pyvenv.cfg`가 있는 venv만 읽는다. 읽는 파일은 실제 경로가 그 venv root 안에 있을 때만 연다. site
-  디렉터리(`lib/python<X.Y>/site-packages`, Windows `Lib/site-packages`)도 마찬가지다. 배포판은 CPython 3.12
-  `importlib.metadata`처럼 찾는다. `.dist-info`와 `.egg-info`를 대소문자 상관없이 보고, 첫 `-` 앞의 이름으로
-  정규화해 같은 이름은 첫 것만 쓴다. entry point가 있든 없든 먼저 중복을 없앤다. 그 배포판들의 `aelix.extensions`
-  entry point와 이름·버전(`METADATA` 또는 `PKG-INFO`)을 낸다. **native 목록과 다를 수 있는 점**이 있다. CPython은
-  디렉터리 순서에서 첫 것을 쓰는데, Studio는 그 순서를 알 수 없어 이름순으로 고른다. 또 `include-system-site-packages
-= true`인 venv의 시스템 쪽 패키지와 `.pth`로 더해진 경로는 보지 않는다. 실행 파일이 venv 밖의 Python(시스템 pip,
+  디렉터리(`lib/python<X.Y>/site-packages`, Windows `Lib/site-packages`)도 마찬가지다. `lib` 자체도 실제 경로로 풀어
+  root 안인지 확인한 뒤에야 나열한다. 배포판은 CPython 3.12 `importlib.metadata`처럼 찾는다. `.dist-info`와
+  `.egg-info`를 대소문자 상관없이 보고, 첫 `-` 앞의 이름으로 정규화해 같은 이름은 첫 것만 쓴다. 접미사가 정확히
+  `.dist-info`·`.egg-info`가 아니면(`.DIST-INFO` 등) CPython(`_name_from_stem`)처럼 메타데이터의 `Name`으로 이름을
+  정한다. entry point가 있든 없든 먼저 중복을 없앤다. 그 배포판들의 `aelix.extensions` entry point와
+  이름·버전(`METADATA` 또는 `PKG-INFO`)을 낸다. **native 목록과 다를 수 있는 점**이 있다. 같은 이름이 둘일 때 고르는
+  순서(아래 "한계로 수용한 것")와, `include-system-site-packages = true`인 venv의 시스템 쪽 패키지와 `.pth`로 더해진
+  경로를 보지 않는 것이다. 실행 파일이 venv 밖의 Python(시스템 pip,
   `--user`)을 가리키면 `not_a_venv`로 그 interpreter 경로(정규화한 것)만 돌려준다. site 위치를 추측하지 않는다.
 - **한도.** 실행 파일은 앞 4 KiB, `METADATA`·`PKG-INFO`는 앞 256 KiB(머리글이 앞에 있다), `entry_points.txt`와
   `pyproject.toml`은 256 KiB까지 읽는다. 넘는 `entry_points.txt`는 건너뛰고 `ENTRY_POINTS_TOO_LARGE`를 붙인다. 환경은
@@ -1135,7 +1155,8 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
   파서(`entry_points.txt`의 extras 떼기, `pyproject.toml`)는 입력 길이에 선형이다. 정규식 백트래킹에 기대지 않는다.
 - **링크와 특수 파일.** 실제 경로로 따라가며 순환(`ELOOP`)은 `unreadable`로 끝낸다. 파일은 `stat`으로 일반 파일인지
   먼저 보고, 일반 파일일 때만 연다. FIFO·장치·소켓은 열지 않는다. 링크를 따르지 않고(`O_NOFOLLOW`) non-blocking으로
-  연 뒤 `fstat`의 dev·ino가 `stat`과 같은지 다시 본다. 다르면 읽지 않는다.
+  연 뒤 `fstat`의 dev·ino가 `stat`과 같은지 다시 본다. 다르면 읽지 않는다. `stat`과 `open` 사이의 교체는 아래 "한계로
+  수용한 것"에 적었다.
 - **실패 격리.** 환경 하나를 읽다 실패하면 그 항목만 상태 code(`unreadable`)를 받고 나머지는 계속 읽는다. 디렉터리를
   읽지 못한 것은 `no_cli`나 빈 목록이 아니라 `unreadable`이다. 메타데이터 문제는 code로만 알린다
   (`ENTRY_POINTS_TOO_LARGE`, `METADATA_UNREADABLE`, `DUPLICATE_DISTRIBUTION`, `DUPLICATE_ENTRY`). 오류 문구와 파일
@@ -1143,15 +1164,32 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
 - **runtime 독립.** Studio runtime 번들, helper 세대, 변경 잠금이 필요 없다. 번들이 없어 `RUNTIME_UNAVAILABLE`일
   때도, 다른 변경이 잠금을 잡고 있을 때도 답한다. 서비스가 설정되기 전(데스크톱 시작 직후, 시작 실패)에도 두 host가
   `list_terminal`만은 직접 답한다.
-- **경로와 이름 가림.** 답을 만든 뒤 마지막으로 **모든 문자열 필드**를 한 번 더 가린다. 위치, 실행 파일, 전역 항목
-  이름, 배포판 이름·버전, entry 이름, 참조(`file://` 포함)가 모두 대상이다. 홈 디렉터리(적힌 것과 realpath)는 텍스트
-  어디에 있든 `~`가 된다. 사용자 이름은 독립된 낱말로 나오는 곳마다 `<user>`가 된다. 원격 WebUI에 홈 경로와 사용자
-  이름을 보내지 않으려는 것이다. 홈 밖의 다른 절대 경로(`/opt/homebrew/...`)는 그대로 둔다.
+- **경로와 이름 가림.** 답을 만든 뒤 마지막으로 **자유 텍스트 필드**를 가린다. 위치, 실행 파일, 찾아본 위치, 전역
+  항목 이름, native 버전, 배포판 이름·버전, entry 이름, 참조(`file://` 포함)가 대상이다. 정해진 값만 갖는
+  필드(`status`, `foundBy`, `kind`, `issues`)는 건드리지 않는다. 그래서 사용자 이름이 `listed` 같은 값이어도 답의 뜻이
+  바뀌지 않는다.
+  - 홈 디렉터리(적힌 것과 realpath)는 텍스트 어디에 있든 `~`가 된다. 이름을 이을 수 있는 글자(문자, 숫자, `.`, `-`,
+    `_`)가 아닌 곳에서 끝난 것으로 본다. 그래서 따옴표, 괄호, 쉼표 앞에서도 바뀐다. Windows에서는 `/`와 `\`를 같게
+    본다. macOS와 Windows에서는 대소문자를 무시한다.
+  - 사용자 이름은 독립된 낱말로 나오는 곳마다 `<user>`가 된다.
+  - 원격 WebUI에 홈 경로와 사용자 이름을 보내지 않으려는 것이다. 홈 밖의 다른 절대 경로(`/opt/homebrew/...`)는 그대로
+    둔다.
 - **Windows.** uv와 pipx의 도구 디렉터리만 본다. `aelix.exe`(uv trampoline, distlib launcher)는 이진 형식이라
   해석하지 않는다. **Windows 실기에서는 확인하지 않았다.** 경로 규칙은 위 소스를 읽어 정했고 시험은 Windows 배치를
   흉내 낸 것이다.
 - **이 기계의 확인.** macOS에서 `uv tool install aelix`로 설치한 실제 CLI(`~/.local/bin/aelix` → uv tool 환경,
   native 0.1.0b2)를 읽었다. pip pack 두 개가 그 CLI의 목록대로 나왔다. **[실행]**
+- **한계로 수용한 것 (2026-11-24 리드 결정).** 재확인 리뷰가 지적했고, 고치지 않고 여기에 적기로 한 것이다.
+  - **`stat`과 `open` 사이의 교체.** 같은 사용자의 프로세스가 그 사이에 파일을 특수 파일로 바꿀 수 있다. POSIX에서는
+    `O_NONBLOCK`과 `fstat`(dev·ino) 확인 덕분에 기다리거나 잘못 읽지 않는다. 그래도 `open` 자체는 일어날 수 있다.
+    Windows에는 두 플래그가 없다. Windows named pipe는 `\\.\pipe\` 경로라 이미 거절한다.
+  - **짧은 사용자 이름.** 이름이 짧으면 같은 낱말인 다른 텍스트도 `<user>`가 된다. 덜 가리는 것보다 안전한 쪽이다.
+  - **긴 낱말 속 사용자 이름.** `aliceTools`처럼 다른 글자에 붙은 이름은 가리지 않는다.
+  - **Windows 알려진 폴더.** `APPDATA`·`LOCALAPPDATA`가 없을 때 uv와 platformdirs는 Known Folder API에 묻는다. Studio는
+    보통 위치로 대신하므로, 폴더를 옮긴 환경에서는 다를 수 있다.
+  - **CPython의 배포판 선택 순서.** 같은 이름의 배포판이 둘이면 CPython은 디렉터리 순서(`listdir`)에서 첫 것을 쓴다.
+    Studio는 그 순서를 알 수 없어 이름순으로 고른다. native와 다른 것을 고를 수 있고, 그때는
+    `DUPLICATE_DISTRIBUTION`이 붙는다.
 
 ## 10. 확인하지 않은 것
 
@@ -1172,7 +1210,8 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
   네트워크를 전부 막은 반입을 다시 실행하지 않았다. 둘은 2차 절차로 실행했다.
 - **사용자의 터미널 CLI를 실행하는 목록·설치·제거.** 실행하지 않았다. 읽기 전용 목록은 파일만 읽는다(9절).
 - **터미널 CLI 목록의 Windows·Linux 실기, pipx 설치.** macOS의 uv tool 설치만 실제로 읽었다. pipx·Linux·Windows는
-  소스에서 정한 경로와 그 배치를 흉내 낸 시험이다.
+  소스에서 정한 경로와 그 배치를 흉내 낸 시험이다. Windows의 단계별 링크 해석(`lstat`·`readlink`)과 junction도
+  macOS에서 win32 규칙으로 흉내 냈을 뿐이다. 한계로 수용한 것은 9절에 있다.
 - **공개 PyPI에서 확장을 이름으로 설치.** 내부 index(loopback)에서 이름 설치를 했고, 공개 PyPI에서는 확장의
   의존성(`tabulate`)만 받았다.
 - **컴파일된 모듈이 든 확장, 의존성이 큰 확장.** 순수 Python 확장으로만 실험했다.
@@ -1329,6 +1368,25 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
   - pyproject는 존재하는 선언 경로만 받고, 파서 없이 읽지 못하는 형태는 `unknown`으로 둔다.
   - 한도와 읽기 실패를 `truncated`·`unreadable`로 알린다.
   - ADR 서두·5.11·6절·9절을 구현에 맞췄다.
+
+**2026-11-24, PR D 재확인(blocking 5, should-fix 7, nit 1).** 리드가 고칠 것과 한계로 적을 것을 나눴다. 한계로
+수용한 다섯 가지는 9절에 적었다.
+
+- **가림:** 모든 문자열이 아니라 자유 텍스트 필드만 가린다. 사용자 이름이 `listed`여도 `status`가 바뀌지 않는다. 홈은
+  따옴표·문장 부호 앞에서도, Windows에서는 `/`로 적은 것도 `~`가 된다.
+- **시간:** 파일 시스템 호출이 돌아온 뒤에도 한도를 확인한다. 연 뒤, 나열을 시작하기 전, 읽기마다 확인한다. 스캔은
+  진행 중인 호출이 모두 돌아온 뒤에 끝나고, 그 전에는 새 스캔을 시작하지 않는다. 병렬 작업은 실패가 있어도 모두
+  끝날 때까지 기다린다.
+- **경로 범위:** `lib`을 실제 경로로 확인한 뒤에 나열한다. Windows에서는 링크를 한 단계씩 풀어 UNC를 가리키는 로컬
+  링크를 따라가기 전에 거절한다.
+- **should-fix:**
+  - Windows의 `C:foo`·`\foo`를 상대 경로로 무시한다.
+  - 대문자 접미사의 배포판은 CPython처럼 `Name`으로 이름을 정한다.
+  - pyproject의 여러 줄 문자열, 배열 표, 중복 표·키, 하위 표를 처리했다. 표 이름 복사를 없애고 앞 16부분만 본다.
+    선언 경로가 64개를 넘으면 `truncated`다.
+  - 읽지 못한 실행 파일 디렉터리, `--user` 폴더, 도구, 도구 안의 한도를 `unreadable`·`truncated`로 알린다.
+  - 9절의 시간·경로 보장 문구를 구현에 맞췄다.
+- **nit:** 정적 검사가 `import (`처럼 괄호 앞에 공백이 있는 호출도 잡는다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

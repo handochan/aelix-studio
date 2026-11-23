@@ -1,7 +1,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { TerminalCliEnvironment, TerminalCliFoundBy, TerminalCliListing } from '../types.js';
-import { createScan, listDirectory, lstatOf, realpathOf, ScanStopped, statOf, type Scan } from './files.js';
+import { createScan, listDirectory, lstatEntry, realpathOf, ScanStopped, statOf, type Scan } from './files.js';
 import { readGlobalExtensions } from './globalDirectory.js';
 import { launcherInterpreter } from './launcher.js';
 import { searchLocations, type ToolRoot } from './locations.js';
@@ -33,19 +33,24 @@ export type Masks = { homes: string[]; username?: string; platform: NodeJS.Platf
 const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
- * Hide the home directory and the user name in any text of a reply: a home directory wherever
- * it starts a path in the text (`/home/alice/x`, `file:///home/alice/x`) becomes `~`, and the
- * user name wherever it stands as a word of its own (in a path, a package name, a reference)
- * becomes `<user>`. Case is ignored for both on macOS and Windows, and for the user name
- * everywhere.
+ * Hide the home directory and the user name in a text of a reply. A home directory becomes `~`
+ * wherever it starts a path in the text (`/home/alice/x`, `file:///home/alice/x`,
+ * `"C:/Users/alice"`), up to any character that cannot continue its last name (a separator, a
+ * quote, punctuation other than `.`, `-`, `_`). On Windows either separator matches either.
+ * The user name becomes `<user>` wherever it stands as a word of its own (in a path, a package
+ * name, a reference); inside a longer word (`aliceTools`) it stays, and a short name may also
+ * hide an ordinary word: both are accepted (ADR 9). Case is ignored for the home on macOS and
+ * Windows, and for the user name everywhere.
  */
 export function maskText(text: string, masks: Masks): string {
   let masked = text;
-  const fold = masks.platform === 'darwin' || masks.platform === 'win32' ? 'gi' : 'g';
+  const windows = masks.platform === 'win32';
+  const fold = masks.platform === 'darwin' || windows ? 'giu' : 'gu';
   // Longest first, so a real path that extends the written one is not cut.
   for (const home of masks.homes.filter((value) => value.length > 1).toSorted((a, b) => b.length - a.length)) {
     const trimmed = home.replace(/[\\/]+$/, '');
-    masked = masked.replace(new RegExp(`${escapeRegExp(trimmed)}(?=$|[\\\\/])`, fold), '~');
+    const pattern = windows ? trimmed.split(/[\\/]/).map(escapeRegExp).join('[\\\\/]') : escapeRegExp(trimmed);
+    masked = masked.replace(new RegExp(`${pattern}(?![\\p{L}\\p{N}._-])`, fold), '~');
   }
   if (masks.username)
     masked = masked.replace(
@@ -61,13 +66,39 @@ export function labelPath(target: string, masks: Masks): string {
   return maskText(paths.normalize(target), masks);
 }
 
-/** Every string of a reply, masked: the last step before it leaves, whatever field holds it. */
-function sanitize<T>(value: T, masks: Masks): T {
-  if (typeof value === 'string') return maskText(value, masks) as T;
-  if (Array.isArray(value)) return value.map((item) => sanitize(item, masks)) as T;
-  if (value && typeof value === 'object')
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, sanitize(item, masks)])) as T;
-  return value;
+/**
+ * Mask the free text of a reply, the last step before it leaves: every field that holds a path,
+ * a name, a version or a reference. Fields with a fixed set of values (`status`, `foundBy`,
+ * `issues`, `kind`) are left alone, so a user name that happens to be one of them cannot change
+ * the reply's meaning.
+ */
+function sanitize(listing: TerminalCliListing, masks: Masks): TerminalCliListing {
+  const text = (value: string): string => maskText(value, masks);
+  const place = (value: string): string => labelPath(value, masks);
+  return {
+    ...listing,
+    environments: listing.environments.map((environment) => ({
+      ...environment,
+      location: place(environment.location),
+      launchers: environment.launchers.map(place),
+      ...(environment.nativeVersion === undefined ? {} : { nativeVersion: text(environment.nativeVersion) }),
+      extensions: environment.extensions.map((extension) => ({
+        name: text(extension.name),
+        distribution: text(extension.distribution),
+        version: text(extension.version),
+        reference: text(extension.reference),
+      })),
+    })),
+    globalExtensions: {
+      ...listing.globalExtensions,
+      location: listing.globalExtensions.location && place(listing.globalExtensions.location),
+      extensions: listing.globalExtensions.extensions.map((extension) => ({
+        ...extension,
+        name: text(extension.name),
+      })),
+    },
+    searched: listing.searched.map(place),
+  };
 }
 
 type Found = {
@@ -158,7 +189,8 @@ async function scanListing(
       const real = await realpathOf(scan, candidate);
       if (!real) continue;
       // eslint-disable-next-line no-await-in-loop -- as above
-      const held = await holdsCli(scan, real);
+      const { held, truncated } = await holdsCli(scan, real);
+      if (truncated) listing.truncated = true;
       if (held === 'yes') add(real, { status: 'listed', location: real }, root.foundBy);
       else if (held === 'unreadable') add(real, { status: 'unreadable', location: real }, root.foundBy);
     }
@@ -169,14 +201,22 @@ async function scanListing(
     // `pip install --user` on macOS puts launchers in `~/Library/Python/<version>/bin`.
     const user = path.join(home, 'Library', 'Python');
     const versions = await listDirectory(scan, user, USER_SCHEME_LIMIT);
+    // A folder that cannot be read may hide launchers: the listing is not complete.
+    if (versions === 'unreadable') listing.truncated = true;
     if (typeof versions === 'string') return [];
     if (versions.truncated) listing.truncated = true;
     return versions.names.map((version) => path.join(user, version, 'bin'));
   };
 
   const scanLauncher = async (launcher: string): Promise<void> => {
-    // `lstat`: a link that goes nowhere or loops is still a launcher found, and reported.
-    if (!(await lstatOf(scan, launcher))) return;
+    // `lstat`: a link that goes nowhere or loops is still a launcher found, and reported; a
+    // directory that cannot be read may hold one.
+    const entry = await lstatEntry(scan, launcher);
+    if (entry === 'absent') return;
+    if (entry === 'unreadable') {
+      add(`launcher:${launcher}`, { status: 'unreadable', location: launcher }, 'launcher', launcher);
+      return;
+    }
     const target = await followLauncher(scan, launcher);
     if (!target) {
       add(`launcher:${launcher}`, { status: 'unreadable', location: launcher }, 'launcher', launcher);
@@ -242,8 +282,9 @@ let current: { answer: Promise<TerminalCliListing>; ended: Promise<void> } | und
  *
  * One scan at a time for the whole process: callers while it runs, and after it answered but
  * before it ended, share its answer. Its clock starts before its first file system call; at
- * `LISTING_DEADLINE_MS` it answers with what it read (`timedOut`) and stops reading. Every
- * string of the answer has the home directory and the user name hidden.
+ * `LISTING_DEADLINE_MS` it answers with what it read (`timedOut`) and starts no further call.
+ * It ends once the calls already running have returned. Every free-text field of the answer
+ * has the home directory and the user name hidden (`sanitize`).
  */
 export function listTerminalCli(options: TerminalListingOptions = {}): Promise<TerminalCliListing> {
   if (current) return current.answer;
@@ -275,36 +316,23 @@ export function listTerminalCli(options: TerminalListingOptions = {}): Promise<T
   const answer = Promise.race([work, timeout]).then((finished) => {
     clearTimeout(timer);
     // A copy: reading that goes on until the scan stops must not change the answer.
-    const result = structuredClone(listing);
+    const result = sanitize(structuredClone(listing), masks);
     result.timedOut = !finished;
-    const environments = result.environments
-      .map((environment) => ({
-        ...environment,
-        location: labelPath(environment.location, masks),
-        launchers: environment.launchers.map((launcher) => labelPath(launcher, masks)),
-      }))
-      .toSorted(
-        (a, b) =>
-          FOUND_BY_ORDER.indexOf(a.foundBy[0]) - FOUND_BY_ORDER.indexOf(b.foundBy[0]) ||
-          a.location.localeCompare(b.location)
-      );
-    return sanitize(
-      {
-        ...result,
-        environments,
-        searched: result.searched.map((place) => labelPath(place, masks)),
-        globalExtensions: {
-          ...result.globalExtensions,
-          location: result.globalExtensions.location && labelPath(result.globalExtensions.location, masks),
-        },
-      },
-      masks
+    result.environments.sort(
+      (a, b) =>
+        FOUND_BY_ORDER.indexOf(a.foundBy[0]) - FOUND_BY_ORDER.indexOf(b.foundBy[0]) ||
+        a.location.localeCompare(b.location)
     );
+    return result;
   });
-  const ended = work.then(() => {
-    clearTimeout(timer);
-    current = undefined;
-  });
+  // Ended only once every file system call of the scan has settled: until then a new request
+  // gets this answer, and no second scan starts beside the first one's reads.
+  const ended = work
+    .then(() => scan.settled())
+    .then(() => {
+      clearTimeout(timer);
+      current = undefined;
+    });
   current = { answer, ended };
   return answer;
 }
