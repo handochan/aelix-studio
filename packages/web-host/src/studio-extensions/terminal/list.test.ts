@@ -7,6 +7,7 @@ import { execFileSync } from 'node:child_process';
 import { chmod, mkdtemp, readdir, readFile, realpath, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cliVenv, distribution, launcherScript, link, ranAnything, write } from '../../../tests/fixtures/terminalCli';
 
@@ -528,7 +529,8 @@ describe('text in a reply', () => {
 
 describe('nothing is run', () => {
   it('has no way to start a process, load code or use the network in the code that reads the terminal CLI', async () => {
-    const directory = path.dirname(new URL(import.meta.url).pathname);
+    // `fileURLToPath`, not the URL's pathname: on Windows that is `/D:/…`, not a path.
+    const directory = path.dirname(fileURLToPath(import.meta.url));
     const sources = (await readdir(directory)).filter((name) => name.endsWith('.ts') && !name.endsWith('.test.ts'));
     expect(sources.toSorted()).toEqual([
       'files.ts',
