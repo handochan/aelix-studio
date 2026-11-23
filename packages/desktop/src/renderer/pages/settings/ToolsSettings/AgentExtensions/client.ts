@@ -4,11 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ExtensionCommand, StudioExtensionsReply } from '@aionui/web-host';
+import type { StudioExtensionsReply, StudioExtensionsRequest } from '@aionui/web-host';
 
 declare global {
   interface Window {
-    __studioExtensions?: { request: (command: ExtensionCommand) => Promise<StudioExtensionsReply> };
+    __studioExtensions?: { request: (command: StudioExtensionsRequest) => Promise<StudioExtensionsReply> };
   }
 }
 
@@ -26,10 +26,11 @@ const transportFailure = (status: number): StudioExtensionsReply => {
 /**
  * Send one request to the Studio extension helper (Studio #32): over the desktop window's
  * dedicated channel, or the WebUI route of the page's own origin. Requests can carry proxy
- * credentials, so they bypass the generic bridge, HTTP interceptors and logging, and a lost
- * answer is never sent again: it may follow a change that was made (`CONNECTION_LOST`).
+ * credentials, so they bypass the generic bridge, HTTP interceptors and logging, a redirect is
+ * never followed (it would send the body on), and a lost answer is never sent again: it may
+ * follow a change that was made (`CONNECTION_LOST`).
  */
-export async function requestStudioExtensions(command: ExtensionCommand): Promise<StudioExtensionsReply> {
+export async function requestStudioExtensions(command: StudioExtensionsRequest): Promise<StudioExtensionsReply> {
   try {
     if (window.__studioExtensions) return await window.__studioExtensions.request(command);
     const response = await fetch(ROUTE, {
@@ -38,6 +39,7 @@ export async function requestStudioExtensions(command: ExtensionCommand): Promis
       cache: 'no-store',
       headers: { 'Content-Type': 'application/json', 'X-Studio-Extensions': '1' },
       body: JSON.stringify(command),
+      redirect: 'error',
       signal: AbortSignal.timeout(25000),
     });
     if (!response.ok) return transportFailure(response.status);

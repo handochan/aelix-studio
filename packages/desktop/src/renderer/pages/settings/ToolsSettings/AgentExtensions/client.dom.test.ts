@@ -34,8 +34,35 @@ describe('the screen client of the extension helper', () => {
         cache: 'no-store',
         headers: { 'Content-Type': 'application/json', 'X-Studio-Extensions': '1' },
         body: JSON.stringify({ action: 'get_settings' }),
+        redirect: 'error',
       })
     );
+  });
+
+  it('follows no redirect, which would send the body on: a redirected answer is lost', async () => {
+    // With redirect: 'error' the browser rejects a 307/308 instead of posting the body again.
+    const fetch = vi.fn(async (_url: string, init?: RequestInit) => {
+      if (init?.redirect === 'error') throw new TypeError('Failed to fetch: redirect');
+      return new Response(JSON.stringify({ ok: true, data: {} }));
+    });
+    vi.stubGlobal('fetch', fetch);
+    const reply = await requestStudioExtensions({
+      action: 'set_proxy_credentials',
+      credentials: { username: 'ops', password: 'sentinel-secret' },
+    });
+    expect(reply).toEqual({ ok: false, code: 'CONNECTION_LOST' });
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('passes an INSECURE_TRANSPORT answer on, and adds no acknowledgement by itself', async () => {
+    const fetch = vi.fn(
+      async (_url: string, _init?: RequestInit) =>
+        new Response(JSON.stringify({ ok: false, code: 'INSECURE_TRANSPORT' }))
+    );
+    vi.stubGlobal('fetch', fetch);
+    const command = { action: 'clear_proxy_credentials' } as const;
+    expect(await requestStudioExtensions(command)).toEqual({ ok: false, code: 'INSECURE_TRANSPORT' });
+    expect(JSON.parse(String(fetch.mock.calls[0][1]?.body))).toEqual(command);
   });
 
   it.each([

@@ -1,5 +1,5 @@
-import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { resolveNativeRuntime } from '../../studio-auth/runtime.js';
 import type { ProxyCredentialVault } from '../flow/online/proxy/credentials.js';
 import { STATE_DIRECTORY } from '../store/layout.js';
 import { ExtensionService, type ExtensionServiceOptions } from './service.js';
@@ -31,15 +31,18 @@ export type StudioExtensionsConfig = {
 let shared: ExtensionService | undefined;
 
 /**
- * The bundled runtime: `AELIX_STUDIO_RUNTIME`, else the packaged app's
- * `resources/studio-preview`, else a development checkout's `.local/studio-preview`.
+ * The bundled runtime, found exactly as native auth finds its own: `AELIX_STUDIO_RUNTIME` when
+ * set, else the first of the packaged app's `resources/studio-preview` and a development
+ * checkout's `.local/studio-preview` that native auth's `resolveNativeRuntime` accepts (the
+ * launcher, a manifest for this platform, the interpreter). When none is, the checkout path,
+ * which the helper then reports as `RUNTIME_UNAVAILABLE`.
  */
-export function studioRuntimeDirectory(env: NodeJS.ProcessEnv = process.env): string {
+export function studioRuntimeDirectory(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
   if (env.AELIX_STUDIO_RUNTIME) return env.AELIX_STUDIO_RUNTIME;
   const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  const packaged = resources && path.join(resources, 'studio-preview');
-  if (packaged && existsSync(path.join(packaged, 'manifest.json'))) return packaged;
-  return path.resolve('.local/studio-preview');
+  const checkout = path.resolve(cwd, '.local/studio-preview');
+  const candidates = [...(resources ? [path.join(resources, 'studio-preview')] : []), checkout];
+  return candidates.find((candidate) => resolveNativeRuntime(candidate)) ?? checkout;
 }
 
 /**

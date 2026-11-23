@@ -277,13 +277,27 @@ export type ExtensionReply =
  * `UNAUTHENTICATED` without a real WebUI login, `FRAME_LIMIT` for a request over 60 kB,
  * `UNAVAILABLE` when the host could not answer, and `CONNECTION_LOST` when the screen lost the
  * answer. A lost answer may follow a change that was made; the screen never sends it again.
+ * `INSECURE_TRANSPORT`: the request carries proxy credentials over plain HTTP from another
+ * machine; see `StudioExtensionsRequest`.
  */
 export type StudioExtensionsTransportCode =
   | 'FORBIDDEN'
   | 'UNAUTHENTICATED'
   | 'FRAME_LIMIT'
   | 'UNAVAILABLE'
-  | 'CONNECTION_LOST';
+  | 'CONNECTION_LOST'
+  | 'INSECURE_TRANSPORT';
+
+/**
+ * A request as the screen sends it. Over the WebUI on plain HTTP from another machine, a
+ * request carrying proxy credentials (`set_proxy_credentials`, `proxyCredentials`, or a proxy
+ * address typed with them) is answered `INSECURE_TRANSPORT`: the screen warns that they would
+ * cross the network unencrypted and, if the user goes on, sends it again with
+ * `acknowledgeInsecureTransport: true` (2026-11-22 user decision: warn, then allow). The
+ * desktop window and a WebUI on this machine or over TLS need no flag. The channel removes it
+ * before the helper sees the request. Using saved credentials sends nothing secret.
+ */
+export type StudioExtensionsRequest = ExtensionCommand & { acknowledgeInsecureTransport?: true };
 
 /** A reply as the screen receives it: the helper's, or the channel's own refusal. */
 export type StudioExtensionsReply = ExtensionReply | { ok: false; code: StudioExtensionsTransportCode };

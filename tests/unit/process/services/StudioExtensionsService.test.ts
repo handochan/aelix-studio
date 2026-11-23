@@ -36,7 +36,8 @@ import {
   studioExtensionsIpcHandler,
 } from '@process/services/StudioExtensionsService';
 
-const event = (id: number): IpcMainInvokeEvent => ({ sender: { id } }) as unknown as IpcMainInvokeEvent;
+const event = (id: number, devTools = false): IpcMainInvokeEvent =>
+  ({ sender: { id, isDevToolsOpened: () => devTools } }) as unknown as IpcMainInvokeEvent;
 
 describe('the desktop channel of the extension helper', () => {
   beforeEach(async () => {
@@ -59,20 +60,50 @@ describe('the desktop channel of the extension helper', () => {
     expect(request).toHaveBeenCalledWith('desktop:7', { action: 'list' });
   });
 
-  it('refuses a request over 60 kB, or one that is not data, before the helper sees it', async () => {
-    const request = vi.fn();
+  it('refuses a request over 60 kB in UTF-8, or one that is not JSON data, before the helper sees it', async () => {
+    const request = vi.fn(async () => ({ ok: true as const, data: {} }));
     const handle = studioExtensionsIpcHandler(
       () => true,
       () => ({ request }) as unknown as ExtensionService
     );
-    expect(await handle(event(7), { action: 'install', source: { kind: 'file', path: 'x'.repeat(60001) } })).toEqual({
-      ok: false,
-      code: 'FRAME_LIMIT',
-    });
+    const install = (value: unknown) => ({ action: 'install', source: { kind: 'file', path: value } });
+    expect(await handle(event(7), install('x'.repeat(60001)))).toEqual({ ok: false, code: 'FRAME_LIMIT' });
+    // 30,001 UTF-16 units, 60,002 bytes: counted as bytes.
+    expect(await handle(event(7), install('é'.repeat(30001)))).toEqual({ ok: false, code: 'FRAME_LIMIT' });
     const circular: Record<string, unknown> = {};
     circular.self = circular;
-    expect(await handle(event(7), circular)).toEqual({ ok: false, code: 'INVALID_INPUT' });
+    for (const value of [
+      circular,
+      new ArrayBuffer(70000),
+      install(new ArrayBuffer(70000)),
+      install(new Uint8Array(8)),
+      install(new Date()),
+      install(new Map()),
+      install(Number.NaN),
+      'list',
+    ])
+      expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT' });
     expect(request).not.toHaveBeenCalled();
+    expect(await handle(event(7), install('é'.repeat(100)))).toEqual({ ok: true, data: {} });
+  });
+
+  it('refuses the window while its DevTools are open in a packaged app, not in a development build', async () => {
+    const request = vi.fn(async () => ({ ok: true as const, data: {} }));
+    const service = () => ({ request }) as unknown as ExtensionService;
+    const packaged = studioExtensionsIpcHandler(
+      () => true,
+      service,
+      () => true
+    );
+    expect(await packaged(event(7, true), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN' });
+    expect(request).not.toHaveBeenCalled();
+    expect(await packaged(event(7, false), { action: 'list' })).toEqual({ ok: true, data: {} });
+    const development = studioExtensionsIpcHandler(
+      () => true,
+      service,
+      () => false
+    );
+    expect(await development(event(7, true), { action: 'list' })).toEqual({ ok: true, data: {} });
   });
 
   it('answers RUNTIME_UNAVAILABLE until the helper is started', async () => {

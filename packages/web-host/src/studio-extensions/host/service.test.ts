@@ -546,6 +546,24 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect((await listing()).current).toBe(done.generation);
   });
 
+  it.each([
+    ['its window closes', 'desktop:7', 'desktop:7', false],
+    ['the WebUI listener stops', 'web:operator', 'web:', true],
+  ] as const)(
+    'ends a change asked for while %s before it starts, even while the bundle is still being found',
+    async (_case, owner, cancelled, prefix) => {
+      const request = await installRequest({ name: 'demo-one' });
+      // No await between the request and the cancel: it lands while the change finds its bundle.
+      const pending = service.request(owner, request);
+      service.cancelOwner(cancelled, prefix);
+      expect(await pending).toEqual({ ok: false, code: 'CANCELLED' });
+      expect(spawn.calls.filter((call) => call.args.includes('hold'))).toEqual([]);
+      expect((await listing()).current).toBeNull();
+      // Nothing is left marked as running: the next change starts.
+      expect((await settle(await service.request(owner, request), owner)).phase).toBe('switched');
+    }
+  );
+
   it('cancels the change of a caller whose window or session closed', async () => {
     holdInstaller();
     const started = operation(await service.request('web:user-1', await installRequest({ name: 'demo-one' })));

@@ -36,5 +36,6 @@ export type {
   ProxyCredentialMode,
   ProxyCredentials,
   StudioExtensionsReply,
+  StudioExtensionsRequest,
   StudioExtensionsTransportCode,
 } from './types.js';

@@ -45,6 +45,7 @@ export type {
   ProxyCredentials,
   StudioExtensionsConfig,
   StudioExtensionsReply,
+  StudioExtensionsRequest,
   StudioExtensionsTransportCode,
 } from './studio-extensions/index.js';
 

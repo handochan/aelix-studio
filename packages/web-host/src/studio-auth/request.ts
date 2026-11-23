@@ -16,6 +16,8 @@ export type StudioRequestOptions = {
 };
 
 const BODY_LIMIT = 60000;
+/** `application/json`, with parameters or none; not `application/jsonx` or the like. */
+const JSON_TYPE = /^application\/json\s*(?:;.*)?$/i;
 
 /** Answer as JSON that is never cached and sends no referrer. */
 export function respondStudio(res: ServerResponse, status: number, body: unknown): void {
@@ -46,7 +48,7 @@ export async function admitStudioRequest(
     req.method !== 'POST' ||
     req.url !== options.route ||
     req.headers[options.marker] !== '1' ||
-    !req.headers['content-type']?.startsWith('application/json') ||
+    !JSON_TYPE.test(req.headers['content-type'] ?? '') ||
     !options.origins.includes(req.headers.origin ?? '') ||
     req.headers['sec-fetch-site'] === 'cross-site'
   ) {

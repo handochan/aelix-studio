@@ -676,26 +676,42 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   (`packages/web-host/src/studio-auth/`)와 같은 자리, 같은 방식이다. 데스크톱은 IPC로, WebUI는 로그인한
   사용자의 요청으로 부른다. 세대 interpreter를 argv로 직접 실행하고 shell을 쓰지 않는다.
 - **host 조립(2026-11-22).** 프로세스마다 서비스는 하나다(`configureStudioExtensions`). 데스크톱 IPC와 그
-  프로세스가 띄운 WebUI가 같은 서비스를 쓴다. 상태는 `<Studio 사용자 데이터>/aelix-runtime`, 번들은 native auth와
-  같은 방식(`AELIX_STUDIO_RUNTIME`, 설치 앱의 `resources/studio-preview`, checkout의 `.local/studio-preview`)으로
-  찾는다. 설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다.
+  프로세스가 띄운 WebUI가 같은 서비스를 쓴다. 상태는 `<Studio 사용자 데이터>/aelix-runtime`이다. 번들은 native auth와
+  똑같이 찾는다. `AELIX_STUDIO_RUNTIME`이 있으면 그것을 쓰고, 없으면 설치 앱의 `resources/studio-preview`와 checkout의
+  `.local/studio-preview` 중 native auth의 `resolveNativeRuntime`이 받는 첫 번째를 쓴다(`manifest.json`만 있는
+  디렉터리는 받지 않는다). 설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다. 시작 전의 변경(이른 검사, 번들 찾기)도
+  owner와 함께 먼저 등록해 둔다. 그 사이 창이 닫히거나 listener가 멈추면 아무것도 바꾸지 않고 `CANCELLED`로 끝난다.
   - **데스크톱.** app `ready` 뒤에 `safeStorage` vault로 설정한다(Linux는 이때 비밀 저장소를 알린다). 실패해도 앱은
     뜬다. macOS에서는 시작할 때 `safeStorage`를 부르지 않는다. 사용 가능 여부를 묻는 것만으로도 main thread에서
     Keychain을 읽어 Keychain 창을 기다릴 수 있다(CI에서 앱 시작이 멈췄다). 모든 macOS 사용자에게 Keychain이 있으므로
     `keychain`으로 두고, 인증 정보를 봉인하거나 열 때만 Keychain을 쓴다. Keychain이 거절하면 저장은
-    `PROXY_CREDENTIALS_NOT_STORED`로 끝나고, 열기는 다시 묻는다. 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다(preload
-    `__studioExtensions` → `ipcMain` `studio:extensions`). native auth와 같은 검사(등록한 Studio 창의 main frame,
-    그 창의 페이지 URL)를 통과한 창에만 답하고, 60 kB를 넘는 요청은 거절한다. 창마다 owner(`desktop:<webContents>`)가
-    다르다. 창이 사라지거나 main frame이 다른 페이지로 가면 그 창이 시작한 변경을 취소한다.
+    `PROXY_CREDENTIALS_NOT_STORED`로 끝나고, 열기는 다시 묻는다.
+  - **데스크톱 채널.** 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다
+    (preload `__studioExtensions` → `ipcMain` `studio:extensions`). native auth와 같은 검사(등록한 Studio 창의 main frame,
+    그 창의 페이지 URL)를 통과한 창에만 답한다. 설치 앱에서는 그 창의 DevTools가 열려 있는 동안 `FORBIDDEN`이다. console에
+    붙여 넣은 코드(self-XSS)가 helper와 keychain에 닿지 못하게 하려는 것이다. 개발 빌드는 그대로 쓸 수 있다(2026-11-22
+    결정). 요청은 JSON 자료(null·boolean·유한한 수·문자열·배열·평범한 객체, 깊이 16)여야 하고, UTF-8로 60 kB 이하여야
+    한다. buffer·typed array·날짜·Map은 `INVALID_INPUT`이다. 창마다 owner(`desktop:<webContents>`)가 다르다. 창이
+    사라지거나 main frame이 다른 페이지로 가면 그 창이 시작한 변경을 취소한다.
   - **WebUI.** 같은 listener의 `POST /api/studio/extensions`이다. native auth facade와 같은 입장 검사를 같은 코드로
-    한다(JSON POST, `X-Studio-Extensions: 1`, 페이지 자신의 origin, cross-site 아님, 실제 WebUI 로그인, 60 kB, 10초).
-    로그인한 사용자가 owner(`web:<user>`)다. listener가 멈추면 WebUI 사용자의 변경을 취소한다. 별도 WebUI는 vault 없이
-    설정되어 memory-only다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할 수 있다(2026-11-22 사용자
-    결정, 저장한 값은 돌려주지 않는다).
-  - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 답을 잃으면 `CONNECTION_LOST`로 끝내고
-    다시 보내지 않는다. 이미 바뀐 뒤일 수 있기 때문이다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`,
-    `UNAVAILABLE`, `CONNECTION_LOST`)은 `types.ts`의 `StudioExtensionsReply`다. **[실행: facade·채널·client 단위 시험,
-    static server route 시험, 설치 앱 smoke에서 실제 IPC로 `get_settings`·`list`]**
+    한다. JSON POST(`application/json`과 매개변수만, `application/jsonx` 같은 것은 아님), `X-Studio-Extensions: 1`, 페이지
+    자신의 origin, cross-site 아님, 실제 WebUI 로그인, 60 kB, 10초다. 로그인한 사용자가 owner(`web:<user>`)다. listener가
+    멈추면 WebUI 사용자의 변경을 취소한다. 별도 WebUI(`scripts/webui.ts`, 배포 패키지 `aelix-studio-web`)는 vault 없이
+    설정되어 memory-only이고, 멈출 때 서비스를 정리한다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할
+    수 있다(2026-11-22 사용자 결정, 저장한 값은 돌려주지 않는다).
+  - **암호화되지 않은 원격 연결.** proxy 인증 정보를 싣는 요청(`set_proxy_credentials`, `proxyCredentials`가 있는 요청,
+    사용자 부분이 있는 proxy 주소의 `set_settings`)이 다른 기계에서 평문 HTTP로 오면 `INSECURE_TRANSPORT`로 답한다. 화면은
+    인증 정보가 암호화되지 않은 채 네트워크를 지난다고 경고하고, 사용자가 계속하면 `acknowledgeInsecureTransport: true`를
+    붙여 다시 보낸다(2026-11-22 사용자 결정: 경고한 뒤 허용). 안전한지는 socket으로만 판단한다. TLS이거나 상대 주소가
+    loopback(127.0.0.0/8, ::1, IPv4-mapped 포함)이면 안전하고, `X-Forwarded-*` 같은 header는 보지 않는다. 그래서 다른
+    기계의 TLS reverse proxy 뒤라도 평문 구간이 있으면 묻는다. 데스크톱 창과 이 기계의 WebUI는 표시가 필요 없다. 표시는
+    helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
+  - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 본문을 다시 보내게 되는 redirect는 따르지
+    않는다(`redirect: 'error'`). 답을 잃거나 redirect되면 `CONNECTION_LOST`로 끝내고 다시 보내지 않는다. 이미 바뀐 뒤일 수
+    있기 때문이다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`, `UNAVAILABLE`, `CONNECTION_LOST`,
+    `INSECURE_TRANSPORT`)은 `types.ts`의 `StudioExtensionsReply`이고, 요청 형태는 `StudioExtensionsRequest`다. **[실행:
+    facade·채널·client 단위 시험, 시작 전 취소 경합, static server route 시험, 설치 앱 smoke에서 실제 IPC로
+    `get_settings`·`list`]**
 - host와 ACP를 거치지 않는다. 실행 중인 worker를 건드리지 않는다(D05·D17). 변경은 5.6의 잠금으로 한 번에
   하나만 한다.
 - 화면 모듈(D20)은 아래 요청만 안다. pip, venv, 세대 경로는 모른다.
@@ -1150,6 +1166,17 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 **2026-11-22, host 조립과 IPC(1b 화면의 PR A).** #112가 미룬 조립을 했다. 데스크톱 전용 채널, WebUI route, 프로세스
 하나의 서비스, 화면 client를 5.11에 적었다. native auth와 WebUI 입장 검사를 한 코드로 나눠 쓴다. 서비스 파일은 디렉터리
 한도 때문에 `studio-extensions/host/`로 옮겼다.
+
+**2026-11-23, PR A 독립 리뷰(blocking 2, should-fix 5, nit 1).**
+
+- 원격 평문 HTTP로 오는 proxy 인증 정보에는 경고와 확인 표시를 요구한다(사용자 결정).
+- 설치 앱에서는 DevTools가 열린 창의 요청을 거절한다.
+- 시작 전 변경을 먼저 등록해 취소를 잃지 않는다.
+- 요청 크기를 UTF-8로 재고, JSON 자료가 아니면 거절한다.
+- 배포 패키지 WebUI도 서비스를 설정한다.
+- 번들 찾기를 native auth와 같게 했다.
+- client는 redirect를 따르지 않는다.
+- JSON 형식 검사를 정확히 했다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

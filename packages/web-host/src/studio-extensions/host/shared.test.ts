@@ -72,13 +72,39 @@ describe('the extension helper service of a host process', () => {
       resources.resourcesPath = before;
     });
 
-    it('is AELIX_STUDIO_RUNTIME first, then the packaged resources, then a checkout', async () => {
-      expect(studioRuntimeDirectory({ AELIX_STUDIO_RUNTIME: '/opt/runtime' })).toBe('/opt/runtime');
+    /** A runtime native auth accepts: launcher, manifest for this platform, interpreter, entry. */
+    const runtimeAt = async (directory: string): Promise<string> => {
+      await mkdir(path.join(directory, 'python', ...(process.platform === 'win32' ? [] : ['bin'])), {
+        recursive: true,
+      });
+      await writeFile(path.join(directory, 'launch.cjs'), '');
+      await writeFile(path.join(directory, 'launch.py'), '');
+      await writeFile(
+        path.join(directory, 'python', ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3'])),
+        ''
+      );
+      await writeFile(
+        path.join(directory, 'manifest.json'),
+        JSON.stringify({ schema: 'aelix.studio-preview.runtime/1', target: `${process.platform}-${process.arch}` })
+      );
+      return directory;
+    };
+
+    it('is AELIX_STUDIO_RUNTIME first, then the packaged resources, then a checkout, each validated as native auth does', async () => {
+      const cwd = path.join(scratch, 'checkout');
+      const packaged = path.join(scratch, 'Resources', 'studio-preview');
+      expect(studioRuntimeDirectory({ AELIX_STUDIO_RUNTIME: '/opt/runtime' }, cwd)).toBe('/opt/runtime');
       resources.resourcesPath = path.join(scratch, 'Resources');
-      expect(studioRuntimeDirectory({})).toBe(path.resolve('.local/studio-preview'));
-      await mkdir(path.join(scratch, 'Resources', 'studio-preview'), { recursive: true });
-      await writeFile(path.join(scratch, 'Resources', 'studio-preview', 'manifest.json'), '{}');
-      expect(studioRuntimeDirectory({})).toBe(path.join(scratch, 'Resources', 'studio-preview'));
+      // Nothing valid: the checkout path, reported unavailable by the helper.
+      expect(studioRuntimeDirectory({}, cwd)).toBe(path.join(cwd, '.local', 'studio-preview'));
+      // A packaged directory with a manifest alone is not a runtime: the checkout one wins.
+      await mkdir(packaged, { recursive: true });
+      await writeFile(path.join(packaged, 'manifest.json'), '{}');
+      await runtimeAt(path.join(cwd, '.local', 'studio-preview'));
+      expect(studioRuntimeDirectory({}, cwd)).toBe(path.join(cwd, '.local', 'studio-preview'));
+      // A complete packaged runtime comes first.
+      await runtimeAt(packaged);
+      expect(studioRuntimeDirectory({}, cwd)).toBe(packaged);
     });
   });
 });
