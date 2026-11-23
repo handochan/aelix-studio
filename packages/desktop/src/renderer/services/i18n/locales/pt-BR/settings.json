@@ -615,7 +615,7 @@
       "pinnedTitle": "Versão fixada",
       "pinnedBody": "{{name}} está fixada em uma versão. Para mudar, instale pelo nome a versão desejada.",
       "installOther": "Instalar outra versão",
-      "onlineDisabled": "A atualização baixa do índice de pacotes, e as instalações online estão desativadas."
+      "onlineDisabled": "A atualização baixa do índice de pacotes ou do repositório Git, e as instalações online estão desativadas."
     },
     "terminal": {
       "title": "aelix do terminal (somente leitura)",

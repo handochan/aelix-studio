@@ -15,7 +15,10 @@ const withoutCredentials = (address: string): string => address.replace(/^([^:/?
 
 type Props = {
   state: ExtensionSettingsState;
-  /** The host is Windows, where Git installs (and so private Git) are not offered yet. */
+  /**
+   * Git installs (and so private Git) are not offered: the host is Windows, or that is not known
+   * yet.
+   */
   windows: boolean;
   saving: boolean;
   onSave: (settings: ExtensionSettings) => void;

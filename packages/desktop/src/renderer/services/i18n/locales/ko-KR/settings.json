@@ -498,7 +498,7 @@
       "updateFromFile": "파일로 업데이트",
       "upgrade": "최신으로",
       "remove": "제거",
-      "reconcile": "다시 맞추기",
+      "reconcile": "다시 설정",
       "cancel": "취소",
       "close": "닫기",
       "continue": "계속",
@@ -615,7 +615,7 @@
       "pinnedTitle": "고정된 버전",
       "pinnedBody": "{{name}}은(는) 한 버전에 고정되어 있습니다. 바꾸려면 원하는 버전을 이름으로 설치하세요.",
       "installOther": "다른 버전 설치",
-      "onlineDisabled": "업데이트는 패키지 인덱스에서 내려받는데, 온라인 설치가 꺼져 있습니다."
+      "onlineDisabled": "업데이트는 패키지 인덱스나 Git 저장소에서 내려받는데, 온라인 설치가 꺼져 있습니다."
     },
     "terminal": {
       "title": "터미널 aelix(읽기 전용)",
@@ -690,7 +690,7 @@
       "PROXY_CHANGED": "그사이 프록시 주소가 바뀌었습니다. 새 프록시의 인증 정보를 입력하세요.",
       "GIT_FETCH_FAILED": "Git 저장소나 요청한 revision을 가져오지 못했습니다.",
       "SUBDIRECTORY_INVALID": "저장소에 하위 경로가 없거나 일반 폴더가 아닙니다.",
-      "BUNDLE_CHANGED": "설치된 확장이 다른 Studio 버전의 것입니다. 먼저 다시 맞추세요.",
+      "BUNDLE_CHANGED": "설치된 확장이 다른 Studio 버전의 것입니다. 먼저 다시 설정하세요.",
       "BUSY": "다른 변경이 진행 중입니다. 끝난 뒤 다시 시도하세요.",
       "CONFLICT": "그사이 확장이 바뀌었습니다. 다시 시도하세요.",
       "CANCELLED": "중지했습니다.",

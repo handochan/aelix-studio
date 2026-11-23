@@ -18,7 +18,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CredentialsReason } from '../dialogs/CredentialsPrompt';
 import { failureCode, useExtensionsChannel, type SendResult } from './channel';
-import { isOperation, useOperation } from './operation';
+import { currentOwner, isOperation, useOperation, type Change } from './operation';
 import { upgradeOf, upgradeRequest } from './upgrade';
 
 /** What the page asks the user through its dialogs; each resolves when the user answers. */
@@ -48,10 +48,7 @@ const failureOf = (reply: StudioExtensionsReply): { code: string; detail?: strin
   return { code, ...(detail ? { detail } : {}) };
 };
 
-/** A change whose credentials the user may be asked for, kept to be sent again. */
-export type Change =
-  | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
-  | { action: 'upgrade'; entry: ExtensionEntry; allowUnpin?: boolean };
+export type { Change } from './operation';
 
 /** A proxy address typed with a user name and password. */
 export const PROXY_WITH_CREDENTIALS = /^[^:/?#]*:\/\/[^/?#]*@/;
@@ -64,10 +61,12 @@ const PROXY_REASONS: Record<string, CredentialsReason> = {
 };
 
 /**
- * The state and actions of the agent extensions screen. Reads the settings first (their reply
- * says the transport before any secret is sent), then the list and the terminal CLI.
+ * The state and actions of the agent extensions screen for `owner` (the signed-in user, `local`
+ * in the desktop app). Reads the settings first (their reply says the transport before any
+ * secret is sent), then the list and the terminal CLI. An answer that arrives once another
+ * owner has the screen, or after sign-out, is dropped: nothing of it is shown or asked about.
  */
-export function useAgentExtensions(asks: Asks) {
+export function useAgentExtensions(asks: Asks, owner: string) {
   const asksRef = useRef(asks);
   asksRef.current = asks;
   const confirmInsecure = useCallback(() => asksRef.current.confirmInsecure(), []);
@@ -77,7 +76,10 @@ export function useAgentExtensions(asks: Asks) {
   const [terminal, setTerminal] = useState<Load<TerminalCliListing>>({ loading: true });
   const [savingSettings, setSavingSettings] = useState(false);
   const settingsRef = useRef<ExtensionSettingsState | undefined>(undefined);
-  const [lastChange, setLastChange] = useState<Change | undefined>(undefined);
+  /** Another owner has the screen now (or nobody, after sign-out). */
+  const stale = (): boolean => currentOwner() !== owner;
+  /** The online change sent in this visit, as typed (the kept one leaves out a URL with a password). */
+  const [visitChange, setVisitChange] = useState<Change | undefined>(undefined);
 
   const refreshList = useCallback(async (): Promise<void> => {
     setList((current) => ({ ...current, loading: true }));
@@ -121,11 +123,20 @@ export function useAgentExtensions(asks: Asks) {
     })();
   }, [refreshSettings, refreshList, refreshTerminal]);
 
-  const { operation, start, cancel, dismiss } = useOperation(send, () => void refreshList());
+  const {
+    operation,
+    change: keptChange,
+    retried: lastRetried,
+    start,
+    cancel,
+    dismiss,
+  } = useOperation(send, () => void refreshList(), owner);
+  /** The change a follow-up sends again: this visit's, or the one kept from an earlier visit. */
+  const lastChange = visitChange ?? keptChange;
 
   /** A settings reply: shown, or its code told. Whether it was ok. */
   const applySettings = (reply: SendResult): boolean => {
-    if (reply === 'declined') return false;
+    if (reply === 'declined' || stale()) return false;
     if (!reply.ok) {
       asksRef.current.failure(failureCode(reply) ?? 'UNKNOWN');
       return false;
@@ -156,7 +167,7 @@ export function useAgentExtensions(asks: Asks) {
 
   /** Send an online change; `retried` once it was sent again after a proxy refusal. */
   const sendOnline = async (change: Change, reason?: CredentialsReason, retried = false): Promise<void> => {
-    setLastChange(change);
+    setVisitChange(change);
     const online = change.action === 'upgrade' || change.source.kind !== 'file';
     const credentials = online ? await credentialsFor(reason) : null;
     if (credentials === undefined) return;
@@ -176,16 +187,17 @@ export function useAgentExtensions(asks: Asks) {
             ...extra,
           });
     const reply = await send(command, { secret: credentials !== null });
-    if (reply === 'declined') return;
+    if (reply === 'declined' || stale()) return;
     const code = failureCode(reply);
     if (code !== undefined) await followUp(code, change, retried);
-    else if (reply.ok && isOperation(reply.data)) start(reply.data);
+    else if (reply.ok && isOperation(reply.data)) start(reply.data, { owner, change, retried });
   };
 
   /**
    * What a failure code of a change leads to: asking again, confirming, or its text. A proxy
    * refusal reads the settings again (they may be stale), asks once and sends once more; the
-   * same kind of refusal after that is told, not sent again.
+   * same kind of refusal after that, at once or from the change it started, is told, not sent
+   * again: one retry per change.
    */
   const followUp = async (code: string, change: Change, retried = false): Promise<void> => {
     const reason = PROXY_REASONS[code];
@@ -207,18 +219,18 @@ export function useAgentExtensions(asks: Asks) {
 
   /** An offline change (update from a file, remove): started, or its code told. */
   const sendChange = async (command: StudioExtensionsRequest): Promise<void> => {
-    setLastChange(undefined);
+    setVisitChange(undefined);
     const reply = await send(command);
-    if (reply === 'declined') return;
+    if (reply === 'declined' || stale()) return;
     const code = failureCode(reply);
     if (code !== undefined) asksRef.current.failure(code);
-    else if (reply.ok && isOperation(reply.data)) start(reply.data);
+    else if (reply.ok && isOperation(reply.data)) start(reply.data, { owner, retried: false });
   };
 
   /** A change answered at once (rollback, reconcile): its code told, the list read again. */
   const sendDirect = async (command: StudioExtensionsRequest): Promise<void> => {
     const reply = await send(command);
-    if (reply === 'declined') return;
+    if (reply === 'declined' || stale()) return;
     const code = failureCode(reply);
     if (code !== undefined) asksRef.current.failure(code);
     await refreshList();
@@ -235,7 +247,7 @@ export function useAgentExtensions(asks: Asks) {
      * changed, a version constraint is unknown or pinned): ask, and send it again.
      */
     retryAfter: async (code: string) => {
-      if (lastChange) await followUp(code, lastChange);
+      if (lastChange) await followUp(code, lastChange, lastRetried);
     },
     upgrade: async (entry: ExtensionEntry) => {
       const availability = upgradeOf(entry);
@@ -256,7 +268,7 @@ export function useAgentExtensions(asks: Asks) {
     setDefault: async (entry: ExtensionEntry, enabled: boolean) => {
       if (entry.managedId === undefined) return;
       const reply = await send({ action: 'set_default', extensionId: entry.managedId, enabled });
-      if (reply === 'declined') return;
+      if (reply === 'declined' || stale()) return;
       if (reply.ok) setList({ data: reply.data as ExtensionListing, loading: false });
       else asksRef.current.failure(failureCode(reply) ?? 'UNKNOWN');
     },
@@ -286,5 +298,5 @@ export function useAgentExtensions(asks: Asks) {
     dismiss,
   };
 
-  return { transport, list, settings, terminal, operation, savingSettings, lastChange, actions };
+  return { transport, list, settings, terminal, operation, savingSettings, lastChange, lastRetried, actions };
 }

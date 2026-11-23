@@ -615,7 +615,7 @@
       "pinnedTitle": "固定版本",
       "pinnedBody": "{{name}} 固定在一個版本上。若要變更，請依名稱安裝想要的版本。",
       "installOther": "安裝其他版本",
-      "onlineDisabled": "更新需要從套件索引下載，但線上安裝已關閉。"
+      "onlineDisabled": "更新需要從套件索引或 Git 儲存庫下載，但線上安裝已關閉。"
     },
     "terminal": {
       "title": "終端機 aelix（唯讀）",

@@ -120,15 +120,20 @@ describe('the screen channel', () => {
     expect(request).toHaveBeenLastCalledWith(secret);
   });
 
-  it('asks and sends again once when the host still answers INSECURE_TRANSPORT', async () => {
-    // The channel said secure, then a request was refused as insecure (it changed meanwhile).
-    const request = channel('secure', 'INSECURE_TRANSPORT');
+  it('checks the channel again before sending again, after the host answered INSECURE_TRANSPORT', async () => {
+    // The channel said secure, then a secret was refused as insecure: it changed meanwhile.
+    let transport: 'secure' | 'insecure' = 'secure';
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      const flagged = (command as { acknowledgeInsecureTransport?: boolean }).acknowledgeInsecureTransport;
+      if (command.action !== 'get_settings' && !flagged) {
+        transport = 'insecure';
+        return { ok: false, code: 'INSECURE_TRANSPORT', transport } as unknown as StudioExtensionsReply;
+      }
+      return { ok: true, data: { settings: {} }, transport } as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
     const confirm = vi.fn(async () => true);
     const { result } = renderHook(() => useExtensionsChannel(confirm));
-    await act(async () => {
-      await result.current.send({ action: 'get_settings' });
-    });
-    request.mockClear();
     let reply: unknown;
     await act(async () => {
       reply = await result.current.send(secret, { secret: true });
@@ -137,9 +142,45 @@ describe('the screen channel', () => {
     expect(commands(request)).toEqual([
       { action: 'get_settings' },
       secret,
+      { action: 'get_settings' },
       { ...secret, acknowledgeInsecureTransport: true },
     ]);
     expect(reply).toMatchObject({ ok: true });
+  });
+
+  it.each(['secure', 'insecure'] as const)(
+    'sends no secret, and asks nothing, once the screen was left while the channel was being checked (%s)',
+    async (transport) => {
+      let answer: (() => void) | undefined;
+      const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+        if (command.action === 'get_settings') await new Promise<void>((resolve) => (answer = resolve));
+        return { ok: true, data: { settings: {} }, transport } as unknown as StudioExtensionsReply;
+      });
+      window.__studioExtensions = { request };
+      const confirm = vi.fn(async () => true);
+      const { result, unmount } = renderHook(() => useExtensionsChannel(confirm));
+      const sending = result.current.send(secret, { secret: true });
+      await vi.waitFor(() => expect(answer).toBeDefined());
+      unmount();
+      answer?.();
+      // Whatever the answer says: the screen that asked is gone.
+      expect(await sending).toBe('declined');
+      expect(confirm).not.toHaveBeenCalled();
+      expect(commands(request)).toEqual([{ action: 'get_settings' }]);
+    }
+  );
+
+  it('sends no secret once the screen was left while the user was being asked', async () => {
+    const request = channel('insecure');
+    let decide: ((yes: boolean) => void) | undefined;
+    const confirm = vi.fn(() => new Promise<boolean>((resolve) => (decide = resolve)));
+    const { result, unmount } = renderHook(() => useExtensionsChannel(confirm));
+    const sending = result.current.send(secret, { secret: true });
+    await vi.waitFor(() => expect(decide).toBeDefined());
+    unmount();
+    decide?.(true);
+    expect(await sending).toBe('declined');
+    expect(commands(request)).toEqual([{ action: 'get_settings' }]);
   });
 
   it('asks again before sending again when a secret it was told to send is still refused', async () => {
@@ -161,6 +202,10 @@ describe('the screen channel', () => {
     // The same insecure verdict, already confirmed: still asked again, and not sent on no.
     expect(confirm).toHaveBeenCalledTimes(2);
     expect(reply).toBe('declined');
-    expect(commands(request)).toEqual([{ action: 'get_settings' }, { ...secret, acknowledgeInsecureTransport: true }]);
+    expect(commands(request)).toEqual([
+      { action: 'get_settings' },
+      { ...secret, acknowledgeInsecureTransport: true },
+      { action: 'get_settings' },
+    ]);
   });
 });

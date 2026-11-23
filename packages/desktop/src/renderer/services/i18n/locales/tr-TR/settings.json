@@ -615,7 +615,7 @@
       "pinnedTitle": "Sabitlenmiş sürüm",
       "pinnedBody": "{{name}} tek bir sürüme sabitlenmiş. Değiştirmek için istediğiniz sürümü adıyla kurun.",
       "installOther": "Başka sürüm kur",
-      "onlineDisabled": "Güncelleme paket dizininden indirir ve çevrimiçi kurulum kapalı."
+      "onlineDisabled": "Güncelleme paket dizininden veya Git deposundan indirir ve çevrimiçi kurulum kapalı."
     },
     "terminal": {
       "title": "Terminaldeki aelix (salt okunur)",

@@ -605,7 +605,7 @@
       "pinnedTitle": "Festgelegte Version",
       "pinnedBody": "{{name}} ist auf eine Version festgelegt. Um sie zu ändern, installieren Sie die gewünschte Version nach Name.",
       "installOther": "Andere Version installieren",
-      "onlineDisabled": "Die Aktualisierung lädt aus dem Paketindex, und Online-Installationen sind aus."
+      "onlineDisabled": "Die Aktualisierung lädt aus dem Paketindex oder dem Git-Repository, und Online-Installationen sind aus."
     },
     "terminal": {
       "title": "aelix im Terminal (nur lesen)",

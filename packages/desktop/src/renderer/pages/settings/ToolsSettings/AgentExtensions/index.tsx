@@ -11,6 +11,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { onUserChange, useAuth } from '@/renderer/hooks/context/AuthContext';
 import type { ExtensionEntry, ProxyCredentials } from '@aionui/web-host';
 import { Alert, Button, Collapse, Message, Modal, Popconfirm, Spin } from '@arco-design/web-react';
 import { Plus, Return } from '@icon-park/react';
@@ -25,7 +26,7 @@ import InstallSettings from './InstallSettings';
 import ExtensionList from './list/ExtensionList';
 import TerminalSection from './list/TerminalSection';
 import { failureKey } from './messages';
-import { isFinished } from './state/operation';
+import { forgetOwners, isFinished } from './state/operation';
 import { useAgentExtensions, type Asks } from './state/useAgentExtensions';
 
 type CredentialsAsk = {
@@ -51,14 +52,28 @@ async function pickWheelOnHost(filterName: string): Promise<string | undefined> 
   }
 }
 
+// What the screen keeps across visits belongs to the signed-in user: dropped when they sign out
+// or another user signs in.
+onUserChange(forgetOwners);
+
+const PROXY_CODES = new Set(['PROXY_CREDENTIALS_REJECTED', 'PROXY_CREDENTIALS_REQUIRED', 'PROXY_CHANGED']);
+
+/** The screen of one owner: another signed-in user gets a new one, with nothing of this one's. */
 const AgentExtensionsSettings: React.FC = () => {
+  const { user } = useAuth();
+  const owner = user?.id ?? 'local';
+  return <AgentExtensionsScreen key={owner} owner={owner} />;
+};
+
+const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
   const { t } = useTranslation();
   const [insecureAsk, setInsecureAsk] = useState<(yes: boolean) => void>();
   const [credentialsAsk, setCredentialsAsk] = useState<CredentialsAsk>();
   const [unpinAsk, setUnpinAsk] = useState<EntryAsk>();
   const [pinnedAsk, setPinnedAsk] = useState<EntryAsk>();
   const [install, setInstall] = useState<InstallPreset>();
-  const [windows, setWindows] = useState(false);
+  /** The host is Windows; undefined until that is known (Git stays off until then). */
+  const [windows, setWindows] = useState<boolean | undefined>(undefined);
   const pickWheel = useCallback(() => pickWheelOnHost(t('settings.agentExtensions.install.wheelFilter')), [t]);
 
   const asks = useMemo<Asks>(
@@ -72,8 +87,8 @@ const AgentExtensionsSettings: React.FC = () => {
     }),
     [t]
   );
-  const { transport, list, settings, terminal, operation, savingSettings, lastChange, actions } =
-    useAgentExtensions(asks);
+  const { transport, list, settings, terminal, operation, savingSettings, lastChange, lastRetried, actions } =
+    useAgentExtensions(asks, owner);
 
   // Leaving the screen answers what it still asks with "no": no request waits on a closed
   // dialog, and typed credentials go with the dialog's state.
@@ -126,11 +141,9 @@ const AgentExtensionsSettings: React.FC = () => {
         {label}
       </Button>
     );
-    if (
-      lastChange &&
-      (code === 'PROXY_CREDENTIALS_REJECTED' || code === 'PROXY_CREDENTIALS_REQUIRED' || code === 'PROXY_CHANGED')
-    )
-      return retry(t('settings.agentExtensions.actions.enterCredentials'));
+    // One retry per change: a change already sent again ends with its failure.
+    if (lastChange && code && PROXY_CODES.has(code))
+      return lastRetried ? null : retry(t('settings.agentExtensions.actions.enterCredentials'));
     if (lastChange?.action === 'upgrade' && (code === 'PIN_UNKNOWN' || code === 'PINNED'))
       return retry(t('settings.agentExtensions.actions.continue'));
     if (code === 'BUNDLE_CHANGED')
@@ -265,7 +278,7 @@ const AgentExtensionsSettings: React.FC = () => {
         {state && (
           <InstallSettings
             state={state}
-            windows={windows}
+            windows={windows !== false}
             saving={savingSettings}
             onSave={(next) => void actions.saveSettings(next)}
             onSaveCredentials={() => void actions.saveCredentials()}

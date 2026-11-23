@@ -615,7 +615,7 @@
       "pinnedTitle": "Version figée",
       "pinnedBody": "{{name}} est figée sur une version. Pour en changer, installez par son nom la version souhaitée.",
       "installOther": "Installer une autre version",
-      "onlineDisabled": "La mise à jour télécharge depuis l’index de paquets, et les installations en ligne sont désactivées."
+      "onlineDisabled": "La mise à jour télécharge depuis l’index de paquets ou le dépôt Git, et les installations en ligne sont désactivées."
     },
     "terminal": {
       "title": "aelix du terminal (lecture seule)",

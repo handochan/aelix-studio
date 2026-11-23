@@ -11,13 +11,17 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { failureKey } from '../messages';
 
-const STATUS_COLOR: Record<TerminalCliEnvironment['status'], string> = {
-  listed: 'green',
-  not_a_venv: 'gray',
-  unresolved_launcher: 'gray',
-  no_cli: 'gray',
-  unreadable: 'orangered',
+/** Status tags in the theme's meaning colors: read, nothing to read, could not read. */
+const STATUS_CLASS: Record<TerminalCliEnvironment['status'], string> = {
+  listed: '!bg-success-light-1 !text-success-6',
+  not_a_venv: '!bg-fill-2 !text-t-secondary',
+  unresolved_launcher: '!bg-fill-2 !text-t-secondary',
+  no_cli: '!bg-fill-2 !text-t-secondary',
+  unreadable: '!bg-warning-light-1 !text-warning-6',
 };
+
+/** Warning tags (issue codes, a list cut short). */
+const WARNING_CLASS = '!bg-warning-light-1 !text-warning-6';
 
 type Props = {
   listing?: TerminalCliListing;
@@ -36,7 +40,7 @@ const Environment: React.FC<{ environment: TerminalCliEnvironment }> = ({ enviro
     >
       <div className='flex flex-wrap items-center gap-8px'>
         <span className='text-13px font-mono text-t-primary break-all'>{environment.location}</span>
-        <Tag size='small' color={STATUS_COLOR[environment.status]}>
+        <Tag size='small' className={STATUS_CLASS[environment.status]} data-testid='terminal-status'>
           {t(`settings.agentExtensions.terminal.status.${environment.status}`)}
         </Tag>
         {environment.foundBy.map((by) => (
@@ -76,12 +80,12 @@ const Environment: React.FC<{ environment: TerminalCliEnvironment }> = ({ enviro
       {(environment.issues.length > 0 || environment.truncated) && (
         <div className='flex flex-wrap gap-6px'>
           {environment.issues.map((issue) => (
-            <Tag key={issue} size='small' color='orange'>
+            <Tag key={issue} size='small' className={WARNING_CLASS} data-testid='terminal-warning'>
               {t(`settings.agentExtensions.terminal.issues.${issue}`)}
             </Tag>
           ))}
           {environment.truncated && (
-            <Tag size='small' color='orange'>
+            <Tag size='small' className={WARNING_CLASS} data-testid='terminal-warning'>
               {t('settings.agentExtensions.terminal.truncatedDistributions')}
             </Tag>
           )}

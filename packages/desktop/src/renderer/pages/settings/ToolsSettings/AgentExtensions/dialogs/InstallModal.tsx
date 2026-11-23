@@ -21,8 +21,11 @@ type Props = {
   preset?: InstallPreset;
   /** Name and Git installs are allowed (settings and Studio policy). */
   onlineAllowed: boolean;
-  /** The host is Windows, where Git installs are not offered yet: the Git tab is off. */
-  windows: boolean;
+  /**
+   * The host is Windows, where Git installs are not offered yet; undefined while that is not
+   * known. The Git tab is on only once the host is known not to be Windows.
+   */
+  windows: boolean | undefined;
   /** The proxy online installs use, or null for a direct connection. */
   proxy: string | null;
   /** Choose a wheel on the host: the OS dialog in the app, the host file picker in the WebUI. */
@@ -58,12 +61,13 @@ const InstallModal: React.FC<Props> = ({
   useEffect(() => {
     if (!visible) return;
     const first: InstallTab = preset?.tab ?? (onlineAllowed ? 'index' : 'file');
-    setTab(first === 'git' && windows ? 'index' : first);
+    setTab(first === 'git' && windows !== false ? 'index' : first);
     setName(preset?.name ?? '');
     setVersion('');
   }, [visible, preset, onlineAllowed, windows]);
 
-  const gitBlocked = windows || !onlineAllowed;
+  const gitOff = windows !== false;
+  const gitBlocked = gitOff || !onlineAllowed;
   const source = ((): ExtensionSource | undefined => {
     const index = indexUrl.trim() ? { indexUrl: indexUrl.trim() } : {};
     if (tab === 'index' && onlineAllowed && name.trim())
@@ -151,9 +155,9 @@ const InstallModal: React.FC<Props> = ({
         </Tabs.TabPane>
         <Tabs.TabPane
           key='git'
-          disabled={windows}
+          disabled={gitOff}
           title={
-            windows ? (
+            windows === true ? (
               // The helper's own refusal on this platform, said before it is asked.
               <Tooltip content={t(failureKey('UNSUPPORTED_PLATFORM'))}>
                 <span data-testid='install-git-tab'>{t('settings.agentExtensions.install.tabs.git')}</span>

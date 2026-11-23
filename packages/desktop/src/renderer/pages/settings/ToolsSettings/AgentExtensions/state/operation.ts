@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import type { ExtensionData, ExtensionOperation, StudioExtensionsRequest } from '@aionui/web-host';
+import type {
+  ExtensionData,
+  ExtensionEntry,
+  ExtensionOperation,
+  ExtensionSource,
+  StudioExtensionsRequest,
+} from '@aionui/web-host';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { failureCode, type SendResult } from './channel';
 
@@ -20,53 +26,140 @@ export const isOperation = (data: ExtensionData): data is ExtensionOperation =>
   typeof (data as ExtensionOperation).operationId === 'string' &&
   typeof (data as ExtensionOperation).phase === 'string';
 
-/**
- * The change this window started and the user has not dismissed yet. Kept outside the component
- * so leaving the screen and coming back shows it again and goes on polling it; the host cancels
- * it only when the window closes or reloads. Every mounted screen is told when it changes, so a
- * start reply that arrives after the screen was left and opened again is shown by the new one.
- */
-let shown: ExtensionOperation | undefined;
-const viewers = new Set<(operation: ExtensionOperation | undefined) => void>();
+/** An online change as the user asked for it, kept to be sent again; it never holds proxy credentials. */
+export type Change =
+  | { action: 'install'; source: ExtensionSource; replaceIncompatible?: boolean }
+  | { action: 'upgrade'; entry: ExtensionEntry; allowUnpin?: boolean };
 
-const keep = (next: ExtensionOperation | undefined): void => {
-  shown = next;
-  for (const viewer of viewers) viewer(next);
+/** What the screen keeps of the change it started, across visits. */
+export type Kept = {
+  operation: ExtensionOperation;
+  /**
+   * The change it came from, to send again after a proxy refusal. Absent for offline changes,
+   * and for a change whose URL holds a user name or password (a secret is never kept).
+   */
+  change?: Change;
+  /** It was already sent again after a proxy refusal: it is not offered again. */
+  retried: boolean;
 };
 
+/** What `start` records with an operation, and for whom it was asked. */
+export type Started = { owner: string; change?: Change; retried: boolean };
+
+/** A URL with a user part. */
+const withUserPart = (url: string | undefined): boolean => {
+  if (!url) return false;
+  try {
+    const parsed = new URL(url);
+    return parsed.username !== '' || parsed.password !== '';
+  } catch {
+    // Not a URL this can read: kept out rather than guessed at.
+    return /@/.test(url);
+  }
+};
+
+/** The change, unless it holds something secret. */
+function keepable(change: Change | undefined): Change | undefined {
+  if (!change || change.action !== 'install' || change.source.kind === 'file') return change;
+  const source = change.source;
+  const urls = source.kind === 'git' ? [source.url, source.indexUrl] : [source.indexUrl];
+  return urls.some(withUserPart) ? undefined : change;
+}
+
 /**
- * The change in progress on this screen: polled every `POLL_INTERVAL_MS` until it finishes.
- * `onFinished` runs once when it does (the screen then reads the list again). A poll that is
- * lost is tried again; an operation the host no longer knows (`NOT_FOUND`) ends as failed.
+ * The change each owner (the signed-in user; `local` in the desktop app) started and has not
+ * dismissed yet. Kept outside the component so leaving the screen and coming back shows it again
+ * and goes on polling it; the host cancels it only when the window closes or reloads. Only the
+ * current owner's is kept: when another owner opens the screen, or on sign-out, the others' are
+ * dropped, and an answer that arrives for an owner who is no longer current is dropped too.
+ * Every mounted screen is told when the current owner's changes, so a start reply that arrives
+ * after the screen was left and opened again is shown by the new one.
+ */
+const kept = new Map<string, Kept>();
+let owner: string | undefined;
+const viewers = new Set<(current: Kept | undefined) => void>();
+
+const keptNow = (): Kept | undefined => (owner === undefined ? undefined : kept.get(owner));
+const notify = (): void => {
+  const current = keptNow();
+  for (const viewer of viewers) viewer(current);
+};
+
+/** Whose changes the screen shows: a new owner drops every other's. */
+export function claimOwner(next: string): void {
+  if (owner === next) return;
+  owner = next;
+  // Deleting while iterating a Map is safe: each entry is visited once.
+  for (const key of kept.keys()) if (key !== next) kept.delete(key);
+  notify();
+}
+
+/** The owner whose answers are taken now; undefined after sign-out until a screen claims one. */
+export const currentOwner = (): string | undefined => owner;
+
+/** On sign-out: no owner, nothing kept. */
+export function forgetOwners(): void {
+  owner = undefined;
+  kept.clear();
+  notify();
+}
+
+/**
+ * The change in progress on this screen for `ownerId`: polled every `POLL_INTERVAL_MS` until it
+ * finishes. `onFinished` runs once when it does (the screen then reads the list again). A poll
+ * that is lost is tried again; an operation the host no longer knows (`NOT_FOUND`) ends as
+ * failed.
  */
 export function useOperation(
   send: (command: StudioExtensionsRequest) => Promise<SendResult>,
-  onFinished: (operation: ExtensionOperation) => void
+  onFinished: (operation: ExtensionOperation) => void,
+  ownerId: string
 ) {
-  const [operation, setOperation] = useState<ExtensionOperation | undefined>(shown);
+  const [current, setCurrent] = useState<Kept | undefined>(() => {
+    claimOwner(ownerId);
+    return keptNow();
+  });
   const finishedRef = useRef(onFinished);
   finishedRef.current = onFinished;
 
   useEffect(() => {
-    viewers.add(setOperation);
+    claimOwner(ownerId);
+    const viewer = (next: Kept | undefined): void => setCurrent(owner === ownerId ? next : undefined);
+    viewers.add(viewer);
     // What changed between the first render and this subscription.
-    setOperation(shown);
+    viewer(keptNow());
     return () => {
-      viewers.delete(setOperation);
+      viewers.delete(viewer);
     };
-  }, []);
+  }, [ownerId]);
 
-  const show = useCallback((next: ExtensionOperation | undefined) => {
-    const wasRunning = shown !== undefined && !isFinished(shown) && shown.operationId === next?.operationId;
-    keep(next);
-    if (next && isFinished(next) && wasRunning) finishedRef.current(next);
-  }, []);
+  /** A newer state of the kept operation (a poll, a cancel), for this owner only. */
+  const show = useCallback(
+    (next: ExtensionOperation | undefined) => {
+      if (owner !== ownerId) return;
+      const previous = kept.get(ownerId);
+      if (!next) kept.delete(ownerId);
+      else if (previous) kept.set(ownerId, { ...previous, operation: next });
+      else return;
+      notify();
+      const wasRunning =
+        previous !== undefined &&
+        !isFinished(previous.operation) &&
+        previous.operation.operationId === next?.operationId;
+      if (next && isFinished(next) && wasRunning) finishedRef.current(next);
+    },
+    [ownerId]
+  );
 
-  const start = useCallback((next: ExtensionOperation) => {
-    keep(next);
+  /** A change the host started, kept for the owner who asked; dropped if that is not the current owner. */
+  const start = useCallback((next: ExtensionOperation, started: Started) => {
+    if (owner !== started.owner) return;
+    kept.set(started.owner, { operation: next, change: keepable(started.change), retried: started.retried });
+    notify();
     if (isFinished(next)) finishedRef.current(next);
   }, []);
 
+  const operation = current?.operation;
   const operationId = operation?.operationId;
   const running = operation !== undefined && !isFinished(operation);
   useEffect(() => {
@@ -80,7 +173,8 @@ export function useOperation(
         show(reply.data);
         if (isFinished(reply.data)) return;
       } else if (reply !== 'declined' && failureCode(reply) === 'NOT_FOUND') {
-        if (shown) show({ ...shown, phase: 'failed', code: 'NOT_FOUND' });
+        const last = kept.get(ownerId)?.operation;
+        if (last) show({ ...last, phase: 'failed', code: 'NOT_FOUND' });
         return;
       }
       timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
@@ -90,7 +184,7 @@ export function useOperation(
       stopped = true;
       clearTimeout(timer);
     };
-  }, [operationId, running, send, show]);
+  }, [operationId, running, send, show, ownerId]);
 
   const cancel = useCallback(async (): Promise<void> => {
     if (!operationId) return;
@@ -99,14 +193,15 @@ export function useOperation(
   }, [operationId, send, show]);
 
   const dismiss = useCallback(() => {
-    if (shown && !isFinished(shown)) return;
+    const last = kept.get(ownerId)?.operation;
+    if (last && !isFinished(last)) return;
     show(undefined);
-  }, [show]);
+  }, [show, ownerId]);
 
-  return { operation, start, cancel, dismiss };
+  return { operation, change: current?.change, retried: current?.retried ?? false, start, cancel, dismiss };
 }
 
-/** For tests: forget the change kept across visits. */
+/** For tests: forget every change kept across visits, and the owner. */
 export function resetShownOperation(): void {
-  keep(undefined);
+  forgetOwners();
 }

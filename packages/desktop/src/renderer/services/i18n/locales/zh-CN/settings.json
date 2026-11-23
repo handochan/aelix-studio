@@ -615,7 +615,7 @@
       "pinnedTitle": "固定版本",
       "pinnedBody": "{{name}} 固定在一个版本上。要更改，请按名称安装所需的版本。",
       "installOther": "安装其他版本",
-      "onlineDisabled": "更新需要从软件包索引下载，但在线安装已关闭。"
+      "onlineDisabled": "更新需要从软件包索引或 Git 仓库下载，但在线安装已关闭。"
     },
     "terminal": {
       "title": "终端 aelix（只读）",

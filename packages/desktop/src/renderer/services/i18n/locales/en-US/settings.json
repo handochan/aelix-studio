@@ -615,7 +615,7 @@
       "pinnedTitle": "Pinned version",
       "pinnedBody": "{{name}} is pinned to one version. To change it, install the version you want by name.",
       "installOther": "Install another version",
-      "onlineDisabled": "Updating downloads from the package index, and online installs are off."
+      "onlineDisabled": "Updating downloads from the package index or the Git repository, and online installs are off."
     },
     "terminal": {
       "title": "Terminal aelix (read only)",

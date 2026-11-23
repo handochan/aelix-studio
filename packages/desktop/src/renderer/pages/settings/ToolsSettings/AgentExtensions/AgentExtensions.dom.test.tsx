@@ -20,13 +20,35 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const bridge = vi.hoisted(() => ({
   platform: 'darwin',
+  /** Replaces the platform answer (one that never comes, or fails). */
+  systemInfo: undefined as Promise<{ platform: string }> | undefined,
   picked: ['/host/wheels/demo-2.0-py3-none-any.whl'] as string[] | undefined,
   opened: [] as unknown[],
 }));
 
+/** The signed-in user (WebUI), and what is told when they sign out or change. */
+const auth = vi.hoisted(() => ({
+  user: null as { id: string; username: string } | null,
+  onChange: [] as (() => void)[],
+}));
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  useAuth: () => ({ user: auth.user }),
+  onUserChange: (handler: () => void) => {
+    auth.onChange.push(handler);
+    return () => {};
+  },
+}));
+/** Another user signs in on the same tab: what kept state for the last one is told. */
+const switchUser = (id: string | null): void => {
+  auth.user = id === null ? null : { id, username: id };
+  for (const handler of auth.onChange) handler();
+};
+
 vi.mock('@/common', () => ({
   ipcBridge: {
-    application: { systemInfo: { invoke: () => Promise.resolve({ platform: bridge.platform }) } },
+    application: {
+      systemInfo: { invoke: () => bridge.systemInfo ?? Promise.resolve({ platform: bridge.platform }) },
+    },
     dialog: {
       showOpen: {
         invoke: (options: unknown) => {
@@ -182,7 +204,9 @@ const errorsShown = () => vi.mocked(Message.error).mock.calls.map(([text]) => te
 beforeEach(() => {
   resetShownOperation();
   bridge.platform = 'darwin';
+  bridge.systemInfo = undefined;
   bridge.opened = [];
+  auth.user = null;
   // Arco's message box renders with an API this React no longer has: watched, not rendered.
   vi.spyOn(Message, 'error').mockImplementation(() => () => {});
   host = {
@@ -631,5 +655,190 @@ describe('the agent extensions screen', () => {
       open?.();
       expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
     });
+
+    /** Proxy settings that ask for credentials on every online change (memory-only mode). */
+    const proxyWithPassword = (): void => {
+      host.settings = {
+        ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
+        credentialMode: 'memory-only',
+      };
+    };
+    const enterCredentials = async (password: string): Promise<void> => {
+      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
+      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: password } });
+      fireEvent.click(screen.getByTestId('credentials-submit'));
+    };
+
+    it('is sent again once after a proxy refusal, and then ends with the refusal', async () => {
+      proxyWithPassword();
+      host.changes.push(
+        ['checking', 'failed:PROXY_CREDENTIALS_REJECTED'],
+        ['checking', 'failed:PROXY_CREDENTIALS_REJECTED']
+      );
+      render(<AgentExtensionsSettings />);
+      await startInstall();
+      await enterCredentials('wrong');
+      fireEvent.click(await screen.findByTestId('operation-retry'));
+      await enterCredentials('still-wrong');
+      await waitFor(() => expect(sent('install')).toHaveLength(2));
+      await waitFor(() => expect(sent('poll').length).toBeGreaterThanOrEqual(2));
+      expect(await screen.findByTestId('operation-failure')).toHaveTextContent(
+        'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
+      );
+      // The retried change failed again: no third try is offered.
+      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument());
+      expect(screen.queryByTestId('operation-retry')).toBeNull();
+    }, 15000);
+
+    it('can still be sent again after a proxy refusal when the screen is opened again', async () => {
+      proxyWithPassword();
+      host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], ['checking', 'switched']);
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      await enterCredentials('wrong');
+      expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
+      first.unmount();
+      render(<AgentExtensionsSettings />);
+      fireEvent.click(await screen.findByTestId('operation-retry'));
+      await enterCredentials('right');
+      await waitFor(() => expect(sent('install')).toHaveLength(2));
+      expect(sent('install')[1]).toEqual({
+        action: 'install',
+        source: { kind: 'index', name: 'aelix-notes' },
+        proxyCredentials: { username: 'ops', password: 'right' },
+      });
+    }, 15000);
+
+    it('is not shown to another user who signs in on the same tab', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push(long);
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
+      first.unmount();
+      switchUser('bob');
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+
+    it('is not shown to another user when its start answer arrives after they took the screen', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push(long);
+      let open: (() => void) | undefined;
+      host.gate = new Promise((resolve) => (open = resolve));
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      await waitFor(() => expect(sent('install')).toHaveLength(1));
+      first.unmount();
+      // Another user on the same tab, without the first one signing out here.
+      auth.user = { id: 'bob', username: 'bob' };
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      open?.();
+      await waitFor(() => expect(sent('install')).toHaveLength(1));
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+
+    it('keeps no Git address with a password across visits, so it is not offered again there', async () => {
+      proxyWithPassword();
+      host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED']);
+      const first = render(<AgentExtensionsSettings />);
+      fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+      fireEvent.click(await screen.findByTestId('install-git-tab'));
+      fireEvent.change(await screen.findByTestId('install-git-url'), {
+        target: { value: 'https://ops:git-token@git.example/pack.git' },
+      });
+      fireEvent.click(screen.getByTestId('install-submit'));
+      await enterCredentials('wrong');
+      // In this visit it can be sent again.
+      expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
+      first.unmount();
+      render(<AgentExtensionsSettings />);
+      expect(await screen.findByTestId('operation-failure')).toBeInTheDocument();
+      expect(screen.queryByTestId('operation-retry')).toBeNull();
+    }, 15000);
+
+    it('is dropped when another user takes the screen, even if the first comes back', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push(long);
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
+      first.unmount();
+      auth.user = { id: 'bob', username: 'bob' };
+      const second = render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      second.unmount();
+      auth.user = { id: 'alice', username: 'alice' };
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+
+    it('tells another user nothing of a refusal that arrives after they took the screen', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push({ code: 'NO_CHANGE' });
+      let open: (() => void) | undefined;
+      host.gate = new Promise((resolve) => (open = resolve));
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      await waitFor(() => expect(sent('install')).toHaveLength(1));
+      first.unmount();
+      auth.user = { id: 'bob', username: 'bob' };
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      open?.();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(errorsShown()).toEqual([]);
+    });
+
+    it('is forgotten when its user signs out', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push(long);
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
+      first.unmount();
+      switchUser(null);
+      auth.user = { id: 'alice', username: 'alice' };
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+  });
+
+  describe('the Git tab while the platform is not known', () => {
+    const gitTab = async (): Promise<Element | null> => {
+      fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+      return (await screen.findByTestId('install-git-tab')).closest('[role="tab"]');
+    };
+
+    it('stays off while the answer has not come', async () => {
+      bridge.systemInfo = new Promise(() => {});
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      expect(await gitTab()).toHaveAttribute('aria-disabled', 'true');
+      expect(screen.queryByTestId('settings-private-git')).toBeNull();
+    });
+
+    it('stays off when the platform cannot be read', async () => {
+      bridge.systemInfo = Promise.reject(new Error('no answer'));
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      expect(await gitTab()).toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  it('colors terminal statuses and warnings by meaning, from the theme', async () => {
+    host.terminal = terminalListing();
+    host.terminal.environments[0] = { ...host.terminal.environments[0], issues: ['DUPLICATE_ENTRY'], truncated: true };
+    render(<AgentExtensionsSettings />);
+    await unfoldTerminal();
+    expect(await screen.findByTestId('terminal-status')).toHaveClass('!bg-success-light-1', '!text-success-6');
+    const warnings = screen.getAllByTestId('terminal-warning');
+    expect(warnings).toHaveLength(2);
+    for (const warning of warnings) expect(warning).toHaveClass('!bg-warning-light-1', '!text-warning-6');
   });
 });
