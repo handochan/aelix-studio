@@ -328,9 +328,10 @@ export type TerminalCliEnvironment = {
  * `pyproject`, one whose `pyproject.toml` declares `[tool.aelix] extensions` with a path that
  * exists; `package`, one with `__init__.py`. `unknown`: its `pyproject.toml` falls outside the
  * strict rule Studio reads it by (ADR 9: one `[tool.aelix]` table with a one-line array of plain
- * strings; multi-line strings, quoted or dotted keys, inline tables, multi-line arrays, escapes
- * or repeats make it `unknown`), is too large, or declares more paths than are checked and none
- * of those checked exists. Manifests are not parsed: a broken one is listed and fails in native.
+ * strings; multi-line strings anywhere, other ways of naming `tool.aelix`, inline tables,
+ * multi-line arrays or escapes inside that table, or a table or key given twice make it
+ * `unknown`), is too large, or declares more paths than are checked and none of those checked
+ * exists. Manifests are not parsed: a broken one is listed and fails in native.
  */
 export type TerminalGlobalExtensionKind = 'file' | 'manifest' | 'pyproject' | 'package' | 'unknown';
 

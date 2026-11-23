@@ -341,7 +341,7 @@ describe('the interpreter a launcher names', () => {
 describe('linear time on hostile input', () => {
   it('strips entry point extras in linear time, as the pattern did', () => {
     // With no closing `]`, the pattern tried every `[` to the end: quadratic.
-    fast(() => parseExtensionEntries('[aelix.extensions]\nx = mod' + '['.repeat(50_000) + 'x\n'));
+    fast(() => parseExtensionEntries('[aelix.extensions]\nx = mod' + '['.repeat(100_000) + 'x\n'));
     fast(() => parseExtensionEntries('[aelix.extensions]\nx = mod' + '['.repeat(200_000) + ' ]\n'));
     const entries = parseExtensionEntries(
       '[aelix.extensions]\na = mod:setup [extra]\nb = mod [x[y]\nc = mod[x] y\nd = mod:attr\n'
@@ -414,7 +414,22 @@ describe('pyproject tables, by the strict rule', () => {
     // Not TOML this reader can follow.
     ['[project]\njust words\n' + declared, 'unknown'],
     ['[project]\nname = "open\n' + declared, 'unknown'],
-    ['["a\\"b"]\nx = 1\n' + declared, 'unknown'],
+    // Escapes: read in names, so a name is what it says; only where tool.aelix can be named.
+    ['["a\\"b"]\nx = 1\n' + declared, { paths: ['a.py'] }],
+    ['[project."a\\tb"]\nx = "c\\td"\n' + declared, { paths: ['a.py'] }],
+    ['[project]\ndescription = "a\\tb"\n' + declared, { paths: ['a.py'] }],
+    ['["t\\u006fol".aelix]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[tool."a\\u0065lix"]\nextensions = ["a.py"]\n', 'unknown'],
+    ['"t\\u006fol".x = 1\n' + declared, 'unknown'],
+    ['[tool]\n"a\\u0065lix" = 1\n' + declared, 'unknown'],
+    ['["a\\qb"]\nx = 1\n' + declared, 'unknown'],
+    ['[project]\n"\\uD800" = 1\n' + declared, 'unknown'],
+    // Given twice once escapes are read.
+    ['[project]\nname = "a"\n"n\\u0061me" = "b"\n' + declared, 'unknown'],
+    ['[project]\n["proj\\u0065ct"]\n' + declared, 'unknown'],
+    // Inline tables: in tool.aelix at any depth; elsewhere left alone.
+    ['[tool.aelix]\nlist = [{ a = 1 }]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[project]\nauthors = [{ name = "x" }]\n' + declared, { paths: ['a.py'] }],
     ['[project\n' + declared, 'unknown'],
     ['x = "' + 'y'.repeat(5000) + '"\n', 'unknown'],
   ])('reads %j', (text, expected) => {
@@ -619,7 +634,8 @@ describe('the global extension directory', () => {
 
   it('says it stopped short past the limit even when a declared path was found', async () => {
     const directory = path.join(scratch, 'agent', 'extensions');
-    const declared = Array.from({ length: DECLARED_LIMIT + 1 }, (_, index) => `"p${index}.py"`).join(', ');
+    // One of them empty: counted as declared all the same.
+    const declared = ['""', ...Array.from({ length: DECLARED_LIMIT }, (_, index) => `"p${index}.py"`)].join(', ');
     await write(path.join(directory, 'many', 'pyproject.toml'), `[tool.aelix]\nextensions = [${declared}]\n`);
     await write(path.join(directory, 'many', 'p0.py'));
     expect(await readGlobalExtensions(scan, directory)).toEqual({
