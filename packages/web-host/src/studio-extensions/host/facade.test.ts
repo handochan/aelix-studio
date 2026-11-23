@@ -169,6 +169,7 @@ describe('the extension helper on the WebUI listener', () => {
       for (const command of [
         { action: 'get_settings' },
         { action: 'install', source: { kind: 'index', name: 'demo' } },
+        { action: 'upgrade', name: 'demo' },
         { action: 'set_settings', settings: { proxy: 'http://proxy.example:3128', proxyAuthentication: true } },
         { action: 'clear_proxy_credentials' },
       ]) {
@@ -240,12 +241,22 @@ describe('the extension helper on the WebUI listener', () => {
 
   it('caps the body and refuses malformed JSON without repeating it', async () => {
     authenticate = true;
-    const malformed = await request({ cookie: 'aelix-studio-session=valid' }, '{"password":"sentinel-secret"');
+    const malformed = await request(
+      { cookie: 'aelix-studio-session=valid' },
+      '{"action":"upgrade","name":"demo","proxyCredentials":{"password":"sentinel-secret"'
+    );
     expect(malformed.status).toBe(400);
     const text = await malformed.text();
     expect(text).not.toContain('sentinel-secret');
     expect(JSON.parse(text)).toEqual({ ok: false, code: 'INVALID_INPUT', transport: 'secure' });
-    const large = await request({ cookie: 'aelix-studio-session=valid' }, 'x'.repeat(60001));
+    const large = await request(
+      { cookie: 'aelix-studio-session=valid' },
+      JSON.stringify({
+        action: 'upgrade',
+        name: 'demo',
+        proxyCredentials: { username: 'ops', password: 'é'.repeat(30001) },
+      })
+    );
     expect(large.status).toBe(413);
     expect(await large.json()).toEqual({ ok: false, code: 'FRAME_LIMIT', transport: 'secure' });
     expect(handler).not.toHaveBeenCalled();

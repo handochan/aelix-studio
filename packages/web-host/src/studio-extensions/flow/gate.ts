@@ -5,7 +5,7 @@ import {
   type InstalledExtension,
   type SiteSnapshot,
 } from '../inspect/site.js';
-import { runToExit } from '../process.js';
+import { redactUrlCredentials, runToExit } from '../process.js';
 import type { Candidate, FlowContext } from './candidate.js';
 import { loadEnvironment } from './environment.js';
 import type { ManagedEntry } from '../launch/managedCatalog.js';
@@ -295,7 +295,7 @@ export async function runLoadCheck(
  * or reported without the user's paths in it.
  */
 export function redactPaths(text: string, locations: [directory: string, label: string][]): string {
-  let redacted = text;
+  let redacted = redactUrlCredentials(text);
   for (const [directory, label] of locations
     .filter(([directory]) => directory.length > 1)
     .toSorted(([left], [right]) => right.length - left.length))

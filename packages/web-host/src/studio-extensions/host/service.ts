@@ -27,7 +27,7 @@ import {
   type StoredSettings,
 } from '../flow/online/settings.js';
 import { parseOnlineSource } from '../flow/online/source.js';
-import { spawnChild, windowsChildSpawn, type Spawn } from '../process.js';
+import { redactUrlCredentials, spawnChild, windowsChildSpawn, type Spawn } from '../process.js';
 import { locateLayout, resolveBundle, verifyLayout } from '../store/layout.js';
 import { listTerminalCli, type TerminalListingOptions } from '../terminal/list.js';
 import { isManagedId } from '../launch/managedCatalog.js';
@@ -101,6 +101,7 @@ const ACTIONS = new Set([
   'clear_proxy_credentials',
   'install',
   'update',
+  'upgrade',
   'remove',
   'set_default',
   'rollback',
@@ -109,11 +110,11 @@ const ACTIONS = new Set([
   'cancel',
   'list_terminal',
 ]);
-const FINISHED = new Set(['switched', 'failed', 'cancelled']);
+const FINISHED = new Set(['switched', 'already_latest', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
   ok: false,
   code,
-  ...(detail && detail.length > 0 ? { detail } : {}),
+  ...(detail && detail.length > 0 ? { detail: detail.map(redactUrlCredentials) } : {}),
 });
 const isPath = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 4096 && !value.includes('\0') && path.isAbsolute(value);
@@ -140,7 +141,7 @@ const isName = (value: unknown): value is string =>
  * running conversation. Each adapter reads the current generation when it starts,
  * including when an existing conversation's adapter restarts.
  *
- * One change runs at a time. `install`, `update` and `remove` return an operation to
+ * One change runs at a time. `install`, `update`, `upgrade` and `remove` return an operation to
  * `poll`; `list`, `rollback`, `set_default`, `get_settings`, `set_settings` and the proxy
  * credential requests answer directly.
  * Saving settings is a change too: it waits for the lock and answers `BUSY` while another
@@ -214,7 +215,11 @@ export class ExtensionService {
 
   /** An unexpected error: its text may hold paths, so it goes to the log and the reply carries the code only. */
   private unexpected(error: unknown): ExtensionReply {
-    (this.options.log ?? console.error)('[studio-extensions] unexpected error', error);
+    // Error causes and extra properties can hold raw process arguments. Log only scrubbed text.
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
+    const logged = new Error(redactUrlCredentials(message));
+    if (error instanceof Error && error.stack) logged.stack = redactUrlCredentials(error.stack);
+    (this.options.log ?? console.error)('[studio-extensions] unexpected error', logged);
     return fail('INTERNAL');
   }
 
@@ -289,19 +294,24 @@ export class ExtensionService {
 
   /** The early checks of a change and its start; `abort` is already registered for cancelOwner. */
   private async start(owner: string, change: MutationRequest, abort: AbortController): Promise<ExtensionReply> {
-    if (change.action === 'install' && change.source.kind !== 'file') {
+    if (change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file')) {
       if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
       // An early answer for the screen; the change checks the settings again under the lock.
       const stored = await this.storedSettings();
       const { settings, unreadable } = stored;
       if (unreadable) return fail('SETTINGS_UNREADABLE');
       if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
-      if (change.proxyCredentials && settings.proxy === null)
+      if (change.action === 'install' && change.proxyCredentials && settings.proxy === null)
         return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
       // The credentials are for this address; the change ends if the settings name another by then.
       if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
-      // The screen asks for credentials on this answer; nothing has started.
-      if (settings.proxy !== null && settings.proxyAuthentication && !change.proxyCredentials) {
+      // Installs can ask here. Upgrades check the saved source and pin under the lock before asking.
+      if (
+        change.action === 'install' &&
+        settings.proxy !== null &&
+        settings.proxyAuthentication &&
+        !change.proxyCredentials
+      ) {
         const layout = await locateLayout(this.options.root);
         if (!(await hasSavedCredentials(layout, this.vault, settings.proxy, stored.credentialId)))
           return fail('PROXY_CREDENTIALS_REQUIRED');
@@ -367,8 +377,8 @@ export class ExtensionService {
         action: tracked.state.action,
         phase: code === 'CANCELLED' ? 'cancelled' : 'failed',
         code,
-        ...(detail.length > 0 ? { detail } : {}),
-        ...(output ? { output } : {}),
+        ...(detail.length > 0 ? { detail: detail.map(redactUrlCredentials) } : {}),
+        ...(output ? { output: redactUrlCredentials(output) } : {}),
       };
     };
     try {
@@ -379,7 +389,10 @@ export class ExtensionService {
         suffix: () => randomBytes(2).toString('hex'),
         now: () => new Date(),
       });
-      tracked.state = { ...tracked.state, phase: 'switched', generation: outcome.generation };
+      tracked.state =
+        'alreadyLatest' in outcome
+          ? { ...tracked.state, phase: 'already_latest' }
+          : { ...tracked.state, phase: 'switched', generation: outcome.generation };
     } catch (error) {
       if (error instanceof ExtensionFailure) finish(error.code, error.detail, error.output);
       else {
@@ -411,6 +424,17 @@ export class ExtensionService {
 
 function parseChange(command: ExtensionCommand): MutationRequest | undefined {
   if (command.action === 'remove') return isName(command.name) ? { action: 'remove', name: command.name } : undefined;
+  if (command.action === 'upgrade') {
+    const { name, allowUnpin, proxyCredentials } = command;
+    if (!isName(name) || (allowUnpin !== undefined && typeof allowUnpin !== 'boolean') || 'source' in command)
+      return undefined;
+    return {
+      action: 'upgrade',
+      name,
+      allowUnpin,
+      ...(proxyCredentials === undefined ? {} : { proxyCredentials: parseProxyCredentials(proxyCredentials) }),
+    };
+  }
   if (command.action !== 'install' && command.action !== 'update') return undefined;
   const source = parseSource(command.source);
   if (!source) return undefined;
