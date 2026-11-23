@@ -136,9 +136,11 @@ def generate(output, p3):
 
 def generate_running_input(output):
     output.mkdir(parents=True, exist_ok=True)
-    for index, name in enumerate(("idle", "steer", "caption", "stop", "extra")):
+    for index, name in enumerate(("idle", "steer", "caption", "stop", "extra", "follow-up")):
         corners(160 + index, 120).save(output / f"{name}.png")
     corners(320, 240).save(output / "follow-up.jpg", quality=92)
+    corners(192, 128).save(output / "idle.jpg", quality=92)
+    (output / "mixed-notes.txt").write_text("Synthetic reference attachment.\n", encoding="utf-8")
     large = corners(6000, 4000)
     width, height = 2600, 1900
     noise = Image.frombytes("RGB", (width, height), random.Random(104).randbytes(width * height * 3))
