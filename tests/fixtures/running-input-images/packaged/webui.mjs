@@ -46,7 +46,16 @@ export async function startWebUI({ executable, cwd, env, password, setupPage, st
       } else {
         process.kill(-child.pid, 'SIGTERM');
       }
-      await boundedWait(exited, 'webui-exit', { timeoutMs: 12000, log: () => {} });
+      const waitForExit = () => boundedWait(exited, 'webui-exit', { timeoutMs: 8000, log: () => {} });
+      try {
+        await waitForExit();
+      } catch (error) {
+        if (windows || child.exitCode !== null || child.signalCode !== null) throw error;
+        // Some Linux builds keep the headless server alive after SIGTERM.
+        // Escalate only the process group created by this fixture.
+        process.kill(-child.pid, 'SIGKILL');
+        await waitForExit();
+      }
     }
   };
   const close = async () => {

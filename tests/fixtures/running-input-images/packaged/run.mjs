@@ -608,14 +608,17 @@ try {
   }
   await sampleTask?.catch(() => {});
   await provider?.close();
+  let cleanup = 'cleanup-webui';
   try {
     if (webui) await webui.close();
+    cleanup = 'cleanup-electron';
     if (app) await closeElectron(app);
+    cleanup = 'cleanup-profile';
     if (root) fs.rmSync(root, { recursive: true, force: true, maxRetries: 5 });
-  } catch {
+  } catch (error) {
     result.status = 'failed';
-    result.stage = 'cleanup';
-    result.failure = 'cleanup-failed';
+    result.stage = cleanup;
+    result.failure = classifyFailure(error);
     process.exitCode = 1;
   }
   save();
