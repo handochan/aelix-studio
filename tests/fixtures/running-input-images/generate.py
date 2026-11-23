@@ -139,7 +139,13 @@ def generate_running_input(output):
     for index, name in enumerate(("idle", "steer", "caption", "stop", "extra")):
         corners(160 + index, 120).save(output / f"{name}.png")
     corners(320, 240).save(output / "follow-up.jpg", quality=92)
-    corners(6000, 4000).save(output / "large.jpg", quality=92)
+    large = corners(6000, 4000)
+    width, height = 2600, 1900
+    noise = Image.frombytes("RGB", (width, height), random.Random(104).randbytes(width * height * 3))
+    large.paste(noise, (1700, 1050))
+    large.save(output / "large.jpg", quality=92)
+    # The source must exceed the model's per-file byte cap to trigger conversion.
+    assert 3_750_000 < (output / "large.jpg").stat().st_size < 16_777_216
 
 
 if __name__ == "__main__":

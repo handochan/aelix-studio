@@ -154,16 +154,6 @@ async function runScenario(page, scenario, row) {
   const check = (next) => {
     stage = next;
   };
-  await page.evaluate(() => {
-    const fixture = window.__runningImageFixture;
-    fixture.transitions = [];
-    fixture.observer?.disconnect();
-    fixture.observer = new MutationObserver(() => {
-      const next = document.querySelector('[data-testid="running-image-submission"]')?.getAttribute('data-status');
-      if (next && next !== fixture.transitions.at(-1)) fixture.transitions.push(next);
-    });
-    fixture.observer.observe(document.body, { childList: true, subtree: true, attributes: true });
-  });
   const pixel = page.locator('[data-testid="running-input-notice"][data-images="true"]');
   const frameStart = writes().length;
   offset = frameStart;
@@ -193,6 +183,15 @@ async function runScenario(page, scenario, row) {
     await send.click();
     check('hold-provider');
     await waitForObservation(() => requests().some(({ held }) => held));
+    // The boot prompt can be accepted by Host before ACP marks its native turn
+    // active. A fresh renderer queries the already-running turn without a send.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    check('native-active');
+    await page.waitForFunction(
+      () => window.__runningImageFixture.acknowledgments.some(({ kind, active }) => kind === 'turn-state' && active),
+      undefined,
+      options
+    );
     check('mode-visible');
     const mode = page.getByTestId('running-input-mode');
     await expect(mode).toBeVisible(options);
@@ -209,7 +208,6 @@ async function runScenario(page, scenario, row) {
   for (const file of files) {
     await expect(page.locator('.sendbox-panel').getByAltText(path.parse(file).name)).toBeVisible(options);
   }
-  check('attach-digest');
   check('attachment-blobs');
   const initialUploads = await page.evaluate(() => [...window.__runningImageFixture.uploads]);
   assert.deepEqual(
@@ -221,26 +219,6 @@ async function runScenario(page, scenario, row) {
     await page.evaluate(() => {
       window.__runningImageFixture.holdImageAck = true;
     });
-  await page.evaluate(() => {
-    const fixture = window.__runningImageFixture;
-    fixture.toasts = [];
-    fixture.toastObserver?.disconnect();
-    fixture.toastObserver = new MutationObserver(() => {
-      const visible = Array.from(document.querySelectorAll('.arco-message-content'))
-        .map((el) => el.textContent.toLowerCase())
-        .join(' ');
-      for (const [phrase, tag] of [
-        ['turn changed', 'turn-changed'],
-        ['still working', 'busy'],
-        ['file', 'file'],
-        ['verified', 'verification'],
-        ['attachment', 'attachment'],
-      ]) {
-        if (visible.includes(phrase) && !fixture.toasts.includes(tag)) fixture.toasts.push(tag);
-      }
-    });
-    fixture.toastObserver.observe(document.body, { childList: true, subtree: true });
-  });
   // Let the attachment and text render settle before taking the submission snapshot.
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
   check('send');
@@ -271,7 +249,17 @@ async function runScenario(page, scenario, row) {
 
   check('notice');
   if (stopCase) {
+    check('pending-notice');
     await expect(pixel).toHaveAttribute('data-kind', 'pending', options);
+    // The composer shows Send in its action slot while a draft is present.
+    // Clear the draft through the UI after dispatch to expose the real Stop.
+    await input.fill('');
+    const chip = page
+      .locator('.sendbox-panel .relative.inline-block')
+      .filter({ has: page.getByAltText(path.parse(scenario.image).name) });
+    await chip.locator(':scope > div.absolute').click();
+    await expect(pixel).toHaveAttribute('data-kind', 'pending', options);
+    check('stop-ack');
     const stopStart = await clickTimed(page, stop);
     const stopped = await takeAck(page, 'abort', stopStart);
     assert.equal(stopped.success, true);
@@ -281,6 +269,7 @@ async function runScenario(page, scenario, row) {
       window.__runningImageFixture.holdImageAck = false;
       window.__runningImageFixture.releaseImageAck();
     });
+    check('stop-notice');
     await expect(pixel).toContainText(stoppedNotice, options);
     row.noticeAckMs = Math.round(await page.evaluate((started) => performance.now() - started, start));
   }
@@ -325,8 +314,7 @@ async function runScenario(page, scenario, row) {
   }
   assert.equal(native.captionAdded, scenario.notice === 'caption');
   row.nativeImageWrites = frames().filter(({ images }) => images.length > 0).length;
-  row.nativeWrites =
-    frames().filter(({ method }) => method === scenario.write).length - Number(busy && scenario.write === 'prompt');
+  row.nativeWrites = frames().filter(({ method }) => method === scenario.write).length;
   row.stopWrites = frames().filter(({ method }) => method === 'abort').length;
   row.notice = scenario.notice;
 
@@ -349,14 +337,13 @@ async function runScenario(page, scenario, row) {
   );
   assert.equal(provider.failed, false);
   const images = requests().flatMap((request) => request.images);
-  const distinct = [...new Map(images.map((image) => [image.sha256, image])).values()];
-  assert.deepEqual(distinct, pathCase || stopCase ? [] : [studio]);
+  assert.deepEqual(images, pathCase || stopCase ? [] : [studio]);
   if (scenario.notice === 'caption') assert.ok(requests().some(({ captionAdded }) => captionAdded));
   if (scenario.notice === 'caption') {
     const bubbles = page.getByTestId('message-text-right');
     await expect(bubbles.filter({ hasText: /The user attached one or more images/ })).toHaveCount(0, options);
   }
-  row.provider = distinct[0] ?? empty();
+  row.provider = images[0] ?? empty();
   row.providerImageOccurrences = images.length;
   check('rss');
   await waitForObservation(() => Object.values(peak).every((value) => value > 0));
@@ -468,18 +455,7 @@ try {
     sampler?.kill();
   });
   const page = await app.firstWindow();
-  let submitEvents = 0;
-  page.on('console', (message) => {
-    if (message.type() !== 'info' || !message.text().startsWith('[sendbox]')) return;
-    void message
-      .args()[1]
-      ?.jsonValue()
-      .then((fields) => {
-        if (fields?.event === 'submit') submitEvents++;
-      })
-      .catch(() => {});
-  });
-  await page.exposeFunction('__fixtureHash', (bytes) => digest(Buffer.from(bytes)));
+  await page.exposeFunction('__fixtureHash', (encoded) => digest(Buffer.from(encoded, 'base64')));
   await page.addInitScript(observeRenderer);
   await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
   await page.reload({ waitUntil: 'domcontentloaded' });
@@ -537,12 +513,11 @@ try {
               .filter((key) => notice.includes(key))
               .map((key) => knownReasons[key]),
             responses: window.__runningImageFixture.acknowledgments
-              .map(({ kind, status }) => ({ kind, status }))
+              .map(({ kind, status, active }) => ({ kind, status, active }))
               .slice(-16),
           };
         })
         .catch(() => null);
-      row.submitEvents = submitEvents;
       row.providerFailed = provider.failed;
       row.heldRequests = provider.requests.filter(({ held }) => held).length;
       row.providerRequests = provider.requests.length;

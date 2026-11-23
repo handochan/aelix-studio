@@ -100,6 +100,10 @@ It builds the Provider Preview package on Windows x64, Linux x64 and Linux
 arm64 from the selected commit and launches the unpacked Electron app with its
 pinned Host, ACP wheel and native runtime.
 
+```sh
+gh workflow run pr-checks.yml -R handochan/aelix-studio --ref <branch> -f image_acceptance=true
+```
+
 The test-only launcher lives outside the package. It uses ACP's MockTransport
 pattern to keep the production A-1b route unchanged
 (`openai-codex/gpt-6-luna`, `openai-codex-responses`,
@@ -110,7 +114,10 @@ image and reports its length, then returns deterministic Responses SSE events.
 
 The runner compares provider bytes with the Studio multipart Blob and the
 bundled ACP's actual native pipe write. It holds the provider's first reply to
-exercise both queues, and holds the renderer's image ACK for the Stop case.
+exercise both queues. It reloads the renderer after the provider sees the held
+turn so initial Host acceptance and active ACP state can settle independently.
+For Stop it holds the image ACK, clears the draft to reveal the composer's Stop
+button, stops the turn, then releases the ACK.
 The Stop scenario expects one native image write and zero provider image
 occurrences. The path-only fallback expects five references and zero image
 writes. Each scenario starts its own conversation.

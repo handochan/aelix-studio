@@ -9,7 +9,15 @@ export function observeRenderer() {
   });
   const digest = async (blob) => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
-    if (!globalThis.crypto?.subtle) return window.__fixtureHash(Array.from(bytes));
+    if (!globalThis.crypto?.subtle) {
+      const data = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+      return window.__fixtureHash(data.slice(data.indexOf(',') + 1));
+    }
     return {
       bytes: bytes.length,
       sha256: Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes)), (byte) =>
@@ -40,6 +48,7 @@ export function observeRenderer() {
       kind = 'prompt';
     }
     if (options?.method === 'POST' && path.endsWith('/cancel')) kind = 'abort';
+    if (options?.method === 'POST' && path.endsWith('/fs/content/metadata')) kind = 'metadata';
     if (options?.method === 'POST' && path.endsWith('/byte-grants')) kind = 'grant';
     if (options?.method === 'POST' && path.endsWith('/acp-extensions')) {
       const envelope = JSON.parse(options.body);
@@ -105,8 +114,19 @@ export async function attach(page, paths, expectedUploads, stage) {
 }
 
 export async function clickTimed(page, button) {
-  const start = await page.evaluate(() => performance.now());
+  await button.evaluate((element) => {
+    window.__runningImageFixture.clickTime = null;
+    element.addEventListener(
+      'click',
+      () => {
+        window.__runningImageFixture.clickTime = performance.now();
+      },
+      { capture: true, once: true }
+    );
+  });
   await button.click();
+  const start = await page.evaluate(() => window.__runningImageFixture.clickTime);
+  if (!Number.isFinite(start)) throw new Error('Click timestamp missing');
   return start;
 }
 
