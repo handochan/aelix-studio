@@ -116,4 +116,14 @@ describe('the change kept for the screen', () => {
     act(() => result.current.start(operation('op-1', 'installing'), { ...sender, request: earlier }));
     expect(result.current.operation).toEqual(operation('op-2', 'installing'));
   });
+
+  it('keeps showing an accepted change when a newer request was refused, and takes its late start', () => {
+    const { result } = renderHook(() => useOperation(quiet, vi.fn(), 'alice'));
+    const sender = { owner: 'alice', epoch: sessionEpoch(), retried: false };
+    const first = nextChangeRequest();
+    // A second request was asked for and refused (BUSY): it never started anything.
+    nextChangeRequest();
+    act(() => result.current.start(operation('op-1', 'installing'), { ...sender, request: first }));
+    expect(result.current.operation).toEqual(operation('op-1', 'installing'));
+  });
 });

@@ -27,7 +27,8 @@ export class FlowEnded extends Error {
  * - `ask`: a question to the user. Asked only while `valid()`, and gone on from only while
  *   `valid()` (a question asked of a screen that was left would never be answered).
  * - `answer`: an answer the flow asked for, to be taken (shown, kept) even after the screen was
- *   left. Goes on only while `current()`: the same owner and sign-in, and no newer request.
+ *   left. Goes on only while `current()`: the same owner and sign-in (for a poll or a cancel,
+ *   also the same operation).
  * Each throws `FlowEnded` otherwise.
  */
 export type Flow = {
@@ -39,14 +40,20 @@ export type Flow = {
   answer<T>(waiting: Promise<T>): Promise<T>;
 };
 
+/**
+ * The gate every flow's `step` and `answer` are made of, for code that waits on something of its
+ * own (a dialog's file choice): await, then go on only while `still()`.
+ */
+export const gateWhile =
+  (still: () => boolean) =>
+  async <T>(waiting: Promise<T>): Promise<T> => {
+    const value = await waiting;
+    if (!still()) throw new FlowEnded();
+    return value;
+  };
+
 export function createFlow(sender: Sender, checks: { valid: () => boolean; current: () => boolean }): Flow {
-  const gate =
-    (still: () => boolean) =>
-    async <T>(waiting: Promise<T>): Promise<T> => {
-      const value = await waiting;
-      if (!still()) throw new FlowEnded();
-      return value;
-    };
+  const gate = gateWhile;
   const step = gate(checks.valid);
   return {
     sender,

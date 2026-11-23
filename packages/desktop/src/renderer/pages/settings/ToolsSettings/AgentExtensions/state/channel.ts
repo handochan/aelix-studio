@@ -38,16 +38,24 @@ export const failureCode = (reply: StudioExtensionsReply): string | undefined =>
  *    kept for the next one); after a yes it carries `acknowledgeInsecureTransport: true`;
  * 3. a request the host still refuses as `INSECURE_TRANSPORT` goes the same way once more.
  * The flow is checked after every await: waiting for the secret before it and the check
- * (`flow.step`), and around the question (`flow.ask`).
+ * (`flow.step`), and around the question (`flow.ask`). And every request, the check and the
+ * secret alike, is sent by `deliver`, which asks the flow once more right before it calls the
+ * client, with no await between the two.
  */
 export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
   /** Secret requests, one after another: no two checks or questions at once. */
   const secrets = useRef<Promise<unknown>>(Promise.resolve());
   const [banner, setBanner] = useState<StudioExtensionsTransport | undefined>(undefined);
 
-  const deliver = useCallback(async (request: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+  /**
+   * Send one request for `flow`: checked right before the client is called (nothing awaited in
+   * between); a flow that may not go on sends nothing (`FlowEnded`). The banner takes the
+   * reply's transport only while the flow is current.
+   */
+  const deliver = useCallback(async (request: StudioExtensionsRequest, flow: Flow): Promise<StudioExtensionsReply> => {
+    if (!flow.valid()) throw new FlowEnded();
     const reply = await requestStudioExtensions(request);
-    setBanner(reply.transport ?? 'insecure');
+    if (flow.current()) setBanner(reply.transport ?? 'insecure');
     return reply;
   }, []);
 
@@ -55,11 +63,11 @@ export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
   const deliverSecret = useCallback(
     async (command: StudioExtensionsRequest, flow: Flow): Promise<SendResult> => {
       const attempt = async (): Promise<SendResult> => {
-        const check = await flow.step(deliver({ action: 'get_settings' }));
+        const check = await flow.step(deliver({ action: 'get_settings' }, flow));
         // This check's own answer decides, not whichever reply came last.
-        if ((check.transport ?? 'insecure') === 'secure') return deliver(command);
+        if ((check.transport ?? 'insecure') === 'secure') return deliver(command, flow);
         if (!(await flow.ask(confirmInsecure))) return 'declined';
-        return deliver({ ...command, acknowledgeInsecureTransport: true });
+        return deliver({ ...command, acknowledgeInsecureTransport: true }, flow);
       };
       try {
         const reply = await attempt();
@@ -75,8 +83,14 @@ export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
 
   const send = useCallback(
     async (command: StudioExtensionsRequest, flow: Flow): Promise<SendResult> => {
-      if (!flow.valid()) return 'declined';
-      if (!carriesSecret(command)) return deliver(command);
+      if (!carriesSecret(command)) {
+        try {
+          return await deliver(command, flow);
+        } catch (error) {
+          if (error instanceof FlowEnded) return 'declined';
+          throw error;
+        }
+      }
       const before = secrets.current;
       const turn = (async (): Promise<SendResult> => {
         try {

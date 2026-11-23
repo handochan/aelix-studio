@@ -75,8 +75,14 @@ const kept = new Map<string, Kept>();
 let owner: string | undefined;
 /** Goes up at every sign-out (or change of user): answers sent in an earlier sign-in are dropped. */
 let epoch = 0;
-/** The latest change request: the answer to an earlier one starts nothing over it. */
+/** The latest change request asked for: an older change flow asks and sends nothing more. */
 let changeRequest = 0;
+/**
+ * The request of the latest start the host accepted. Only an accepted start takes the place of
+ * the change shown: a start answering an older request than this one is dropped, while a request
+ * that was refused (`BUSY`, say) changes nothing.
+ */
+let acceptedRequest = 0;
 const viewers = new Set<(current: Kept | undefined) => void>();
 
 const keptNow = (): Kept | undefined => (owner === undefined ? undefined : kept.get(owner));
@@ -106,12 +112,13 @@ export const isCurrent = (sender: Sender): boolean => sender.owner === owner && 
 /** A new change request, which takes the place of every earlier one. */
 export const nextChangeRequest = (): number => (changeRequest += 1);
 
-/** Whether `request` is still the latest change request. */
+/** Whether `request` is still the latest change request asked for. */
 export const isLatestChange = (request: number): boolean => request === changeRequest;
 
 /** On sign-out (or another user): a new sign-in, no owner, nothing kept. */
 export function forgetOwners(): void {
   epoch += 1;
+  acceptedRequest = changeRequest;
   owner = undefined;
   kept.clear();
   notify();
@@ -171,10 +178,12 @@ export function useOperation(
 
   /**
    * A change the host started, kept for the sender who asked. Dropped if that sender is no
-   * longer current, or if a newer change was asked for since (it must not cover that one).
+   * longer current, or if a start answering a newer request was already accepted (it must not
+   * cover that one). A newer request that was refused does not count.
    */
   const start = useCallback((next: ExtensionOperation, started: Started) => {
-    if (!isCurrent(started) || !isLatestChange(started.request)) return;
+    if (!isCurrent(started) || started.request < acceptedRequest) return;
+    acceptedRequest = started.request;
     kept.set(started.owner, { operation: next, change: keepable(started.change), retried: started.retried });
     notify();
     if (isFinished(next)) finishedRef.current(next);

@@ -348,4 +348,58 @@ describe('the screen channel', () => {
     });
     expect(request).not.toHaveBeenCalled();
   });
+
+  it('checks its flow once more right before the secret leaves, with nothing awaited in between', async () => {
+    // The flow ends right after the check passed: the step after the check is the last yes.
+    let checked = false;
+    let cut = false;
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      if (command.action === 'get_settings') checked = true;
+      return { ok: true, data: { settings: {} }, transport: 'secure' } as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
+    const { result } = renderHook(() => useExtensionsChannel(vi.fn(async () => true)));
+    // Only sending asks `valid`; the banner asks `current`, which stays true here.
+    const flow = createFlow(
+      { owner: 'local', epoch: 0 },
+      {
+        valid: () => {
+          if (cut) return false;
+          if (checked) cut = true;
+          return true;
+        },
+        current: () => true,
+      }
+    );
+    let reply: unknown;
+    await act(async () => {
+      reply = await result.current.send(secret, flow);
+    });
+    expect(reply).toBe('declined');
+    expect(commands(request)).toEqual([{ action: 'get_settings' }]);
+  });
+
+  it('checks its flow right before checking again after INSECURE_TRANSPORT', async () => {
+    let cut = false;
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      const flagged = (command as { acknowledgeInsecureTransport?: boolean }).acknowledgeInsecureTransport;
+      if (command.action !== 'get_settings' && !flagged) {
+        // The flow ends with the refusal.
+        cut = true;
+        return { ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' } as unknown as StudioExtensionsReply;
+      }
+      return { ok: true, data: { settings: {} }, transport: 'secure' } as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
+    const { result } = renderHook(() => useExtensionsChannel(vi.fn(async () => true)));
+    let reply: unknown;
+    await act(async () => {
+      reply = await result.current.send(
+        secret,
+        flowWhile(() => !cut)
+      );
+    });
+    expect(reply).toBe('declined');
+    expect(commands(request)).toEqual([{ action: 'get_settings' }, secret]);
+  });
 });

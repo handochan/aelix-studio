@@ -12,29 +12,23 @@
 
 import { ipcBridge } from '@/common';
 import { onUserChange, useAuth } from '@/renderer/hooks/context/AuthContext';
-import type { ExtensionEntry, ProxyCredentials } from '@aionui/web-host';
 import { Alert, Button, Collapse, Message, Modal, Popconfirm, Spin } from '@arco-design/web-react';
 import { Plus, Return } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import SettingsPageHeader from '../../components/SettingsPageHeader';
 import SettingsPageWrapper from '../../components/SettingsPageWrapper';
-import CredentialsPrompt, { type CredentialsReason } from './dialogs/CredentialsPrompt';
+import CredentialsPrompt from './dialogs/CredentialsPrompt';
 import InstallModal, { type InstallPreset } from './dialogs/InstallModal';
 import OperationView from './dialogs/OperationView';
+import { useQuestions } from './dialogs/questions';
 import InstallSettings from './InstallSettings';
 import ExtensionList from './list/ExtensionList';
 import TerminalSection from './list/TerminalSection';
 import { failureKey } from './messages';
-import { forgetOwners, isFinished } from './state/operation';
+import { createFlow, runFlow } from './state/flow';
+import { forgetOwners, isCurrent, isFinished, sessionEpoch } from './state/operation';
 import { useAgentExtensions, type Asks } from './state/useAgentExtensions';
-
-type CredentialsAsk = {
-  reason: CredentialsReason;
-  proxy: string;
-  resolve: (answer?: { credentials: ProxyCredentials; save: boolean }) => void;
-};
-type EntryAsk = { entry: ExtensionEntry; resolve: (yes: boolean) => void };
 
 /**
  * Choose a wheel on the host: the OS dialog in the app, the host file picker in the WebUI.
@@ -74,55 +68,41 @@ const AgentExtensionsSettings: React.FC = () => {
 
 const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
   const { t } = useTranslation();
-  const [insecureAsk, setInsecureAsk] = useState<(yes: boolean) => void>();
-  const [credentialsAsk, setCredentialsAsk] = useState<CredentialsAsk>();
-  const [unpinAsk, setUnpinAsk] = useState<EntryAsk>();
-  const [pinnedAsk, setPinnedAsk] = useState<EntryAsk>();
   const [install, setInstall] = useState<InstallPreset>();
   /** The host is Windows; undefined until that is known (Git stays off until then). */
   const [windows, setWindows] = useState<boolean | undefined>(undefined);
   const pickWheel = useCallback(() => pickWheelOnHost(t('settings.agentExtensions.install.wheelFilter')), [t]);
 
+  // One open question per dialog; leaving the screen answers what it still asks with "no".
+  const questions = useQuestions();
   const asks = useMemo<Asks>(
     () => ({
-      confirmInsecure: () => new Promise<boolean>((resolve) => setInsecureAsk(() => resolve)),
-      credentials: (reason, proxy) => new Promise((resolve) => setCredentialsAsk({ reason, proxy, resolve })),
-      confirmUnpin: (entry) => new Promise<boolean>((resolve) => setUnpinAsk({ entry, resolve })),
-      pinned: (entry) => new Promise<boolean>((resolve) => setPinnedAsk({ entry, resolve })),
+      ...questions.asks,
       failure: (code) => void Message.error(t(failureKey(code))),
       installByName: (name) => setInstall({ tab: 'index', name }),
     }),
-    [t]
+    [questions.asks, t]
   );
   const { transport, list, settings, terminal, operation, savingSettings, lastChange, lastRetried, actions } =
     useAgentExtensions(asks, owner);
 
-  // Leaving the screen answers what it still asks with "no": no request waits on a closed
-  // dialog, and typed credentials go with the dialog's state.
-  const open = useRef({ insecureAsk, credentialsAsk, unpinAsk, pinnedAsk });
-  open.current = { insecureAsk, credentialsAsk, unpinAsk, pinnedAsk };
-  useEffect(
-    () => () => {
-      open.current.insecureAsk?.(false);
-      open.current.credentialsAsk?.resolve(undefined);
-      open.current.unpinAsk?.resolve(false);
-      open.current.pinnedAsk?.resolve(false);
-    },
-    []
-  );
-
   useEffect(() => {
-    // The host's platform (the backend runs there, in the app and the WebUI alike).
-    void ipcBridge.application.systemInfo
-      .invoke()
-      .then((info) => setWindows(platformIsWindows(info.platform)))
-      .catch((): void => {});
-  }, []);
+    // The host's platform (the backend runs there, in the app and the WebUI alike), taken only
+    // while this screen is open for the same owner and sign-in.
+    let left = false;
+    const sender = { owner, epoch: sessionEpoch() };
+    const still = (): boolean => !left && isCurrent(sender);
+    const flow = createFlow(sender, { valid: still, current: still });
+    void runFlow(async () => {
+      const info = await flow.step(ipcBridge.application.systemInfo.invoke());
+      setWindows(platformIsWindows(info.platform));
+    }).catch((): void => {});
+    return () => {
+      left = true;
+    };
+  }, [owner]);
 
-  const answer = useCallback(<T,>(clear: () => void, resolve: ((value: T) => void) | undefined, value: T) => {
-    clear();
-    resolve?.(value);
-  }, []);
+  const { open } = questions;
 
   const busy = operation !== undefined && !isFinished(operation);
   const listing = list.data;
@@ -318,46 +298,46 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         onClose={actions.dismiss}
       />
       <CredentialsPrompt
-        visible={credentialsAsk !== undefined}
-        reason={credentialsAsk?.reason ?? 'required'}
-        proxy={credentialsAsk?.proxy ?? ''}
+        visible={open.credentials !== undefined}
+        reason={open.credentials?.reason ?? 'required'}
+        proxy={open.credentials?.proxy ?? ''}
         mode={state?.credentialMode ?? 'memory-only'}
-        onDone={(result) => answer(() => setCredentialsAsk(undefined), credentialsAsk?.resolve, result)}
+        onDone={(result) => open.credentials?.answer(result)}
       />
       <Modal
         unmountOnExit
-        visible={insecureAsk !== undefined}
+        visible={open.insecure !== undefined}
         title={t('settings.agentExtensions.insecure.title')}
         okText={t('settings.agentExtensions.insecure.confirm')}
         cancelText={t('settings.agentExtensions.actions.cancel')}
         okButtonProps={{ status: 'warning' }}
-        onOk={() => answer(() => setInsecureAsk(undefined), insecureAsk, true)}
-        onCancel={() => answer(() => setInsecureAsk(undefined), insecureAsk, false)}
+        onOk={() => open.insecure?.answer(true)}
+        onCancel={() => open.insecure?.answer(false)}
         data-testid='agent-extensions-insecure-confirm'
       >
         {t('settings.agentExtensions.insecure.body')}
       </Modal>
       <Modal
         unmountOnExit
-        visible={unpinAsk !== undefined}
+        visible={open.unpin !== undefined}
         title={t('settings.agentExtensions.upgrade.unpinTitle')}
         okText={t('settings.agentExtensions.upgrade.unpinConfirm')}
         cancelText={t('settings.agentExtensions.actions.cancel')}
-        onOk={() => answer(() => setUnpinAsk(undefined), unpinAsk?.resolve, true)}
-        onCancel={() => answer(() => setUnpinAsk(undefined), unpinAsk?.resolve, false)}
+        onOk={() => open.unpin?.answer(true)}
+        onCancel={() => open.unpin?.answer(false)}
       >
-        {t('settings.agentExtensions.upgrade.unpinBody', { name: unpinAsk?.entry.name ?? '' })}
+        {t('settings.agentExtensions.upgrade.unpinBody', { name: open.unpin?.entry.name ?? '' })}
       </Modal>
       <Modal
         unmountOnExit
-        visible={pinnedAsk !== undefined}
+        visible={open.pinned !== undefined}
         title={t('settings.agentExtensions.upgrade.pinnedTitle')}
         okText={t('settings.agentExtensions.upgrade.installOther')}
         cancelText={t('settings.agentExtensions.actions.close')}
-        onOk={() => answer(() => setPinnedAsk(undefined), pinnedAsk?.resolve, true)}
-        onCancel={() => answer(() => setPinnedAsk(undefined), pinnedAsk?.resolve, false)}
+        onOk={() => open.pinned?.answer(true)}
+        onCancel={() => open.pinned?.answer(false)}
       >
-        {t('settings.agentExtensions.upgrade.pinnedBody', { name: pinnedAsk?.entry.name ?? '' })}
+        {t('settings.agentExtensions.upgrade.pinnedBody', { name: open.pinned?.entry.name ?? '' })}
       </Modal>
     </SettingsPageWrapper>
   );

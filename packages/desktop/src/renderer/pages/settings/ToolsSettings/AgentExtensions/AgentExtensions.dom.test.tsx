@@ -170,8 +170,13 @@ function fakeHelper(): void {
       }
       if (action === 'rollback' || action === 'reconcile_bundle')
         return reply({ ok: true, data: { current: 'g2', previous: null, revision: 2 } });
-      if (host.gate) await host.gate;
+      // The change answered is taken in the order asked; only the first one asked waits on the gate.
       const change = host.changes.shift() ?? ['checking', 'switched'];
+      if (host.gate) {
+        const gate = host.gate;
+        host.gate = undefined;
+        await gate;
+      }
       if (!Array.isArray(change)) return reply({ ok: false, code: change.code });
       const id = `op-${(next += 1)}`;
       operations.set(id, { phases: change, at: 0, action: action as ExtensionOperation['action'] });
@@ -466,6 +471,30 @@ describe('the agent extensions screen', () => {
     expect(document.body.textContent).not.toContain('sentinel-secret');
   });
 
+  it(
+    'fills a wheel chosen for an earlier opening of the install dialog into no later one',
+    async () => {
+      let choose: ((files: string[]) => void) | undefined;
+      bridge.pickGate = new Promise((resolve) => (choose = resolve));
+      render(<AgentExtensionsSettings />);
+      const openFileTab = async (): Promise<void> => {
+        fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+        fireEvent.click(await screen.findByText('settings.agentExtensions.install.tabs.file'));
+      };
+      await openFileTab();
+      fireEvent.click(await screen.findByTestId('install-pick-wheel'));
+      await waitFor(() => expect(bridge.opened).toHaveLength(1));
+      fireEvent.click(
+        screen.getByText('settings.agentExtensions.actions.cancel', { selector: '.arco-modal-footer button span' })
+      );
+      await openFileTab();
+      choose?.(['/host/wheels/late-1.0-py3-none-any.whl']);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(((await screen.findByTestId('install-wheel')) as HTMLInputElement).value).toBe('');
+    },
+    LONG
+  );
+
   it('sends no update for a wheel chosen after the screen was left', async () => {
     let choose: ((files: string[]) => void) | undefined;
     bridge.pickGate = new Promise((resolve) => (choose = resolve));
@@ -648,6 +677,41 @@ describe('the agent extensions screen', () => {
     expect(bridge.opened[0]).toMatchObject({
       filters: [{ name: 'settings.agentExtensions.install.wheelFilter', extensions: ['whl'] }],
     });
+  });
+
+  it('takes nothing from answers that arrive after the user signed out: banner, platform, saving', async () => {
+    auth.user = { id: 'alice', username: 'alice' };
+    let platform: ((info: { platform: string }) => void) | undefined;
+    bridge.systemInfo = new Promise((resolve) => (platform = resolve));
+    render(<AgentExtensionsSettings />);
+    await screen.findByTestId('agent-extension-aelix-starter');
+    await waitFor(() => expect(screen.queryByTestId('agent-extensions-insecure')).toBeNull());
+    // A save is out when the user signs out; the screen is still up for a moment.
+    let answer: (() => void) | undefined;
+    host.settingsGate = undefined;
+    const held = new Promise<void>((resolve) => (answer = resolve));
+    const request = window.__studioExtensions!.request;
+    window.__studioExtensions = {
+      request: async (command: StudioExtensionsRequest) => {
+        if (command.action === 'set_settings') {
+          await held;
+          return { ok: true, data: host.settings, transport: 'insecure' } as unknown as StudioExtensionsReply;
+        }
+        return request(command);
+      },
+    };
+    fireEvent.click(screen.getByTestId('settings-online'));
+    fireEvent.click(screen.getByTestId('settings-save'));
+    await waitFor(() => expect(sent('set_settings')).toHaveLength(0));
+    switchUser(null);
+    answer?.();
+    platform?.({ platform: 'darwin' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    // The insecure answer to the save shows no banner, the platform opens no Git, and the
+    // save button does not come back for the user who left.
+    expect(screen.queryByTestId('agent-extensions-insecure')).toBeNull();
+    expect(screen.queryByTestId('settings-private-git')).toBeNull();
+    expect(screen.getByTestId('settings-save').className).toContain('arco-btn-loading');
   });
 
   it('warns about the channel until the first reply says it is secure', async () => {
@@ -918,6 +982,21 @@ describe('the agent extensions screen', () => {
       open?.();
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+
+    it('stays shown when a later change is refused as BUSY before the first one’s start came', async () => {
+      host.changes.push(long, { code: 'BUSY' });
+      let open: (() => void) | undefined;
+      host.gate = new Promise((resolve) => (open = resolve));
+      render(<AgentExtensionsSettings />);
+      await startInstall();
+      await waitFor(() => expect(sent('install')).toHaveLength(1));
+      // Asked again while the first start is still out: the helper is busy with the first.
+      await startInstall();
+      await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.BUSY']));
+      open?.();
+      expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
+      expect(screen.getByTestId('operation-cancel')).toBeInTheDocument();
     });
 
     it('is forgotten when its user signs out', async () => {

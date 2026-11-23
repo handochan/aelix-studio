@@ -78,7 +78,7 @@ type ScreenFlow = Flow & { request: number };
  * (`sessionEpoch`), this screen, and, for changes, its change request (`nextChangeRequest`).
  * Every await goes through the flow's gates: nothing is asked or sent for a screen that was
  * left, a user who signed out, or a change asked for again since; an answer is taken only for
- * the same owner and sign-in and the latest change request.
+ * the same owner and sign-in, and a start only if no start of a newer request was accepted.
  */
 export function useAgentExtensions(asks: Asks, owner: string) {
   const asksRef = useRef(asks);
@@ -110,8 +110,11 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     (change = false): ScreenFlow => {
       const sender: Sender = { owner, epoch: sessionEpoch() };
       const request = change ? nextChangeRequest() : 0;
-      const current = (): boolean => isCurrent(sender) && (!change || isLatestChange(request));
-      return { ...createFlow(sender, { current, valid: () => !left.current && current() }), request };
+      // Answers count while the owner and sign-in hold (which start wins is the store's call:
+      // the newest one the host accepted). Asking and sending more stop for a newer change too.
+      const current = (): boolean => isCurrent(sender);
+      const valid = (): boolean => !left.current && current() && (!change || isLatestChange(request));
+      return { ...createFlow(sender, { current, valid }), request };
     },
     [owner]
   );
@@ -359,7 +362,8 @@ export function useAgentExtensions(asks: Asks, owner: string) {
           // A proxy address that may carry a user part makes this a secret request.
           applySettings(await flow.answer(send({ action: 'set_settings', settings: next }, flow)));
         } finally {
-          setSavingSettings(false);
+          // Only the screen that saved, for the same owner and sign-in, shows it ended.
+          if (flow.valid()) setSavingSettings(false);
         }
       }),
     saveCredentials: () =>

@@ -7,9 +7,10 @@
 import type { ExtensionSource } from '@aionui/web-host';
 import { Alert, Button, Checkbox, Input, Modal, Tabs, Tooltip } from '@arco-design/web-react';
 import { FolderOpen } from '@icon-park/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { failureKey } from '../messages';
+import { gateWhile, runFlow } from '../state/flow';
 import { withoutUserPart } from '../state/secrets';
 
 export type InstallTab = 'index' | 'git' | 'file';
@@ -58,6 +59,19 @@ const InstallModal: React.FC<Props> = ({
   const [subdirectory, setSubdirectory] = useState('');
   const [wheel, setWheel] = useState('');
   const [useFolder, setUseFolder] = useState(false);
+
+  /** Changes each time the dialog opens or closes: a file chosen for one opening fills no other. */
+  const opening = useRef(0);
+  useEffect(() => {
+    opening.current += 1;
+  }, [visible]);
+
+  const chooseWheel = (): Promise<void> =>
+    runFlow(async () => {
+      const mine = opening.current;
+      const picked = await gateWhile(() => opening.current === mine)(pickWheel());
+      if (picked) setWheel(picked);
+    });
 
   useEffect(() => {
     if (!visible) return;
@@ -218,7 +232,7 @@ const InstallModal: React.FC<Props> = ({
               />
               <Button
                 icon={<FolderOpen theme='outline' size='14' />}
-                onClick={() => void pickWheel().then((picked) => picked && setWheel(picked))}
+                onClick={() => void chooseWheel()}
                 data-testid='install-pick-wheel'
               >
                 {t('settings.agentExtensions.install.choose')}
