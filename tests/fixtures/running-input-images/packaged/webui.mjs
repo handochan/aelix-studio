@@ -73,7 +73,12 @@ export async function startWebUI({ executable, cwd, env, password, setupPage, st
       )
       .toBe(true);
     stage('webui-browser');
-    browser = await chromium.launch({ channel: 'chromium', headless: true, env });
+    browser = await chromium.launch({
+      channel: 'chromium',
+      executablePath: process.env.IMAGE_CHROMIUM,
+      headless: true,
+      env,
+    });
     const cdp = await browser.newBrowserCDPSession();
     const { processInfo } = await cdp.send('SystemInfo.getProcessInfo');
     await cdp.detach();

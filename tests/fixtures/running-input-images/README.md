@@ -129,8 +129,9 @@ writes. Each scenario starts its own conversation.
 For WebUI, a fresh profile obtains a throwaway admin password from the bundled
 Host's password-reset endpoint. The same package starts its `--webui` server on
 loopback. Headless Chromium submits the real login form and checks that the
-conversation API returns 401 before login and 200 after login. Both surfaces
-run the same scenarios with separate profiles.
+conversation API returns 401 before login and 200 after login. If the Playwright
+installer cannot supply Chromium, the fixture downloads the same version from
+its release archive. Both surfaces run the same scenarios with separate profiles.
 
 `image-acceptance.json` and `image-acceptance-webui.json` contain the fixed
 fields and label their surface. The Actions job summary has a table for each.

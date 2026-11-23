@@ -84,7 +84,8 @@ jobs:
 
           status=0
           run_probe electron || status=1
-          if node node_modules/@playwright/test/cli.js install chromium --no-shell >/dev/null 2>&1; then
+          if IMAGE_CHROMIUM=$(node tests/fixtures/running-input-images/packaged/installBrowser.mjs 2>/dev/null); then
+            export IMAGE_CHROMIUM
             run_probe webui || status=1
           else
             echo 'browser_install=failed' >> "$GITHUB_OUTPUT"
