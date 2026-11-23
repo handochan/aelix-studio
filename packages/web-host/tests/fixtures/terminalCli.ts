@@ -18,7 +18,8 @@ export const distribution = async (
   version: string,
   entryPoints?: string
 ): Promise<void> => {
-  const info = path.join(site, `${name}-${version}.dist-info`);
+  // Installers write the name with `_` for `-` and `.` (wheel file name escaping).
+  const info = path.join(site, `${name.replace(/[-.]+/g, '_')}-${version}.dist-info`);
   await write(
     path.join(info, 'METADATA'),
     `Metadata-Version: 2.1\nName: ${name}\nVersion: ${version}\n\nA long description.\n`

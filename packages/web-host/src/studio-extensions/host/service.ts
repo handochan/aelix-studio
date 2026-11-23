@@ -40,7 +40,6 @@ import {
   type ExtensionSettingsState,
   type ExtensionSource,
   type ProxyCredentials,
-  type TerminalCliListing,
 } from '../types.js';
 
 export type ExtensionServiceOptions = {
@@ -160,9 +159,6 @@ export class ExtensionService {
    */
   private readonly starting = new Set<{ owner: string; abort: AbortController }>();
   private changing = false;
-  /** A terminal listing in progress: callers at the same time share it. */
-  private terminalListing?: Promise<TerminalCliListing>;
-
   constructor(private readonly options: ExtensionServiceOptions) {}
 
   private get platform(): NodeJS.Platform {
@@ -216,14 +212,6 @@ export class ExtensionService {
     return readSettings(layout);
   }
 
-  /** The terminal CLI's extensions; a listing already in progress is shared, not started again. */
-  private listTerminal(): Promise<TerminalCliListing> {
-    this.terminalListing ??= listTerminalCli(this.options.terminal).finally(() => {
-      this.terminalListing = undefined;
-    });
-    return this.terminalListing;
-  }
-
   /** An unexpected error: its text may hold paths, so it goes to the log and the reply carries the code only. */
   private unexpected(error: unknown): ExtensionReply {
     (this.options.log ?? console.error)('[studio-extensions] unexpected error', error);
@@ -242,7 +230,8 @@ export class ExtensionService {
       if (!ACTIONS.has(command.action)) return fail('UNSUPPORTED');
       if (command.action === 'poll' || command.action === 'cancel') return this.control(owner, command);
       // Read only, from files: no runtime, no lock, no generation (ADR 9).
-      if (command.action === 'list_terminal') return { ok: true, data: await this.listTerminal() };
+      // One scan for the whole process, shared with the hosts' answer before a service exists.
+      if (command.action === 'list_terminal') return { ok: true, data: await listTerminalCli(this.options.terminal) };
       if (command.action === 'list') {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);

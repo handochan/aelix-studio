@@ -102,8 +102,21 @@ export function parseEntryPoints(text: string): Map<string, Map<string, string>>
 export function parseExtensionEntries(text: string): Map<string, string> {
   const entries = new Map<string, string>();
   for (const [name, value] of parseEntryPoints(text).get(EXTENSION_GROUP) ?? [])
-    entries.set(name, value.replace(/\[[^\]]*\]\s*$/, '').replace(/\s+/g, ''));
+    entries.set(name, withoutExtras(value).replace(/\s+/g, ''));
   return entries;
+}
+
+/**
+ * A reference without a trailing `[extras]`, as `/\[[^\]]*\]\s*$/` removed it: from the first
+ * `[` after the last inner `]` to the final `]`, then optional space. Found with plain scans,
+ * so its time is linear in the value whatever it holds; the pattern backtracks on a run of `[`.
+ */
+function withoutExtras(value: string): string {
+  const trimmed = value.trimEnd();
+  if (!trimmed.endsWith(']')) return value;
+  const close = trimmed.length - 1;
+  const open = trimmed.indexOf('[', trimmed.lastIndexOf(']', close - 1) + 1);
+  return open < 0 || open >= close ? value : trimmed.slice(0, open);
 }
 
 /** The names of the scripts an `entry_points.txt` makes the installer write. */

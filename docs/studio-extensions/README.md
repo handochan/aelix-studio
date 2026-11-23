@@ -5,7 +5,8 @@
 > (11절). 실험 명령과 출력은 [실험 기록](spike-evidence.md)에 있다.
 
 상태: **설치 방식 채택(2026-11-17 사용자 결정, 8.2의 A1)** · 설치 helper 구현을 시작하고 화면에는 아직 내지
-않는다. 같은 날 A2·A3·A4·A10·A11·A12도 정해졌다. 2026-11-19에 A5·A6·A7을 정했다. A8·A9는 미정이다.
+않는다. 같은 날 A2·A3·A4·A10·A11·A12도 정해졌다. 2026-11-19에 A5·A6·A7을, 2026-11-22에 A8·A9를 정했다
+(터미널 CLI 확장은 이번에 읽기 전용 목록, 설치·제거는 9절 2단계).
 초기 실험은 macOS 번들 사본에서 수행했다. OS별 설치 앱 확인은 9절의 1a′를 따른다. 이 문서는 병합·출시 승인이
 아니다. 구현·병합·출시는 각 Issue와 저장소 규칙을 따른다. 판단의 정본은
 [decisions.md](../studio-release-train/decisions.md)의 D04와 기록이다.
@@ -682,7 +683,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   디렉터리는 받지 않는다). 받는 형식은 넓히지 않는다. native auth는 `prepare.py`가 만든 manifest 없는 runtime도 받지만,
   확장 기능은 이 플랫폼용 배포 번들(`manifest.json`, `native-site`)만 받는다. 그런 runtime이면 `RUNTIME_UNAVAILABLE`과,
   필요한 번들과 `AELIX_STUDIO_RUNTIME`을 적은 detail로 답한다(`docs/studio-preview/identity.md`에 번들 만드는 법).
-  설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다. 시작 전의 변경(이른 검사, 번들 찾기)도
+  설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다. 예외는 `list_terminal`이다. 파일만 읽으므로 서비스가 없어도
+  두 host가 직접 답한다(9절). 시작 전의 변경(이른 검사, 번들 찾기)도
   owner와 함께 먼저 등록해 둔다. 그 사이 창이 닫히거나 listener가 멈추면 아무것도 바꾸지 않고 `CANCELLED`로 끝난다.
   - **데스크톱.** app `ready` 뒤에 `safeStorage` vault로 설정한다(Linux는 이때 비밀 저장소를 알린다). 실패해도 앱은
     뜬다. macOS에서는 시작할 때 `safeStorage`를 부르지 않는다. 사용 가능 여부를 묻는 것만으로도 main thread에서
@@ -772,14 +774,14 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 ## 6. 사용자 CLI에 이미 있는 확장
 
 Studio runtime은 CLI와 agent dir(`~/.aelix/agent`)을 공유하지만 Python 환경은 따로다. 아래는 지금 보이는
-것이다. 어디까지 다룰지는 8.2의 A8·A9에서 사용자가 정한다.
+것이다. 8.2의 A8·A9 결정(2026-11-22)에 따라 이번에는 읽기 전용 목록만 낸다(9절).
 
-| 종류                                       | 지금 Studio가 보는 것                                                                                                                                  | Studio가 할 수 있는 것                                                                                                                                              |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 전역 디렉터리 `~/.aelix/agent/extensions/` | 번들 native를 CLI처럼 실행하면 로드된다. 번들에 없는 패키지를 import하는 확장은 오류가 난다. **대화(ACP)에서는 로드되지 않는다** [실행]                | 디렉터리를 읽어 보여 준다(`list_terminal`, 9절) [실행]. 대화에서 켜는 것은 #7의 켜기/끄기와 같은 방식(`--extension`)으로 할 수 있다 [추정]                          |
-| 프로젝트 `.aelix/extensions/`              | 위와 같다. 프로젝트 신뢰가 있어야 한다 [소스]                                                                                                          | 이 카드에서 다루지 않는다                                                                                                                                           |
-| CLI 환경에 pip으로 설치한 확장             | **보이지 않는다.** `extension list`는 비어 있다. 공유 `settings.json`의 설치 기록만 `extension source list`에 보인다 [실행]                            | 그 환경의 패키지 메타데이터를 파일로 읽어 `extension list`와 같은 목록을 보여 준다(`list_terminal`, 9절) [실행]. 제거는 사용자의 `aelix`를 실행해야 한다(9절 2단계) |
-| 기록의 교차 영향                           | agent dir을 공유한 채 설치하면 Studio의 설치가 CLI 기록에 섞인다. 한쪽에서 이름 없이 `extension update`를 하면 다른 쪽이 기록한 확장까지 깔린다 [실행] | Studio는 세대별 `agent/`에 기록한다(5.4). 이름 없는 `update`를 쓰지 않는다                                                                                          |
+| 종류                                       | 지금 Studio가 보는 것                                                                                                                                  | Studio가 할 수 있는 것                                                                                                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 전역 디렉터리 `~/.aelix/agent/extensions/` | 번들 native를 CLI처럼 실행하면 로드된다. 번들에 없는 패키지를 import하는 확장은 오류가 난다. **대화(ACP)에서는 로드되지 않는다** [실행]                | 디렉터리를 읽어 보여 준다(`list_terminal`, 9절) [실행]. 대화에서 켜는 것은 #7의 켜기/끄기와 같은 방식(`--extension`)으로 할 수 있다 [추정]                                   |
+| 프로젝트 `.aelix/extensions/`              | 위와 같다. 프로젝트 신뢰가 있어야 한다 [소스]                                                                                                          | 이 카드에서 다루지 않는다                                                                                                                                                    |
+| CLI 환경에 pip으로 설치한 확장             | **보이지 않는다.** `extension list`는 비어 있다. 공유 `settings.json`의 설치 기록만 `extension source list`에 보인다 [실행]                            | 그 환경의 패키지 메타데이터를 파일로 읽어 `extension list`에 가까운 목록을 보여 준다(`list_terminal`, 9절의 차이) [실행]. 제거는 사용자의 `aelix`를 실행해야 한다(9절 2단계) |
+| 기록의 교차 영향                           | agent dir을 공유한 채 설치하면 Studio의 설치가 CLI 기록에 섞인다. 한쪽에서 이름 없이 `extension update`를 하면 다른 쪽이 기록한 확장까지 깔린다 [실행] | Studio는 세대별 `agent/`에 기록한다(5.4). 이름 없는 `update`를 쓰지 않는다                                                                                                   |
 
 사용자의 터미널 CLI에 설치·제거하려면 사용자의 `aelix extension install|remove … --yes`를 그 환경에서
 실행한다. 세대가 없으므로 Studio가 검증하거나 되돌릴 수 없다. **[추정: 실행하지 않았다]**
@@ -1080,56 +1082,76 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
 
 8.2의 A9 결정에 따라 `list_terminal`이 사용자의 터미널 `aelix`에 설치된 확장을 읽기 전용으로 돌려준다. 요청·응답의
 정본은 `types.ts`의 `TerminalCliListing`이고, 구현은 `packages/web-host/src/studio-extensions/terminal/`이다.
-2026-11-24 리드 결정(권장안 1–6과 아래 제약)을 따른다.
+2026-11-24 리드 결정(권장안 1–6과 아래 제약)과 같은 날 독립 리뷰(blocking 5, should-fix 6)의 방향을 따른다.
 
-- **실행 금지.** `aelix`, Python, 셸을 실행하지 않는다. 자식 프로세스를 띄우지 않고 네트워크를 쓰지 않으며 아무것도
-  쓰지 않는다. 파일을 읽기만 한다. 시험은 읽은 실행 파일이 실행되면 남길 표시 파일이 없는지 보고, 이 디렉터리의
-  소스에 프로세스·네트워크·쓰기 API가 없는지 확인한다.
+- **실행 금지.** `aelix`, Python, 셸을 실행하지 않는다. 자식 프로세스를 띄우지 않고, 코드를 불러오지 않고, 네트워크를
+  쓰지 않으며, 아무것도 쓰지 않는다. 파일을 읽기만 한다. 시험은 읽은 실행 파일이 실행되면 남길 표시 파일이 없는지
+  본다. 또 이 디렉터리의 소스에 프로세스·동적 `import()`·`require`·네트워크·쓰기 API가 없는지 확인한다.
+- **스캔 하나, 시간 한도.** 프로세스 전체에서 스캔은 하나다. 서비스 구성 전이든 후든 동시 요청과 후속 요청이 그
+  스캔을 나눠 받는다. 시간이 다 된 스캔도 끝날 때까지는 새 스캔을 시작하지 않고 같은 답을 준다. 시계는 첫 파일 시스템
+  호출(홈의 realpath)보다 먼저 시작한다. 모든 호출은 한도(5초)를 먼저 확인하므로, 시간이 다 되면 답만 끝내지 않고
+  스캔도 멈춘다. 그때까지 읽은 것으로 답하고 `timedOut`을 붙인다. 답은 그 시점의 사본이다. 동시에 도는 파일 시스템
+  호출은 8개까지이고, 긴 목록도 한꺼번에 예약하지 않는다.
 - **찾는 곳.** Studio 프로세스의 환경 변수로 정한다. **셸 설정 파일에만 둔 변수는 보지 못한다.** GUI 앱은 사용자
   셸의 PATH도 받지 못한다. 그래서 터미널이 실제로 어느 `aelix`를 쓰는지 알 수 없다. 찾은 환경을 실제 경로로 중복을
   없애 모두 돌려주고, 각각 찾은 방법(`uv_tool`, `pipx`, `launcher`)을 붙인다. 하나도 없으면 빈 목록과 찾아본 위치
-  (`searched`)를 돌려준다.
+  (`searched`)를 돌려준다. 상대 경로 값은 쓰지 않는다. uv·pipx는 그것을 자기 실행 디렉터리 기준으로 읽는데, Studio는
+  그 디렉터리를 모른다. Windows UNC·장치 경로(`\\server\…`, `\\?\`, `\\.\`)는 환경 변수, PATH, shebang, 링크
+  대상 어디에서 와도 건드리지 않는다.
   - uv tool(uv 0.13.9 `uv-dirs`·`uv-tool`·`uv-state` 소스): `UV_TOOL_DIR`. 없으면 `$XDG_DATA_HOME/uv/tools`
     또는 `~/.local/share/uv/tools`, macOS의 예전 `~/Library/Application Support/uv/tools`, Windows의
-    `%APPDATA%\uv\data\tools`와 `%APPDATA%\uv\tools`. 그 아래 도구마다 `pyvenv.cfg`와 `aelix` 배포판이 있는
+    `%APPDATA%\uv\data\tools`와 `%APPDATA%\uv\tools`다. 그 아래 도구마다 `pyvenv.cfg`와 `aelix` 배포판이 있는
     것만 읽는다(디렉터리 이름으로 먼저 거른다).
   - pipx(pipx 1.19.0 `paths.py`, platformdirs 4.14.8 소스): `PIPX_HOME`. 없으면 사용자 데이터 디렉터리
     (`$XDG_DATA_HOME/pipx`, Linux `~/.local/share/pipx`, macOS `~/Library/Application Support/pipx`, Windows
-    `%LOCALAPPDATA%\pipx\pipx`)와 예전 `~/.local/pipx`(Windows는 `~\pipx`도)의 `venvs`.
+    `%LOCALAPPDATA%\pipx\pipx`)와 예전 `~/.local/pipx`(Windows는 `~\pipx`도)의 `venvs`다.
+  - Windows에 `APPDATA`·`LOCALAPPDATA`가 없으면 보통 위치인 `~\AppData\Roaming`·`~\AppData\Local`을 쓴다. uv와
+    platformdirs는 Windows에 알려진 폴더를 묻지만, Studio는 API 호출이나 명령 없이 할 수 있는 데까지만 한다.
   - `aelix` 실행 파일(Windows 제외): `UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`, `$XDG_DATA_HOME/../bin`, `PIPX_BIN_DIR`,
-    `~/.local/bin`, Homebrew와 시스템 bin, macOS `--user`의 `~/Library/Python/<버전>/bin`, Studio 프로세스 PATH(앞
-    64개). 링크는 실제 경로로 따라간다. `<환경>/bin/aelix`에 닿으면 그 환경이다. 아니면 앞 4 KiB에서 첫 줄의
-    interpreter를 읽는다. `#!/경로/python`과 pip·uv가 쓰는 `/bin/sh` + `'''exec' '경로'` 형태만 해석한다.
+    `~/.local/bin`, Homebrew와 시스템 bin, macOS `--user`의 `~/Library/Python/<버전>/bin`(16개), Studio 프로세스
+    PATH(앞 64개)다. 한도를 넘으면 `truncated`다. 링크는 실제 경로로 따라간다. `<환경>/bin/aelix`에 닿으면 그
+    환경이다. 아니면 앞 4 KiB에서 interpreter를 읽는다. 해석하는 형태는 `#!/경로/python [인자]`와, pip(distlib)·uv가
+    쓰는 `/bin/sh` + `'''exec' <경로> [인자] "$0" "$@"`(따옴표 `'`·`"` 또는 없음)뿐이다. 상대 경로, `env`, 4 KiB에서
+    잘린 줄은 `unresolved_launcher`다. 작업 디렉터리 기준으로 찾지 않는다.
   - 전역 디렉터리: `AELIX_CODING_AGENT_DIR`(native처럼 `~`를 펼친다). 없으면 `~/.aelix/agent`의 `extensions`다.
-    native 디렉터리 계층의 규칙대로 한 단계만 본다. `*.py`는 `file`이다. 하위 디렉터리는 `aelix-plugin.toml`이면
-    `manifest`, `pyproject.toml`에 `[tool.aelix]` 표 머리 줄이 있으면 `pyproject`, `__init__.py`면 `package`다.
+    값이 상대 경로처럼 Studio가 자리를 정할 수 없는 것이면 전역 디렉터리를 보지 않는다. native 디렉터리 계층의
+    규칙대로 한 단계만 본다. `*.py`는 `file`이다. 하위 디렉터리는 `aelix-plugin.toml`이면 `manifest`, `pyproject.toml`의
+    `[tool.aelix] extensions` 배열에 실제로 있는 경로가 하나라도 있으면 `pyproject`, `__init__.py`면 `package`다.
     이름과 종류만 낸다. TOML 파서 의존성(lockfile 변경)을 더하지 않으려고 manifest를 해석하지 않는다. 그래서 깨진
-    manifest도 목록에 나오고 native에서 실패한다. 프로젝트 `.aelix/extensions`는 6절대로 다루지 않는다.
-- **읽는 것.** `pyvenv.cfg`가 있는 venv만 읽는다. site-packages(`lib/python<X.Y>/site-packages`, Windows
-  `Lib/site-packages`)의 `aelix.extensions` entry point와 그 배포판의 이름·버전을 낸다. 그 CLI의 `extension list`가
-  `importlib.metadata`로 읽는 것과 같다. 실행 파일이 venv 밖의 Python(시스템 pip, `--user`)을 가리키면
-  `not_a_venv`로 그 interpreter 경로만 돌려준다. site-packages 위치를 추측하지 않는다. interpreter를 읽을 수 없는
-  실행 파일(`#!/usr/bin/env`, 이진 파일)은 `unresolved_launcher`다. `include-system-site-packages = true`인 venv의
-  시스템 쪽 패키지는 보지 않는다.
-- **한도.** 실행 파일은 앞 4 KiB, `METADATA`는 앞 256 KiB(머리글이 앞에 있다), `entry_points.txt`와
+    manifest도 목록에 나오고 native에서 실패한다. `pyproject.toml`은 줄 단위의 선형 판독기로 표준 형태만 읽는다. 같은
+    표를 인용 키·점 표기·인라인 표로 쓰거나, 줄이 4,096자를 넘거나, 파일이 256 KiB를 넘으면 `unknown`이다. native는
+    받을 수 있지만 Studio는 파서 없이 판단하지 못하는 경우다. 프로젝트 `.aelix/extensions`는 6절대로 다루지 않는다.
+- **읽는 것.** `pyvenv.cfg`가 있는 venv만 읽는다. 읽는 파일은 실제 경로가 그 venv root 안에 있을 때만 연다. site
+  디렉터리(`lib/python<X.Y>/site-packages`, Windows `Lib/site-packages`)도 마찬가지다. 배포판은 CPython 3.12
+  `importlib.metadata`처럼 찾는다. `.dist-info`와 `.egg-info`를 대소문자 상관없이 보고, 첫 `-` 앞의 이름으로
+  정규화해 같은 이름은 첫 것만 쓴다. entry point가 있든 없든 먼저 중복을 없앤다. 그 배포판들의 `aelix.extensions`
+  entry point와 이름·버전(`METADATA` 또는 `PKG-INFO`)을 낸다. **native 목록과 다를 수 있는 점**이 있다. CPython은
+  디렉터리 순서에서 첫 것을 쓰는데, Studio는 그 순서를 알 수 없어 이름순으로 고른다. 또 `include-system-site-packages
+= true`인 venv의 시스템 쪽 패키지와 `.pth`로 더해진 경로는 보지 않는다. 실행 파일이 venv 밖의 Python(시스템 pip,
+  `--user`)을 가리키면 `not_a_venv`로 그 interpreter 경로(정규화한 것)만 돌려준다. site 위치를 추측하지 않는다.
+- **한도.** 실행 파일은 앞 4 KiB, `METADATA`·`PKG-INFO`는 앞 256 KiB(머리글이 앞에 있다), `entry_points.txt`와
   `pyproject.toml`은 256 KiB까지 읽는다. 넘는 `entry_points.txt`는 건너뛰고 `ENTRY_POINTS_TOO_LARGE`를 붙인다. 환경은
   16개, 환경마다 배포판 2,000개, 도구 디렉터리마다 256개, 전역 디렉터리는 500개 항목까지 본다. 넘으면 `truncated`다.
-  전체는 5초까지다. 그때까지 읽은 것으로 답하고 `timedOut`을 붙인다. 답은 그 시점의 사본이라 이후 바뀌지 않는다.
-- **링크와 특수 파일.** 실제 경로로 따라가며 순환(`ELOOP`)은 `unreadable`로 끝낸다. 파일은 non-blocking으로 열고
-  fstat으로 일반 파일인지 본 뒤 읽는다. FIFO·장치는 기다리지도 읽지도 않는다.
-- **실패 격리.** 환경 하나를 읽다 실패하면 그 항목만 `unreadable`이고 나머지는 계속 읽는다. 메타데이터 문제는
-  code로만 알린다(`ENTRY_POINTS_TOO_LARGE`, `METADATA_UNREADABLE`, `DUPLICATE_DISTRIBUTION`, `DUPLICATE_ENTRY`).
-  오류 문구와 파일 내용은 답에 넣지 않는다.
+  파서(`entry_points.txt`의 extras 떼기, `pyproject.toml`)는 입력 길이에 선형이다. 정규식 백트래킹에 기대지 않는다.
+- **링크와 특수 파일.** 실제 경로로 따라가며 순환(`ELOOP`)은 `unreadable`로 끝낸다. 파일은 `stat`으로 일반 파일인지
+  먼저 보고, 일반 파일일 때만 연다. FIFO·장치·소켓은 열지 않는다. 링크를 따르지 않고(`O_NOFOLLOW`) non-blocking으로
+  연 뒤 `fstat`의 dev·ino가 `stat`과 같은지 다시 본다. 다르면 읽지 않는다.
+- **실패 격리.** 환경 하나를 읽다 실패하면 그 항목만 상태 code(`unreadable`)를 받고 나머지는 계속 읽는다. 디렉터리를
+  읽지 못한 것은 `no_cli`나 빈 목록이 아니라 `unreadable`이다. 메타데이터 문제는 code로만 알린다
+  (`ENTRY_POINTS_TOO_LARGE`, `METADATA_UNREADABLE`, `DUPLICATE_DISTRIBUTION`, `DUPLICATE_ENTRY`). 오류 문구와 파일
+  내용은 답에 넣지 않는다.
 - **runtime 독립.** Studio runtime 번들, helper 세대, 변경 잠금이 필요 없다. 번들이 없어 `RUNTIME_UNAVAILABLE`일
   때도, 다른 변경이 잠금을 잡고 있을 때도 답한다. 서비스가 설정되기 전(데스크톱 시작 직후, 시작 실패)에도 두 host가
-  `list_terminal`만은 직접 답한다. 같은 서비스에 동시에 온 요청은 진행 중인 읽기 하나를 나눠 받는다.
-- **경로.** 홈 디렉터리는 `~`, 사용자 이름이 경로 한 마디 전체인 곳은 `<user>`로 바꾼다. 원격 WebUI에 홈 경로와 사용자
+  `list_terminal`만은 직접 답한다.
+- **경로와 이름 가림.** 답을 만든 뒤 마지막으로 **모든 문자열 필드**를 한 번 더 가린다. 위치, 실행 파일, 전역 항목
+  이름, 배포판 이름·버전, entry 이름, 참조(`file://` 포함)가 모두 대상이다. 홈 디렉터리(적힌 것과 realpath)는 텍스트
+  어디에 있든 `~`가 된다. 사용자 이름은 독립된 낱말로 나오는 곳마다 `<user>`가 된다. 원격 WebUI에 홈 경로와 사용자
   이름을 보내지 않으려는 것이다. 홈 밖의 다른 절대 경로(`/opt/homebrew/...`)는 그대로 둔다.
 - **Windows.** uv와 pipx의 도구 디렉터리만 본다. `aelix.exe`(uv trampoline, distlib launcher)는 이진 형식이라
   해석하지 않는다. **Windows 실기에서는 확인하지 않았다.** 경로 규칙은 위 소스를 읽어 정했고 시험은 Windows 배치를
   흉내 낸 것이다.
 - **이 기계의 확인.** macOS에서 `uv tool install aelix`로 설치한 실제 CLI(`~/.local/bin/aelix` → uv tool 환경,
-  native 0.1.0b2)를 읽어 pip pack 두 개를 그 CLI의 목록대로 냈다. 26 ms였다. **[실행]**
+  native 0.1.0b2)를 읽었다. pip pack 두 개가 그 CLI의 목록대로 나왔다. **[실행]**
 
 ## 10. 확인하지 않은 것
 
@@ -1292,6 +1314,21 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 **2026-11-24, 터미널 CLI 읽기 전용 목록(1b의 PR D).** 8.2의 A8·A9에 2026-11-22 결정을 적었다. `list_terminal`을
 5.11 표의 새 행으로 두고, 찾는 방법·한도·한계를 9절에 적었다. uv와 pipx의 기본 경로는 각 프로젝트의 공개 소스에서
 확인했다. 6절 표의 "Studio가 할 수 있는 것"을 실제 구현으로 바꿨다.
+
+**2026-11-24, PR D 독립 리뷰(blocking 5, should-fix 6, nit 1).** 9절 "터미널 CLI 읽기 전용 목록"을 고쳐 썼다.
+
+- **스캔:** 시간 한도가 답만이 아니라 스캔도 멈추게 했다. 시계를 첫 파일 시스템 호출보다 먼저 시작하고, 스캔을
+  프로세스에 하나로 두었다. 파일 시스템 호출은 동시에 8개까지다.
+- **파서:** 두 정규식을 선형 판독기로 바꿨다.
+- **읽는 범위와 특수 파일:** 경로를 venv root, 절대 interpreter, 비 UNC로 한정했다. 특수 파일은 열기 전에 거른다.
+- **가림:** 답의 모든 문자열을 가린다.
+- **should-fix:**
+  - 상대 경로 변수는 무시하고, Windows 앱 데이터는 보통 위치로 대신한다.
+  - distlib의 인용 없는·인자 있는 래퍼와 잘린 줄을 처리했다.
+  - 배포판을 CPython처럼 먼저 중복 제거하고 `.egg-info`·대문자를 포함했다.
+  - pyproject는 존재하는 선언 경로만 받고, 파서 없이 읽지 못하는 형태는 `unknown`으로 둔다.
+  - 한도와 읽기 실패를 `truncated`·`unreadable`로 알린다.
+  - ADR 서두·5.11·6절·9절을 구현에 맞췄다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

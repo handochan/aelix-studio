@@ -88,10 +88,48 @@ describe('where the terminal CLI is looked for', () => {
     expect(locations.agentDirectory).toBe('C:\\Users\\u\\.aelix\\agent');
   });
 
-  it('looks at no more than the first entries of a long PATH', () => {
+  it('looks at no more than the first entries of a long PATH, and says it stopped short', () => {
     const path = Array.from({ length: PATH_ENTRY_LIMIT + 10 }, (_, index) => `/p${index}`).join(':');
     const locations = searchLocations({ PATH: path }, '/home/u', 'linux');
     expect(locations.launcherDirectories).toContain(`/p${PATH_ENTRY_LIMIT - 1}`);
     expect(locations.launcherDirectories).not.toContain(`/p${PATH_ENTRY_LIMIT}`);
+    expect(locations.truncated).toBe(true);
+    expect(searchLocations({ PATH: '/a:/b' }, '/home/u', 'linux').truncated).toBe(false);
+  });
+
+  it('ignores relative locations, which uv and pipx take from a working directory Studio does not know', () => {
+    const locations = searchLocations(
+      { UV_TOOL_DIR: 'tools', PIPX_HOME: 'pipx-home', AELIX_CODING_AGENT_DIR: 'agent' },
+      '/home/u',
+      'linux'
+    );
+    expect(roots(locations)).toEqual([
+      'uv_tool /home/u/.local/share/uv/tools',
+      'pipx /home/u/.local/share/pipx/venvs',
+      'pipx /home/u/.local/pipx/venvs',
+    ]);
+    expect(locations.agentDirectory).toBeUndefined();
+  });
+
+  it('refuses Windows UNC and device paths from every variable, and falls back to the usual app data folders', () => {
+    const locations = searchLocations(
+      {
+        UV_TOOL_DIR: '\\\\server\\tools',
+        PIPX_HOME: '\\\\?\\C:\\pipx',
+        AELIX_CODING_AGENT_DIR: '//server/agent',
+      },
+      'C:\\Users\\u',
+      'win32'
+    );
+    expect(roots(locations)).toEqual([
+      'uv_tool C:\\Users\\u\\AppData\\Roaming\\uv\\data\\tools',
+      'uv_tool C:\\Users\\u\\AppData\\Roaming\\uv\\tools',
+      'pipx C:\\Users\\u\\AppData\\Local\\pipx\\pipx\\venvs',
+      'pipx C:\\Users\\u\\.local\\pipx\\venvs',
+      'pipx C:\\Users\\u\\pipx\\venvs',
+    ]);
+    expect(locations.agentDirectory).toBeUndefined();
+    // A UNC home gives nothing to search.
+    expect(searchLocations({}, '\\\\server\\home\\u', 'win32').toolRoots).toEqual([]);
   });
 });
