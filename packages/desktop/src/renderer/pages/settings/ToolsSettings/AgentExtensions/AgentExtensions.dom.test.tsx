@@ -301,7 +301,7 @@ describe('the agent extensions screen', () => {
         expect(sent('install')).toEqual([{ action: 'install', source: { kind: 'index', name: 'aelix-notes' } }])
       );
       expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
-      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 5000 });
+      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument());
       expect(screen.getByText('settings.agentExtensions.progress.switched')).toBeInTheDocument();
       expect(sent('poll').length).toBeGreaterThanOrEqual(2);
       expect(sent('list').length).toBeGreaterThanOrEqual(2);
@@ -330,9 +330,7 @@ describe('the agent extensions screen', () => {
       await install();
       fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
       // The dialog leaves after its exit animation, which can be slow on a busy runner.
-      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
-        timeout: 4000,
-      });
+      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
       expect(sent('install')).toEqual([]);
 
       await install();
@@ -369,7 +367,7 @@ describe('the agent extensions screen', () => {
         fireEvent.click(screen.getByTestId('credentials-submit'));
       };
       await enter('wrong');
-      expect(await screen.findByTestId('operation-failure', {}, { timeout: 4000 })).toHaveTextContent(
+      expect(await screen.findByTestId('operation-failure', {})).toHaveTextContent(
         'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
       );
       fireEvent.click(screen.getByTestId('operation-retry'));
@@ -424,7 +422,7 @@ describe('the agent extensions screen', () => {
         await screen.findByText('settings.agentExtensions.actions.remove', { selector: '.arco-popconfirm button span' })
       );
       await waitFor(() => expect(sent('remove')).toEqual([{ action: 'remove', name: 'aelix-starter' }]));
-      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 4000 });
+      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument());
       fireEvent.click(screen.getByTestId('operation-close'));
       fireEvent.click(screen.getByTestId('agent-extensions-rollback'));
       fireEvent.click(
@@ -602,9 +600,7 @@ describe('the agent extensions screen', () => {
       const input = await typeProxyWithPassword();
       fireEvent.click(screen.getByTestId('settings-save'));
       fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
-      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
-        timeout: 4000,
-      });
+      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
       expect(sent('set_settings')).toEqual([]);
       expect(input.value).toBe('http://proxy.corp:3128');
 
@@ -662,7 +658,7 @@ describe('the agent extensions screen', () => {
         },
       ]);
       // Asked once: the prompt leaves (after its exit animation) and does not come back.
-      await waitFor(() => expect(screen.queryByTestId('credentials-password')).toBeNull(), { timeout: 4000 });
+      await waitFor(() => expect(screen.queryByTestId('credentials-password')).toBeNull());
       expect(sent('install')).toHaveLength(2);
     },
     LONG
@@ -765,7 +761,7 @@ describe('the agent extensions screen', () => {
       const polled = sent('poll').length;
       render(<AgentExtensionsSettings />);
       expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
-      await waitFor(() => expect(sent('poll').length).toBeGreaterThan(polled), { timeout: 3000 });
+      await waitFor(() => expect(sent('poll').length).toBeGreaterThan(polled));
     });
 
     it('is shown when its start answer arrives after the screen was left and opened again', async () => {
