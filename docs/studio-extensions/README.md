@@ -733,7 +733,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
       없다. 표시는 helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
   - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 본문을 다시 보내게 되는 redirect는 따르지
     않는다(`redirect: 'error'`). 답을 잃거나 redirect되면 `CONNECTION_LOST`로 끝내고 다시 보내지 않는다. 이미 바뀐 뒤일 수
-    있기 때문이다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`, `UNAVAILABLE`, `CONNECTION_LOST`,
+    있기 때문이다. 2xx가 아닌 답도 본문이 16 KiB 이하의 JSON 객체(`application/json`)이면 읽어 host가 쓴 `code`(채널의
+    거절 code일 때)와 `transport`를 지킨다. 본문이 없거나 읽을 수 없으면 status로 code를 정하고 `transport`는 없다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`, `UNAVAILABLE`, `CONNECTION_LOST`,
     `INSECURE_TRANSPORT`)은 `types.ts`의 `StudioExtensionsReply`이고, 요청 형태는 `StudioExtensionsRequest`다. **[실행:
     facade·채널·client 단위 시험, 시작 전 취소 경합, static server route 시험, 설치 앱 smoke에서 실제 IPC로
     `get_settings`·`list`]**
@@ -1221,6 +1222,10 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
   보낸다.
 - 확장 기능은 manifest 없는 runtime을 받지 않는다는 것을 detail과 배포 패키지 문서에 적었다. 받는 형식은 넓히지 않았다.
 - origin/main(#117·#119)을 merge했다.
+
+**2026-11-24, PR A 세 번째 재확인(should-fix 1, nit 1).** 화면 client가 2xx가 아닌 답의 본문을 버려 401·503의
+`transport`를 잃던 것을 고쳤다. 크기 안의 JSON 거절이면 `code`와 `transport`를 지킨다. 배포 패키지 문서에 Windows
+준비본의 Python 경로(`native\Scripts\python.exe`)를 더했다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

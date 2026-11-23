@@ -80,6 +80,61 @@ describe('the screen client of the extension helper', () => {
     expect(await requestStudioExtensions({ action: 'list' })).toEqual({ ok: false, code });
   });
 
+  it.each([
+    [401, { ok: false, code: 'UNAUTHENTICATED', transport: 'insecure' }],
+    [503, { ok: false, code: 'UNAVAILABLE', transport: 'secure' }],
+    [403, { ok: false, code: 'FORBIDDEN', transport: 'insecure' }],
+  ])('keeps the code and transport of a %i the host wrote', async (status, body) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status,
+            headers: { 'content-type': 'application/json' },
+          })
+      )
+    );
+    expect(await requestStudioExtensions({ action: 'get_settings' })).toEqual(body);
+  });
+
+  it.each([
+    ['no body', null, 'application/json'],
+    ['a body that is not JSON', 'Service Unavailable', 'application/json'],
+    ['a JSON body of another type', '{"ok":false,"code":"UNAVAILABLE","transport":"secure"}', 'text/plain'],
+    ['a JSON array', '[{"transport":"secure"}]', 'application/json'],
+    ['a transport that is not one', '{"ok":false,"code":"UNAVAILABLE","transport":"tls"}', 'application/json'],
+    [
+      'a body over the limit',
+      JSON.stringify({ ok: false, code: 'UNAVAILABLE', transport: 'secure', pad: 'x'.repeat(17000) }),
+      'application/json',
+    ],
+  ])('reads %s as a refusal without transport, by its status', async (_case, body, type) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(body, { status: 503, headers: { 'content-type': type } }))
+    );
+    expect(await requestStudioExtensions({ action: 'get_settings' })).toEqual({ ok: false, code: 'UNAVAILABLE' });
+  });
+
+  it('takes the code from the status when the body names one the route does not write', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('{"ok":false,"code":"BUSY","transport":"secure"}', {
+            status: 401,
+            headers: { 'content-type': 'application/json; charset=utf-8' },
+          })
+      )
+    );
+    expect(await requestStudioExtensions({ action: 'list' })).toEqual({
+      ok: false,
+      code: 'UNAUTHENTICATED',
+      transport: 'secure',
+    });
+  });
+
   it('never sends a request again when its answer is lost: the change may have been made', async () => {
     const credentials = { username: 'ops', password: 'sentinel-secret' };
     const fetch = vi.fn(async () => {

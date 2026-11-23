@@ -90,6 +90,15 @@ installed Studio app. You can build one from a prepared runtime:
 export AELIX_STUDIO_RUNTIME=/path/to/studio-runtime-bundle
 ```
 
+On Windows, the prepared runtime's Python is `native\Scripts\python.exe`:
+
+```powershell
+C:\path\to\prepared\studio-preview\native\Scripts\python.exe -B `
+  scripts\studio-preview\packaging\bundle.py `
+  --runtime C:\path\to\prepared\studio-preview --output C:\path\to\studio-runtime-bundle
+$env:AELIX_STUDIO_RUNTIME = 'C:\path\to\studio-runtime-bundle'
+```
+
 The bundle serves native Provider sign-in too. Without a runtime, those screens
 report that it is not available here. With only a prepared runtime, Agent
 Extensions report the same and name the bundle they need. Agent Extensions in
