@@ -35,4 +35,27 @@ describe('the credentials dialog', () => {
     view.rerender(<CredentialsPrompt {...props} question={first} proxy='http://old.proxy:3128' />);
     expect((screen.getByTestId('credentials-password') as HTMLInputElement).value).toBe('');
   });
+
+  it('does not carry the keychain choice of one question over to the question that takes its place', () => {
+    const onDone = vi.fn();
+    const props = { visible: true, reason: 'required' as const, mode: 'keychain' as const, onDone };
+    const view = render(<CredentialsPrompt {...props} question={{ id: 21 }} proxy='http://old.proxy:3128' />);
+    fireEvent.click(screen.getByText('settings.agentExtensions.credentials.save'));
+    view.rerender(<CredentialsPrompt {...props} question={{ id: 22 }} proxy='http://new.proxy:3128' />);
+    fireEvent.change(screen.getByTestId('credentials-username'), { target: { value: 'ops' } });
+    fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'new-secret' } });
+    fireEvent.click(screen.getByTestId('credentials-submit'));
+    expect(onDone).toHaveBeenCalledWith({ credentials: { username: 'ops', password: 'new-secret' }, save: false });
+  });
+
+  it('keeps the keychain choice the user made for the question in front of them', () => {
+    const onDone = vi.fn();
+    const props = { visible: true, reason: 'required' as const, mode: 'keychain' as const, onDone };
+    render(<CredentialsPrompt {...props} question={{ id: 23 }} proxy='http://proxy:3128' />);
+    fireEvent.click(screen.getByText('settings.agentExtensions.credentials.save'));
+    fireEvent.change(screen.getByTestId('credentials-username'), { target: { value: 'ops' } });
+    fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByTestId('credentials-submit'));
+    expect(onDone).toHaveBeenCalledWith({ credentials: { username: 'ops', password: 'secret' }, save: true });
+  });
 });

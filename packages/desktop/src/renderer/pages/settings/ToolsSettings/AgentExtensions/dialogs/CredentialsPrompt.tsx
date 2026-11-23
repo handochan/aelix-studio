@@ -39,8 +39,8 @@ type Props = {
 /**
  * Asks for the proxy's user name and password. They live only in this dialog's state until sent,
  * for the question they were typed for: when another question (a new proxy, a new ask), or none,
- * takes its place, they are cleared in that same render, so nothing typed for the one before stays
- * in state. They are also cleared when the dialog closes. "Keep in the keychain" shows only where
+ * takes its place, they are cleared in that same render, and the keychain choice goes back to its
+ * default, so nothing typed or chosen for the one before stays in state. They are also cleared when the dialog closes. "Keep in the keychain" shows only where
  * Studio can keep them.
  */
 const CredentialsPrompt: React.FC<Props> = ({ question, visible, reason, proxy, mode, onDone }) => {
@@ -50,10 +50,12 @@ const CredentialsPrompt: React.FC<Props> = ({ question, visible, reason, proxy, 
   const [save, setSave] = useState(reason === 'save');
   const [typedFor, setTypedFor] = useState(question?.id);
   if (typedFor !== question?.id) {
-    // Another question: what was typed goes before this render is shown.
+    // Another question: what was typed or chosen for the one before goes before this render is
+    // shown, the keychain choice included.
     setTypedFor(question?.id);
     setUsername('');
     setPassword('');
+    setSave(reason === 'save');
   }
 
   useEffect(() => {
