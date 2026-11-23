@@ -608,7 +608,7 @@
     "terminal": {
       "title": "aelix im Terminal (nur lesen)",
       "description": "Erweiterungen, die für aelix in Ihrem Terminal installiert sind. Studio-Unterhaltungen verwenden sie nicht. Installieren und entfernen Sie sie mit aelix im Terminal.",
-      "summary": "{{environments}} Umgebungen · {{global}} globale Einträge",
+      "summary": "Umgebungen: {{environments}} · Globale Einträge: {{global}}",
       "reading": "Wird gelesen…",
       "status": {
         "listed": "Gelesen",

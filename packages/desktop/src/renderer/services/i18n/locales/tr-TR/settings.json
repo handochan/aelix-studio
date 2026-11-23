@@ -618,7 +618,7 @@
     "terminal": {
       "title": "Terminaldeki aelix (salt okunur)",
       "description": "Terminalinizdeki aelix için kurulan uzantılar. Studio sohbetleri bunları kullanmaz. Terminalde aelix ile kurun ve kaldırın.",
-      "summary": "{{environments}} ortam · {{global}} genel öğe",
+      "summary": "Ortamlar: {{environments}} · Genel öğeler: {{global}}",
       "reading": "Okunuyor…",
       "status": {
         "listed": "Okundu",

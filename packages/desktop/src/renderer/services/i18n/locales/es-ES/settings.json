@@ -606,7 +606,7 @@
     "terminal": {
       "title": "aelix del terminal (solo lectura)",
       "description": "Extensiones instaladas para aelix en tu terminal. Las conversaciones de Studio no las usan. Instálalas y quítalas con aelix en el terminal.",
-      "summary": "{{environments}} entornos · {{global}} entradas globales",
+      "summary": "Entornos: {{environments}} · Entradas globales: {{global}}",
       "reading": "Leyendo…",
       "status": {
         "listed": "Leído",

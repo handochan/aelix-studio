@@ -618,7 +618,7 @@
     "terminal": {
       "title": "Terminal aelix (read only)",
       "description": "Extensions installed for aelix in your terminal. Studio conversations do not use them. Install and remove them with aelix in the terminal.",
-      "summary": "{{environments}} environments · {{global}} global entries",
+      "summary": "Environments: {{environments}} · Global entries: {{global}}",
       "reading": "Reading…",
       "status": {
         "listed": "Read",

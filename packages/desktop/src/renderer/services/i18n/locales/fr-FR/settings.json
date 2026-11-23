@@ -618,7 +618,7 @@
     "terminal": {
       "title": "aelix du terminal (lecture seule)",
       "description": "Extensions installées pour aelix dans votre terminal. Les conversations Studio ne les utilisent pas. Installez-les et supprimez-les avec aelix dans le terminal.",
-      "summary": "{{environments}} environnements · {{global}} entrées globales",
+      "summary": "Environnements : {{environments}} · Entrées globales : {{global}}",
       "reading": "Lecture…",
       "status": {
         "listed": "Lu",

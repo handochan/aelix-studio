@@ -618,7 +618,7 @@
     "terminal": {
       "title": "aelix do terminal (somente leitura)",
       "description": "Extensões instaladas para o aelix no seu terminal. As conversas do Studio não as usam. Instale e remova pelo aelix no terminal.",
-      "summary": "{{environments}} ambientes · {{global}} itens globais",
+      "summary": "Ambientes: {{environments}} · Itens globais: {{global}}",
       "reading": "Lendo…",
       "status": {
         "listed": "Lido",

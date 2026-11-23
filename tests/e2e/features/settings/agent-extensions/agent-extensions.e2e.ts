@@ -44,6 +44,8 @@ test.describe('Agent Extensions', () => {
       terminal.locator('[data-testid="terminal-environment"], [data-testid="terminal-none"]').first()
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.getByTestId('install-settings')).toBeVisible();
+    // Let the section finish unfolding before the picture.
+    await page.waitForTimeout(400);
     await takeScreenshot(page, 'agent-extensions/tc-aext-02/01-lists.png');
   });
 
