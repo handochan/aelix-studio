@@ -29,7 +29,12 @@ vi.mock('electron', () => ({
   },
 }));
 
-import { disposeStudioExtensions, getStudioExtensionService, type ExtensionService } from '@aionui/web-host';
+import {
+  disposeStudioExtensions,
+  getStudioExtensionService,
+  type ExtensionService,
+  type StudioExtensionsRequest,
+} from '@aionui/web-host';
 import {
   cancelStudioExtensionsOf,
   startStudioExtensions,
@@ -64,40 +69,46 @@ describe('the desktop channel of the extension helper', () => {
     expect(request).toHaveBeenCalledWith('desktop:7', { action: 'list' });
   });
 
-  it('refuses a request over 60 kB in UTF-8, or one that is not JSON data, before the helper sees it', async () => {
-    const request = vi.fn(async () => ({ ok: true as const, data: {} }));
-    const handle = studioExtensionsIpcHandler(
-      () => true,
-      () => ({ request }) as unknown as ExtensionService
-    );
-    const install = (value: unknown) => ({ action: 'install', source: { kind: 'file', path: value } });
-    expect(await handle(event(7), install('x'.repeat(60001)))).toEqual({
-      ok: false,
-      code: 'FRAME_LIMIT',
-      transport: 'secure',
-    });
-    // 30,001 UTF-16 units, 60,002 bytes: counted as bytes.
-    expect(await handle(event(7), install('é'.repeat(30001)))).toEqual({
-      ok: false,
-      code: 'FRAME_LIMIT',
-      transport: 'secure',
-    });
-    const circular: Record<string, unknown> = {};
-    circular.self = circular;
-    for (const value of [
-      circular,
-      new ArrayBuffer(70000),
-      install(new ArrayBuffer(70000)),
-      install(new Uint8Array(8)),
-      install(new Date()),
-      install(new Map()),
-      install(Number.NaN),
-      'list',
-    ])
-      expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT', transport: 'secure' });
-    expect(request).not.toHaveBeenCalled();
-    expect(await handle(event(7), install('é'.repeat(100)))).toEqual({ ok: true, data: {}, transport: 'secure' });
-  });
+  it.each(['install', 'upgrade'] as const)(
+    'checks the size and JSON data of an %s before calling the helper',
+    async (action) => {
+      const request = vi.fn(async () => ({ ok: true as const, data: {} }));
+      const handle = studioExtensionsIpcHandler(
+        () => true,
+        () => ({ request }) as unknown as ExtensionService
+      );
+      const command = (value: unknown) =>
+        action === 'upgrade'
+          ? { action, name: 'demo', proxyCredentials: { username: 'ops', password: value } }
+          : { action, source: { kind: 'file', path: value } };
+      expect(await handle(event(7), command('x'.repeat(60001)))).toEqual({
+        ok: false,
+        code: 'FRAME_LIMIT',
+        transport: 'secure',
+      });
+      // 30,001 UTF-16 units, 60,002 bytes: counted as bytes.
+      expect(await handle(event(7), command('é'.repeat(30001)))).toEqual({
+        ok: false,
+        code: 'FRAME_LIMIT',
+        transport: 'secure',
+      });
+      const circular: Record<string, unknown> = {};
+      circular.self = circular;
+      for (const value of [
+        circular,
+        new ArrayBuffer(70000),
+        command(new ArrayBuffer(70000)),
+        command(new Uint8Array(8)),
+        command(new Date()),
+        command(new Map()),
+        command(Number.NaN),
+        'list',
+      ])
+        expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT', transport: 'secure' });
+      expect(request).not.toHaveBeenCalled();
+      expect(await handle(event(7), command('é'.repeat(100)))).toEqual({ ok: true, data: {}, transport: 'secure' });
+    }
+  );
 
   it('refuses the window while its DevTools are open in a packaged app, not in a development build', async () => {
     const request = vi.fn(async () => ({ ok: true as const, data: {} }));
@@ -107,19 +118,30 @@ describe('the desktop channel of the extension helper', () => {
       service,
       () => true
     );
-    expect(await packaged(event(7, true), { action: 'list' })).toEqual({
+    const upgrade = {
+      action: 'upgrade',
+      name: 'demo',
+      allowUnpin: true,
+      proxyCredentials: { username: 'ops', password: 'fixture-secret' },
+    } satisfies StudioExtensionsRequest;
+    expect(await packaged(event(7, true), upgrade)).toEqual({
       ok: false,
       code: 'FORBIDDEN',
       transport: 'secure',
     });
     expect(request).not.toHaveBeenCalled();
-    expect(await packaged(event(7, false), { action: 'list' })).toEqual({ ok: true, data: {}, transport: 'secure' });
+    expect(await packaged(event(7, false), { ...upgrade, acknowledgeInsecureTransport: true })).toEqual({
+      ok: true,
+      data: {},
+      transport: 'secure',
+    });
+    expect(request).toHaveBeenCalledWith('desktop:7', upgrade);
     const development = studioExtensionsIpcHandler(
       () => true,
       service,
       () => false
     );
-    expect(await development(event(7, true), { action: 'list' })).toEqual({ ok: true, data: {}, transport: 'secure' });
+    expect(await development(event(7, true), upgrade)).toEqual({ ok: true, data: {}, transport: 'secure' });
   });
 
   it('answers RUNTIME_UNAVAILABLE until the helper is started', async () => {

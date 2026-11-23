@@ -12,7 +12,7 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { parseRequirement } from '../inspect/requirement.js';
-import { contentDistributions, INSTALLER, readSite, type SiteSnapshot } from '../inspect/site.js';
+import { contentDistributions, INSTALLER, readSite, rewriteRecord, type SiteSnapshot } from '../inspect/site.js';
 import { runToExit, type Spawn } from '../process.js';
 import { hashFile } from '../store/artifacts.js';
 import { generationPaths, type Bundle, type BundleFacts, type GenerationPaths, type Layout } from '../store/layout.js';
@@ -198,6 +198,7 @@ async function carryOver(
     return real === root || inside(root, real);
   };
   const copied = new Set<string>();
+  const rebased = new Map<string, Buffer>();
   /** File made by this carry-over (device and inode) to the file it was copied from. */
   const made = new Map<string, string>();
   for (const distribution of contentDistributions(snapshot)) {
@@ -244,7 +245,16 @@ async function carryOver(
       const rewrite = platform === 'win32' ? rewriteWindowsLauncher : rewriteScriptHeader;
       const rewritten = rewrite(await readFile(destination), parent.python, candidate.python);
       // oxlint-disable-next-line no-await-in-loop
-      if (rewritten) await writeFile(destination, rewritten);
+      if (rewritten) {
+        await writeFile(destination, rewritten);
+        rebased.set(destination, rewritten);
+      }
+    }
+  }
+  for (const distribution of contentDistributions(snapshot)) {
+    if (distribution.files.some((file) => file.endsWith('.pyc') || rebased.has(path.resolve(candidate.site, file)))) {
+      // oxlint-disable-next-line no-await-in-loop -- each distribution owns a separate RECORD
+      await rewriteRecord(candidate.site, distribution.info, rebased, true);
     }
   }
   // Leave nested links behind: native would write through them. A non-directory agent
@@ -274,9 +284,11 @@ export async function createCandidate(
   context: FlowContext,
   id: string,
   parent: GenerationRecord | null,
-  requireCompleteFiles = false
+  requireCompleteFiles = false,
+  staging?: string
 ): Promise<Candidate> {
-  const paths = generationPaths(context.layout, id, context.bundle.binding.pythonMinor, context.platform);
+  const location = staging === undefined ? context.layout : { ...context.layout, generations: staging };
+  const paths = generationPaths(location, id, context.bundle.binding.pythonMinor, context.platform);
   await mkdir(paths.directory);
   const result = await runToExit(
     context.spawn,

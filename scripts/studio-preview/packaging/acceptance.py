@@ -31,8 +31,10 @@ INSTALL_PROGRESS_INTERVAL = 30
 INSTALL_PROBE_TIMEOUT = 5
 # Keep one bounded recapture for incomplete Linux measurements. macOS Intel
 # hit the qualifier's 180s deadline in PR Checks run 44986691773 (Studio #116).
-EXTENSIONS_CAPTURE_TIMEOUT = 180
-DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 300
+# The upgrade qualification adds real pip installs, an index lookup and Git fetches.
+EXTENSIONS_CAPTURE_TIMEOUT = 300
+DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 420
+LINUX_EXTENSIONS_CAPTURE_TIMEOUT = 420
 EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
 INSTALL_PROGRESS_PROBE = r"""
@@ -257,8 +259,12 @@ def record_extension_qualification(report, output, audits, verify, *, signature=
     smoke_status = report['status']
     report['smokeStatus'] = smoke_status
     report['status'] = 'running'
-    capture_timeout = (DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT if report['target'] == 'darwin-x64'
-                       else EXTENSIONS_CAPTURE_TIMEOUT)
+    target = report['target']
+    capture_timeout = EXTENSIONS_CAPTURE_TIMEOUT
+    if target == 'darwin-x64':
+        capture_timeout = DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT
+    elif target.startswith('linux-'):
+        capture_timeout = LINUX_EXTENSIONS_CAPTURE_TIMEOUT
     verdict = dict(status='running', captureTimeoutSeconds=capture_timeout,
                    totalTimeoutSeconds=audits.time_budget(capture_timeout),
                    timeoutScope='audit-supervisor' if audits.enabled else 'qualifier-command',

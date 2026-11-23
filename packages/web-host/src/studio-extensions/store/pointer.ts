@@ -1,6 +1,6 @@
 import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { parseSubdirectory } from '../flow/online/source.js';
+import { parseIndexRequirement, parseSubdirectory } from '../flow/online/source.js';
 import { isAdapterReference, isObjectReference } from '../inspect/metadata.js';
 import type { LaunchForm } from '../launch/form.js';
 import { isManagedId, managedExtensionId, parseManagedCatalog } from '../launch/managedCatalog.js';
@@ -43,7 +43,7 @@ export type GenerationRecord = {
   parent: string | null;
   createdAt: string;
   binding: BundleBinding;
-  operation: { action: 'install' | 'update' | 'remove'; target: string };
+  operation: { action: 'install' | 'update' | 'upgrade' | 'remove'; target: string };
   /** Distributions other than the installer, by canonical name. */
   distributions: Record<string, RecordedDistribution>;
   /** `aelix.extensions` entries by entry name. */
@@ -69,9 +69,13 @@ function parseBinding(value: unknown): BundleBinding | undefined {
 
 function parseOrigin(value: unknown): ExtensionOrigin | undefined {
   if (!isObject(value)) return undefined;
-  const { kind, artifact, wheel, sha256, indexUrl, url, commit, subdirectory } = value;
+  const { kind, artifact, wheel, sha256, indexUrl, url, commit, subdirectory, requirement } = value;
   if (kind === 'file' && isText(artifact) && isText(wheel) && isText(sha256)) return { kind, artifact, wheel, sha256 };
-  if (kind === 'index' && isText(indexUrl)) return { kind, indexUrl };
+  if (kind === 'index' && isText(indexUrl)) {
+    if (requirement === undefined) return { kind, indexUrl };
+    const parsed = parseIndexRequirement(requirement);
+    return parsed && { kind, indexUrl, requirement: parsed.text };
+  }
   if (
     kind === 'git' &&
     isText(indexUrl) &&
@@ -129,7 +133,10 @@ export function parseGenerationRecord(text: string): GenerationRecord | undefine
   const managed = launch.managed === undefined ? undefined : parseManagedCatalog(launch.managed);
   if (launch.managed !== undefined && managed === undefined) return undefined;
   const { action, target } = operation;
-  if ((action !== 'install' && action !== 'update' && action !== 'remove') || typeof target !== 'string')
+  if (
+    (action !== 'install' && action !== 'update' && action !== 'upgrade' && action !== 'remove') ||
+    typeof target !== 'string'
+  )
     return undefined;
   const record: GenerationRecord = {
     schema: GENERATION_SCHEMA,

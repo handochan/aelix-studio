@@ -10,7 +10,7 @@ import { spawnChild, type Spawn } from '../../process';
 import { layoutOf, type Bundle, type Layout } from '../../store/layout';
 import { ExtensionFailure } from '../../types';
 import { baseEnvironment, managementEnvironment } from '../environment';
-import { checkSubdirectory, checkoutSubdirectory, COPY_SOURCE, copyWithoutLinks } from './checkout';
+import { checkSubdirectory, fetchGitSource, COPY_SOURCE, copyWithoutLinks } from './checkout';
 
 const run = promisify(execFile);
 /** The no-follow copy is plain Python; the system interpreter runs it as the bundled one would. */
@@ -55,14 +55,17 @@ describe.skipIf(process.platform === 'win32' || !PYTHON)('fetching a git source 
     subdirectory: string,
     revision = '',
     options: { env?: Record<string, string>; url?: string; signal?: AbortSignal; spawn?: Spawn } = {}
-  ) =>
-    checkoutSubdirectory(
+  ) => {
+    const { checkout } = await fetchGitSource(
       context(options.spawn, options.signal),
       directWriter(layout.root),
       options.env ?? environment(),
       source(subdirectory, revision, options.url),
       30_000
     );
+    if (!checkout) throw new Error('expected a checked subdirectory');
+    return checkout;
+  };
   const refusal = async (work: Promise<unknown>): Promise<ExtensionFailure> => {
     const error = await work.catch((caught: unknown) => caught);
     if (!(error instanceof ExtensionFailure)) throw new Error(`expected a failure, got ${String(error)}`);
