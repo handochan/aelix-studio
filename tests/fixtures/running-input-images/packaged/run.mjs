@@ -11,6 +11,7 @@ import httpBridge from '../../../e2e/helpers/httpBridge.ts';
 import { closeElectron } from '../../../../scripts/studio-preview/host-release/verification.mjs';
 import { attach, clickTimed, observeRenderer, takeAck } from './browser.mjs';
 import { digest, holdMessage, model, providerId, startProvider } from './provider.mjs';
+import { startWebUI, webuiApi } from './webui.mjs';
 
 const scenarios = [
   { name: 'idle-png', image: 'idle.png', write: 'prompt', notice: 'none' },
@@ -21,13 +22,18 @@ const scenarios = [
   { name: 'five-paths', image: null, write: 'steer', notice: 'blocked-path-only' },
   { name: 'stop-pending', image: 'stop.png', write: 'steer', notice: 'queued-after-stop' },
 ];
-const { httpGet, httpPost } = httpBridge;
-const output = path.resolve('.local/image-acceptance.json');
+const surface = process.env.IMAGE_SURFACE ?? 'electron';
+assert.ok(surface === 'electron' || surface === 'webui');
+const { httpGet, httpPost } = surface === 'electron' ? httpBridge : webuiApi;
+const output = path.resolve(
+  surface === 'electron' ? '.local/image-acceptance.json' : '.local/image-acceptance-webui.json'
+);
 const inputs = path.resolve(process.env.IMAGE_INPUTS ?? '.local/image-acceptance-inputs');
 const baseline = JSON.parse(fs.readFileSync('scripts/studio-preview/baseline.json'));
 const result = {
   schema: 'studio.running-image-acceptance/1',
   target: process.platform + '-' + process.arch,
+  surface,
   status: 'failed',
   stage: 'setup',
   failure: null,
@@ -49,6 +55,7 @@ function classifyFailure(error) {
   if (/Unable to open X display|Missing X server/i.test(message)) return 'display-unavailable';
   if (/Process failed to launch|failed to launch/i.test(message)) return 'launch-failed';
   if (error?.code === 'ENOENT') return 'file-not-found';
+  if (/intercepts pointer events/i.test(message)) return 'click-obscured';
   if (error?.name === 'TimeoutError') return 'timeout';
   return 'assertion-or-runtime';
 }
@@ -64,6 +71,7 @@ const stoppedNotice = /Not confirmed whether they were handled after Stop/;
 const empty = () => ({ bytes: null, sha256: null });
 
 let app;
+let webui;
 let root;
 let provider;
 let sampler;
@@ -81,7 +89,7 @@ const writes = () => {
     .map((line) => JSON.parse(line));
 };
 
-function sampleRss(pid) {
+function sampleRss(pid, browserPid = 0) {
   sampler = spawn(driver, ['-I', '-B', path.join(import.meta.dirname, 'sampleRss.py')], {
     stdio: ['pipe', 'pipe', 'ignore'],
     windowsHide: true,
@@ -93,7 +101,7 @@ function sampleRss(pid) {
   return (async () => {
     while (sampler.exitCode === null && !sampler.stdin.destroyed) {
       const row = writes().slice(offset).at(-1);
-      sampler.stdin.write([pid, row?.acpPid ?? 0, row?.nativePid ?? 0].join(' ') + '\n');
+      sampler.stdin.write([pid, row?.acpPid ?? 0, row?.nativePid ?? 0, browserPid].join(' ') + '\n');
       const line = await iterator.next();
       if (line.done) break;
       const sample = JSON.parse(line.value);
@@ -211,7 +219,13 @@ async function runScenario(page, scenario, row) {
     const mode = page.getByTestId('running-input-mode');
     await expect(mode).toBeVisible(options);
     check('mode-select');
-    await mode.getByText(scenario.write === 'follow_up' ? 'Follow-up' : 'Steer', { exact: true }).click();
+    const value = scenario.write === 'follow_up' ? 'follow-up' : 'steer';
+    const radio = mode.locator('input[type="radio"][value="' + value + '"]');
+    await mode
+      .locator('label')
+      .filter({ has: page.locator('input[type="radio"][value="' + value + '"]') })
+      .click();
+    await expect(radio).toBeChecked(options);
   }
   check('attach');
   const files = (pathCase ? ['idle.png', 'steer.png', 'caption.png', 'stop.png', 'extra.png'] : [scenario.image]).map(
@@ -423,6 +437,14 @@ try {
   const python = path.join(bundle, 'python', ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3']));
   const initial = await app.firstWindow();
   await initial.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
+  let password;
+  if (surface === 'webui') {
+    result.stage = 'webui-credential';
+    save();
+    const reset = await httpBridge.httpPost(initial, '/api/webui/reset-password');
+    password = reset?.new_password;
+    assert.ok(typeof password === 'string' && password.length > 0);
+  }
   await closeElectron(app);
   app = undefined;
 
@@ -467,24 +489,47 @@ try {
 
   result.stage = 'application-restart';
   save();
-  app = await launch();
-  // Playwright starts Electron through cmd.exe on Windows. Measure the main
-  // process and its children using the PID inside Electron.
-  sampleTask = sampleRss(await app.evaluate(() => process.pid));
+  const setupPage = async (page) => {
+    await page.exposeFunction('__fixtureHash', (encoded) => digest(Buffer.from(encoded, 'base64')));
+    await page.addInitScript(observeRenderer);
+  };
+  let page;
+  if (surface === 'webui') {
+    result.stage = 'webui-login';
+    save();
+    webui = await startWebUI({
+      executable: executable(),
+      cwd: root,
+      env,
+      password,
+      setupPage,
+      stage: (name) => {
+        result.stage = name;
+        save();
+      },
+    });
+    ({ page } = webui);
+    sampleTask = sampleRss(webui.pid, webui.browserPid);
+  } else {
+    app = await launch();
+    // Playwright starts Electron through cmd.exe on Windows. Measure the main
+    // process and its children using the PID inside Electron.
+    sampleTask = sampleRss(await app.evaluate(() => process.pid));
+    page = await app.firstWindow();
+    await setupPage(page);
+    await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => !!window.__runningImageFixture && window.__backendPort > 0);
+  }
   void sampleTask.catch(() => {
     sampler?.kill();
   });
-  const page = await app.firstWindow();
-  await page.exposeFunction('__fixtureHash', (encoded) => digest(Buffer.from(encoded, 'base64')));
-  await page.addInitScript(observeRenderer);
-  await page.waitForFunction(() => window.__backendPort > 0, undefined, { timeout: 60000 });
-  await page.reload({ waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => !!window.__runningImageFixture && window.__backendPort > 0);
   result.stage = 'scenarios';
   save();
   for (const scenario of scenarios) {
     const row = {
       scenario: scenario.name,
+      surface,
       status: 'failed',
       stage: 'start',
       notice: null,
@@ -510,8 +555,9 @@ try {
     try {
       await runScenario(page, scenario, row);
       row.stage = 'complete';
-    } catch {
+    } catch (error) {
       row.stage = stage;
+      row.failure = classifyFailure(error);
       row.renderer = await page
         .evaluate(() => {
           const submission = document.querySelector('[data-testid="running-image-submission"]');
@@ -563,6 +609,7 @@ try {
   await sampleTask?.catch(() => {});
   await provider?.close();
   try {
+    if (webui) await webui.close();
     if (app) await closeElectron(app);
     if (root) fs.rmSync(root, { recursive: true, force: true, maxRetries: 5 });
   } catch {

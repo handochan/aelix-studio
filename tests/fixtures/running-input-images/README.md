@@ -99,9 +99,10 @@ with `image_acceptance=true` or when a PR receives `run-image-acceptance`.
 Use the manual dispatch for docs-only changes covered by PR Checks'
 `paths-ignore` filter.
 It builds the Provider Preview package on Windows x64, Linux x64 and Linux
-arm64 from the selected commit. It runs the unpacked Windows app and the
-installed Linux DEB with each package's pinned Host, ACP wheel, and native
-runtime. On Linux, installing the DEB applies the Chromium sandbox setup.
+arm64 from the selected commit. Each runner uses the unpacked Windows app or
+installed Linux DEB to exercise both Electron and the logged-in WebUI with
+the pinned Host, ACP wheel, and native runtime. The Linux DEB applies the
+Chromium sandbox setup.
 
 ```sh
 gh workflow run pr-checks.yml -R handochan/aelix-studio --ref <branch> -f image_acceptance=true
@@ -125,8 +126,16 @@ The Stop scenario expects one native image write and zero provider image
 occurrences. The path-only fallback expects five references and zero image
 writes. Each scenario starts its own conversation.
 
-`image-acceptance.json` and the Actions summary report fixed fields. Latency
-uses the renderer's monotonic clock from the send click until the Host
+For WebUI, a fresh profile obtains a throwaway admin password from the bundled
+Host's password-reset endpoint. The same package starts its `--webui` server on
+loopback. Headless Chromium submits the real login form and checks that the
+conversation API returns 401 before login and 200 after login. Both surfaces
+run the same scenarios with separate profiles.
+
+`image-acceptance.json` and `image-acceptance-webui.json` contain the fixed
+fields and label their surface. The Actions job summary has a table for each.
+Latency uses the renderer's monotonic clock from the send click until the Host
 response, with a separate timestamp for the Stop notice. RSS is sampled
-every 125 ms in bytes, with Studio covering the Electron process tree
-excluding the Host subtree. Digests and lengths describe generated inputs.
+every 125 ms. Studio covers the Electron process tree excluding the Host
+subtree and includes the separate Chromium tree for WebUI. Digests and
+lengths describe generated inputs.

@@ -56,7 +56,7 @@ jobs:
         env:
           CSC_FOR_PULL_REQUEST: 'true'
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview >/dev/null 2>&1
-      - name: Run the packaged app with synthetic images
+      - name: Run Electron and logged-in WebUI with synthetic images
         id: scenarios
         env:
           IMAGE_PYTHON: python
@@ -71,10 +71,26 @@ jobs:
             manifest=$(dpkg -L "$package" | awk '/\/resources\/studio-preview\/manifest.json$/')
             export IMAGE_EXECUTABLE="${manifest%/resources/studio-preview/manifest.json}/aelix-studio"
             test -x "$IMAGE_EXECUTABLE"
-            xvfb-run -a node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
-          else
-            node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
           fi
+
+          run_probe() {
+            export IMAGE_SURFACE="$1"
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              xvfb-run -a node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
+            else
+              node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
+            fi
+          }
+
+          status=0
+          run_probe electron || status=1
+          if node node_modules/@playwright/test/cli.js install chromium --no-shell >/dev/null 2>&1; then
+            run_probe webui || status=1
+          else
+            echo 'browser_install=failed' >> "$GITHUB_OUTPUT"
+            status=1
+          fi
+          exit "$status"
       - name: Summarize acceptance
         if: always()
         env:
@@ -84,13 +100,16 @@ jobs:
           PREPARE: ${{ steps.prepare.outcome }}
           PACKAGE: ${{ steps.package.outcome }}
           SCENARIOS: ${{ steps.scenarios.outcome }}
+          WEBUI_BROWSER_INSTALL: ${{ steps.scenarios.outputs.browser_install }}
         run: node tests/fixtures/running-input-images/packaged/summary.mjs
       - name: Upload fixed-field acceptance results
         if: always()
         uses: actions/upload-artifact@v6
         with:
           name: image-acceptance-${{ matrix.target }}
-          path: .local/image-acceptance.json
+          path: |
+            .local/image-acceptance.json
+            .local/image-acceptance-webui.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 14

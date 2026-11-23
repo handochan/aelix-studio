@@ -14,7 +14,7 @@ def rss(pid):
         return 0
 
 
-def snapshot(root, acp, native):
+def snapshot(root, acp, native, browser):
     process = psutil.Process(root)
     studio = rss(root)
     host = 0
@@ -27,6 +27,12 @@ def snapshot(root, acp, native):
                 studio += sum(rss(item.pid) for item in child.children(recursive=True))
         except psutil.NoSuchProcess:
             continue
+    if browser > 0:
+        try:
+            browser_process = psutil.Process(browser)
+            studio += rss(browser) + sum(rss(child.pid) for child in browser_process.children(recursive=True))
+        except psutil.NoSuchProcess:
+            pass
     if sys.platform == "win32" and native > 0:
         # ACP owns a Windows Job gate. Its direct child runs the bundled worker.
         try:
