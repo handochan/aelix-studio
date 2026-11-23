@@ -13,6 +13,7 @@ import type {
 } from '@aionui/web-host';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { failureCode, type SendResult } from './channel';
+import { sourceHasUserPart } from './secrets';
 
 /** How often a running change is polled (11-22 design note: one second). */
 export const POLL_INTERVAL_MS = 1000;
@@ -43,27 +44,19 @@ export type Kept = {
   retried: boolean;
 };
 
+/**
+ * Who a request was sent for: the owner, and the sign-in (`epoch`) it was sent in. An answer is
+ * taken only while both are still current.
+ */
+export type Sender = { owner: string; epoch: number };
+
 /** What `start` records with an operation, and for whom it was asked. */
-export type Started = { owner: string; change?: Change; retried: boolean };
+export type Started = Sender & { change?: Change; retried: boolean };
 
-/** A URL with a user part. */
-const withUserPart = (url: string | undefined): boolean => {
-  if (!url) return false;
-  try {
-    const parsed = new URL(url);
-    return parsed.username !== '' || parsed.password !== '';
-  } catch {
-    // Not a URL this can read: kept out rather than guessed at.
-    return /@/.test(url);
-  }
-};
-
-/** The change, unless it holds something secret. */
+/** The change, unless it holds something secret (a URL with a user part). */
 function keepable(change: Change | undefined): Change | undefined {
-  if (!change || change.action !== 'install' || change.source.kind === 'file') return change;
-  const source = change.source;
-  const urls = source.kind === 'git' ? [source.url, source.indexUrl] : [source.indexUrl];
-  return urls.some(withUserPart) ? undefined : change;
+  if (!change || change.action !== 'install') return change;
+  return sourceHasUserPart(change.source) ? undefined : change;
 }
 
 /**
@@ -77,6 +70,8 @@ function keepable(change: Change | undefined): Change | undefined {
  */
 const kept = new Map<string, Kept>();
 let owner: string | undefined;
+/** Goes up at every sign-out (or change of user): answers sent in an earlier sign-in are dropped. */
+let epoch = 0;
 const viewers = new Set<(current: Kept | undefined) => void>();
 
 const keptNow = (): Kept | undefined => (owner === undefined ? undefined : kept.get(owner));
@@ -97,8 +92,15 @@ export function claimOwner(next: string): void {
 /** The owner whose answers are taken now; undefined after sign-out until a screen claims one. */
 export const currentOwner = (): string | undefined => owner;
 
-/** On sign-out: no owner, nothing kept. */
+/** The sign-in answers are taken for now (see `epoch`). */
+export const sessionEpoch = (): number => epoch;
+
+/** Whether an answer sent for `sender` may still be taken. */
+export const isCurrent = (sender: Sender): boolean => sender.owner === owner && sender.epoch === epoch;
+
+/** On sign-out (or another user): a new sign-in, no owner, nothing kept. */
 export function forgetOwners(): void {
+  epoch += 1;
   owner = undefined;
   kept.clear();
   notify();
@@ -133,13 +135,18 @@ export function useOperation(
     };
   }, [ownerId]);
 
-  /** A newer state of the kept operation (a poll, a cancel), for this owner only. */
+  /**
+   * A newer state of the kept operation (a poll, a cancel answer), or none (dismissed). Taken
+   * only for the sender it was asked for and the operation it was asked about: a late answer
+   * about an earlier operation, sign-in or owner is dropped.
+   */
   const show = useCallback(
-    (next: ExtensionOperation | undefined) => {
-      if (owner !== ownerId) return;
+    (next: ExtensionOperation | undefined, sender: Sender) => {
+      if (!isCurrent(sender) || sender.owner !== ownerId) return;
       const previous = kept.get(ownerId);
       if (!next) kept.delete(ownerId);
-      else if (previous) kept.set(ownerId, { ...previous, operation: next });
+      else if (previous && previous.operation.operationId === next.operationId)
+        kept.set(ownerId, { ...previous, operation: next });
       else return;
       notify();
       const wasRunning =
@@ -151,9 +158,9 @@ export function useOperation(
     [ownerId]
   );
 
-  /** A change the host started, kept for the owner who asked; dropped if that is not the current owner. */
+  /** A change the host started, kept for the sender who asked; dropped if that is no longer current. */
   const start = useCallback((next: ExtensionOperation, started: Started) => {
-    if (owner !== started.owner) return;
+    if (!isCurrent(started)) return;
     kept.set(started.owner, { operation: next, change: keepable(started.change), retried: started.retried });
     notify();
     if (isFinished(next)) finishedRef.current(next);
@@ -166,15 +173,16 @@ export function useOperation(
     if (!operationId || !running) return;
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
+    const sender: Sender = { owner: ownerId, epoch };
     const poll = async (): Promise<void> => {
       const reply = await send({ action: 'poll', operationId });
       if (stopped) return;
       if (reply !== 'declined' && reply.ok && isOperation(reply.data)) {
-        show(reply.data);
+        show(reply.data, sender);
         if (isFinished(reply.data)) return;
       } else if (reply !== 'declined' && failureCode(reply) === 'NOT_FOUND') {
         const last = kept.get(ownerId)?.operation;
-        if (last) show({ ...last, phase: 'failed', code: 'NOT_FOUND' });
+        if (last?.operationId === operationId) show({ ...last, phase: 'failed', code: 'NOT_FOUND' }, sender);
         return;
       }
       timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
@@ -188,14 +196,15 @@ export function useOperation(
 
   const cancel = useCallback(async (): Promise<void> => {
     if (!operationId) return;
+    const sender: Sender = { owner: ownerId, epoch };
     const reply = await send({ action: 'cancel', operationId });
-    if (reply !== 'declined' && reply.ok && isOperation(reply.data)) show(reply.data);
-  }, [operationId, send, show]);
+    if (reply !== 'declined' && reply.ok && isOperation(reply.data)) show(reply.data, sender);
+  }, [operationId, send, show, ownerId]);
 
   const dismiss = useCallback(() => {
     const last = kept.get(ownerId)?.operation;
     if (last && !isFinished(last)) return;
-    show(undefined);
+    show(undefined, { owner: ownerId, epoch });
   }, [show, ownerId]);
 
   return { operation, change: current?.change, retried: current?.retried ?? false, start, cancel, dismiss };

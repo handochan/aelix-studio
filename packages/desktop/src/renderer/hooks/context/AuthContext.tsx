@@ -174,6 +174,8 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setStatus('checking');
 
     const currentUser = await fetchCurrentUser(controller.signal);
+    // A newer check took this one's place: its answer (null when aborted) says nothing.
+    if (controller.signal.aborted) return;
     if (currentUser) {
       changeUser(currentUser);
       setStatus('authenticated');

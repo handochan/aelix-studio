@@ -8,10 +8,7 @@ import type { ExtensionSettings, ExtensionSettingsState } from '@aionui/web-host
 import { Alert, Button, Input, Switch } from '@arco-design/web-react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { PROXY_WITH_CREDENTIALS } from './state/useAgentExtensions';
-
-/** The address with its user name and password taken out. */
-const withoutCredentials = (address: string): string => address.replace(/^([^:/?#]*:\/\/)[^/?#]*@/, '$1');
+import { hasUserPart, withoutUserPart } from './state/secrets';
 
 type Props = {
   state: ExtensionSettingsState;
@@ -73,12 +70,12 @@ const InstallSettings: React.FC<Props> = ({
   };
   const changed = JSON.stringify(settings) !== JSON.stringify(state.settings) || state.unreadable;
   const sameProxy = (state.settings.proxy ?? '') === proxy.trim();
-  const typedCredentials = PROXY_WITH_CREDENTIALS.test(proxy.trim());
+  const typedCredentials = hasUserPart(proxy);
   const needsAuthentication = typedCredentials && !settings.proxyAuthentication;
 
   const save = (): void => {
     onSave(settings);
-    if (typedCredentials) setProxy(withoutCredentials(proxy.trim()));
+    if (typedCredentials) setProxy(withoutUserPart(proxy.trim()));
   };
 
   return (

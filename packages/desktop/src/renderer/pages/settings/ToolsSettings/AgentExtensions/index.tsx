@@ -58,6 +58,13 @@ onUserChange(forgetOwners);
 
 const PROXY_CODES = new Set(['PROXY_CREDENTIALS_REJECTED', 'PROXY_CREDENTIALS_REQUIRED', 'PROXY_CHANGED']);
 
+/** Hosts Studio runs on that are known not to be Windows. */
+const NOT_WINDOWS = new Set(['darwin', 'linux']);
+
+/** The host is Windows (true), known not to be (false), or not known (undefined: Git stays off). */
+const platformIsWindows = (platform: unknown): boolean | undefined =>
+  platform === 'win32' ? true : typeof platform === 'string' && NOT_WINDOWS.has(platform) ? false : undefined;
+
 /** The screen of one owner: another signed-in user gets a new one, with nothing of this one's. */
 const AgentExtensionsSettings: React.FC = () => {
   const { user } = useAuth();
@@ -108,7 +115,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
     // The host's platform (the backend runs there, in the app and the WebUI alike).
     void ipcBridge.application.systemInfo
       .invoke()
-      .then((info) => setWindows(info.platform === 'win32'))
+      .then((info) => setWindows(platformIsWindows(info.platform)))
       .catch((): void => {});
   }, []);
 

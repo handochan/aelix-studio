@@ -17,8 +17,8 @@ import type {
 } from '@aionui/web-host';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CredentialsReason } from '../dialogs/CredentialsPrompt';
-import { failureCode, useExtensionsChannel, type SendResult } from './channel';
-import { currentOwner, isOperation, useOperation, type Change } from './operation';
+import { failureCode, useExtensionsChannel, type SendResult, type StillValid } from './channel';
+import { isCurrent, isOperation, sessionEpoch, useOperation, type Change, type Sender } from './operation';
 import { upgradeOf, upgradeRequest } from './upgrade';
 
 /** What the page asks the user through its dialogs; each resolves when the user answers. */
@@ -50,9 +50,6 @@ const failureOf = (reply: StudioExtensionsReply): { code: string; detail?: strin
 
 export type { Change } from './operation';
 
-/** A proxy address typed with a user name and password. */
-export const PROXY_WITH_CREDENTIALS = /^[^:/?#]*:\/\/[^/?#]*@/;
-
 /** Refusals about the proxy's credentials, and what the user is asked after each. */
 const PROXY_REASONS: Record<string, CredentialsReason> = {
   PROXY_CREDENTIALS_REQUIRED: 'required',
@@ -61,10 +58,22 @@ const PROXY_REASONS: Record<string, CredentialsReason> = {
 };
 
 /**
+ * One flow of the screen (an install with its questions and retries, a settings save): who it
+ * is for, and whether it may still go on. `valid` is passed to every send and asked after every
+ * await; an answer is taken only while `sender` is current.
+ */
+type Flow = { sender: Sender; valid: StillValid };
+
+/**
  * The state and actions of the agent extensions screen for `owner` (the signed-in user, `local`
  * in the desktop app). Reads the settings first (their reply says the transport before any
- * secret is sent), then the list and the terminal CLI. An answer that arrives once another
- * owner has the screen, or after sign-out, is dropped: nothing of it is shown or asked about.
+ * secret is sent), then the list and the terminal CLI.
+ *
+ * Every action is a flow captured when it starts: the owner, the sign-in (`sessionEpoch`), this
+ * visit of the screen, and, for changes, its place among the changes asked for. After every
+ * await (a dialog, a check, a reply) the flow goes on only while all of them still hold, so
+ * nothing is sent for a screen that was left, a user who signed out, or a change asked for again
+ * since. An answer that arrives later is taken only for the same owner and sign-in.
  */
 export function useAgentExtensions(asks: Asks, owner: string) {
   const asksRef = useRef(asks);
@@ -76,10 +85,30 @@ export function useAgentExtensions(asks: Asks, owner: string) {
   const [terminal, setTerminal] = useState<Load<TerminalCliListing>>({ loading: true });
   const [savingSettings, setSavingSettings] = useState(false);
   const settingsRef = useRef<ExtensionSettingsState | undefined>(undefined);
-  /** Another owner has the screen now (or nobody, after sign-out). */
-  const stale = (): boolean => currentOwner() !== owner;
   /** The online change sent in this visit, as typed (the kept one leaves out a URL with a password). */
   const [visitChange, setVisitChange] = useState<Change | undefined>(undefined);
+  /** Changes when the screen is left. */
+  const visit = useRef(0);
+  /** The latest change asked for: an older change flow stops where it is. */
+  const latestChange = useRef(0);
+
+  useEffect(
+    () => () => {
+      visit.current += 1;
+    },
+    []
+  );
+
+  /** Start a flow; `change` for a change, which takes the place of any earlier change flow. */
+  const flow = (change = false): Flow => {
+    const sender: Sender = { owner, epoch: sessionEpoch() };
+    const atVisit = visit.current;
+    const request = change ? (latestChange.current += 1) : 0;
+    return {
+      sender,
+      valid: () => visit.current === atVisit && isCurrent(sender) && (!change || latestChange.current === request),
+    };
+  };
 
   const refreshList = useCallback(async (): Promise<void> => {
     setList((current) => ({ ...current, loading: true }));
@@ -134,9 +163,9 @@ export function useAgentExtensions(asks: Asks, owner: string) {
   /** The change a follow-up sends again: this visit's, or the one kept from an earlier visit. */
   const lastChange = visitChange ?? keptChange;
 
-  /** A settings reply: shown, or its code told. Whether it was ok. */
-  const applySettings = (reply: SendResult): boolean => {
-    if (reply === 'declined' || stale()) return false;
+  /** A settings reply for `sender`: shown, or its code told. Whether it was ok. */
+  const applySettings = (reply: SendResult, sender: Sender): boolean => {
+    if (reply === 'declined' || !isCurrent(sender)) return false;
     if (!reply.ok) {
       asksRef.current.failure(failureCode(reply) ?? 'UNKNOWN');
       return false;
@@ -147,30 +176,39 @@ export function useAgentExtensions(asks: Asks, owner: string) {
 
   /**
    * The credentials an online change brings: null for none (no proxy authentication, or saved
-   * ones the helper uses), undefined when the user stopped. Asked before sending when nothing
-   * is saved here (memory-only, or no saved credentials), and always for a `reason` (the host
-   * asked for them) while there is a proxy.
+   * ones the helper uses), undefined when the user stopped or the flow ended. Asked before
+   * sending when nothing is saved here (memory-only, or no saved credentials), and always for a
+   * `reason` (the host asked for them) while there is a proxy.
    */
-  const credentialsFor = async (reason?: CredentialsReason): Promise<ProxyCredentials | null | undefined> => {
+  const credentialsFor = async (
+    { sender, valid }: Flow,
+    reason?: CredentialsReason
+  ): Promise<ProxyCredentials | null | undefined> => {
     const state = settingsRef.current;
     const proxy = state?.settings.proxy;
     if (!state || !proxy) return null;
     if (reason === undefined && !state.settings.proxyAuthentication) return null;
     if (reason === undefined && state.credentialMode === 'keychain' && state.hasSavedCredentials) return null;
     const answer = await asksRef.current.credentials(reason ?? 'required', proxy);
-    if (!answer) return undefined;
+    if (!answer || !valid()) return undefined;
     if (!answer.save) return answer.credentials;
     // Kept in the keychain first; the change then uses the saved ones.
-    const saved = await send({ action: 'set_proxy_credentials', credentials: answer.credentials }, { secret: true });
-    return applySettings(saved) ? null : undefined;
+    const saved = await send({ action: 'set_proxy_credentials', credentials: answer.credentials }, valid);
+    return applySettings(saved, sender) && valid() ? null : undefined;
   };
 
-  /** Send an online change; `retried` once it was sent again after a proxy refusal. */
-  const sendOnline = async (change: Change, reason?: CredentialsReason, retried = false): Promise<void> => {
+  /** Send an online change in `current`; `retried` once it was sent again after a proxy refusal. */
+  const sendOnline = async (
+    current: Flow,
+    change: Change,
+    reason?: CredentialsReason,
+    retried = false
+  ): Promise<void> => {
+    if (!current.valid()) return;
     setVisitChange(change);
     const online = change.action === 'upgrade' || change.source.kind !== 'file';
-    const credentials = online ? await credentialsFor(reason) : null;
-    if (credentials === undefined) return;
+    const credentials = online ? await credentialsFor(current, reason) : null;
+    if (credentials === undefined || !current.valid()) return;
     const extra = credentials ? { proxyCredentials: credentials } : {};
     const command: StudioExtensionsRequest =
       change.action === 'install'
@@ -186,32 +224,35 @@ export function useAgentExtensions(asks: Asks, owner: string) {
             ...(change.allowUnpin ? { allowUnpin: true } : {}),
             ...extra,
           });
-    const reply = await send(command, { secret: credentials !== null });
-    if (reply === 'declined' || stale()) return;
+    // The channel decides from the request whether it carries a secret.
+    const reply = await send(command, current.valid);
+    if (reply === 'declined' || !isCurrent(current.sender)) return;
     const code = failureCode(reply);
-    if (code !== undefined) await followUp(code, change, retried);
-    else if (reply.ok && isOperation(reply.data)) start(reply.data, { owner, change, retried });
+    if (code !== undefined) await followUp(current, code, change, retried);
+    else if (reply.ok && isOperation(reply.data)) start(reply.data, { ...current.sender, change, retried });
   };
 
   /**
    * What a failure code of a change leads to: asking again, confirming, or its text. A proxy
    * refusal reads the settings again (they may be stale), asks once and sends once more; the
    * same kind of refusal after that, at once or from the change it started, is told, not sent
-   * again: one retry per change.
+   * again: one retry per change. Questions and sends stay in the change's flow.
    */
-  const followUp = async (code: string, change: Change, retried = false): Promise<void> => {
+  const followUp = async (current: Flow, code: string, change: Change, retried = false): Promise<void> => {
+    if (!current.valid()) return;
     const reason = PROXY_REASONS[code];
     if (reason) {
       if (retried) return asksRef.current.failure(code);
       await refreshSettings();
-      return sendOnline(change, reason, true);
+      return sendOnline(current, change, reason, true);
     }
     if (change.action === 'upgrade' && code === 'PIN_UNKNOWN') {
-      if (await asksRef.current.confirmUnpin(change.entry)) await sendOnline({ ...change, allowUnpin: true });
+      if (await asksRef.current.confirmUnpin(change.entry)) await sendOnline(current, { ...change, allowUnpin: true });
       return;
     }
     if (change.action === 'upgrade' && code === 'PINNED') {
-      if (await asksRef.current.pinned(change.entry)) asksRef.current.installByName(change.entry.distribution);
+      if ((await asksRef.current.pinned(change.entry)) && current.valid())
+        asksRef.current.installByName(change.entry.distribution);
       return;
     }
     asksRef.current.failure(code);
@@ -219,47 +260,51 @@ export function useAgentExtensions(asks: Asks, owner: string) {
 
   /** An offline change (update from a file, remove): started, or its code told. */
   const sendChange = async (command: StudioExtensionsRequest): Promise<void> => {
+    const current = flow(true);
     setVisitChange(undefined);
-    const reply = await send(command);
-    if (reply === 'declined' || stale()) return;
+    const reply = await send(command, current.valid);
+    if (reply === 'declined' || !isCurrent(current.sender)) return;
     const code = failureCode(reply);
     if (code !== undefined) asksRef.current.failure(code);
-    else if (reply.ok && isOperation(reply.data)) start(reply.data, { owner, retried: false });
+    else if (reply.ok && isOperation(reply.data)) start(reply.data, { ...current.sender, retried: false });
   };
 
   /** A change answered at once (rollback, reconcile): its code told, the list read again. */
   const sendDirect = async (command: StudioExtensionsRequest): Promise<void> => {
-    const reply = await send(command);
-    if (reply === 'declined' || stale()) return;
+    const current = flow(true);
+    const reply = await send(command, current.valid);
+    if (reply === 'declined' || !isCurrent(current.sender)) return;
     const code = failureCode(reply);
     if (code !== undefined) asksRef.current.failure(code);
     await refreshList();
   };
 
   const actions = {
-    install: (source: ExtensionSource) => sendOnline({ action: 'install', source }),
+    install: (source: ExtensionSource) => sendOnline(flow(true), { action: 'install', source }),
     /** After `BUNDLE_CHANGED` on an install: install anyway, replacing the other runtime's extensions. */
     installReplacing: async () => {
-      if (lastChange?.action === 'install') await sendOnline({ ...lastChange, replaceIncompatible: true });
+      if (lastChange?.action === 'install') await sendOnline(flow(true), { ...lastChange, replaceIncompatible: true });
     },
     /**
      * After a change ended with a code that asks the user something (the proxy refused or
      * changed, a version constraint is unknown or pinned): ask, and send it again.
      */
     retryAfter: async (code: string) => {
-      if (lastChange) await followUp(code, lastChange, lastRetried);
+      if (lastChange) await followUp(flow(true), code, lastChange, lastRetried);
     },
     upgrade: async (entry: ExtensionEntry) => {
+      const current = flow(true);
       const availability = upgradeOf(entry);
       if (availability === 'pinned') {
-        if (await asksRef.current.pinned(entry)) asksRef.current.installByName(entry.distribution);
+        if ((await asksRef.current.pinned(entry)) && current.valid()) asksRef.current.installByName(entry.distribution);
         return;
       }
       if (availability === 'confirmation_required') {
-        if (await asksRef.current.confirmUnpin(entry)) await sendOnline({ action: 'upgrade', entry, allowUnpin: true });
+        if (await asksRef.current.confirmUnpin(entry))
+          await sendOnline(current, { action: 'upgrade', entry, allowUnpin: true });
         return;
       }
-      await sendOnline({ action: 'upgrade', entry });
+      await sendOnline(current, { action: 'upgrade', entry });
     },
     updateFromFile: (entry: ExtensionEntry, path: string) =>
       sendChange({ action: 'update', name: entry.name, source: { kind: 'file', path } }),
@@ -267,31 +312,38 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     /** The app-wide default for new conversations; the reply is the list with it changed. */
     setDefault: async (entry: ExtensionEntry, enabled: boolean) => {
       if (entry.managedId === undefined) return;
-      const reply = await send({ action: 'set_default', extensionId: entry.managedId, enabled });
-      if (reply === 'declined' || stale()) return;
+      const current = flow();
+      const reply = await send({ action: 'set_default', extensionId: entry.managedId, enabled }, current.valid);
+      if (reply === 'declined' || !isCurrent(current.sender)) return;
       if (reply.ok) setList({ data: reply.data as ExtensionListing, loading: false });
       else asksRef.current.failure(failureCode(reply) ?? 'UNKNOWN');
     },
     rollback: () => sendDirect({ action: 'rollback' }),
     reconcile: () => sendDirect({ action: 'reconcile_bundle' }),
     saveSettings: async (next: ExtensionSettings) => {
+      const current = flow();
       setSavingSettings(true);
       try {
-        const secret = typeof next.proxy === 'string' && PROXY_WITH_CREDENTIALS.test(next.proxy);
-        applySettings(await send({ action: 'set_settings', settings: next }, { secret }));
+        // A proxy address with a user name and password makes this a secret request.
+        applySettings(await send({ action: 'set_settings', settings: next }, current.valid), current.sender);
       } finally {
         setSavingSettings(false);
       }
     },
     saveCredentials: async () => {
+      const current = flow();
       const proxy = settingsRef.current?.settings.proxy;
       if (!proxy) return;
       const answer = await asksRef.current.credentials('save', proxy);
-      if (!answer) return;
-      applySettings(await send({ action: 'set_proxy_credentials', credentials: answer.credentials }, { secret: true }));
+      if (!answer || !current.valid()) return;
+      applySettings(
+        await send({ action: 'set_proxy_credentials', credentials: answer.credentials }, current.valid),
+        current.sender
+      );
     },
     clearCredentials: async () => {
-      applySettings(await send({ action: 'clear_proxy_credentials' }));
+      const current = flow();
+      applySettings(await send({ action: 'clear_proxy_credentials' }, current.valid), current.sender);
     },
     refreshTerminal,
     cancel,

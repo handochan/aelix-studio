@@ -836,6 +836,55 @@ describe('the agent extensions screen', () => {
       expect(errorsShown()).toEqual([]);
     });
 
+    it('sends nothing when the screen is left right after the credentials were given', async () => {
+      proxyWithPassword();
+      const view = render(<AgentExtensionsSettings />);
+      await startInstall();
+      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
+      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'sentinel-secret' } });
+      fireEvent.click(screen.getByTestId('credentials-submit'));
+      view.unmount();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(sent('install')).toEqual([]);
+    });
+
+    it(
+      'sends nothing when the user signs out while being asked about the channel',
+      async () => {
+        auth.user = { id: 'alice', username: 'alice' };
+        proxyWithPassword();
+        host.transport = 'insecure';
+        render(<AgentExtensionsSettings />);
+        await startInstall();
+        await enterCredentials('sentinel-secret');
+        const confirm = await screen.findByText('settings.agentExtensions.insecure.confirm');
+        switchUser(null);
+        fireEvent.click(confirm);
+        await new Promise((resolve) => setTimeout(resolve, 100));
+        expect(sent('install')).toEqual([]);
+      },
+      LONG
+    );
+
+    it('is not brought back by a late answer when the same user signs in again', async () => {
+      auth.user = { id: 'alice', username: 'alice' };
+      host.changes.push(long);
+      let open: (() => void) | undefined;
+      host.gate = new Promise((resolve) => (open = resolve));
+      const first = render(<AgentExtensionsSettings />);
+      await startInstall();
+      await waitFor(() => expect(sent('install')).toHaveLength(1));
+      first.unmount();
+      // Signed out, and in again as the same user.
+      switchUser(null);
+      auth.user = { id: 'alice', username: 'alice' };
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      open?.();
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      expect(screen.queryByTestId('operation-view')).toBeNull();
+    });
+
     it('is forgotten when its user signs out', async () => {
       auth.user = { id: 'alice', username: 'alice' };
       host.changes.push(long);
@@ -871,6 +920,75 @@ describe('the agent extensions screen', () => {
       await screen.findByTestId('agent-extension-aelix-starter');
       expect(await gitTab()).toHaveAttribute('aria-disabled', 'true');
     });
+
+    it.each(['', 'freebsd', 'Win32'])('stays off for a platform it does not know (%j)', async (platform) => {
+      bridge.platform = platform;
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      // Wait for the answer to have come in.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(await gitTab()).toHaveAttribute('aria-disabled', 'true');
+    });
+
+    it.each(['darwin', 'linux'])('opens for a known host that is not Windows (%s)', async (platform) => {
+      bridge.platform = platform;
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      await waitFor(async () => expect(screen.getByTestId('settings-private-git')).toBeInTheDocument());
+      expect(await gitTab()).not.toHaveAttribute('aria-disabled', 'true');
+    });
+  });
+
+  describe('secrets in what is typed', () => {
+    const openGit = async (): Promise<HTMLInputElement> => {
+      fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+      await waitFor(() =>
+        expect(screen.getByTestId('install-git-tab').closest('[role="tab"]')).not.toHaveAttribute(
+          'aria-disabled',
+          'true'
+        )
+      );
+      fireEvent.click(screen.getByTestId('install-git-tab'));
+      return (await screen.findByTestId('install-git-url')) as HTMLInputElement;
+    };
+
+    it(
+      'asks before a Git address with a password crosses an insecure channel, and keeps it nowhere',
+      async () => {
+        host.transport = 'insecure';
+        render(<AgentExtensionsSettings />);
+        await waitFor(() => expect(screen.getByTestId('settings-private-git')).toBeInTheDocument());
+        const url = await openGit();
+        fireEvent.change(url, { target: { value: 'https://ops:git-token@git.example/pack.git' } });
+        fireEvent.click(screen.getByTestId('install-submit'));
+        const question = (await screen.findByText('settings.agentExtensions.insecure.body')).closest('.arco-modal');
+        fireEvent.click(
+          within(question as HTMLElement).getByText('settings.agentExtensions.actions.cancel', {
+            selector: 'button span',
+          })
+        );
+        await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
+        expect(sent('install')).toEqual([]);
+        // Opened again: the address is there without its user part.
+        expect((await openGit()).value).toBe('https://git.example/pack.git');
+      },
+      LONG
+    );
+
+    it(
+      'keeps no user part in the Git field after the dialog is closed',
+      async () => {
+        render(<AgentExtensionsSettings />);
+        await waitFor(() => expect(screen.getByTestId('settings-private-git')).toBeInTheDocument());
+        const url = await openGit();
+        fireEvent.change(url, { target: { value: 'https://ops:git-token@git.example/pack.git' } });
+        fireEvent.click(
+          screen.getByText('settings.agentExtensions.actions.cancel', { selector: '.arco-modal-footer button span' })
+        );
+        expect((await openGit()).value).toBe('https://git.example/pack.git');
+      },
+      LONG
+    );
   });
 
   it('colors terminal statuses and warnings by meaning, from the theme', async () => {

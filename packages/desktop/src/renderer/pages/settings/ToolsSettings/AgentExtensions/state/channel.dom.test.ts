@@ -59,7 +59,7 @@ describe('the screen channel', () => {
     request.mockClear();
     let reply: unknown;
     await act(async () => {
-      reply = await result.current.send(secret, { secret: true });
+      reply = await result.current.send(secret);
     });
     expect(reply).toBe('declined');
     expect(confirm).toHaveBeenCalledTimes(1);
@@ -75,8 +75,8 @@ describe('the screen channel', () => {
     });
     expect(result.current.transport).toBe('insecure');
     await act(async () => {
-      await result.current.send(secret, { secret: true });
-      await result.current.send(secret, { secret: true });
+      await result.current.send(secret);
+      await result.current.send(secret);
     });
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(request).toHaveBeenLastCalledWith({ ...secret, acknowledgeInsecureTransport: true });
@@ -93,7 +93,7 @@ describe('the screen channel', () => {
     const { result } = renderHook(() => useExtensionsChannel(confirm));
     await act(async () => {
       await result.current.send({ action: 'get_settings' });
-      await result.current.send(secret, { secret: true });
+      await result.current.send(secret);
     });
     expect(confirm).toHaveBeenCalledTimes(1);
     transport = 'secure';
@@ -103,7 +103,7 @@ describe('the screen channel', () => {
     transport = 'insecure';
     await act(async () => {
       await result.current.send({ action: 'get_settings' });
-      await result.current.send(secret, { secret: true });
+      await result.current.send(secret);
     });
     expect(confirm).toHaveBeenCalledTimes(2);
   });
@@ -114,7 +114,7 @@ describe('the screen channel', () => {
     const { result } = renderHook(() => useExtensionsChannel(confirm));
     await act(async () => {
       await result.current.send({ action: 'get_settings' });
-      await result.current.send(secret, { secret: true });
+      await result.current.send(secret);
     });
     expect(confirm).not.toHaveBeenCalled();
     expect(request).toHaveBeenLastCalledWith(secret);
@@ -136,7 +136,7 @@ describe('the screen channel', () => {
     const { result } = renderHook(() => useExtensionsChannel(confirm));
     let reply: unknown;
     await act(async () => {
-      reply = await result.current.send(secret, { secret: true });
+      reply = await result.current.send(secret);
     });
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(commands(request)).toEqual([
@@ -159,7 +159,7 @@ describe('the screen channel', () => {
       window.__studioExtensions = { request };
       const confirm = vi.fn(async () => true);
       const { result, unmount } = renderHook(() => useExtensionsChannel(confirm));
-      const sending = result.current.send(secret, { secret: true });
+      const sending = result.current.send(secret);
       await vi.waitFor(() => expect(answer).toBeDefined());
       unmount();
       answer?.();
@@ -175,7 +175,7 @@ describe('the screen channel', () => {
     let decide: ((yes: boolean) => void) | undefined;
     const confirm = vi.fn(() => new Promise<boolean>((resolve) => (decide = resolve)));
     const { result, unmount } = renderHook(() => useExtensionsChannel(confirm));
-    const sending = result.current.send(secret, { secret: true });
+    const sending = result.current.send(secret);
     await vi.waitFor(() => expect(decide).toBeDefined());
     unmount();
     decide?.(true);
@@ -197,7 +197,7 @@ describe('the screen channel', () => {
     const { result } = renderHook(() => useExtensionsChannel(confirm));
     let reply: unknown;
     await act(async () => {
-      reply = await result.current.send(secret, { secret: true });
+      reply = await result.current.send(secret);
     });
     // The same insecure verdict, already confirmed: still asked again, and not sent on no.
     expect(confirm).toHaveBeenCalledTimes(2);
@@ -207,5 +207,108 @@ describe('the screen channel', () => {
       { ...secret, acknowledgeInsecureTransport: true },
       { action: 'get_settings' },
     ]);
+  });
+
+  it.each([
+    ['proxy credentials', { action: 'set_proxy_credentials', credentials: { username: 'u', password: 'p' } }],
+    [
+      'a Git URL with a password',
+      { action: 'install', source: { kind: 'git', url: 'https://u:tok@git.example/x.git' } },
+    ],
+    [
+      'a Git URL with a token as user',
+      { action: 'install', source: { kind: 'git', url: 'https://tok@git.example/x.git' } },
+    ],
+    [
+      'an index URL with a password',
+      { action: 'install', source: { kind: 'index', name: 'x', indexUrl: 'https://u:p@pypi.corp/simple' } },
+    ],
+    ['a proxy address with a password', { action: 'set_settings', settings: { proxy: 'http://u:p@proxy:3128' } }],
+    [
+      'an upgrade with proxy credentials',
+      { action: 'upgrade', name: 'x', proxyCredentials: { username: 'u', password: 'p' } },
+    ],
+  ])('takes %s as a secret: checked and asked about over an insecure channel', async (_, command) => {
+    const request = channel('insecure');
+    const confirm = vi.fn(async () => false);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    let reply: unknown;
+    await act(async () => {
+      reply = await result.current.send(command as StudioExtensionsRequest);
+    });
+    expect(reply).toBe('declined');
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(commands(request)).toEqual([{ action: 'get_settings' }]);
+  });
+
+  it('sends a request without a secret at once, with no check', async () => {
+    const request = channel('insecure');
+    const confirm = vi.fn(async () => true);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    const plain = { action: 'install', source: { kind: 'git', url: 'https://git.example/x.git' } } as const;
+    await act(async () => {
+      await result.current.send(plain as unknown as StudioExtensionsRequest);
+    });
+    expect(confirm).not.toHaveBeenCalled();
+    expect(commands(request)).toEqual([plain]);
+  });
+
+  it('decides by its own check, not by a secure answer to another request that came last', async () => {
+    let releaseCheck: (() => void) | undefined;
+    let releaseList: (() => void) | undefined;
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      if (command.action === 'list') {
+        await new Promise<void>((resolve) => (releaseList = resolve));
+        return { ok: true, data: { extensions: [] }, transport: 'secure' } as unknown as StudioExtensionsReply;
+      }
+      if (command.action === 'get_settings') {
+        await new Promise<void>((resolve) => (releaseCheck = resolve));
+        // The list answer lands right behind the check's own answer.
+        releaseList?.();
+      }
+      return { ok: true, data: { settings: {} }, transport: 'insecure' } as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
+    const confirm = vi.fn(async () => true);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    await act(async () => {
+      const listing = result.current.send({ action: 'list' });
+      const sending = result.current.send(secret);
+      await vi.waitFor(() => expect(releaseCheck).toBeDefined());
+      releaseCheck?.();
+      await Promise.all([listing, sending]);
+    });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(commands(request).at(-1)).toEqual({ ...secret, acknowledgeInsecureTransport: true });
+  });
+
+  it('sends no secret for a flow that ended while it waited, and asks nothing for it', async () => {
+    let answer: (() => void) | undefined;
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      if (command.action === 'get_settings') await new Promise<void>((resolve) => (answer = resolve));
+      return { ok: true, data: { settings: {} }, transport: 'insecure' } as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
+    const confirm = vi.fn(async () => true);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    let valid = true;
+    const sending = result.current.send(secret, () => valid);
+    await vi.waitFor(() => expect(answer).toBeDefined());
+    // Signed out, or another change asked for, while the check was out.
+    valid = false;
+    answer?.();
+    expect(await sending).toBe('declined');
+    expect(confirm).not.toHaveBeenCalled();
+    expect(commands(request)).toEqual([{ action: 'get_settings' }]);
+  });
+
+  it('sends nothing for a flow that already ended', async () => {
+    const request = channel('secure');
+    const { result } = renderHook(() => useExtensionsChannel(vi.fn(async () => true)));
+    await act(async () => {
+      expect(await result.current.send(secret, () => false)).toBe('declined');
+      expect(await result.current.send({ action: 'remove', name: 'x' }, () => false)).toBe('declined');
+    });
+    expect(request).not.toHaveBeenCalled();
   });
 });

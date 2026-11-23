@@ -91,4 +91,50 @@ describe('the signed-in user, as the screen hears of it', () => {
     expect(changed).toHaveBeenCalledTimes(3);
     stop();
   });
+
+  it('is not told by a check that a newer one replaced', async () => {
+    const alice = { id: 'alice', username: 'alice' };
+    let hold = false;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: { signal?: AbortSignal }) =>
+          new Promise<Response>((resolve, reject) => {
+            if (!hold) return resolve(json({ success: true, user: alice }));
+            // A slow check: it ends only when a newer one aborts it.
+            init?.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' }))
+            );
+          })
+      )
+    );
+    const changed = vi.fn();
+    const stop = onUserChange(changed);
+    let auth: Auth | undefined;
+    const Probe: React.FC = () => {
+      auth = useAuth();
+      return null;
+    };
+    render(
+      <AuthProvider>
+        <Probe />
+      </AuthProvider>
+    );
+    await waitFor(() => expect(auth?.user?.id).toBe('alice'));
+    hold = true;
+    let slow: Promise<void> | undefined;
+    act(() => {
+      slow = auth?.refresh();
+    });
+    hold = false;
+    await act(async () => {
+      await auth?.refresh();
+      await slow;
+    });
+    // The aborted check found no user; that is not a sign-out.
+    expect(changed).not.toHaveBeenCalled();
+    expect(auth?.user?.id).toBe('alice');
+    expect(auth?.status).toBe('authenticated');
+    stop();
+  });
 });

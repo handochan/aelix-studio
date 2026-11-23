@@ -10,6 +10,7 @@ import { FolderOpen } from '@icon-park/react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { failureKey } from '../messages';
+import { withoutUserPart } from '../state/secrets';
 
 export type InstallTab = 'index' | 'git' | 'file';
 
@@ -67,6 +68,19 @@ const InstallModal: React.FC<Props> = ({
   }, [visible, preset, onlineAllowed, windows]);
 
   const gitOff = windows !== false;
+
+  /**
+   * The URL fields keep no user name or password once the dialog is sent or closed: what was
+   * typed for this install is not there the next time it opens.
+   */
+  const forgetUserParts = (): void => {
+    setGitUrl((url) => withoutUserPart(url.trim()));
+    setIndexUrl((url) => withoutUserPart(url.trim()));
+  };
+  const close = (): void => {
+    forgetUserParts();
+    onCancel();
+  };
   const gitBlocked = gitOff || !onlineAllowed;
   const source = ((): ExtensionSource | undefined => {
     const index = indexUrl.trim() ? { indexUrl: indexUrl.trim() } : {};
@@ -115,15 +129,19 @@ const InstallModal: React.FC<Props> = ({
     <Modal
       visible={visible}
       title={t('settings.agentExtensions.install.title')}
-      onCancel={onCancel}
+      onCancel={close}
       unmountOnExit
       footer={
         <>
-          <Button onClick={onCancel}>{t('settings.agentExtensions.actions.cancel')}</Button>
+          <Button onClick={close}>{t('settings.agentExtensions.actions.cancel')}</Button>
           <Button
             type='primary'
             disabled={!source}
-            onClick={() => source && onSubmit(source)}
+            onClick={() => {
+              if (!source) return;
+              forgetUserParts();
+              onSubmit(source);
+            }}
             data-testid='install-submit'
           >
             {t('settings.agentExtensions.actions.install')}
