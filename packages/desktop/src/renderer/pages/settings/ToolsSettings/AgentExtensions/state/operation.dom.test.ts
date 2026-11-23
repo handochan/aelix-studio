@@ -97,7 +97,7 @@ describe('the change kept for the screen', () => {
     });
     // The first change ends (it switched before the cancel arrived), and a second one starts.
     act(() => result.current.start(operation('op-1', 'switched'), started));
-    act(() => result.current.dismiss());
+    act(() => result.current.dismiss('op-1'));
     act(() => result.current.start(operation('op-2', 'installing'), started));
     await act(async () => {
       answerCancel?.(reply(operation('op-1', 'cancelled')));
@@ -125,5 +125,16 @@ describe('the change kept for the screen', () => {
     nextChangeRequest();
     act(() => result.current.start(operation('op-1', 'installing'), { ...sender, request: first }));
     expect(result.current.operation).toEqual(operation('op-1', 'installing'));
+  });
+
+  it('closes only the operation it was asked to close', () => {
+    const { result } = renderHook(() => useOperation(quiet, vi.fn(), 'alice'));
+    const started = { owner: 'alice', epoch: sessionEpoch(), request: nextChangeRequest(), retried: false };
+    act(() => result.current.start(operation('op-2', 'switched'), started));
+    // A close for an earlier operation, from a button of an earlier screen state.
+    act(() => result.current.dismiss('op-1'));
+    expect(result.current.operation).toEqual(operation('op-2', 'switched'));
+    act(() => result.current.dismiss('op-2'));
+    expect(result.current.operation).toBeUndefined();
   });
 });

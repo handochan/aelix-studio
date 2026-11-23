@@ -235,11 +235,15 @@ export function useOperation(
     [operationId, send, show, ownerId]
   );
 
-  const dismiss = useCallback(() => {
-    const last = kept.get(ownerId)?.operation;
-    if (last && !isFinished(last)) return;
-    show(undefined, { owner: ownerId, epoch });
-  }, [show, ownerId]);
+  /** Close operation `operationId` once it finished; nothing for any other (a later one shown since). */
+  const dismiss = useCallback(
+    (operationId: string) => {
+      const last = kept.get(ownerId)?.operation;
+      if (!last || last.operationId !== operationId || !isFinished(last)) return;
+      show(undefined, { owner: ownerId, epoch });
+    },
+    [show, ownerId]
+  );
 
   /**
    * What sends operation `operationId` again: the change that started it (never one that held a

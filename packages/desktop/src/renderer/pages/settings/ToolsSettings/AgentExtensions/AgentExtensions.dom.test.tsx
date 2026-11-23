@@ -14,7 +14,7 @@ import type {
   TerminalCliListing,
 } from '@aionui/web-host';
 import { Message } from '@arco-design/web-react';
-import { cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -489,6 +489,45 @@ describe('the agent extensions screen', () => {
       choose?.(['/host/wheels/late-1.0-py3-none-any.whl']);
       await new Promise((resolve) => setTimeout(resolve, 50));
       expect(((await screen.findByTestId('install-wheel')) as HTMLInputElement).value).toBe('');
+    },
+    LONG
+  );
+
+  // The turns cover the steps between the file dialog's answer and its use: one of them falls
+  // between the last await and the use, where only the check at the use stands.
+  it.each([1, 2, 3, 4, 5])(
+    'keeps a newly typed wheel when the dialog closed and opened right as an earlier choice came (%i turns)',
+    async (turns) => {
+      let choose: ((files: string[]) => void) | undefined;
+      bridge.pickGate = new Promise((resolve) => (choose = resolve));
+      render(<AgentExtensionsSettings />);
+      const openFileTab = async (): Promise<void> => {
+        fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+        fireEvent.click(await screen.findByText('settings.agentExtensions.install.tabs.file'));
+      };
+      await openFileTab();
+      fireEvent.click(await screen.findByTestId('install-pick-wheel'));
+      await waitFor(() => expect(bridge.opened).toHaveLength(1));
+      // Right behind the choice (`turns` turns of the microtask queue): closed, opened again, and a
+      // new path typed.
+      const reopen = (): void => {
+        fireEvent.click(
+          screen.getByText('settings.agentExtensions.actions.cancel', { selector: '.arco-modal-footer button span' })
+        );
+        fireEvent.click(screen.getByTestId('agent-extensions-install'));
+        fireEvent.change(screen.getByTestId('install-wheel'), {
+          target: { value: '/host/wheels/new-2.0-py3-none-any.whl' },
+        });
+      };
+      const later = (turns: number, run: () => void): void =>
+        queueMicrotask(() => (turns > 1 ? later(turns - 1, run) : run()));
+      choose?.(['/host/wheels/old-1.0-py3-none-any.whl']);
+      later(turns, reopen);
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      fireEvent.click(await screen.findByText('settings.agentExtensions.install.tabs.file'));
+      expect(((await screen.findByTestId('install-wheel')) as HTMLInputElement).value).toBe(
+        '/host/wheels/new-2.0-py3-none-any.whl'
+      );
     },
     LONG
   );

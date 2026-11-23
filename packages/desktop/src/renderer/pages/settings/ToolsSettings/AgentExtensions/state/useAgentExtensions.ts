@@ -295,25 +295,28 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     retryOf,
     /**
      * After `BUNDLE_CHANGED` on operation `operationId`, an install: install the same again,
-     * replacing the other runtime's extensions. The operation is dismissed.
+     * replacing the other runtime's extensions. The operation is dismissed. Nothing at all once
+     * that operation is no longer the one kept (a button of an earlier screen state).
      */
     installReplacing: (operationId: string) =>
       runFlow(async () => {
         const again = retryOf(operationId);
-        dismiss();
-        if (again?.change.action === 'install')
-          await sendOnline(startFlow(true), { ...again.change, replaceIncompatible: true });
+        if (again?.change.action !== 'install') return;
+        dismiss(operationId);
+        await sendOnline(startFlow(true), { ...again.change, replaceIncompatible: true });
       }),
     /**
      * After operation `operationId` ended with a code that asks the user something (the proxy
      * refused or changed, a version constraint is unknown or pinned): ask, and send the change
-     * that started that operation again. The operation is dismissed.
+     * that started that operation again. The operation is dismissed. Nothing at all once that
+     * operation is no longer the one kept (a button of an earlier screen state).
      */
     retryAfter: (operationId: string, code: string) =>
       runFlow(async () => {
         const again = retryOf(operationId);
-        dismiss();
-        if (again) await followUp(startFlow(true), code, again.change, again.retried);
+        if (!again) return;
+        dismiss(operationId);
+        await followUp(startFlow(true), code, again.change, again.retried);
       }),
     upgrade: (entry: ExtensionEntry) =>
       runFlow(async () => {

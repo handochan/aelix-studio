@@ -118,4 +118,64 @@ describe('flows of the screen', () => {
     // The question would go to a dialog no one can answer any more.
     expect(asks.confirmUnpin).not.toHaveBeenCalled();
   });
+
+  it.each(['retryAfter', 'installReplacing'] as const)(
+    'does nothing for a button of an operation no longer shown (%s): the operation shown stays',
+    async (action) => {
+      const requests: StudioExtensionsRequest[] = [];
+      const phases = ['failed', 'switched'];
+      const codes = ['PROXY_CREDENTIALS_REJECTED', undefined];
+      let next = 0;
+      window.__studioExtensions = {
+        request: vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+          requests.push(command);
+          let data: unknown = { current: 'g1', previous: null, revision: 1, extensions: [], rollbackAvailable: false };
+          if (command.action === 'get_settings')
+            data = {
+              settings: { onlineInstall: true, proxy: null, proxyAuthentication: false, privateGit: false },
+              credentialMode: 'keychain',
+              hasSavedCredentials: false,
+              unreadable: false,
+              onlineInstallLocked: false,
+            };
+          if (command.action === 'install') {
+            const at = next;
+            next += 1;
+            data = {
+              operationId: `op-${at + 1}`,
+              action: 'install',
+              phase: phases[at],
+              ...(codes[at] ? { code: codes[at] } : {}),
+            };
+          }
+          return { ok: true, data, transport: 'secure' } as unknown as StudioExtensionsReply;
+        }),
+      };
+      const asks: Asks = {
+        confirmInsecure: vi.fn(async () => true),
+        credentials: vi.fn(async () => undefined),
+        confirmUnpin: vi.fn(async () => false),
+        pinned: vi.fn(async () => false),
+        failure: vi.fn(),
+        installByName: vi.fn(),
+      };
+      const { result } = renderHook(() => useAgentExtensions(asks, 'local'));
+      await waitFor(() => expect(result.current.settings.data).toBeDefined());
+      await act(async () => {
+        await result.current.actions.install({ kind: 'index', name: 'first' });
+      });
+      expect(result.current.operation?.operationId).toBe('op-1');
+      await act(async () => {
+        await result.current.actions.install({ kind: 'index', name: 'second' });
+      });
+      expect(result.current.operation?.operationId).toBe('op-2');
+      // The first operation's button, pressed late.
+      await act(async () => {
+        if (action === 'retryAfter') await result.current.actions.retryAfter('op-1', 'PROXY_CREDENTIALS_REJECTED');
+        else await result.current.actions.installReplacing('op-1');
+      });
+      expect(result.current.operation?.operationId).toBe('op-2');
+      expect(requests.filter((request) => request.action === 'install')).toHaveLength(2);
+    }
+  );
 });

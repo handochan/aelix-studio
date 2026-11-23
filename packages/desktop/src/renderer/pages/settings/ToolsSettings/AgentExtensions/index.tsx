@@ -137,7 +137,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         <>
           <Button
             onClick={() => {
-              actions.dismiss();
+              actions.dismiss(operationId);
               void actions.reconcile();
             }}
           >
@@ -292,7 +292,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         operation={operation}
         followUps={followUps}
         onCancel={() => void actions.cancel()}
-        onClose={actions.dismiss}
+        onClose={() => operation && actions.dismiss(operation.operationId)}
       />
       <CredentialsPrompt
         question={open.credentials}

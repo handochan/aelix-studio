@@ -24,4 +24,15 @@ describe('the credentials dialog', () => {
     expect((screen.getByTestId('credentials-password') as HTMLInputElement).value).toBe('');
     expect((screen.getByTestId('credentials-username') as HTMLInputElement).value).toBe('');
   });
+
+  it('keeps nothing typed for a question once another took its place, even if it comes back', () => {
+    const props = { visible: true, reason: 'required' as const, mode: 'memory-only' as const, onDone: vi.fn() };
+    const first = { id: 11 };
+    const view = render(<CredentialsPrompt {...props} question={first} proxy='http://old.proxy:3128' />);
+    fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'old-secret' } });
+    view.rerender(<CredentialsPrompt {...props} question={{ id: 12 }} proxy='http://new.proxy:3128' />);
+    // Shown again with the first question's id: had its typing stayed in state, it would be back.
+    view.rerender(<CredentialsPrompt {...props} question={first} proxy='http://old.proxy:3128' />);
+    expect((screen.getByTestId('credentials-password') as HTMLInputElement).value).toBe('');
+  });
 });
