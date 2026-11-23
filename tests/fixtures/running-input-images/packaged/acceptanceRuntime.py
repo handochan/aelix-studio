@@ -10,10 +10,35 @@ import runpy
 import sqlite3
 import sys
 from urllib.parse import urlsplit
+from urllib.request import ProxyHandler, build_opener
 
 ROUTE = "https://chatgpt.com/backend-api/codex/responses"
 CAPTION = "The user attached one or more images."
 COMMANDS = {"prompt", "steer", "follow_up", "abort"}
+
+
+def fixture_provider_endpoint():
+    endpoint = urlsplit(os.environ["STUDIO_FIXTURE_PROVIDER"])
+    if (endpoint.scheme, endpoint.hostname, endpoint.path) != ("http", "127.0.0.1", "/responses"):
+        raise ValueError("Invalid fixture provider")
+    return endpoint
+
+
+def check_mixed_references(text):
+    # The test driver keeps the independently resolved expectations in memory.
+    # Compare this pipe frame here and persist only the match results.
+    endpoint = fixture_provider_endpoint()._replace(path="/fixture/mixed-references").geturl()
+    with build_opener(ProxyHandler({})).open(endpoint, timeout=5) as response:
+        expected = json.load(response)
+    _, files_marker, files = text.partition("\n[[AION_FILES]]\n")
+    _, sessions_marker, sessions = text.partition("\n[[AION_SESSIONS]]\n")
+    session_block, sessions_end, _ = sessions.partition("\n[[/AION_SESSIONS]]")
+    return {
+        "nativeFileRefMatches": bool(files_marker and files.splitlines() == [expected["filePath"]]),
+        "nativeSessionRefMatches": bool(
+            sessions_marker and sessions_end and session_block.splitlines()[1:] == [expected["sessionRow"]]
+        ),
+    }
 
 
 def observe_acp(bundle, arguments):
@@ -35,6 +60,17 @@ def observe_acp(bundle, arguments):
         finally:
             native_pipe.reset(marker)
 
+    def append_observation(observation):
+        with receipt.open("a", encoding="ascii") as stream:
+            stream.write(json.dumps(observation) + "\n")
+
+    def observe_mixed(observation, text):
+        try:
+            observation.update(check_mixed_references(text))
+        except (OSError, ValueError, KeyError):
+            observation.update(nativeFileRefMatches=False, nativeSessionRefMatches=False)
+        append_observation(observation)
+
     def write(writer, data):
         result = original_write(writer, data)
         target = native_pipe.get()
@@ -49,11 +85,16 @@ def observe_acp(bundle, arguments):
             paths = 0
             if "\n[[AION_FILES]]\n" in text:
                 paths = len(text.split("\n[[AION_FILES]]\n", 1)[1].splitlines())
-            with receipt.open("a", encoding="ascii") as stream:
-                stream.write(json.dumps({
-                    "method": frame["type"], "images": images, "captionAdded": text == CAPTION,
-                    "pathCount": paths, "acpPid": os.getpid(), "nativePid": target[1],
-                }) + "\n")
+            observation = {
+                "method": frame["type"], "images": images, "captionAdded": text == CAPTION,
+                "pathCount": paths, "acpPid": os.getpid(), "nativePid": target[1],
+            }
+            if frame["type"] == "follow_up" and "[[AION_SESSIONS]]" in text:
+                # Resolve comparison data off the pipe writer's event loop so
+                # the probe does not delay the native acknowledgment.
+                asyncio.get_running_loop().run_in_executor(None, observe_mixed, observation, text)
+            else:
+                append_observation(observation)
         return result
 
     Session.rpc = rpc
@@ -67,9 +108,7 @@ def redirect_codex(bundle):
     import httpx
     from aelix_ai.providers import openai_codex_responses as codex
 
-    endpoint = urlsplit(os.environ["STUDIO_FIXTURE_PROVIDER"])
-    if (endpoint.scheme, endpoint.hostname, endpoint.path) != ("http", "127.0.0.1", "/responses"):
-        raise ValueError("Invalid fixture provider")
+    endpoint = fixture_provider_endpoint()
 
     # Adapt ACP's test_native_image_prompt.py MockTransport pattern. The native
     # client still serializes a real Codex Responses request on the A-1b route.

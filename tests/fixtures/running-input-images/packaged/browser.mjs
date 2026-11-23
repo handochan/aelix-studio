@@ -4,6 +4,7 @@ export function observeRenderer() {
   const fixture = (window.__runningImageFixture = {
     uploads: [],
     uploadRefs: [],
+    mixedGrants: [],
     sawPreparing: false,
     uploadStatuses: [],
     acknowledgments: [],
@@ -91,6 +92,14 @@ export function observeRenderer() {
         .clone()
         .json()
         .catch(() => undefined);
+      if (kind === 'grant' && fixture.expectedGrantPath) {
+        const { refs } = JSON.parse(options.body);
+        fixture.mixedGrants.push({
+          requestedPngOnly:
+            refs.length === 1 && refs[0].kind === 'upload' && refs[0].path === fixture.expectedGrantPath,
+          images: (body?.data?.grants ?? []).map(({ byteLength, sha256 }) => ({ bytes: byteLength, sha256 })),
+        });
+      }
       fixture.acknowledgments.push({
         kind,
         status: response.status,

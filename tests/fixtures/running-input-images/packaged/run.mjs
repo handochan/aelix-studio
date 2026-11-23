@@ -15,8 +15,10 @@ import { startWebUI, webuiApi } from './webui.mjs';
 
 const scenarios = [
   { name: 'idle-png', image: 'idle.png', write: 'prompt', notice: 'none' },
+  { name: 'idle-jpeg', image: 'idle.jpg', write: 'prompt', notice: 'none' },
   { name: 'steer-png', image: 'steer.png', write: 'steer', notice: 'queued' },
   { name: 'follow-up-jpeg', image: 'follow-up.jpg', write: 'follow_up', notice: 'queued' },
+  { name: 'follow-up-png', image: 'follow-up.png', write: 'follow_up', notice: 'queued', mixedReferences: true },
   { name: 'caption', image: 'caption.png', write: 'steer', notice: 'caption' },
   { name: 'downscale', image: 'large.jpg', write: 'steer', notice: 'downscaled' },
   { name: 'five-paths', image: null, write: 'steer', notice: 'blocked-path-only' },
@@ -154,13 +156,18 @@ function isolatedEnv(root, agent) {
   };
 }
 
-async function createConversation(page, name, workspace) {
+async function newHostConversation(page, name, workspace) {
   const conversation = await httpPost(page, '/api/conversations', {
     type: 'acp',
     name,
     extra: { agent_id: 'fixture-images', backend: 'aelix', workspace, custom_workspace: true },
   });
   assert.ok(conversation?.id);
+  return conversation;
+}
+
+async function createConversation(page, name, workspace) {
+  const conversation = await newHostConversation(page, name, workspace);
   await page.evaluate((id) => {
     location.hash = '/conversation/' + id;
   }, conversation.id);
@@ -182,6 +189,52 @@ async function persistedUserRows(page, scope) {
 async function hostIdle(page, scope) {
   const { runtime } = await httpGet(page, scope);
   return runtime?.state === 'idle' && !runtime.is_processing && runtime.turn_id === null;
+}
+
+const mixedFile = 'mixed-notes.txt';
+
+async function prepareMixedDraft(page, scope, workspace, imageName, input) {
+  const target = await newHostConversation(page, 'ImageReferenceTarget', workspace);
+  const detail = await httpGet(page, '/api/conversations/' + target.id);
+  const source = await httpGet(page, scope);
+  assert.ok(detail.name && detail.extra.workspace && detail.extra.workspace === source.extra.workspace);
+
+  const uploads = await page.evaluate(() => window.__runningImageFixture.uploadRefs);
+  const imagePath = uploads.find((ref) => path.basename(ref) === imageName);
+  const fileRef = uploads.find((ref) => path.basename(ref) === mixedFile);
+  assert.ok(imagePath && fileRef && imagePath !== fileRef);
+  const { path: filePath } = await httpPost(page, '/api/fs/content/metadata', {
+    file: { kind: 'upload', path: fileRef },
+  });
+  assert.ok(filePath);
+  provider.expectMixedReferences({ filePath, sessionRow: detail.name + '\t' + target.id + '\tworkspace: same' });
+  await page.evaluate((ref) => {
+    window.__runningImageFixture.expectedGrantPath = ref;
+  }, imagePath);
+
+  await input.fill('Inspect the mixed references. @@ImageReferenceTarget');
+  await page
+    .getByRole('listbox', { name: 'Conversation mentions' })
+    .getByRole('option')
+    .filter({ hasText: 'ImageReferenceTarget' })
+    .click(options);
+}
+
+async function verifyMixedFrame(page, native, studio, row) {
+  const batches = await page.evaluate(() => window.__runningImageFixture.mixedGrants);
+  row.mixedGrantCount = batches.reduce((count, { images }) => count + images.length, 0);
+  row.mixedGrantMatchesPng =
+    batches.length === 1 &&
+    batches[0].requestedPngOnly &&
+    batches[0].images.length === 1 &&
+    batches[0].images[0].bytes === studio.bytes &&
+    batches[0].images[0].sha256 === studio.sha256;
+  row.nativeFileRefMatches = native.nativeFileRefMatches === true;
+  row.nativeSessionRefMatches = native.nativeSessionRefMatches === true;
+  assert.equal(row.mixedGrantCount, 1);
+  assert.equal(row.mixedGrantMatchesPng, true);
+  assert.equal(row.nativeFileRefMatches, true);
+  assert.equal(row.nativeSessionRefMatches, true);
 }
 
 async function runScenario(page, scenario, row) {
@@ -216,8 +269,11 @@ async function runScenario(page, scenario, row) {
     probe.uploadRefs.length = 0;
     probe.uploadStatuses.length = 0;
     probe.acknowledgments.length = 0;
+    probe.mixedGrants.length = 0;
+    probe.expectedGrantPath = undefined;
   });
   provider.expectPaths();
+  provider.expectMixedReferences();
   check('held-turn');
   if (busy) {
     await input.fill(holdMessage);
@@ -256,14 +312,19 @@ async function runScenario(page, scenario, row) {
   }
   row.userRowsBeforeSend = startingRows.length;
   check('attach');
-  const files = (pathCase ? ['idle.png', 'steer.png', 'caption.png', 'stop.png', 'extra.png'] : [scenario.image]).map(
-    (file) => path.join(inputs, file)
-  );
+  const names = pathCase ? ['idle.png', 'steer.png', 'caption.png', 'stop.png', 'extra.png'] : [scenario.image];
+  if (scenario.mixedReferences) names.push(mixedFile);
+  const files = names.map((file) => path.join(inputs, file));
   const source = scenario.image ? digest(fs.readFileSync(files[0])) : empty();
   row.source = source;
   await attach(page, files, files.length, check);
   for (const file of files) {
-    await expect(page.locator('.sendbox-panel').getByAltText(path.parse(file).name)).toBeVisible(options);
+    const panel = page.locator('.sendbox-panel');
+    const attachment =
+      path.basename(file) === mixedFile
+        ? panel.getByText(mixedFile, { exact: true })
+        : panel.getByAltText(path.parse(file).name);
+    await expect(attachment).toBeVisible(options);
   }
   check('attachment-blobs');
   const initialUploads = await page.evaluate(() => [...window.__runningImageFixture.uploads]);
@@ -287,7 +348,12 @@ async function runScenario(page, scenario, row) {
     assert.equal(row.originalPathCount, 5);
     provider.expectPaths(originalPaths);
   }
-  if (scenario.notice !== 'caption') await input.fill('Inspect the acceptance attachment.');
+  if (scenario.mixedReferences) {
+    check('mixed-draft');
+    await prepareMixedDraft(page, scope, workspace, scenario.image, input);
+  } else if (scenario.notice !== 'caption') {
+    await input.fill('Inspect the acceptance attachment.');
+  }
   if (stopCase)
     await page.evaluate(() => {
       window.__runningImageFixture.holdImageAck = true;
@@ -387,11 +453,18 @@ async function runScenario(page, scenario, row) {
   const native = frames().find(({ method }) => method === scenario.write);
   assert.ok(native);
   const studioUploads = await page.evaluate(() => [...window.__runningImageFixture.uploads]);
-  const studio = scenario.notice === 'downscaled' ? studioUploads.at(-1) : initialUploads[0];
+  const studio =
+    scenario.notice === 'downscaled'
+      ? studioUploads.at(-1)
+      : initialUploads.find(({ sha256 }) => sha256 === source.sha256);
   if (!pathCase) {
     row.studio = studio;
     row.native = native.images[0] ?? empty();
     assert.deepEqual(native.images, [studio]);
+    if (scenario.mixedReferences) {
+      check('mixed-native-references');
+      await verifyMixedFrame(page, native, studio, row);
+    }
     if (scenario.notice === 'downscaled') {
       assert.equal(studioUploads.length, 2);
       assert.notEqual(studio.sha256, source.sha256);
@@ -622,6 +695,10 @@ try {
       pathCount: null,
       originalPathCount: null,
       pathRefsMatch: null,
+      mixedGrantCount: null,
+      mixedGrantMatchesPng: null,
+      nativeFileRefMatches: null,
+      nativeSessionRefMatches: null,
       preparingObserved: null,
       pathPreparingObserved: null,
       userRowsInitial: null,
