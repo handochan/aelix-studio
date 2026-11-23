@@ -64,6 +64,13 @@ jobs:
           python -m pip install Pillow==11.3.0 psutil==7.0.0 >/dev/null 2>&1
           python -B tests/fixtures/running-input-images/generate.py --running-input .local/image-acceptance-inputs >/dev/null 2>&1
           if [[ "$RUNNER_OS" == Linux ]]; then
+            set -- .local/provider-installer/artifacts/*.deb
+            test "$#" -eq 1 && test -f "$1"
+            package=$(dpkg-deb --field "$1" Package)
+            sudo -n apt-get install -y "$PWD/$1" >/dev/null 2>&1
+            manifest=$(dpkg -L "$package" | awk '/\/resources\/studio-preview\/manifest.json$/')
+            export IMAGE_EXECUTABLE="${manifest%/resources/studio-preview/manifest.json}/aelix-studio"
+            test -x "$IMAGE_EXECUTABLE"
             xvfb-run -a node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
           else
             node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1

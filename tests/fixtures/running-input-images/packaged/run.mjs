@@ -30,6 +30,7 @@ const result = {
   target: process.platform + '-' + process.arch,
   status: 'failed',
   stage: 'setup',
+  failure: null,
   host: baseline.aioncore.tag,
   acp: baseline.acp.commit,
   native: baseline.native.sourceTag.commit,
@@ -41,6 +42,20 @@ const save = () => {
   fs.mkdirSync(path.dirname(output), { recursive: true });
   fs.writeFileSync(output, JSON.stringify(result, null, 2) + '\n');
 };
+function classifyFailure(error) {
+  const message = String(error?.message ?? '');
+  if (/SUID sandbox|No usable sandbox|namespace sandbox/i.test(message)) return 'chromium-sandbox';
+  if (/cannot open shared object file|Library not loaded/i.test(message)) return 'missing-library';
+  if (/Unable to open X display|Missing X server/i.test(message)) return 'display-unavailable';
+  if (/Process failed to launch|failed to launch/i.test(message)) return 'launch-failed';
+  if (error?.code === 'ENOENT') return 'file-not-found';
+  if (error?.name === 'TimeoutError') return 'timeout';
+  return 'assertion-or-runtime';
+}
+process.on('uncaughtExceptionMonitor', (error) => {
+  result.failure = classifyFailure(error);
+  save();
+});
 const config = (dir, name, data) => fs.writeFileSync(path.join(dir, name), JSON.stringify(data), { mode: 0o600 });
 const options = { timeout: 25000 };
 const driver = process.env.IMAGE_PYTHON ?? 'python3';
@@ -383,6 +398,7 @@ try {
   });
 
   result.stage = 'application';
+  save();
   provider = await startProvider();
   const fixtureEnv = {
     STUDIO_FIXTURE_WRITES: frameFile,
@@ -413,6 +429,7 @@ try {
   // Like the #113 integration, seed only the sandbox catalog. The released
   // Host negotiates H1 exclusively with an unoverridden builtin Aelix entry.
   result.stage = 'seed-builtin';
+  save();
   const database = path.join(env.AIONUI_E2E_USER_DATA_DIR, 'aionui', 'aionui-backend.db');
   assert.ok(fs.existsSync(database));
   const seeded = spawnSync(driver, ['-I', '-B', runtimeFixture, 'seed', database], {
@@ -449,8 +466,11 @@ try {
   assert.equal(seeded.status, 0);
 
   result.stage = 'application-restart';
+  save();
   app = await launch();
-  sampleTask = sampleRss(app.process().pid);
+  // Playwright starts Electron through cmd.exe on Windows. Measure the main
+  // process and its children using the PID inside Electron.
+  sampleTask = sampleRss(await app.evaluate(() => process.pid));
   void sampleTask.catch(() => {
     sampler?.kill();
   });
@@ -461,6 +481,7 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => !!window.__runningImageFixture && window.__backendPort > 0);
   result.stage = 'scenarios';
+  save();
   for (const scenario of scenarios) {
     const row = {
       scenario: scenario.name,
@@ -530,7 +551,8 @@ try {
   }
   result.stage = 'complete';
   result.status = 'passed';
-} catch {
+} catch (error) {
+  result.failure = classifyFailure(error);
   process.exitCode = 1;
 } finally {
   if (sampler?.exitCode === null) {
@@ -546,6 +568,7 @@ try {
   } catch {
     result.status = 'failed';
     result.stage = 'cleanup';
+    result.failure = 'cleanup-failed';
     process.exitCode = 1;
   }
   save();

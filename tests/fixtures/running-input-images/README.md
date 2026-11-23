@@ -99,8 +99,9 @@ with `image_acceptance=true` or when a PR receives `run-image-acceptance`.
 Use the manual dispatch for docs-only changes covered by PR Checks'
 `paths-ignore` filter.
 It builds the Provider Preview package on Windows x64, Linux x64 and Linux
-arm64 from the selected commit and launches the unpacked Electron app with its
-pinned Host, ACP wheel and native runtime.
+arm64 from the selected commit. It runs the unpacked Windows app and the
+installed Linux DEB with each package's pinned Host, ACP wheel, and native
+runtime. On Linux, installing the DEB applies the Chromium sandbox setup.
 
 ```sh
 gh workflow run pr-checks.yml -R handochan/aelix-studio --ref <branch> -f image_acceptance=true
