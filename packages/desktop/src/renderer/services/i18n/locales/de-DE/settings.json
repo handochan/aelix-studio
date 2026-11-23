@@ -463,6 +463,7 @@
     "description": "Python-Erweiterungen, die Aelix-Agenten Befehle, Werkzeuge und MCP-Server hinzufügen. Studio installiert sie in einem eigenen Bereich; die App und das aelix im Terminal bleiben unverändert.",
     "appliesAt": "Änderungen gelten ab dem nächsten Agentenstart: in einer neuen Unterhaltung oder wenn ein Agent neu startet. Laufende Unterhaltungen behalten ihren Stand.",
     "empty": "Noch keine Agent-Erweiterungen installiert.",
+    "defaultEnabled": "In neuen Unterhaltungen verwenden",
     "reconcileBanner": "Studio wurde aktualisiert. Einige Erweiterungen müssen für diese Version neu eingerichtet werden.",
     "status": {
       "ready": "Bereit",
@@ -607,6 +608,8 @@
     "terminal": {
       "title": "aelix im Terminal (nur lesen)",
       "description": "Erweiterungen, die für aelix in Ihrem Terminal installiert sind. Studio-Unterhaltungen verwenden sie nicht. Installieren und entfernen Sie sie mit aelix im Terminal.",
+      "summary": "{{environments}} Umgebungen · {{global}} globale Einträge",
+      "reading": "Wird gelesen…",
       "status": {
         "listed": "Gelesen",
         "not_a_venv": "Nicht gelesen: außerhalb einer virtuellen Umgebung",
@@ -634,11 +637,13 @@
       "none": "Kein aelix im Terminal gefunden.",
       "globalTitle": "Globaler Erweiterungsordner: {{location}}",
       "globalEmpty": "Leer.",
+      "globalUnreadable": "Der Ordner konnte nicht gelesen werden.",
       "kinds": {
         "file": "Datei",
         "manifest": "Plugin",
         "pyproject": "pyproject",
-        "package": "Paket"
+        "package": "Paket",
+        "unknown": "unbekannte Form"
       },
       "truncatedGlobal": "Nicht alle Einträge wurden gelesen.",
       "searched": "Durchsuchte Orte"

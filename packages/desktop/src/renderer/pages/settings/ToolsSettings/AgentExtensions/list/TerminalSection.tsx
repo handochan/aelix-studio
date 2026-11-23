@@ -92,9 +92,10 @@ const Environment: React.FC<{ environment: TerminalCliEnvironment }> = ({ enviro
 };
 
 /**
- * The extensions of the user's terminal `aelix`, read only (2026-11-22 user decision 4). Studio
- * reads them from files; it cannot install, remove or check them, and Studio conversations do
- * not use them.
+ * The extensions of the user's terminal `aelix`, read only (2026-11-22 user decision 4), folded
+ * by default under a summary line. Studio reads them from files; it cannot install, remove or
+ * check them, and Studio conversations do not use them. When nothing is found, the places looked
+ * in are unfolded.
  */
 const TerminalSection: React.FC<Props> = ({ listing, loading, failure, onRefresh }) => {
   const { t } = useTranslation();
@@ -119,67 +120,89 @@ const TerminalSection: React.FC<Props> = ({ listing, loading, failure, onRefresh
           {t('settings.agentExtensions.actions.refresh')}
         </Button>
       </div>
-      {failure && <Alert type='warning' content={t(failureKey(failure))} />}
-      {!listing && loading && <Spin className='self-center' />}
-      {listing && (
-        <>
-          {(listing.timedOut || listing.truncated) && (
-            <Alert
-              type='info'
-              content={t(
-                listing.timedOut
-                  ? 'settings.agentExtensions.terminal.timedOut'
-                  : 'settings.agentExtensions.terminal.truncated'
-              )}
-            />
-          )}
-          {listing.environments.length === 0 ? (
-            <div className='text-13px text-t-secondary' data-testid='terminal-none'>
-              {t('settings.agentExtensions.terminal.none')}
-            </div>
-          ) : (
-            listing.environments.map((environment) => (
-              <Environment key={environment.location} environment={environment} />
-            ))
-          )}
-          <div className='flex flex-col gap-6px' data-testid='terminal-global'>
-            <span className='text-13px text-t-primary'>
-              {t('settings.agentExtensions.terminal.globalTitle', { location: global?.location ?? '' })}
-            </span>
-            {global?.status !== 'listed' || global.extensions.length === 0 ? (
-              <span className='text-12px text-t-secondary'>{t('settings.agentExtensions.terminal.globalEmpty')}</span>
-            ) : (
-              <div className='flex flex-wrap gap-6px'>
-                {global.extensions.map((extension) => (
-                  <Tag key={extension.name} size='small' bordered>
-                    {extension.name} · {t(`settings.agentExtensions.terminal.kinds.${extension.kind}`)}
-                  </Tag>
-                ))}
-              </div>
-            )}
-            {global?.truncated && (
-              <span className='text-12px text-t-secondary'>
-                {t('settings.agentExtensions.terminal.truncatedGlobal')}
-              </span>
+      <Collapse bordered={false} defaultActiveKey={[]} data-testid='terminal-collapse'>
+        <Collapse.Item
+          name='terminal'
+          header={
+            listing
+              ? t('settings.agentExtensions.terminal.summary', {
+                  environments: listing.environments.length,
+                  global: listing.globalExtensions.extensions.length,
+                })
+              : t('settings.agentExtensions.terminal.reading')
+          }
+        >
+          <div className='flex flex-col gap-12px'>
+            {failure && <Alert type='warning' content={t(failureKey(failure))} />}
+            {!listing && loading && <Spin className='self-center' />}
+            {listing && (
+              <>
+                {(listing.timedOut || listing.truncated) && (
+                  <Alert
+                    type='info'
+                    content={t(
+                      listing.timedOut
+                        ? 'settings.agentExtensions.terminal.timedOut'
+                        : 'settings.agentExtensions.terminal.truncated'
+                    )}
+                  />
+                )}
+                {listing.environments.length === 0 ? (
+                  <div className='text-13px text-t-secondary' data-testid='terminal-none'>
+                    {t('settings.agentExtensions.terminal.none')}
+                  </div>
+                ) : (
+                  listing.environments.map((environment) => (
+                    <Environment key={environment.location} environment={environment} />
+                  ))
+                )}
+                <div className='flex flex-col gap-6px' data-testid='terminal-global'>
+                  <span className='text-13px text-t-primary'>
+                    {t('settings.agentExtensions.terminal.globalTitle', { location: global?.location ?? '' })}
+                  </span>
+                  {global?.status === 'unreadable' ? (
+                    <span className='text-12px text-t-secondary'>
+                      {t('settings.agentExtensions.terminal.globalUnreadable')}
+                    </span>
+                  ) : global?.status !== 'listed' || global.extensions.length === 0 ? (
+                    <span className='text-12px text-t-secondary'>
+                      {t('settings.agentExtensions.terminal.globalEmpty')}
+                    </span>
+                  ) : (
+                    <div className='flex flex-wrap gap-6px'>
+                      {global.extensions.map((extension) => (
+                        <Tag key={extension.name} size='small' bordered>
+                          {extension.name} · {t(`settings.agentExtensions.terminal.kinds.${extension.kind}`)}
+                        </Tag>
+                      ))}
+                    </div>
+                  )}
+                  {global?.truncated && (
+                    <span className='text-12px text-t-secondary'>
+                      {t('settings.agentExtensions.terminal.truncatedGlobal')}
+                    </span>
+                  )}
+                </div>
+                <Collapse
+                  bordered={false}
+                  defaultActiveKey={listing.environments.length === 0 ? ['searched'] : []}
+                  data-testid='terminal-searched'
+                >
+                  <Collapse.Item name='searched' header={t('settings.agentExtensions.terminal.searched')}>
+                    <ul className='m-0 ps-16px text-12px font-mono text-t-secondary'>
+                      {listing.searched.map((place) => (
+                        <li key={place} className='break-all'>
+                          {place}
+                        </li>
+                      ))}
+                    </ul>
+                  </Collapse.Item>
+                </Collapse>
+              </>
             )}
           </div>
-          <Collapse
-            bordered={false}
-            defaultActiveKey={listing.environments.length === 0 ? ['searched'] : []}
-            data-testid='terminal-searched'
-          >
-            <Collapse.Item name='searched' header={t('settings.agentExtensions.terminal.searched')}>
-              <ul className='m-0 ps-16px text-12px font-mono text-t-secondary'>
-                {listing.searched.map((place) => (
-                  <li key={place} className='break-all'>
-                    {place}
-                  </li>
-                ))}
-              </ul>
-            </Collapse.Item>
-          </Collapse>
-        </>
-      )}
+        </Collapse.Item>
+      </Collapse>
     </section>
   );
 };

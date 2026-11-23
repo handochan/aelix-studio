@@ -90,7 +90,7 @@ const CredentialsPrompt: React.FC<Props> = ({ visible, reason, proxy, mode, onDo
         <Input.Password
           value={password}
           onChange={setPassword}
-          autoComplete='off'
+          autoComplete='new-password'
           placeholder={t('settings.agentExtensions.credentials.password')}
           aria-label={t('settings.agentExtensions.credentials.password')}
           data-testid='credentials-password'

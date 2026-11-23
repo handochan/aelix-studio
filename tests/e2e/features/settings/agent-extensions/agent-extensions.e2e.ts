@@ -38,6 +38,8 @@ test.describe('Agent Extensions', () => {
     await expect(studio.first()).toBeVisible({ timeout: 15_000 });
     const terminal = page.getByTestId('terminal-section');
     await expect(terminal).toBeVisible();
+    // Folded under its summary line until opened.
+    await terminal.locator('.arco-collapse-item-header').first().click();
     await expect(
       terminal.locator('[data-testid="terminal-environment"], [data-testid="terminal-none"]').first()
     ).toBeVisible({ timeout: 15_000 });

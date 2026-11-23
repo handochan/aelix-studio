@@ -14,7 +14,7 @@ import { ipcBridge } from '@/common';
 import type { ExtensionEntry, ProxyCredentials } from '@aionui/web-host';
 import { Alert, Button, Collapse, Message, Modal, Popconfirm, Spin } from '@arco-design/web-react';
 import { Plus, Return } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import SettingsPageHeader from '../../components/SettingsPageHeader';
 import SettingsPageWrapper from '../../components/SettingsPageWrapper';
@@ -70,6 +70,20 @@ const AgentExtensionsSettings: React.FC = () => {
   );
   const { transport, list, settings, terminal, operation, savingSettings, lastChange, actions } =
     useAgentExtensions(asks);
+
+  // Leaving the screen answers what it still asks with "no": no request waits on a closed
+  // dialog, and typed credentials go with the dialog's state.
+  const open = useRef({ insecureAsk, credentialsAsk, unpinAsk, pinnedAsk });
+  open.current = { insecureAsk, credentialsAsk, unpinAsk, pinnedAsk };
+  useEffect(
+    () => () => {
+      open.current.insecureAsk?.(false);
+      open.current.credentialsAsk?.resolve(undefined);
+      open.current.unpinAsk?.resolve(false);
+      open.current.pinnedAsk?.resolve(false);
+    },
+    []
+  );
 
   useEffect(() => {
     // The host's platform (the backend runs there, in the app and the WebUI alike).
@@ -237,6 +251,7 @@ const AgentExtensionsSettings: React.FC = () => {
                   void pickWheel().then((path) => path && actions.updateFromFile(entry, path))
                 }
                 onRemove={(entry) => void actions.remove(entry)}
+                onToggleDefault={(entry, enabled) => void actions.setDefault(entry, enabled)}
               />
             )}
           </section>

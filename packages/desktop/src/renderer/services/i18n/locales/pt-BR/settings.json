@@ -473,6 +473,7 @@
     "description": "Extensões Python que adicionam comandos, ferramentas e servidores MCP aos agentes Aelix. O Studio as instala em seu próprio espaço; o app e o aelix do seu terminal não mudam.",
     "appliesAt": "As mudanças valem a partir do próximo início do agente: uma nova conversa, ou quando um agente reinicia. Conversas em andamento mantêm o estado inicial.",
     "empty": "Nenhuma extensão de agente instalada ainda.",
+    "defaultEnabled": "Usar em novas conversas",
     "reconcileBanner": "O Studio foi atualizado. Algumas extensões precisam ser configuradas de novo para esta versão.",
     "status": {
       "ready": "Pronta",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "aelix do terminal (somente leitura)",
       "description": "Extensões instaladas para o aelix no seu terminal. As conversas do Studio não as usam. Instale e remova pelo aelix no terminal.",
+      "summary": "{{environments}} ambientes · {{global}} itens globais",
+      "reading": "Lendo…",
       "status": {
         "listed": "Lido",
         "not_a_venv": "Não lido: fora de um ambiente virtual",
@@ -644,11 +647,13 @@
       "none": "Nenhum aelix de terminal encontrado.",
       "globalTitle": "Pasta global de extensões: {{location}}",
       "globalEmpty": "Vazia.",
+      "globalUnreadable": "Não foi possível ler a pasta.",
       "kinds": {
         "file": "arquivo",
         "manifest": "plugin",
         "pyproject": "pyproject",
-        "package": "pacote"
+        "package": "pacote",
+        "unknown": "formato desconhecido"
       },
       "truncatedGlobal": "Nem todos os itens foram lidos.",
       "searched": "Locais verificados"

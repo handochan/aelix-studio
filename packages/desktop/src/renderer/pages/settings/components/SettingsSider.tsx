@@ -12,6 +12,7 @@ import {
   Info,
   Lightning,
   LinkCloud,
+  PlugOne,
   Puzzle,
   Speed,
   System,
@@ -108,7 +109,7 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
       'agent-extensions': {
         id: 'agent-extensions',
         label: t('settings.agentExtensions.navLabel'),
-        icon: <Puzzle />,
+        icon: <PlugOne />,
         path: 'agent-extensions',
       },
       appearance: { id: 'appearance', label: t('settings.appearancePanel'), icon: <Computer />, path: 'appearance' },

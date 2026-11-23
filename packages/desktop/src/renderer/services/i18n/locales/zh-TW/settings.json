@@ -473,6 +473,7 @@
     "description": "為 Aelix 代理程式加入指令、工具和 MCP 伺服器的 Python 擴充。Studio 將其安裝在自己的空間中，不會更動應用程式和終端機中的 aelix。",
     "appliesAt": "變更從下一次代理程式啟動時生效：新對話，或代理程式重新啟動時。進行中的對話維持開始時的狀態。",
     "empty": "尚未安裝代理程式擴充。",
+    "defaultEnabled": "在新對話中預設使用",
     "reconcileBanner": "Studio 已更新。有些擴充需要為此版本重新設定。",
     "status": {
       "ready": "就緒",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "終端機 aelix（唯讀）",
       "description": "為終端機中的 aelix 安裝的擴充。Studio 對話不會使用它們。請在終端機中以 aelix 安裝和移除。",
+      "summary": "{{environments}} 個環境 · {{global}} 個全域項目",
+      "reading": "正在讀取…",
       "status": {
         "listed": "已讀取",
         "not_a_venv": "未讀取：不在虛擬環境中",
@@ -644,11 +647,13 @@
       "none": "找不到終端機 aelix。",
       "globalTitle": "全域擴充資料夾：{{location}}",
       "globalEmpty": "空的。",
+      "globalUnreadable": "無法讀取該資料夾。",
       "kinds": {
         "file": "檔案",
         "manifest": "外掛程式",
         "pyproject": "pyproject",
-        "package": "套件"
+        "package": "套件",
+        "unknown": "不明格式"
       },
       "truncatedGlobal": "未能讀取所有項目。",
       "searched": "尋找過的位置"

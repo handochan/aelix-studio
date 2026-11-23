@@ -108,6 +108,13 @@ function fakeHelper(): void {
         state.at += 1;
         return reply({ ok: true, data: operation(command.operationId) });
       }
+      if (action === 'set_default' && 'extensionId' in command) {
+        const listing = host.listing as ExtensionListing;
+        listing.extensions = listing.extensions.map((item) =>
+          item.managedId === command.extensionId ? { ...item, defaultEnabled: command.enabled } : item
+        );
+        return reply({ ok: true, data: listing });
+      }
       if (action === 'rollback' || action === 'reconcile_bundle')
         return reply({ ok: true, data: { current: 'g2', previous: null, revision: 2 } });
       const change = host.changes.shift() ?? ['checking', 'switched'];
@@ -140,6 +147,11 @@ const terminalListing = (overrides: Partial<TerminalCliListing> = {}): TerminalC
 });
 
 const actionsOf = () => host.requests.map((request) => request.action as string);
+
+/** Unfold the terminal section, folded under its summary line. */
+const unfoldTerminal = async (): Promise<void> => {
+  fireEvent.click(await screen.findByText(/settings\.agentExtensions\.terminal\.summary/));
+};
 const sent = (action: string) => host.requests.filter((request) => request.action === action);
 
 beforeEach(() => {
@@ -188,6 +200,9 @@ describe('the agent extensions screen', () => {
       within(screen.getByTestId('agent-extension-aelix-starter')).queryByTestId('agent-extension-update')
     ).toBeNull();
     expect(screen.queryByTestId('agent-extension-upgrade')).toBeNull();
+    // Folded under its summary until opened.
+    expect(screen.queryByTestId('terminal-environment')).toBeNull();
+    await unfoldTerminal();
     const terminal = await screen.findByTestId('terminal-environment');
     expect(within(terminal).getByText('~/.local/share/uv/tools/aelix')).toBeInTheDocument();
     expect(within(terminal).getByText('memory')).toBeInTheDocument();
@@ -202,6 +217,7 @@ describe('the agent extensions screen', () => {
     expect(screen.getByTestId('agent-extensions-install')).toBeDisabled();
     fireEvent.click(screen.getByText('settings.agentExtensions.runtime.details'));
     expect(await screen.findByText('Agent Extensions need the bundle')).toBeInTheDocument();
+    await unfoldTerminal();
     expect(await screen.findByTestId('terminal-environment')).toBeInTheDocument();
   });
 
@@ -280,6 +296,11 @@ describe('the agent extensions screen', () => {
     );
     fireEvent.click(screen.getByTestId('operation-retry'));
     expect(await screen.findByText('settings.agentExtensions.credentials.rejected')).toBeInTheDocument();
+    // What was typed before is gone once sent; the browser is told not to fill it in.
+    const password = (await screen.findByTestId('credentials-password')) as HTMLInputElement;
+    expect(password.value).toBe('');
+    expect(password).toHaveAttribute('autocomplete', 'new-password');
+    expect((screen.getByTestId('credentials-username') as HTMLInputElement).value).toBe('');
     await enter('right');
     await waitFor(() => expect(sent('install')).toHaveLength(2));
     expect(sent('install')[1]).toMatchObject({ proxyCredentials: { username: 'ops', password: 'right' } });
@@ -330,6 +351,40 @@ describe('the agent extensions screen', () => {
     await waitFor(() => expect(sent('rollback')).toHaveLength(1));
   }, 10000);
 
+  it('sets the app-wide default for new conversations, only for managed extensions', async () => {
+    const listing = host.listing as ExtensionListing;
+    listing.extensions = [
+      entry('managed-one', { managedId: 'studio.managed-one', defaultEnabled: true }),
+      entry('legacy'),
+    ];
+    render(<AgentExtensionsSettings />);
+    const managed = await screen.findByTestId('agent-extension-managed-one');
+    expect(within(screen.getByTestId('agent-extension-legacy')).queryByTestId('agent-extension-default')).toBeNull();
+    fireEvent.click(within(managed).getByRole('switch'));
+    await waitFor(() =>
+      expect(sent('set_default')).toEqual([
+        { action: 'set_default', extensionId: 'studio.managed-one', enabled: false },
+      ])
+    );
+    await waitFor(() => expect(within(managed).getByRole('switch')).toHaveAttribute('aria-checked', 'false'));
+  });
+
+  it('answers a pending question with no when the screen closes, and sends nothing', async () => {
+    host.settings = {
+      ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
+      credentialMode: 'memory-only',
+    };
+    const view = render(<AgentExtensionsSettings />);
+    fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+    fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
+    fireEvent.click(screen.getByTestId('install-submit'));
+    fireEvent.change(await screen.findByTestId('credentials-password'), { target: { value: 'sentinel-secret' } });
+    view.unmount();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sent('install')).toEqual([]);
+    expect(document.body.textContent).not.toContain('sentinel-secret');
+  });
+
   it('updates a file import from a wheel chosen on the host', async () => {
     render(<AgentExtensionsSettings />);
     fireEvent.click(
@@ -350,6 +405,7 @@ describe('the agent extensions screen', () => {
     bridge.platform = 'win32';
     host.terminal = terminalListing({ environments: [] });
     render(<AgentExtensionsSettings />);
+    await unfoldTerminal();
     expect(await screen.findByTestId('terminal-none')).toBeInTheDocument();
     expect(screen.getByText('~/.local/share/uv/tools')).toBeInTheDocument();
     await waitFor(() => expect(screen.queryByTestId('settings-private-git')).toBeNull());

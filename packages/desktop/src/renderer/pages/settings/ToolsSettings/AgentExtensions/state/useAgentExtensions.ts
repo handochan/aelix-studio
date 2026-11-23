@@ -238,6 +238,14 @@ export function useAgentExtensions(asks: Asks) {
     updateFromFile: (entry: ExtensionEntry, path: string) =>
       sendChange({ action: 'update', name: entry.name, source: { kind: 'file', path } }),
     remove: (entry: ExtensionEntry) => sendChange({ action: 'remove', name: entry.name }),
+    /** The app-wide default for new conversations; the reply is the list with it changed. */
+    setDefault: async (entry: ExtensionEntry, enabled: boolean) => {
+      if (entry.managedId === undefined) return;
+      const reply = await send({ action: 'set_default', extensionId: entry.managedId, enabled });
+      if (reply === 'declined') return;
+      if (reply.ok) setList({ data: reply.data as ExtensionListing, loading: false });
+      else asksRef.current.failure(failureCode(reply) ?? 'UNKNOWN');
+    },
     rollback: () => sendDirect({ action: 'rollback' }),
     reconcile: () => sendDirect({ action: 'reconcile_bundle' }),
     saveSettings: async (next: ExtensionSettings) => {

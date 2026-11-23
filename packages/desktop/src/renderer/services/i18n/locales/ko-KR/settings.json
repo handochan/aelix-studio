@@ -473,6 +473,7 @@
     "description": "Aelix 에이전트에 명령·도구·MCP 서버를 더하는 Python 확장입니다. Studio가 자기 공간에 설치하며, 앱과 터미널의 aelix는 바뀌지 않습니다.",
     "appliesAt": "변경은 다음 에이전트 시작부터 적용됩니다. 새 대화이거나 에이전트가 다시 시작될 때입니다. 실행 중인 대화는 시작할 때의 상태를 유지합니다.",
     "empty": "아직 설치한 에이전트 확장이 없습니다.",
+    "defaultEnabled": "새 대화에서 기본 사용",
     "reconcileBanner": "Studio가 업데이트되었습니다. 이 버전에 맞게 다시 맞춰야 하는 확장이 있습니다.",
     "status": {
       "ready": "준비됨",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "터미널 aelix(읽기 전용)",
       "description": "터미널의 aelix에 설치된 확장입니다. Studio 대화에서는 쓰지 않습니다. 설치와 제거는 터미널에서 aelix로 하세요.",
+      "summary": "환경 {{environments}}개 · 전역 항목 {{global}}개",
+      "reading": "읽는 중…",
       "status": {
         "listed": "읽음",
         "not_a_venv": "읽지 않음: 가상 환경 밖",
@@ -644,11 +647,13 @@
       "none": "터미널 aelix를 찾지 못했습니다.",
       "globalTitle": "전역 확장 폴더: {{location}}",
       "globalEmpty": "비어 있습니다.",
+      "globalUnreadable": "폴더를 읽을 수 없습니다.",
       "kinds": {
         "file": "파일",
         "manifest": "플러그인",
         "pyproject": "pyproject",
-        "package": "패키지"
+        "package": "패키지",
+        "unknown": "알 수 없는 형식"
       },
       "truncatedGlobal": "모든 항목을 읽지는 못했습니다.",
       "searched": "찾아본 위치"

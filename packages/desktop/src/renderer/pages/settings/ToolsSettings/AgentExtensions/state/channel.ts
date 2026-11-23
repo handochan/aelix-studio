@@ -28,7 +28,8 @@ export const failureCode = (reply: StudioExtensionsReply): string | undefined =>
  * reply without one (a refusal before the route, a lost answer) counts as `insecure`, and so
  * does the time before the first reply. Before the first request that carries a secret over an
  * insecure channel it asks the user once for this visit of the screen; after a yes, such
- * requests carry `acknowledgeInsecureTransport: true`. A request the host still answers
+ * requests carry `acknowledgeInsecureTransport: true`. The yes lasts while the transport stays
+ * the same and the screen stays open (a new visit is a new hook). A request the host still answers
  * `INSECURE_TRANSPORT` (the channel became insecure after the last reply) is asked about and
  * sent again once.
  */
@@ -46,8 +47,11 @@ export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
 
   const deliver = useCallback(async (request: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
     const reply = await requestStudioExtensions(request);
-    transport.current = reply.transport ?? 'insecure';
-    setCurrent(transport.current);
+    const next = reply.transport ?? 'insecure';
+    // A yes was for the channel as it was: once it changes, the next secret is asked about again.
+    if (next !== transport.current) acknowledged.current = false;
+    transport.current = next;
+    setCurrent(next);
     return reply;
   }, []);
 

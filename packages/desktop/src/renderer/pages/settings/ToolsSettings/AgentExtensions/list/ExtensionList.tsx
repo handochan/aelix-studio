@@ -5,7 +5,7 @@
  */
 
 import type { ExtensionEntry, ExtensionOrigin, ExtensionStatus } from '@aionui/web-host';
-import { Button, Popconfirm, Tag, Tooltip } from '@arco-design/web-react';
+import { Button, Popconfirm, Switch, Tag, Tooltip } from '@arco-design/web-react';
 import { Delete, Refresh, Upload } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
@@ -42,10 +42,22 @@ type Props = {
   onUpgrade: (entry: ExtensionEntry) => void;
   onUpdateFromFile: (entry: ExtensionEntry) => void;
   onRemove: (entry: ExtensionEntry) => void;
+  /**
+   * The app-wide default for new conversations (A5 (c), `set_default`), for entries with a
+   * managed ID. Per-conversation exceptions belong to the conversation (#7), not here.
+   */
+  onToggleDefault: (entry: ExtensionEntry, enabled: boolean) => void;
 };
 
 /** The extensions Studio installed, with what can be done to each. */
-const ExtensionList: React.FC<Props> = ({ extensions, busy, onUpgrade, onUpdateFromFile, onRemove }) => {
+const ExtensionList: React.FC<Props> = ({
+  extensions,
+  busy,
+  onUpgrade,
+  onUpdateFromFile,
+  onRemove,
+  onToggleDefault,
+}) => {
   const { t } = useTranslation();
   if (extensions.length === 0) {
     return (
@@ -90,6 +102,18 @@ const ExtensionList: React.FC<Props> = ({ extensions, busy, onUpgrade, onUpdateF
               </div>
             </div>
             <div className='flex shrink-0 flex-wrap items-center gap-8px'>
+              {entry.managedId !== undefined && (
+                <label className='flex items-center gap-6px text-12px text-t-secondary me-8px'>
+                  <Switch
+                    size='small'
+                    checked={entry.defaultEnabled ?? true}
+                    disabled={busy}
+                    onChange={(enabled) => onToggleDefault(entry, enabled)}
+                    data-testid='agent-extension-default'
+                  />
+                  {t('settings.agentExtensions.defaultEnabled')}
+                </label>
+              )}
               {upgrade && (
                 <Button
                   size='small'

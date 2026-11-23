@@ -473,6 +473,7 @@
     "description": "Python extensions that add commands, tools and MCP servers to Aelix agents. Studio keeps them in its own space; the app and your terminal aelix are not changed.",
     "appliesAt": "Changes apply from the next agent start: a new conversation, or when an agent restarts. Running conversations keep what they started with.",
     "empty": "No agent extensions are installed yet.",
+    "defaultEnabled": "Use in new conversations",
     "reconcileBanner": "Studio was updated. Some extensions need to be set up again for this version.",
     "status": {
       "ready": "Ready",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "Terminal aelix (read only)",
       "description": "Extensions installed for aelix in your terminal. Studio conversations do not use them. Install and remove them with aelix in the terminal.",
+      "summary": "{{environments}} environments · {{global}} global entries",
+      "reading": "Reading…",
       "status": {
         "listed": "Read",
         "not_a_venv": "Not read: outside a virtual environment",
@@ -644,11 +647,13 @@
       "none": "No terminal aelix was found.",
       "globalTitle": "Global extension folder: {{location}}",
       "globalEmpty": "Nothing here.",
+      "globalUnreadable": "The folder could not be read.",
       "kinds": {
         "file": "file",
         "manifest": "plugin",
         "pyproject": "pyproject",
-        "package": "package"
+        "package": "package",
+        "unknown": "unknown form"
       },
       "truncatedGlobal": "Not all entries were read.",
       "searched": "Places looked in"

@@ -17,6 +17,7 @@ import {
   Info,
   Lightning,
   LinkCloud,
+  PlugOne,
   Puzzle,
   Robot,
   System,
@@ -68,7 +69,7 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
     'agent-extensions': {
       id: 'agent-extensions',
       label: t('settings.agentExtensions.navLabel'),
-      icon: <Puzzle theme='outline' size='16' />,
+      icon: <PlugOne theme='outline' size='16' />,
       path: 'agent-extensions',
     },
     appearance: {

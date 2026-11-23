@@ -6,6 +6,7 @@
 
 import type { ExtensionEntry, ProxyCredentials, StudioExtensionsRequest } from '@aionui/web-host';
 
+// TODO(#121): replace these local shapes with the shared types once PR C is merged, and delete this file.
 /*
  * "Update to latest" follows the contract of PR C (#121, `codex/studio-32-extension-upgrade`,
  * types.ts at b037fa75) until it is merged: then these local shapes give way to the shared

@@ -473,6 +473,7 @@
     "description": "Aelix エージェントにコマンド・ツール・MCP サーバーを追加する Python 拡張です。Studio は専用の領域にインストールし、アプリやターミナルの aelix は変更しません。",
     "appliesAt": "変更は次のエージェント起動から適用されます（新しい会話、またはエージェントの再起動時）。実行中の会話は開始時の状態のままです。",
     "empty": "エージェント拡張はまだインストールされていません。",
+    "defaultEnabled": "新しい会話で既定で使う",
     "reconcileBanner": "Studio が更新されました。このバージョン向けに再設定が必要な拡張があります。",
     "status": {
       "ready": "準備完了",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "ターミナルの aelix（読み取り専用）",
       "description": "ターミナルの aelix にインストールされた拡張です。Studio の会話では使われません。インストールと削除はターミナルの aelix で行ってください。",
+      "summary": "環境 {{environments}} 件 · グローバル項目 {{global}} 件",
+      "reading": "読み取り中…",
       "status": {
         "listed": "読み取り済み",
         "not_a_venv": "未読み取り: 仮想環境の外",
@@ -644,11 +647,13 @@
       "none": "ターミナルの aelix が見つかりませんでした。",
       "globalTitle": "グローバル拡張フォルダー: {{location}}",
       "globalEmpty": "空です。",
+      "globalUnreadable": "フォルダーを読み取れません。",
       "kinds": {
         "file": "ファイル",
         "manifest": "プラグイン",
         "pyproject": "pyproject",
-        "package": "パッケージ"
+        "package": "パッケージ",
+        "unknown": "不明な形式"
       },
       "truncatedGlobal": "すべての項目は読み取れませんでした。",
       "searched": "探した場所"

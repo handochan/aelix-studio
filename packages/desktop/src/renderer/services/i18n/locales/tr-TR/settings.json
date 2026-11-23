@@ -473,6 +473,7 @@
     "description": "Aelix ajanlarına komut, araç ve MCP sunucusu ekleyen Python uzantıları. Studio bunları kendi alanına kurar; uygulama ve terminaldeki aelix değişmez.",
     "appliesAt": "Değişiklikler bir sonraki ajan başlangıcından itibaren geçerlidir: yeni bir sohbette ya da bir ajan yeniden başladığında. Süren sohbetler başladıkları hâli korur.",
     "empty": "Henüz kurulu ajan uzantısı yok.",
+    "defaultEnabled": "Yeni sohbetlerde kullan",
     "reconcileBanner": "Studio güncellendi. Bazı uzantıların bu sürüm için yeniden ayarlanması gerekiyor.",
     "status": {
       "ready": "Hazır",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "Terminaldeki aelix (salt okunur)",
       "description": "Terminalinizdeki aelix için kurulan uzantılar. Studio sohbetleri bunları kullanmaz. Terminalde aelix ile kurun ve kaldırın.",
+      "summary": "{{environments}} ortam · {{global}} genel öğe",
+      "reading": "Okunuyor…",
       "status": {
         "listed": "Okundu",
         "not_a_venv": "Okunmadı: sanal ortam dışında",
@@ -644,11 +647,13 @@
       "none": "Terminalde aelix bulunamadı.",
       "globalTitle": "Genel uzantı klasörü: {{location}}",
       "globalEmpty": "Boş.",
+      "globalUnreadable": "Klasör okunamadı.",
       "kinds": {
         "file": "dosya",
         "manifest": "eklenti",
         "pyproject": "pyproject",
-        "package": "paket"
+        "package": "paket",
+        "unknown": "bilinmeyen biçim"
       },
       "truncatedGlobal": "Tüm öğeler okunmadı.",
       "searched": "Bakılan konumlar"

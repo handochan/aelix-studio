@@ -473,6 +473,7 @@
     "description": "为 Aelix 智能体添加命令、工具和 MCP 服务器的 Python 扩展。Studio 将其安装在自己的空间中，不会改动应用和终端中的 aelix。",
     "appliesAt": "更改从下一次智能体启动时生效：新对话，或智能体重新启动时。正在进行的对话保持开始时的状态。",
     "empty": "尚未安装智能体扩展。",
+    "defaultEnabled": "在新对话中默认使用",
     "reconcileBanner": "Studio 已更新。有些扩展需要为此版本重新配置。",
     "status": {
       "ready": "就绪",
@@ -617,6 +618,8 @@
     "terminal": {
       "title": "终端 aelix（只读）",
       "description": "为终端中的 aelix 安装的扩展。Studio 对话不会使用它们。请在终端中用 aelix 安装和移除。",
+      "summary": "{{environments}} 个环境 · {{global}} 个全局条目",
+      "reading": "正在读取…",
       "status": {
         "listed": "已读取",
         "not_a_venv": "未读取：不在虚拟环境中",
@@ -644,11 +647,13 @@
       "none": "未找到终端 aelix。",
       "globalTitle": "全局扩展文件夹：{{location}}",
       "globalEmpty": "为空。",
+      "globalUnreadable": "无法读取该文件夹。",
       "kinds": {
         "file": "文件",
         "manifest": "插件",
         "pyproject": "pyproject",
-        "package": "包"
+        "package": "包",
+        "unknown": "未知格式"
       },
       "truncatedGlobal": "未能读取全部条目。",
       "searched": "查找过的位置"

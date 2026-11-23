@@ -60,6 +60,32 @@ describe('the screen channel', () => {
     expect(request).toHaveBeenLastCalledWith({ ...secret, acknowledgeInsecureTransport: true });
   });
 
+  it('asks again once the transport changed after a yes', async () => {
+    let transport: 'secure' | 'insecure' = 'insecure';
+    const request = vi.fn(
+      async (): Promise<StudioExtensionsReply> =>
+        ({ ok: true, data: { settings: {} }, transport }) as unknown as StudioExtensionsReply
+    );
+    window.__studioExtensions = { request };
+    const confirm = vi.fn(async () => true);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    await act(async () => {
+      await result.current.send({ action: 'get_settings' });
+      await result.current.send(secret, { secret: true });
+    });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    transport = 'secure';
+    await act(async () => {
+      await result.current.send({ action: 'get_settings' });
+    });
+    transport = 'insecure';
+    await act(async () => {
+      await result.current.send({ action: 'get_settings' });
+      await result.current.send(secret, { secret: true });
+    });
+    expect(confirm).toHaveBeenCalledTimes(2);
+  });
+
   it('sends a secret on a secure channel without asking or flagging it', async () => {
     const request = channel('secure');
     const confirm = vi.fn(async () => true);
