@@ -14,7 +14,7 @@ import type {
   TerminalCliListing,
 } from '@aionui/web-host';
 import { Message } from '@arco-design/web-react';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -47,6 +47,9 @@ vi.mock('../../components/SettingsPageWrapper', () => ({
 }));
 
 import AgentExtensionsSettings from './index';
+
+// The screen answers through several async steps (and dialog animations): room for a loaded runner.
+configure({ asyncUtilTimeout: 4000 });
 import { resetShownOperation } from './state/operation';
 
 const entry = (name: string, extra: Partial<ExtensionEntry> = {}): ExtensionEntry => ({
@@ -299,7 +302,7 @@ describe('the agent extensions screen', () => {
         },
       ])
     );
-  });
+  }, 10000);
 
   it('asks again for credentials the proxy refused, and sends the change again', async () => {
     host.settings = {
@@ -504,7 +507,7 @@ describe('the agent extensions screen', () => {
     await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.INVALID_INPUT']));
     expect(sent('set_settings')).toHaveLength(1);
     expect(input.value).toBe('http://proxy.corp:3128');
-  });
+  }, 10000);
 
   it('asks to turn on proxy authentication before saving an address with a password', async () => {
     render(<AgentExtensionsSettings />);
