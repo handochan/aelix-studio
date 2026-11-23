@@ -24,6 +24,8 @@ type Line = {
   depth: number;
   /** A basic string on it holds a `\` escape. */
   escape: boolean;
+  /** A `{` outside strings: an inline table, at any depth. */
+  brace: boolean;
   /** A string is still open at its end (a one-line string that does not close). */
   open: boolean;
 };
@@ -34,6 +36,7 @@ function scanLine(raw: string): Line {
   let equals = -1;
   let depth = 0;
   let escape = false;
+  let brace = false;
   let end = line.length;
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
@@ -47,17 +50,51 @@ function scanLine(raw: string): Line {
       end = index;
       break;
     } else if (char === '=' && equals < 0) equals = index;
-    else if (char === '[' || char === '{') depth += 1;
-    else if (char === ']' || char === '}') depth -= 1;
+    else if (char === '[' || char === '{') {
+      depth += 1;
+      if (char === '{') brace = true;
+    } else if (char === ']' || char === '}') depth -= 1;
   }
-  return { text: line.slice(0, end).trimEnd(), equals, depth, escape, open: quote !== '' };
+  return { text: line.slice(0, end).trimEnd(), equals, depth, escape, brace, open: quote !== '' };
+}
+
+const SIMPLE_ESCAPES: Record<string, string> = { b: '\b', t: '\t', n: '\n', f: '\f', r: '\r', '"': '"', '\\': '\\' };
+
+/**
+ * The text of a basic string's content with its escapes read (TOML 1.0: `\b \t \n \f \r \" \\`,
+ * `\uXXXX`, `\UXXXXXXXX`); undefined for an escape TOML refuses.
+ */
+function unescapeBasic(content: string): string | undefined {
+  let text = '';
+  for (let index = 0; index < content.length; index += 1) {
+    const char = content[index];
+    if (char !== '\\') {
+      text += char;
+      continue;
+    }
+    const kind = content[index + 1];
+    index += 1;
+    if (kind in SIMPLE_ESCAPES) {
+      text += SIMPLE_ESCAPES[kind];
+      continue;
+    }
+    const digits = kind === 'u' ? 4 : kind === 'U' ? 8 : 0;
+    const hex = content.slice(index + 1, index + 1 + digits);
+    if (digits === 0 || !new RegExp(`^[0-9A-Fa-f]{${digits}}$`).test(hex)) return undefined;
+    const point = Number.parseInt(hex, 16);
+    if (point > 0x10ffff || (point >= 0xd800 && point <= 0xdfff)) return undefined;
+    text += String.fromCodePoint(point);
+    index += digits;
+  }
+  return text;
 }
 
 const BARE_KEY = /[A-Za-z0-9_-]/;
 
 /**
- * The names of a TOML key or table name (`a.b`, `"a".'b'`, with space around the dots), and
- * whether a part was quoted; undefined when it is not one.
+ * The names of a TOML key or table name (`a.b`, `"a".'b'`, with space around the dots), with
+ * escapes read, and whether a part was quoted (an escape is only in a quoted part); undefined
+ * when it is not one (or holds an escape TOML refuses).
  */
 function keyPath(text: string): { names: string[]; quoted: boolean } | undefined {
   const names: string[] = [];
@@ -69,10 +106,19 @@ function keyPath(text: string): { names: string[]; quoted: boolean } | undefined
   for (;;) {
     space();
     const char = text[index];
-    if (char === '"' || char === "'") {
+    if (char === "'") {
       const close = text.indexOf(char, index + 1);
       if (close < 0) return undefined;
       names.push(text.slice(index + 1, close));
+      quoted = true;
+      index = close + 1;
+    } else if (char === '"') {
+      let close = index + 1;
+      while (close < text.length && text[close] !== '"') close += text[close] === '\\' ? 2 : 1;
+      if (close >= text.length) return undefined;
+      const name = unescapeBasic(text.slice(index + 1, close));
+      if (name === undefined) return undefined;
+      names.push(name);
       quoted = true;
       index = close + 1;
     } else {
@@ -125,15 +171,17 @@ function plainStrings(value: string): string[] | undefined {
  * table, one line `extensions = ["…", …]` of basic strings without escapes. Anything that could
  * say otherwise in a way this cannot tell is `unknown`:
  * - three quotes of either kind anywhere in the file (a multi-line string);
- * - `tool.aelix` named any other way: a quoted name, an array of tables, `extensions` as a
- *   table, a dotted key or an inline table under `[tool]` or at the top;
- * - in `[tool.aelix]`: a quoted or dotted key, an inline table, a value on more lines (a
- *   multi-line array), or an escape;
- * - a table or a key given twice (TOML refuses the file, and native reads nothing), an escape
- *   in a table name, a line that is neither a table, a key nor empty, a string left open, or a
- *   line over `LINE_LIMIT`.
+ * - `tool.aelix` named any other way, in the places that can name it (table names starting
+ *   with `tool`, keys at the top, keys under `[tool]`): a quoted or escaped name, an array of
+ *   tables, `extensions` as a table, a dotted key or an inline table;
+ * - in `[tool.aelix]`: a quoted, escaped or dotted key, an inline table at any depth, a value
+ *   on more lines (a multi-line array), or an escape in a value;
+ * - a table or a key given twice, compared with escapes read (TOML refuses the file, and
+ *   native reads nothing), an escape TOML refuses in a name, a line that is neither a table, a
+ *   key nor empty, a string left open, or a line over `LINE_LIMIT`.
  *
- * Values on more lines elsewhere are skipped to where their brackets close.
+ * Escapes and inline tables elsewhere are left alone, and values on more lines elsewhere are
+ * skipped to where their brackets close.
  */
 export function readDeclaredExtensions(text: string): DeclaredExtensions {
   if (text.includes('"""') || text.includes("'''")) return 'unknown';
@@ -154,11 +202,12 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
     if (line.text === '') continue;
     if (line.text.startsWith('[')) {
       const array = line.text.startsWith('[[');
-      if (line.escape || !line.text.endsWith(array ? ']]' : ']')) return 'unknown';
+      if (!line.text.endsWith(array ? ']]' : ']')) return 'unknown';
       const header = keyPath(line.text.slice(array ? 2 : 1, array ? -2 : -1));
       if (!header) return 'unknown';
       const [first, second, third] = header.names;
       const underAelix = first === 'tool' && second === 'aelix';
+      // Quoted (escaped ones included) or an array of tables: another way to name tool.aelix.
       if (first === 'tool' && (array || header.quoted) && (second === undefined || second === 'aelix'))
         return 'unknown';
       if (underAelix && third === 'extensions') return 'unknown';
@@ -182,8 +231,7 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
     if (table === 'tool' && key.names[0] === 'aelix') return 'unknown';
     if (table === 'aelix') {
       const value = line.text.slice(line.equals + 1).trim();
-      if (key.quoted || key.names.length > 1 || line.escape || line.depth !== 0 || value.startsWith('{'))
-        return 'unknown';
+      if (key.quoted || key.names.length > 1 || line.escape || line.depth !== 0 || line.brace) return 'unknown';
       if (key.names[0] === 'extensions') {
         const strings = plainStrings(value);
         if (!strings) return 'unknown';
@@ -210,13 +258,15 @@ async function directoryKind(
     if (declared !== 'none') {
       // Native takes the table only when a declared path exists, resolved from the directory.
       const paths = scan.platform === 'win32' ? path.win32 : path.posix;
+      // The first `DECLARED_LIMIT` declared values are looked at; more make the answer
+      // `truncated`, whatever is left out of them (empty, UNC) or found in them.
+      const truncated = declared.paths.length > DECLARED_LIMIT;
       const candidates = declared.paths
+        .slice(0, DECLARED_LIMIT)
         .filter((entry) => entry !== '')
         .map((entry) => paths.resolve(directory, entry))
         .filter((candidate) => !isUncOrDevice(candidate, scan.platform));
-      // More declared paths than are checked: the answer may have missed one.
-      const truncated = candidates.length > DECLARED_LIMIT;
-      for (const candidate of candidates.slice(0, DECLARED_LIMIT)) {
+      for (const candidate of candidates) {
         // eslint-disable-next-line no-await-in-loop -- stops at the first that exists
         if (await statOf(scan, candidate)) return { kind: 'pyproject', truncated };
       }

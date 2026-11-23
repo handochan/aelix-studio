@@ -325,6 +325,20 @@ describe.runIf(posix)('the terminal CLI list', () => {
     }
   });
 
+  it.runIf(process.getuid?.() !== 0)('reports a tool it cannot resolve, instead of passing it over', async () => {
+    const tools = path.join(home, '.local', 'share', 'uv', 'tools');
+    await cliVenv(path.join(tools, 'aelix'), scratch);
+    // The tool directory can be listed but not searched: its entries cannot be resolved.
+    await chmod(tools, 0o444);
+    try {
+      expect((await list({ PATH: '' })).environments).toEqual([
+        expect.objectContaining({ status: 'unreadable', location: '~/.local/share/uv/tools/aelix' }),
+      ]);
+    } finally {
+      await chmod(tools, 0o755);
+    }
+  });
+
   it.runIf(process.getuid?.() !== 0)('reports a tool it cannot look into, instead of passing it over', async () => {
     const other = path.join(home, '.local', 'share', 'uv', 'tools', 'other');
     await cliVenv(other, scratch, {}, { cli: false });

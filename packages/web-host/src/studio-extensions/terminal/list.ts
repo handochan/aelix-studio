@@ -1,7 +1,16 @@
 import os from 'node:os';
 import path from 'node:path';
 import type { TerminalCliEnvironment, TerminalCliFoundBy, TerminalCliListing } from '../types.js';
-import { createScan, listDirectory, lstatEntry, realpathOf, ScanStopped, statOf, type Scan } from './files.js';
+import {
+  createScan,
+  listDirectory,
+  lstatEntry,
+  realpathEntry,
+  realpathOf,
+  ScanStopped,
+  statOf,
+  type Scan,
+} from './files.js';
 import { readGlobalExtensions } from './globalDirectory.js';
 import { launcherInterpreter } from './launcher.js';
 import { searchLocations, type ToolRoot } from './locations.js';
@@ -202,8 +211,14 @@ async function scanListing(
     for (const name of children.names) {
       const candidate = path.join(root.directory, name);
       // eslint-disable-next-line no-await-in-loop -- in a stable order, so the limit keeps the same ones
-      const real = await realpathOf(scan, candidate);
-      if (!real) continue;
+      const real = await realpathEntry(scan, candidate);
+      if (real === 'absent') continue;
+      // A tool that cannot be resolved (a directory on the way that cannot be searched, a link
+      // loop) may hold the CLI: reported, not passed over.
+      if (real === 'unreadable') {
+        add(candidate, { status: 'unreadable', location: candidate }, root.foundBy);
+        continue;
+      }
       // eslint-disable-next-line no-await-in-loop -- as above
       const { held, truncated } = await holdsCli(scan, real);
       if (truncated) listing.truncated = true;
