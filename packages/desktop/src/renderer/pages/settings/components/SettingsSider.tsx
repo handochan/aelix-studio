@@ -25,17 +25,17 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Tooltip } from '@arco-design/web-react';
 import { getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
 
-/** Builtin settings tab IDs in display order (must match router paths). */
 /**
- * Whether the sider item at `path` is the page shown: its own route or a page under it
- * (`agent/<id>/repair`), never another item whose path only starts the same (`agent` is not
- * `agent-extensions`).
+ * Whether the settings menu item at `path` (in the sider or the mobile top menu) is the page
+ * shown: its own route or a page under it (`agent/<id>/repair`), never another item whose path
+ * only starts the same (`agent` is not `agent-extensions`).
  */
 export function isSiderItemSelected(pathname: string, path: string): boolean {
   const shown = pathname.replace(/^\/settings\/?/, '');
   return shown === path || shown.startsWith(`${path}/`);
 }
 
+/** Builtin settings tab IDs in display order (must match router paths). */
 export const BUILTIN_TAB_IDS = [
   'agent',
   'model',

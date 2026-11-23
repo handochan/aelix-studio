@@ -21,6 +21,8 @@ vi.mock('@/renderer/utils/platform', () => ({
   resolveExtensionAssetUrl: (url: string) => url,
 }));
 
+import { LayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import SettingsPageWrapper from '../../components/SettingsPageWrapper';
 import SettingsSider, { isSiderItemSelected } from '../../components/SettingsSider';
 
 /** The sider items shown as the current page at `pathname`. */
@@ -36,6 +38,32 @@ const selectedAt = (pathname: string): string[] => {
   view.unmount();
   return selected;
 };
+
+/** The labels of the mobile top settings menu items shown as the current page at `pathname`. */
+const mobileSelectedAt = (pathname: string): string[] => {
+  const view = render(
+    <LayoutContext.Provider value={{ isMobile: true, siderCollapsed: false, setSiderCollapsed: () => {} }}>
+      <MemoryRouter initialEntries={[pathname]}>
+        <SettingsPageWrapper>
+          <div />
+        </SettingsPageWrapper>
+      </MemoryRouter>
+    </LayoutContext.Provider>
+  );
+  const selected = [...view.container.querySelectorAll('.settings-mobile-top-nav__item--active')].map(
+    (item) => item.querySelector('.settings-mobile-top-nav__label')?.textContent ?? ''
+  );
+  view.unmount();
+  return selected;
+};
+
+describe('the mobile top settings menu', () => {
+  it('shows only Agent Extensions as the page on its route, not Agents as well', () => {
+    expect(mobileSelectedAt('/settings/agent-extensions')).toEqual(['settings.agentExtensions.navLabel']);
+    expect(mobileSelectedAt('/settings/agent')).toEqual(['settings.agents']);
+    expect(mobileSelectedAt('/settings/agent/claude/repair')).toEqual(['settings.agents']);
+  });
+});
 
 describe('the settings sider', () => {
   it('shows only Agent Extensions as the page on its route, not Agents as well', () => {
