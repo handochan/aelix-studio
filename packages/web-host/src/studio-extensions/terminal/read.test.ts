@@ -92,7 +92,11 @@ beforeEach(async () => {
 afterEach(() => rm(scratch, { recursive: true, force: true }));
 
 /** A time-bounded call: linear parsers finish well under this on any machine. */
-const fast = (run: () => unknown, limitMs = 250): void => {
+/**
+ * Runs in linear time: the inputs below are sized so that quadratic work takes seconds, and the
+ * limit leaves room for a busy machine.
+ */
+const fast = (run: () => unknown, limitMs = 1000): void => {
   const started = performance.now();
   run();
   expect(performance.now() - started).toBeLessThan(limitMs);
@@ -136,6 +140,15 @@ describe('limits on work at once', () => {
     const soon = createScan(Date.now() + 30, process.platform);
     const late = soon.fs(() => new Promise((resolve) => setTimeout(() => resolve('late'), 80)));
     await expect(late).rejects.toThrow('time limit');
+  });
+
+  it('gives nothing from a call that failed after the deadline, so nothing follows it either', async () => {
+    const soon = createScan(Date.now() + 30, process.platform);
+    const failed = soon.fs(
+      () =>
+        new Promise((_, reject) => setTimeout(() => reject(Object.assign(new Error('gone'), { code: 'ENOENT' })), 80))
+    );
+    await expect(failed).rejects.toThrow('time limit');
   });
 
   it('says when every file system call of a scan has settled', async () => {
@@ -252,8 +265,13 @@ describe('bounded reads', () => {
     expect(fsSpy.reads).toBe(0);
   });
 
-  it('follows no link to a UNC path on Windows: the target is read before it is followed', async () => {
-    await symlink('//server/share', path.join(scratch, 'to-unc'));
+  it('follows no link to a UNC path on Windows: the target is read before it is followed', async (context) => {
+    // The type is given, so Windows does not look at the share to choose one.
+    const made = await symlink('//server/share', path.join(scratch, 'to-unc'), 'dir').catch(
+      (error: NodeJS.ErrnoException) => error.code
+    );
+    // Windows without the right to make links: nothing to test there.
+    if (made === 'EPERM' && !posix) context.skip();
     const windows = createScan(Date.now() + 10_000, 'win32');
     expect(await readBounded(windows, path.join(scratch, 'to-unc', 'x'), 100)).toBe('unreadable');
     expect(await listDirectory(windows, path.join(scratch, 'to-unc'), 10)).toBe('unreadable');
@@ -332,46 +350,73 @@ describe('linear time on hostile input', () => {
   });
 
   it('reads pyproject tables in linear time', () => {
-    fast(() => readDeclaredExtensions('[tool.aelix]\nextensions = [\n' + '"a",\n'.repeat(40_000) + ']\n'));
+    fast(() => readDeclaredExtensions('[project]\nx = [\n' + '"a",\n'.repeat(40_000) + ']\n'));
     fast(() => readDeclaredExtensions('[' + ' '.repeat(4000) + '\n'.repeat(60_000)));
     fast(() => readDeclaredExtensions(' \n'.repeat(100_000) + '[tool.aelix]'));
-    // A deep table and many assignments under it: no copying of the table per line.
-    fast(() => readDeclaredExtensions('[' + 'a.'.repeat(2000) + 'b]\n' + 'k=1\n'.repeat(400_000)));
-    expect(readDeclaredExtensions('x = "' + 'y'.repeat(5000) + '"\n')).toBe('unknown');
+    // A deep table and many keys under it: nothing of the table is copied per line.
+    const keys = Array.from({ length: 50_000 }, (_, index) => `k${index} = 1`).join('\n');
+    fast(() => readDeclaredExtensions('[' + 'a.'.repeat(2000) + 'b]\n' + keys));
+    fast(() => readDeclaredExtensions('[tool.aelix]\nextensions = [' + '"a", '.repeat(800) + ']\n'));
   });
 });
 
-describe('pyproject tables', () => {
+describe('pyproject tables, by the strict rule', () => {
+  const declared = '[tool.aelix]\nextensions = ["a.py"]\n';
+  const tripleDouble = '"'.repeat(3);
+  const tripleSingle = "'".repeat(3);
   it.each([
-    ['[tool.aelix]\nextensions = ["ext.py", \'other.py\']\n', { paths: ['ext.py', 'other.py'] }],
-    [
-      '[ tool . aelix ] # here\nextensions = [ # list\n  "a.py", # one\n  "b\\\\c.py",\n]\n',
-      { paths: ['a.py', 'b\\c.py'] },
-    ],
+    // The one form taken.
+    ['[tool.aelix]\nextensions = ["ext.py", "other.py"]\n', { paths: ['ext.py', 'other.py'] }],
+    ['[ tool . aelix ] # here\nextensions = [ "a.py", "b.py", ] # list\n', { paths: ['a.py', 'b.py'] }],
+    ['﻿[tool.aelix]\r\nextensions = ["a.py"]\r\n', { paths: ['a.py'] }],
     ['[tool.aelix]\nextensions = []\n', { paths: [] }],
+    // Elsewhere, values on more lines are skipped, nested arrays included.
+    ['[project]\nname = "x"\ndependencies = [\n  "a", # ]\n  ["n"],\n]\n' + declared, { paths: ['a.py'] }],
     ['[project]\nname = "x"\n', 'none'],
     ['[tool.aelixir]\nextensions = ["a.py"]\n', 'none'],
     ['[tool.other]\nnote = "aelix"\n', 'none'],
-    ['["tool".aelix]\nextensions = ["a.py"]\n', 'unknown'],
-    ['[tool."aelix"]\nextensions = ["a.py"]\n', 'unknown'],
-    ['tool.aelix.extensions = ["a.py"]\n', 'unknown'],
-    ['[tool]\naelix.extensions = ["a.py"]\n', 'unknown'],
-    ['[tool]\naelix = { extensions = ["a.py"] }\n', 'unknown'],
-    ['[tool.aelix]\n"extensions" = ["a.py"]\n', 'unknown'],
-    ['[tool.aelix]\nextensions = [["a.py"]]\n', 'unknown'],
-    ['[tool.aelix]\nextensions = ["a\\u0041.py"]\n', 'unknown'],
-    ['[tool.aelix]\nextensions = ["a.py"\n', 'unknown'],
-    // A table inside a multi-line string is text, not a table.
-    ['[project]\ndescription = """\n[tool.aelix]\nextensions = ["a.py"]\n"""\n', 'none'],
-    ["[project]\nreadme = '''\n[tool.aelix]\n'''\n[tool.aelix]\nextensions = ['b.py']\n", { paths: ['b.py'] }],
-    ['[[tool.aelix]]\nextensions = ["a.py"]\n', 'unknown'],
-    ['[tool.aelix]\nextensions = ["a.py"]\n[tool.aelix]\nname = "x"\n', 'unknown'],
-    ['[tool.aelix]\nextensions = ["a.py"]\nextensions = ["b.py"]\n', 'unknown'],
-    // Deep tables elsewhere, or under `tool.aelix` but not its `extensions`, change nothing.
+    ['[tool."black"]\nx = 1\n', 'none'],
+    ['[tool.aelix.sub]\nextensions = ["a.py"]\n', 'none'],
     ['[' + Array.from({ length: 20 }, () => 'a').join('.') + '.aelix]\nx = 1\n', 'none'],
     ['[tool.aelix.' + Array.from({ length: 20 }, () => 'a').join('.') + ']\nx = 1\n', 'none'],
+    // Three quotes anywhere, even inside a one-line string.
+    [`[project]\ndescription = ${tripleDouble}x\n${tripleDouble}\n${declared}`, 'unknown'],
+    [`[project]\nx = 'a${tripleDouble}b'\n${declared}`, 'unknown'],
+    [`[project]\nreadme = ${tripleSingle}x\n${tripleSingle}\n${declared}`, 'unknown'],
+    // tool.aelix named another way.
+    ['["tool".aelix]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[tool."aelix"]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[[tool.aelix]]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[[tool]]\naelix = 1\n', 'unknown'],
     ['[tool.aelix.extensions]\nx = 1\n', 'unknown'],
-    ['[tool]\naelix = "x"\n', 'unknown'],
+    ['tool.aelix.extensions = ["a.py"]\n', 'unknown'],
+    ['tool = { aelix = { extensions = ["a.py"] } }\n', 'unknown'],
+    ['[tool]\naelix.extensions = ["a.py"]\n', 'unknown'],
+    ['[tool]\naelix = { extensions = ["a.py"] }\n', 'unknown'],
+    ['[tool]\n"aelix" = 1\n', 'unknown'],
+    // In [tool.aelix]: quoted or dotted keys, inline tables, more lines, escapes, other strings.
+    ['[tool.aelix]\n"extensions" = ["a.py"]\n', 'unknown'],
+    ['[tool.aelix]\nextensions.x = 1\n', 'unknown'],
+    ['[tool.aelix]\noptions = { a = 1 }\nextensions = ["a.py"]\n', 'unknown'],
+    ['[tool.aelix]\nextensions = [\n  "a.py",\n]\n', 'unknown'],
+    ['[tool.aelix]\nother = [\n  "x",\n]\nextensions = ["a.py"]\n', 'unknown'],
+    ['[tool.aelix]\nextensions = ["a.py"\n', 'unknown'],
+    ['[tool.aelix]\nextensions = [["a.py"]]\n', 'unknown'],
+    ['[tool.aelix]\nextensions = ["a\\u0041.py"]\n', 'unknown'],
+    ['[tool.aelix]\nname = "a\\tb"\nextensions = ["a.py"]\n', 'unknown'],
+    ["[tool.aelix]\nextensions = ['a.py']\n", 'unknown'],
+    ['[tool.aelix]\nextensions = "a.py"\n', 'unknown'],
+    // Given twice: TOML refuses the file.
+    [declared + '[tool.aelix]\nname = "x"\n', 'unknown'],
+    ['[tool.aelix]\nextensions = ["a.py"]\nextensions = ["b.py"]\n', 'unknown'],
+    ['[project]\nname = "a"\n[project]\nversion = "1"\n' + declared, 'unknown'],
+    ['[project]\nname = "a"\nname = "b"\n' + declared, 'unknown'],
+    // Not TOML this reader can follow.
+    ['[project]\njust words\n' + declared, 'unknown'],
+    ['[project]\nname = "open\n' + declared, 'unknown'],
+    ['["a\\"b"]\nx = 1\n' + declared, 'unknown'],
+    ['[project\n' + declared, 'unknown'],
+    ['x = "' + 'y'.repeat(5000) + '"\n', 'unknown'],
   ])('reads %j', (text, expected) => {
     expect(readDeclaredExtensions(text)).toEqual(expected);
   });
@@ -506,6 +551,27 @@ describe('the terminal CLI virtual environment', () => {
       await chmod(posixSite(locked), 0o755);
     }
   });
+
+  it.runIf(unprivileged)(
+    'calls an environment unreadable when a directory above its files cannot be searched',
+    async () => {
+      const root = path.join(scratch, 'venv');
+      await cliVenv(root, scratch);
+      const version = path.dirname(posixSite(root));
+      await chmod(version, 0o000);
+      try {
+        expect(await readCliVenv(scan, root)).toBe('unreadable');
+      } finally {
+        await chmod(version, 0o755);
+      }
+      await chmod(root, 0o000);
+      try {
+        expect(await readCliVenv(scan, root)).toBe('unreadable');
+      } finally {
+        await chmod(root, 0o755);
+      }
+    }
+  );
 });
 
 describe('the global extension directory', () => {
@@ -547,6 +613,17 @@ describe('the global extension directory', () => {
     await write(path.join(directory, 'many', `p${DECLARED_LIMIT}.py`));
     expect(await readGlobalExtensions(scan, directory)).toEqual({
       extensions: [{ name: 'many', kind: 'unknown' }],
+      truncated: true,
+    });
+  });
+
+  it('says it stopped short past the limit even when a declared path was found', async () => {
+    const directory = path.join(scratch, 'agent', 'extensions');
+    const declared = Array.from({ length: DECLARED_LIMIT + 1 }, (_, index) => `"p${index}.py"`).join(', ');
+    await write(path.join(directory, 'many', 'pyproject.toml'), `[tool.aelix]\nextensions = [${declared}]\n`);
+    await write(path.join(directory, 'many', 'p0.py'));
+    expect(await readGlobalExtensions(scan, directory)).toEqual({
+      extensions: [{ name: 'many', kind: 'pyproject' }],
       truncated: true,
     });
   });

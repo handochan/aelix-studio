@@ -326,9 +326,11 @@ export type TerminalCliEnvironment = {
  * How native's directory tier takes an entry of the global extension directory, first match
  * wins for a directory: `file`, a `*.py` file; `manifest`, a directory with `aelix-plugin.toml`;
  * `pyproject`, one whose `pyproject.toml` declares `[tool.aelix] extensions` with a path that
- * exists; `package`, one with `__init__.py`. `unknown`: its `pyproject.toml` names that table in
- * a form Studio reads only with a TOML parser (quoted or dotted keys, inline tables), or is too
- * large. Manifests are not parsed: a broken one is listed and fails in native.
+ * exists; `package`, one with `__init__.py`. `unknown`: its `pyproject.toml` falls outside the
+ * strict rule Studio reads it by (ADR 9: one `[tool.aelix]` table with a one-line array of plain
+ * strings; multi-line strings, quoted or dotted keys, inline tables, multi-line arrays, escapes
+ * or repeats make it `unknown`), is too large, or declares more paths than are checked and none
+ * of those checked exists. Manifests are not parsed: a broken one is listed and fails in native.
  */
 export type TerminalGlobalExtensionKind = 'file' | 'manifest' | 'pyproject' | 'package' | 'unknown';
 
@@ -348,14 +350,17 @@ export type TerminalCliListing = {
     /** `absent`: no such directory (or no agent directory Studio can place); `unreadable`: it cannot be read. */
     status: 'listed' | 'absent' | 'unreadable';
     extensions: TerminalGlobalExtension[];
-    /** More than 500 entries: the rest were not looked at. */
+    /** More than 500 entries, or a `pyproject.toml` with more than 64 paths: the rest were not looked at. */
     truncated: boolean;
   };
   /** Every directory looked in, for the screen to show when nothing was found. */
   searched: string[];
   /** More than 16 environments: the rest were not read. */
   truncated: boolean;
-  /** The 5-second limit ended the reading: what was read by then. */
+  /**
+   * The scan did not end within its 5-second limit: the answer is what was read by then. False
+   * only for a scan that ended before the limit.
+   */
   timedOut: boolean;
 };
 

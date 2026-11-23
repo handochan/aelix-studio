@@ -13,7 +13,7 @@ export class ScanStopped extends Error {
 /**
  * One read-only scan of the terminal CLI: its deadline, its platform, and a cap on file system
  * calls running at once. Every file system call goes through `fs`, which checks the deadline
- * before it starts and again when it returns, so nothing new starts once time is up.
+ * before it starts and again when it returns or fails, so nothing new starts once time is up.
  */
 export type Scan = {
   readonly platform: NodeJS.Platform;
@@ -52,7 +52,14 @@ export function createScan(deadline: number, platform: NodeJS.Platform, concurre
       // A call let in by `release` holds the slot it was given.
       try {
         check();
-        const result = await call();
+        let result: T;
+        try {
+          result = await call();
+        } catch (error) {
+          // A call that failed after the deadline starts nothing more either.
+          check();
+          throw error;
+        }
         // A call that came back after the deadline starts nothing more.
         check();
         return result;
@@ -171,6 +178,20 @@ function rethrowStop(error: unknown): undefined {
  */
 export async function realpathOf(scan: Scan, target: string): Promise<string | undefined> {
   return realPath(scan, target).catch(rethrowStop);
+}
+
+/**
+ * The real path, `absent` when it does not exist, or `unreadable` when it cannot be resolved
+ * (a directory on the way that cannot be searched, a link loop, a UNC or device path).
+ */
+export async function realpathEntry(scan: Scan, target: string): Promise<string | 'absent' | 'unreadable'> {
+  try {
+    return await realPath(scan, target);
+  } catch (error) {
+    if (error instanceof ScanStopped) throw error;
+    const code = errorCode(error);
+    return code === 'ENOENT' || code === 'ENOTDIR' ? 'absent' : 'unreadable';
+  }
 }
 
 type Stats = Awaited<ReturnType<typeof stat>>;

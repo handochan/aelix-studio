@@ -35,8 +35,10 @@ const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/
 /**
  * Hide the home directory and the user name in a text of a reply. A home directory becomes `~`
  * wherever it starts a path in the text (`/home/alice/x`, `file:///home/alice/x`,
- * `"C:/Users/alice"`), up to any character that cannot continue its last name (a separator, a
- * quote, punctuation other than `.`, `-`, `_`). On Windows either separator matches either.
+ * `"C:/Users/alice"`, `in /home/alice.`), up to any character that cannot continue its last
+ * name: a separator, a space, a quote, punctuation other than `-` and `_`, or a `.` that
+ * nothing of a name follows. `/home/alice.bak` is another path (its user name part is still
+ * hidden below). On Windows either separator matches either.
  * The user name becomes `<user>` wherever it stands as a word of its own (in a path, a package
  * name, a reference); inside a longer word (`aliceTools`) it stays, and a short name may also
  * hide an ordinary word: both are accepted (ADR 9). Case is ignored for the home on macOS and
@@ -50,7 +52,7 @@ export function maskText(text: string, masks: Masks): string {
   for (const home of masks.homes.filter((value) => value.length > 1).toSorted((a, b) => b.length - a.length)) {
     const trimmed = home.replace(/[\\/]+$/, '');
     const pattern = windows ? trimmed.split(/[\\/]/).map(escapeRegExp).join('[\\\\/]') : escapeRegExp(trimmed);
-    masked = masked.replace(new RegExp(`${pattern}(?![\\p{L}\\p{N}._-])`, fold), '~');
+    masked = masked.replace(new RegExp(`${pattern}(?![\\p{L}\\p{N}_-]|\\.[\\p{L}\\p{N}._-])`, fold), '~');
   }
   if (masks.username)
     masked = masked.replace(
@@ -58,6 +60,14 @@ export function maskText(text: string, masks: Masks): string {
       '<user>'
     );
   return masked;
+}
+
+/**
+ * What tells environments apart: the place as found, and on Windows without case, where paths
+ * that differ only by case are the same place. The first spelling found is the one shown.
+ */
+export function environmentKey(place: string, platform: NodeJS.Platform): string {
+  return platform === 'win32' ? place.toLowerCase() : place;
 }
 
 /** A path for a reply: normalized, then masked. */
@@ -161,7 +171,13 @@ async function scanListing(
   }
 
   const found = new Map<string, Found>();
-  const add = (key: string, entry: Omit<Found, 'foundBy' | 'launchers'>, by: TerminalCliFoundBy, launcher?: string) => {
+  const add = (
+    place: string,
+    entry: Omit<Found, 'foundBy' | 'launchers'>,
+    by: TerminalCliFoundBy,
+    launcher?: string
+  ) => {
+    const key = environmentKey(place, platform);
     let current = found.get(key);
     if (!current) {
       if (found.size >= ENVIRONMENT_LIMIT) {
@@ -303,10 +319,12 @@ export function listTerminalCli(options: TerminalListingOptions = {}): Promise<T
   };
   let masks: Masks = { homes: [home], username, platform };
   const work = scanListing(scan, listing, env, home, (ready) => (masks = ready), username).then(
-    () => true,
+    // Finished in time only if it ended before the deadline: work after the last file system
+    // call (parsing) can carry it past.
+    () => Date.now() < deadline,
     (error: unknown) => {
       if (!(error instanceof ScanStopped)) listing.truncated = true;
-      return !(error instanceof ScanStopped);
+      return !(error instanceof ScanStopped) && Date.now() < deadline;
     }
   );
   let timer: NodeJS.Timeout | undefined;
