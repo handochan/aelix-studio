@@ -25,7 +25,7 @@ import {
 } from '../../../../../tests/fixtures/extensionRuntime';
 import { writeWheel } from '../../../../../tests/fixtures/extensionWheels';
 import { redactUrlCredentials, type Spawn } from '../../../process';
-import { ExtensionService, type ExtensionServiceOptions } from '../../../service';
+import { ExtensionService, type ExtensionServiceOptions } from '../../../host/service';
 import { layoutOf, type Layout } from '../../../store/layout';
 import {
   ExtensionFailure,
@@ -158,6 +158,21 @@ describe('the sealed credential store', () => {
     await dropProxyCredentials(layout, writer, next);
     expect(await readdir(layout.root)).toEqual([`proxy-credentials-${next}.json`]);
     await dropProxyCredentials(layout, writer, null);
+    expect(await readdir(layout.root)).toEqual([]);
+  });
+
+  it('keeps nothing, and says so, when the keychain refuses to seal', async () => {
+    const refusing: ProxyCredentialVault = {
+      mode: 'keychain',
+      seal: () => {
+        throw new Error('Encryption is not available.');
+      },
+      open: () => '',
+    };
+    const failure = await failureOf(
+      saveProxyCredentials(layout, refusing, STORE_PROXY, CREDENTIALS, directWriter(layout.root))
+    );
+    expect(failure.code).toBe('PROXY_CREDENTIALS_NOT_STORED');
     expect(await readdir(layout.root)).toEqual([]);
   });
 

@@ -1,7 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type { FlowContext } from './flow/candidate.js';
-import { baseEnvironment } from './flow/environment.js';
+import type { FlowContext } from '../flow/candidate.js';
+import { baseEnvironment } from '../flow/environment.js';
 import {
   clearProxyCredentials,
   describe,
@@ -12,19 +12,24 @@ import {
   setDefault,
   setProxyCredentials,
   type MutationRequest,
-} from './flow/mutate.js';
-import { privateGitEnvironment } from './flow/online/credentials.js';
+} from '../flow/mutate.js';
+import { privateGitEnvironment } from '../flow/online/credentials.js';
 import {
   hasSavedCredentials,
   MEMORY_ONLY_VAULT,
   parseProxyCredentials,
   type ProxyCredentialVault,
-} from './flow/online/proxy/credentials.js';
-import { parseSettingsChange, readSettings, type SettingsChange, type StoredSettings } from './flow/online/settings.js';
-import { parseOnlineSource } from './flow/online/source.js';
-import { redactUrlCredentials, spawnChild, windowsChildSpawn, type Spawn } from './process.js';
-import { locateLayout, resolveBundle, verifyLayout } from './store/layout.js';
-import { isManagedId } from './launch/managedCatalog.js';
+} from '../flow/online/proxy/credentials.js';
+import {
+  parseSettingsChange,
+  readSettings,
+  type SettingsChange,
+  type StoredSettings,
+} from '../flow/online/settings.js';
+import { parseOnlineSource } from '../flow/online/source.js';
+import { redactUrlCredentials, spawnChild, windowsChildSpawn, type Spawn } from '../process.js';
+import { locateLayout, resolveBundle, verifyLayout } from '../store/layout.js';
+import { isManagedId } from '../launch/managedCatalog.js';
 import {
   ExtensionFailure,
   type ExtensionCommand,
@@ -34,7 +39,7 @@ import {
   type ExtensionSettingsState,
   type ExtensionSource,
   type ProxyCredentials,
-} from './types.js';
+} from '../types.js';
 
 export type ExtensionServiceOptions = {
   /** The bundled Studio runtime: the directory holding `manifest.json`. */
@@ -62,6 +67,16 @@ export type ExtensionServiceOptions = {
    */
   proxyVault?: ProxyCredentialVault;
 };
+
+/**
+ * What a host without a usable runtime can do about it. The standalone WebUI package ships
+ * none: its operator points `AELIX_STUDIO_RUNTIME` at one. Native auth also takes a prepared
+ * development runtime without a manifest; extensions take only the distributable bundle for
+ * this platform (`manifest.json`, `native-site`; see `resolveBundle`), and say so.
+ */
+export const RUNTIME_HINT =
+  'Agent Extensions need the distributable Studio runtime bundle for this platform, with manifest.json and ' +
+  'native-site; set AELIX_STUDIO_RUNTIME to it. A prepared runtime without manifest.json is not enough';
 
 type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
 
@@ -134,6 +149,12 @@ const isName = (value: unknown): value is string =>
 export class ExtensionService {
   private operation?: Tracked;
   private direct?: { owner: string; abort: AbortController; done: Promise<ExtensionReply> };
+  /**
+   * Changes asked for that have not started yet (early checks, finding the bundle). They are
+   * registered before anything awaits, so a window that closes or a WebUI listener that stops
+   * in that time still cancels them: they end with CANCELLED before anything is changed.
+   */
+  private readonly starting = new Set<{ owner: string; abort: AbortController }>();
   private changing = false;
 
   constructor(private readonly options: ExtensionServiceOptions) {}
@@ -212,7 +233,7 @@ export class ExtensionService {
       if (command.action === 'poll' || command.action === 'cancel') return this.control(owner, command);
       if (command.action === 'list') {
         const context = await this.context();
-        return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
+        return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
       }
       if (command.action === 'get_settings')
         return { ok: true, data: await this.settingsState(await this.storedSettings()) };
@@ -252,60 +273,73 @@ export class ExtensionService {
       }
       const change = parseChange(command);
       if (!change) return fail('INVALID_INPUT');
-      if (change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file')) {
-        if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
-        // An early answer for the screen; the change checks the settings again under the lock.
-        const stored = await this.storedSettings();
-        const { settings, unreadable } = stored;
-        if (unreadable) return fail('SETTINGS_UNREADABLE');
-        if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
-        if (change.action === 'install' && change.proxyCredentials && settings.proxy === null)
-          return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
-        // The credentials are for this address; the change ends if the settings name another by then.
-        if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
-        // The screen asks for credentials on this answer; nothing has started.
-        if (
-          change.action === 'install' &&
-          settings.proxy !== null &&
-          settings.proxyAuthentication &&
-          !change.proxyCredentials
-        ) {
-          const layout = await locateLayout(this.options.root);
-          if (!(await hasSavedCredentials(layout, this.vault, settings.proxy, stored.credentialId)))
-            return fail('PROXY_CREDENTIALS_REQUIRED');
-        }
-      } else if (change.action === 'install' && change.proxyCredentials)
-        return fail('INVALID_INPUT', ['a file import runs offline and takes no proxy credentials']);
-      if (this.platform === 'win32' && change.action === 'install' && change.source.kind === 'git')
-        return fail('UNSUPPORTED_PLATFORM');
-      if (this.changing) return fail('BUSY');
-      this.changing = true;
       const abort = new AbortController();
-      let context: FlowContext | undefined;
+      const entry = { owner, abort };
+      this.starting.add(entry);
       try {
-        context = await this.context(abort.signal);
+        return await this.start(owner, change, abort);
       } finally {
-        if (!context) this.changing = false;
+        this.starting.delete(entry);
       }
-      if (!context) return fail('RUNTIME_UNAVAILABLE');
-      const tracked: Tracked = {
-        owner,
-        state: { operationId: randomUUID(), action: change.action, phase: 'checking' },
-        abort,
-        done: Promise.resolve(),
-      };
-      this.operation = tracked;
-      tracked.done = this.run(tracked, change, context);
-      return { ok: true, data: { ...tracked.state } };
     } catch (error) {
       return error instanceof ExtensionFailure ? fail(error.code, error.detail) : this.unexpected(error);
     }
   }
 
+  /** The early checks of a change and its start; `abort` is already registered for cancelOwner. */
+  private async start(owner: string, change: MutationRequest, abort: AbortController): Promise<ExtensionReply> {
+    if (change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file')) {
+      if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
+      // An early answer for the screen; the change checks the settings again under the lock.
+      const stored = await this.storedSettings();
+      const { settings, unreadable } = stored;
+      if (unreadable) return fail('SETTINGS_UNREADABLE');
+      if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
+      if (change.action === 'install' && change.proxyCredentials && settings.proxy === null)
+        return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
+      // The credentials are for this address; the change ends if the settings name another by then.
+      if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
+      // Installs can ask here. Upgrades check the saved source and pin under the lock before asking.
+      if (
+        change.action === 'install' &&
+        settings.proxy !== null &&
+        settings.proxyAuthentication &&
+        !change.proxyCredentials
+      ) {
+        const layout = await locateLayout(this.options.root);
+        if (!(await hasSavedCredentials(layout, this.vault, settings.proxy, stored.credentialId)))
+          return fail('PROXY_CREDENTIALS_REQUIRED');
+      }
+    } else if (change.action === 'install' && change.proxyCredentials)
+      return fail('INVALID_INPUT', ['a file import runs offline and takes no proxy credentials']);
+    if (this.platform === 'win32' && change.action === 'install' && change.source.kind === 'git')
+      return fail('UNSUPPORTED_PLATFORM');
+    if (abort.signal.aborted) return fail('CANCELLED');
+    if (this.changing) return fail('BUSY');
+    this.changing = true;
+    let context: FlowContext | undefined;
+    try {
+      context = await this.context(abort.signal);
+    } finally {
+      if (!context || abort.signal.aborted) this.changing = false;
+    }
+    if (abort.signal.aborted) return fail('CANCELLED');
+    if (!context) return fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
+    const tracked: Tracked = {
+      owner,
+      state: { operationId: randomUUID(), action: change.action, phase: 'checking' },
+      abort,
+      done: Promise.resolve(),
+    };
+    this.operation = tracked;
+    tracked.done = this.run(tracked, change, context);
+    return { ok: true, data: { ...tracked.state } };
+  }
+
   private async runDirect(command: DirectCommand, signal: AbortSignal): Promise<ExtensionReply> {
     try {
       const context = await this.context(signal);
-      if (!context) return fail('RUNTIME_UNAVAILABLE');
+      if (!context) return fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
       if (command.action === 'set_default')
         return { ok: true, data: await setDefault(context, command.extensionId, command.enabled) };
       if (command.action === 'set_settings')
@@ -366,7 +400,7 @@ export class ExtensionService {
 
   /** Cancel a caller's running change when its window or WebUI session closes. */
   cancelOwner(owner: string, prefix = false): void {
-    for (const tracked of [this.operation, this.direct])
+    for (const tracked of [this.operation, this.direct, ...this.starting])
       if (tracked && (prefix ? tracked.owner.startsWith(owner) : tracked.owner === owner)) tracked.abort.abort();
   }
 
@@ -375,6 +409,7 @@ export class ExtensionService {
    * The promise resolves once the change has ended and nothing of it is running any more.
    */
   async dispose(): Promise<void> {
+    for (const entry of this.starting) entry.abort.abort();
     this.operation?.abort.abort();
     this.direct?.abort.abort();
     await Promise.all([this.operation?.done, this.direct?.done]);

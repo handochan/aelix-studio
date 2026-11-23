@@ -13,6 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { openBrowserUrl, shouldAutoOpenBrowser } from './browser.js';
 import { ensureAdminPassword } from './ensureAdminPassword.js';
+import { startStandaloneExtensions, stopStandaloneExtensions } from './studioExtensions.js';
 import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
 import { getStandaloneWebDataFolder } from '../../desktop/src/common/config/appIdentity.js';
 
@@ -187,12 +188,15 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     console.log('');
     console.log('Press Ctrl+C to stop.');
   } else {
+    const userDataPath = await resolveStandaloneStudioUserDataPath(dataDir);
+    // Memory-only: no keychain in the standalone WebUI (Studio #32).
+    startStandaloneExtensions(userDataPath);
     const handle = await startWebHost({
       app: {
         version,
         isPackaged: true,
         resourcesPath: cliRoot,
-        userDataPath: await resolveStandaloneStudioUserDataPath(dataDir),
+        userDataPath,
       },
       staticDir,
       port,
@@ -251,6 +255,7 @@ async function runStart(flags: Map<string, string | true>): Promise<void> {
     console.log(`\n[aelix-studio-web] received ${signal}, stopping...`);
     try {
       if (currentHandle) await currentHandle.stop();
+      await stopStandaloneExtensions();
     } catch (err) {
       console.error('[aelix-studio-web] stop failed:', err);
     }

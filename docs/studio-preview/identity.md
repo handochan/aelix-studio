@@ -75,6 +75,36 @@ command at `~/.local/bin/aelix-studio-web`. The data and logs default to
 resetting with an alternate data directory, use the same `--data-dir` or
 `AIONUI_DATA_DIR` both times. The flag takes priority over the environment.
 
+The package does not include the Studio runtime that native Provider sign-in
+and Agent Extensions use. Point `AELIX_STUDIO_RUNTIME` at one before you start
+the WebUI. Native Provider sign-in also accepts a prepared runtime
+([Providers](providers.md#runtime-and-usage)). Agent Extensions need the
+distributable runtime bundle for the same OS and architecture: a directory with
+`manifest.json` and `native-site`, such as `resources/studio-preview` of an
+installed Studio app. You can build one from a prepared runtime:
+
+```bash
+/path/to/prepared/studio-preview/native/bin/python -B \
+  scripts/studio-preview/packaging/bundle.py \
+  --runtime /path/to/prepared/studio-preview --output /path/to/studio-runtime-bundle
+export AELIX_STUDIO_RUNTIME=/path/to/studio-runtime-bundle
+```
+
+On Windows, the prepared runtime's Python is `native\Scripts\python.exe`:
+
+```powershell
+C:\path\to\prepared\studio-preview\native\Scripts\python.exe -B `
+  scripts\studio-preview\packaging\bundle.py `
+  --runtime C:\path\to\prepared\studio-preview --output C:\path\to\studio-runtime-bundle
+$env:AELIX_STUDIO_RUNTIME = 'C:\path\to\studio-runtime-bundle'
+```
+
+The bundle serves native Provider sign-in too. Without a runtime, those screens
+report that it is not available here. With only a prepared runtime, Agent
+Extensions report the same and name the bundle they need. Agent Extensions in
+the standalone WebUI never keep proxy credentials: they are asked at each
+install.
+
 On Linux with a systemd user manager, start the WebUI in a terminal first to
 read the generated operator password. After stopping that instance with
 Ctrl+C, you can run the packaged unit in the background.

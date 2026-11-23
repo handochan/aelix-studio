@@ -100,7 +100,10 @@ export type ExtensionCommand =
       proxyCredentials?: ProxyCredentials;
     }
   | { action: 'update'; name: string; source: FileExtensionSource }
-  /** Re-resolve the installed source. allowUnpin confirms a legacy index origin with no saved requirement. */
+  /**
+   * Re-resolve the installed source. `allowUnpin` confirms a legacy index origin with no saved requirement.
+   * `proxyCredentials` are scoped to this request, as for online installs.
+   */
   | { action: 'upgrade'; name: string; allowUnpin?: boolean; proxyCredentials?: ProxyCredentials }
   | { action: 'remove'; name: string }
   | { action: 'set_default'; extensionId: string; enabled: boolean }
@@ -289,6 +292,61 @@ export type ExtensionData = ExtensionListing | ExtensionOperation | ExtensionRol
 export type ExtensionReply =
   | { ok: true; data: ExtensionData }
   | { ok: false; code: ExtensionFailureCode; detail?: string[] };
+
+/**
+ * What the Studio host's own channel to the helper answers before the helper sees a request
+ * (the desktop `studio:extensions` IPC channel and the WebUI `/api/studio/extensions` route):
+ * `FORBIDDEN` for a caller that is not the Studio window or not a same-origin request,
+ * `UNAUTHENTICATED` without a real WebUI login, `FRAME_LIMIT` for a request over 60 kB,
+ * `UNAVAILABLE` when the host could not answer, and `CONNECTION_LOST` when the screen lost the
+ * answer. A lost answer may follow a change that was made; the screen never sends it again.
+ * `INSECURE_TRANSPORT`: the request carries proxy credentials over plain HTTP from another
+ * machine without the acknowledgement; see `StudioExtensionsRequest`.
+ */
+export type StudioExtensionsTransportCode =
+  | 'FORBIDDEN'
+  | 'UNAUTHENTICATED'
+  | 'FRAME_LIMIT'
+  | 'UNAVAILABLE'
+  | 'CONNECTION_LOST'
+  | 'INSECURE_TRANSPORT';
+
+/**
+ * Whether the channel can carry a secret without it crossing a network in the clear:
+ * `secure` for the desktop window and a WebUI over TLS or from this machine, `insecure` for a
+ * WebUI over plain HTTP from another machine. Decided by the host from the connection itself
+ * (for the WebUI, at the listener that accepted it), never from what a client sends. The
+ * page's `Origin` can only lower a WebUI verdict: an `http:` origin on a host other than
+ * localhost, 127/8 or [::1] (a reverse proxy on this machine serving the public over plain
+ * HTTP), or no parseable origin, is `insecure`.
+ */
+export type StudioExtensionsTransport = 'secure' | 'insecure';
+
+/**
+ * A request as the screen sends it (2026-11-23 user decision: warn, then allow). The screen
+ * sends `get_settings` first when it opens and takes `transport` from that reply before it
+ * sends any secret. The channel puts `transport` on every reply it writes, its own refusals
+ * included. Some replies cannot carry it: a WebUI request the listener refuses before the
+ * route (an empty 403 for an origin it does not accept) and an answer the screen lost
+ * (`CONNECTION_LOST`). The screen treats a reply without `transport` as `insecure`.
+ *
+ * On `insecure`, before a request that carries proxy credentials (`set_proxy_credentials`,
+ * `proxyCredentials` on install or upgrade, or a proxy address typed with them), the screen warns that they would
+ * cross the network unencrypted; if the user goes on, it sends the request with
+ * `acknowledgeInsecureTransport: true`. The channel still answers such a request without the
+ * flag `INSECURE_TRANSPORT`, as a second line. It removes the flag before the helper sees the
+ * request. Using saved credentials sends nothing secret and needs no flag.
+ */
+export type StudioExtensionsRequest = ExtensionCommand & { acknowledgeInsecureTransport?: true };
+
+/**
+ * A reply as the screen receives it: the helper's, or the channel's own refusal, with the
+ * channel's `transport` (absent where the channel could not write it; see
+ * `StudioExtensionsRequest`).
+ */
+export type StudioExtensionsReply = (ExtensionReply | { ok: false; code: StudioExtensionsTransportCode }) & {
+  transport?: StudioExtensionsTransport;
+};
 
 /** A failure with a code the caller can show. Anything else is reported as `INTERNAL`. */
 export class ExtensionFailure extends Error {

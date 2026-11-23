@@ -722,6 +722,69 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 - 설치는 **Studio helper 서비스**가 한다. Provider 설정이 쓰는 `NativeAuthService`
   (`packages/web-host/src/studio-auth/`)와 같은 자리, 같은 방식이다. 데스크톱은 IPC로, WebUI는 로그인한
   사용자의 요청으로 부른다. 세대 interpreter를 argv로 직접 실행하고 shell을 쓰지 않는다.
+- **host 조립(2026-11-22).** 프로세스마다 서비스는 하나다(`configureStudioExtensions`). 데스크톱 IPC와 그
+  프로세스가 띄운 WebUI가 같은 서비스를 쓴다. 상태는 `<Studio 사용자 데이터>/aelix-runtime`이다. 번들은 native auth와
+  똑같이 찾는다. `AELIX_STUDIO_RUNTIME`이 있으면 그것을 쓰고, 없으면 설치 앱의 `resources/studio-preview`와 checkout의
+  `.local/studio-preview` 중 native auth의 `resolveNativeRuntime`이 받는 첫 번째를 쓴다(`manifest.json`만 있는
+  디렉터리는 받지 않는다). 받는 형식은 넓히지 않는다. native auth는 `prepare.py`가 만든 manifest 없는 runtime도 받지만,
+  확장 기능은 이 플랫폼용 배포 번들(`manifest.json`, `native-site`)만 받는다. 그런 runtime이면 `RUNTIME_UNAVAILABLE`과,
+  필요한 번들과 `AELIX_STUDIO_RUNTIME`을 적은 detail로 답한다(`docs/studio-preview/identity.md`에 번들 만드는 법).
+  설정되기 전의 요청에는 `RUNTIME_UNAVAILABLE`로 답한다. 시작 전의 변경(이른 검사, 번들 찾기)도
+  owner와 함께 먼저 등록해 둔다. 그 사이 창이 닫히거나 listener가 멈추면 아무것도 바꾸지 않고 `CANCELLED`로 끝난다.
+  - **데스크톱.** app `ready` 뒤에 `safeStorage` vault로 설정한다(Linux는 이때 비밀 저장소를 알린다). 실패해도 앱은
+    뜬다. macOS에서는 시작할 때 `safeStorage`를 부르지 않는다. 사용 가능 여부를 묻는 것만으로도 main thread에서
+    Keychain을 읽어 Keychain 창을 기다릴 수 있다(CI에서 앱 시작이 멈췄다). 모든 macOS 사용자에게 Keychain이 있으므로
+    `keychain`으로 두고, 인증 정보를 봉인하거나 열 때만 Keychain을 쓴다. Keychain이 거절하면 저장은
+    `PROXY_CREDENTIALS_NOT_STORED`로 끝나고, 열기는 다시 묻는다.
+  - **데스크톱 채널.** 요청은 proxy 인증 정보를 실을 수 있으므로 일반 bridge와 그 로그를 거치지 않는 전용 채널이다
+    (preload `__studioExtensions` → `ipcMain` `studio:extensions`). native auth와 같은 검사(등록한 Studio 창의 main frame,
+    그 창의 페이지 URL)를 통과한 창에만 답한다. 설치 앱에서는 그 창의 DevTools가 열려 있는 동안 `FORBIDDEN`이다. console에
+    붙여 넣은 코드(self-XSS)가 helper와 keychain에 닿지 못하게 하려는 것이다. 개발 빌드는 그대로 쓸 수 있다(2026-11-22
+    결정). 요청은 JSON 자료(null·boolean·유한한 수·문자열·배열·평범한 객체, 깊이 16)여야 하고, UTF-8로 60 kB 이하여야
+    한다. buffer·typed array·날짜·Map은 `INVALID_INPUT`이다. 창마다 owner(`desktop:<webContents>`)가 다르다. 창이
+    사라지거나 main frame이 다른 페이지로 가면 그 창이 시작한 변경을 취소한다.
+  - **WebUI.** 같은 listener의 `POST /api/studio/extensions`이다. native auth facade와 같은 입장 검사를 같은 코드로
+    한다. JSON POST(`application/json`과 매개변수만, `application/jsonx` 같은 것은 아님), `X-Studio-Extensions: 1`, 페이지
+    자신의 origin, cross-site 아님, 실제 WebUI 로그인, 60 kB, 10초다. 로그인한 사용자가 owner(`web:<user>`)다. listener가
+    멈추면 WebUI 사용자의 변경을 취소한다. 별도 WebUI(`scripts/webui.ts`, 배포 패키지 `aelix-studio-web`)는 vault 없이
+    설정되어 memory-only이고, 멈출 때 서비스를 정리한다. 배포 패키지에는 Studio runtime이 없다. native auth와 같이
+    운영자가 준비한 runtime을 `AELIX_STUDIO_RUNTIME`으로 가리킨다. 없으면 `RUNTIME_UNAVAILABLE`과 그 방법이 적힌 detail로
+    답한다. 화면은 이것을 "이 환경에 runtime이 없음"으로 보여 준다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할
+    수 있다(2026-11-22 사용자 결정, 저장한 값은 돌려주지 않는다).
+  - **암호화되지 않은 원격 연결(2026-11-23 사용자 결정: 경고한 뒤 허용).**
+    - **판단.** 먼저 연결 자체로 정한다. TLS이거나 상대 주소가 loopback(127.0.0.0/8, ::1, IPv4-mapped 포함)이면
+      안전하고, `X-Forwarded-*` 같은 header는 보지 않는다. WebUI listener는 모든 연결을 127.0.0.1에서 내부 HTTP 서버로
+      잇는다. 그래서 내부 서버의 socket은 늘 loopback이다. 판단은 연결을 받은 listener가 실제 상대 주소로 한다. 그 결과는
+      내부 서버로 잇는 연결의 (local address, local port)에 걸어 둔다. relay는 `localAddress: '127.0.0.1'`로 잇는다. 내부
+      서버는 요청 socket의 remote address와 remote port가 **둘 다** 맞을 때만 그것을 찾고, 없으면 원격으로 본다(fail
+      closed). 연결이 닫히면 그 자리의 기록이 자기 것일 때만 지운다. 같은 주소와 port를 새 연결이 먼저 다시 쓴 경우에 그
+      기록을 지우지 않기 위해서다. 다른 기계의 TLS reverse proxy 뒤라도 평문 구간이 있으면 원격이다.
+    - **Origin으로 낮추기(2026-11-24).** 같은 기계의 reverse proxy가 공개 평문 HTTP를 loopback으로 넘기면 socket은
+      안전해 보이지만, 비밀은 proxy에 닿기 전에 평문으로 네트워크를 지났다. 그래서 페이지의 `Origin`으로 판정을
+      **낮추기만** 한다. socket이 안전해도 `Origin`이 `http:`이고 host가 loopback 이름(`localhost`, 127/8, `[::1]`)이
+      아니면 `insecure`다. `Origin`이 없거나 해석할 수 없으면(이 facade의 입장 검사는 `Origin`을 요구하지 않는다)
+      `insecure`다. `https:` origin은 그대로 둔다. 같은 origin 요청이므로 브라우저가 TLS로 보냈고, TLS를 끝내는 proxy가
+      이 기계에 있다. 그 밖의 scheme도 `insecure`다. `Origin`으로 판정을 올리지는 않는다. 원격 평문 socket은 `https:`
+      origin이어도 `insecure`다. **한계.** `Origin`은 브라우저가 정하는 값이다. 브라우저가 아닌 client는 마음대로 보낼
+      수 있지만, 그 client가 자기 비밀을 평문으로 보내는 것을 막지 못할 뿐 다른 사용자를 위험하게 하지 않는다. 다른
+      기계에서 `http://localhost`로 받는 평문 TCP 전달(SSH tunnel이 아닌 것)이나 `Origin`을 loopback 이름으로 바꾸는
+      proxy는 구별하지 못한다. 그런 구성은 운영자 책임이다.
+    - **순서.** 채널이 쓰는 모든 답에 `transport: 'secure' | 'insecure'`가 붙는다. WebUI의 입장 거절(403·401·413·400),
+      `RUNTIME_UNAVAILABLE`, 503 `UNAVAILABLE`과 데스크톱 채널의 이른 거절(`FORBIDDEN`, `INVALID_INPUT`, `FRAME_LIMIT`,
+      `RUNTIME_UNAVAILABLE`)에도 붙는다. 붙일 수 없는 답이 있다. listener가 route 전에 거절하는 요청(받지 않는 origin의
+      빈 403)과 화면이 잃은 답(`CONNECTION_LOST`)이다. 그래서 화면은 열 때 `get_settings`를 먼저 보내 그 답에서
+      `transport`를 알고, `transport`가 없는 답은 `insecure`로 본다. `insecure`이면 proxy 인증 정보를 싣는 요청(`set_proxy_credentials`, `proxyCredentials`가 있는 요청,
+      사용자 부분이 있는 proxy 주소의 `set_settings`)을 보내기 **전에** 인증 정보가 암호화되지 않은 채 네트워크를 지난다고
+      경고한다. 사용자가 계속하면 `acknowledgeInsecureTransport: true`를 붙여 보낸다. 서버는 둘째 방어선으로, 표시 없이
+      그런 요청이 오면 `INSECURE_TRANSPORT`로 답한다. 데스크톱 창(`transport: 'secure'`)과 이 기계의 WebUI는 표시가 필요
+      없다. 표시는 helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
+  - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 본문을 다시 보내게 되는 redirect는 따르지
+    않는다(`redirect: 'error'`). 답을 잃거나 redirect되면 `CONNECTION_LOST`로 끝내고 다시 보내지 않는다. 이미 바뀐 뒤일 수
+    있기 때문이다. 2xx가 아닌 답도 본문이 16 KiB 이하의 JSON 객체(`application/json`)이면 읽어 host가 쓴 `code`(채널의
+    거절 code일 때)와 `transport`를 지킨다. 본문이 없거나 읽을 수 없으면 status로 code를 정하고 `transport`는 없다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`, `UNAVAILABLE`, `CONNECTION_LOST`,
+    `INSECURE_TRANSPORT`)은 `types.ts`의 `StudioExtensionsReply`이고, 요청 형태는 `StudioExtensionsRequest`다. **[실행:
+    facade·채널·client 단위 시험, 시작 전 취소 경합, static server route 시험, 설치 앱 smoke에서 실제 IPC로
+    `get_settings`·`list`]**
 - host와 ACP를 거치지 않는다. 실행 중인 worker를 건드리지 않는다(D05·D17). 변경은 5.6의 잠금으로 한 번에
   하나만 한다.
 - 화면 모듈(D20)은 아래 요청만 안다. pip, venv, 세대 경로는 모른다.
@@ -730,7 +793,7 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라)                                                                                                 |
 | `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`, 요청을 확인한 뒤 proxy가 바뀌었으면 `PROXY_CHANGED`, proxy가 인증 정보를 거절해 실패했으면 `PROXY_CREDENTIALS_REJECTED`                                                                                        |
-| `upgrade` (이름, 선택적 `allowUnpin`·이번 요청의 proxy 인증 정보)                                            | 작업 ID. 새 버전이나 commit이 없으면 `already_latest`. `PINNED`는 재설치 안내, `PIN_UNKNOWN`은 사용자 확인 뒤 재시도. 파일·출처 미상은 `UPGRADE_UNAVAILABLE`.                                                                                                                                                |
+| `upgrade` (이름, 선택적 `allowUnpin`·이번 요청의 proxy 인증 정보)                                            | 작업 ID. 새 버전이나 commit이 없으면 `already_latest`. `PINNED`는 재설치 안내, `PIN_UNKNOWN`은 사용자 확인 뒤 재시도. 파일·출처 미상은 `UPGRADE_UNAVAILABLE`. `proxyCredentials`를 보내면 설치와 같은 채널 규칙을 적용한다. `transport: 'insecure'`에서는 사용자 확인 표시가 필요하다.                       |
 | `update` (이름, 파일 `source`) / `remove` (이름)                                                             | 작업 ID. 오프라인이라 proxy 인증 정보를 받지 않는다                                                                                                                                                                                                                                                          |
 | `set_default` (`extensionId`, `enabled`)                                                                     | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                                                                                                                               |
 | `get_settings`                                                                                               | 확장 설정(`onlineInstall`·`proxy`·`proxyAuthentication`·`privateGit`), 인증 정보를 저장할 수 있는지(`credentialMode`)와 저장돼 있는지(`hasSavedCredentials`, 값은 돌려주지 않는다), 읽을 수 없었는지(`unreadable`), Studio 정책이 온라인 설치를 막는지(`onlineInstallLocked`). 파일만 읽고 복호화하지 않는다 |
@@ -1175,6 +1238,44 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 접속 기한(합계)을 정했다. 결정: `%` 뒤 16진 두 자리 거절을 없앴다. relay가 입력값으로 Basic 값을 만들어 Git의 이중
 디코딩이 더는 관계없다. ASCII만 받는 규칙과 사용자 이름의 `:` 거절은 그대로다. 각 지적은 고친 것을 되돌리면 실패하는
 시험으로 확인했다.
+
+**2026-11-22, host 조립과 IPC(1b 화면의 PR A).** #112가 미룬 조립을 했다. 데스크톱 전용 채널, WebUI route, 프로세스
+하나의 서비스, 화면 client를 5.11에 적었다. native auth와 WebUI 입장 검사를 한 코드로 나눠 쓴다. 서비스 파일은 디렉터리
+한도 때문에 `studio-extensions/host/`로 옮겼다.
+
+**2026-11-23, PR A 독립 리뷰(blocking 2, should-fix 5, nit 1).**
+
+- 원격 평문 HTTP로 오는 proxy 인증 정보에는 경고와 확인 표시를 요구한다(사용자 결정).
+- 설치 앱에서는 DevTools가 열린 창의 요청을 거절한다.
+- 시작 전 변경을 먼저 등록해 취소를 잃지 않는다.
+- 요청 크기를 UTF-8로 재고, JSON 자료가 아니면 거절한다.
+- 배포 패키지 WebUI도 서비스를 설정한다.
+- 번들 찾기를 native auth와 같게 했다.
+- client는 redirect를 따르지 않는다.
+- JSON 형식 검사를 정확히 했다.
+
+**2026-11-23, PR A 재확인(blocking 1, should-fix 2, nit 1).**
+
+- WebUI listener가 연결을 127.0.0.1에서 잇기 때문에 loopback 판단이 무력했다. 판단을 listener가 실제 상대 주소로 하도록
+  옮겼다. 실제 listener를 LAN 주소로 거치는 시험으로 확인했다.
+- 모든 답에 `transport`를 붙였다. 화면은 비밀을 보내기 전에 경고한다.
+- 배포 패키지 WebUI의 runtime은 native auth와 같이 `AELIX_STUDIO_RUNTIME`으로 정한다는 것을 적었다.
+- 결정 날짜를 고쳤다(11-23).
+
+**2026-11-24, PR A 두 번째 재확인(blocking 1, should-fix 3).**
+
+- 같은 기계의 reverse proxy가 공개 평문 HTTP를 넘기면 `secure`로 판정되던 것을 고쳤다. `Origin`으로 판정을 낮추기만
+  한다. loopback 연결에 공개 `http://` origin이면 `insecure`, TLS를 끝내는 proxy의 `https://` origin이면 `secure`인
+  것을 시험했다.
+- listener의 판정 기록을 (local address, local port)로 찾고, 닫힐 때 자기 기록만 지운다.
+- WebUI 거절·503과 데스크톱 이른 거절에도 `transport`를 붙였다. 붙일 수 없는 답 때문에 화면은 `get_settings`를 먼저
+  보낸다.
+- 확장 기능은 manifest 없는 runtime을 받지 않는다는 것을 detail과 배포 패키지 문서에 적었다. 받는 형식은 넓히지 않았다.
+- origin/main(#117·#119)을 merge했다.
+
+**2026-11-24, PR A 세 번째 재확인(should-fix 1, nit 1).** 화면 client가 2xx가 아닌 답의 본문을 버려 401·503의
+`transport`를 잃던 것을 고쳤다. 크기 안의 JSON 거절이면 `code`와 `transport`를 지킨다. 배포 패키지 문서에 Windows
+준비본의 Python 경로(`native\Scripts\python.exe`)를 더했다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

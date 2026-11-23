@@ -50,6 +50,7 @@ export default defineConfig({
             'tests/unit/**/*.dom.test.ts',
             'tests/unit/**/*.dom.test.tsx',
             'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent/*.dom.test.tsx',
+            'packages/desktop/src/renderer/pages/settings/ToolsSettings/AgentExtensions/**/*.dom.test.{ts,tsx}',
           ],
           setupFiles: ['./tests/vitest.dom.setup.ts'],
         },
