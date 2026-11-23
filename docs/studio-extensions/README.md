@@ -526,6 +526,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
   함께 `ONLINE_INSTALL_DISABLED`로 거절한다. 조회나 목록을 표시할 때는 확인 요청을 보내지 않는다.
   사용자의 proxy·private Git 설정은 설치와 같다. 인증이 필요한 경우 확인과 설치가 그 작업의 loopback
   relay 하나를 사용하고, 작업이 끝나면 닫는다.
+  Git의 임시 clone과 checkout에는 Studio의 고정 reflog 작성자 정보를 준다. Git이 기본 이메일을 만들려고
+  시스템 hostname을 DNS에 조회하는 것을 막는다.
 - 온라인 설치 도구에는 후보 전용 홈·임시 디렉터리와 시스템 실행 경로를 준다. pip와 Git의 사용자·시스템
   설정, 환경·시스템 프록시, netrc·credential helper·SSH 사용자 설정·키는 적용하지 않는다. 예외는 사용자가
   Studio 확장 설정에서 직접 정한 두 가지뿐이다(아래의 proxy와 비공개 Git). SSH는 기존 known-hosts 파일로
