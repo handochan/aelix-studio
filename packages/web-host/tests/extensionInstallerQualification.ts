@@ -7,6 +7,7 @@ import type { AddressInfo } from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 import { ExtensionService, STATE_ENVIRONMENT, type ProxyCredentialVault } from '../src/studio-extensions';
 import { baseEnvironment } from '../src/studio-extensions/flow/environment';
 import { runToExit, spawnChild, windowsChildSpawn, type Child, type Spawn } from '../src/studio-extensions/process';
@@ -261,7 +262,7 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
       { command: script, args: [], env, cwd: scratch },
       { timeoutMs: 15_000 }
     );
-    assert.equal(consoleResult.code, 0, consoleResult.output);
+    assert.equal(consoleResult.code, 0, JSON.stringify(consoleResult));
     // realpath would collapse a POSIX venv symlink to the bundle. Compare interpreter spellings.
     const pathKey = (value: string) => (windows ? value.replace(/^\\\\\?\\/, '').toLowerCase() : value);
     assert.equal(pathKey(JSON.parse(consoleResult.output.trim()) as string), pathKey(paths(second).python));
@@ -513,6 +514,197 @@ async function qualifyProxyCredentials(
   }
 }
 
+async function qualifyUpgrades(payload: string, scratch: string, checks: string[]): Promise<void> {
+  const service = new ExtensionService({
+    runtime: payload,
+    root: path.join(scratch, 'upgrade runtime'),
+    env: { ...baseEnvironment(process.env, process.platform), HOME: scratch, USERPROFILE: scratch },
+  });
+  const owner = 'upgrade-qualification';
+  const name = 'studio-upgrade-index';
+  const wheels = new Map<string, Buffer>();
+  const publish = (version: string) => {
+    const { filename, data } = buildWheel({ name, version });
+    wheels.set(filename, data);
+  };
+  publish('1.0');
+  let rearrangeIndex = false;
+  let oversized = false;
+  let oversizedRequests = 0;
+  const signature = 'fixture-download-signature';
+  let indexRequests = 0;
+  let swapRequested = 0;
+  const swapped = buildWheel({ name, version: '1.2', prelude: 'ARTIFACT = "alternate"' });
+  const yanked = buildWheel({
+    name,
+    version: '1.1',
+    prelude: 'ARTIFACT = "yanked"',
+    filename: name.replaceAll('-', '_') + '-1.1-2-py3-none-any.whl',
+  });
+  const server = createServer((request, response) => {
+    const address = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const url = address.pathname;
+    const wheel = address.searchParams.get('sig') === signature ? wheels.get(url.slice(1)) : undefined;
+    if (url === `/simple/${name}/` && oversized) {
+      oversizedRequests++;
+      response.writeHead(200, { 'content-type': 'text/html' });
+      response.end(' '.repeat(8 * 1024 * 1024 + 1));
+    } else if (url === `/simple/${name}/` && wheels.size > 0) {
+      indexRequests++;
+      response.writeHead(200, { 'content-type': 'text/html' });
+      if (rearrangeIndex && indexRequests > 1) {
+        response.end(`<a data-yanked="test" href="/${yanked.filename}">${yanked.filename}</a>`);
+      } else
+        response.end([...wheels.keys()].map((file) => `<a href="/${file}?sig=${signature}">${file}</a>`).join('\n'));
+    } else if (url === '/' + yanked.filename) response.writeHead(200).end(yanked.data);
+    else if (wheel && url === '/' + swapped.filename && ++swapRequested > 1) response.writeHead(200).end(swapped.data);
+    else if (wheel) response.writeHead(200).end(wheel);
+    else response.writeHead(404).end();
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const indexUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}/simple/`;
+  const change = async (command: ExtensionCommand, phase = 'switched') => {
+    const started = await service.request(owner, command);
+    assert(started.ok && 'operationId' in started.data, JSON.stringify(started));
+    const operationId = started.data.operationId;
+    const operation = await until(command.action, async () => {
+      const reply = await service.request(owner, { action: 'poll', operationId });
+      assert(reply.ok && 'phase' in reply.data, JSON.stringify(reply));
+      return ['switched', 'already_latest', 'failed', 'cancelled'].includes(reply.data.phase) ? reply.data : undefined;
+    });
+    assert.equal(operation.phase, phase, JSON.stringify(operation));
+    return operation;
+  };
+  const list = async () => {
+    const reply = await service.request(owner, { action: 'list' });
+    assert(reply.ok && 'extensions' in reply.data, JSON.stringify(reply));
+    return reply.data;
+  };
+  try {
+    const requirement = `${name}>=1,<2`;
+    await change({ action: 'install', source: { kind: 'index', requirement, indexUrl } });
+    publish('1.1');
+    publish('2.0');
+    rearrangeIndex = true;
+    indexRequests = 0;
+    await change({ action: 'upgrade', name });
+    assert.equal(indexRequests, 1, 'the apply must use the selected archive rather than reselecting a yanked wheel');
+    rearrangeIndex = false;
+    const updated = await list();
+    const entry = updated.extensions.find((item) => item.name === name);
+    assert.equal(entry?.version, '1.1');
+    assert.deepEqual(entry?.origin, { kind: 'index', indexUrl, requirement });
+    const noChange = await change({ action: 'upgrade', name }, 'already_latest');
+    assert.equal(noChange.generation, undefined);
+    assert.deepEqual(await list(), updated);
+
+    publish('1.2');
+    const hashMismatch = await change({ action: 'upgrade', name }, 'failed');
+    assert.equal(hashMismatch.code, 'INSTALLER_FAILED');
+    assert.equal(swapRequested, 2, 'the second request must return the substituted file');
+    assert.match(hashMismatch.output ?? '', /THESE PACKAGES DO NOT MATCH THE HASHES/i);
+    assert(!JSON.stringify(hashMismatch).includes(signature));
+    assert.deepEqual(await list(), updated);
+
+    oversized = true;
+    const tooLarge = await change({ action: 'upgrade', name }, 'failed');
+    assert.equal(tooLarge.code, 'UPGRADE_RESPONSE_TOO_LARGE');
+    assert.equal(oversizedRequests, 1, 'the oversized index response must be served');
+    assert.deepEqual(await list(), updated);
+    checks.push(
+      'index upgrade: selected archive survives index mutation, swapped bytes and oversized response are rejected, already latest leaves the pointer unchanged'
+    );
+
+    if (windows) return; // The helper refuses Git on Windows.
+    const repo = path.join(scratch, 'upgrade-repo');
+    const nested = path.join(repo, 'packages', 'fixture');
+    await mkdir(nested, { recursive: true });
+    const git = async (...args: string[]) => {
+      const answer = await runToExit(
+        spawnChild,
+        {
+          command: 'git',
+          args: ['-c', 'user.name=Extension fixture', '-c', 'user.email=fixture@example.invalid', ...args],
+          cwd: repo,
+          env: { PATH: '/usr/bin:/bin', HOME: scratch, GIT_CONFIG_NOSYSTEM: '1' },
+        },
+        { timeoutMs: 15_000 }
+      );
+      assert.equal(answer.code, 0, answer.output);
+      return answer.output.trim();
+    };
+    const gitName = 'studio-upgrade-git';
+    const subName = 'studio-upgrade-sub';
+    const backend = [
+      'from pathlib import Path',
+      'import shutil',
+      'def build_wheel(wheel_directory, config_settings=None, metadata_directory=None):',
+      '    wheel = next(Path(__file__).parent.glob("*.whl"))',
+      '    shutil.copyfile(wheel, Path(wheel_directory) / wheel.name)',
+      '    return wheel.name',
+    ].join('\n');
+    const pyproject = '[build-system]\nrequires = []\nbuild-backend = "backend"\nbackend-path = ["."]\n';
+    const stage = async (commitContent: string) => {
+      for (const [dir, name] of [
+        [repo, gitName],
+        [nested, subName],
+      ]) {
+        const wheel = buildWheel({ name, prelude: `REVISION = "${commitContent}"` });
+        // oxlint-disable-next-line no-await-in-loop -- each project supplies its own fixture wheel
+        await Promise.all([
+          writeFile(path.join(dir, wheel.filename), wheel.data),
+          writeFile(path.join(dir, 'backend.py'), backend),
+          writeFile(path.join(dir, 'pyproject.toml'), pyproject),
+        ]);
+      }
+      await git('add', '-A');
+      await git('commit', '-qm', commitContent);
+      await git('tag', '-f', 'extension-release');
+      return git('rev-parse', 'HEAD');
+    };
+    await git('init', '--quiet', '--initial-branch=main');
+    const firstCommit = await stage('initial');
+    const gitUrl = 'git+' + pathToFileURL(repo).href;
+    const rootUrl = gitUrl + '@main';
+    const nestedUrl = gitUrl + '@extension-release';
+    await change({ action: 'install', source: { kind: 'git', url: rootUrl, indexUrl } });
+    await change({
+      action: 'install',
+      source: { kind: 'git', url: nestedUrl, indexUrl, subdirectory: 'packages/fixture' },
+    });
+    const newCommit = await stage('changed');
+    assert.notEqual(firstCommit, newCommit);
+    await change({ action: 'upgrade', name: gitName });
+    await change({ action: 'upgrade', name: subName });
+    const afterGit = await list();
+    const binding = await resolveBundle(payload);
+    assert(binding && afterGit.current);
+    const layout = await locateLayout(path.join(scratch, 'upgrade runtime'));
+    const generation = generationPaths(layout, afterGit.current, binding.binding.pythonMinor);
+    for (const [name, url] of [
+      [gitName, rootUrl],
+      [subName, nestedUrl],
+    ]) {
+      const entry = afterGit.extensions.find((extension) => extension.name === name);
+      assert.equal(entry?.version, '0.1.0');
+      assert.equal(entry.origin?.kind === 'git' && entry.origin.commit, newCommit);
+      assert.equal(entry.origin?.kind === 'git' && entry.origin.url, url);
+      // oxlint-disable-next-line no-await-in-loop -- both installed modules must contain the new commit's code
+      const installed = await readFile(path.join(generation.site, name.replaceAll('-', '_'), '__init__.py'), 'utf8');
+      assert.match(installed, /REVISION = "changed"/);
+    }
+    await change({ action: 'upgrade', name: gitName }, 'already_latest');
+    await change({ action: 'upgrade', name: subName }, 'already_latest');
+    assert.deepEqual(await list(), afterGit);
+    checks.push('Git upgrade: root and checked subdirectory reinstall same-version wheels at the new commit');
+  } finally {
+    await service.dispose();
+    server.closeAllConnections();
+    server.close();
+  }
+}
+
 const [payload, report] = process.argv.slice(2);
 assert(payload && report, 'usage: extensionInstallerQualification.ts INSTALLED_PAYLOAD REPORT');
 const scratch = await realpath(await mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', 'studio-ext-')));
@@ -531,6 +723,8 @@ try {
   checkpoint('installed-runtime-checks');
   await qualifyProxyCredentials(payload, scratch, evidence.checks, checkpoint);
   checkpoint('proxy-keychain-drop-and-cleanup');
+  await qualifyUpgrades(payload, scratch, evidence.checks);
+  checkpoint('online-upgrades');
   await writeFile(report, JSON.stringify({ status: 'passed', ...evidence }, null, 2) + '\n');
 } catch (error) {
   await writeFile(report, JSON.stringify({ status: 'failed', ...evidence, error: String(error) }, null, 2) + '\n');

@@ -7,10 +7,10 @@ import {
   fakeRuntime,
   installWheel,
   type FakeRuntimeOptions,
-} from '../../tests/fixtures/extensionRuntime';
-import { writeWheel, type WheelSpec } from '../../tests/fixtures/extensionWheels';
-import { ExtensionService } from './service';
-import type { ExtensionListing, ExtensionOperation, ExtensionReply } from './types';
+} from '../../../tests/fixtures/extensionRuntime';
+import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
+import { ExtensionService, RUNTIME_HINT } from './service';
+import type { ExtensionListing, ExtensionOperation, ExtensionReply } from '../types';
 
 // These fixtures assert POSIX paths and installer environment. Preview installer CI runs real Windows.
 describe.skipIf(process.platform === 'win32')('the extension helper service', () => {
@@ -403,17 +403,28 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect(await readdir(path.join(root, 'generations'))).toEqual([before.generation]);
   });
 
-  it('reports the runtime as unavailable when there is no bundle, for every kind of request', async () => {
+  it('reports the runtime as unavailable when there is no bundle, for every kind of request, with the fix', async () => {
     const missing = new ExtensionService({ runtime: path.join(scratch, 'absent'), root, spawn });
-    expect(await missing.request('window:1', { action: 'list' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
-    expect(await missing.request('window:1', { action: 'rollback' })).toEqual({
+    const unavailable = {
       ok: false,
       code: 'RUNTIME_UNAVAILABLE',
-    });
+      detail: [RUNTIME_HINT],
+    };
+    expect(await missing.request('window:1', { action: 'list' })).toEqual(unavailable);
+    expect(await missing.request('window:1', { action: 'rollback' })).toEqual(unavailable);
     const install = await installRequest({ name: 'demo-one' });
-    expect(await missing.request('window:1', install)).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await missing.request('window:1', install)).toEqual(unavailable);
     // A refused start is not a running change: the next request is not answered with BUSY.
-    expect(await missing.request('window:1', install)).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await missing.request('window:1', install)).toEqual(unavailable);
+    // A prepared development runtime, which native auth takes, has no manifest: the same answer.
+    const prepared = path.join(scratch, 'prepared');
+    await mkdir(path.join(prepared, 'native-site'), { recursive: true });
+    await writeFile(path.join(prepared, 'launch.py'), '');
+    const development = new ExtensionService({ runtime: prepared, root, spawn });
+    expect(await development.request('window:1', { action: 'list' })).toEqual(unavailable);
+    await development.dispose();
+    // The fix names what the bundle needs and where it goes.
+    for (const part of ['manifest.json', 'native-site', 'AELIX_STUDIO_RUNTIME']) expect(RUNTIME_HINT).toContain(part);
     expect(spawn.calls).toEqual([]);
   });
 
@@ -507,11 +518,13 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
       env: {},
       log: (_message, error) => logged.push(error),
       spawn: () => {
-        throw new Error(`EACCES: permission denied, open '${root}'`);
+        throw new Error('Download failed at https://files.invalid/candidate.whl?sig=hidden-signature#hidden-hash');
       },
     });
     expect(await broken.request('window:1', { action: 'rollback' })).toEqual({ ok: false, code: 'INTERNAL' });
     expect(logged).toHaveLength(1);
+    expect((logged[0] as Error).message).toBe('Download failed at https://files.invalid/candidate.whl?***');
+    expect((logged[0] as Error).stack).not.toMatch(/hidden-signature|hidden-hash/);
   });
 
   // Review finding 3, seen from a caller.
@@ -545,6 +558,24 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect(operation(cancel).phase).toBe('switched');
     expect((await listing()).current).toBe(done.generation);
   });
+
+  it.each([
+    ['its window closes', 'desktop:7', 'desktop:7', false],
+    ['the WebUI listener stops', 'web:operator', 'web:', true],
+  ] as const)(
+    'ends a change asked for while %s before it starts, even while the bundle is still being found',
+    async (_case, owner, cancelled, prefix) => {
+      const request = await installRequest({ name: 'demo-one' });
+      // No await between the request and the cancel: it lands while the change finds its bundle.
+      const pending = service.request(owner, request);
+      service.cancelOwner(cancelled, prefix);
+      expect(await pending).toEqual({ ok: false, code: 'CANCELLED' });
+      expect(spawn.calls.filter((call) => call.args.includes('hold'))).toEqual([]);
+      expect((await listing()).current).toBeNull();
+      // Nothing is left marked as running: the next change starts.
+      expect((await settle(await service.request(owner, request), owner)).phase).toBe('switched');
+    }
+  );
 
   it('cancels the change of a caller whose window or session closed', async () => {
     holdInstaller();

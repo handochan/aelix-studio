@@ -7,13 +7,56 @@ import { join } from 'node:path';
 import type { AddressInfo } from 'node:net';
 import type { Duplex } from 'node:stream';
 import { CookieJar } from 'jsdom';
-import { startWebHost } from '../src/index.js';
+import { configureStudioExtensions, disposeStudioExtensions, startWebHost } from '../src/index.js';
+import { createFakeBundle, fakeRuntime } from './fixtures/extensionRuntime.js';
 import { startStaticServer, type StaticServerHandle } from '../src/static-server.js';
 
 vi.mock('node:os', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:os')>();
   return { ...actual, networkInterfaces: vi.fn<typeof actual.networkInterfaces>(() => ({})) };
 });
+
+/** This machine's own LAN IPv4 address, if it has one: a peer the listener sees as remote. */
+const LAN_ADDRESS = Object.values((await vi.importActual<typeof import('node:os')>('node:os')).networkInterfaces())
+  .flatMap((entries) => entries ?? [])
+  .find((entry) => entry.family === 'IPv4' && !entry.internal)?.address;
+
+/** One raw request to `connectTo`, from `localAddress`, naming `authority` as Host and in Origin. */
+function postFrom(
+  connectTo: string,
+  port: number,
+  localAddress: string,
+  body: unknown,
+  authority = `${connectTo}:${port}`,
+  origin = `http://${authority}`
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: connectTo,
+        port,
+        localAddress,
+        method: 'POST',
+        path: '/api/studio/extensions',
+        headers: {
+          host: authority,
+          origin,
+          'content-type': 'application/json',
+          'x-studio-extensions': '1',
+          cookie: 'aelix-studio-session=valid',
+        },
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk: Buffer) => (text += chunk.toString()));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, json: JSON.parse(text || '{}') }));
+      }
+    );
+    req.on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error('HTTP response timeout')));
+    req.end(JSON.stringify(body));
+  });
+}
 
 function setLanAddress(address: string): void {
   vi.mocked(networkInterfaces).mockReturnValue({
@@ -526,6 +569,182 @@ describe('static-server', () => {
     expect(r.status).toBe(200);
     const json = (await r.json()) as { user: { username: string } };
     expect(json.user.username).toBe('from-backend');
+  });
+
+  it('answers the extension helper route itself, as the signed-in user, and stops WebUI changes with it', async () => {
+    const forwarded: string[] = [];
+    const backend = await startMockBackend((req, res) => {
+      if (req.url === '/api/auth/user') {
+        res.writeHead(req.headers.cookie === 'aionui-session=valid' ? 200 : 401, {
+          'content-type': 'application/json',
+        });
+        res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
+        return;
+      }
+      forwarded.push(String(req.url));
+      res.writeHead(404).end();
+    });
+    stopBackend = backend.close;
+    const scratch = await fs.mkdtemp(join(os.tmpdir(), 'studio-static-extensions-'));
+    try {
+      const bundle = await createFakeBundle(join(scratch, 'bundle'));
+      const service = configureStudioExtensions({
+        userDataPath: join(scratch, 'user data'),
+        runtime: bundle,
+        service: { spawn: fakeRuntime({ bundle }) },
+      });
+      const request = vi.spyOn(service, 'request');
+      const cancel = vi.spyOn(service, 'cancelOwner');
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const origin = handle.localUrl;
+      const response = await fetch(`${origin}/api/studio/extensions`, {
+        method: 'POST',
+        headers: {
+          origin,
+          'content-type': 'application/json',
+          'x-studio-extensions': '1',
+          cookie: 'aelix-studio-session=valid',
+        },
+        body: JSON.stringify({ action: 'get_settings' }),
+      });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({ ok: true, data: { credentialMode: 'memory-only' } });
+      expect(request).toHaveBeenCalledWith('web:operator', { action: 'get_settings' });
+      expect(forwarded).toEqual([]);
+      await handle.stop();
+      handle = null;
+      expect(cancel).toHaveBeenCalledWith('web:', true);
+    } finally {
+      await disposeStudioExtensions();
+      await fs.rm(scratch, { recursive: true, force: true });
+    }
+  });
+
+  it.runIf(LAN_ADDRESS)(
+    'decides at the listener, from the real peer, whether proxy credentials may travel',
+    async () => {
+      const lan = String(LAN_ADDRESS);
+      const backend = await startMockBackend((req, res) => {
+        res.writeHead(req.headers.cookie === 'aionui-session=valid' ? 200 : 401, {
+          'content-type': 'application/json',
+        });
+        res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
+      });
+      stopBackend = backend.close;
+      const scratch = await fs.mkdtemp(join(os.tmpdir(), 'studio-static-transport-'));
+      try {
+        const bundle = await createFakeBundle(join(scratch, 'bundle'));
+        const service = configureStudioExtensions({
+          userDataPath: join(scratch, 'user data'),
+          runtime: bundle,
+          service: { spawn: fakeRuntime({ bundle }) },
+        });
+        const request = vi.spyOn(service, 'request');
+        setLanAddress(lan);
+        handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0, allowRemote: true });
+        const port = handle.port;
+        const secret = {
+          action: 'set_proxy_credentials',
+          credentials: { username: 'ops', password: 'sentinel-secret' },
+        };
+
+        // From another address of this machine's network: every relayed request comes from
+        // 127.0.0.1 to the internal server, but the listener saw the LAN peer.
+        const settings = await postFrom(lan, port, lan, { action: 'get_settings' });
+        expect(settings).toMatchObject({ status: 200, json: { ok: true, transport: 'insecure' } });
+        request.mockClear();
+        const refused = await postFrom(lan, port, lan, secret);
+        expect(refused).toEqual({
+          status: 200,
+          json: { ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' },
+        });
+        expect(request).not.toHaveBeenCalled();
+        const acknowledged = await postFrom(lan, port, lan, { ...secret, acknowledgeInsecureTransport: true });
+        expect(acknowledged).toMatchObject({ status: 200, json: { transport: 'insecure' } });
+        expect(request).toHaveBeenCalledWith('web:operator', secret);
+
+        // From this machine, at the server's own local origin: no flag needed.
+        request.mockClear();
+        const local = await postFrom('127.0.0.1', port, '127.0.0.1', secret, new URL(handle.localUrl).host);
+        expect(local).toMatchObject({ status: 200, json: { transport: 'secure' } });
+        expect(local.json.code).not.toBe('INSECURE_TRANSPORT');
+        expect(request).toHaveBeenCalledWith('web:operator', secret);
+      } finally {
+        await disposeStudioExtensions();
+        await fs.rm(scratch, { recursive: true, force: true });
+      }
+    }
+  );
+
+  it('lowers a loopback connection by the Origin: a reverse proxy on this machine in front of the public', async () => {
+    const backend = await startMockBackend((req, res) => {
+      res.writeHead(req.headers.cookie === 'aionui-session=valid' ? 200 : 401, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
+    });
+    stopBackend = backend.close;
+    const scratch = await fs.mkdtemp(join(os.tmpdir(), 'studio-static-proxy-'));
+    try {
+      const bundle = await createFakeBundle(join(scratch, 'bundle'));
+      const service = configureStudioExtensions({
+        userDataPath: join(scratch, 'user data'),
+        runtime: bundle,
+        service: { spawn: fakeRuntime({ bundle }) },
+      });
+      const request = vi.spyOn(service, 'request');
+      const secret = { action: 'set_proxy_credentials', credentials: { username: 'ops', password: 'sentinel-secret' } };
+
+      // A proxy on this machine serves the public over plain HTTP and connects from loopback.
+      vi.stubEnv('AELIX_STUDIO_ORIGIN', 'http://studio.example');
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const plain = await postFrom('127.0.0.1', handle.port, '127.0.0.1', secret, 'studio.example');
+      expect(plain).toEqual({ status: 200, json: { ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' } });
+      expect(request).not.toHaveBeenCalled();
+      // Refusals say it too: an unauthenticated request through the same proxy.
+      const refused = await new Promise<{ status?: number; body: string }>((resolve, reject) => {
+        const req = http.request(
+          {
+            host: '127.0.0.1',
+            port: handle!.port,
+            method: 'POST',
+            path: '/api/studio/extensions',
+            headers: {
+              host: 'studio.example',
+              origin: 'http://studio.example',
+              'content-type': 'application/json',
+              'x-studio-extensions': '1',
+            },
+          },
+          (res) => {
+            let body = '';
+            res.on('data', (chunk: Buffer) => (body += chunk.toString()));
+            res.on('end', () => resolve({ status: res.statusCode, body }));
+          }
+        );
+        req.once('error', reject).end('{"action":"get_settings"}');
+      });
+      expect(refused.status).toBe(401);
+      expect(JSON.parse(refused.body)).toEqual({ ok: false, code: 'UNAUTHENTICATED', transport: 'insecure' });
+      await handle.stop();
+      handle = null;
+
+      // A proxy on this machine that terminates TLS: the browser sent it encrypted.
+      vi.stubEnv('AELIX_STUDIO_ORIGIN', 'https://studio.example');
+      handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0 });
+      const tls = await postFrom(
+        '127.0.0.1',
+        handle.port,
+        '127.0.0.1',
+        secret,
+        'studio.example',
+        'https://studio.example'
+      );
+      expect(tls).toMatchObject({ status: 200, json: { transport: 'secure' } });
+      expect(tls.json.code).not.toBe('INSECURE_TRANSPORT');
+      expect(request).toHaveBeenCalledWith('web:operator', secret);
+    } finally {
+      await disposeStudioExtensions();
+      await fs.rm(scratch, { recursive: true, force: true });
+    }
   });
 
   it('/logout reverse-proxies to backend (no local handler)', async () => {

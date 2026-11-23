@@ -4,7 +4,15 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { isAdapterReference } from '../inspect/metadata.js';
-import { contentDistributions, readSite, type SiteSnapshot } from '../inspect/site.js';
+import {
+  contentDistributions,
+  readSite,
+  refuseSharedFiles,
+  removeInstalledDirectUrl,
+  verifyRecordFiles,
+  type SiteSnapshot,
+} from '../inspect/site.js';
+import { compareInstalledVersions, parseVersion, specifierExcludes } from '../inspect/version.js';
 import type { WheelFacts } from '../inspect/wheel.js';
 import { runToExit, type RunResult } from '../process.js';
 import { discardStage, promoteImport, readStoredImport, stageImport, type ImportSet } from '../store/artifacts.js';
@@ -70,7 +78,17 @@ import {
   type LoadExpectation,
 } from './gate.js';
 import { checkImport } from './importCheck.js';
-import { checkoutSubdirectory, type GitCheckout } from './online/checkout.js';
+import { fetchGitSource, type GitCheckout } from './online/checkout.js';
+import {
+  archiveRequirement,
+  BOUNDED_INDEX_PIP,
+  INDEX_RESPONSE_LIMIT,
+  PIP_RESPONSE_LIMIT_EXIT,
+  readResolutionReport,
+  requestedArchive,
+  RESOLUTION_REPORT_LIMIT,
+  type ResolvedArchive,
+} from './online/indexPip.js';
 import { privateGitAccess } from './online/credentials.js';
 import {
   dropProxyCredentials,
@@ -80,21 +98,35 @@ import {
 } from './online/proxy/credentials.js';
 import { startProxyRelay, type ProxyRelay } from './online/proxy/relay.js';
 import { readSettings, writeSettings, type SettingsChange, type StoredSettings } from './online/settings.js';
-import { installedCheckoutOrigin, installedGitOrigin, matchesVersion, onlineIndex } from './online/source.js';
+import {
+  indexRequirement,
+  installedCheckoutOrigin,
+  installedGitOrigin,
+  matchesVersion,
+  onlineIndex,
+  parseIndexRequirement,
+  pinnedGit,
+  recordVerifiedSource,
+  upgradeSource,
+  verifyUpgradeSource,
+  type IndexSource,
+} from './online/source.js';
+
+type RequestCredentials = {
+  proxyCredentials?: ProxyCredentials;
+  /** Per-request credentials belong to the proxy seen before the change took the lock. */
+  proxyCredentialsFor?: string;
+};
+type InstallRequest = {
+  action: 'install';
+  source: ExtensionSource;
+  replaceIncompatible?: boolean;
+} & RequestCredentials;
+type UpgradeRequest = { action: 'upgrade'; name: string; allowUnpin?: boolean } & RequestCredentials;
 
 export type MutationRequest =
-  | {
-      action: 'install';
-      source: ExtensionSource;
-      replaceIncompatible?: boolean;
-      /** For this install only; never stored. */
-      proxyCredentials?: ProxyCredentials;
-      /**
-       * The proxy the request was checked against. The credentials are for that address only:
-       * if the settings name another one by the time the change holds the lock, it ends.
-       */
-      proxyCredentialsFor?: string;
-    }
+  | InstallRequest
+  | UpgradeRequest
   | { action: 'update'; name: string; source: FileExtensionSource }
   | { action: 'remove'; name: string };
 
@@ -105,7 +137,7 @@ export type MutationHooks = {
   now(): Date;
 };
 
-export type MutationOutcome = { generation: string; revision: number };
+export type MutationOutcome = { generation: string; revision: number } | { alreadyLatest: true };
 
 const EMPTY_SITE: SiteSnapshot = {
   distributions: new Map(),
@@ -202,7 +234,20 @@ async function manifestBindings(
 
 type Installer = { native: string[]; importSet?: ImportSet; wheels: WheelFacts[] };
 type Preparation = Installer & { change: ChangeRequest };
-type OnlineInstaller = Installer & { source: OnlineExtensionSource };
+type OnlineInstaller = Installer & { source: OnlineExtensionSource; upgrade?: string };
+
+function prepareOnline(source: OnlineExtensionSource, upgrade?: string): OnlineInstaller {
+  const target = source.kind === 'index' ? nativeIndexTarget(source) : source.url;
+  const args = source.kind === 'index' ? ['--index-url', onlineIndex(source)] : [];
+  return { source, upgrade, native: ['extension', 'install', target, ...args, '--yes'], wheels: [] };
+}
+
+function nativeIndexTarget(source: IndexSource): string {
+  const { name, specifier } = indexRequirement(source);
+  const target = name + specifier;
+  // Native recognizes a trailing .git as a repository, even in a version label.
+  return target.toLowerCase().endsWith('.git') ? `${name}(${specifier})` : target;
+}
 
 /** Work out what the request means against the current generation, and store an import. */
 async function prepare(
@@ -210,7 +255,9 @@ async function prepare(
   lock: MutationLock,
   request: MutationRequest,
   before: SiteSnapshot,
-  bundle: BundleFacts
+  bundle: BundleFacts,
+  parent: GenerationRecord | null,
+  beforeSite: string | undefined
 ): Promise<Preparation | OnlineInstaller> {
   const name = request.action === 'install' ? undefined : request.name;
   const resolution = name === undefined ? undefined : resolveDistribution(before, name);
@@ -232,16 +279,31 @@ async function prepare(
       wheels: [],
     };
   }
-  if (request.source.kind !== 'file') {
-    const source = request.source;
-    const native = ['extension', 'install'];
-    if (source.kind === 'index') {
-      native.push(source.version === undefined ? source.name : `${source.name}==${source.version}`);
-      // A flag also prevents native from falling back to registered extra indexes.
-      native.push('--index-url', onlineIndex(source));
-    } else native.push(source.url);
-    return { native: [...native, '--yes'], source, wheels: [] };
+  if (request.action === 'upgrade') {
+    const distribution = resolution && 'distribution' in resolution ? resolution.distribution : '';
+    const origin = parent?.distributions[distribution]?.origin;
+    const source = upgradeSource(origin, distribution);
+    if (origin?.kind !== 'git' && origin?.kind !== 'index') throw new ExtensionFailure('UPGRADE_UNAVAILABLE');
+    if (!source) throw new ExtensionFailure('UPGRADE_SOURCE_MISMATCH');
+    if (source.kind === 'git' && context.platform === 'win32') throw new ExtensionFailure('UNSUPPORTED_PLATFORM');
+    const recorded = parent?.distributions[distribution];
+    const installed = before.distributions.get(distribution);
+    if (
+      !beforeSite ||
+      !installed ||
+      recorded?.version !== installed.version ||
+      recorded.recordSha256 !== installed.recordSha256
+    )
+      throw new ExtensionFailure('GENERATION_MODIFIED');
+    await verifyUpgradeSource(beforeSite, source, origin, installed);
+    if (origin.kind === 'git' && source.kind === 'git' && pinnedGit(source, origin.commit))
+      throw new ExtensionFailure('PINNED');
+    if (source.kind === 'index' && indexRequirement(source).exact) throw new ExtensionFailure('PINNED');
+    if (origin.kind === 'index' && origin.requirement === undefined && !request.allowUnpin)
+      throw new ExtensionFailure('PIN_UNKNOWN');
+    return prepareOnline(source, distribution);
   }
+  if (request.source.kind !== 'file') return prepareOnline(request.source);
   const staged = await stageImport(context.layout, request.source, lock);
   try {
     const check = await checkImport(staged.target, staged.files, bundle);
@@ -300,12 +362,14 @@ async function onlineAccess(
 async function installProxy(
   context: FlowContext,
   stored: StoredSettings,
-  request: Extract<MutationRequest, { action: 'install' }>
+  request: InstallRequest | UpgradeRequest
 ): Promise<{ proxy: string; credentials?: ProxyCredentials } | undefined> {
   const { proxy, proxyAuthentication } = stored.settings;
   const vault = context.proxyVault ?? MEMORY_ONLY_VAULT;
   // Another Studio process changed the proxy after the request was checked: its credentials
   // were typed for the earlier address and go nowhere.
+  if (request.proxyCredentials && request.proxyCredentialsFor === undefined && proxy === null)
+    throw new ExtensionFailure('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
   if (request.proxyCredentials && request.proxyCredentialsFor !== proxy)
     throw new ExtensionFailure('PROXY_CHANGED', ['the proxy changed after the request was checked']);
   if (proxy === null) return undefined;
@@ -315,8 +379,8 @@ async function installProxy(
   if (proxyAuthentication && !credentials)
     throw new ExtensionFailure('PROXY_CREDENTIALS_REQUIRED', [
       vault.mode === 'memory-only'
-        ? 'proxy credentials are not kept here; send them with the install'
-        : 'no saved proxy credentials could be opened; send them with the install or save them again',
+        ? 'proxy credentials are not kept here; send them with the request'
+        : 'no saved proxy credentials could be opened; send them with the request or save them again',
     ]);
   return credentials ? { proxy, credentials } : { proxy };
 }
@@ -335,6 +399,111 @@ function rejectedCredentials(
   return new ExtensionFailure('PROXY_CREDENTIALS_REJECTED', ['the proxy refused the credentials'], failed.output);
 }
 
+type InstallerEnvironment = Awaited<ReturnType<typeof onlineEnvironment>>;
+
+async function onlineEnvironment(
+  context: FlowContext,
+  agentDirectory: string,
+  constraintsUrl: string,
+  source: OnlineExtensionSource,
+  settings: ExtensionSettings,
+  proxy: string | undefined,
+  directory: string
+) {
+  const cwd = path.join(directory, 'install-work');
+  const home = path.join(directory, 'install-home');
+  await Promise.all([mkdir(cwd), mkdir(home, { mode: 0o700 })]);
+  const env = managementEnvironment(context.base, context.platform, {
+    agentDirectory,
+    nativeSite: context.bundle.nativeSite,
+    constraintsUrl,
+    online: {
+      indexUrl: onlineIndex(source),
+      home,
+      work: cwd,
+      access: await onlineAccess(context, settings, proxy, source, home),
+    },
+  });
+  return { env, cwd };
+}
+
+function runPip(
+  context: FlowContext,
+  python: string,
+  installer: InstallerEnvironment,
+  args: string[],
+  limitIndexResponses = false,
+  input?: string
+): Promise<RunResult> {
+  const pip = limitIndexResponses
+    ? ['-c', BOUNDED_INDEX_PIP, String(INDEX_RESPONSE_LIMIT), String(RESOLUTION_REPORT_LIMIT)]
+    : ['-m', 'pip'];
+  return runToExit(
+    context.spawn,
+    { command: python, args: ['-P', '-B', ...pip, ...args], ...installer },
+    { timeoutMs: context.timeouts.installerMs, signal: context.signal, redact: true, secrets: context.secrets, input }
+  );
+}
+
+async function fetchForInstall(
+  context: FlowContext,
+  lock: MutationLock,
+  env: Record<string, string>,
+  source: Extract<OnlineExtensionSource, { kind: 'git' }>,
+  relay?: ProxyRelay,
+  installedCommit?: string
+) {
+  try {
+    return await fetchGitSource(context, lock, env, source, context.timeouts.installerMs, installedCommit);
+  } catch (error) {
+    if (error instanceof ExtensionFailure && error.code === 'GIT_FETCH_FAILED')
+      throw rejectedCredentials(context, relay, { output: error.output }) ?? error;
+    throw error;
+  }
+}
+
+/** Probe the saved index in a disposable environment. Ignore installed packages so an
+ * unreachable index cannot look like an up-to-date installation. The real install resolves
+ * dependencies under the same bundle constraints. */
+async function resolveIndexUpgrade(
+  context: FlowContext,
+  probe: Candidate,
+  installer: InstallerEnvironment,
+  source: IndexSource,
+  relay?: ProxyRelay
+): Promise<ResolvedArchive> {
+  const deadline = performance.now() + context.timeouts.installerMs;
+  const report = path.join(probe.paths.directory, 'resolution.json');
+  const result = await runPip(
+    context,
+    probe.paths.python,
+    installer,
+    ['install', '--dry-run', '--report', report, '--ignore-installed', '--no-deps', nativeIndexTarget(source)],
+    true
+  );
+  refuseSizeLimit(result);
+  if (result.code !== 0) {
+    const refused = rejectedCredentials(context, relay, result);
+    if (refused) throw refused;
+  }
+  requireSuccess(result, { 1: 'INSTALLER_FAILED', 2: 'INSTALLER_NOT_RUN' }, 'resolving the index requirement');
+  const target = requestedArchive(await readResolutionReport(report, deadline, context.signal));
+  const { name, version } = target.metadata ?? {};
+  const wanted = indexRequirement(source).name;
+  const reported = parseIndexRequirement(name);
+  if (reported?.name !== wanted || reported.specifier || typeof version !== 'string' || !parseVersion(version))
+    throw new ExtensionFailure('REQUEST_MISMATCH', ['pip resolved an unexpected name or version']);
+  const archive = archiveRequirement(wanted, target);
+  if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+  if (performance.now() >= deadline) throw new ExtensionFailure('TIMEOUT');
+  return { version, ...archive };
+}
+
+function refuseSizeLimit(result: RunResult): void {
+  if (result.code === PIP_RESPONSE_LIMIT_EXIT && !result.cancelled && !result.timedOut)
+    throw new ExtensionFailure('UPGRADE_RESPONSE_TOO_LARGE');
+}
+
 /** The record of a verified candidate: what it holds and where each distribution came from. */
 function describeMutation(
   context: FlowContext,
@@ -343,6 +512,7 @@ function describeMutation(
   request: MutationRequest,
   preparation: Preparation,
   snapshot: SiteSnapshot,
+  initial: SiteSnapshot,
   bound: Map<string, boolean>,
   forms: Map<string, ExtensionForm>,
   launch: LaunchForm,
@@ -360,7 +530,8 @@ function describeMutation(
   for (const { name, version, recordSha256 } of contentDistributions(snapshot)) {
     const inherited = parent?.distributions[name];
     // An untouched distribution keeps its origin; one this change wrote came from the import set.
-    const untouched = inherited?.version === version && inherited.recordSha256 === recordSha256;
+    const copied = initial.distributions.get(name);
+    const untouched = inherited && copied?.version === version && copied.recordSha256 === recordSha256;
     const origin =
       name === preparation.change.distribution && onlineOrigin
         ? onlineOrigin
@@ -500,6 +671,7 @@ async function verifyCandidate(
   expected: ExpectedExtensions,
   unboundDistribution?: string
 ): Promise<{ bound: Map<string, boolean>; forms: Map<string, ExtensionForm>; launch: LaunchForm }> {
+  await verifyRecordFiles(candidate.paths.site, candidate.paths.venv, snapshot, context.signal);
   const bound = await manifestBindings(context, candidate, env, expected);
   // The installer's verdict stands even when `extension verify` does not repeat it.
   if (unboundDistribution !== undefined && [...bound.values()].every(Boolean))
@@ -556,10 +728,14 @@ async function commitCandidate(
   context: FlowContext,
   lock: MutationLock,
   base: PointerState,
-  record: GenerationRecord
+  record: GenerationRecord,
+  snapshot: SiteSnapshot
 ): Promise<void> {
   const { layout } = context;
   const revision = base.pointer?.revision ?? 0;
+  // Check against the pre-load ledger: a load check may change an installed file or its RECORD.
+  const paths = generationPaths(layout, record.generation, record.binding.pythonMinor, context.platform);
+  await verifyRecordFiles(paths.site, paths.venv, snapshot, context.signal);
   await writeGenerationRecord(layout, record);
   const latest = await readPointer(layout);
   if (
@@ -608,6 +784,8 @@ export async function mutate(
   const guarded = underLock(context, lock);
   let unfinished: string | undefined;
   let relay: ProxyRelay | undefined;
+  let checkout: GitCheckout | undefined;
+  let staging: string | undefined;
   try {
     const { bundle, layout, platform } = guarded;
     const stale = base.record && !sameBinding(base.record.binding, bundle.binding);
@@ -616,10 +794,24 @@ export async function mutate(
     // The settings this change uses: read once, under the lock, so none of them moves until it ends.
     const stored = await readSettings(layout);
     const { settings, unreadable } = stored;
-    let proxy: string | undefined;
-    if (request.action === 'install' && request.source.kind !== 'file') {
+    const onlineRequest =
+      request.action === 'upgrade' || (request.action === 'install' && request.source.kind !== 'file');
+    if (onlineRequest) {
       if (unreadable) throw new ExtensionFailure('SETTINGS_UNREADABLE', ['the extension settings cannot be read']);
       if (!settings.onlineInstall) throw new ExtensionFailure('ONLINE_INSTALL_DISABLED');
+    }
+    // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
+    const parent = stale ? null : base.record;
+    const facts = await readBundleFacts(bundle);
+    const beforeSite = parent && generationPaths(layout, parent.generation, parent.binding.pythonMinor, platform).site;
+    const before = beforeSite ? await readSite(beforeSite) : EMPTY_SITE;
+    const prepared = await prepare(guarded, lock, request, before, facts, parent, beforeSite || undefined);
+    const source = 'source' in prepared ? prepared.source : undefined;
+    const upgrade = 'upgrade' in prepared ? prepared.upgrade : undefined;
+    const offlineImport = prepared.importSet !== undefined;
+    let proxy: string | undefined;
+    if (onlineRequest) {
+      if (guarded.signal?.aborted) throw new ExtensionFailure('CANCELLED');
       const upstream = await installProxy(guarded, stored, request);
       // Credentials typed where nothing is kept replace any a keychain saved for this proxy:
       // keeping those would bring back the old password the next time a keychain is there.
@@ -633,19 +825,65 @@ export async function mutate(
     }
     // What the installers print is masked for the relay token too, in or outside a URL.
     const online: FlowContext = relay ? { ...guarded, secrets: relay.secrets } : guarded;
-    // A confirmed reinstall starts fresh and keeps the old record as the previous generation.
-    const parent = stale ? null : base.record;
-    const facts = await readBundleFacts(bundle);
-    const before = parent
-      ? await readSite(generationPaths(layout, parent.generation, parent.binding.pythonMinor, platform).site)
-      : EMPTY_SITE;
-    const prepared = await prepare(guarded, lock, request, before, facts);
-    const source = 'source' in prepared ? prepared.source : undefined;
-    const offlineImport = prepared.importSet !== undefined;
-
-    hooks.progress('preparing');
     const constraintsUrl = await writeConstraints(layout, bundle, facts);
     const revision = base.pointer?.revision ?? 0;
+    let resolvedArchive: ResolvedArchive | undefined;
+    let resolvedCommit: string | undefined;
+    if (upgrade && source) {
+      staging = path.join(layout.artifacts, '.staging-upgrade-' + randomBytes(6).toString('hex'));
+      await mkdir(staging, { mode: 0o700 });
+      if (source.kind === 'index') {
+        const probe = await createCandidate(guarded, 'probe', null, false, staging);
+        const scan = await scanGeneration(probe, facts, false);
+        if (scan.problems.length > 0)
+          throw new ExtensionFailure(
+            scan.problems[0].code,
+            scan.problems.map(({ message }) => message)
+          );
+        const installer = await onlineEnvironment(
+          guarded,
+          probe.paths.agent,
+          constraintsUrl,
+          source,
+          settings,
+          proxy,
+          staging
+        );
+        resolvedArchive = await resolveIndexUpgrade(online, probe, installer, source, relay);
+        const currentVersion = parseVersion(before.distributions.get(upgrade)?.version ?? '');
+        const latestVersion = parseVersion(resolvedArchive.version);
+        if (!currentVersion || !latestVersion) throw new ExtensionFailure('REQUEST_MISMATCH');
+        if (guarded.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+        if (compareInstalledVersions(latestVersion, currentVersion) <= 0) return { alreadyLatest: true };
+      } else {
+        const installer = await onlineEnvironment(
+          guarded,
+          path.join(staging, 'agent'),
+          constraintsUrl,
+          source,
+          settings,
+          proxy,
+          staging
+        );
+        const origin = parent?.distributions[upgrade]?.origin;
+        const fetched = await fetchForInstall(
+          online,
+          lock,
+          installer.env,
+          source,
+          relay,
+          origin?.kind === 'git' ? origin.commit : undefined
+        );
+        checkout = fetched.checkout;
+        resolvedCommit = fetched.commit;
+      }
+      if (guarded.signal?.aborted) throw new ExtensionFailure('CANCELLED');
+      const origin = parent?.distributions[upgrade]?.origin;
+      if (origin?.kind === 'git' && resolvedCommit === origin.commit) return { alreadyLatest: true };
+      await removeFromState(layout, lock, staging);
+      staging = undefined;
+    }
+    hooks.progress('preparing');
     unfinished = generationId(revision + 1, hooks.suffix());
     const candidate = await createCandidate(guarded, unfinished, parent);
     const refuse = (problems: { code: ExtensionFailureCode; message: string }[], output?: string): void => {
@@ -656,63 +894,64 @@ export async function mutate(
           output
         );
     };
-    refuse((await scanGeneration(candidate, facts, offlineImport)).problems);
+    const initial = await scanGeneration(candidate, facts, offlineImport);
+    refuse(initial.problems);
 
     hooks.progress('installing');
     const management = { agentDirectory: candidate.paths.agent, nativeSite: bundle.nativeSite, constraintsUrl };
     // native treats an existing relative path as a local install, even when it looks like a package name.
-    const cwd = source ? path.join(candidate.paths.directory, 'install-work') : candidate.paths.directory;
-    const home = path.join(candidate.paths.directory, 'install-home');
-    if (source) await Promise.all([mkdir(cwd), mkdir(home, { mode: 0o700 })]);
-    const installerEnvironment = managementEnvironment(guarded.base, platform, {
+    const isolated = managementEnvironment(guarded.base, platform, {
       ...management,
       ...(prepared.importSet ? { offlineLinksUrl: pathToFileURL(prepared.importSet.directory).href } : {}),
-      ...(source
-        ? {
-            online: {
-              indexUrl: onlineIndex(source),
-              home,
-              work: cwd,
-              access: await onlineAccess(guarded, settings, proxy, source, home),
-            },
-          }
-        : {}),
     });
+    const installerEnvironment = source
+      ? await onlineEnvironment(
+          guarded,
+          candidate.paths.agent,
+          constraintsUrl,
+          source,
+          settings,
+          proxy,
+          candidate.paths.directory
+        )
+      : { env: isolated, cwd: candidate.paths.directory };
+    if (!checkout && source?.kind === 'git' && source.subdirectory !== undefined)
+      checkout = (await fetchForInstall(online, lock, installerEnvironment.env, source, relay)).checkout;
+    if (upgrade && source?.kind === 'git') refuseSharedFiles(candidate.paths.site, initial.snapshot, upgrade, platform);
     let native = prepared.native;
-    let checkout: GitCheckout | undefined;
-    if (source?.kind === 'git' && source.subdirectory !== undefined) {
-      // Studio fetches and checks the subdirectory; native installs a checked copy of it.
-      try {
-        checkout = await checkoutSubdirectory(
-          online,
-          lock,
-          installerEnvironment,
-          { ...source, subdirectory: source.subdirectory },
-          guarded.timeouts.installerMs
-        );
-      } catch (error) {
-        // Only a fetch that failed is the proxy's refusal; CANCELLED, TIMEOUT and the rest stay.
-        const fetchFailed = error instanceof ExtensionFailure && error.code === 'GIT_FETCH_FAILED';
-        throw (fetchFailed && rejectedCredentials(guarded, relay, { output: error.output })) || error;
+    if (checkout) native = ['extension', 'install', checkout.directory, '--yes'];
+    else if (upgrade && source) {
+      if (source.kind === 'git') {
+        // pip compares the distribution version during a Git update. Remove only this
+        // distribution in the candidate so a new commit with the same version is installed.
+        const removed = await runPip(guarded, candidate.paths.python, { ...installerEnvironment, env: isolated }, [
+          'uninstall',
+          '--yes',
+          upgrade,
+        ]);
+        requireSuccess(removed, { 1: 'INSTALLER_FAILED' }, 'removing the old Git distribution');
       }
-      native = ['extension', 'install', checkout.directory, '--yes'];
     }
-    let installer: RunResult;
-    try {
-      installer = await runManagement(
-        online,
-        candidate,
-        installerEnvironment,
-        native,
-        guarded.timeouts.installerMs,
-        cwd
-      );
-    } finally {
-      // Nothing after the installer goes online; the relay and its token end here.
-      await relay?.close();
-      // The installed files are in the venv now; the lock holder removes the sources.
-      if (checkout) await removeFromState(layout, lock, checkout.staging);
-    }
+    const installer = resolvedArchive
+      ? await runPip(
+          { ...online, secrets: [...(online.secrets ?? []), resolvedArchive.privateQuery] },
+          candidate.paths.python,
+          installerEnvironment,
+          ['install', '--studio-archive-stdin'],
+          true,
+          resolvedArchive.requirement + '\n'
+        )
+      : await runManagement(
+          online,
+          candidate,
+          installerEnvironment.env,
+          native,
+          guarded.timeouts.installerMs,
+          installerEnvironment.cwd
+        );
+    refuseSizeLimit(installer);
+    // Nothing after the installer goes online; the relay and its token end here.
+    await relay?.close();
     // An install the user's proxy refused to sign in is reported as that, so the screen can ask again.
     if (installer.code !== 0 && installer.code !== INSTALLED_NOT_BOUND) {
       const refused = rejectedCredentials(guarded, relay, installer);
@@ -736,24 +975,62 @@ export async function mutate(
     if ('change' in prepared) preparation = prepared;
     else if (prepared.source.kind === 'git') {
       const { distribution, origin } = checkout
-        ? await installedCheckoutOrigin(prepared.source, candidate.paths.site, before, scan.snapshot, checkout)
-        : await installedGitOrigin(prepared.source, candidate.paths.site, before, scan.snapshot);
-      preparation = { ...prepared, change: { action: 'install', distribution } };
+        ? await installedCheckoutOrigin(
+            prepared.source,
+            candidate.paths.site,
+            initial.snapshot,
+            scan.snapshot,
+            checkout
+          )
+        : await installedGitOrigin(prepared.source, candidate.paths.site, initial.snapshot, scan.snapshot);
+      if (upgrade && (distribution !== upgrade || origin.kind !== 'git' || origin.commit !== resolvedCommit))
+        throw new ExtensionFailure('REQUEST_MISMATCH', [
+          'the upgrade did not install the selected Git distribution and commit',
+        ]);
+      preparation = { ...prepared, change: { action: upgrade ? 'update' : 'install', distribution } };
       onlineOrigin = origin;
     } else {
-      const { name, version } = prepared.source;
-      preparation = { ...prepared, change: { action: 'install', distribution: name, version, matchesVersion } };
-      if (before.distributions.get(name)?.recordSha256 !== scan.snapshot.distributions.get(name)?.recordSha256)
-        onlineOrigin = { kind: 'index', indexUrl: onlineIndex(prepared.source) };
+      const { name, specifier, text, exact } = indexRequirement(prepared.source);
+      const version = scan.snapshot.distributions.get(name)?.version;
+      if (
+        version !== undefined &&
+        (specifierExcludes(specifier, version) ||
+          (exact?.startsWith('===') && version.toLowerCase() !== exact.slice(3).trim().toLowerCase()))
+      )
+        throw new ExtensionFailure('REQUEST_MISMATCH', [
+          'the installed version does not satisfy the requested requirement',
+        ]);
+      preparation = {
+        ...prepared,
+        change:
+          resolvedArchive !== undefined
+            ? { action: 'update', distribution: name, version: resolvedArchive.version }
+            : {
+                action: 'install',
+                distribution: name,
+                version: exact?.startsWith('===') ? undefined : exact?.slice(2).trim(),
+                matchesVersion,
+              },
+      };
+      if (
+        initial.snapshot.distributions.get(name)?.recordSha256 !== scan.snapshot.distributions.get(name)?.recordSha256
+      )
+        onlineOrigin = { kind: 'index', indexUrl: onlineIndex(prepared.source), requirement: text };
     }
-    const gate = compareRequest(preparation.change, before, scan.snapshot);
+    const gate = compareRequest(preparation.change, initial.snapshot, scan.snapshot);
     if (!gate.changed) throw new ExtensionFailure('NO_CHANGE', ['nothing was installed or removed'], installer.output);
     if (gate.problems.length > 0) throw new ExtensionFailure('REQUEST_MISMATCH', gate.problems, installer.output);
+    const installed = scan.snapshot.distributions.get(preparation.change.distribution);
+    if (installed && onlineOrigin) {
+      if (resolvedArchive) await removeInstalledDirectUrl(candidate.paths.site, installed);
+      await recordVerifiedSource(candidate.paths.site, installed, onlineOrigin);
+    }
+    const finalSnapshot = onlineOrigin ? await readSite(candidate.paths.site) : scan.snapshot;
     const { bound, forms, launch } = await verifyCandidate(
       guarded,
       candidate,
       managementEnvironment(guarded.base, platform, management),
-      scan.snapshot,
+      finalSnapshot,
       gate.expected,
       installer.code === INSTALLED_NOT_BOUND ? preparation.change.distribution : undefined
     );
@@ -764,14 +1041,19 @@ export async function mutate(
       parent,
       request,
       preparation,
-      scan.snapshot,
+      finalSnapshot,
+      initial.snapshot,
       bound,
       forms,
       launch,
       hooks.now(),
       onlineOrigin
     );
-    await commitCandidate(guarded, lock, base, record);
+    if (checkout) {
+      await removeFromState(layout, lock, checkout.staging);
+      checkout = undefined;
+    }
+    await commitCandidate(guarded, lock, base, record, finalSnapshot);
     unfinished = undefined;
     return { generation: candidate.id, revision: revision + 1 };
   } catch (error) {
@@ -780,12 +1062,21 @@ export async function mutate(
     // candidate is in effect, and a launcher may already use it. It stays.
     if (unfinished !== undefined && !(await inEffect(context.layout, unfinished)))
       await lock.remove(`generations/${unfinished}`).catch(() => {});
-    throw outcome(error, lock);
+    const proxyFailure =
+      error instanceof ExtensionFailure &&
+      (error.code === 'PROXY_CHANGED' ||
+        error.code === 'PROXY_CREDENTIALS_REQUIRED' ||
+        error.code === 'PROXY_CREDENTIALS_REJECTED');
+    throw outcome(proxyFailure && context.signal?.aborted ? new ExtensionFailure('CANCELLED') : error, lock);
   } finally {
     await relay?.close();
     // Clean-up runs after a failure too: a refused import must not leave its wheels in the
     // store. The caller reports the outcome only after this, so "switched" also means "idle again".
-    if (!lock.lost()) await tidy(context, lock);
+    if (!lock.lost()) {
+      if (staging) await removeFromState(context.layout, lock, staging).catch(() => {});
+      if (checkout) await removeFromState(context.layout, lock, checkout.staging).catch(() => {});
+      await tidy(context, lock);
+    }
     await lock.release();
   }
 }
@@ -830,13 +1121,15 @@ function assertSafeScan(scan: Awaited<ReturnType<typeof scanGeneration>>): SiteS
   return scan.snapshot;
 }
 
+type VerifiedRebound = { record: GenerationRecord; snapshot: SiteSnapshot };
+
 async function verifyReboundCandidate(
   context: FlowContext,
   candidate: Candidate,
   old: GenerationRecord,
   facts: BundleFacts,
   replay?: Awaited<ReturnType<typeof replayPlan>>
-): Promise<GenerationRecord> {
+): Promise<VerifiedRebound> {
   const { bundle, layout, platform } = context;
   const env = managementEnvironment(context.base, platform, {
     agentDirectory: candidate.paths.agent,
@@ -877,8 +1170,7 @@ async function verifyReboundCandidate(
   const distributions: GenerationRecord['distributions'] = Object.create(null);
   for (const { name, version, recordSha256 } of contentDistributions(snapshot)) {
     const prior = old.distributions[name];
-    if (!replay && (prior?.version !== version || prior.recordSha256 !== recordSha256))
-      throw new ExtensionFailure('GENERATION_MODIFIED');
+    if (!replay && prior?.version !== version) throw new ExtensionFailure('GENERATION_MODIFIED');
     const origin = prior?.version === version ? prior.origin : undefined;
     distributions[name] = { version, recordSha256, ...(origin ? { origin } : {}) };
   }
@@ -898,7 +1190,10 @@ async function verifyReboundCandidate(
   );
   requireSuccess(dependencies, { 1: 'VERIFICATION_FAILED' }, 'the dependency check');
   const verified = await verifyCandidate(context, candidate, env, snapshot, expected);
-  return describeCandidate(context, candidate, old, old.operation, distributions, snapshot, verified, new Date());
+  return {
+    record: describeCandidate(context, candidate, old, old.operation, distributions, snapshot, verified, new Date()),
+    snapshot,
+  };
 }
 
 /** Try to move a whole generation to the current bundle. The old generation stays intact. */
@@ -907,7 +1202,7 @@ async function rebind(
   lock: MutationLock,
   base: PointerState,
   old: GenerationRecord
-): Promise<GenerationRecord | undefined> {
+): Promise<VerifiedRebound | undefined> {
   const facts = await readBundleFacts(context.bundle);
   const current = context.bundle.binding;
   const canCopy = old.binding.target === current.target && old.binding.pythonMinor === current.pythonMinor;
@@ -918,6 +1213,15 @@ async function rebind(
     try {
       const replay = copy ? undefined : await replayPlan(context, old, facts);
       preparing = true;
+      if (copy) {
+        const site = generationPaths(context.layout, old.generation, old.binding.pythonMinor, context.platform).site;
+        const original = contentDistributions(await readSite(site));
+        if (
+          original.length !== Object.keys(old.distributions).length ||
+          original.some((dist) => old.distributions[dist.name]?.recordSha256 !== dist.recordSha256)
+        )
+          throw new ExtensionFailure('GENERATION_MODIFIED');
+      }
       const candidate = await createCandidate(context, id, copy ? old : null, copy);
       return await verifyReboundCandidate(context, candidate, old, facts, replay);
     } catch (error) {
@@ -937,10 +1241,11 @@ async function switchRebound(
   old: GenerationRecord
 ): Promise<GenerationRecord | undefined> {
   const guarded = underLock(context, lock);
-  const record = await rebind(guarded, lock, base, old);
-  if (!record) return undefined;
+  const rebound = await rebind(guarded, lock, base, old);
+  if (!rebound) return undefined;
+  const { record, snapshot } = rebound;
   try {
-    await commitCandidate(guarded, lock, base, record);
+    await commitCandidate(guarded, lock, base, record, snapshot);
   } catch (error) {
     if (!(await inEffect(context.layout, record.generation)))
       await lock.remove(`generations/${record.generation}`).catch(() => {});
@@ -1132,7 +1437,9 @@ export async function clearProxyCredentials(context: FlowContext): Promise<Store
  * conversations get it with its manifest bound (a pack, decision B5); one passed by module
  * reference loads but is `manifest_unbound`.
  */
-export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>): Promise<ExtensionListing> {
+export async function describe(
+  context: Pick<FlowContext, 'bundle' | 'layout' | 'platform'>
+): Promise<ExtensionListing> {
   await verifyLayout(context.layout);
   const { pointer, record } = await readPointer(context.layout);
   if (!pointer || !record)
@@ -1156,12 +1463,24 @@ export async function describe(context: Pick<FlowContext, 'bundle' | 'layout'>):
     extensions: Object.entries(record.extensions)
       .map(([name, extension]) => {
         const id = managedExtensionId(extension.distribution, name, extension.plugin);
+        const origin = record.distributions[extension.distribution]?.origin;
+        const source = usable ? upgradeSource(origin, extension.distribution) : undefined;
+        let upgrade: ExtensionListing['extensions'][number]['upgrade'];
+        if (source?.kind === 'index' && origin?.kind === 'index')
+          upgrade = indexRequirement(source).exact
+            ? 'pinned'
+            : origin.requirement === undefined
+              ? 'confirmation_required'
+              : 'available';
+        if (source?.kind === 'git' && origin?.kind === 'git' && context.platform !== 'win32')
+          upgrade = pinnedGit(source, origin.commit) ? 'pinned' : 'available';
         return {
           name,
           distribution: extension.distribution,
           version: record.distributions[extension.distribution]?.version ?? '',
           reference: extension.reference,
-          origin: record.distributions[extension.distribution]?.origin ?? null,
+          origin: origin ?? null,
+          ...(upgrade ? { upgrade } : {}),
           ...(managed.has(id) ? { managedId: id, defaultEnabled: recordedDefault(pointer.defaults, id) ?? true } : {}),
           status: !usable
             ? ('reinstall_needed' as const)

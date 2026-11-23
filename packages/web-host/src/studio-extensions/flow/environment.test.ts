@@ -148,6 +148,16 @@ describe('the environment of helper children', () => {
     expect(environment).not.toHaveProperty('HTTPS_PROXY');
   });
 
+  it('supplies an isolated Git reflog identity so local operations need no hostname lookup', () => {
+    const online = { indexUrl: 'https://mirror.invalid/simple/', home: '/data/installer-home', work: '/data/work' };
+    const base = baseEnvironment({ GIT_COMMITTER_EMAIL: 'ambient@example.invalid' }, 'linux');
+    expect(managementEnvironment(base, 'linux', { ...management, online })).toMatchObject({
+      GIT_COMMITTER_NAME: 'Aelix Studio extension installer',
+      GIT_COMMITTER_EMAIL: 'extensions@studio.invalid',
+    });
+    expect(managementEnvironment(base, 'linux', management)).not.toHaveProperty('GIT_COMMITTER_EMAIL');
+  });
+
   const online = { indexUrl: 'https://mirror.invalid/simple/', home: '/data/installer-home', work: '/data/work' };
   const proxy = 'http://proxy.corp.example:3128';
 

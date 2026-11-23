@@ -25,7 +25,7 @@ import {
 } from '../../../../../tests/fixtures/extensionRuntime';
 import { writeWheel } from '../../../../../tests/fixtures/extensionWheels';
 import { redactUrlCredentials, type Spawn } from '../../../process';
-import { ExtensionService, type ExtensionServiceOptions } from '../../../service';
+import { ExtensionService, type ExtensionServiceOptions } from '../../../host/service';
 import { layoutOf, type Layout } from '../../../store/layout';
 import {
   ExtensionFailure,
@@ -158,6 +158,21 @@ describe('the sealed credential store', () => {
     await dropProxyCredentials(layout, writer, next);
     expect(await readdir(layout.root)).toEqual([`proxy-credentials-${next}.json`]);
     await dropProxyCredentials(layout, writer, null);
+    expect(await readdir(layout.root)).toEqual([]);
+  });
+
+  it('keeps nothing, and says so, when the keychain refuses to seal', async () => {
+    const refusing: ProxyCredentialVault = {
+      mode: 'keychain',
+      seal: () => {
+        throw new Error('Encryption is not available.');
+      },
+      open: () => '',
+    };
+    const failure = await failureOf(
+      saveProxyCredentials(layout, refusing, STORE_PROXY, CREDENTIALS, directWriter(layout.root))
+    );
+    expect(failure.code).toBe('PROXY_CREDENTIALS_NOT_STORED');
     expect(await readdir(layout.root)).toEqual([]);
   });
 
@@ -301,7 +316,11 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
   const request = (command: unknown): Promise<ExtensionReply> => service.request('window:1', command);
   const settle = async (reply: ExtensionReply): Promise<ExtensionOperation> => {
     let state = data<ExtensionOperation>(reply);
-    for (let round = 0; round < 1000 && !['switched', 'failed', 'cancelled'].includes(state.phase); round += 1) {
+    for (
+      let round = 0;
+      round < 1000 && !['switched', 'already_latest', 'failed', 'cancelled'].includes(state.phase);
+      round += 1
+    ) {
       await new Promise((resolve) => setTimeout(resolve, 5));
       state = data<ExtensionOperation>(await request({ action: 'poll', operationId: state.operationId }));
     }
@@ -558,6 +577,83 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
       expect(JSON.stringify(state)).not.toContain(basic(CREDENTIALS).slice('Basic '.length));
     });
 
+    it('uses a fresh relay for the upgrade probe and install with request credentials', async () => {
+      service = start();
+      expect(await settle(await nameInstall())).toMatchObject({ phase: 'switched' });
+      const name = `demo-${installs}`;
+      const upgraded = await writeWheel(path.join(scratch, 'wheels'), { name, version: '2.0.0' });
+      const command = { action: 'upgrade', name };
+      data(await request({ action: 'set_settings', settings: { proxy, proxyAuthentication: true } }));
+      expect(await settle(await request(command))).toMatchObject({ code: 'PROXY_CREDENTIALS_REQUIRED' });
+      expect(
+        await request({ ...command, proxyCredentials: { username: 'bad:user', password: 'secret' } })
+      ).toMatchObject({ code: 'INVALID_INPUT' });
+      let relay = '';
+      runtime.pip = async (spec) => {
+        relay = spec.env.PIP_PROXY;
+        expect(relay).toMatch(/^http:\/\/run:[0-9a-f]{64}@127\.0\.0\.1:[0-9]+$/);
+        expectNowhere([spec]);
+        expect(await throughProxy(spec.env)).toBe(200);
+        const report = spec.args[spec.args.indexOf('--report') + 1];
+        await writeFile(
+          report,
+          JSON.stringify({
+            version: '1',
+            install: [
+              {
+                requested: true,
+                is_yanked: false,
+                metadata: { name, version: '2.0.0' },
+                download_info: {
+                  url: 'https://files.invalid/upgrade.whl',
+                  archive_info: { hashes: { sha256: '1'.repeat(64) } },
+                },
+              },
+            ],
+          })
+        );
+        return 0;
+      };
+      runtime.install = async (venv, _wheel, spec) => {
+        expect(spec.env.PIP_PROXY).toBe(relay);
+        expect(await throughProxy(spec.env)).toBe(200);
+        await installWheel(venv, upgraded);
+        return 0;
+      };
+      const state = await settle(await request({ ...command, proxyCredentials: CREDENTIALS }));
+      expect(state).toMatchObject({ phase: 'switched' });
+      expect(signIns).toEqual([basic(CREDENTIALS), basic(CREDENTIALS)]);
+      expect(await settings()).toMatchObject({ hasSavedCredentials: false });
+      expect(await writtenLeaks()).toEqual([]);
+    });
+
+    it.each([
+      ['PROXY_CREDENTIALS_REJECTED', 'failed'],
+      ['CANCELLED', 'cancelled'],
+      ['TIMEOUT', 'failed'],
+    ])('reports %s while resolving an upgrade through the relay', async (code, phase) => {
+      expect(await settle(await nameInstall())).toMatchObject({ phase: 'switched' });
+      const command = { action: 'upgrade', name: `demo-${installs}` };
+      data(await request({ action: 'set_settings', settings: { proxy } }));
+      data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
+      await service.dispose();
+      service = start({ proxyVault: vault, timeouts: { installerMs: 1000 } });
+      refuseSignIn = true;
+      runtime.pip = async (spec) => {
+        expect(await throughProxy(spec.env)).toBe(502);
+        if (code === 'PROXY_CREDENTIALS_REJECTED') return 1;
+        return new Promise<number>(() => {});
+      };
+      const started = data<ExtensionOperation>(await request(command));
+      if (code === 'CANCELLED') {
+        await expect.poll(() => printed.length, { timeout: 5000 }).toBe(1);
+        data(await request({ action: 'cancel', operationId: started.operationId }));
+      }
+      expect(await settle({ ok: true, data: started })).toMatchObject({ code, phase });
+      expect(signIns).toEqual([basic(CREDENTIALS)]);
+      expect(await readdir(path.join(root, 'artifacts'))).toEqual([]);
+    });
+
     it('clears saved credentials and then asks for them, before anything starts', async () => {
       data(await request({ action: 'set_settings', settings: { proxy } }));
       data(await request({ action: 'set_proxy_credentials', credentials: CREDENTIALS }));
@@ -664,28 +760,36 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
       expect(await nameInstall()).toEqual({ ok: false, code: 'PROXY_CREDENTIALS_REQUIRED' });
     });
 
-    it('sends credentials of the request nowhere when the proxy changed before the change began', async () => {
-      data(await request({ action: 'set_settings', settings: { proxy, proxyAuthentication: true } }));
-      // Another Studio process saves another proxy between the early check and the lock.
-      beforeLock = () =>
-        writeFileSync(
-          path.join(root, 'settings.json'),
-          JSON.stringify({
-            schema: 'aelix.studio.extensions.settings/1',
-            onlineInstall: true,
-            proxy: 'http://127.0.0.1:9',
-            privateGit: false,
-            proxyAuthentication: true,
-            proxyCredentialId: null,
-          })
-        );
-      const reply = await nameInstall({ proxyCredentials: CREDENTIALS });
-      const state = await settle(reply);
-      expect(state).toMatchObject({ phase: 'failed', code: 'PROXY_CHANGED' });
-      expect(installer()).toBeUndefined();
-      expect(signIns).toEqual([]);
-      expectNowhere([reply, state]);
-    });
+    it.each(['install', 'upgrade'])(
+      'sends %s credentials nowhere when the proxy changed before the lock',
+      async (action) => {
+        if (action === 'upgrade') expect(await settle(await nameInstall())).toMatchObject({ phase: 'switched' });
+        data(await request({ action: 'set_settings', settings: { proxy, proxyAuthentication: true } }));
+        // Another Studio process saves another proxy between the early check and the lock.
+        beforeLock = () =>
+          writeFileSync(
+            path.join(root, 'settings.json'),
+            JSON.stringify({
+              schema: 'aelix.studio.extensions.settings/1',
+              onlineInstall: true,
+              proxy: 'http://127.0.0.1:9',
+              privateGit: false,
+              proxyAuthentication: true,
+              proxyCredentialId: null,
+            })
+          );
+        const count = spawn.calls.length;
+        const reply =
+          action === 'install'
+            ? await nameInstall({ proxyCredentials: CREDENTIALS })
+            : await request({ action, name: `demo-${installs}`, proxyCredentials: CREDENTIALS });
+        const state = await settle(reply);
+        expect(state).toMatchObject({ phase: 'failed', code: 'PROXY_CHANGED' });
+        expect(spawn.calls.slice(count).some((call) => call.args.includes('install'))).toBe(false);
+        expect(signIns).toEqual([]);
+        expectNowhere([reply, state]);
+      }
+    );
 
     it('drops what a keychain saved for the proxy when credentials are typed or sent here', async () => {
       const keychain = start({ proxyVault: fakeKeychain() });

@@ -223,6 +223,10 @@ export function managementEnvironment(
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_CONFIG_GLOBAL: nullDevice(platform),
       GIT_CEILING_DIRECTORIES: path.dirname(work),
+      // Git writes reflogs even for local clones and detached checkouts. Without a
+      // committer email it can ask DNS for the machine's fully qualified hostname.
+      GIT_COMMITTER_NAME: 'Aelix Studio extension installer',
+      GIT_COMMITTER_EMAIL: 'extensions@studio.invalid',
       GIT_TERMINAL_PROMPT: '0',
       GIT_ASKPASS: '/usr/bin/false',
       GIT_CONFIG_COUNT: String(gitConfig.length),

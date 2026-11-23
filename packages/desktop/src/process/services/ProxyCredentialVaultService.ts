@@ -29,13 +29,19 @@ const NOT_A_KEYCHAIN = new Set(['basic_text', 'unknown']);
  * Windows DPAPI, Linux libsecret or KWallet. `memory-only` when it cannot (no encryption, or a
  * Linux `basic_text`/`unknown` backend): then nothing is saved and each install asks.
  *
+ * On macOS nothing is asked of `safeStorage` here: even its availability check reads the
+ * Keychain on the main thread and can wait for a Keychain prompt, which would hold app
+ * startup. Every macOS user has a Keychain, so the vault is `keychain` and touches it only
+ * when credentials are sealed or opened; a Keychain that refuses then makes the save fail
+ * (`PROXY_CREDENTIALS_NOT_STORED`) and the open ask again.
+ *
  * Call it after the app is ready; before that, Linux reports no backend yet.
  */
 export function createProxyCredentialVault(
   storage: SafeStorageLike = safeStorage,
   platform: NodeJS.Platform = process.platform
 ): ProxyCredentialVault {
-  if (!storage.isEncryptionAvailable()) return EXTENSION_PROXY_MEMORY_ONLY_VAULT;
+  if (platform !== 'darwin' && !storage.isEncryptionAvailable()) return EXTENSION_PROXY_MEMORY_ONLY_VAULT;
   if (platform === 'linux' && NOT_A_KEYCHAIN.has(storage.getSelectedStorageBackend?.() ?? 'unknown'))
     return EXTENSION_PROXY_MEMORY_ONLY_VAULT;
   return {
