@@ -503,8 +503,22 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       const applied = spawn.calls.slice(start).find((call) => call.args.includes('--studio-archive-stdin'));
       expect(applied).toBeDefined();
       expect(JSON.stringify(applied)).not.toContain('fixture-signature');
-      expect(JSON.stringify(state)).not.toMatch(/fixture-signature|sha256=/);
+      expect(JSON.stringify(state)).not.toContain('fixture-signature');
+      expect(state.output).toContain(`#sha256=${digest}`);
       expect(state.output).toContain('/upgrade.whl?***');
+    });
+
+    it('masks a relative signed URL from a failed pip probe', async () => {
+      expect((await installFromIndex()).phase).toBe('switched');
+      runtime.pip = async (_spec, child) => {
+        child.complain('ERROR: fetching ../files/pkg.whl?X-Amz-Signature=');
+        child.complain('private-probe-signature&X-Amz-Expires=60 failed\n');
+        return 1;
+      };
+      const state = await upgrade();
+      expect(state).toMatchObject({ phase: 'failed', code: 'INSTALLER_FAILED' });
+      expect(state.output).toContain('../files/pkg.whl?*** failed');
+      expect(JSON.stringify(state)).not.toContain('private-probe-signature');
     });
 
     it('checks an installed local version against a mutated legacy requirement', async () => {

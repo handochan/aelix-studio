@@ -251,6 +251,25 @@ describe('masking credentials in output', () => {
     }
   });
 
+  it.each(['../files/pkg.whl', '/files/pkg.whl', 'pkg.whl', 'C:\\files\\pkg.whl'])(
+    'masks a signed query on the path-like token %s',
+    (file) => {
+      expect(redactUrlCredentials(`failed at ${file}?X-Amz-Signature=hidden#fragment end`)).toBe(
+        `failed at ${file}?*** end`
+      );
+    }
+  );
+
+  it('preserves a complete public digest and masks a fragment with additional fields', () => {
+    const digest = 'ab'.repeat(32);
+    expect(redactUrlCredentials(`../pkg.whl?sig=hidden#sha256=${digest} https://h/pkg.whl#sha256=${digest}`)).toBe(
+      `../pkg.whl?***#sha256=${digest} https://h/pkg.whl#sha256=${digest}`
+    );
+    expect(redactUrlCredentials(`pkg.whl#sha256=${digest}&token=hidden pkg.whl#sha256=hidden`)).toBe(
+      'pkg.whl#*** pkg.whl#***'
+    );
+  });
+
   it('masks what a real child prints in pieces before the result is cut', async () => {
     const script =
       'const [a, b] = [process.argv[1].slice(0, 30), process.argv[1].slice(30)];' +

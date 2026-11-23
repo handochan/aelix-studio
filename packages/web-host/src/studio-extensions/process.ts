@@ -83,6 +83,17 @@ export function windowsChildSpawn(python: string, launcher: string): Spawn {
 const AUTHORITY_END = /[\s/?#]/;
 const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 const LETTER = /[a-z]/i;
+const PUBLIC_DIGEST = /^(?:sha256=[a-f0-9]{64}|sha384=[a-f0-9]{96}|sha512=[a-f0-9]{128})$/i;
+
+/** Treat a query or fragment in any output token as sensitive unless the fragment is a digest. */
+function redactUrlSuffix(token: string): string {
+  const marker = token.search(/[?#]/);
+  if (marker < 0 || marker === token.length - 1) return token;
+  const fragment = token.indexOf('#', marker);
+  const publicDigest = fragment >= 0 && PUBLIC_DIGEST.test(token.slice(fragment + 1));
+  if (marker === fragment && publicDigest) return token;
+  return token.slice(0, marker + 1) + '***' + (publicDigest ? token.slice(fragment) : '');
+}
 
 /**
  * Hide credentials, queries and fragments in URLs before tool output reaches a reply.
@@ -93,8 +104,8 @@ const LETTER = /[a-z]/i;
  * `scheme://`, the authority runs to the first `/`, `?`, `#` or whitespace, or to the next URL,
  * or the end; everything before its last `@` is the user part. That is masked whole, except
  * that a plain SSH account name without a password (`ssh://git@host`) stays, since it says
- * which account was used. A query or fragment ends at whitespace even when its value
- * contains another URL or punctuation that looks like the end of a quoted field.
+ * which account was used. Also mask query and fragment values in whitespace-delimited
+ * tokens, covering relative URLs and paths. Only a complete, public hash fragment stays.
  *
  * Fail-safe: ambiguous spans are masked; over-masking is accepted over leaking. Plain output
  * does not say where a URL ends, so text after it up to such a delimiter (a JSON field that
@@ -136,16 +147,8 @@ export function redactUrlCredentials(text: string): string {
     const keep = /^(?:git\+)?ssh$/i.test(text.slice(url.scheme, url.from - 3)) && !authority.slice(0, at).includes(':');
     masked += text.slice(cursor, url.from) + (at < 0 || keep ? authority : '***' + authority.slice(at));
     cursor = end;
-    let marker = end;
-    while (marker < bound && !isWhitespace(text.charCodeAt(marker)) && text[marker] !== '?' && text[marker] !== '#')
-      marker += 1;
-    if (marker < bound && (text[marker] === '?' || text[marker] === '#')) {
-      masked += text.slice(end, marker + 1) + '***';
-      cursor = marker + 1;
-      while (cursor < text.length && !isWhitespace(text.charCodeAt(cursor))) cursor += 1;
-    }
   }
-  return masked + text.slice(cursor);
+  return (masked + text.slice(cursor)).replace(/\S+/g, redactUrlSuffix);
 }
 
 /** Whitespace as `\s` matches it, by character code. */

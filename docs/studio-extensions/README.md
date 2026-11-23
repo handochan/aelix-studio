@@ -330,7 +330,7 @@ requirement 필드가 없던 개발·시험 세대는 `PIN_UNKNOWN`으로 답한
 - 이름 출처는 잠금 아래의 임시 venv와 번들 pip로 저장된 index에서 조회한다. 설치된 패키지를 무시하므로
   index 접속 실패가 "이미 최신"으로 처리되지 않는다. 조회에서 선택한 파일의 URL과 강한 hash로 후보를
   설치한다. 같은 버전의 파일이 교체되거나 yank돼도 조회에서 얻은 파일만 시도한다. 다운로드 URL은 pip에
-  전용 표준 입력으로 넘기고, 진단 출력의 URL에서 query와 fragment를 가린다.
+  전용 표준 입력으로 넘긴다. 진단에서는 상대 URL과 경로의 query도 가린다. fragment는 공개 hash만 남긴다.
   업그레이드 pip의 Simple API 응답은 압축을 푼 뒤 8 MiB, `resolution.json`은 1 MiB까지 받는다.
   조회와 보고서 읽기·해석에 같은 시간 제한을 적용한다. 상한을 넘기면 `UPGRADE_RESPONSE_TOO_LARGE`다.
 - Git은 원래 URL의 ref를 다시 해석한다. 저장한 commit과 같은 길이의 full SHA ref는 `PINNED`다.

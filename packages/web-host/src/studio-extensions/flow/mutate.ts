@@ -934,7 +934,7 @@ export async function mutate(
     }
     const installer = resolvedArchive
       ? await runPip(
-          { ...online, secrets: [...(online.secrets ?? []), ...resolvedArchive.privateFields] },
+          { ...online, secrets: [...(online.secrets ?? []), resolvedArchive.privateQuery] },
           candidate.paths.python,
           installerEnvironment,
           ['install', '--studio-archive-stdin'],

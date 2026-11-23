@@ -73,7 +73,7 @@ status = main(args)
 sys.exit(${PIP_RESPONSE_LIMIT_EXIT} if exceeded else status)
 `;
 
-export type ResolvedArchive = { version: string; requirement: string; privateFields: string[] };
+export type ResolvedArchive = { version: string; requirement: string; privateQuery: string };
 
 type RequestedArchive = {
   requested?: unknown;
@@ -148,5 +148,5 @@ export function archiveRequirement(name: string, archive: RequestedArchive): Omi
     throw new ExtensionFailure('REQUEST_MISMATCH', ['pip did not identify a verifiable archive']);
   const algorithm = supported[0];
   url.hash = `${algorithm}=${String(hashes?.[algorithm]).toLowerCase()}`;
-  return { requirement: `${name} @ ${url.href}`, privateFields: [url.search.slice(1), url.hash.slice(1)] };
+  return { requirement: `${name} @ ${url.href}`, privateQuery: url.search.slice(1) };
 }
