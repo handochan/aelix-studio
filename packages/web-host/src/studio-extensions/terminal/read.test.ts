@@ -1,15 +1,18 @@
 /**
  * Reading the terminal CLI from its files: the interpreter a launcher names, the extensions of
- * its virtual environment, and its global extension directory. Nothing is run.
+ * its virtual environment, and its global extension directory. Nothing is run, and every read
+ * is bounded.
  */
 import { execFileSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { cliVenv, distribution, write } from '../../../tests/fixtures/terminalCli';
+import { listDirectory, readBounded } from './files';
 import { readGlobalExtensions } from './globalDirectory';
-import { readHead, readLauncherInterpreter } from './launcher';
-import { readCliVenv } from './venv';
+import { HEAD_LIMIT, launcherInterpreter, readLauncherInterpreter } from './launcher';
+import { METADATA_LIMIT, readCliVenv } from './venv';
 
 let scratch = '';
 beforeEach(async () => {
@@ -17,18 +20,29 @@ beforeEach(async () => {
 });
 afterEach(() => rm(scratch, { recursive: true, force: true }));
 
-const write = async (file: string, text = ''): Promise<void> => {
-  await mkdir(path.dirname(file), { recursive: true });
-  await writeFile(file, text);
-};
+describe('bounded reads', () => {
+  it('reads a regular file within its limit, or its head, and never waits on a FIFO', async () => {
+    const file = path.join(scratch, 'file');
+    await write(file, 'x'.repeat(10000));
+    expect(await readBounded(file, 100)).toBe('too_large');
+    expect(await readBounded(file, 100, true)).toEqual({ text: 'x'.repeat(100) });
+    expect(await readBounded(file, 20000)).toEqual({ text: 'x'.repeat(10000) });
+    expect(await readBounded(path.join(scratch, 'missing'), 100)).toBe('absent');
+    expect(await readBounded(scratch, 100)).toBe('not_a_file');
+    if (process.platform !== 'win32') {
+      const fifo = path.join(scratch, 'fifo');
+      execFileSync('mkfifo', [fifo]);
+      expect(await readBounded(fifo, 100)).toBe('not_a_file');
+    }
+  });
 
-/** A distribution in `site`, with an optional `entry_points.txt`. */
-const distribution = (site: string, name: string, version: string, entryPoints?: string): Promise<void[]> =>
-  Promise.all([
-    write(path.join(site, `${name}-${version}.dist-info`, 'METADATA'), `Name: ${name}\nVersion: ${version}\n`),
-    write(path.join(site, `${name}-${version}.dist-info`, 'RECORD'), ''),
-    ...(entryPoints ? [write(path.join(site, `${name}-${version}.dist-info`, 'entry_points.txt'), entryPoints)] : []),
-  ]);
+  it('lists a directory up to a limit and says when there was more', async () => {
+    for (const name of ['a', 'b', 'c']) await write(path.join(scratch, 'dir', name));
+    expect(await listDirectory(path.join(scratch, 'dir'), 5)).toEqual({ names: ['a', 'b', 'c'], truncated: false });
+    expect((await listDirectory(path.join(scratch, 'dir'), 2))?.truncated).toBe(true);
+    expect(await listDirectory(path.join(scratch, 'dir', 'a'), 2)).toBeUndefined();
+  });
+});
 
 describe('the interpreter a launcher names', () => {
   it.each([
@@ -57,17 +71,13 @@ describe('the interpreter a launcher names', () => {
     expect(readLauncherInterpreter(head)).toBeUndefined();
   });
 
-  it('reads only the head of a regular file, and never waits on a FIFO', async () => {
+  it('reads only the first 4 KiB of a launcher', async () => {
     const launcher = path.join(scratch, 'aelix');
-    await write(launcher, '#!/opt/python\n' + 'x'.repeat(10000));
-    expect((await readHead(launcher))?.length).toBe(4096);
-    expect(await readHead(path.join(scratch, 'missing'))).toBeUndefined();
-    expect(await readHead(scratch)).toBeUndefined();
-    if (process.platform !== 'win32') {
-      const fifo = path.join(scratch, 'fifo');
-      execFileSync('mkfifo', [fifo]);
-      expect(await readHead(fifo)).toBeUndefined();
-    }
+    // The interpreter line ends past the limit: nothing is read beyond it to finish the line.
+    await write(launcher, '#!/opt/' + 'p'.repeat(HEAD_LIMIT) + '/python\n');
+    expect(await launcherInterpreter(launcher)).toBe('/opt/' + 'p'.repeat(HEAD_LIMIT - '#!/opt/'.length));
+    await write(launcher, '#!/opt/python\n' + 'x'.repeat(HEAD_LIMIT * 4));
+    expect(await launcherInterpreter(launcher)).toBe('/opt/python');
   });
 });
 
@@ -76,11 +86,15 @@ describe('the terminal CLI virtual environment', () => {
 
   it('lists the aelix.extensions entry points of the environment that holds the CLI', async () => {
     const root = path.join(scratch, 'tools', 'aelix');
-    await write(path.join(root, 'pyvenv.cfg'), 'home = /opt/python/bin\n');
+    await cliVenv(root, scratch);
     const site = posixSite(root);
-    await distribution(site, 'aelix', '0.1.0b2', '[console_scripts]\naelix = aelix_coding_agent.cli.entry:main_sync\n');
     await distribution(site, 'Aelix_Memory', '0.4.0', '[aelix.extensions]\nmemory = aelix_memory:setup\n');
-    await distribution(site, 'aelix-webtool', '0.2.0', '[aelix.extensions]\nwebtool = aelix_webtool\n[other]\nx = y\n');
+    await distribution(
+      site,
+      'aelix-webtool',
+      '0.2.0',
+      '[aelix.extensions]\nwebtool = aelix_webtool [extra]\n[other]\nx = y\n'
+    );
     await distribution(site, 'requests', '2.0');
     expect(await readCliVenv(root, 'darwin')).toEqual({
       nativeVersion: '0.1.0b2',
@@ -88,25 +102,55 @@ describe('the terminal CLI virtual environment', () => {
         { name: 'memory', distribution: 'Aelix_Memory', version: '0.4.0', reference: 'aelix_memory:setup' },
         { name: 'webtool', distribution: 'aelix-webtool', version: '0.2.0', reference: 'aelix_webtool' },
       ],
-      problems: [],
+      issues: [],
+      truncated: false,
     });
   });
 
-  it('reads the Windows layout, and reports what cannot be a ledger', async () => {
+  it('reads the Windows layout, and reports what cannot be a ledger by code, without file content', async () => {
     const root = path.join(scratch, 'pipx', 'venvs', 'aelix');
-    await write(path.join(root, 'pyvenv.cfg'), '');
+    await cliVenv(root, scratch, {}, { windows: true });
     const site = path.join(root, 'Lib', 'site-packages');
-    await distribution(site, 'aelix-coding-agent', '0.1.0');
     await distribution(site, 'one', '1.0', '[aelix.extensions]\nsame = one:setup\n');
     await distribution(site, 'two', '1.0', '[aelix.extensions]\nsame = two:setup\n');
+    await distribution(site, 'two', '2.0', '[aelix.extensions]\nlater = two:setup\n');
+    await write(path.join(site, 'big-1.0.dist-info', 'METADATA'), 'Name: big\nVersion: 1.0\n');
+    await write(
+      path.join(site, 'big-1.0.dist-info', 'entry_points.txt'),
+      '[aelix.extensions]\nsecret-name = x\n' + '#'.repeat(METADATA_LIMIT)
+    );
+    await write(path.join(site, 'nameless-1.0.dist-info', 'METADATA'), 'Summary: nothing\n');
+    await write(path.join(site, 'nameless-1.0.dist-info', 'entry_points.txt'), '[aelix.extensions]\nhidden = y\n');
     const venv = await readCliVenv(root, 'win32');
-    expect(venv).toMatchObject({
-      nativeVersion: '0.1.0',
-      extensions: [{ name: 'same', distribution: 'one' }],
-      problems: ['extension same is provided twice'],
+    expect(venv).toEqual({
+      nativeVersion: '0.1.0b2',
+      extensions: [
+        { name: 'same', distribution: 'one', version: '1.0', reference: 'one:setup' },
+        { name: 'same', distribution: 'two', version: '1.0', reference: 'two:setup' },
+      ],
+      issues: ['ENTRY_POINTS_TOO_LARGE', 'METADATA_UNREADABLE', 'DUPLICATE_DISTRIBUTION', 'DUPLICATE_ENTRY'],
+      truncated: false,
     });
+    expect(JSON.stringify(venv)).not.toContain('secret-name');
     // The POSIX layout is not looked for on Windows, nor the other way round.
     expect(await readCliVenv(root, 'linux')).toBe('no_cli');
+  });
+
+  it('reads a METADATA only up to its limit: the headers come first', async () => {
+    const root = path.join(scratch, 'venv');
+    await cliVenv(root, scratch);
+    await write(
+      path.join(posixSite(root), 'long-1.0.dist-info', 'METADATA'),
+      'Name: long\nVersion: 1.0\n\n' + 'd'.repeat(METADATA_LIMIT * 2)
+    );
+    await write(
+      path.join(posixSite(root), 'long-1.0.dist-info', 'entry_points.txt'),
+      '[aelix.extensions]\nlong = long:setup\n'
+    );
+    expect(await readCliVenv(root, 'linux')).toMatchObject({
+      extensions: [{ name: 'long', version: '1.0' }],
+      issues: [],
+    });
   });
 
   it('tells a directory that is not a virtual environment from one without the CLI', async () => {
@@ -115,8 +159,7 @@ describe('the terminal CLI virtual environment', () => {
     await write(path.join(plain, 'lib', 'python3.12', 'site-packages', 'x.py'));
     expect(await readCliVenv(plain, 'linux')).toBe('not_a_venv');
     const other = path.join(scratch, 'other');
-    await write(path.join(other, 'pyvenv.cfg'));
-    await distribution(posixSite(other), 'ruff', '0.9');
+    await cliVenv(other, scratch, {}, { cli: false });
     expect(await readCliVenv(other, 'linux')).toBe('no_cli');
   });
 });
@@ -135,13 +178,16 @@ describe('the global extension directory', () => {
     await write(path.join(directory, 'undeclared', '__init__.py'));
     await write(path.join(directory, 'nothing', 'pyproject.toml'), '[project]\n');
     await write(path.join(directory, 'empty', 'README.md'));
-    expect(await readGlobalExtensions(directory)).toEqual([
-      { name: '.hidden.py', kind: 'file' },
-      { name: 'declared', kind: 'pyproject' },
-      { name: 'single.py', kind: 'file' },
-      { name: 'undeclared', kind: 'package' },
-      { name: 'with-manifest', kind: 'manifest' },
-    ]);
-    expect(await readGlobalExtensions(path.join(scratch, 'absent'))).toEqual([]);
+    expect(await readGlobalExtensions(directory)).toEqual({
+      extensions: [
+        { name: '.hidden.py', kind: 'file' },
+        { name: 'declared', kind: 'pyproject' },
+        { name: 'single.py', kind: 'file' },
+        { name: 'undeclared', kind: 'package' },
+        { name: 'with-manifest', kind: 'manifest' },
+      ],
+      truncated: false,
+    });
+    expect(await readGlobalExtensions(path.join(scratch, 'absent'))).toBe('absent');
   });
 });

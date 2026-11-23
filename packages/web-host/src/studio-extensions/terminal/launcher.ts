@@ -1,8 +1,7 @@
-import { constants } from 'node:fs';
-import { open } from 'node:fs/promises';
+import { readBounded } from './files.js';
 
 /** The most of a launcher this reads: a script launcher names its interpreter in its first lines. */
-const HEAD_LIMIT = 4096;
+export const HEAD_LIMIT = 4 * 1024;
 
 /** The second line of a `/bin/sh` launcher that re-runs itself with the interpreter (pip, uv). */
 const SH_EXEC = /^'''exec' (['"])(.+?)\1 "\$0" "\$@"\s*$/;
@@ -27,21 +26,8 @@ export function readLauncherInterpreter(head: string): string | undefined {
   return interpreter;
 }
 
-/**
- * The first bytes of a regular file as text, or undefined when it is not one or cannot be
- * read. Opened without blocking, so a FIFO in its place never makes the listing wait.
- */
-export async function readHead(file: string): Promise<string | undefined> {
-  let handle: Awaited<ReturnType<typeof open>> | undefined;
-  try {
-    handle = await open(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
-    if (!(await handle.stat()).isFile()) return undefined;
-    const buffer = Buffer.alloc(HEAD_LIMIT);
-    const { bytesRead } = await handle.read(buffer, 0, HEAD_LIMIT, 0);
-    return buffer.subarray(0, bytesRead).toString('utf8');
-  } catch {
-    return undefined;
-  } finally {
-    await handle?.close().catch((): void => {});
-  }
+/** The interpreter the launcher file names, from its first `HEAD_LIMIT` bytes only. */
+export async function launcherInterpreter(file: string): Promise<string | undefined> {
+  const head = await readBounded(file, HEAD_LIMIT, true);
+  return typeof head === 'object' ? readLauncherInterpreter(head.text) : undefined;
 }

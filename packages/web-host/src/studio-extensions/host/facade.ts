@@ -2,7 +2,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http';
 import { admitStudioRequest, respondStudio } from '../../studio-auth/request.js';
 import type { StudioExtensionsTransport } from '../types.js';
 import { RUNTIME_HINT, type ExtensionService } from './service.js';
-import { getStudioExtensionService } from './shared.js';
+import { answerWithoutService, getStudioExtensionService } from './shared.js';
 import { requestTransport } from './transport.js';
 
 export const STUDIO_EXTENSIONS_ROUTE = '/api/studio/extensions';
@@ -74,7 +74,7 @@ export async function handleStudioExtensions(
     const service = options.service ?? getStudioExtensionService();
     const reply = service
       ? await service.request(`web:${admitted.userId}`, command)
-      : { ok: false, code: 'RUNTIME_UNAVAILABLE', detail: [RUNTIME_HINT] };
+      : ((await answerWithoutService(command)) ?? { ok: false, code: 'RUNTIME_UNAVAILABLE', detail: [RUNTIME_HINT] });
     respondStudio(res, 200, { ...reply, transport });
   } catch {
     respondStudio(res, 503, { ok: false, code: 'UNAVAILABLE', transport });

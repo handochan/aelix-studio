@@ -115,7 +115,12 @@ export type ExtensionCommand =
   | { action: 'set_proxy_credentials'; credentials: ProxyCredentials }
   /** Drop saved credentials. `proxyAuthentication` stays as it is. */
   | { action: 'clear_proxy_credentials' }
-  | { action: 'poll' | 'cancel'; operationId: string };
+  | { action: 'poll' | 'cancel'; operationId: string }
+  /**
+   * The extensions of the user's terminal `aelix`, read only (2026-11-22 user decision 4);
+   * see `TerminalCliListing`. Needs neither the Studio runtime nor the change lock.
+   */
+  | { action: 'list_terminal' };
 
 /** Where an installed distribution came from. Only file imports retain wheel bytes. */
 export type FileExtensionOrigin = { kind: 'file'; artifact: string; wheel: string; sha256: string };
@@ -264,7 +269,99 @@ export type ExtensionOperation = {
 
 export type ExtensionRollback = { current: string; previous: string | null; revision: number };
 
-export type ExtensionData = ExtensionListing | ExtensionOperation | ExtensionRollback | ExtensionSettingsState;
+/** How a terminal CLI environment was found (see `TerminalCliListing`). */
+export type TerminalCliFoundBy = 'uv_tool' | 'pipx' | 'launcher';
+
+/** One `aelix.extensions` entry point of a terminal CLI environment: what its `extension list` shows. */
+export type TerminalCliExtension = {
+  /** Entry point name. */
+  name: string;
+  /** Distribution name as its metadata writes it. */
+  distribution: string;
+  version: string;
+  /** The object reference the entry point names. */
+  reference: string;
+};
+
+/**
+ * Why part of an environment could not be read as a ledger. Codes only, never file content.
+ * `ENTRY_POINTS_TOO_LARGE`: an `entry_points.txt` over 256 KiB, skipped.
+ * `METADATA_UNREADABLE`: a distribution with extensions whose `METADATA` gives no name and version.
+ * `DUPLICATE_DISTRIBUTION`: two `.dist-info` of one distribution; the first by name is used.
+ * `DUPLICATE_ENTRY`: two distributions provide one entry name; both are listed.
+ */
+export type TerminalCliIssue =
+  | 'ENTRY_POINTS_TOO_LARGE'
+  | 'METADATA_UNREADABLE'
+  | 'DUPLICATE_DISTRIBUTION'
+  | 'DUPLICATE_ENTRY';
+
+/**
+ * One place the terminal CLI was found. Paths have the home directory as `~` and the user name
+ * as `<user>` wherever it is a path segment; other absolute paths stay as they are.
+ *
+ * `listed`: a virtual environment with the CLI; `extensions` is its list. `location` is the
+ * environment. `not_a_venv`: an `aelix` launcher runs a Python outside a virtual environment
+ * (a system or `--user` pip install); it is not read, and `location` is that interpreter.
+ * `unresolved_launcher`: an `aelix` launcher whose interpreter cannot be read from its first
+ * line (`#!/usr/bin/env`, a binary); `location` is the launcher. `no_cli`: a launcher's virtual
+ * environment without the CLI. `unreadable`: reading the environment failed.
+ */
+export type TerminalCliEnvironment = {
+  status: 'listed' | 'not_a_venv' | 'unresolved_launcher' | 'no_cli' | 'unreadable';
+  location: string;
+  /** Every way it was found, in this order: uv tool, pipx, launcher. */
+  foundBy: TerminalCliFoundBy[];
+  /** The `aelix` launchers found for it, if any. */
+  launchers: string[];
+  /** The native version there (`listed` only). */
+  nativeVersion?: string;
+  extensions: TerminalCliExtension[];
+  issues: TerminalCliIssue[];
+  /** More than 2,000 distributions: the rest were not looked at. */
+  truncated: boolean;
+};
+
+/**
+ * How native's directory tier takes an entry of the global extension directory, first match
+ * wins for a directory: `file`, a `*.py` file; `manifest`, a directory with `aelix-plugin.toml`;
+ * `pyproject`, one whose `pyproject.toml` has a `[tool.aelix]` table; `package`, one with
+ * `__init__.py`. Nothing is parsed further: a broken manifest is listed and fails in native.
+ */
+export type TerminalGlobalExtensionKind = 'file' | 'manifest' | 'pyproject' | 'package';
+
+export type TerminalGlobalExtension = { name: string; kind: TerminalGlobalExtensionKind };
+
+/**
+ * The extensions of the user's terminal `aelix`, read from files only (ADR 9): nothing is
+ * executed and no network is used. Studio does not know which `aelix` a terminal runs (that
+ * depends on the shell's PATH), so every environment found is listed; none found is an empty
+ * list with `searched`. Studio cannot install, remove or check these; that is ADR 9 phase 2.
+ */
+export type TerminalCliListing = {
+  environments: TerminalCliEnvironment[];
+  /** `<agent dir>/extensions`, which native loads in the terminal but not in Studio conversations. */
+  globalExtensions: {
+    location: string;
+    status: 'listed' | 'absent';
+    extensions: TerminalGlobalExtension[];
+    /** More than 500 entries: the rest were not looked at. */
+    truncated: boolean;
+  };
+  /** Every directory looked in, for the screen to show when nothing was found. */
+  searched: string[];
+  /** More than 16 environments: the rest were not read. */
+  truncated: boolean;
+  /** The 5-second limit ended the reading: what was read by then. */
+  timedOut: boolean;
+};
+
+export type ExtensionData =
+  | ExtensionListing
+  | ExtensionOperation
+  | ExtensionRollback
+  | ExtensionSettingsState
+  | TerminalCliListing;
 
 export type ExtensionReply =
   | { ok: true; data: ExtensionData }

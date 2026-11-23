@@ -744,7 +744,8 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 
 | 요청                                                                                                         | 응답                                                                                                                                                                                                                                                                                                         |
 | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요), 터미널 CLI 쪽 항목(6절, 8.2의 A8·A9에 따라)                                                                                                 |
+| `list`                                                                                                       | 현재·이전 세대 ID, 적용 시점(`appliesAt: 'next_adapter_start'`, 다음 어댑터 시작), 확장별 이름·배포판·버전·출처·상태(준비됨 / manifest 미결합 / 다시 설치 필요)                                                                                                                                              |
+| `list_terminal`                                                                                              | 사용자의 터미널 `aelix`에 설치된 확장(환경별 pip pack, 전역 디렉터리). 파일만 읽는다. runtime·잠금·세대가 필요 없고 `RUNTIME_UNAVAILABLE`일 때도 답한다(9절, 2026-11-22 결정 4)                                                                                                                              |
 | `install` (이름+index \| 파일·폴더 \| git+선택적 하위 경로, 오프라인 여부, 이번 설치에만 쓸 proxy 인증 정보) | 작업 ID. proxy가 인증을 요구하는데 인증 정보가 없으면 시작 전에 `PROXY_CREDENTIALS_REQUIRED`, 요청을 확인한 뒤 proxy가 바뀌었으면 `PROXY_CHANGED`, proxy가 인증 정보를 거절해 실패했으면 `PROXY_CREDENTIALS_REJECTED`                                                                                        |
 | `update` (이름, 파일 `source`) / `remove` (이름)                                                             | 작업 ID. 오프라인이라 proxy 인증 정보를 받지 않는다                                                                                                                                                                                                                                                          |
 | `set_default` (`extensionId`, `enabled`)                                                                     | 변경된 앱 기본값이 포함된 목록                                                                                                                                                                                                                                                                               |
@@ -773,12 +774,12 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
 Studio runtime은 CLI와 agent dir(`~/.aelix/agent`)을 공유하지만 Python 환경은 따로다. 아래는 지금 보이는
 것이다. 어디까지 다룰지는 8.2의 A8·A9에서 사용자가 정한다.
 
-| 종류                                       | 지금 Studio가 보는 것                                                                                                                                  | Studio가 할 수 있는 것                                                                                        |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
-| 전역 디렉터리 `~/.aelix/agent/extensions/` | 번들 native를 CLI처럼 실행하면 로드된다. 번들에 없는 패키지를 import하는 확장은 오류가 난다. **대화(ACP)에서는 로드되지 않는다** [실행]                | 디렉터리를 읽어 보여 준다. 대화에서 켜는 것은 #7의 켜기/끄기와 같은 방식(`--extension`)으로 할 수 있다 [추정] |
-| 프로젝트 `.aelix/extensions/`              | 위와 같다. 프로젝트 신뢰가 있어야 한다 [소스]                                                                                                          | 이 카드에서 다루지 않는다                                                                                     |
-| CLI 환경에 pip으로 설치한 확장             | **보이지 않는다.** `extension list`는 비어 있다. 공유 `settings.json`의 설치 기록만 `extension source list`에 보인다 [실행]                            | 기록을 읽어 보여 준다. 실제 목록과 제거는 사용자의 `aelix`를 실행해야 한다. 실행해 보지 않았다 [추정]         |
-| 기록의 교차 영향                           | agent dir을 공유한 채 설치하면 Studio의 설치가 CLI 기록에 섞인다. 한쪽에서 이름 없이 `extension update`를 하면 다른 쪽이 기록한 확장까지 깔린다 [실행] | Studio는 세대별 `agent/`에 기록한다(5.4). 이름 없는 `update`를 쓰지 않는다                                    |
+| 종류                                       | 지금 Studio가 보는 것                                                                                                                                  | Studio가 할 수 있는 것                                                                                                                                              |
+| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 전역 디렉터리 `~/.aelix/agent/extensions/` | 번들 native를 CLI처럼 실행하면 로드된다. 번들에 없는 패키지를 import하는 확장은 오류가 난다. **대화(ACP)에서는 로드되지 않는다** [실행]                | 디렉터리를 읽어 보여 준다(`list_terminal`, 9절) [실행]. 대화에서 켜는 것은 #7의 켜기/끄기와 같은 방식(`--extension`)으로 할 수 있다 [추정]                          |
+| 프로젝트 `.aelix/extensions/`              | 위와 같다. 프로젝트 신뢰가 있어야 한다 [소스]                                                                                                          | 이 카드에서 다루지 않는다                                                                                                                                           |
+| CLI 환경에 pip으로 설치한 확장             | **보이지 않는다.** `extension list`는 비어 있다. 공유 `settings.json`의 설치 기록만 `extension source list`에 보인다 [실행]                            | 그 환경의 패키지 메타데이터를 파일로 읽어 `extension list`와 같은 목록을 보여 준다(`list_terminal`, 9절) [실행]. 제거는 사용자의 `aelix`를 실행해야 한다(9절 2단계) |
+| 기록의 교차 영향                           | agent dir을 공유한 채 설치하면 Studio의 설치가 CLI 기록에 섞인다. 한쪽에서 이름 없이 `extension update`를 하면 다른 쪽이 기록한 확장까지 깔린다 [실행] | Studio는 세대별 `agent/`에 기록한다(5.4). 이름 없는 `update`를 쓰지 않는다                                                                                          |
 
 사용자의 터미널 CLI에 설치·제거하려면 사용자의 `aelix extension install|remove … --yes`를 그 환경에서
 실행한다. 세대가 없으므로 Studio가 검증하거나 되돌릴 수 없다. **[추정: 실행하지 않았다]**
@@ -1005,7 +1006,8 @@ A8과 A9를 미루는 것은 정하는 시점을 뒤로 두는 것이다. 첫 Be
   - (나) Studio 대화용을 먼저 내고, 이어서 "터미널 CLI에도 설치"를 낸다. → 화면에서 고르면 터미널 CLI
     환경에도 설치된다. 누를 때마다 동의를 받는다. 터미널 쪽은 Studio가 검증하거나 되돌리지 못한다.
   - 권장: (나). 사용자의 CLI를 실행하는 방식은 아직 실험하지 않았다.
-  - **미정.** 아직 묻지 않았다.
+  - **결정(2026-11-22): 터미널 쪽 설치는 9절 2단계에서 다룬다.** A9와 함께 정했다.
+    [Issue #32 결정 4](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7074517387)
 - **A9. 터미널 CLI에 이미 설치된 확장을 Studio에서 어디까지 다룰 것인가.** 확정된 요구는 "현재 CLI에 설치된
   확장의 목록·제거·비활성화"다.
   - (가) 보기만 한다. 설치 기록과 전역 디렉터리를 읽어 보여 준다. → 제거는 터미널에서 해야 한다. **요구를
@@ -1014,7 +1016,10 @@ A8과 A9를 미루는 것은 정하는 시점을 뒤로 두는 것이다. 첫 Be
     제거한다.
   - 비활성화는 어느 쪽이든 #7과 aelix-ai #624가 맡는다.
   - 권장: (나)를 A8의 둘째 단계와 함께 낸다. 그 전까지 화면은 (가)의 모습이다.
-  - **미정.** 아직 묻지 않았다.
+  - **결정(2026-11-22): 이번에 읽기 전용 목록으로 보여 준다.** 사용자의 터미널 aelix에 설치된 확장(pip pack,
+    `~/.aelix/agent/extensions`)이 대상이다. 터미널 쪽 설치·제거는 9절 2단계에서 다룬다. 찾는 방법과 한계는 9절
+    "터미널 CLI 읽기 전용 목록"이다.
+    [Issue #32 결정 4](https://github.com/handochan/aelix-studio/issues/32#issuecomment-7074517387)
 - **A10. R8(확장 관리 API)을 beta.3에 요구할 것인가.**
   - (가) 요구하지 않는다. → 진행률이 거칠고, 오류는 pip 문장으로 보인다.
   - (나) 요구한다. → 7.2의 항목이 beta.3 범위에 들어간다.
@@ -1071,6 +1076,61 @@ Windows 세대의 pack은 junction이고 관리 자식은 Windows Job Object로 
 launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치는 격리된 시스템 환경을 쓴다. Windows Git
 설치는 시스템 Git·SSH 경로를 확인하기 전까지 보류한다.
 
+### 터미널 CLI 읽기 전용 목록 (1b, 2026-11-24)
+
+8.2의 A9 결정에 따라 `list_terminal`이 사용자의 터미널 `aelix`에 설치된 확장을 읽기 전용으로 돌려준다. 요청·응답의
+정본은 `types.ts`의 `TerminalCliListing`이고, 구현은 `packages/web-host/src/studio-extensions/terminal/`이다.
+2026-11-24 리드 결정(권장안 1–6과 아래 제약)을 따른다.
+
+- **실행 금지.** `aelix`, Python, 셸을 실행하지 않는다. 자식 프로세스를 띄우지 않고 네트워크를 쓰지 않으며 아무것도
+  쓰지 않는다. 파일을 읽기만 한다. 시험은 읽은 실행 파일이 실행되면 남길 표시 파일이 없는지 보고, 이 디렉터리의
+  소스에 프로세스·네트워크·쓰기 API가 없는지 확인한다.
+- **찾는 곳.** Studio 프로세스의 환경 변수로 정한다. **셸 설정 파일에만 둔 변수는 보지 못한다.** GUI 앱은 사용자
+  셸의 PATH도 받지 못한다. 그래서 터미널이 실제로 어느 `aelix`를 쓰는지 알 수 없다. 찾은 환경을 실제 경로로 중복을
+  없애 모두 돌려주고, 각각 찾은 방법(`uv_tool`, `pipx`, `launcher`)을 붙인다. 하나도 없으면 빈 목록과 찾아본 위치
+  (`searched`)를 돌려준다.
+  - uv tool(uv 0.13.9 `uv-dirs`·`uv-tool`·`uv-state` 소스): `UV_TOOL_DIR`. 없으면 `$XDG_DATA_HOME/uv/tools`
+    또는 `~/.local/share/uv/tools`, macOS의 예전 `~/Library/Application Support/uv/tools`, Windows의
+    `%APPDATA%\uv\data\tools`와 `%APPDATA%\uv\tools`. 그 아래 도구마다 `pyvenv.cfg`와 `aelix` 배포판이 있는
+    것만 읽는다(디렉터리 이름으로 먼저 거른다).
+  - pipx(pipx 1.19.0 `paths.py`, platformdirs 4.14.8 소스): `PIPX_HOME`. 없으면 사용자 데이터 디렉터리
+    (`$XDG_DATA_HOME/pipx`, Linux `~/.local/share/pipx`, macOS `~/Library/Application Support/pipx`, Windows
+    `%LOCALAPPDATA%\pipx\pipx`)와 예전 `~/.local/pipx`(Windows는 `~\pipx`도)의 `venvs`.
+  - `aelix` 실행 파일(Windows 제외): `UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`, `$XDG_DATA_HOME/../bin`, `PIPX_BIN_DIR`,
+    `~/.local/bin`, Homebrew와 시스템 bin, macOS `--user`의 `~/Library/Python/<버전>/bin`, Studio 프로세스 PATH(앞
+    64개). 링크는 실제 경로로 따라간다. `<환경>/bin/aelix`에 닿으면 그 환경이다. 아니면 앞 4 KiB에서 첫 줄의
+    interpreter를 읽는다. `#!/경로/python`과 pip·uv가 쓰는 `/bin/sh` + `'''exec' '경로'` 형태만 해석한다.
+  - 전역 디렉터리: `AELIX_CODING_AGENT_DIR`(native처럼 `~`를 펼친다). 없으면 `~/.aelix/agent`의 `extensions`다.
+    native 디렉터리 계층의 규칙대로 한 단계만 본다. `*.py`는 `file`이다. 하위 디렉터리는 `aelix-plugin.toml`이면
+    `manifest`, `pyproject.toml`에 `[tool.aelix]` 표 머리 줄이 있으면 `pyproject`, `__init__.py`면 `package`다.
+    이름과 종류만 낸다. TOML 파서 의존성(lockfile 변경)을 더하지 않으려고 manifest를 해석하지 않는다. 그래서 깨진
+    manifest도 목록에 나오고 native에서 실패한다. 프로젝트 `.aelix/extensions`는 6절대로 다루지 않는다.
+- **읽는 것.** `pyvenv.cfg`가 있는 venv만 읽는다. site-packages(`lib/python<X.Y>/site-packages`, Windows
+  `Lib/site-packages`)의 `aelix.extensions` entry point와 그 배포판의 이름·버전을 낸다. 그 CLI의 `extension list`가
+  `importlib.metadata`로 읽는 것과 같다. 실행 파일이 venv 밖의 Python(시스템 pip, `--user`)을 가리키면
+  `not_a_venv`로 그 interpreter 경로만 돌려준다. site-packages 위치를 추측하지 않는다. interpreter를 읽을 수 없는
+  실행 파일(`#!/usr/bin/env`, 이진 파일)은 `unresolved_launcher`다. `include-system-site-packages = true`인 venv의
+  시스템 쪽 패키지는 보지 않는다.
+- **한도.** 실행 파일은 앞 4 KiB, `METADATA`는 앞 256 KiB(머리글이 앞에 있다), `entry_points.txt`와
+  `pyproject.toml`은 256 KiB까지 읽는다. 넘는 `entry_points.txt`는 건너뛰고 `ENTRY_POINTS_TOO_LARGE`를 붙인다. 환경은
+  16개, 환경마다 배포판 2,000개, 도구 디렉터리마다 256개, 전역 디렉터리는 500개 항목까지 본다. 넘으면 `truncated`다.
+  전체는 5초까지다. 그때까지 읽은 것으로 답하고 `timedOut`을 붙인다. 답은 그 시점의 사본이라 이후 바뀌지 않는다.
+- **링크와 특수 파일.** 실제 경로로 따라가며 순환(`ELOOP`)은 `unreadable`로 끝낸다. 파일은 non-blocking으로 열고
+  fstat으로 일반 파일인지 본 뒤 읽는다. FIFO·장치는 기다리지도 읽지도 않는다.
+- **실패 격리.** 환경 하나를 읽다 실패하면 그 항목만 `unreadable`이고 나머지는 계속 읽는다. 메타데이터 문제는
+  code로만 알린다(`ENTRY_POINTS_TOO_LARGE`, `METADATA_UNREADABLE`, `DUPLICATE_DISTRIBUTION`, `DUPLICATE_ENTRY`).
+  오류 문구와 파일 내용은 답에 넣지 않는다.
+- **runtime 독립.** Studio runtime 번들, helper 세대, 변경 잠금이 필요 없다. 번들이 없어 `RUNTIME_UNAVAILABLE`일
+  때도, 다른 변경이 잠금을 잡고 있을 때도 답한다. 서비스가 설정되기 전(데스크톱 시작 직후, 시작 실패)에도 두 host가
+  `list_terminal`만은 직접 답한다. 같은 서비스에 동시에 온 요청은 진행 중인 읽기 하나를 나눠 받는다.
+- **경로.** 홈 디렉터리는 `~`, 사용자 이름이 경로 한 마디 전체인 곳은 `<user>`로 바꾼다. 원격 WebUI에 홈 경로와 사용자
+  이름을 보내지 않으려는 것이다. 홈 밖의 다른 절대 경로(`/opt/homebrew/...`)는 그대로 둔다.
+- **Windows.** uv와 pipx의 도구 디렉터리만 본다. `aelix.exe`(uv trampoline, distlib launcher)는 이진 형식이라
+  해석하지 않는다. **Windows 실기에서는 확인하지 않았다.** 경로 규칙은 위 소스를 읽어 정했고 시험은 Windows 배치를
+  흉내 낸 것이다.
+- **이 기계의 확인.** macOS에서 `uv tool install aelix`로 설치한 실제 CLI(`~/.local/bin/aelix` → uv tool 환경,
+  native 0.1.0b2)를 읽어 pip pack 두 개를 그 CLI의 목록대로 냈다. 26 ms였다. **[실행]**
+
 ## 10. 확인하지 않은 것
 
 - **Windows 기업 정책.** AppLocker처럼 사용자 영역 실행을 막는 정책, 최대 경로 정책을 바꾼 환경,
@@ -1088,7 +1148,9 @@ launcher는 복사 시 새 interpreter를 가리킨다. 온라인 이름 설치�
   helper 구현을 따른다.
 - **대조를 넣은 뒤의 재구축과 전부 차단한 반입.** 5.5의 요청 대조를 넣은 뒤로는 기록을 다시 설치하는 재구축과
   네트워크를 전부 막은 반입을 다시 실행하지 않았다. 둘은 2차 절차로 실행했다.
-- **사용자의 터미널 CLI를 실행하는 목록·설치·제거.** 실행하지 않았다.
+- **사용자의 터미널 CLI를 실행하는 목록·설치·제거.** 실행하지 않았다. 읽기 전용 목록은 파일만 읽는다(9절).
+- **터미널 CLI 목록의 Windows·Linux 실기, pipx 설치.** macOS의 uv tool 설치만 실제로 읽었다. pipx·Linux·Windows는
+  소스에서 정한 경로와 그 배치를 흉내 낸 시험이다.
 - **공개 PyPI에서 확장을 이름으로 설치.** 내부 index(loopback)에서 이름 설치를 했고, 공개 PyPI에서는 확장의
   의존성(`tabulate`)만 받았다.
 - **컴파일된 모듈이 든 확장, 의존성이 큰 확장.** 순수 Python 확장으로만 실험했다.
@@ -1226,6 +1288,10 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 **2026-11-24, PR A 세 번째 재확인(should-fix 1, nit 1).** 화면 client가 2xx가 아닌 답의 본문을 버려 401·503의
 `transport`를 잃던 것을 고쳤다. 크기 안의 JSON 거절이면 `code`와 `transport`를 지킨다. 배포 패키지 문서에 Windows
 준비본의 Python 경로(`native\Scripts\python.exe`)를 더했다.
+
+**2026-11-24, 터미널 CLI 읽기 전용 목록(1b의 PR D).** 8.2의 A8·A9에 2026-11-22 결정을 적었다. `list_terminal`을
+5.11 표의 새 행으로 두고, 찾는 방법·한도·한계를 9절에 적었다. uv와 pipx의 기본 경로는 각 프로젝트의 공개 소스에서
+확인했다. 6절 표의 "Studio가 할 수 있는 것"을 실제 구현으로 바꿨다.
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.
