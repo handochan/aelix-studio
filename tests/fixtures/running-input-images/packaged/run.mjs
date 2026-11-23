@@ -507,8 +507,6 @@ try {
           const notice = submission?.textContent?.toLowerCase() ?? '';
           return {
             status: submission?.getAttribute('data-status') ?? null,
-            transitions: window.__runningImageFixture.transitions,
-            toasts: window.__runningImageFixture.toasts,
             reason: Object.keys(knownReasons)
               .filter((key) => notice.includes(key))
               .map((key) => knownReasons[key]),

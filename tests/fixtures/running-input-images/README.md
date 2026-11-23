@@ -96,6 +96,8 @@ markers.
 
 The PR Checks workflow runs the packaged image suite when dispatched
 with `image_acceptance=true` or when a PR receives `run-image-acceptance`.
+Use the manual dispatch for docs-only changes covered by PR Checks'
+`paths-ignore` filter.
 It builds the Provider Preview package on Windows x64, Linux x64 and Linux
 arm64 from the selected commit and launches the unpacked Electron app with its
 pinned Host, ACP wheel and native runtime.
