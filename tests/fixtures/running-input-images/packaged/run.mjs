@@ -208,33 +208,30 @@ async function prepareMixedDraft(page, scope, workspace, imageName, input) {
   });
   assert.ok(filePath);
   provider.expectMixedReferences({ filePath, sessionRow: detail.name + '\t' + target.id + '\tworkspace: same' });
-  await page.evaluate((ref) => {
-    window.__runningImageFixture.expectedGrantPath = ref;
-  }, imagePath);
-
   await input.fill('Inspect the mixed references. @@ImageReferenceTarget');
   await page
     .getByRole('listbox', { name: 'Conversation mentions' })
     .getByRole('option')
     .filter({ hasText: 'ImageReferenceTarget' })
     .click(options);
+  return imagePath;
 }
 
-async function verifyMixedFrame(page, native, studio, row) {
-  const batches = await page.evaluate(() => window.__runningImageFixture.mixedGrants);
-  row.mixedGrantCount = batches.reduce((count, { images }) => count + images.length, 0);
+async function verifyMixedGrants(page, studio, row) {
+  const requests = await page.evaluate(() => window.__runningImageFixture.mixedGrants);
+  const [request] = requests;
+  const images = request?.images ?? [];
+  row.mixedGrantRequestCount = requests.length;
+  row.mixedGrantCount = requests.reduce((count, entry) => count + (entry.images?.length ?? 0), 0);
   row.mixedGrantMatchesPng =
-    batches.length === 1 &&
-    batches[0].requestedPngOnly &&
-    batches[0].images.length === 1 &&
-    batches[0].images[0].bytes === studio.bytes &&
-    batches[0].images[0].sha256 === studio.sha256;
-  row.nativeFileRefMatches = native.nativeFileRefMatches === true;
-  row.nativeSessionRefMatches = native.nativeSessionRefMatches === true;
+    requests.length === 1 &&
+    request.requestedPngOnly &&
+    images.length === 1 &&
+    images[0].bytes === studio.bytes &&
+    images[0].sha256 === studio.sha256;
+  assert.equal(row.mixedGrantRequestCount, 1);
   assert.equal(row.mixedGrantCount, 1);
   assert.equal(row.mixedGrantMatchesPng, true);
-  assert.equal(row.nativeFileRefMatches, true);
-  assert.equal(row.nativeSessionRefMatches, true);
 }
 
 async function runScenario(page, scenario, row) {
@@ -348,9 +345,10 @@ async function runScenario(page, scenario, row) {
     assert.equal(row.originalPathCount, 5);
     provider.expectPaths(originalPaths);
   }
+  let expectedGrantPath;
   if (scenario.mixedReferences) {
     check('mixed-draft');
-    await prepareMixedDraft(page, scope, workspace, scenario.image, input);
+    expectedGrantPath = await prepareMixedDraft(page, scope, workspace, scenario.image, input);
   } else if (scenario.notice !== 'caption') {
     await input.fill('Inspect the acceptance attachment.');
   }
@@ -364,7 +362,7 @@ async function runScenario(page, scenario, row) {
     window.__runningImageFixture.sawPreparing = false;
   });
   check('send');
-  const start = await clickTimed(page, send);
+  const start = await clickTimed(page, send, expectedGrantPath);
   check('send-ack');
   let ack;
   if (pathCase) {
@@ -462,8 +460,13 @@ async function runScenario(page, scenario, row) {
     row.native = native.images[0] ?? empty();
     assert.deepEqual(native.images, [studio]);
     if (scenario.mixedReferences) {
+      check('mixed-grants-after-ack');
+      await verifyMixedGrants(page, studio, row);
       check('mixed-native-references');
-      await verifyMixedFrame(page, native, studio, row);
+      row.nativeFileRefMatches = native.nativeFileRefMatches === true;
+      row.nativeSessionRefMatches = native.nativeSessionRefMatches === true;
+      assert.equal(row.nativeFileRefMatches, true);
+      assert.equal(row.nativeSessionRefMatches, true);
     }
     if (scenario.notice === 'downscaled') {
       assert.equal(studioUploads.length, 2);
@@ -531,6 +534,10 @@ async function runScenario(page, scenario, row) {
   check('rss');
   await waitForObservation(() => Object.values(peak).every((value) => value > 0));
   row.peakRssBytes = { ...peak };
+  if (scenario.mixedReferences) {
+    check('mixed-grants-after-provider');
+    await verifyMixedGrants(page, studio, row);
+  }
   row.status = 'passed';
 }
 
@@ -695,6 +702,7 @@ try {
       pathCount: null,
       originalPathCount: null,
       pathRefsMatch: null,
+      mixedGrantRequestCount: null,
       mixedGrantCount: null,
       mixedGrantMatchesPng: null,
       nativeFileRefMatches: null,
