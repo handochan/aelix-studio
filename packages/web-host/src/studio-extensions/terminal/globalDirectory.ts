@@ -186,8 +186,11 @@ function plainStrings(value: string): string[] | undefined {
 /** A key or table name as one string, with nothing a decoded name holds able to run two parts together. */
 const pathKey = (names: string[]): string => JSON.stringify(names);
 
-/** How deep a table name is looked into for the arrays of tables it sits in. */
-const ARRAY_SCOPE_DEPTH = 16;
+/**
+ * The most parts a table or key name may have: a deeper one makes the file `unknown`
+ * (2026-11-24 orchestrator decision: structure that deep is not judged).
+ */
+export const NAME_DEPTH_LIMIT = 16;
 
 export function readDeclaredExtensions(text: string): DeclaredExtensions {
   if (text.includes('"""') || text.includes("'''")) return 'unknown';
@@ -201,7 +204,7 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
    */
   const tableKey = (names: string[]): string => {
     let scope = '';
-    for (let depth = 1; depth < names.length && depth <= ARRAY_SCOPE_DEPTH; depth += 1) {
+    for (let depth = 1; depth < names.length; depth += 1) {
       const element = elements.get(pathKey(names.slice(0, depth)));
       if (element !== undefined) scope += `#${depth}:${element}`;
     }
@@ -224,7 +227,7 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
       const array = line.text.startsWith('[[');
       if (!line.text.endsWith(array ? ']]' : ']')) return 'unknown';
       const header = keyPath(line.text.slice(array ? 2 : 1, array ? -2 : -1));
-      if (!header) return 'unknown';
+      if (!header || header.names.length > NAME_DEPTH_LIMIT) return 'unknown';
       const [first, second, third] = header.names;
       const underAelix = first === 'tool' && second === 'aelix';
       // Quoted (escaped ones included) or an array of tables: another way to name tool.aelix.
@@ -247,7 +250,7 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
     }
     if (line.equals < 0 || line.depth < 0) return 'unknown';
     const key = keyPath(line.text.slice(0, line.equals));
-    if (!key) return 'unknown';
+    if (!key || key.names.length > NAME_DEPTH_LIMIT) return 'unknown';
     const name = pathKey(key.names);
     if (keys.has(name)) return 'unknown';
     keys.add(name);

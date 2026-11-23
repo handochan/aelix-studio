@@ -356,11 +356,11 @@ describe('linear time on hostile input', () => {
     // A deep table and many keys under it: nothing of the table is copied per line.
     const keys = Array.from({ length: 50_000 }, (_, index) => `k${index} = 1`).join('\n');
     fast(() => readDeclaredExtensions('[' + 'a.'.repeat(2000) + 'b]\n' + keys));
-    // Many elements of an array of tables, each with its sub-table; and deep array names.
+    // Many elements of an array of tables, each with its sub-table.
     fast(() => readDeclaredExtensions('[[x]]\n[x.y]\n'.repeat(30_000)));
-    fast(() =>
-      readDeclaredExtensions(Array.from({ length: 60 }, (_, index) => `[[${'a.'.repeat(2000)}b${index}]]`).join('\n'))
-    );
+    // Deep sub-tables: with no depth limit, finding the arrays each sits in is quadratic.
+    const deep = Array.from({ length: 120 }, (_, index) => `[${'a.'.repeat(2000)}b${index}]`).join('\n');
+    fast(() => readDeclaredExtensions('[[a]]\n' + deep));
     fast(() => readDeclaredExtensions('[tool.aelix]\nextensions = [' + '"a", '.repeat(800) + ']\n'));
   });
 });
@@ -382,8 +382,8 @@ describe('pyproject tables, by the strict rule', () => {
     ['[tool.other]\nnote = "aelix"\n', 'none'],
     ['[tool."black"]\nx = 1\n', 'none'],
     ['[tool.aelix.sub]\nextensions = ["a.py"]\n', 'none'],
-    ['[' + Array.from({ length: 20 }, () => 'a').join('.') + '.aelix]\nx = 1\n', 'none'],
-    ['[tool.aelix.' + Array.from({ length: 20 }, () => 'a').join('.') + ']\nx = 1\n', 'none'],
+    ['[' + Array.from({ length: 15 }, () => 'a').join('.') + '.aelix]\nx = 1\n', 'none'],
+    ['[tool.aelix.' + Array.from({ length: 14 }, () => 'a').join('.') + ']\nx = 1\n', 'none'],
     // Three quotes anywhere, even inside a one-line string.
     [`[project]\ndescription = ${tripleDouble}x\n${tripleDouble}\n${declared}`, 'unknown'],
     [`[project]\nx = 'a${tripleDouble}b'\n${declared}`, 'unknown'],
@@ -438,6 +438,11 @@ describe('pyproject tables, by the strict rule', () => {
     ['[[x]]\n[x.y]\na = 1\n[[x]]\n[x.y]\na = 2\n' + declared, { paths: ['a.py'] }],
     ['[[x]]\n[[x.z]]\n[x.z.w]\n[[x.z]]\n[x.z.w]\n' + declared, { paths: ['a.py'] }],
     ['[[x]]\n[x.y]\n[x.y]\n' + declared, 'unknown'],
+    // Names deeper than NAME_DEPTH_LIMIT parts are not judged.
+    [`[${Array.from({ length: 16 }, () => 'a').join('.')}]\nx = 1\n` + declared, { paths: ['a.py'] }],
+    [`[${Array.from({ length: 17 }, () => 'a').join('.')}]\nx = 1\n` + declared, 'unknown'],
+    [`[[${Array.from({ length: 17 }, () => 'a').join('.')}]]\n` + declared, 'unknown'],
+    [`[project]\n${Array.from({ length: 17 }, () => 'k').join('.')} = 1\n` + declared, 'unknown'],
     ['[a]\n[[x]]\n[a]\n' + declared, 'unknown'],
     ['[project]\n["proj\\u0065ct"]\n' + declared, 'unknown'],
     // Inline tables: in tool.aelix at any depth; elsewhere left alone.
