@@ -294,6 +294,8 @@ export type FakeRuntimeOptions = {
   remove?: (venv: Venv, entry: string) => Promise<number>;
   /** Replaces `pip check` when revalidating a generation against a new bundle. */
   checkDependencies?: () => number;
+  /** Answers pip's upgrade probe or candidate uninstall. */
+  pip?: (spec: SpawnSpec, child: ScriptedChild) => Promise<number>;
   /** Entry names `extension verify` reports as not bound. */
   unbound?: string[];
   /** Load errors by object reference. */
@@ -479,6 +481,23 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
     }
     if (args.slice(-3).join(' ') === '-m pip check') {
       child.exit(options.checkDependencies?.() ?? 0);
+      return;
+    }
+    if (inline.includes('aelix-studio-bounded-index-pip') && !args.includes('--dry-run')) {
+      finish(child, async () =>
+        options.install
+          ? options.install(
+              venvOf(spec.command, platform),
+              args.includes('--studio-archive-stdin') ? child.written.join('').trimEnd() : (args.at(-1) ?? ''),
+              spec,
+              (text) => child.print(text)
+            )
+          : 2
+      );
+      return;
+    }
+    if ((args.includes('-m') && args.includes('pip')) || inline.includes('aelix-studio-bounded-index-pip')) {
+      finish(child, async () => (options.pip ? options.pip(spec, child) : 2));
       return;
     }
     const native = args.slice(args.indexOf('native') + 1).filter((arg) => arg !== '--offline');

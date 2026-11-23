@@ -558,11 +558,13 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
       env: {},
       log: (_message, error) => logged.push(error),
       spawn: () => {
-        throw new Error(`EACCES: permission denied, open '${root}'`);
+        throw new Error('Download failed at https://files.invalid/candidate.whl?sig=hidden-signature#hidden-hash');
       },
     });
     expect(await broken.request('window:1', { action: 'rollback' })).toEqual({ ok: false, code: 'INTERNAL' });
     expect(logged).toHaveLength(1);
+    expect((logged[0] as Error).message).toBe('Download failed at https://files.invalid/candidate.whl?***');
+    expect((logged[0] as Error).stack).not.toMatch(/hidden-signature|hidden-hash/);
   });
 
   // Review finding 3, seen from a caller.
