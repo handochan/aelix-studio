@@ -382,7 +382,8 @@ export async function fetchGitSource(
   writer: StateWriter,
   env: Record<string, string>,
   source: Extract<OnlineExtensionSource, { kind: 'git' }>,
-  timeoutMs: number
+  timeoutMs: number,
+  installedCommit?: string
 ): Promise<{ commit: string; checkout?: GitCheckout }> {
   const { layout } = context;
   const suffix = randomBytes(6).toString('hex');
@@ -411,7 +412,7 @@ export async function fetchGitSource(
     );
     if (cloned.code !== 0) throw failure(cloned, 'fetching the repository');
     const commit = await revisionCommit(git, clone, revision);
-    if (source.subdirectory === undefined) {
+    if (commit === installedCommit || source.subdirectory === undefined) {
       await discard(clone);
       return { commit };
     }

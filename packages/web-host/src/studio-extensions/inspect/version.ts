@@ -90,12 +90,10 @@ export function compareInstalledVersions(left: Version, right: Version): number 
   return a.length - b.length;
 }
 
-const sameRelease = (left: Version, right: Version): boolean =>
-  left.epoch === right.epoch && compareReleases(left.release, right.release) === 0;
 const isPreRelease = (version: Version): boolean => version.pre !== null || version.dev !== null;
 
 /** True, false, or undefined when this module cannot decide. */
-function clauseAccepts(operator: string, operand: string, version: Version): boolean | undefined {
+function clauseAccepts(operator: string, operand: string, version: Version, compareLocal = false): boolean | undefined {
   if (operator === '===') return undefined;
   if (operand.endsWith('.*')) {
     if (operator !== '==' && operator !== '!=') return undefined;
@@ -108,7 +106,13 @@ function clauseAccepts(operator: string, operand: string, version: Version): boo
     return operator === '==' ? matches : !matches;
   }
   const bound = parseVersion(operand);
-  if (!bound || bound.local !== null) return undefined;
+  if (!bound) return undefined;
+  if (bound.local !== null) {
+    if (!compareLocal) return undefined;
+    if (operator === '==') return compareInstalledVersions(version, bound) === 0;
+    if (operator === '!=') return compareInstalledVersions(version, bound) !== 0;
+    return undefined;
+  }
   const order = compareVersions(version, bound);
   switch (operator) {
     case '==':
@@ -121,10 +125,20 @@ function clauseAccepts(operator: string, operand: string, version: Version): boo
       return order <= 0;
     case '<':
       // Excludes pre-releases of the bound unless the bound is itself a pre-release.
-      return order < 0 && !(!isPreRelease(bound) && isPreRelease(version) && sameRelease(version, bound));
+      return (
+        order < 0 &&
+        !(!isPreRelease(bound) && isPreRelease(version) && compareVersions(version, { ...bound, dev: 0 }) >= 0)
+      );
     case '>':
       // Excludes post-releases of the bound unless the bound is itself a post-release.
-      return order > 0 && !(bound.post === null && version.post !== null && sameRelease(version, bound));
+      return (
+        order > 0 &&
+        !(
+          bound.post === null &&
+          version.post !== null &&
+          compareVersions({ ...version, post: null, dev: null }, bound) === 0
+        )
+      );
     case '~=': {
       if (bound.release.length < 2) return undefined;
       const prefix = bound.release.slice(0, -1);
@@ -152,4 +166,19 @@ export function specifierExcludes(specifier: string, installed: string): boolean
     if (clauseAccepts(match[1], match[2], version) === false) return true;
   }
   return false;
+}
+
+/** Require every saved clause to accept the actual installed metadata, including local pins. */
+export function acceptsInstalledVersion(specifier: string, installed: string): boolean {
+  if (specifier === '') return true;
+  const version = parseVersion(installed);
+  return Boolean(
+    version &&
+    specifier.split(',').every((clause) => {
+      const match = /^(~=|===|==|!=|<=|>=|<|>)\s*(\S+)$/.exec(clause.trim());
+      if (!match) return false;
+      if (match[1] === '===') return match[2].toLowerCase() === installed.toLowerCase();
+      return clauseAccepts(match[1], match[2], version, true) === true;
+    })
+  );
 }

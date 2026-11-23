@@ -2,8 +2,13 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRequirement } from '../../inspect/requirement.js';
-import type { SiteSnapshot } from '../../inspect/site.js';
-import { compareVersions, parseVersion } from '../../inspect/version.js';
+import { recordInstalledMetadata, type InstalledDistribution, type SiteSnapshot } from '../../inspect/site.js';
+import {
+  acceptsInstalledVersion,
+  compareInstalledVersions,
+  compareVersions,
+  parseVersion,
+} from '../../inspect/version.js';
 import { ExtensionFailure, type ExtensionOrigin, type OnlineExtensionSource } from '../../types.js';
 
 const PYPI = 'https://pypi.org/simple/';
@@ -176,16 +181,85 @@ export function upgradeSource(
   return undefined;
 }
 
-/** PEP 610 provenance of one distribution in a site, or undefined when it has none that parses. */
-async function directUrl(site: string, info: string): Promise<Record<string, unknown> | undefined> {
-  const recorded = await readFile(path.join(site, info, 'direct_url.json'), 'utf8').catch(() => '');
+const INDEX_ORIGIN_FILE = 'aelix_studio_index.json';
+
+async function installedMetadata(site: string, info: string, filename: string): Promise<unknown> {
   try {
-    const value: unknown = JSON.parse(recorded);
-    return typeof value === 'object' && value !== null && !Array.isArray(value)
-      ? (value as Record<string, unknown>)
-      : undefined;
-  } catch {
-    return undefined;
+    return JSON.parse(await readFile(path.join(site, info, filename), 'utf8')) as unknown;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === 'ENOENT' ? undefined : null;
+  }
+}
+
+type DirectUrl = {
+  url?: unknown;
+  vcs_info?: { vcs?: unknown; commit_id?: unknown; requested_revision?: unknown };
+  subdirectory?: unknown;
+  dir_info?: unknown;
+};
+async function directUrl(site: string, info: string): Promise<DirectUrl | undefined> {
+  const value = await installedMetadata(site, info, 'direct_url.json');
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as DirectUrl) : undefined;
+}
+
+function comparableGitUrl(value: unknown): string | undefined {
+  const url = address(value, ['https:', 'ssh:', 'git:', 'file:']);
+  if (!url || url.hash || url.search) return undefined;
+  // pip strips user info from the recorded URL. The repository and ref still identify the source.
+  url.username = '';
+  return url.href;
+}
+
+function matchesGitSource(source: GitSource, direct: DirectUrl | undefined): boolean {
+  const { repository, revision } = gitLocation(source);
+  const actual = comparableGitUrl(direct?.url);
+  return (
+    actual !== undefined &&
+    actual === comparableGitUrl(repository) &&
+    direct?.subdirectory === source.subdirectory &&
+    direct?.vcs_info?.vcs === 'git' &&
+    direct.vcs_info.requested_revision === revision
+  );
+}
+
+export async function verifyUpgradeSource(
+  site: string,
+  source: OnlineExtensionSource,
+  origin: ExtensionOrigin,
+  installed: InstalledDistribution
+): Promise<void> {
+  const mismatch = (): ExtensionFailure =>
+    new ExtensionFailure('UPGRADE_SOURCE_MISMATCH', [
+      'the saved source does not agree with the installed distribution; reinstall to refresh it',
+    ]);
+  if (source.kind === 'git' && origin.kind === 'git') {
+    const direct = await directUrl(site, installed.info);
+    if (!matchesGitSource(source, direct) || direct?.vcs_info?.commit_id !== origin.commit) throw mismatch();
+    return;
+  }
+  if (source.kind !== 'index' || origin.kind !== 'index') throw mismatch();
+  const { name, specifier } = indexRequirement(source);
+  if (name !== installed.name || !acceptsInstalledVersion(specifier, installed.version)) throw mismatch();
+  const saved = await installedMetadata(site, installed.info, INDEX_ORIGIN_FILE);
+  if (saved !== undefined) {
+    const local = saved as { indexUrl?: unknown; requirement?: unknown } | null;
+    if (local?.indexUrl !== onlineIndex(source) || local?.requirement !== origin.requirement) throw mismatch();
+  }
+}
+
+export async function recordVerifiedSource(site: string, installed: InstalledDistribution, origin: ExtensionOrigin) {
+  if (origin.kind === 'index') {
+    await recordInstalledMetadata(site, installed, INDEX_ORIGIN_FILE, {
+      indexUrl: origin.indexUrl,
+      requirement: origin.requirement,
+    });
+  } else if (origin.kind === 'git' && origin.subdirectory !== undefined) {
+    const { repository, revision } = gitLocation(origin);
+    await recordInstalledMetadata(site, installed, 'direct_url.json', {
+      url: comparableGitUrl(repository),
+      vcs_info: { vcs: 'git', commit_id: origin.commit, requested_revision: revision },
+      subdirectory: origin.subdirectory,
+    });
   }
 }
 
@@ -250,11 +324,7 @@ export async function installedGitOrigin(
   before: SiteSnapshot,
   after: SiteSnapshot
 ): Promise<{ distribution: string; origin: ExtensionOrigin }> {
-  const requested = new URL(source.url.slice(4));
-  const at = requested.pathname.lastIndexOf('@');
-  const commitPin = at < 0 ? '' : decodeURIComponent(requested.pathname.slice(at + 1)).toLowerCase();
-  if (at >= 0) requested.pathname = requested.pathname.slice(0, at);
-  requested.username = '';
+  const commitPin = gitLocation(source).revision?.toLowerCase() ?? '';
   const matches = [];
   for (const name of changedExtensionDistributions(before, after)) {
     const installed = after.distributions.get(name);
@@ -262,18 +332,12 @@ export async function installedGitOrigin(
     // oxlint-disable-next-line no-await-in-loop -- only the metadata of changed extension distributions
     const direct = await directUrl(site, installed.info);
     if (!direct) continue;
-    const url = typeof direct.url === 'string' ? URL.parse(direct.url) : null;
-    // pip removes credentials (including the optional SSH username) from its saved URL.
-    if (url) url.username = '';
-    const vcs = direct.vcs_info as { vcs?: unknown; commit_id?: unknown } | undefined;
-    const commit = vcs?.commit_id;
+    const commit = direct.vcs_info?.commit_id;
     if (
-      url?.href === requested.href &&
-      direct.subdirectory === undefined &&
-      vcs?.vcs === 'git' &&
+      matchesGitSource(source, direct) &&
       typeof commit === 'string' &&
       COMMIT.test(commit) &&
-      (!COMMIT.test(commitPin) || commitPin === commit)
+      (!pinnedGit(source, commit) || commitPin === commit)
     )
       matches.push({ distribution: name, commit });
   }
@@ -290,7 +354,7 @@ export function matchesVersion(pin: string, installed: string): boolean {
   const wanted = parseVersion(pin);
   const actual = parseVersion(installed);
   if (!wanted || !actual || compareVersions(wanted, actual) !== 0) return false;
-  return wanted.local === null || wanted.local.replace(/[-_]/g, '.') === actual.local?.replace(/[-_]/g, '.');
+  return wanted.local === null || compareInstalledVersions(wanted, actual) === 0;
 }
 
 export function onlineIndex(source: OnlineExtensionSource): string {

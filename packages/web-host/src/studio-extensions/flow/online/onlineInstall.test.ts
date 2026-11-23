@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 /**
  * Online installs through the helper service with the user's extension settings (Studio #32
  * 1b): the stored settings, the proxy, private Git and git subdirectories. The bundled runtime
@@ -9,7 +10,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   createFakeBundle,
   fakeRuntime,
@@ -21,6 +22,8 @@ import { generationPaths, locateLayout } from '../../store/layout';
 import { readPointer } from '../../store/pointer';
 import { ExtensionService, type ExtensionServiceOptions } from '../../service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply, ExtensionSettingsState } from '../../types';
+
+import { readResolutionReport } from './indexPip';
 
 const run = promisify(execFile);
 const OWNER = 'window:1';
@@ -255,6 +258,26 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
   describe('online upgrades', () => {
     const name = 'demo-one';
     const command = { action: 'upgrade', name };
+    const savedGeneration = async () => {
+      const layout = await locateLayout(root);
+      const { record } = await readPointer(layout);
+      if (!record) throw new Error('expected installed extension');
+      return { record, paths: generationPaths(layout, record.generation, record.binding.pythonMinor) };
+    };
+    const legacyOrigin = async (requirement?: string) => {
+      const { record, paths } = await savedGeneration();
+      const info = path.join(paths.site, 'demo_one-1.0.0.dist-info');
+      await rm(path.join(info, 'aelix_studio_index.json'));
+      const ledger = path.join(info, 'RECORD');
+      const content = (await readFile(ledger, 'utf8'))
+        .split('\n')
+        .filter((line) => !line.includes('aelix_studio_index.json'))
+        .join('\n');
+      await writeFile(ledger, content);
+      record.distributions[name].recordSha256 = createHash('sha256').update(content).digest('hex');
+      record.distributions[name].origin = { kind: 'index', indexUrl: 'https://mirror.invalid/simple/', requirement };
+      await writeFile(paths.record, JSON.stringify(record));
+    };
     const upgrade = (extra = {}) => service.request(OWNER, { ...command, ...extra }).then(settle);
     const planned = (version: string) => {
       runtime.pip = async (spec) => {
@@ -262,7 +285,18 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
         await writeFile(
           report,
           JSON.stringify({
-            install: [{ requested: true, metadata: { name, version } }],
+            version: '1',
+            install: [
+              {
+                requested: true,
+                is_yanked: false,
+                metadata: { name, version },
+                download_info: {
+                  url: 'https://files.invalid/upgrade.whl',
+                  archive_info: { hashes: { sha256: '1'.repeat(64) } },
+                },
+              },
+            ],
           })
         );
         return 0;
@@ -287,7 +321,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       await installVersion('1.0.0', requirement);
       const wheel = await writeWheel(path.join(scratch, 'wheels'), { name, version: '1.3.0' });
       runtime.install = async (venv, target) => {
-        expect(target).toBe('demo-one==1.3.0');
+        expect(target).toBe('demo-one @ https://files.invalid/upgrade.whl#sha256=' + '1'.repeat(64));
         await installWheel(venv, wheel);
         return 0;
       };
@@ -332,6 +366,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
 
     it.each(['==', '==='])('refuses an exact %s requirement even with allowUnpin', async (op) => {
       await installVersion('1.0.0', name + op + '1.0.0');
+      await save({ proxy: PROXY, proxyAuthentication: true });
       expect((await listing()).extensions[0]?.upgrade).toBe('pinned');
       const count = spawn.calls.length;
       expect(await upgrade({ allowUnpin: true })).toMatchObject({ code: 'PINNED' });
@@ -340,16 +375,11 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
 
     it('requires confirmation for legacy records, and saves the name when that upgrade succeeds', async () => {
       await installFromIndex();
-      const layout = await locateLayout(root);
-      const { record } = await readPointer(layout);
-      if (!record) throw new Error('expected installed extension');
-      record.distributions[name].origin = { kind: 'index', indexUrl: 'https://mirror.invalid/simple/' };
-      await writeFile(
-        generationPaths(layout, record.generation, record.binding.pythonMinor).record,
-        JSON.stringify(record)
-      );
+      await legacyOrigin();
+      await save({ proxy: PROXY, proxyAuthentication: true });
       expect((await listing()).extensions[0]?.upgrade).toBe('confirmation_required');
       expect(await upgrade()).toMatchObject({ code: 'PIN_UNKNOWN' });
+      await save({ proxy: null });
       planned('2.0.0');
       const wheel = await writeWheel(path.join(scratch, 'wheels'), { name, version: '2.0.0' });
       runtime.install = async (venv) => {
@@ -358,6 +388,62 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       };
       expect(await upgrade({ allowUnpin: true })).toMatchObject({ phase: 'switched' });
       expect((await listing()).extensions[0]).toMatchObject({ upgrade: 'available', origin: { requirement: name } });
+    });
+
+    it.each([{ requirement: 'demo-one>=0' }, { indexUrl: 'https://other.invalid/simple/' }])(
+      'rejects a valid index record mutation before starting the installer %j',
+      async (tampered) => {
+        await installFromIndex();
+        const { record, paths } = await savedGeneration();
+        record.distributions[name].origin = {
+          kind: 'index',
+          indexUrl: 'https://pypi.org/simple/',
+          requirement: name,
+          ...tampered,
+        };
+        await writeFile(paths.record, JSON.stringify(record));
+        const count = spawn.calls.length;
+        const previous = await listing();
+        expect(await upgrade()).toMatchObject({ code: 'UPGRADE_SOURCE_MISMATCH' });
+        expect(spawn.calls.slice(count).some((call) => call.args.includes('venv'))).toBe(false);
+        expect(await listing()).toEqual(previous);
+      }
+    );
+
+    it('checks an installed local version against a mutated legacy requirement', async () => {
+      await installVersion('1.0.0', name);
+      await legacyOrigin('demo-one>=2');
+      expect(await upgrade()).toMatchObject({ code: 'UPGRADE_SOURCE_MISMATCH' });
+    });
+
+    it('normalizes a numeric local pin and sends mixed-case .Git versions as package requirements', async () => {
+      let selected = '';
+      const wheel = await writeWheel(path.join(scratch, 'wheels'), { name, version: '1.0+build.1.git' });
+      runtime.install = async (venv, target) => {
+        selected = target;
+        await installWheel(venv, wheel);
+        return 0;
+      };
+      const state = await settle(
+        await service.request(OWNER, {
+          action: 'install',
+          source: { kind: 'index', requirement: 'demo-one==1.0+build.01.Git' },
+        })
+      );
+      expect(state.phase).toBe('switched');
+      expect(selected).toBe('demo-one(==1.0+build.01.Git)');
+      expect(await upgrade()).toMatchObject({ code: 'PINNED' });
+    });
+
+    it('rejects a resolution report over one MiB before creating a generation', async () => {
+      await installFromIndex();
+      runtime.pip = async (spec) => {
+        await writeFile(spec.args[spec.args.indexOf('--report') + 1], ' '.repeat(1024 * 1024 + 1));
+        return 0;
+      };
+      const initial = await listing();
+      expect(await upgrade()).toMatchObject({ code: 'UPGRADE_RESPONSE_TOO_LARGE' });
+      expect(await listing()).toEqual(initial);
     });
 
     it('refuses to go online when settings or Studio policy disable installs', async () => {
@@ -408,6 +494,45 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       expect(await listing()).toEqual(before);
     });
   });
+
+  it.each(['missing', 'changed'] as const)(
+    'rejects a candidate with a %s file still listed by another distribution',
+    async (damage) => {
+      const filename = 'dependency.dat';
+      const recordFile = 'demo_dependency-0.1.0.dist-info';
+      const dependency = await writeWheel(path.join(scratch, 'wheels'), {
+        name: 'demo-dependency',
+        extension: false,
+        files: { [filename]: 'present' },
+      });
+      const first = await writeWheel(path.join(scratch, 'wheels'), { name: 'first' });
+      runtime.install = async (venv) => {
+        await installWheel(venv, first);
+        await installWheel(venv, dependency);
+        const ledger = path.join(venv.site, recordFile, 'RECORD');
+        const hash = createHash('sha256').update('present').digest('base64url');
+        await writeFile(
+          ledger,
+          (await readFile(ledger, 'utf8')).replace(filename + ',,', filename + ',sha256=' + hash + ',7')
+        );
+        return 0;
+      };
+      const command = { action: 'install', source: { kind: 'index', name: 'first' } };
+      expect((await settle(await service.request(OWNER, command))).phase).toBe('switched');
+      const before = await listing();
+      const replacement = await writeWheel(path.join(scratch, 'wheels'), { name: 'first', version: '2.0.0' });
+      runtime.install = async (venv) => {
+        await installWheel(venv, replacement);
+        const file = path.join(venv.site, filename);
+        if (damage === 'missing') await rm(file);
+        else await writeFile(file, 'changed');
+        return 0;
+      };
+      const state = await settle(await service.request(OWNER, command));
+      expect(state).toMatchObject({ code: 'GENERATION_MODIFIED' });
+      expect(await listing()).toEqual(before);
+    }
+  );
 
   describe('private Git', () => {
     const user = { PATH: '/usr/bin', HOME: '/Users/someone', SSH_AUTH_SOCK: '/private/tmp/agent.sock' };
@@ -565,7 +690,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
         await installWheel(venv, old ? oldWheel : newWheel);
         await writeFile(
           path.join(venv.site, `demo_sub-${version}.dist-info`, 'direct_url.json'),
-          JSON.stringify({ url, vcs_info: { vcs: 'git', commit_id: installingCommit } })
+          JSON.stringify({ url, vcs_info: { vcs: 'git', requested_revision: 'main', commit_id: installingCommit } })
         );
         return 0;
       };
@@ -577,6 +702,116 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       const state = await settle(await service.request(OWNER, { action: 'upgrade', name }));
       expect(state).toMatchObject({ phase: 'switched' });
       expect((await listing()).extensions[0]).toMatchObject({ version: '2.0.0', origin: { commit: installingCommit } });
+    });
+
+    it.each(['url', 'commit'] as const)('rejects a valid Git %s record mutation before fetching', async (field) => {
+      const name = 'demo-sub';
+      const url = pathToFileURL(repository).href;
+      const wheel = await writeWheel(path.join(scratch, 'wheels'), { name });
+      runtime.install = async (venv) => {
+        await installWheel(venv, wheel);
+        await writeFile(
+          path.join(venv.site, 'demo_sub-0.1.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url, vcs_info: { vcs: 'git', commit_id: commit, requested_revision: 'main' } })
+        );
+        return 0;
+      };
+      expect(
+        (
+          await settle(
+            await service.request(OWNER, {
+              action: 'install',
+              source: { kind: 'git', url: url + '@main' },
+            })
+          )
+        ).phase
+      ).toBe('switched');
+      const layout = await locateLayout(root);
+      const { record } = await readPointer(layout);
+      const origin = record?.distributions[name]?.origin;
+      if (!record || origin?.kind !== 'git') throw new Error('missing fixture origin');
+      origin[field] = field === 'url' ? 'git+https://other.invalid/repository.git@main' : 'a'.repeat(40);
+      await writeFile(
+        generationPaths(layout, record.generation, record.binding.pythonMinor).record,
+        JSON.stringify(record)
+      );
+      const count = spawn.calls.length;
+      await save({ proxy: PROXY, proxyAuthentication: true });
+      const state = await settle(await service.request(OWNER, { action: 'upgrade', name }));
+      expect(state).toMatchObject({ code: 'UPGRADE_SOURCE_MISMATCH' });
+      expect(spawn.calls.slice(count).some((call) => call.command === 'git')).toBe(false);
+    });
+
+    it('refuses Git uninstall when the distribution shares a RECORD file', async () => {
+      const name = 'demo-sub';
+      const files = { 'shared-data.txt': 'both distributions use this' };
+      const dependent = await writeWheel(path.join(scratch, 'wheels'), { name: 'demo-shared', files });
+      const original = await writeWheel(path.join(scratch, 'wheels'), { name, files });
+      expect(
+        (
+          await settle(
+            await service.request(OWNER, {
+              action: 'install',
+              source: { kind: 'file', path: dependent },
+            })
+          )
+        ).phase
+      ).toBe('switched');
+      const url = pathToFileURL(repository).href;
+      runtime.install = async (venv) => {
+        await installWheel(venv, original);
+        await writeFile(
+          path.join(venv.site, 'demo_sub-0.1.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url, vcs_info: { vcs: 'git', requested_revision: 'main', commit_id: commit } })
+        );
+        return 0;
+      };
+      expect(
+        (
+          await settle(
+            await service.request(OWNER, {
+              action: 'install',
+              source: { kind: 'git', url: url + '@main' },
+            })
+          )
+        ).phase
+      ).toBe('switched');
+      await git(repository, 'commit', '--allow-empty', '-qm', 'move ref');
+      const previous = await listing();
+      const count = spawn.calls.length;
+      const result = await settle(await service.request(OWNER, { action: 'upgrade', name }));
+      expect(result).toMatchObject({ code: 'SHARED_DISTRIBUTION_FILES' });
+      expect(spawn.calls.slice(count).some((call) => call.args.includes('uninstall'))).toBe(false);
+      expect(await listing()).toEqual(previous);
+    });
+
+    it('checks an unchanged subdirectory ref before checkout and staging', async () => {
+      const name = 'demo-sub';
+      const wheel = await writeWheel(path.join(scratch, 'wheels'), { name });
+      runtime.install = async (venv, target) => {
+        await installWheel(venv, wheel);
+        await writeFile(
+          path.join(venv.site, 'demo_sub-0.1.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url: pathToFileURL(target).href, dir_info: {} })
+        );
+        return 0;
+      };
+      expect((await settle(await service.request(OWNER, request('packages/demo')))).phase).toBe('switched');
+      const count = spawn.calls.length;
+      const previous = await listing();
+      const state = await settle(await service.request(OWNER, { action: 'upgrade', name }));
+      expect(state.phase).toBe('already_latest');
+      expect(
+        spawn.calls
+          .slice(count)
+          .some(
+            (call) =>
+              call.args.includes('checkout') ||
+              call.args.includes('submodule') ||
+              call.args.some((arg) => arg.includes('aelix-studio-copy-tree'))
+          )
+      ).toBe(false);
+      expect(await listing()).toEqual(previous);
     });
 
     it('rejects an upgraded subdirectory that became a symlink', async () => {
@@ -682,4 +917,20 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       expect(spawn.calls).toEqual([]);
     });
   });
+});
+
+it('checks the original operation deadline after reading and parsing the report', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'studio-index-report-'));
+  const file = path.join(directory, 'resolution.json');
+  try {
+    await writeFile(file, '{"version":"1"}');
+    const clock = vi.spyOn(performance, 'now').mockReturnValueOnce(1).mockReturnValueOnce(1).mockReturnValue(90001);
+    try {
+      await expect(readResolutionReport(file, 80000)).rejects.toMatchObject({ code: 'TIMEOUT' });
+    } finally {
+      clock.mockRestore();
+    }
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

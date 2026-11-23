@@ -218,6 +218,12 @@ export type ExtensionFailureCode =
   | 'NOT_INSTALLED'
   /** A file or an unrecorded source cannot be upgraded online. */
   | 'UPGRADE_UNAVAILABLE'
+  /** Saved source and the active distribution's metadata do not agree. Reinstall to refresh the source. */
+  | 'UPGRADE_SOURCE_MISMATCH'
+  /** Removing the Git distribution would remove files also claimed by another distribution. */
+  | 'SHARED_DISTRIBUTION_FILES'
+  /** The upgrade index response or pip report exceeded its allowed size. */
+  | 'UPGRADE_RESPONSE_TOO_LARGE'
   /** The saved requirement names an exact version or the Git ref names a full commit SHA. */
   | 'PINNED'
   /** A legacy index record lost the requirement. Retry only after the user confirms allowUnpin. */

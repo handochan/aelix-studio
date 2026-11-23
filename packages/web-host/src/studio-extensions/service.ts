@@ -255,12 +255,17 @@ export class ExtensionService {
         const { settings, unreadable } = stored;
         if (unreadable) return fail('SETTINGS_UNREADABLE');
         if (!settings.onlineInstall) return fail('ONLINE_INSTALL_DISABLED');
-        if (change.proxyCredentials && settings.proxy === null)
+        if (change.action === 'install' && change.proxyCredentials && settings.proxy === null)
           return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
         // The credentials are for this address; the change ends if the settings name another by then.
         if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
         // The screen asks for credentials on this answer; nothing has started.
-        if (settings.proxy !== null && settings.proxyAuthentication && !change.proxyCredentials) {
+        if (
+          change.action === 'install' &&
+          settings.proxy !== null &&
+          settings.proxyAuthentication &&
+          !change.proxyCredentials
+        ) {
           const layout = await locateLayout(this.options.root);
           if (!(await hasSavedCredentials(layout, this.vault, settings.proxy, stored.credentialId)))
             return fail('PROXY_CREDENTIALS_REQUIRED');

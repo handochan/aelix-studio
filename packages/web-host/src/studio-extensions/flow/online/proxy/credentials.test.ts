@@ -569,7 +569,7 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
       const upgraded = await writeWheel(path.join(scratch, 'wheels'), { name, version: '2.0.0' });
       const command = { action: 'upgrade', name };
       data(await request({ action: 'set_settings', settings: { proxy, proxyAuthentication: true } }));
-      expect(await request(command)).toMatchObject({ code: 'PROXY_CREDENTIALS_REQUIRED' });
+      expect(await settle(await request(command))).toMatchObject({ code: 'PROXY_CREDENTIALS_REQUIRED' });
       expect(
         await request({ ...command, proxyCredentials: { username: 'bad:user', password: 'secret' } })
       ).toMatchObject({ code: 'INVALID_INPUT' });
@@ -582,7 +582,20 @@ describe.skipIf(process.platform === 'win32')('online installs with proxy creden
         const report = spec.args[spec.args.indexOf('--report') + 1];
         await writeFile(
           report,
-          JSON.stringify({ install: [{ requested: true, metadata: { name, version: '2.0.0' } }] })
+          JSON.stringify({
+            version: '1',
+            install: [
+              {
+                requested: true,
+                is_yanked: false,
+                metadata: { name, version: '2.0.0' },
+                download_info: {
+                  url: 'https://files.invalid/upgrade.whl',
+                  archive_info: { hashes: { sha256: '1'.repeat(64) } },
+                },
+              },
+            ],
+          })
         );
         return 0;
       };

@@ -262,7 +262,7 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
       { command: script, args: [], env, cwd: scratch },
       { timeoutMs: 15_000 }
     );
-    assert.equal(consoleResult.code, 0, consoleResult.output);
+    assert.equal(consoleResult.code, 0, JSON.stringify(consoleResult));
     // realpath would collapse a POSIX venv symlink to the bundle. Compare interpreter spellings.
     const pathKey = (value: string) => (windows ? value.replace(/^\\\\\?\\/, '').toLowerCase() : value);
     assert.equal(pathKey(JSON.parse(consoleResult.output.trim()) as string), pathKey(paths(second).python));
@@ -528,13 +528,32 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
     wheels.set(filename, data);
   };
   publish('1.0');
+  let rearrangeIndex = false;
+  let oversized = false;
+  let indexRequests = 0;
+  let swapRequested = 0;
+  const swapped = buildWheel({ name, version: '1.2', prelude: 'ARTIFACT = "alternate"' });
+  const yanked = buildWheel({
+    name,
+    version: '1.1',
+    prelude: 'ARTIFACT = "yanked"',
+    filename: name.replaceAll('-', '_') + '-1.1-2-py3-none-any.whl',
+  });
   const server = createServer((request, response) => {
     const url = request.url ?? '';
     const wheel = wheels.get(url.slice(1));
-    if (url === `/simple/${name}/` && wheels.size > 0) {
+    if (url === `/simple/${name}/` && oversized) {
       response.writeHead(200, { 'content-type': 'text/html' });
-      response.end([...wheels.keys()].map((file) => `<a href="/${file}">${file}</a>`).join('\n'));
-    } else if (wheel) response.writeHead(200).end(wheel);
+      response.end(' '.repeat(8 * 1024 * 1024 + 1));
+    } else if (url === `/simple/${name}/` && wheels.size > 0) {
+      indexRequests++;
+      response.writeHead(200, { 'content-type': 'text/html' });
+      if (rearrangeIndex && indexRequests > 1) {
+        response.end(`<a data-yanked="test" href="/${yanked.filename}">${yanked.filename}</a>`);
+      } else response.end([...wheels.keys()].map((file) => `<a href="/${file}">${file}</a>`).join('\n'));
+    } else if (url === '/' + yanked.filename) response.writeHead(200).end(yanked.data);
+    else if (wheel && url === '/' + swapped.filename && ++swapRequested > 1) response.writeHead(200).end(swapped.data);
+    else if (wheel) response.writeHead(200).end(wheel);
     else response.writeHead(404).end();
   });
   server.listen(0, '127.0.0.1');
@@ -562,7 +581,11 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
     await change({ action: 'install', source: { kind: 'index', requirement, indexUrl } });
     publish('1.1');
     publish('2.0');
+    rearrangeIndex = true;
+    indexRequests = 0;
     await change({ action: 'upgrade', name });
+    assert.equal(indexRequests, 1, 'the apply must use the selected archive rather than reselecting a yanked wheel');
+    rearrangeIndex = false;
     const updated = await list();
     const entry = updated.extensions.find((item) => item.name === name);
     assert.equal(entry?.version, '1.1');
@@ -571,7 +594,7 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
     assert.equal(noChange.generation, undefined);
     assert.deepEqual(await list(), updated);
     checks.push(
-      'index upgrade: newly published compatible version, saved requirement, already latest leaves pointer unchanged'
+      'index upgrade: hashed selection survives index mutation, bounded response rejects, already latest leaves pointer unchanged'
     );
 
     if (windows) return; // The helper refuses Git on Windows.
