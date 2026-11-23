@@ -183,10 +183,33 @@ function plainStrings(value: string): string[] | undefined {
  * Escapes and inline tables elsewhere are left alone, and values on more lines elsewhere are
  * skipped to where their brackets close.
  */
+/** A key or table name as one string, with nothing a decoded name holds able to run two parts together. */
+const pathKey = (names: string[]): string => JSON.stringify(names);
+
+/**
+ * The most parts a table or key name may have: a deeper one makes the file `unknown`
+ * (2026-11-24 orchestrator decision: structure that deep is not judged).
+ */
+export const NAME_DEPTH_LIMIT = 16;
+
 export function readDeclaredExtensions(text: string): DeclaredExtensions {
   if (text.includes('"""') || text.includes("'''")) return 'unknown';
   let table: 'top' | 'tool' | 'aelix' | 'other' = 'top';
   const tables = new Set<string>();
+  /** For each array of tables, how many of its elements have begun. */
+  const elements = new Map<string, number>();
+  /**
+   * A table as TOML tells tables apart: its name, and the element of each array of tables it
+   * sits in (`[x.y]` under the first `[[x]]` is not the one under the second).
+   */
+  const tableKey = (names: string[]): string => {
+    let scope = '';
+    for (let depth = 1; depth < names.length; depth += 1) {
+      const element = elements.get(pathKey(names.slice(0, depth)));
+      if (element !== undefined) scope += `#${depth}:${element}`;
+    }
+    return pathKey(names) + scope;
+  };
   let keys = new Set<string>();
   let continuing = 0;
   let found: string[] | undefined;
@@ -204,15 +227,19 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
       const array = line.text.startsWith('[[');
       if (!line.text.endsWith(array ? ']]' : ']')) return 'unknown';
       const header = keyPath(line.text.slice(array ? 2 : 1, array ? -2 : -1));
-      if (!header) return 'unknown';
+      if (!header || header.names.length > NAME_DEPTH_LIMIT) return 'unknown';
       const [first, second, third] = header.names;
       const underAelix = first === 'tool' && second === 'aelix';
       // Quoted (escaped ones included) or an array of tables: another way to name tool.aelix.
       if (first === 'tool' && (array || header.quoted) && (second === undefined || second === 'aelix'))
         return 'unknown';
       if (underAelix && third === 'extensions') return 'unknown';
-      if (!array) {
-        const name = header.names.join('\u0000');
+      if (array) {
+        // A new element: what is defined under it is new too.
+        const name = pathKey(header.names);
+        elements.set(name, (elements.get(name) ?? 0) + 1);
+      } else {
+        const name = tableKey(header.names);
         if (tables.has(name)) return 'unknown';
         tables.add(name);
       }
@@ -223,8 +250,8 @@ export function readDeclaredExtensions(text: string): DeclaredExtensions {
     }
     if (line.equals < 0 || line.depth < 0) return 'unknown';
     const key = keyPath(line.text.slice(0, line.equals));
-    if (!key) return 'unknown';
-    const name = key.names.join('\u0000');
+    if (!key || key.names.length > NAME_DEPTH_LIMIT) return 'unknown';
+    const name = pathKey(key.names);
     if (keys.has(name)) return 'unknown';
     keys.add(name);
     if (table === 'top' && key.names[0] === 'tool') return 'unknown';
