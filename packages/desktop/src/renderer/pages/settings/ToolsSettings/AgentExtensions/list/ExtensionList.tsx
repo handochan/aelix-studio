@@ -11,10 +11,11 @@ import React from 'react';
 import { useTranslation } from 'react-i18next';
 import { upgradeOf } from '../state/upgrade';
 
-const STATUS_COLOR: Record<ExtensionStatus, string> = {
-  ready: 'green',
-  manifest_unbound: 'orangered',
-  reinstall_needed: 'red',
+/** Status tags in the theme's meaning colors: ready, needs attention, broken. */
+const STATUS_CLASS: Record<ExtensionStatus, string> = {
+  ready: '!bg-success-light-1 !text-success-6',
+  manifest_unbound: '!bg-warning-light-1 !text-warning-6',
+  reinstall_needed: '!bg-danger-light-1 !text-danger-6',
 };
 
 /** The host of a URL, or the text itself when it is not one. */
@@ -39,6 +40,8 @@ type Props = {
   extensions: ExtensionEntry[];
   /** A change is running: no other can start. */
   busy: boolean;
+  /** Online installs are allowed (settings and Studio policy); upgrades need them. */
+  onlineAllowed: boolean;
   onUpgrade: (entry: ExtensionEntry) => void;
   onUpdateFromFile: (entry: ExtensionEntry) => void;
   onRemove: (entry: ExtensionEntry) => void;
@@ -53,6 +56,7 @@ type Props = {
 const ExtensionList: React.FC<Props> = ({
   extensions,
   busy,
+  onlineAllowed,
   onUpgrade,
   onUpdateFromFile,
   onRemove,
@@ -88,7 +92,7 @@ const ExtensionList: React.FC<Props> = ({
                   disabled={entry.status === 'ready'}
                   content={t(`settings.agentExtensions.statusHint.${entry.status}`)}
                 >
-                  <Tag size='small' color={STATUS_COLOR[entry.status]} data-testid='agent-extension-status'>
+                  <Tag size='small' className={STATUS_CLASS[entry.status]} data-testid='agent-extension-status'>
                     {t(`settings.agentExtensions.status.${entry.status}`)}
                   </Tag>
                 </Tooltip>
@@ -115,15 +119,20 @@ const ExtensionList: React.FC<Props> = ({
                 </label>
               )}
               {upgrade && (
-                <Button
-                  size='small'
-                  icon={<Refresh theme='outline' size='14' />}
-                  disabled={busy}
-                  onClick={() => onUpgrade(entry)}
-                  data-testid='agent-extension-upgrade'
-                >
-                  {t('settings.agentExtensions.actions.upgrade')}
-                </Button>
+                <Tooltip disabled={onlineAllowed} content={t('settings.agentExtensions.upgrade.onlineDisabled')}>
+                  {/* A wrapper takes the pointer for the tooltip: a disabled button does not. */}
+                  <span className='inline-flex' data-testid='agent-extension-upgrade-wrapper'>
+                    <Button
+                      size='small'
+                      icon={<Refresh theme='outline' size='14' />}
+                      disabled={busy || !onlineAllowed}
+                      onClick={() => onUpgrade(entry)}
+                      data-testid='agent-extension-upgrade'
+                    >
+                      {t('settings.agentExtensions.actions.upgrade')}
+                    </Button>
+                  </span>
+                </Tooltip>
               )}
               {entry.origin?.kind === 'file' && (
                 <Button

@@ -8,6 +8,10 @@ import type { ExtensionSettings, ExtensionSettingsState } from '@aionui/web-host
 import { Alert, Button, Input, Switch } from '@arco-design/web-react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { PROXY_WITH_CREDENTIALS } from './state/useAgentExtensions';
+
+/** The address with its user name and password taken out. */
+const withoutCredentials = (address: string): string => address.replace(/^([^:/?#]*:\/\/)[^/?#]*@/, '$1');
 
 type Props = {
   state: ExtensionSettingsState;
@@ -37,7 +41,10 @@ const Row: React.FC<{ label: string; hint?: React.ReactNode; children: React.Rea
  * Settings for name and Git installs: online installs on or off, the one proxy they use and its
  * credentials, and private Git. Every field is sent on save (the contract asks for all of them
  * after `unreadable`). A proxy address typed with a user name and password is split by the
- * helper; the page treats such an address as a secret.
+ * helper; the page treats such an address as a secret. It is kept only while typed: once sent,
+ * the field holds the address without them whatever the answer (saved, refused, or the send
+ * declined), so the password stays nowhere on the page. The helper refuses such an address
+ * with proxy authentication off, so saving waits until it is on.
  */
 const InstallSettings: React.FC<Props> = ({
   state,
@@ -63,6 +70,13 @@ const InstallSettings: React.FC<Props> = ({
   };
   const changed = JSON.stringify(settings) !== JSON.stringify(state.settings) || state.unreadable;
   const sameProxy = (state.settings.proxy ?? '') === proxy.trim();
+  const typedCredentials = PROXY_WITH_CREDENTIALS.test(proxy.trim());
+  const needsAuthentication = typedCredentials && !settings.proxyAuthentication;
+
+  const save = (): void => {
+    onSave(settings);
+    if (typedCredentials) setProxy(withoutCredentials(proxy.trim()));
+  };
 
   return (
     <section
@@ -87,13 +101,20 @@ const InstallSettings: React.FC<Props> = ({
         />
       </Row>
       <Row label={t('settings.agentExtensions.settings.proxy')} hint={t('settings.agentExtensions.settings.proxyHint')}>
-        <Input
-          value={proxy}
-          onChange={setProxy}
-          placeholder='http://proxy.example:3128'
-          aria-label={t('settings.agentExtensions.settings.proxy')}
-          data-testid='settings-proxy'
-        />
+        <div className='flex w-full flex-col gap-6px'>
+          <Input
+            value={proxy}
+            onChange={setProxy}
+            placeholder='http://proxy.example:3128'
+            aria-label={t('settings.agentExtensions.settings.proxy')}
+            data-testid='settings-proxy'
+          />
+          {needsAuthentication && (
+            <span className='text-12px text-warning' data-testid='settings-proxy-needs-auth'>
+              {t('settings.agentExtensions.settings.credentialsNeedAuthentication')}
+            </span>
+          )}
+        </div>
       </Row>
       <Row
         label={t('settings.agentExtensions.settings.proxyAuthentication')}
@@ -152,8 +173,8 @@ const InstallSettings: React.FC<Props> = ({
         <Button
           type='primary'
           loading={saving}
-          disabled={!changed}
-          onClick={() => onSave(settings)}
+          disabled={!changed || needsAuthentication}
+          onClick={save}
           data-testid='settings-save'
         >
           {t('settings.agentExtensions.actions.save')}

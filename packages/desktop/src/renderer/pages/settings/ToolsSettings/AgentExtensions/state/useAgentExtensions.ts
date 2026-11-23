@@ -54,7 +54,14 @@ export type Change =
   | { action: 'upgrade'; entry: ExtensionEntry; allowUnpin?: boolean };
 
 /** A proxy address typed with a user name and password. */
-const PROXY_WITH_CREDENTIALS = /^[^:/?#]*:\/\/[^/?#]*@/;
+export const PROXY_WITH_CREDENTIALS = /^[^:/?#]*:\/\/[^/?#]*@/;
+
+/** Refusals about the proxy's credentials, and what the user is asked after each. */
+const PROXY_REASONS: Record<string, CredentialsReason> = {
+  PROXY_CREDENTIALS_REQUIRED: 'required',
+  PROXY_CREDENTIALS_REJECTED: 'rejected',
+  PROXY_CHANGED: 'changed',
+};
 
 /**
  * The state and actions of the agent extensions screen. Reads the settings first (their reply
@@ -130,12 +137,14 @@ export function useAgentExtensions(asks: Asks) {
   /**
    * The credentials an online change brings: null for none (no proxy authentication, or saved
    * ones the helper uses), undefined when the user stopped. Asked before sending when nothing
-   * is saved here (memory-only, or no saved credentials), and always for a `reason`.
+   * is saved here (memory-only, or no saved credentials), and always for a `reason` (the host
+   * asked for them) while there is a proxy.
    */
   const credentialsFor = async (reason?: CredentialsReason): Promise<ProxyCredentials | null | undefined> => {
     const state = settingsRef.current;
     const proxy = state?.settings.proxy;
-    if (!state || !proxy || !state.settings.proxyAuthentication) return null;
+    if (!state || !proxy) return null;
+    if (reason === undefined && !state.settings.proxyAuthentication) return null;
     if (reason === undefined && state.credentialMode === 'keychain' && state.hasSavedCredentials) return null;
     const answer = await asksRef.current.credentials(reason ?? 'required', proxy);
     if (!answer) return undefined;
@@ -145,7 +154,8 @@ export function useAgentExtensions(asks: Asks) {
     return applySettings(saved) ? null : undefined;
   };
 
-  const sendOnline = async (change: Change, reason?: CredentialsReason): Promise<void> => {
+  /** Send an online change; `retried` once it was sent again after a proxy refusal. */
+  const sendOnline = async (change: Change, reason?: CredentialsReason, retried = false): Promise<void> => {
     setLastChange(change);
     const online = change.action === 'upgrade' || change.source.kind !== 'file';
     const credentials = online ? await credentialsFor(reason) : null;
@@ -168,17 +178,21 @@ export function useAgentExtensions(asks: Asks) {
     const reply = await send(command, { secret: credentials !== null });
     if (reply === 'declined') return;
     const code = failureCode(reply);
-    if (code !== undefined) await followUp(code, change);
+    if (code !== undefined) await followUp(code, change, retried);
     else if (reply.ok && isOperation(reply.data)) start(reply.data);
   };
 
-  /** What a failure code of a change leads to: asking again, confirming, or its text. */
-  const followUp = async (code: string, change: Change): Promise<void> => {
-    if (code === 'PROXY_CREDENTIALS_REQUIRED') return sendOnline(change, 'required');
-    if (code === 'PROXY_CREDENTIALS_REJECTED') return sendOnline(change, 'rejected');
-    if (code === 'PROXY_CHANGED') {
+  /**
+   * What a failure code of a change leads to: asking again, confirming, or its text. A proxy
+   * refusal reads the settings again (they may be stale), asks once and sends once more; the
+   * same kind of refusal after that is told, not sent again.
+   */
+  const followUp = async (code: string, change: Change, retried = false): Promise<void> => {
+    const reason = PROXY_REASONS[code];
+    if (reason) {
+      if (retried) return asksRef.current.failure(code);
       await refreshSettings();
-      return sendOnline(change, 'changed');
+      return sendOnline(change, reason, true);
     }
     if (change.action === 'upgrade' && code === 'PIN_UNKNOWN') {
       if (await asksRef.current.confirmUnpin(change.entry)) await sendOnline({ ...change, allowUnpin: true });

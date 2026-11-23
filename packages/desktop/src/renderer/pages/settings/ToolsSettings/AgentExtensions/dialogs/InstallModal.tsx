@@ -5,10 +5,11 @@
  */
 
 import type { ExtensionSource } from '@aionui/web-host';
-import { Alert, Button, Checkbox, Input, Modal, Tabs } from '@arco-design/web-react';
+import { Alert, Button, Checkbox, Input, Modal, Tabs, Tooltip } from '@arco-design/web-react';
 import { FolderOpen } from '@icon-park/react';
 import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { failureKey } from '../messages';
 
 export type InstallTab = 'index' | 'git' | 'file';
 
@@ -20,7 +21,7 @@ type Props = {
   preset?: InstallPreset;
   /** Name and Git installs are allowed (settings and Studio policy). */
   onlineAllowed: boolean;
-  /** The host is Windows, where Git installs are not offered yet. */
+  /** The host is Windows, where Git installs are not offered yet: the Git tab is off. */
   windows: boolean;
   /** The proxy online installs use, or null for a direct connection. */
   proxy: string | null;
@@ -57,10 +58,10 @@ const InstallModal: React.FC<Props> = ({
   useEffect(() => {
     if (!visible) return;
     const first: InstallTab = preset?.tab ?? (onlineAllowed ? 'index' : 'file');
-    setTab(first);
+    setTab(first === 'git' && windows ? 'index' : first);
     setName(preset?.name ?? '');
     setVersion('');
-  }, [visible, preset, onlineAllowed]);
+  }, [visible, preset, onlineAllowed, windows]);
 
   const gitBlocked = windows || !onlineAllowed;
   const source = ((): ExtensionSource | undefined => {
@@ -148,13 +149,22 @@ const InstallModal: React.FC<Props> = ({
             {onlineAllowed && indexField}
           </div>
         </Tabs.TabPane>
-        <Tabs.TabPane key='git' title={t('settings.agentExtensions.install.tabs.git')}>
-          <div className='flex flex-col gap-12px pt-8px'>
-            {windows ? (
-              <Alert type='warning' content={t('settings.agentExtensions.install.windowsGit')} />
+        <Tabs.TabPane
+          key='git'
+          disabled={windows}
+          title={
+            windows ? (
+              // The helper's own refusal on this platform, said before it is asked.
+              <Tooltip content={t(failureKey('UNSUPPORTED_PLATFORM'))}>
+                <span data-testid='install-git-tab'>{t('settings.agentExtensions.install.tabs.git')}</span>
+              </Tooltip>
             ) : (
-              offline || onlineNotice
-            )}
+              <span data-testid='install-git-tab'>{t('settings.agentExtensions.install.tabs.git')}</span>
+            )
+          }
+        >
+          <div className='flex flex-col gap-12px pt-8px'>
+            {offline || onlineNotice}
             <Input
               value={gitUrl}
               onChange={setGitUrl}

@@ -23,9 +23,16 @@ export const isOperation = (data: ExtensionData): data is ExtensionOperation =>
 /**
  * The change this window started and the user has not dismissed yet. Kept outside the component
  * so leaving the screen and coming back shows it again and goes on polling it; the host cancels
- * it only when the window closes or reloads.
+ * it only when the window closes or reloads. Every mounted screen is told when it changes, so a
+ * start reply that arrives after the screen was left and opened again is shown by the new one.
  */
 let shown: ExtensionOperation | undefined;
+const viewers = new Set<(operation: ExtensionOperation | undefined) => void>();
+
+const keep = (next: ExtensionOperation | undefined): void => {
+  shown = next;
+  for (const viewer of viewers) viewer(next);
+};
 
 /**
  * The change in progress on this screen: polled every `POLL_INTERVAL_MS` until it finishes.
@@ -40,21 +47,25 @@ export function useOperation(
   const finishedRef = useRef(onFinished);
   finishedRef.current = onFinished;
 
+  useEffect(() => {
+    viewers.add(setOperation);
+    // What changed between the first render and this subscription.
+    setOperation(shown);
+    return () => {
+      viewers.delete(setOperation);
+    };
+  }, []);
+
   const show = useCallback((next: ExtensionOperation | undefined) => {
     const wasRunning = shown !== undefined && !isFinished(shown) && shown.operationId === next?.operationId;
-    shown = next;
-    setOperation(next);
+    keep(next);
     if (next && isFinished(next) && wasRunning) finishedRef.current(next);
   }, []);
 
-  const start = useCallback(
-    (next: ExtensionOperation) => {
-      shown = undefined;
-      show(next);
-      if (isFinished(next)) finishedRef.current(next);
-    },
-    [show]
-  );
+  const start = useCallback((next: ExtensionOperation) => {
+    keep(next);
+    if (isFinished(next)) finishedRef.current(next);
+  }, []);
 
   const operationId = operation?.operationId;
   const running = operation !== undefined && !isFinished(operation);
@@ -97,5 +108,5 @@ export function useOperation(
 
 /** For tests: forget the change kept across visits. */
 export function resetShownOperation(): void {
-  shown = undefined;
+  keep(undefined);
 }

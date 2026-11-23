@@ -14,34 +14,56 @@ const secret = {
   credentials: { username: 'ops', password: 'sentinel-secret' },
 } as const;
 
-/** The desktop channel answering every request with `transport` (or none). */
+/** The desktop channel answering every request with `transport` (or none); `refuse` answers secrets sent unflagged. */
 function channel(transport: 'secure' | 'insecure' | undefined, refuse?: string) {
   const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
     const flagged = (command as { acknowledgeInsecureTransport?: boolean }).acknowledgeInsecureTransport;
     const body =
-      refuse && !flagged ? { ok: false as const, code: refuse } : { ok: true as const, data: { settings: {} } };
+      refuse && !flagged && command.action !== 'get_settings'
+        ? { ok: false as const, code: refuse }
+        : { ok: true as const, data: { settings: {} } };
     return { ...body, ...(transport ? { transport } : {}) } as StudioExtensionsReply;
   });
   window.__studioExtensions = { request };
   return request;
 }
 
+/** What was sent, in order. */
+const commands = (request: ReturnType<typeof vi.fn>) => request.mock.calls.map(([command]) => command);
+
 afterEach(() => {
   delete window.__studioExtensions;
 });
 
 describe('the screen channel', () => {
-  it('counts the time before the first reply as insecure: a first secret is asked about', async () => {
-    const request = channel('secure');
+  it('counts the time before the first reply as insecure', () => {
+    channel('secure');
+    const { result } = renderHook(() => useExtensionsChannel(vi.fn(async () => true)));
+    expect(result.current.transport).toBeUndefined();
+  });
+
+  it('reads the channel again, with nothing secret, right before every secret', async () => {
+    let transport: 'secure' | 'insecure' = 'secure';
+    const request = vi.fn(
+      async (): Promise<StudioExtensionsReply> =>
+        ({ ok: true, data: { settings: {} }, transport }) as unknown as StudioExtensionsReply
+    );
+    window.__studioExtensions = { request };
     const confirm = vi.fn(async () => false);
     const { result } = renderHook(() => useExtensionsChannel(confirm));
+    await act(async () => {
+      await result.current.send({ action: 'get_settings' });
+    });
+    // The last reply said secure; the channel has since become insecure.
+    transport = 'insecure';
+    request.mockClear();
     let reply: unknown;
     await act(async () => {
       reply = await result.current.send(secret, { secret: true });
     });
     expect(reply).toBe('declined');
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(request).not.toHaveBeenCalled();
+    expect(commands(request)).toEqual([{ action: 'get_settings' }]);
   });
 
   it('takes a reply without transport as insecure, and asks once per visit', async () => {
@@ -112,10 +134,33 @@ describe('the screen channel', () => {
       reply = await result.current.send(secret, { secret: true });
     });
     expect(confirm).toHaveBeenCalledTimes(1);
-    expect(request.mock.calls.map(([command]) => command)).toEqual([
+    expect(commands(request)).toEqual([
+      { action: 'get_settings' },
       secret,
       { ...secret, acknowledgeInsecureTransport: true },
     ]);
     expect(reply).toMatchObject({ ok: true });
+  });
+
+  it('asks again before sending again when a secret it was told to send is still refused', async () => {
+    let refusals = 1;
+    const request = vi.fn(async (command: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
+      const refused = command.action !== 'get_settings' && refusals > 0;
+      if (refused) refusals -= 1;
+      return (refused
+        ? { ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' }
+        : { ok: true, data: { settings: {} }, transport: 'insecure' }) as unknown as StudioExtensionsReply;
+    });
+    window.__studioExtensions = { request };
+    const confirm = vi.fn().mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+    const { result } = renderHook(() => useExtensionsChannel(confirm));
+    let reply: unknown;
+    await act(async () => {
+      reply = await result.current.send(secret, { secret: true });
+    });
+    // The same insecure verdict, already confirmed: still asked again, and not sent on no.
+    expect(confirm).toHaveBeenCalledTimes(2);
+    expect(reply).toBe('declined');
+    expect(commands(request)).toEqual([{ action: 'get_settings' }, { ...secret, acknowledgeInsecureTransport: true }]);
   });
 });

@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git, gerekirse @ref ile",
       "subdirectory": "Alt dizin",
       "subdirectoryPlaceholder": "Depodaki alt dizin (isteğe bağlı)",
-      "windowsGit": "Git'ten kurulum Windows'ta henüz kullanılamıyor.",
       "fileNotice": "Dosya içe aktarma hiçbir zaman ağa bağlanmaz.",
       "wheel": "Wheel dosyası",
+      "wheelFilter": "Python wheel",
       "wheelPlaceholder": "Studio ana makinesindeki bir .whl dosyasının yolu",
       "choose": "Seç",
       "folderOption": "Bağımlılıklar için aynı klasördeki diğer wheel dosyalarını kullan"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "Studio ilkesiyle kapatıldı.",
       "proxy": "Proxy",
       "proxyHint": "Çevrimiçi kurulumlar yalnızca bu proxy'yi kullanır. Sistem ve ortam proxy'leri kullanılmaz.",
+      "credentialsNeedAuthentication": "Bu adreste kullanıcı adı ve parola var. Kaydetmek için “Proxy parola istiyor” seçeneğini açın.",
       "proxyAuthentication": "Proxy parola istiyor",
       "keychainHint": "Kullanıcı adı ve parola sistem anahtar zincirinde saklanabilir.",
       "memoryOnlyHint": "Burada hiçbir şey saklanmaz: her kurulumda girersiniz.",
@@ -613,7 +614,8 @@
       "unpinConfirm": "En son sürüme güncelle",
       "pinnedTitle": "Sabitlenmiş sürüm",
       "pinnedBody": "{{name}} tek bir sürüme sabitlenmiş. Değiştirmek için istediğiniz sürümü adıyla kurun.",
-      "installOther": "Başka sürüm kur"
+      "installOther": "Başka sürüm kur",
+      "onlineDisabled": "Güncelleme paket dizininden indirir ve çevrimiçi kurulum kapalı."
     },
     "terminal": {
       "title": "Terminaldeki aelix (salt okunur)",

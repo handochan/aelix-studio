@@ -35,12 +35,15 @@ type CredentialsAsk = {
 };
 type EntryAsk = { entry: ExtensionEntry; resolve: (yes: boolean) => void };
 
-/** Choose a wheel on the host: the OS dialog in the app, the host file picker in the WebUI. */
-async function pickWheel(): Promise<string | undefined> {
+/**
+ * Choose a wheel on the host: the OS dialog in the app, the host file picker in the WebUI.
+ * `filterName` names the wheel filter in the dialog.
+ */
+async function pickWheelOnHost(filterName: string): Promise<string | undefined> {
   try {
     const files = await ipcBridge.dialog.showOpen.invoke({
       properties: ['openFile'],
-      filters: [{ name: 'Python wheel', extensions: ['whl'] }],
+      filters: [{ name: filterName, extensions: ['whl'] }],
     });
     return files?.[0];
   } catch {
@@ -56,6 +59,7 @@ const AgentExtensionsSettings: React.FC = () => {
   const [pinnedAsk, setPinnedAsk] = useState<EntryAsk>();
   const [install, setInstall] = useState<InstallPreset>();
   const [windows, setWindows] = useState(false);
+  const pickWheel = useCallback(() => pickWheelOnHost(t('settings.agentExtensions.install.wheelFilter')), [t]);
 
   const asks = useMemo<Asks>(
     () => ({
@@ -198,7 +202,8 @@ const AgentExtensionsSettings: React.FC = () => {
             </div>
           }
         />
-        {transport === 'insecure' && (
+        {/* Until the first reply the channel is not known: warned about as insecure. */}
+        {transport !== 'secure' && (
           <Alert
             type='warning'
             content={t('settings.agentExtensions.insecure.banner')}
@@ -246,6 +251,7 @@ const AgentExtensionsSettings: React.FC = () => {
               <ExtensionList
                 extensions={listing.extensions}
                 busy={busy}
+                onlineAllowed={onlineAllowed}
                 onUpgrade={(entry) => void actions.upgrade(entry)}
                 onUpdateFromFile={(entry) =>
                   void pickWheel().then((path) => path && actions.updateFromFile(entry, path))

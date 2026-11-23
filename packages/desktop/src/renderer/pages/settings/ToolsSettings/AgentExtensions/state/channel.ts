@@ -26,12 +26,16 @@ export const failureCode = (reply: StudioExtensionsReply): string | undefined =>
 /**
  * The screen's channel to the extension helper. It keeps the transport of the latest reply: a
  * reply without one (a refusal before the route, a lost answer) counts as `insecure`, and so
- * does the time before the first reply. Before the first request that carries a secret over an
- * insecure channel it asks the user once for this visit of the screen; after a yes, such
- * requests carry `acknowledgeInsecureTransport: true`. The yes lasts while the transport stays
- * the same and the screen stays open (a new visit is a new hook). A request the host still answers
- * `INSECURE_TRANSPORT` (the channel became insecure after the last reply) is asked about and
- * sent again once.
+ * does the time before the first reply.
+ *
+ * Right before every request that carries a secret it reads the transport again with a request
+ * that carries none (`get_settings`), so a channel that became insecure since the last reply is
+ * known before the secret leaves. Over an insecure channel it asks the user once for this visit
+ * of the screen; after a yes, such requests carry `acknowledgeInsecureTransport: true`. The yes
+ * lasts while the transport stays the same and the screen stays open (a new visit is a new
+ * hook). A request the host still answers `INSECURE_TRANSPORT` is never sent again without
+ * asking: the user is asked again, even for the verdict already confirmed, and it is sent again
+ * once.
  */
 export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
   const transport = useRef<StudioExtensionsTransport>('insecure');
@@ -58,11 +62,14 @@ export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
   const send = useCallback(
     async (command: StudioExtensionsRequest, options: SendOptions = {}): Promise<SendResult> => {
       if (!options.secret) return deliver(command);
+      // The channel as it is now, read with nothing secret in the request.
+      await deliver({ action: 'get_settings' });
       if (transport.current !== 'secure' && !(await acknowledge())) return 'declined';
       const reply = await deliver(
         transport.current === 'secure' ? command : { ...command, acknowledgeInsecureTransport: true }
       );
       if (failureCode(reply) !== 'INSECURE_TRANSPORT') return reply;
+      acknowledged.current = false;
       if (!(await acknowledge())) return 'declined';
       return deliver({ ...command, acknowledgeInsecureTransport: true });
     },

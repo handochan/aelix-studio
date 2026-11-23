@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git，需要時加上 @ref",
       "subdirectory": "子目錄",
       "subdirectoryPlaceholder": "儲存庫中的子目錄（選填）",
-      "windowsGit": "Windows 上暫不支援從 Git 安裝。",
       "fileNotice": "匯入檔案不會連線網路。",
       "wheel": "wheel 檔案",
+      "wheelFilter": "Python wheel 檔案",
       "wheelPlaceholder": "Studio 主機上 .whl 檔案的路徑",
       "choose": "選擇",
       "folderOption": "以同一資料夾中的其他 wheel 滿足相依套件"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "已被 Studio 政策關閉。",
       "proxy": "代理伺服器",
       "proxyHint": "線上安裝只使用此代理伺服器，不使用系統或環境的代理伺服器。",
+      "credentialsNeedAuthentication": "此位址包含使用者名稱與密碼。請開啟「代理伺服器需要密碼」後再儲存。",
       "proxyAuthentication": "代理伺服器需要密碼",
       "keychainHint": "使用者名稱和密碼可以儲存在系統鑰匙圈中。",
       "memoryOnlyHint": "此環境不會儲存，每次安裝時輸入。",
@@ -613,7 +614,8 @@
       "unpinConfirm": "更新到最新",
       "pinnedTitle": "固定版本",
       "pinnedBody": "{{name}} 固定在一個版本上。若要變更，請依名稱安裝想要的版本。",
-      "installOther": "安裝其他版本"
+      "installOther": "安裝其他版本",
+      "onlineDisabled": "更新需要從套件索引下載，但線上安裝已關閉。"
     },
     "terminal": {
       "title": "終端機 aelix（唯讀）",

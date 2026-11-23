@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git，需要时加 @ref",
       "subdirectory": "子目录",
       "subdirectoryPlaceholder": "仓库中的子目录（可选）",
-      "windowsGit": "Windows 上暂不支持从 Git 安装。",
       "fileNotice": "导入文件不会连接网络。",
       "wheel": "wheel 文件",
+      "wheelFilter": "Python wheel 文件",
       "wheelPlaceholder": "Studio 主机上 .whl 文件的路径",
       "choose": "选择",
       "folderOption": "用同一文件夹中的其他 wheel 满足依赖"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "已被 Studio 策略关闭。",
       "proxy": "代理",
       "proxyHint": "在线安装只使用此代理，不使用系统或环境代理。",
+      "credentialsNeedAuthentication": "此地址包含用户名和密码。请打开“代理需要密码”后再保存。",
       "proxyAuthentication": "代理需要密码",
       "keychainHint": "用户名和密码可以保存在系统钥匙串中。",
       "memoryOnlyHint": "此环境不保存，每次安装时输入。",
@@ -613,7 +614,8 @@
       "unpinConfirm": "更新到最新",
       "pinnedTitle": "固定版本",
       "pinnedBody": "{{name}} 固定在一个版本上。要更改，请按名称安装所需的版本。",
-      "installOther": "安装其他版本"
+      "installOther": "安装其他版本",
+      "onlineDisabled": "更新需要从软件包索引下载，但在线安装已关闭。"
     },
     "terminal": {
       "title": "终端 aelix（只读）",

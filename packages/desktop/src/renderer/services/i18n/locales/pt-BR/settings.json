@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git, com @ref se necessário",
       "subdirectory": "Subdiretório",
       "subdirectoryPlaceholder": "Subdiretório no repositório (opcional)",
-      "windowsGit": "A instalação pelo Git ainda não está disponível no Windows.",
       "fileNotice": "Importar um arquivo nunca se conecta à rede.",
       "wheel": "Arquivo wheel",
+      "wheelFilter": "Wheel do Python",
       "wheelPlaceholder": "Caminho de um arquivo .whl no host do Studio",
       "choose": "Escolher",
       "folderOption": "Usar outros wheels da mesma pasta para as dependências"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "Desligadas pela política do Studio.",
       "proxy": "Proxy",
       "proxyHint": "As instalações online usam somente este proxy. Proxies do sistema e do ambiente não são usados.",
+      "credentialsNeedAuthentication": "Este endereço tem usuário e senha. Ative “O proxy exige senha” para salvá-lo.",
       "proxyAuthentication": "O proxy exige senha",
       "keychainHint": "O usuário e a senha podem ser guardados no chaveiro do sistema.",
       "memoryOnlyHint": "Nada é guardado aqui: você os informa a cada instalação.",
@@ -613,7 +614,8 @@
       "unpinConfirm": "Atualizar para a mais recente",
       "pinnedTitle": "Versão fixada",
       "pinnedBody": "{{name}} está fixada em uma versão. Para mudar, instale pelo nome a versão desejada.",
-      "installOther": "Instalar outra versão"
+      "installOther": "Instalar outra versão",
+      "onlineDisabled": "A atualização baixa do índice de pacotes, e as instalações online estão desativadas."
     },
     "terminal": {
       "title": "aelix do terminal (somente leitura)",

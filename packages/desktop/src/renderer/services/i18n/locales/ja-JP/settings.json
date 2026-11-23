@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git、必要なら @ref",
       "subdirectory": "サブディレクトリ",
       "subdirectoryPlaceholder": "リポジトリ内のサブディレクトリ（任意）",
-      "windowsGit": "Windows ではまだ Git からインストールできません。",
       "fileNotice": "ファイルの取り込みはネットワークに接続しません。",
       "wheel": "wheel ファイル",
+      "wheelFilter": "Python wheel",
       "wheelPlaceholder": "Studio ホスト上の .whl ファイルのパス",
       "choose": "選択",
       "folderOption": "同じフォルダーの他の wheel で依存関係を満たす"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "Studio のポリシーでオフになっています。",
       "proxy": "プロキシ",
       "proxyHint": "オンラインインストールはこのプロキシのみを使います。システムや環境のプロキシは使いません。",
+      "credentialsNeedAuthentication": "このアドレスにはユーザー名とパスワードが含まれています。保存するには「プロキシにパスワードが必要」をオンにしてください。",
       "proxyAuthentication": "プロキシにパスワードが必要",
       "keychainHint": "ユーザー名とパスワードをシステムのキーチェーンに保存できます。",
       "memoryOnlyHint": "この環境では保存しません。インストールのたびに入力します。",
@@ -613,7 +614,8 @@
       "unpinConfirm": "最新に更新",
       "pinnedTitle": "固定されたバージョン",
       "pinnedBody": "{{name}} は 1 つのバージョンに固定されています。変更するには、目的のバージョンを名前でインストールしてください。",
-      "installOther": "別のバージョンをインストール"
+      "installOther": "別のバージョンをインストール",
+      "onlineDisabled": "更新はパッケージインデックスからダウンロードしますが、オンラインインストールがオフになっています。"
     },
     "terminal": {
       "title": "ターミナルの aelix（読み取り専用）",

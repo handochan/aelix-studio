@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git، در صورت نیاز با @ref",
       "subdirectory": "زیرپوشه",
       "subdirectoryPlaceholder": "زیرپوشه در مخزن (اختیاری)",
-      "windowsGit": "نصب از Git هنوز در Windows در دسترس نیست.",
       "fileNotice": "وارد کردن فایل هرگز به شبکه وصل نمی‌شود.",
       "wheel": "فایل wheel",
+      "wheelFilter": "فایل wheel پایتون",
       "wheelPlaceholder": "مسیر یک فایل ‎.whl روی میزبان Studio",
       "choose": "انتخاب",
       "folderOption": "برای وابستگی‌ها از wheelهای دیگر همان پوشه استفاده شود"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "با سیاست Studio خاموش شده است.",
       "proxy": "پراکسی",
       "proxyHint": "نصب برخط فقط از این پراکسی استفاده می‌کند. پراکسی‌های سیستم و محیط استفاده نمی‌شوند.",
+      "credentialsNeedAuthentication": "این نشانی نام کاربری و گذرواژه دارد. برای ذخیره، «پراکسی گذرواژه می‌خواهد» را روشن کنید.",
       "proxyAuthentication": "پراکسی گذرواژه می‌خواهد",
       "keychainHint": "نام کاربری و گذرواژه را می‌توان در جاکلیدی سیستم نگه داشت.",
       "memoryOnlyHint": "اینجا چیزی نگه داشته نمی‌شود: در هر نصب آن‌ها را وارد می‌کنید.",
@@ -613,7 +614,8 @@
       "unpinConfirm": "به‌روزرسانی به آخرین نسخه",
       "pinnedTitle": "نسخهٔ ثابت‌شده",
       "pinnedBody": "{{name}} روی یک نسخه ثابت شده است. برای تغییر آن، نسخهٔ دلخواه را با نام نصب کنید.",
-      "installOther": "نصب نسخهٔ دیگر"
+      "installOther": "نصب نسخهٔ دیگر",
+      "onlineDisabled": "به‌روزرسانی از نمایه بسته‌ها دانلود می‌کند و نصب برخط خاموش است."
     },
     "terminal": {
       "title": "aelix ترمینال (فقط خواندنی)",

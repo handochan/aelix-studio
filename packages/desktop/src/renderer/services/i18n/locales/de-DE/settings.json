@@ -534,9 +534,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git, bei Bedarf mit @ref",
       "subdirectory": "Unterverzeichnis",
       "subdirectoryPlaceholder": "Unterverzeichnis im Repository (optional)",
-      "windowsGit": "Die Installation aus Git ist unter Windows noch nicht verfügbar.",
       "fileNotice": "Der Import einer Datei verbindet sich nie mit dem Netzwerk.",
       "wheel": "Wheel-Datei",
+      "wheelFilter": "Python-Wheel",
       "wheelPlaceholder": "Pfad zu einer .whl-Datei auf dem Studio-Host",
       "choose": "Auswählen",
       "folderOption": "Abhängigkeiten aus anderen Wheels im selben Ordner nehmen"
@@ -569,6 +569,7 @@
       "onlineInstallLocked": "Durch eine Studio-Richtlinie ausgeschaltet.",
       "proxy": "Proxy",
       "proxyHint": "Online-Installationen verwenden nur diesen Proxy. System- und Umgebungs-Proxys werden nicht verwendet.",
+      "credentialsNeedAuthentication": "Diese Adresse enthält Benutzername und Passwort. Schalten Sie „Proxy braucht ein Passwort“ ein, um sie zu speichern.",
       "proxyAuthentication": "Proxy braucht ein Passwort",
       "keychainHint": "Benutzername und Passwort können im System-Schlüsselbund gespeichert werden.",
       "memoryOnlyHint": "Hier wird nichts gespeichert: Sie geben sie bei jeder Installation ein.",
@@ -603,7 +604,8 @@
       "unpinConfirm": "Auf neueste Version",
       "pinnedTitle": "Festgelegte Version",
       "pinnedBody": "{{name}} ist auf eine Version festgelegt. Um sie zu ändern, installieren Sie die gewünschte Version nach Name.",
-      "installOther": "Andere Version installieren"
+      "installOther": "Andere Version installieren",
+      "onlineDisabled": "Die Aktualisierung lädt aus dem Paketindex, und Online-Installationen sind aus."
     },
     "terminal": {
       "title": "aelix im Terminal (nur lesen)",

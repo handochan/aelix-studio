@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git, avec @ref si nécessaire",
       "subdirectory": "Sous-répertoire",
       "subdirectoryPlaceholder": "Sous-répertoire du dépôt (facultatif)",
-      "windowsGit": "L'installation depuis Git n'est pas encore disponible sous Windows.",
       "fileNotice": "L'import d'un fichier ne se connecte jamais au réseau.",
       "wheel": "Fichier wheel",
+      "wheelFilter": "Wheel Python",
       "wheelPlaceholder": "Chemin d'un fichier .whl sur l'hôte Studio",
       "choose": "Choisir",
       "folderOption": "Utiliser les autres wheels du même dossier pour les dépendances"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "Désactivées par une règle de Studio.",
       "proxy": "Proxy",
       "proxyHint": "Les installations en ligne n'utilisent que ce proxy. Les proxys du système et de l'environnement ne sont pas utilisés.",
+      "credentialsNeedAuthentication": "Cette adresse contient un nom d’utilisateur et un mot de passe. Activez « Le proxy demande un mot de passe » pour l’enregistrer.",
       "proxyAuthentication": "Le proxy demande un mot de passe",
       "keychainHint": "Le nom d'utilisateur et le mot de passe peuvent être conservés dans le trousseau du système.",
       "memoryOnlyHint": "Rien n'est conservé ici : vous les saisissez à chaque installation.",
@@ -613,7 +614,8 @@
       "unpinConfirm": "Mettre à jour vers la dernière",
       "pinnedTitle": "Version figée",
       "pinnedBody": "{{name}} est figée sur une version. Pour en changer, installez par son nom la version souhaitée.",
-      "installOther": "Installer une autre version"
+      "installOther": "Installer une autre version",
+      "onlineDisabled": "La mise à jour télécharge depuis l’index de paquets, et les installations en ligne sont désactivées."
     },
     "terminal": {
       "title": "aelix du terminal (lecture seule)",

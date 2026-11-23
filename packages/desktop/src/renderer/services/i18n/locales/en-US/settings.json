@@ -544,9 +544,9 @@
       "gitUrlPlaceholder": "https://host/owner/repo.git, with @ref if needed",
       "subdirectory": "Subdirectory",
       "subdirectoryPlaceholder": "Subdirectory in the repository (optional)",
-      "windowsGit": "Installing from Git is not available on Windows yet.",
       "fileNotice": "Importing a file never connects to the network.",
       "wheel": "Wheel file",
+      "wheelFilter": "Python wheel",
       "wheelPlaceholder": "Path to a .whl file on the Studio host",
       "choose": "Choose",
       "folderOption": "Use other wheels in the same folder for dependencies"
@@ -579,6 +579,7 @@
       "onlineInstallLocked": "Turned off by Studio policy.",
       "proxy": "Proxy",
       "proxyHint": "Online installs use this proxy only. System and environment proxies are not used.",
+      "credentialsNeedAuthentication": "This address has a user name and password. Turn on “Proxy needs a password” to save it.",
       "proxyAuthentication": "Proxy needs a password",
       "keychainHint": "The user name and password can be kept in the system keychain.",
       "memoryOnlyHint": "Nothing is kept here: you enter them for each install.",
@@ -613,7 +614,8 @@
       "unpinConfirm": "Update to latest",
       "pinnedTitle": "Pinned version",
       "pinnedBody": "{{name}} is pinned to one version. To change it, install the version you want by name.",
-      "installOther": "Install another version"
+      "installOther": "Install another version",
+      "onlineDisabled": "Updating downloads from the package index, and online installs are off."
     },
     "terminal": {
       "title": "Terminal aelix (read only)",
