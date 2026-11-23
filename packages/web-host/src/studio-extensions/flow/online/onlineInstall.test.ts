@@ -279,7 +279,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
       await writeFile(paths.record, JSON.stringify(record));
     };
     const upgrade = (extra = {}) => service.request(OWNER, { ...command, ...extra }).then(settle);
-    const planned = (version: string) => {
+    const planned = (version: string, url = 'https://files.invalid/upgrade.whl') => {
       runtime.pip = async (spec) => {
         const report = spec.args[spec.args.indexOf('--report') + 1];
         await writeFile(
@@ -292,7 +292,7 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
                 is_yanked: false,
                 metadata: { name, version },
                 download_info: {
-                  url: 'https://files.invalid/upgrade.whl',
+                  url,
                   archive_info: { hashes: { sha256: '1'.repeat(64) } },
                 },
               },
@@ -409,6 +409,103 @@ describe.skipIf(process.platform === 'win32')('online installs with the extensio
         expect(await listing()).toEqual(previous);
       }
     );
+
+    it('rejects a missing index source copy still listed in RECORD before probing', async () => {
+      expect((await installFromIndex()).phase).toBe('switched');
+      const { paths } = await savedGeneration();
+      await rm(path.join(paths.site, 'demo_one-1.0.0.dist-info', 'aelix_studio_index.json'));
+      const count = spawn.calls.length;
+      const before = await listing();
+      expect(await upgrade()).toMatchObject({ code: 'UPGRADE_SOURCE_MISMATCH' });
+      expect(spawn.calls.slice(count).some((call) => call.args.includes('--dry-run'))).toBe(false);
+      expect(await listing()).toEqual(before);
+    });
+
+    it('rejects a Git installation with a forged index origin before probing', async () => {
+      const url = 'https://git.invalid/demo.git';
+      const wheel = await writeWheel(path.join(scratch, 'wheels'), { name, version: '1.0.0' });
+      runtime.install = async (venv) => {
+        await installWheel(venv, wheel);
+        await writeFile(
+          path.join(venv.site, 'demo_one-1.0.0.dist-info', 'direct_url.json'),
+          JSON.stringify({ url, vcs_info: { vcs: 'git', commit_id: 'b'.repeat(40) } })
+        );
+        return 0;
+      };
+      const git = { action: 'install', source: { kind: 'git', url } };
+      expect((await settle(await service.request(OWNER, git))).phase).toBe('switched');
+      const { record, paths } = await savedGeneration();
+      record.distributions[name].origin = {
+        kind: 'index',
+        indexUrl: 'https://other.invalid/simple/',
+        requirement: name,
+      };
+      await writeFile(paths.record, JSON.stringify(record));
+      const count = spawn.calls.length;
+      expect(await upgrade()).toMatchObject({ code: 'UPGRADE_SOURCE_MISMATCH' });
+      expect(spawn.calls.slice(count).some((call) => call.args.includes('--dry-run'))).toBe(false);
+    });
+
+    it.each(['file', 'file and RECORD'])(
+      'rejects a load check that changes the %s before switching',
+      async (damage) => {
+        expect((await installFromIndex()).phase).toBe('switched');
+        const before = await listing();
+        const wheel = await writeWheel(path.join(scratch, 'wheels'), {
+          name,
+          version: '2.0.0',
+          files: { 'upgrade-data.txt': 'original' },
+        });
+        const original = createHash('sha256').update('original').digest('base64url');
+        let file = '';
+        let ledger = '';
+        runtime.install = async (venv) => {
+          await installWheel(venv, wheel);
+          file = path.join(venv.site, 'upgrade-data.txt');
+          ledger = path.join(venv.site, 'demo_one-2.0.0.dist-info', 'RECORD');
+          const text = (await readFile(ledger, 'utf8')).replace(
+            'upgrade-data.txt,,',
+            `upgrade-data.txt,sha256=${original},8`
+          );
+          await writeFile(ledger, text);
+          return 0;
+        };
+        let loads = 0;
+        runtime.beforeLoad = async () => {
+          loads += 1;
+          if (loads !== 2) return;
+          await writeFile(file, 'modified');
+          if (damage === 'file and RECORD') {
+            const changed = createHash('sha256').update('modified').digest('base64url');
+            await writeFile(ledger, (await readFile(ledger, 'utf8')).replace(original, changed));
+          }
+        };
+        planned('2.0.0');
+        expect(await upgrade()).toMatchObject({ phase: 'failed', code: 'GENERATION_MODIFIED' });
+        expect(loads).toBe(2);
+        expect(await listing()).toEqual(before);
+      }
+    );
+
+    it('hands a signed archive to pip privately and masks failure output', async () => {
+      expect((await installFromIndex()).phase).toBe('switched');
+      const url = 'https://files.invalid/upgrade.whl?sig=fixture-signature';
+      const digest = '1'.repeat(64);
+      planned('2.0.0', url);
+      runtime.install = async (_venv, target, _spec, print) => {
+        expect(target).toBe(`demo-one @ ${url}#sha256=${digest}`);
+        print(`Download failed at ${url}#sha256=${digest} and /upgrade.whl?sig=fixture-signature\n`);
+        return 1;
+      };
+      const start = spawn.calls.length;
+      const state = await upgrade();
+      expect(state).toMatchObject({ phase: 'failed', code: 'INSTALLER_FAILED' });
+      const applied = spawn.calls.slice(start).find((call) => call.args.includes('--studio-archive-stdin'));
+      expect(applied).toBeDefined();
+      expect(JSON.stringify(applied)).not.toContain('fixture-signature');
+      expect(JSON.stringify(state)).not.toMatch(/fixture-signature|sha256=/);
+      expect(state.output).toContain('/upgrade.whl?***');
+    });
 
     it('checks an installed local version against a mutated legacy requirement', async () => {
       await installVersion('1.0.0', name);

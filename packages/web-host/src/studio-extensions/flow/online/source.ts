@@ -240,8 +240,14 @@ export async function verifyUpgradeSource(
   if (source.kind !== 'index' || origin.kind !== 'index') throw mismatch();
   const { name, specifier } = indexRequirement(source);
   if (name !== installed.name || !acceptsInstalledVersion(specifier, installed.version)) throw mismatch();
+  // Pip only writes PEP 610 metadata for a direct source. Index upgrades remove the
+  // temporary direct-archive metadata before publishing their replacement.
+  if ((await installedMetadata(site, installed.info, 'direct_url.json')) !== undefined) throw mismatch();
   const saved = await installedMetadata(site, installed.info, INDEX_ORIGIN_FILE);
-  if (saved !== undefined) {
+  if (saved === undefined) {
+    const proof = path.join(site, installed.info, INDEX_ORIGIN_FILE);
+    if (installed.files.some((file) => path.resolve(site, file) === proof)) throw mismatch();
+  } else {
     const local = saved as { indexUrl?: unknown; requirement?: unknown } | null;
     if (local?.indexUrl !== onlineIndex(source) || local?.requirement !== origin.requirement) throw mismatch();
   }

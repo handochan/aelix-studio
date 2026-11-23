@@ -239,6 +239,18 @@ describe('masking credentials in output', () => {
     expect(elapsed(() => redactUrlCredentials(text))).toBeLessThan(BOUND_MS);
   });
 
+  it('masks signed query and fragment across chunks, including nested URLs', () => {
+    const text =
+      'get https://h/file?inside=https://inner/x?secret=nested&sig=private#hidden and https://h/file#hash end';
+    const expected = 'get https://h/file?*** and https://h/file#*** end';
+    for (let split = 1; split < text.length; split += 1) {
+      const tail = new OutputTail(4096, redactUrlCredentials);
+      tail.push(text.slice(0, split));
+      tail.push(text.slice(split));
+      expect(tail.toString()).toBe(expected);
+    }
+  });
+
   it('masks what a real child prints in pieces before the result is cut', async () => {
     const script =
       'const [a, b] = [process.argv[1].slice(0, 30), process.argv[1].slice(30)];' +

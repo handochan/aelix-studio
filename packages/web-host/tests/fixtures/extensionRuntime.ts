@@ -486,7 +486,12 @@ export function fakeRuntime(options: FakeRuntimeOptions): ReturnType<typeof scri
     if (inline.includes('aelix-studio-bounded-index-pip') && !args.includes('--dry-run')) {
       finish(child, async () =>
         options.install
-          ? options.install(venvOf(spec.command, platform), args.at(-1) ?? '', spec, (text) => child.print(text))
+          ? options.install(
+              venvOf(spec.command, platform),
+              args.includes('--studio-archive-stdin') ? child.written.join('').trimEnd() : (args.at(-1) ?? ''),
+              spec,
+              (text) => child.print(text)
+            )
           : 2
       );
       return;

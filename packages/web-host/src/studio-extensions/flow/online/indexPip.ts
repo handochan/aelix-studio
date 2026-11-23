@@ -20,6 +20,9 @@ from pip._vendor.requests.models import Response
 
 index_limit, report_limit = map(int, sys.argv[1:3])
 args = sys.argv[3:]
+# Pass the private URL unchanged to pip in-process. It never becomes a command-line argument.
+if args == ["install", "--studio-archive-stdin"]:
+    args[-1] = sys.stdin.readline().rstrip("\\n")
 
 exceeded = False
 
@@ -70,7 +73,7 @@ status = main(args)
 sys.exit(${PIP_RESPONSE_LIMIT_EXIT} if exceeded else status)
 `;
 
-export type ResolvedArchive = { version: string; requirement: string };
+export type ResolvedArchive = { version: string; requirement: string; privateFields: string[] };
 
 type RequestedArchive = {
   requested?: unknown;
@@ -121,7 +124,7 @@ export function requestedArchive(report: unknown): RequestedArchive {
   return parsed.install[0];
 }
 
-export function archiveRequirement(name: string, archive: RequestedArchive): string {
+export function archiveRequirement(name: string, archive: RequestedArchive): Omit<ResolvedArchive, 'version'> {
   const value = archive.download_info?.url;
   const url = typeof value === 'string' && value.length <= 4096 && !/[\s\\]/.test(value) ? URL.parse(value) : null;
   const hashes = archive.download_info?.archive_info?.hashes;
@@ -145,5 +148,5 @@ export function archiveRequirement(name: string, archive: RequestedArchive): str
     throw new ExtensionFailure('REQUEST_MISMATCH', ['pip did not identify a verifiable archive']);
   const algorithm = supported[0];
   url.hash = `${algorithm}=${String(hashes?.[algorithm]).toLowerCase()}`;
-  return `${name} @ ${url.href}`;
+  return { requirement: `${name} @ ${url.href}`, privateFields: [url.search.slice(1), url.hash.slice(1)] };
 }

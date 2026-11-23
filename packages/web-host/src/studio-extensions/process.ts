@@ -85,15 +85,16 @@ const SCHEME_CHARACTER = /[a-z0-9+.-]/i;
 const LETTER = /[a-z]/i;
 
 /**
- * Hide credentials in URLs inside tool output before it reaches a reply: Git prints remote
- * and submodule addresses as the repository wrote them, and those can carry a token.
+ * Hide credentials, queries and fragments in URLs before tool output reaches a reply.
+ * Git and pip print addresses as written, including signed download links.
  *
  * No list of allowed characters decides where a user part ends: RFC 3986 allows quotes,
  * parentheses and the other sub-delimiters in it, and output may hold a URL as written. After
  * `scheme://`, the authority runs to the first `/`, `?`, `#` or whitespace, or to the next URL,
  * or the end; everything before its last `@` is the user part. That is masked whole, except
  * that a plain SSH account name without a password (`ssh://git@host`) stays, since it says
- * which account was used.
+ * which account was used. A query or fragment ends at whitespace even when its value
+ * contains another URL or punctuation that looks like the end of a quoted field.
  *
  * Fail-safe: ambiguous spans are masked; over-masking is accepted over leaking. Plain output
  * does not say where a URL ends, so text after it up to such a delimiter (a JSON field that
@@ -135,6 +136,14 @@ export function redactUrlCredentials(text: string): string {
     const keep = /^(?:git\+)?ssh$/i.test(text.slice(url.scheme, url.from - 3)) && !authority.slice(0, at).includes(':');
     masked += text.slice(cursor, url.from) + (at < 0 || keep ? authority : '***' + authority.slice(at));
     cursor = end;
+    let marker = end;
+    while (marker < bound && !isWhitespace(text.charCodeAt(marker)) && text[marker] !== '?' && text[marker] !== '#')
+      marker += 1;
+    if (marker < bound && (text[marker] === '?' || text[marker] === '#')) {
+      masked += text.slice(end, marker + 1) + '***';
+      cursor = marker + 1;
+      while (cursor < text.length && !isWhitespace(text.charCodeAt(cursor))) cursor += 1;
+    }
   }
   return masked + text.slice(cursor);
 }
@@ -255,7 +264,7 @@ export type RunOptions = {
   signal?: AbortSignal;
   /** How much of the combined output to keep. */
   tailLimit?: number;
-  /** Mask credentials in URLs (`redactUrlCredentials`) before the output is cut to its tail. */
+  /** Mask sensitive URL parts (`redactUrlCredentials`) before the output is cut to its tail. */
   redact?: boolean;
   /**
    * With `redact`: texts masked wherever they appear, inside a URL or not (a relay token in its

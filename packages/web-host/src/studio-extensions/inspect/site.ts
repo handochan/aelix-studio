@@ -207,10 +207,10 @@ async function verifyDistribution(
   signal?: AbortSignal
 ) {
   const file = recordPath(site, distribution.info);
-  const text = await readFile(file, 'utf8').catch((): undefined => undefined);
-  if (text === undefined || text === '')
-    throw new ExtensionFailure('GENERATION_MODIFIED', [`${distribution.name} has no usable RECORD`]);
-  const records = rows(text);
+  const data = await readFile(file).catch((): undefined => undefined);
+  if (!data?.length || sha256(data) !== distribution.recordSha256)
+    throw new ExtensionFailure('GENERATION_MODIFIED', [`${distribution.name} has a missing or changed RECORD`]);
+  const records = rows(data.toString('utf8'));
   for (let offset = 0; offset < records.length; offset += 32) {
     if (signal?.aborted) throw new ExtensionFailure('CANCELLED');
     // oxlint-disable-next-line no-await-in-loop -- bounded file descriptor and I/O usage

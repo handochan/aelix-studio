@@ -530,6 +530,8 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
   publish('1.0');
   let rearrangeIndex = false;
   let oversized = false;
+  let oversizedRequests = 0;
+  const signature = 'fixture-download-signature';
   let indexRequests = 0;
   let swapRequested = 0;
   const swapped = buildWheel({ name, version: '1.2', prelude: 'ARTIFACT = "alternate"' });
@@ -540,9 +542,11 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
     filename: name.replaceAll('-', '_') + '-1.1-2-py3-none-any.whl',
   });
   const server = createServer((request, response) => {
-    const url = request.url ?? '';
-    const wheel = wheels.get(url.slice(1));
+    const address = new URL(request.url ?? '/', 'http://127.0.0.1');
+    const url = address.pathname;
+    const wheel = address.searchParams.get('sig') === signature ? wheels.get(url.slice(1)) : undefined;
     if (url === `/simple/${name}/` && oversized) {
+      oversizedRequests++;
       response.writeHead(200, { 'content-type': 'text/html' });
       response.end(' '.repeat(8 * 1024 * 1024 + 1));
     } else if (url === `/simple/${name}/` && wheels.size > 0) {
@@ -550,7 +554,8 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
       response.writeHead(200, { 'content-type': 'text/html' });
       if (rearrangeIndex && indexRequests > 1) {
         response.end(`<a data-yanked="test" href="/${yanked.filename}">${yanked.filename}</a>`);
-      } else response.end([...wheels.keys()].map((file) => `<a href="/${file}">${file}</a>`).join('\n'));
+      } else
+        response.end([...wheels.keys()].map((file) => `<a href="/${file}?sig=${signature}">${file}</a>`).join('\n'));
     } else if (url === '/' + yanked.filename) response.writeHead(200).end(yanked.data);
     else if (wheel && url === '/' + swapped.filename && ++swapRequested > 1) response.writeHead(200).end(swapped.data);
     else if (wheel) response.writeHead(200).end(wheel);
@@ -593,8 +598,22 @@ async function qualifyUpgrades(payload: string, scratch: string, checks: string[
     const noChange = await change({ action: 'upgrade', name }, 'already_latest');
     assert.equal(noChange.generation, undefined);
     assert.deepEqual(await list(), updated);
+
+    publish('1.2');
+    const hashMismatch = await change({ action: 'upgrade', name }, 'failed');
+    assert.equal(hashMismatch.code, 'INSTALLER_FAILED');
+    assert.equal(swapRequested, 2, 'the second request must return the substituted file');
+    assert.match(hashMismatch.output ?? '', /THESE PACKAGES DO NOT MATCH THE HASHES/i);
+    assert(!JSON.stringify(hashMismatch).includes(signature));
+    assert.deepEqual(await list(), updated);
+
+    oversized = true;
+    const tooLarge = await change({ action: 'upgrade', name }, 'failed');
+    assert.equal(tooLarge.code, 'UPGRADE_RESPONSE_TOO_LARGE');
+    assert.equal(oversizedRequests, 1, 'the oversized index response must be served');
+    assert.deepEqual(await list(), updated);
     checks.push(
-      'index upgrade: hashed selection survives index mutation, bounded response rejects, already latest leaves pointer unchanged'
+      'index upgrade: selected archive survives index mutation, swapped bytes and oversized response are rejected, already latest leaves the pointer unchanged'
     );
 
     if (windows) return; // The helper refuses Git on Windows.

@@ -432,7 +432,8 @@ function runPip(
   python: string,
   installer: InstallerEnvironment,
   args: string[],
-  limitIndexResponses = false
+  limitIndexResponses = false,
+  input?: string
 ): Promise<RunResult> {
   const pip = limitIndexResponses
     ? ['-c', BOUNDED_INDEX_PIP, String(INDEX_RESPONSE_LIMIT), String(RESOLUTION_REPORT_LIMIT)]
@@ -440,7 +441,7 @@ function runPip(
   return runToExit(
     context.spawn,
     { command: python, args: ['-P', '-B', ...pip, ...args], ...installer },
-    { timeoutMs: context.timeouts.installerMs, signal: context.signal, redact: true, secrets: context.secrets }
+    { timeoutMs: context.timeouts.installerMs, signal: context.signal, redact: true, secrets: context.secrets, input }
   );
 }
 
@@ -492,10 +493,10 @@ async function resolveIndexUpgrade(
   const reported = parseIndexRequirement(name);
   if (reported?.name !== wanted || reported.specifier || typeof version !== 'string' || !parseVersion(version))
     throw new ExtensionFailure('REQUEST_MISMATCH', ['pip resolved an unexpected name or version']);
-  const requirement = archiveRequirement(wanted, target);
+  const archive = archiveRequirement(wanted, target);
   if (context.signal?.aborted) throw new ExtensionFailure('CANCELLED');
   if (performance.now() >= deadline) throw new ExtensionFailure('TIMEOUT');
-  return { version, requirement };
+  return { version, ...archive };
 }
 
 function refuseSizeLimit(result: RunResult): void {
@@ -727,10 +728,14 @@ async function commitCandidate(
   context: FlowContext,
   lock: MutationLock,
   base: PointerState,
-  record: GenerationRecord
+  record: GenerationRecord,
+  snapshot: SiteSnapshot
 ): Promise<void> {
   const { layout } = context;
   const revision = base.pointer?.revision ?? 0;
+  // Check against the pre-load ledger: a load check may change an installed file or its RECORD.
+  const paths = generationPaths(layout, record.generation, record.binding.pythonMinor, context.platform);
+  await verifyRecordFiles(paths.site, paths.venv, snapshot, context.signal);
   await writeGenerationRecord(layout, record);
   const latest = await readPointer(layout);
   if (
@@ -929,11 +934,12 @@ export async function mutate(
     }
     const installer = resolvedArchive
       ? await runPip(
-          online,
+          { ...online, secrets: [...(online.secrets ?? []), ...resolvedArchive.privateFields] },
           candidate.paths.python,
           installerEnvironment,
-          ['install', resolvedArchive.requirement],
-          true
+          ['install', '--studio-archive-stdin'],
+          true,
+          resolvedArchive.requirement + '\n'
         )
       : await runManagement(
           online,
@@ -1047,7 +1053,7 @@ export async function mutate(
       await removeFromState(layout, lock, checkout.staging);
       checkout = undefined;
     }
-    await commitCandidate(guarded, lock, base, record);
+    await commitCandidate(guarded, lock, base, record, finalSnapshot);
     unfinished = undefined;
     return { generation: candidate.id, revision: revision + 1 };
   } catch (error) {
@@ -1115,13 +1121,15 @@ function assertSafeScan(scan: Awaited<ReturnType<typeof scanGeneration>>): SiteS
   return scan.snapshot;
 }
 
+type VerifiedRebound = { record: GenerationRecord; snapshot: SiteSnapshot };
+
 async function verifyReboundCandidate(
   context: FlowContext,
   candidate: Candidate,
   old: GenerationRecord,
   facts: BundleFacts,
   replay?: Awaited<ReturnType<typeof replayPlan>>
-): Promise<GenerationRecord> {
+): Promise<VerifiedRebound> {
   const { bundle, layout, platform } = context;
   const env = managementEnvironment(context.base, platform, {
     agentDirectory: candidate.paths.agent,
@@ -1182,7 +1190,10 @@ async function verifyReboundCandidate(
   );
   requireSuccess(dependencies, { 1: 'VERIFICATION_FAILED' }, 'the dependency check');
   const verified = await verifyCandidate(context, candidate, env, snapshot, expected);
-  return describeCandidate(context, candidate, old, old.operation, distributions, snapshot, verified, new Date());
+  return {
+    record: describeCandidate(context, candidate, old, old.operation, distributions, snapshot, verified, new Date()),
+    snapshot,
+  };
 }
 
 /** Try to move a whole generation to the current bundle. The old generation stays intact. */
@@ -1191,7 +1202,7 @@ async function rebind(
   lock: MutationLock,
   base: PointerState,
   old: GenerationRecord
-): Promise<GenerationRecord | undefined> {
+): Promise<VerifiedRebound | undefined> {
   const facts = await readBundleFacts(context.bundle);
   const current = context.bundle.binding;
   const canCopy = old.binding.target === current.target && old.binding.pythonMinor === current.pythonMinor;
@@ -1230,10 +1241,11 @@ async function switchRebound(
   old: GenerationRecord
 ): Promise<GenerationRecord | undefined> {
   const guarded = underLock(context, lock);
-  const record = await rebind(guarded, lock, base, old);
-  if (!record) return undefined;
+  const rebound = await rebind(guarded, lock, base, old);
+  if (!rebound) return undefined;
+  const { record, snapshot } = rebound;
   try {
-    await commitCandidate(guarded, lock, base, record);
+    await commitCandidate(guarded, lock, base, record, snapshot);
   } catch (error) {
     if (!(await inEffect(context.layout, record.generation)))
       await lock.remove(`generations/${record.generation}`).catch(() => {});

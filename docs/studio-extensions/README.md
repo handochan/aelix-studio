@@ -325,10 +325,12 @@ requirement 필드가 없던 개발·시험 세대는 `PIN_UNKNOWN`으로 답한
   `UPGRADE_SOURCE_MISMATCH`로 안내하고 재설치로 출처를 갱신한다.
 - 이름 출처는 설치된 배포판 이름과 버전이 requirement에 맞는지 확인한다. Studio 설정에는 index
   허용 목록이 없다. 새 설치의 배포판에 남긴 index·requirement와 세대 기록을 대조한다. 이 메타데이터가
-  없는 이전 설치의 index는 URL 형식과 기존 온라인 설치 정책만 확인할 수 있다.
+  없는 이전 설치의 index는 URL 형식과 기존 온라인 설치 정책만 확인할 수 있다. `RECORD`에 사본이
+  있는데 파일이 없거나 index 출처에 PEP 610 직접 출처가 남아 있으면 `UPGRADE_SOURCE_MISMATCH`다.
 - 이름 출처는 잠금 아래의 임시 venv와 번들 pip로 저장된 index에서 조회한다. 설치된 패키지를 무시하므로
   index 접속 실패가 "이미 최신"으로 처리되지 않는다. 조회에서 선택한 파일의 URL과 강한 hash로 후보를
-  설치한다. 동일 버전이 다른 파일로 교체되거나 yank돼도 index로 돌아가 대상을 다시 고르지 않는다.
+  설치한다. 같은 버전의 파일이 교체되거나 yank돼도 조회에서 얻은 파일만 시도한다. 다운로드 URL은 pip에
+  전용 표준 입력으로 넘기고, 진단 출력의 URL에서 query와 fragment를 가린다.
   업그레이드 pip의 Simple API 응답은 압축을 푼 뒤 8 MiB, `resolution.json`은 1 MiB까지 받는다.
   조회와 보고서 읽기·해석에 같은 시간 제한을 적용한다. 상한을 넘기면 `UPGRADE_RESPONSE_TOO_LARGE`다.
 - Git은 원래 URL의 ref를 다시 해석한다. 저장한 commit과 같은 길이의 full SHA ref는 `PINNED`다.
@@ -344,7 +346,8 @@ requirement 필드가 없던 개발·시험 세대는 `PIN_UNKNOWN`으로 답한
 ### 5.5 전환 전 검증
 
 전환 전에 후보의 모든 배포판에서 `RECORD`가 가리키는 파일이 실제로 후보 안에 있는지 확인한다.
-`RECORD`에 hash가 있으면 파일 내용도 대조한다. 스크립트 실행 경로를 새 세대에 맞게 다시 쓰면
+`RECORD`에 hash가 있으면 파일 내용도 대조한다. 마지막 로드 검사 뒤에 같은 `RECORD`와 파일을
+포인터 전환 직전에 다시 확인한다. 스크립트 실행 경로를 새 세대에 맞게 다시 쓰면
 같은 변경에서 hash를 갱신한다. 세대 복사에서 제외하는 bytecode cache는 해당 `RECORD` 행도 정리한다.
 Git 업그레이드 대상과 다른 배포판이 파일을 같이 기록하면 `SHARED_DISTRIBUTION_FILES`로 거절한다.
 

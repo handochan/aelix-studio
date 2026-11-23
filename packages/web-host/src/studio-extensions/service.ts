@@ -22,7 +22,7 @@ import {
 } from './flow/online/proxy/credentials.js';
 import { parseSettingsChange, readSettings, type SettingsChange, type StoredSettings } from './flow/online/settings.js';
 import { parseOnlineSource } from './flow/online/source.js';
-import { spawnChild, windowsChildSpawn, type Spawn } from './process.js';
+import { redactUrlCredentials, spawnChild, windowsChildSpawn, type Spawn } from './process.js';
 import { locateLayout, resolveBundle, verifyLayout } from './store/layout.js';
 import { isManagedId } from './launch/managedCatalog.js';
 import {
@@ -95,7 +95,7 @@ const FINISHED = new Set(['switched', 'already_latest', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
   ok: false,
   code,
-  ...(detail && detail.length > 0 ? { detail } : {}),
+  ...(detail && detail.length > 0 ? { detail: detail.map(redactUrlCredentials) } : {}),
 });
 const isPath = (value: unknown): value is string =>
   typeof value === 'string' && value.length <= 4096 && !value.includes('\0') && path.isAbsolute(value);
@@ -191,7 +191,11 @@ export class ExtensionService {
 
   /** An unexpected error: its text may hold paths, so it goes to the log and the reply carries the code only. */
   private unexpected(error: unknown): ExtensionReply {
-    (this.options.log ?? console.error)('[studio-extensions] unexpected error', error);
+    // Error causes and extra properties can hold raw process arguments. Log only scrubbed text.
+    const message = error instanceof Error ? error.message : typeof error === 'string' ? error : 'Unknown error';
+    const logged = new Error(redactUrlCredentials(message));
+    if (error instanceof Error && error.stack) logged.stack = redactUrlCredentials(error.stack);
+    (this.options.log ?? console.error)('[studio-extensions] unexpected error', logged);
     return fail('INTERNAL');
   }
 
@@ -333,8 +337,8 @@ export class ExtensionService {
         action: tracked.state.action,
         phase: code === 'CANCELLED' ? 'cancelled' : 'failed',
         code,
-        ...(detail.length > 0 ? { detail } : {}),
-        ...(output ? { output } : {}),
+        ...(detail.length > 0 ? { detail: detail.map(redactUrlCredentials) } : {}),
+        ...(output ? { output: redactUrlCredentials(output) } : {}),
       };
     };
     try {
