@@ -7,9 +7,8 @@ import {
   listDirectory,
   mapLimited,
   readBounded,
-  realpathOf,
+  realpathEntry,
   statEntry,
-  statOf,
   type Scan,
 } from './files.js';
 
@@ -98,7 +97,8 @@ async function distributionsOf(
 
 /**
  * The site directories of the environment at `root` that are really inside it (normally one).
- * `lib` itself is resolved and checked to be inside `root` before it is listed.
+ * `lib` itself is resolved and checked to be inside `root` before it is listed. A directory on
+ * the way that cannot be read makes it `unreadable`, not an environment without the CLI.
  */
 async function sitePackages(scan: Scan, root: string): Promise<{ sites: string[]; truncated: boolean } | 'unreadable'> {
   const candidates: string[] = [];
@@ -106,11 +106,9 @@ async function sitePackages(scan: Scan, root: string): Promise<{ sites: string[]
   // The layout follows the platform; paths are joined by this host's rules, as they are read here.
   if (scan.platform === 'win32') candidates.push(path.join(root, 'Lib', 'site-packages'));
   else {
-    const libPath = path.join(root, 'lib');
-    const entry = await statEntry(scan, libPath);
-    if (entry === 'unreadable') return 'unreadable';
-    const lib = entry === 'absent' ? undefined : await realpathOf(scan, libPath);
-    if (lib && isWithin(lib, root, scan.platform)) {
+    const lib = await realpathEntry(scan, path.join(root, 'lib'));
+    if (lib === 'unreadable') return 'unreadable';
+    if (lib !== 'absent' && isWithin(lib, root, scan.platform)) {
       const listing = await listDirectory(scan, lib, 16);
       if (listing === 'unreadable') return 'unreadable';
       if (listing !== 'absent') {
@@ -123,10 +121,13 @@ async function sitePackages(scan: Scan, root: string): Promise<{ sites: string[]
   const sites: string[] = [];
   for (const candidate of candidates) {
     // eslint-disable-next-line no-await-in-loop -- a handful at most, in order
-    const real = await realpathOf(scan, candidate);
-    if (!real || !isWithin(real, root, scan.platform)) continue;
+    const real = await realpathEntry(scan, candidate);
+    if (real === 'unreadable') return 'unreadable';
+    if (real === 'absent' || !isWithin(real, root, scan.platform)) continue;
     // eslint-disable-next-line no-await-in-loop -- as above
-    if ((await statOf(scan, real))?.isDirectory()) sites.push(real);
+    const entry = await statEntry(scan, real);
+    if (entry === 'unreadable') return 'unreadable';
+    if (entry !== 'absent' && entry.isDirectory()) sites.push(real);
   }
   return { sites, truncated };
 }
@@ -217,7 +218,9 @@ async function readSiteForCli(scan: Scan, site: string, root: string): Promise<C
  * `unreadable` when the directories or the CLI's own metadata cannot be read.
  */
 export async function readCliVenv(scan: Scan, root: string): Promise<CliVenv | 'not_a_venv' | 'no_cli' | 'unreadable'> {
-  if (!(await statOf(scan, path.join(root, 'pyvenv.cfg')))?.isFile()) return 'not_a_venv';
+  const config = await statEntry(scan, path.join(root, 'pyvenv.cfg'));
+  if (config === 'unreadable') return 'unreadable';
+  if (config === 'absent' || !config.isFile()) return 'not_a_venv';
   const found = await sitePackages(scan, root);
   if (found === 'unreadable') return 'unreadable';
   let unreadable = false;
@@ -231,9 +234,11 @@ export async function readCliVenv(scan: Scan, root: string): Promise<CliVenv | '
 }
 
 /**
- * Whether `root` holds the CLI, from directory names only (no file is read): how a tool
- * directory's other tools are passed over without reading their metadata. `truncated` when a
- * directory had more entries than this looks at, so the CLI may have been missed.
+ * Whether `root` holds the CLI: how a tool directory's other tools are passed over without
+ * reading their metadata. Distributions are named as `readCliVenv` names them: by directory
+ * name, and by the metadata `Name` only where the suffix is not written exactly (CPython).
+ * `truncated` when a directory had more entries than this looks at, so the CLI may have been
+ * missed.
  */
 export async function holdsCli(
   scan: Scan,
@@ -253,9 +258,11 @@ export async function holdsCli(
       unreadable = true;
       continue;
     }
-    truncated ||= listing.truncated;
-    if (candidatesOf(listing.names).some((entry) => CLI_DISTRIBUTIONS.has(entry.normalized)))
-      return { held: 'yes', truncated };
+    const candidates = candidatesOf(listing.names);
+    truncated ||= listing.truncated || candidates.length > DISTRIBUTION_LIMIT;
+    // eslint-disable-next-line no-await-in-loop -- as above
+    const { distributions } = await distributionsOf(scan, site, root, candidates.slice(0, DISTRIBUTION_LIMIT));
+    if (distributions.some((entry) => CLI_DISTRIBUTIONS.has(entry.normalized))) return { held: 'yes', truncated };
   }
   return { held: unreadable ? 'unreadable' : 'no', truncated };
 }

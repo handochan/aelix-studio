@@ -11,167 +11,188 @@ const LINE_LIMIT = 4096;
 /** What `[tool.aelix] extensions` says, read without a TOML parser. */
 export type DeclaredExtensions = { paths: string[] } | 'none' | 'unknown';
 
-/** A TOML key or header part without its quotes and surrounding space; `quoted` when it had them. */
-function keyPart(raw: string): { name: string; quoted: boolean } {
-  const part = raw.trim();
-  const quoted = part.length >= 2 && (part[0] === '"' || part[0] === "'") && part.at(-1) === part[0];
-  return { name: quoted ? part.slice(1, -1) : part, quoted };
-}
+/** Declared paths whose existence is checked; more make the answer `truncated`. */
+export const DECLARED_LIMIT = 64;
 
-/** The text before a `#` comment, for a line whose only quotes are inside strings. */
-function withoutComment(line: string): string {
+/** One line of a `pyproject.toml` as this reader sees it, in one pass over its characters. */
+type Line = {
+  /** The line without its comment, trimmed. */
+  text: string;
+  /** Where its first `=` outside strings is, or -1. */
+  equals: number;
+  /** `[` and `{` opened minus closed outside strings: above 0, the value goes on below. */
+  depth: number;
+  /** A basic string on it holds a `\` escape. */
+  escape: boolean;
+  /** A string is still open at its end (a one-line string that does not close). */
+  open: boolean;
+};
+
+function scanLine(raw: string): Line {
+  const line = raw.trim();
   let quote = '';
+  let equals = -1;
+  let depth = 0;
+  let escape = false;
+  let end = line.length;
   for (let index = 0; index < line.length; index += 1) {
     const char = line[index];
     if (quote) {
-      if (char === '\\' && quote === '"') index += 1;
-      else if (char === quote) quote = '';
+      if (quote === '"' && char === '\\') {
+        escape = true;
+        index += 1;
+      } else if (char === quote) quote = '';
     } else if (char === '"' || char === "'") quote = char;
-    else if (char === '#') return line.slice(0, index);
+    else if (char === '#') {
+      end = index;
+      break;
+    } else if (char === '=' && equals < 0) equals = index;
+    else if (char === '[' || char === '{') depth += 1;
+    else if (char === ']' || char === '}') depth -= 1;
   }
-  return line;
+  return { text: line.slice(0, end).trimEnd(), equals, depth, escape, open: quote !== '' };
 }
 
-/**
- * Reads the strings of a TOML array fed after its `[`, a piece at a time, in one pass: basic
- * (`"…"`, with `\\` and `\"`) and literal (`'…'`) strings; other values are skipped. A nested
- * array or another escape makes it `unknown`; `closed` once its `]` came.
- */
-class ArrayReader {
-  readonly strings: string[] = [];
-  state: 'open' | 'closed' | 'unknown' = 'open';
-  private quote = '';
-  private value = '';
-  private escaped = false;
-  private comment = false;
+const BARE_KEY = /[A-Za-z0-9_-]/;
 
-  feed(text: string): void {
-    for (const char of text) {
-      if (this.state !== 'open') return;
-      if (this.comment) {
-        if (char === '\n') this.comment = false;
-      } else if (this.quote) {
-        if (this.escaped) {
-          if (char !== '\\' && char !== '"') this.state = 'unknown';
-          this.value += char;
-          this.escaped = false;
-        } else if (this.quote === '"' && char === '\\') this.escaped = true;
-        else if (char === this.quote) {
-          this.strings.push(this.value);
-          this.quote = '';
-          this.value = '';
-        } else if (char === '\n') this.state = 'unknown';
-        else this.value += char;
-      } else if (char === ']') this.state = 'closed';
-      else if (char === '[') this.state = 'unknown';
-      else if (char === '"' || char === "'") this.quote = char;
-      else if (char === '#') this.comment = true;
+/**
+ * The names of a TOML key or table name (`a.b`, `"a".'b'`, with space around the dots), and
+ * whether a part was quoted; undefined when it is not one.
+ */
+function keyPath(text: string): { names: string[]; quoted: boolean } | undefined {
+  const names: string[] = [];
+  let quoted = false;
+  let index = 0;
+  const space = (): void => {
+    while (text[index] === ' ' || text[index] === '\t') index += 1;
+  };
+  for (;;) {
+    space();
+    const char = text[index];
+    if (char === '"' || char === "'") {
+      const close = text.indexOf(char, index + 1);
+      if (close < 0) return undefined;
+      names.push(text.slice(index + 1, close));
+      quoted = true;
+      index = close + 1;
+    } else {
+      const start = index;
+      while (index < text.length && BARE_KEY.test(text[index])) index += 1;
+      if (index === start) return undefined;
+      names.push(text.slice(start, index));
     }
+    space();
+    if (index === text.length) return { names, quoted };
+    if (text[index] !== '.') return undefined;
+    index += 1;
   }
 }
 
-/** The parts of a table name or dotted key read: the first ones decide, the rest are not copied. */
-const DEPTH_LIMIT = 16;
-/** Declared paths whose existence is checked; more make the answer `unknown` and `truncated`. */
-export const DECLARED_LIMIT = 64;
-
 /**
- * The delimiter of a multi-line string (`"""` or `'''`) left open at the end of `line`, if
- * any: an odd count of it on the line opens one that later lines continue.
+ * The strings of a one-line array of basic strings without escapes (`["a", "b",]`);
+ * undefined for any other value.
  */
-function openMultiline(line: string): string | undefined {
-  for (const delimiter of ['"""', "'''"]) {
-    let count = 0;
-    for (let index = line.indexOf(delimiter); index >= 0; index = line.indexOf(delimiter, index + 3)) count += 1;
-    if (count % 2 === 1) return delimiter;
+function plainStrings(value: string): string[] | undefined {
+  if (!value.startsWith('[') || !value.endsWith(']')) return undefined;
+  const last = value.length - 1;
+  const strings: string[] = [];
+  let index = 1;
+  const space = (): void => {
+    while (value[index] === ' ' || value[index] === '\t') index += 1;
+  };
+  for (;;) {
+    space();
+    if (index === last) return strings;
+    if (value[index] !== '"') return undefined;
+    const close = value.indexOf('"', index + 1);
+    if (close < 0 || close === last) return undefined;
+    const text = value.slice(index + 1, close);
+    if (text.includes('\\')) return undefined;
+    strings.push(text);
+    index = close + 1;
+    space();
+    if (index === last) return strings;
+    if (value[index] !== ',') return undefined;
+    index += 1;
   }
-  return undefined;
 }
 
 /**
- * Read `[tool.aelix] extensions = [...]` from a `pyproject.toml` in one pass over its lines, the
- * way native's directory tier takes it. Only that form is read. `unknown`, where native may
- * decide otherwise and Studio cannot tell without a TOML parser: a quoted or dotted key that
- * names the same table (`"tool".aelix`, `tool.aelix.extensions = …`, `aelix.extensions` under
- * `[tool]`), an inline table, an array of tables, the table or the key given twice (native
- * then reads nothing), a table deeper than `DEPTH_LIMIT` that names `aelix`, or a line over
- * `LINE_LIMIT`. Lines inside multi-line strings are skipped.
+ * Read `[tool.aelix] extensions = [...]` from a `pyproject.toml` by one strict rule, in one pass
+ * over its lines. It is not a TOML parser (2026-11-24 orchestrator decision, ADR 9).
+ *
+ * The only form taken is a `[tool.aelix]` header (space around the name allowed) and, in that
+ * table, one line `extensions = ["…", …]` of basic strings without escapes. Anything that could
+ * say otherwise in a way this cannot tell is `unknown`:
+ * - three quotes of either kind anywhere in the file (a multi-line string);
+ * - `tool.aelix` named any other way: a quoted name, an array of tables, `extensions` as a
+ *   table, a dotted key or an inline table under `[tool]` or at the top;
+ * - in `[tool.aelix]`: a quoted or dotted key, an inline table, a value on more lines (a
+ *   multi-line array), or an escape;
+ * - a table or a key given twice (TOML refuses the file, and native reads nothing), an escape
+ *   in a table name, a line that is neither a table, a key nor empty, a string left open, or a
+ *   line over `LINE_LIMIT`.
+ *
+ * Values on more lines elsewhere are skipped to where their brackets close.
  */
 export function readDeclaredExtensions(text: string): DeclaredExtensions {
-  let table: string[] = [];
-  let seenTable = false;
-  let multiline: string | undefined;
-  let reader: ArrayReader | undefined;
+  if (text.includes('"""') || text.includes("'''")) return 'unknown';
+  let table: 'top' | 'tool' | 'aelix' | 'other' = 'top';
+  const tables = new Set<string>();
+  let keys = new Set<string>();
+  let continuing = 0;
   let found: string[] | undefined;
   for (const raw of text.split('\n')) {
     if (raw.length > LINE_LIMIT) return 'unknown';
-    if (multiline) {
-      if (raw.includes(multiline)) multiline = undefined;
+    const line = scanLine(raw);
+    if (line.open) return 'unknown';
+    if (continuing > 0) {
+      continuing += line.depth;
+      if (continuing < 0) return 'unknown';
       continue;
     }
-    if (reader) {
-      reader.feed('\n' + raw);
-      if (reader.state === 'unknown') return 'unknown';
-      if (reader.state === 'closed') {
-        found = reader.strings;
-        reader = undefined;
+    if (line.text === '') continue;
+    if (line.text.startsWith('[')) {
+      const array = line.text.startsWith('[[');
+      if (line.escape || !line.text.endsWith(array ? ']]' : ']')) return 'unknown';
+      const header = keyPath(line.text.slice(array ? 2 : 1, array ? -2 : -1));
+      if (!header) return 'unknown';
+      const [first, second, third] = header.names;
+      const underAelix = first === 'tool' && second === 'aelix';
+      if (first === 'tool' && (array || header.quoted) && (second === undefined || second === 'aelix'))
+        return 'unknown';
+      if (underAelix && third === 'extensions') return 'unknown';
+      if (!array) {
+        const name = header.names.join('\u0000');
+        if (tables.has(name)) return 'unknown';
+        tables.add(name);
       }
+      keys = new Set();
+      if (underAelix && header.names.length === 2) table = 'aelix';
+      else table = first === 'tool' && second === undefined ? 'tool' : 'other';
       continue;
     }
-    const line = withoutComment(raw).trim();
-    if (line === '') continue;
-    if (line.startsWith('[')) {
-      const array = line.startsWith('[[');
-      const close = line.lastIndexOf(']');
-      if (close < 0) return 'unknown';
-      const parts = line
-        .slice(array ? 2 : 1, array ? close - 1 : close)
-        .split('.', DEPTH_LIMIT)
-        .map(keyPart);
-      const names = parts.map((part) => part.name);
-      if (names[0] === 'tool' && names[1] === 'aelix' && (array || parts.some((part) => part.quoted))) return 'unknown';
-      table = array ? ['[['] : names;
-      if (table.length === 2 && table[0] === 'tool' && table[1] === 'aelix') {
-        // TOML refuses a table defined twice; native then reads nothing.
-        if (seenTable) return 'unknown';
-        seenTable = true;
+    if (line.equals < 0 || line.depth < 0) return 'unknown';
+    const key = keyPath(line.text.slice(0, line.equals));
+    if (!key) return 'unknown';
+    const name = key.names.join('\u0000');
+    if (keys.has(name)) return 'unknown';
+    keys.add(name);
+    if (table === 'top' && key.names[0] === 'tool') return 'unknown';
+    if (table === 'tool' && key.names[0] === 'aelix') return 'unknown';
+    if (table === 'aelix') {
+      const value = line.text.slice(line.equals + 1).trim();
+      if (key.quoted || key.names.length > 1 || line.escape || line.depth !== 0 || value.startsWith('{'))
+        return 'unknown';
+      if (key.names[0] === 'extensions') {
+        const strings = plainStrings(value);
+        if (!strings) return 'unknown';
+        found = strings;
       }
-      continue;
     }
-    const multilineOpen = openMultiline(line);
-    const equals = line.indexOf('=');
-    if (equals < 0) {
-      multiline = multilineOpen;
-      continue;
-    }
-    const keys = line.slice(0, equals).split('.', DEPTH_LIMIT).map(keyPart);
-    const value = line.slice(equals + 1).trim();
-    // Names along the key's path, read in place: the table's, then the key's own.
-    const name = (index: number): string | undefined =>
-      index < table.length ? table[index] : keys[index - table.length]?.name;
-    const depth = table.length + keys.length;
-    const underAelix = name(0) === 'tool' && name(1) === 'aelix';
-    const isTarget = depth === 3 && underAelix && name(2) === 'extensions';
-    if (!isTarget) {
-      // What could define `tool.aelix` itself or its `extensions` another way: `aelix = {…}`
-      // under `[tool]`, `tool = { aelix = … }`, or `extensions` as a table.
-      const definesTable = depth === 2 && underAelix;
-      const inline = depth === 1 && name(0) === 'tool' && value.startsWith('{') && value.includes('aelix');
-      const deeper = depth > 3 && underAelix && name(2) === 'extensions';
-      if (definesTable || inline || deeper) return 'unknown';
-      multiline = multilineOpen;
-      continue;
-    }
-    if (keys.length !== 1 || keys[0].quoted || table.length !== 2 || !value.startsWith('[')) return 'unknown';
-    // TOML refuses a key given twice; native then reads nothing.
-    if (found) return 'unknown';
-    const next = new ArrayReader();
-    next.feed(value.slice(1));
-    if (next.state === 'unknown') return 'unknown';
-    if (next.state === 'closed') found = next.strings;
-    else reader = next;
+    continuing = line.depth;
   }
-  if (reader || multiline) return 'unknown';
+  if (continuing > 0) return 'unknown';
   return found ? { paths: found } : 'none';
 }
 
@@ -193,12 +214,14 @@ async function directoryKind(
         .filter((entry) => entry !== '')
         .map((entry) => paths.resolve(directory, entry))
         .filter((candidate) => !isUncOrDevice(candidate, scan.platform));
+      // More declared paths than are checked: the answer may have missed one.
+      const truncated = candidates.length > DECLARED_LIMIT;
       for (const candidate of candidates.slice(0, DECLARED_LIMIT)) {
         // eslint-disable-next-line no-await-in-loop -- stops at the first that exists
-        if (await statOf(scan, candidate)) return { kind: 'pyproject', truncated: false };
+        if (await statOf(scan, candidate)) return { kind: 'pyproject', truncated };
       }
-      // More declared paths than are checked: one of the rest may exist.
-      if (candidates.length > DECLARED_LIMIT) return { kind: 'unknown', truncated: true };
+      // One of the rest may exist.
+      if (truncated) return { kind: 'unknown', truncated };
     }
   }
   if ((await statOf(scan, path.join(directory, '__init__.py')))?.isFile()) return { kind: 'package', truncated: false };

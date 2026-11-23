@@ -48,20 +48,26 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   };
 });
 
-const venvModule = vi.hoisted(() => ({ failFor: undefined as string | undefined }));
+const venvModule = vi.hoisted(() => ({ failFor: undefined as string | undefined, busyMs: 0 }));
 vi.mock('./venv', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./venv')>();
   return {
     ...actual,
     readCliVenv: async (...args: Parameters<typeof actual.readCliVenv>) => {
       if (venvModule.failFor && args[1].endsWith(venvModule.failFor)) throw new Error(`cannot read ${args[1]}`);
-      return actual.readCliVenv(...args);
+      const venv = await actual.readCliVenv(...args);
+      // Work after the last file system call, holding the event loop (slow parsing).
+      const until = Date.now() + venvModule.busyMs;
+      while (Date.now() < until) {
+        // busy
+      }
+      return venv;
     },
   };
 });
 
 import { FS_CONCURRENCY } from './files';
-import { ENVIRONMENT_LIMIT, labelPath, listTerminalCli, maskText, terminalScanEnded } from './list';
+import { ENVIRONMENT_LIMIT, environmentKey, labelPath, listTerminalCli, maskText, terminalScanEnded } from './list';
 
 const posix = process.platform !== 'win32';
 
@@ -72,6 +78,7 @@ describe.runIf(posix)('the terminal CLI list', () => {
     scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-terminal-list-')));
     home = path.join(scratch, 'home', 'alice');
     venvModule.failFor = undefined;
+    venvModule.busyMs = 0;
     Object.assign(fsWatch, { active: 0, peak: 0, calls: 0, delayMs: 0, delayFor: '', delays: [] });
   });
   afterEach(async () => {
@@ -205,12 +212,20 @@ describe.runIf(posix)('the terminal CLI list', () => {
   });
 
   it('leaves fields with fixed values alone when the user name is one of them', async () => {
-    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch, { 'aelix-notes': 'notes' });
+    // Two distributions declare the same entry: the environment has an issue code.
+    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch, {
+      'aelix-notes': 'notes',
+      'aelix-notes-two': 'notes',
+    });
     await write(path.join(home, '.aelix', 'agent', 'extensions', 'hello.py'));
-    for (const username of ['listed', 'uv_tool', 'file']) {
+    for (const username of ['listed', 'uv_tool', 'file', 'duplicate_entry', 'DUPLICATE_ENTRY']) {
       // eslint-disable-next-line no-await-in-loop -- one scan after another: scans are shared while one runs
       const listing = await listTerminalCli({ env: { PATH: '' }, home, platform: 'linux', username });
-      expect(listing.environments[0]).toMatchObject({ status: 'listed', foundBy: ['uv_tool'] });
+      expect(listing.environments[0]).toMatchObject({
+        status: 'listed',
+        foundBy: ['uv_tool'],
+        issues: ['DUPLICATE_ENTRY'],
+      });
       expect(listing.globalExtensions).toMatchObject({ status: 'listed', extensions: [{ kind: 'file' }] });
       // eslint-disable-next-line no-await-in-loop -- as above
       await terminalScanEnded();
@@ -408,6 +423,29 @@ describe.runIf(posix)('the terminal CLI list', () => {
     expect(fsWatch.active).toBe(0);
   });
 
+  it('says it ran out of time when it ended past the deadline, even without a call after it', async () => {
+    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch);
+    // The last file system call returns in time; the parsing after it does not.
+    venvModule.busyMs = 400;
+    const listing = await list({ PATH: '' }, 200);
+    expect(listing.timedOut).toBe(true);
+  });
+
+  it('names a tool by its metadata where its suffix is not written exactly, as CPython does', async () => {
+    const tool = path.join(home, '.local', 'share', 'uv', 'tools', 'renamed');
+    await write(path.join(tool, 'pyvenv.cfg'), 'home = /opt/python/bin\n');
+    const info = path.join(tool, 'lib', 'python3.12', 'site-packages', 'Renamed-0.1.0b2.DIST-INFO');
+    await write(path.join(info, 'METADATA'), 'Metadata-Version: 2.1\nName: aelix\nVersion: 0.1.0b2\n');
+    const listing = await list({ PATH: '' });
+    expect(listing.environments).toEqual([
+      expect.objectContaining({
+        status: 'listed',
+        location: '~/.local/share/uv/tools/renamed',
+        nativeVersion: '0.1.0b2',
+      }),
+    ]);
+  });
+
   it('shares one scan: callers at the same time, and after a timed-out answer until the scan ended', async () => {
     await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch);
     const [first, second] = await Promise.all([list({ PATH: '' }), list({ PATH: '' })]);
@@ -454,12 +492,23 @@ describe('text in a reply', () => {
     // Whatever follows the home that cannot continue its name ends it: quotes, punctuation.
     expect(maskText('"/home/alice"', masks)).toBe('"~"');
     expect(maskText("('/home/alice', 1)", masks)).toBe("('~', 1)");
+    // A period ends it too, unless a name goes on after it: then it is another path, whose
+    // user name part is still hidden.
+    expect(maskText('installed in /home/alice.', masks)).toBe('installed in ~.');
+    expect(maskText('"/home/alice."', masks)).toBe('"~."');
+    expect(maskText('/home/alice. Then', masks)).toBe('~. Then');
     expect(maskText('/home/alice.bak/x', masks)).toBe('/home/<user>.bak/x');
+    expect(maskText('/home/alice.d', masks)).toBe('/home/<user>.d');
     // On Windows either separator matches either.
     const windows = { homes: ['C:\\Users\\Alice'], username: 'alice', platform: 'win32' as const };
     expect(maskText('"C:/Users/alice/x"', windows)).toBe('"~/x"');
     expect(maskText('file:///c:/users/ALICE', windows)).toBe('file:///~');
     expect(maskText('C:\\Users\\alice\\x', windows)).toBe('~\\x');
+    // The same environment written in another case is one environment there.
+    expect(environmentKey('C:\\Users\\Alice\\tools\\aelix', 'win32')).toBe(
+      environmentKey('c:\\users\\alice\\TOOLS\\aelix', 'win32')
+    );
+    expect(environmentKey('/opt/Aelix', 'linux')).not.toBe(environmentKey('/opt/aelix', 'linux'));
   });
 });
 
