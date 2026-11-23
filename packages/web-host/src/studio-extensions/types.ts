@@ -292,26 +292,34 @@ export type StudioExtensionsTransportCode =
  * Whether the channel can carry a secret without it crossing a network in the clear:
  * `secure` for the desktop window and a WebUI over TLS or from this machine, `insecure` for a
  * WebUI over plain HTTP from another machine. Decided by the host from the connection itself
- * (for the WebUI, at the listener that accepted it), never from what a client sends.
+ * (for the WebUI, at the listener that accepted it), never from what a client sends. The
+ * page's `Origin` can only lower a WebUI verdict: an `http:` origin on a host other than
+ * localhost, 127/8 or [::1] (a reverse proxy on this machine serving the public over plain
+ * HTTP), or no parseable origin, is `insecure`.
  */
 export type StudioExtensionsTransport = 'secure' | 'insecure';
 
 /**
- * A request as the screen sends it (2026-11-23 user decision: warn, then allow). Every reply
- * of the channel carries `transport`, so the screen knows it from the first one (the settings
- * it reads when it opens) before it sends any secret. On `insecure`, before a request that
- * carries proxy credentials (`set_proxy_credentials`, `proxyCredentials`, or a proxy address
- * typed with them), the screen warns that they would cross the network unencrypted; if the
- * user goes on, it sends the request with `acknowledgeInsecureTransport: true`. The channel
- * still answers such a request without the flag `INSECURE_TRANSPORT`, as a second line. It
- * removes the flag before the helper sees the request. Using saved credentials sends nothing
- * secret and needs no flag.
+ * A request as the screen sends it (2026-11-23 user decision: warn, then allow). The screen
+ * sends `get_settings` first when it opens and takes `transport` from that reply before it
+ * sends any secret. The channel puts `transport` on every reply it writes, its own refusals
+ * included. Some replies cannot carry it: a WebUI request the listener refuses before the
+ * route (an empty 403 for an origin it does not accept) and an answer the screen lost
+ * (`CONNECTION_LOST`). The screen treats a reply without `transport` as `insecure`.
+ *
+ * On `insecure`, before a request that carries proxy credentials (`set_proxy_credentials`,
+ * `proxyCredentials`, or a proxy address typed with them), the screen warns that they would
+ * cross the network unencrypted; if the user goes on, it sends the request with
+ * `acknowledgeInsecureTransport: true`. The channel still answers such a request without the
+ * flag `INSECURE_TRANSPORT`, as a second line. It removes the flag before the helper sees the
+ * request. Using saved credentials sends nothing secret and needs no flag.
  */
 export type StudioExtensionsRequest = ExtensionCommand & { acknowledgeInsecureTransport?: true };
 
 /**
  * A reply as the screen receives it: the helper's, or the channel's own refusal, with the
- * channel's `transport` (absent on refusals the screen made itself, such as `CONNECTION_LOST`).
+ * channel's `transport` (absent where the channel could not write it; see
+ * `StudioExtensionsRequest`).
  */
 export type StudioExtensionsReply = (ExtensionReply | { ok: false; code: StudioExtensionsTransportCode }) & {
   transport?: StudioExtensionsTransport;

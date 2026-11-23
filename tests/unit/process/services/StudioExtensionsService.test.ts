@@ -54,7 +54,7 @@ describe('the desktop channel of the extension helper', () => {
     const service = { request } as unknown as ExtensionService;
     const trusted = vi.fn((sender: IpcMainInvokeEvent) => sender.sender.id === 7);
     const handle = studioExtensionsIpcHandler(trusted, () => service);
-    expect(await handle(event(8), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN' });
+    expect(await handle(event(8), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN', transport: 'secure' });
     expect(request).not.toHaveBeenCalled();
     expect(await handle(event(7), { action: 'list' })).toEqual({
       ok: true,
@@ -71,9 +71,17 @@ describe('the desktop channel of the extension helper', () => {
       () => ({ request }) as unknown as ExtensionService
     );
     const install = (value: unknown) => ({ action: 'install', source: { kind: 'file', path: value } });
-    expect(await handle(event(7), install('x'.repeat(60001)))).toEqual({ ok: false, code: 'FRAME_LIMIT' });
+    expect(await handle(event(7), install('x'.repeat(60001)))).toEqual({
+      ok: false,
+      code: 'FRAME_LIMIT',
+      transport: 'secure',
+    });
     // 30,001 UTF-16 units, 60,002 bytes: counted as bytes.
-    expect(await handle(event(7), install('é'.repeat(30001)))).toEqual({ ok: false, code: 'FRAME_LIMIT' });
+    expect(await handle(event(7), install('é'.repeat(30001)))).toEqual({
+      ok: false,
+      code: 'FRAME_LIMIT',
+      transport: 'secure',
+    });
     const circular: Record<string, unknown> = {};
     circular.self = circular;
     for (const value of [
@@ -86,7 +94,7 @@ describe('the desktop channel of the extension helper', () => {
       install(Number.NaN),
       'list',
     ])
-      expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT' });
+      expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT', transport: 'secure' });
     expect(request).not.toHaveBeenCalled();
     expect(await handle(event(7), install('é'.repeat(100)))).toEqual({ ok: true, data: {}, transport: 'secure' });
   });
@@ -99,7 +107,11 @@ describe('the desktop channel of the extension helper', () => {
       service,
       () => true
     );
-    expect(await packaged(event(7, true), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN' });
+    expect(await packaged(event(7, true), { action: 'list' })).toEqual({
+      ok: false,
+      code: 'FORBIDDEN',
+      transport: 'secure',
+    });
     expect(request).not.toHaveBeenCalled();
     expect(await packaged(event(7, false), { action: 'list' })).toEqual({ ok: true, data: {}, transport: 'secure' });
     const development = studioExtensionsIpcHandler(
@@ -112,7 +124,11 @@ describe('the desktop channel of the extension helper', () => {
 
   it('answers RUNTIME_UNAVAILABLE until the helper is started', async () => {
     const handle = studioExtensionsIpcHandler(() => true);
-    expect(await handle(event(7), { action: 'list' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await handle(event(7), { action: 'list' })).toEqual({
+      ok: false,
+      code: 'RUNTIME_UNAVAILABLE',
+      transport: 'secure',
+    });
   });
 
   it('starts the helper in the user data directory with the safeStorage vault, and stops it on quit', async () => {

@@ -60,14 +60,15 @@ export function startStudioExtensions(storage?: SafeStorageLike, platform?: Node
  * check native auth uses) is answered, and in a packaged app not while its DevTools are open;
  * each window owns what it starts. A request is JSON data of at most 60 kB in UTF-8. Requests
  * can carry proxy credentials: the channel is its own, outside the generic bridge and its
- * logging.
+ * logging. A window of this app is on this machine, so a secret never crosses a network on
+ * this channel: every reply says `transport: 'secure'`, refusals included.
  */
 export function studioExtensionsIpcHandler(
   trusted: (event: IpcMainInvokeEvent) => boolean,
   service: () => ExtensionService | undefined = getStudioExtensionService,
   packaged: () => boolean = () => app.isPackaged
 ): (event: IpcMainInvokeEvent, command: unknown) => Promise<StudioExtensionsReply> {
-  return async (event, command) => {
+  const answer = async (event: IpcMainInvokeEvent, command: unknown): Promise<StudioExtensionsReply> => {
     if (!trusted(event)) return { ok: false, code: 'FORBIDDEN' };
     // Self-XSS: in a released app, nothing typed into an open DevTools console reaches the
     // helper (or the keychain through it). Development builds keep the console usable.
@@ -79,9 +80,9 @@ export function studioExtensionsIpcHandler(
     const { acknowledgeInsecureTransport: _acknowledged, ...request } = command as Record<string, unknown>;
     const current = service();
     if (!current) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
-    // A window of this app is on this machine: a secret never crosses a network on this channel.
-    return { ...(await current.request(`desktop:${event.sender.id}`, request)), transport: 'secure' };
+    return current.request(`desktop:${event.sender.id}`, request);
   };
+  return async (event, command) => ({ ...(await answer(event, command)), transport: 'secure' });
 }
 
 /** Stop the change a window started when it goes away or loads another page. */

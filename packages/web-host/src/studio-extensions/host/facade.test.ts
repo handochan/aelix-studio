@@ -6,14 +6,8 @@
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExtensionService } from './service';
-import {
-  carriesProxyCredentials,
-  handleStudioExtensions,
-  isLoopbackAddress,
-  secureTransport,
-  STUDIO_EXTENSIONS_ROUTE,
-} from './facade';
+import { RUNTIME_HINT, type ExtensionService } from './service';
+import { carriesProxyCredentials, handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './facade';
 
 describe('the extension helper on the WebUI listener', () => {
   let server: http.Server;
@@ -24,10 +18,13 @@ describe('the extension helper on the WebUI listener', () => {
   let configured: ExtensionService | undefined;
   /** Whether the connection counts as secure; undefined: from the real socket (loopback here). */
   let secure: boolean | undefined;
+  /** The origins admission takes; undefined: the server's own. */
+  let origins: string[] | undefined;
   const handler = vi.fn(async () => ({ ok: true as const, data: { settings: {} } }));
   beforeEach(async () => {
     authenticate = false;
     secure = undefined;
+    origins = undefined;
     configured = { request: handler } as unknown as ExtensionService;
     backend = http.createServer((req, res) => {
       seenHeaders = req.headers;
@@ -41,7 +38,7 @@ describe('the extension helper on the WebUI listener', () => {
     server = http.createServer((req, res) => {
       void handleStudioExtensions(req, res, {
         backendPort: (backend.address() as AddressInfo).port,
-        origins: [url],
+        origins: origins ?? [url],
         ...(configured ? { service: configured } : {}),
         ...(secure === undefined ? {} : { secure: () => Boolean(secure) }),
       });
@@ -76,7 +73,8 @@ describe('the extension helper on the WebUI listener', () => {
   it('refuses a caller without a real login before the helper sees anything, and forwards no identity header', async () => {
     const response = await request({ 'x-aionui-internal': 'forged', 'x-user-id': 'operator' });
     expect(response.status).toBe(401);
-    expect(await response.json()).toEqual({ ok: false, code: 'UNAUTHENTICATED' });
+    // Refusals say the transport too: the screen may read it from whatever reply came first.
+    expect(await response.json()).toEqual({ ok: false, code: 'UNAUTHENTICATED', transport: 'secure' });
     expect(handler).not.toHaveBeenCalled();
     expect(seenHeaders['x-aionui-internal']).toBeUndefined();
     expect(seenHeaders['x-user-id']).toBeUndefined();
@@ -93,6 +91,7 @@ describe('the extension helper on the WebUI listener', () => {
     authenticate = true;
     const response = await request({ cookie: 'aelix-studio-session=valid', ...headers });
     expect(response.status).toBe(403);
+    expect((await response.json()).code).toBe('FORBIDDEN');
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -192,29 +191,37 @@ describe('the extension helper on the WebUI listener', () => {
       expect(handler).toHaveBeenCalledWith('web:operator', secrets[0]);
     });
 
-    it('judges a connection by its socket alone: TLS or a loopback peer', () => {
-      const connection = (socket: Record<string, unknown>, headers: Record<string, string> = {}) =>
-        ({ socket, headers }) as unknown as http.IncomingMessage;
-      expect(secureTransport(connection({ remoteAddress: '127.0.0.1' }))).toBe(true);
-      expect(secureTransport(connection({ remoteAddress: '::ffff:127.0.0.1' }))).toBe(true);
-      expect(secureTransport(connection({ remoteAddress: '203.0.113.7', encrypted: true }))).toBe(true);
-      expect(secureTransport(connection({ remoteAddress: '192.168.1.5' }))).toBe(false);
-      // Headers a client or a proxy sets change nothing.
-      expect(
-        secureTransport(
-          connection(
-            { remoteAddress: '203.0.113.7' },
-            { 'x-forwarded-for': '127.0.0.1', 'x-forwarded-proto': 'https', forwarded: 'for=127.0.0.1;proto=https' }
-          )
-        )
-      ).toBe(false);
+    it('lowers a secure socket by the page origin: a plain-HTTP proxy on this machine in front of the public', async () => {
+      authenticate = true;
+      secure = true;
+      origins = ['http://studio.example', 'https://studio.example'];
+      const plain = await request(
+        { cookie: 'aelix-studio-session=valid', origin: 'http://studio.example' },
+        JSON.stringify(secrets[0])
+      );
+      expect(await plain.json()).toEqual({ ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' });
+      expect(handler).not.toHaveBeenCalled();
+      // A proxy that terminates TLS: the browser sent the secret encrypted.
+      const tls = await request(
+        { cookie: 'aelix-studio-session=valid', origin: 'https://studio.example' },
+        JSON.stringify(secrets[0])
+      );
+      expect(await tls.json()).toMatchObject({ ok: true, transport: 'secure' });
+      expect(handler).toHaveBeenCalledWith('web:operator', secrets[0]);
     });
 
-    it('tells loopback peers and requests that carry credentials apart', () => {
-      for (const address of ['127.0.0.1', '127.10.0.5', '::1', '::ffff:127.0.0.1', '::FFFF:127.0.0.1'])
-        expect(isLoopbackAddress(address)).toBe(true);
-      for (const address of [undefined, '', '192.168.1.5', '10.0.0.1', '::ffff:10.0.0.1', 'fe80::1', '128.0.0.1'])
-        expect(isLoopbackAddress(address)).toBe(false);
+    it('takes no origin as insecure, and never raises an insecure socket', async () => {
+      authenticate = true;
+      origins = [''];
+      const missing = await request({ cookie: 'aelix-studio-session=valid', origin: '' });
+      expect(await missing.json()).toMatchObject({ ok: true, transport: 'insecure' });
+      secure = false;
+      origins = undefined;
+      const lowered = await request({ cookie: 'aelix-studio-session=valid' });
+      expect(await lowered.json()).toMatchObject({ ok: true, transport: 'insecure' });
+    });
+
+    it('tells requests that carry credentials apart', () => {
       for (const command of secrets) expect(carriesProxyCredentials(command)).toBe(true);
       for (const command of [
         null,
@@ -231,8 +238,12 @@ describe('the extension helper on the WebUI listener', () => {
     authenticate = true;
     const malformed = await request({ cookie: 'aelix-studio-session=valid' }, '{"password":"sentinel-secret"');
     expect(malformed.status).toBe(400);
-    expect(await malformed.text()).not.toContain('sentinel-secret');
-    expect((await request({ cookie: 'aelix-studio-session=valid' }, 'x'.repeat(60001))).status).toBe(413);
+    const text = await malformed.text();
+    expect(text).not.toContain('sentinel-secret');
+    expect(JSON.parse(text)).toEqual({ ok: false, code: 'INVALID_INPUT', transport: 'secure' });
+    const large = await request({ cookie: 'aelix-studio-session=valid' }, 'x'.repeat(60001));
+    expect(large.status).toBe(413);
+    expect(await large.json()).toEqual({ ok: false, code: 'FRAME_LIMIT', transport: 'secure' });
     expect(handler).not.toHaveBeenCalled();
   });
 
@@ -243,7 +254,7 @@ describe('the extension helper on the WebUI listener', () => {
     expect(await response.json()).toEqual({
       ok: false,
       code: 'RUNTIME_UNAVAILABLE',
-      detail: ['the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime'],
+      detail: [RUNTIME_HINT],
       transport: 'secure',
     });
   });
@@ -251,8 +262,11 @@ describe('the extension helper on the WebUI listener', () => {
   it('answers UNAVAILABLE, and nothing of the error, when the helper throws', async () => {
     authenticate = true;
     handler.mockRejectedValueOnce(new Error('sentinel-secret'));
+    secure = false;
     const response = await request({ cookie: 'aelix-studio-session=valid' });
     expect(response.status).toBe(503);
-    expect(await response.text()).not.toContain('sentinel-secret');
+    const text = await response.text();
+    expect(text).not.toContain('sentinel-secret');
+    expect(JSON.parse(text)).toEqual({ ok: false, code: 'UNAVAILABLE', transport: 'insecure' });
   });
 });

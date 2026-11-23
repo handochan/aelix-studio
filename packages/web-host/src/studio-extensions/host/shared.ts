@@ -35,7 +35,9 @@ let shared: ExtensionService | undefined;
  * set, else the first of the packaged app's `resources/studio-preview` and a development
  * checkout's `.local/studio-preview` that native auth's `resolveNativeRuntime` accepts (the
  * launcher, a manifest for this platform, the interpreter). When none is, the checkout path,
- * which the helper then reports as `RUNTIME_UNAVAILABLE`.
+ * which the helper then reports as `RUNTIME_UNAVAILABLE`. Native auth also accepts a prepared
+ * runtime without a manifest; the helper does not, and reports that the same way, naming the
+ * bundle it needs (`RUNTIME_HINT`).
  */
 export function studioRuntimeDirectory(env: NodeJS.ProcessEnv = process.env, cwd = process.cwd()): string {
   if (env.AELIX_STUDIO_RUNTIME) return env.AELIX_STUDIO_RUNTIME;

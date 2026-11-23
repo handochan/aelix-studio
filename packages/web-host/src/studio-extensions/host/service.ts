@@ -69,10 +69,14 @@ export type ExtensionServiceOptions = {
 };
 
 /**
- * What a host without the Studio runtime can do about it, as for native auth: the standalone
- * WebUI package ships none, and its operator points `AELIX_STUDIO_RUNTIME` at a prepared one.
+ * What a host without a usable runtime can do about it. The standalone WebUI package ships
+ * none: its operator points `AELIX_STUDIO_RUNTIME` at one. Native auth also takes a prepared
+ * development runtime without a manifest; extensions take only the distributable bundle for
+ * this platform (`manifest.json`, `native-site`; see `resolveBundle`), and say so.
  */
-export const RUNTIME_HINT = 'the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime';
+export const RUNTIME_HINT =
+  'Agent Extensions need the distributable Studio runtime bundle for this platform, with manifest.json and ' +
+  'native-site; set AELIX_STUDIO_RUNTIME to it. A prepared runtime without manifest.json is not enough';
 
 type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
 

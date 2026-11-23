@@ -13,6 +13,8 @@ export type StudioRequestOptions = {
   backendPort: number;
   /** The origins a browser request may come from. */
   origins: string[];
+  /** Fields added to every refusal this answers (the extension facade's `transport`). */
+  refusal?: Record<string, unknown>;
 };
 
 const BODY_LIMIT = 60000;
@@ -52,7 +54,7 @@ export async function admitStudioRequest(
     !options.origins.includes(req.headers.origin ?? '') ||
     req.headers['sec-fetch-site'] === 'cross-site'
   ) {
-    respondStudio(res, 403, { ok: false, code: 'FORBIDDEN' });
+    respondStudio(res, 403, { ok: false, code: 'FORBIDDEN', ...options.refusal });
     return undefined;
   }
   const identity = await fetch(`http://127.0.0.1:${options.backendPort}/api/auth/user`, {
@@ -61,12 +63,12 @@ export async function admitStudioRequest(
     redirect: 'error',
   });
   if (!identity.ok) {
-    respondStudio(res, 401, { ok: false, code: 'UNAUTHENTICATED' });
+    respondStudio(res, 401, { ok: false, code: 'UNAUTHENTICATED', ...options.refusal });
     return undefined;
   }
   const result = (await identity.json()) as { success?: boolean; user?: { id?: string } };
   if (result.success !== true || typeof result.user?.id !== 'string') {
-    respondStudio(res, 401, { ok: false, code: 'UNAUTHENTICATED' });
+    respondStudio(res, 401, { ok: false, code: 'UNAUTHENTICATED', ...options.refusal });
     return undefined;
   }
   const chunks: Buffer[] = [];
@@ -76,7 +78,7 @@ export async function admitStudioRequest(
     for await (const chunk of req) {
       bytes += Buffer.byteLength(chunk);
       if (bytes > BODY_LIMIT) {
-        respondStudio(res, 413, { ok: false, code: 'FRAME_LIMIT' });
+        respondStudio(res, 413, { ok: false, code: 'FRAME_LIMIT', ...options.refusal });
         return undefined;
       }
       chunks.push(Buffer.from(chunk));
@@ -87,7 +89,7 @@ export async function admitStudioRequest(
   try {
     return { userId: result.user.id, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) };
   } catch {
-    respondStudio(res, 400, { ok: false, code: 'INVALID_INPUT' });
+    respondStudio(res, 400, { ok: false, code: 'INVALID_INPUT', ...options.refusal });
     return undefined;
   }
 }

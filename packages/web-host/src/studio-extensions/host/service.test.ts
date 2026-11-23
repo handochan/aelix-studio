@@ -9,7 +9,7 @@ import {
   type FakeRuntimeOptions,
 } from '../../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
-import { ExtensionService } from './service';
+import { ExtensionService, RUNTIME_HINT } from './service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply } from '../types';
 
 // These fixtures assert POSIX paths and installer environment. Preview installer CI runs real Windows.
@@ -408,7 +408,7 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     const unavailable = {
       ok: false,
       code: 'RUNTIME_UNAVAILABLE',
-      detail: ['the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime'],
+      detail: [RUNTIME_HINT],
     };
     expect(await missing.request('window:1', { action: 'list' })).toEqual(unavailable);
     expect(await missing.request('window:1', { action: 'rollback' })).toEqual(unavailable);
@@ -416,6 +416,15 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect(await missing.request('window:1', install)).toEqual(unavailable);
     // A refused start is not a running change: the next request is not answered with BUSY.
     expect(await missing.request('window:1', install)).toEqual(unavailable);
+    // A prepared development runtime, which native auth takes, has no manifest: the same answer.
+    const prepared = path.join(scratch, 'prepared');
+    await mkdir(path.join(prepared, 'native-site'), { recursive: true });
+    await writeFile(path.join(prepared, 'launch.py'), '');
+    const development = new ExtensionService({ runtime: prepared, root, spawn });
+    expect(await development.request('window:1', { action: 'list' })).toEqual(unavailable);
+    await development.dispose();
+    // The fix names what the bundle needs and where it goes.
+    for (const part of ['manifest.json', 'native-site', 'AELIX_STUDIO_RUNTIME']) expect(RUNTIME_HINT).toContain(part);
     expect(spawn.calls).toEqual([]);
   });
 
