@@ -135,8 +135,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
 
   const followUps = (() => {
     if (!operation || operation.phase !== 'failed') return null;
-    // Codes of the upgrade (#121) are compared as text until its types are merged.
-    const code: string | undefined = operation.code;
+    const code = operation.code;
     const retry = (label: string) => (
       <Button
         onClick={() => {

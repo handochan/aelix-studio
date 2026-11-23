@@ -29,7 +29,6 @@ import {
   useOperation,
   type Change,
 } from './operation';
-import { upgradeOf, upgradeRequest } from './upgrade';
 
 /** What the page asks the user through its dialogs; each resolves when the user answers. */
 export type Asks = {
@@ -236,12 +235,12 @@ export function useAgentExtensions(asks: Asks, owner: string) {
             ...(change.replaceIncompatible ? { replaceIncompatible: true } : {}),
             ...extra,
           }
-        : upgradeRequest({
+        : {
             action: 'upgrade',
             name: change.entry.name,
             ...(change.allowUnpin ? { allowUnpin: true } : {}),
             ...extra,
-          });
+          };
     // The channel decides from the request whether it carries a secret.
     const reply = await flow.answer(send(command, flow));
     if (reply === 'declined') return;
@@ -318,7 +317,7 @@ export function useAgentExtensions(asks: Asks, owner: string) {
     upgrade: (entry: ExtensionEntry) =>
       runFlow(async () => {
         const flow = startFlow(true);
-        const availability = upgradeOf(entry);
+        const availability = entry.upgrade;
         if (availability === 'pinned') {
           if (await flow.ask(() => asksRef.current.pinned(entry))) asksRef.current.installByName(entry.distribution);
           return;

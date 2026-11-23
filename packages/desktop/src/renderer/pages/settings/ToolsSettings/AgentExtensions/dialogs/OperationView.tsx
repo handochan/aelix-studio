@@ -30,8 +30,7 @@ const OperationView: React.FC<Props> = ({ operation, followUps, onCancel, onClos
   const { t } = useTranslation();
   if (!operation) return null;
   const finished = isFinished(operation);
-  // `already_latest` comes with the upgrade (#121).
-  const phase: string = operation.phase;
+  const { phase } = operation;
   const succeeded = phase === 'switched' || phase === 'already_latest';
   // Arco counts steps from 1: the stage in progress, or one past the last when all are done.
   const step = succeeded ? STAGES.length + 1 : STAGES.indexOf(operation.phase as (typeof STAGES)[number]) + 1;

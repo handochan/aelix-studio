@@ -8,6 +8,7 @@ import type {
   ExtensionData,
   ExtensionEntry,
   ExtensionOperation,
+  ExtensionPhase,
   ExtensionSource,
   StudioExtensionsRequest,
 } from '@aionui/web-host';
@@ -21,8 +22,8 @@ export type { Sender } from './flow';
 /** How often a running change is polled (11-22 design note: one second). */
 export const POLL_INTERVAL_MS = 1000;
 
-/** Phases after which an operation does not change. `already_latest` comes with the upgrade (#121). */
-const FINISHED = new Set<string>(['switched', 'already_latest', 'failed', 'cancelled']);
+/** Phases after which an operation does not change. */
+const FINISHED = new Set<ExtensionPhase>(['switched', 'already_latest', 'failed', 'cancelled']);
 
 export const isFinished = (operation: ExtensionOperation): boolean => FINISHED.has(operation.phase);
 

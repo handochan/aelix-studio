@@ -7,8 +7,6 @@
 /**
  * Every code the helper or its channel answers, mapped to the screen's own text. The helper's
  * `detail` is plain English for logs and support; the screen shows the text for the code.
- * Codes from the upgrade (#121) are listed already, so the screen has text for them once the
- * host sends them.
  */
 const CODES = [
   // Import refusals.
@@ -52,7 +50,7 @@ const CODES = [
   'UNSUPPORTED',
   'NOT_FOUND',
   'INTERNAL',
-  // The upgrade (#121).
+  // The upgrade.
   'UPGRADE_UNAVAILABLE',
   'UPGRADE_SOURCE_MISMATCH',
   'SHARED_DISTRIBUTION_FILES',

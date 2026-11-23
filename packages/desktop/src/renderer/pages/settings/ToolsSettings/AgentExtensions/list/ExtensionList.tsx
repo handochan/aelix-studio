@@ -9,7 +9,6 @@ import { Button, Popconfirm, Switch, Tag, Tooltip } from '@arco-design/web-react
 import { Delete, Refresh, Upload } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
-import { upgradeOf } from '../state/upgrade';
 
 /** Status tags in the theme's meaning colors: ready, needs attention, broken. */
 const STATUS_CLASS: Record<ExtensionStatus, string> = {
@@ -76,7 +75,7 @@ const ExtensionList: React.FC<Props> = ({
   return (
     <div className='flex flex-col gap-12px' data-testid='agent-extensions-list'>
       {extensions.map((entry) => {
-        const upgrade = upgradeOf(entry);
+        const upgrade = entry.upgrade;
         const detail = originDetail(entry.origin);
         return (
           <div
