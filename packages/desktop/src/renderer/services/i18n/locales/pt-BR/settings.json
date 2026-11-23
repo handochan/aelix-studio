@@ -603,9 +603,9 @@
       "memoryOnly": "Usadas apenas nesta instalação e não guardadas."
     },
     "insecure": {
-      "banner": "Esta conexão com o Studio não é criptografada. Você será consultado antes de enviar uma senha de proxy.",
-      "title": "Enviar a senha sem criptografia?",
-      "body": "Esta página acessa o Studio por HTTP simples a partir de outra máquina. O usuário e a senha do proxy passariam pela rede sem criptografia.",
+      "banner": "Esta conexão com o Studio não é criptografada. Você será consultado a cada envio de senha ou token.",
+      "title": "Enviar sem criptografia?",
+      "body": "Esta página acessa o Studio por HTTP simples a partir de outra máquina. O que você está enviando contém um usuário, senha ou token que atravessaria a rede sem criptografia.",
       "confirm": "Enviar mesmo assim"
     },
     "upgrade": {

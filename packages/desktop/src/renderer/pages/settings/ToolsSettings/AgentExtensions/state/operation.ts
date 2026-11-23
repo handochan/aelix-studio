@@ -13,7 +13,10 @@ import type {
 } from '@aionui/web-host';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { failureCode, type SendResult } from './channel';
+import { createFlow, runFlow, type Flow, type Sender } from './flow';
 import { sourceHasUserPart } from './secrets';
+
+export type { Sender } from './flow';
 
 /** How often a running change is polled (11-22 design note: one second). */
 export const POLL_INTERVAL_MS = 1000;
@@ -45,19 +48,18 @@ export type Kept = {
 };
 
 /**
- * Who a request was sent for: the owner, and the sign-in (`epoch`) it was sent in. An answer is
- * taken only while both are still current.
+ * What `start` records with an operation: for whom it was asked, and which change request it
+ * answers (`request`, from `nextChangeRequest`).
  */
-export type Sender = { owner: string; epoch: number };
+export type Started = Sender & { request: number; change?: Change; retried: boolean };
 
-/** What `start` records with an operation, and for whom it was asked. */
-export type Started = Sender & { change?: Change; retried: boolean };
+/** Whether a change holds something secret: a URL that may carry a user part. */
+export const changeHasSecret = (change: Change): boolean =>
+  change.action === 'install' && sourceHasUserPart(change.source);
 
-/** The change, unless it holds something secret (a URL with a user part). */
-function keepable(change: Change | undefined): Change | undefined {
-  if (!change || change.action !== 'install') return change;
-  return sourceHasUserPart(change.source) ? undefined : change;
-}
+/** The change, unless it holds something secret (it is then sent once and kept nowhere). */
+const keepable = (change: Change | undefined): Change | undefined =>
+  change && changeHasSecret(change) ? undefined : change;
 
 /**
  * The change each owner (the signed-in user; `local` in the desktop app) started and has not
@@ -72,6 +74,8 @@ const kept = new Map<string, Kept>();
 let owner: string | undefined;
 /** Goes up at every sign-out (or change of user): answers sent in an earlier sign-in are dropped. */
 let epoch = 0;
+/** The latest change request: the answer to an earlier one starts nothing over it. */
+let changeRequest = 0;
 const viewers = new Set<(current: Kept | undefined) => void>();
 
 const keptNow = (): Kept | undefined => (owner === undefined ? undefined : kept.get(owner));
@@ -98,6 +102,12 @@ export const sessionEpoch = (): number => epoch;
 /** Whether an answer sent for `sender` may still be taken. */
 export const isCurrent = (sender: Sender): boolean => sender.owner === owner && sender.epoch === epoch;
 
+/** A new change request, which takes the place of every earlier one. */
+export const nextChangeRequest = (): number => (changeRequest += 1);
+
+/** Whether `request` is still the latest change request. */
+export const isLatestChange = (request: number): boolean => request === changeRequest;
+
 /** On sign-out (or another user): a new sign-in, no owner, nothing kept. */
 export function forgetOwners(): void {
   epoch += 1;
@@ -113,7 +123,7 @@ export function forgetOwners(): void {
  * failed.
  */
 export function useOperation(
-  send: (command: StudioExtensionsRequest) => Promise<SendResult>,
+  send: (command: StudioExtensionsRequest, flow: Flow) => Promise<SendResult>,
   onFinished: (operation: ExtensionOperation) => void,
   ownerId: string
 ) {
@@ -158,9 +168,12 @@ export function useOperation(
     [ownerId]
   );
 
-  /** A change the host started, kept for the sender who asked; dropped if that is no longer current. */
+  /**
+   * A change the host started, kept for the sender who asked. Dropped if that sender is no
+   * longer current, or if a newer change was asked for since (it must not cover that one).
+   */
   const start = useCallback((next: ExtensionOperation, started: Started) => {
-    if (!isCurrent(started)) return;
+    if (!isCurrent(started) || !isLatestChange(started.request)) return;
     kept.set(started.owner, { operation: next, change: keepable(started.change), retried: started.retried });
     notify();
     if (isFinished(next)) finishedRef.current(next);
@@ -174,19 +187,23 @@ export function useOperation(
     let stopped = false;
     let timer: ReturnType<typeof setTimeout>;
     const sender: Sender = { owner: ownerId, epoch };
-    const poll = async (): Promise<void> => {
-      const reply = await send({ action: 'poll', operationId });
-      if (stopped) return;
-      if (reply !== 'declined' && reply.ok && isOperation(reply.data)) {
-        show(reply.data, sender);
-        if (isFinished(reply.data)) return;
-      } else if (reply !== 'declined' && failureCode(reply) === 'NOT_FOUND') {
-        const last = kept.get(ownerId)?.operation;
-        if (last?.operationId === operationId) show({ ...last, phase: 'failed', code: 'NOT_FOUND' }, sender);
-        return;
-      }
-      timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
-    };
+    // Polling this operation, from this screen, for this sender.
+    const following = (): boolean =>
+      !stopped && isCurrent(sender) && kept.get(ownerId)?.operation.operationId === operationId;
+    const flow = createFlow(sender, { valid: following, current: following });
+    const poll = (): Promise<void> =>
+      runFlow(async () => {
+        const reply = await flow.answer(send({ action: 'poll', operationId }, flow));
+        if (reply !== 'declined' && reply.ok && isOperation(reply.data)) {
+          show(reply.data, sender);
+          if (isFinished(reply.data)) return;
+        } else if (reply !== 'declined' && failureCode(reply) === 'NOT_FOUND') {
+          const last = kept.get(ownerId)?.operation;
+          if (last?.operationId === operationId) show({ ...last, phase: 'failed', code: 'NOT_FOUND' }, sender);
+          return;
+        }
+        timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
+      });
     timer = setTimeout(() => void poll(), POLL_INTERVAL_MS);
     return () => {
       stopped = true;
@@ -194,12 +211,19 @@ export function useOperation(
     };
   }, [operationId, running, send, show, ownerId]);
 
-  const cancel = useCallback(async (): Promise<void> => {
-    if (!operationId) return;
-    const sender: Sender = { owner: ownerId, epoch };
-    const reply = await send({ action: 'cancel', operationId });
-    if (reply !== 'declined' && reply.ok && isOperation(reply.data)) show(reply.data, sender);
-  }, [operationId, send, show, ownerId]);
+  const cancel = useCallback(
+    (): Promise<void> =>
+      runFlow(async () => {
+        if (!operationId) return;
+        const sender: Sender = { owner: ownerId, epoch };
+        // The answer counts only for this operation, while it is still the one kept.
+        const about = (): boolean => isCurrent(sender) && kept.get(ownerId)?.operation.operationId === operationId;
+        const flow = createFlow(sender, { valid: about, current: about });
+        const reply = await flow.answer(send({ action: 'cancel', operationId }, flow));
+        if (reply !== 'declined' && reply.ok && isOperation(reply.data)) show(reply.data, sender);
+      }),
+    [operationId, send, show, ownerId]
+  );
 
   const dismiss = useCallback(() => {
     const last = kept.get(ownerId)?.operation;

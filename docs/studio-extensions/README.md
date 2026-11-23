@@ -728,9 +728,14 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
       `RUNTIME_UNAVAILABLE`, 503 `UNAVAILABLE`과 데스크톱 채널의 이른 거절(`FORBIDDEN`, `INVALID_INPUT`, `FRAME_LIMIT`,
       `RUNTIME_UNAVAILABLE`)에도 붙는다. 붙일 수 없는 답이 있다. listener가 route 전에 거절하는 요청(받지 않는 origin의
       빈 403)과 화면이 잃은 답(`CONNECTION_LOST`)이다. 그래서 화면은 열 때 `get_settings`를 먼저 보내 그 답에서
-      `transport`를 알고, `transport`가 없는 답은 `insecure`로 본다. `insecure`이면 proxy 인증 정보를 싣는 요청(`set_proxy_credentials`, `proxyCredentials`가 있는 요청,
-      사용자 부분이 있는 proxy 주소의 `set_settings`)을 보내기 **전에** 인증 정보가 암호화되지 않은 채 네트워크를 지난다고
-      경고한다. 사용자가 계속하면 `acknowledgeInsecureTransport: true`를 붙여 보낸다. 서버는 둘째 방어선으로, 표시 없이
+      `transport`를 알고, `transport`가 없는 답은 `insecure`로 본다. 화면이 정한 비밀 요청은 `set_proxy_credentials`,
+      `proxyCredentials`가 있는 요청, 그리고 Git·index URL이나 proxy 주소 문자열에 `@`가 한 글자라도 있는 install·
+      `set_settings`다(2026-11-24 오케스트레이터 결정: 파싱에 기대지 않는 fail-safe 판정, 과잉 판정 허용). 비밀 요청은 한
+      경로로만, 하나씩 나간다. 보내기 **직전마다** 비밀 없는 `get_settings`를 다시 보내 그 답의 `transport`만으로 판단한다
+      (다른 답의 `transport`는 배너에만 쓴다). `insecure`이면 **보낼 때마다** 인증 정보가 암호화되지 않은 채 네트워크를
+      지난다고 경고하고 확인을 받는다. 저장해 두는 동의는 없다(같은 결정: "화면 방문당 한 번 확인"을 폐기). 사용자가
+      계속하면 `acknowledgeInsecureTransport: true`를 붙여 보낸다. 비밀이 든 요청 본문은 보낸 뒤 화면 어디에도 남기지
+      않는다. 재시도하려면 사용자가 다시 입력한다. 서버는 둘째 방어선으로, 표시 없이
       그런 요청이 오면 `INSECURE_TRANSPORT`로 답한다. 데스크톱 창(`transport: 'secure'`)과 이 기계의 WebUI는 표시가 필요
       없다. 표시는 helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
   - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 본문을 다시 보내게 되는 redirect는 따르지

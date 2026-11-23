@@ -603,9 +603,9 @@
       "memoryOnly": "Used for this install only and not kept."
     },
     "insecure": {
-      "banner": "This connection to Studio is not encrypted. You are asked before a proxy password is sent.",
-      "title": "Send the password unencrypted?",
-      "body": "This page reaches Studio over plain HTTP from another machine. The proxy user name and password would cross the network unencrypted.",
+      "banner": "This connection to Studio is not encrypted. You are asked each time before a password or token is sent.",
+      "title": "Send it unencrypted?",
+      "body": "This page reaches Studio over plain HTTP from another machine. What you are sending holds a user name, password or token that would cross the network unencrypted.",
       "confirm": "Send anyway"
     },
     "upgrade": {

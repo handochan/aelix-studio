@@ -273,9 +273,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
                 busy={busy}
                 onlineAllowed={onlineAllowed}
                 onUpgrade={(entry) => void actions.upgrade(entry)}
-                onUpdateFromFile={(entry) =>
-                  void pickWheel().then((path) => path && actions.updateFromFile(entry, path))
-                }
+                onUpdateFromFile={(entry) => void actions.updateFromFile(entry, pickWheel)}
                 onRemove={(entry) => void actions.remove(entry)}
                 onToggleDefault={(entry, enabled) => void actions.setDefault(entry, enabled)}
               />

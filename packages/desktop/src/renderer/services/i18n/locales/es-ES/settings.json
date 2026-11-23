@@ -591,9 +591,9 @@
       "memoryOnly": "Solo se usan para esta instalación y no se guardan."
     },
     "insecure": {
-      "banner": "Esta conexión con Studio no está cifrada. Se te preguntará antes de enviar una contraseña del proxy.",
-      "title": "¿Enviar la contraseña sin cifrar?",
-      "body": "Esta página llega a Studio por HTTP simple desde otra máquina. El usuario y la contraseña del proxy cruzarían la red sin cifrar.",
+      "banner": "Esta conexión con Studio no está cifrada. Se le preguntará cada vez antes de enviar una contraseña o un token.",
+      "title": "¿Enviarlo sin cifrar?",
+      "body": "Esta página llega a Studio por HTTP sin cifrar desde otra máquina. Lo que envía contiene un usuario, una contraseña o un token que cruzaría la red sin cifrar.",
       "confirm": "Enviar de todos modos"
     },
     "upgrade": {

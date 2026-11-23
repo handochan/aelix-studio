@@ -603,9 +603,9 @@
       "memoryOnly": "Utilisés pour cette installation uniquement, sans être conservés."
     },
     "insecure": {
-      "banner": "Cette connexion à Studio n'est pas chiffrée. Une confirmation vous est demandée avant l'envoi d'un mot de passe de proxy.",
-      "title": "Envoyer le mot de passe sans chiffrement ?",
-      "body": "Cette page joint Studio en HTTP simple depuis une autre machine. Le nom d'utilisateur et le mot de passe du proxy traverseraient le réseau sans chiffrement.",
+      "banner": "Cette connexion à Studio n’est pas chiffrée. Une confirmation vous est demandée à chaque envoi d’un mot de passe ou d’un jeton.",
+      "title": "L’envoyer sans chiffrement ?",
+      "body": "Cette page joint Studio en HTTP simple depuis une autre machine. Ce que vous envoyez contient un nom d’utilisateur, un mot de passe ou un jeton qui traverserait le réseau sans chiffrement.",
       "confirm": "Envoyer quand même"
     },
     "upgrade": {

@@ -23,6 +23,8 @@ const bridge = vi.hoisted(() => ({
   /** Replaces the platform answer (one that never comes, or fails). */
   systemInfo: undefined as Promise<{ platform: string }> | undefined,
   picked: ['/host/wheels/demo-2.0-py3-none-any.whl'] as string[] | undefined,
+  /** Replaces the file dialog's answer (one that comes when the test says). */
+  pickGate: undefined as Promise<string[] | undefined> | undefined,
   opened: [] as unknown[],
 }));
 
@@ -53,7 +55,7 @@ vi.mock('@/common', () => ({
       showOpen: {
         invoke: (options: unknown) => {
           bridge.opened.push(options);
-          return Promise.resolve(bridge.picked);
+          return bridge.pickGate ?? Promise.resolve(bridge.picked);
         },
       },
     },
@@ -98,6 +100,8 @@ type Host = {
   settingsRefusal?: string;
   /** Held before a change is answered, until resolved. */
   gate?: Promise<void>;
+  /** Held before `get_settings` is answered, until resolved. */
+  settingsGate?: Promise<void>;
 };
 
 let host: Host;
@@ -131,7 +135,10 @@ function fakeHelper(): void {
     request: vi.fn(async (command: StudioExtensionsRequest) => {
       host.requests.push(command);
       const action = command.action as string;
-      if (action === 'get_settings') return reply({ ok: true, data: host.settings });
+      if (action === 'get_settings') {
+        if (host.settingsGate) await host.settingsGate;
+        return reply({ ok: true, data: host.settings });
+      }
       if (action === 'list')
         return 'code' in host.listing
           ? reply({
@@ -207,6 +214,7 @@ beforeEach(() => {
   resetShownOperation();
   bridge.platform = 'darwin';
   bridge.systemInfo = undefined;
+  bridge.pickGate = undefined;
   bridge.opened = [];
   auth.user = null;
   // Arco's message box renders with an API this React no longer has: watched, not rendered.
@@ -456,6 +464,31 @@ describe('the agent extensions screen', () => {
     await new Promise((resolve) => setTimeout(resolve, 50));
     expect(sent('install')).toEqual([]);
     expect(document.body.textContent).not.toContain('sentinel-secret');
+  });
+
+  it('sends no update for a wheel chosen after the screen was left', async () => {
+    let choose: ((files: string[]) => void) | undefined;
+    bridge.pickGate = new Promise((resolve) => (choose = resolve));
+    const view = render(<AgentExtensionsSettings />);
+    fireEvent.click(
+      within(await screen.findByTestId('agent-extension-local-demo')).getByTestId('agent-extension-update')
+    );
+    await waitFor(() => expect(bridge.opened).toHaveLength(1));
+    view.unmount();
+    choose?.(['/host/wheels/demo-2.0-py3-none-any.whl']);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(sent('update')).toEqual([]);
+  });
+
+  it('asks for nothing more once the screen is left before the settings came', async () => {
+    let answer: (() => void) | undefined;
+    host.settingsGate = new Promise((resolve) => (answer = resolve));
+    const view = render(<AgentExtensionsSettings />);
+    await waitFor(() => expect(sent('get_settings')).toHaveLength(1));
+    view.unmount();
+    answer?.();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(actionsOf()).toEqual(['get_settings']);
   });
 
   it('updates a file import from a wheel chosen on the host', async () => {
@@ -780,11 +813,12 @@ describe('the agent extensions screen', () => {
     });
 
     it(
-      'keeps no Git address with a password across visits, so it is not offered again there',
+      'keeps a change with a Git address holding a password nowhere: it is typed again to retry',
       async () => {
         proxyWithPassword();
         host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED']);
         const first = render(<AgentExtensionsSettings />);
+        await waitFor(() => expect(screen.getByTestId('settings-private-git')).toBeInTheDocument());
         fireEvent.click(await screen.findByTestId('agent-extensions-install'));
         fireEvent.click(await screen.findByTestId('install-git-tab'));
         fireEvent.change(await screen.findByTestId('install-git-url'), {
@@ -792,8 +826,9 @@ describe('the agent extensions screen', () => {
         });
         fireEvent.click(screen.getByTestId('install-submit'));
         await enterCredentials('wrong');
-        // In this visit it can be sent again.
-        expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
+        // Not even in this visit: the request with the address is gone once it was sent.
+        expect(await screen.findByTestId('operation-failure')).toBeInTheDocument();
+        expect(screen.queryByTestId('operation-retry')).toBeNull();
         first.unmount();
         render(<AgentExtensionsSettings />);
         expect(await screen.findByTestId('operation-failure')).toBeInTheDocument();
@@ -971,6 +1006,21 @@ describe('the agent extensions screen', () => {
         expect(sent('install')).toEqual([]);
         // Opened again: the address is there without its user part.
         expect((await openGit()).value).toBe('https://git.example/pack.git');
+      },
+      LONG
+    );
+
+    it(
+      'keeps nothing of an address it cannot take apart, once the dialog is closed',
+      async () => {
+        render(<AgentExtensionsSettings />);
+        await waitFor(() => expect(screen.getByTestId('settings-private-git')).toBeInTheDocument());
+        const url = await openGit();
+        fireEvent.change(url, { target: { value: 'https:///ops:git-token@git.example/pack.git' } });
+        fireEvent.click(
+          screen.getByText('settings.agentExtensions.actions.cancel', { selector: '.arco-modal-footer button span' })
+        );
+        expect((await openGit()).value).toBe('');
       },
       LONG
     );

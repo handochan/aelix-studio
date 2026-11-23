@@ -603,9 +603,9 @@
       "memoryOnly": "Yalnızca bu kurulum için kullanılır ve saklanmaz."
     },
     "insecure": {
-      "banner": "Studio ile bu bağlantı şifrelenmemiş. Bir proxy parolası gönderilmeden önce size sorulur.",
-      "title": "Parola şifrelenmeden gönderilsin mi?",
-      "body": "Bu sayfa Studio'ya başka bir makineden düz HTTP ile bağlanıyor. Proxy kullanıcı adı ve parolası ağda şifrelenmeden geçer.",
+      "banner": "Studio ile bu bağlantı şifreli değil. Her parola veya belirteç gönderiminden önce size sorulur.",
+      "title": "Şifrelemeden gönderilsin mi?",
+      "body": "Bu sayfa Studio’ya başka bir makineden düz HTTP ile bağlanıyor. Gönderdiğiniz içerik, ağdan şifrelenmeden geçecek bir kullanıcı adı, parola veya belirteç içeriyor.",
       "confirm": "Yine de gönder"
     },
     "upgrade": {

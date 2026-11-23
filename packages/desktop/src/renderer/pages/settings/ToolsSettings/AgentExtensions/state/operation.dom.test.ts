@@ -8,7 +8,14 @@ import type { ExtensionOperation, StudioExtensionsReply, StudioExtensionsRequest
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { SendResult } from './channel';
-import { currentOwner, forgetOwners, resetShownOperation, sessionEpoch, useOperation } from './operation';
+import {
+  currentOwner,
+  forgetOwners,
+  nextChangeRequest,
+  resetShownOperation,
+  sessionEpoch,
+  useOperation,
+} from './operation';
 
 const operation = (operationId: string, phase: ExtensionOperation['phase']): ExtensionOperation => ({
   operationId,
@@ -32,7 +39,14 @@ describe('the change kept for the screen', () => {
     expect(currentOwner()).toBe('bob');
     const epoch = sessionEpoch();
     // A late answer for the user before: dropped, not kept for when they come back.
-    act(() => result.current.start(operation('op-1', 'installing'), { owner: 'alice', epoch, retried: false }));
+    act(() =>
+      result.current.start(operation('op-1', 'installing'), {
+        owner: 'alice',
+        epoch,
+        request: nextChangeRequest(),
+        retried: false,
+      })
+    );
     expect(result.current.operation).toBeUndefined();
     unmount();
     const alice = renderHook(() => useOperation(quiet, vi.fn(), 'alice'));
@@ -40,7 +54,12 @@ describe('the change kept for the screen', () => {
     alice.unmount();
     const bob = renderHook(() => useOperation(quiet, vi.fn(), 'bob'));
     act(() =>
-      bob.result.current.start(operation('op-1', 'installing'), { owner: 'bob', epoch: sessionEpoch(), retried: false })
+      bob.result.current.start(operation('op-1', 'installing'), {
+        owner: 'bob',
+        epoch: sessionEpoch(),
+        request: nextChangeRequest(),
+        retried: false,
+      })
     );
     expect(bob.result.current.operation).toEqual(operation('op-1', 'installing'));
     bob.unmount();
@@ -52,7 +71,14 @@ describe('the change kept for the screen', () => {
     // Signed out and in again as the same user: a new sign-in.
     act(() => forgetOwners());
     const again = renderHook(() => useOperation(quiet, vi.fn(), 'alice'));
-    act(() => result.current.start(operation('op-1', 'installing'), { owner: 'alice', epoch: before, retried: false }));
+    act(() =>
+      result.current.start(operation('op-1', 'installing'), {
+        owner: 'alice',
+        epoch: before,
+        request: nextChangeRequest(),
+        retried: false,
+      })
+    );
     expect(again.result.current.operation).toBeUndefined();
   });
 
@@ -63,7 +89,7 @@ describe('the change kept for the screen', () => {
       return reply(operation((command as { operationId: string }).operationId, 'installing'));
     });
     const { result } = renderHook(() => useOperation(send, vi.fn(), 'alice'));
-    const started = { owner: 'alice', epoch: sessionEpoch(), retried: false };
+    const started = { owner: 'alice', epoch: sessionEpoch(), request: nextChangeRequest(), retried: false };
     act(() => result.current.start(operation('op-1', 'installing'), started));
     let cancelling: Promise<void> | undefined;
     act(() => {
@@ -77,6 +103,17 @@ describe('the change kept for the screen', () => {
       answerCancel?.(reply(operation('op-1', 'cancelled')));
       await cancelling;
     });
+    expect(result.current.operation).toEqual(operation('op-2', 'installing'));
+  });
+
+  it('lets the start answer of an earlier change request cover no newer change', () => {
+    const { result } = renderHook(() => useOperation(quiet, vi.fn(), 'alice'));
+    const sender = { owner: 'alice', epoch: sessionEpoch(), retried: false };
+    const earlier = nextChangeRequest();
+    const newer = nextChangeRequest();
+    act(() => result.current.start(operation('op-2', 'installing'), { ...sender, request: newer }));
+    // The earlier request's answer arrives last.
+    act(() => result.current.start(operation('op-1', 'installing'), { ...sender, request: earlier }));
     expect(result.current.operation).toEqual(operation('op-2', 'installing'));
   });
 });

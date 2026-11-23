@@ -593,9 +593,9 @@
       "memoryOnly": "Nur für diese Installation verwendet und nicht gespeichert."
     },
     "insecure": {
-      "banner": "Diese Verbindung zu Studio ist nicht verschlüsselt. Vor dem Senden eines Proxy-Passworts werden Sie gefragt.",
-      "title": "Passwort unverschlüsselt senden?",
-      "body": "Diese Seite erreicht Studio über einfaches HTTP von einem anderen Rechner. Proxy-Benutzername und -Passwort würden das Netzwerk unverschlüsselt durchqueren.",
+      "banner": "Diese Verbindung zu Studio ist nicht verschlüsselt. Vor jedem Senden eines Passworts oder Tokens werden Sie gefragt.",
+      "title": "Unverschlüsselt senden?",
+      "body": "Diese Seite erreicht Studio von einem anderen Rechner über einfaches HTTP. Was Sie senden, enthält einen Benutzernamen, ein Passwort oder ein Token, das unverschlüsselt über das Netzwerk ginge.",
       "confirm": "Trotzdem senden"
     },
     "upgrade": {

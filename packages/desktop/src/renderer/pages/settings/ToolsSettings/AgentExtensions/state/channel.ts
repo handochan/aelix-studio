@@ -5,25 +5,17 @@
  */
 
 import type { StudioExtensionsReply, StudioExtensionsRequest, StudioExtensionsTransport } from '@aionui/web-host';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { requestStudioExtensions } from '../client';
+import { FlowEnded, type Flow } from './flow';
 import { carriesSecret } from './secrets';
 
 /** Asks the user whether a secret may cross the network unencrypted; resolves true to go on. */
 export type ConfirmInsecure = () => Promise<boolean>;
 
 /**
- * Whether the flow a request belongs to may still send: the same owner and sign-in, the same
- * visit of the screen, and no newer request in its place. Captured when the flow starts, before
- * anything it awaits (a dialog, a check), and asked again after every await.
- */
-export type StillValid = () => boolean;
-
-const always: StillValid = () => true;
-
-/**
  * What `send` gives back: the reply, or `declined` when the user kept a secret from an insecure
- * channel, or the flow it was sent for was no longer valid before it went out.
+ * channel, or the flow it was sent for could not go on before it went out.
  */
 export type SendResult = StudioExtensionsReply | 'declined';
 
@@ -36,75 +28,65 @@ export const failureCode = (reply: StudioExtensionsReply): string | undefined =>
  * told (a reply without one, and the time before the first reply, count as `insecure`); it is
  * for the warning banner only and decides nothing.
  *
+ * Every request belongs to a flow (`flow.ts`) and goes out only while that flow may still go on.
  * `send` decides from the request itself whether it carries a secret (`carriesSecret`); a
- * request that does goes out only through `deliverSecret`, one at a time:
- * 1. the flow must still be valid (checked again after every await below);
- * 2. the transport is read with a request that carries nothing (`get_settings`), and only that
+ * request that does goes out only through `deliverSecret`, one after another:
+ * 1. the transport is read with a request that carries nothing (`get_settings`), and only that
  *    reply's transport decides;
- * 3. over an insecure channel the user is asked, once for this visit while the channel stays
- *    insecure (any secure reply takes the yes back; no reply gives one); after a yes the
- *    request carries `acknowledgeInsecureTransport: true`;
- * 4. a request the host still refuses as `INSECURE_TRANSPORT` is asked about again, even for a
- *    verdict already confirmed, and goes the same way once more.
- * Any other request goes out at once, if its flow is still valid.
+ * 2. over an insecure channel the user is asked, for this request (2026-11-24 orchestrator
+ *    decision: every secret sent over an insecure channel is confirmed on its own; no yes is
+ *    kept for the next one); after a yes it carries `acknowledgeInsecureTransport: true`;
+ * 3. a request the host still refuses as `INSECURE_TRANSPORT` goes the same way once more.
+ * The flow is checked after every await: waiting for the secret before it and the check
+ * (`flow.step`), and around the question (`flow.ask`).
  */
 export function useExtensionsChannel(confirmInsecure: ConfirmInsecure) {
-  /** The user said yes to sending secrets over the insecure channel the checks found. */
-  const acknowledged = useRef(false);
-  /** Changes when the screen is left: nothing asked for before then is sent. */
-  const generation = useRef(0);
   /** Secret requests, one after another: no two checks or questions at once. */
   const secrets = useRef<Promise<unknown>>(Promise.resolve());
   const [banner, setBanner] = useState<StudioExtensionsTransport | undefined>(undefined);
 
-  useEffect(
-    () => () => {
-      generation.current += 1;
-    },
-    []
-  );
-
   const deliver = useCallback(async (request: StudioExtensionsRequest): Promise<StudioExtensionsReply> => {
     const reply = await requestStudioExtensions(request);
-    const transport = reply.transport ?? 'insecure';
-    // Any reply may take back a yes (the channel changed since), never give one.
-    if (transport === 'secure') acknowledged.current = false;
-    setBanner(transport);
+    setBanner(reply.transport ?? 'insecure');
     return reply;
   }, []);
 
-  /** One secret request, checked, asked about, and sent only while its flow is valid. */
+  /** One secret request: checked, asked about, and sent only while its flow may go on. */
   const deliverSecret = useCallback(
-    async (command: StudioExtensionsRequest, valid: StillValid, visit: number): Promise<SendResult> => {
-      const ok = (): boolean => generation.current === visit && valid();
+    async (command: StudioExtensionsRequest, flow: Flow): Promise<SendResult> => {
       const attempt = async (): Promise<SendResult> => {
-        if (!ok()) return 'declined';
-        const check = await deliver({ action: 'get_settings' });
+        const check = await flow.step(deliver({ action: 'get_settings' }));
         // This check's own answer decides, not whichever reply came last.
-        const verdict = check.transport ?? 'insecure';
-        if (!ok()) return 'declined';
-        if (verdict !== 'secure' && !acknowledged.current) {
-          const yes = await confirmInsecure();
-          if (!ok() || !yes) return 'declined';
-          acknowledged.current = true;
-        }
-        if (!ok()) return 'declined';
-        return deliver(verdict === 'secure' ? command : { ...command, acknowledgeInsecureTransport: true });
+        if ((check.transport ?? 'insecure') === 'secure') return deliver(command);
+        if (!(await flow.ask(confirmInsecure))) return 'declined';
+        return deliver({ ...command, acknowledgeInsecureTransport: true });
       };
-      const reply = await attempt();
-      if (reply === 'declined' || failureCode(reply) !== 'INSECURE_TRANSPORT') return reply;
-      acknowledged.current = false;
-      return attempt();
+      try {
+        const reply = await attempt();
+        if (reply === 'declined' || failureCode(reply) !== 'INSECURE_TRANSPORT') return reply;
+        return await attempt();
+      } catch (error) {
+        if (error instanceof FlowEnded) return 'declined';
+        throw error;
+      }
     },
     [confirmInsecure, deliver]
   );
 
   const send = useCallback(
-    async (command: StudioExtensionsRequest, valid: StillValid = always): Promise<SendResult> => {
-      const visit = generation.current;
-      if (!valid()) return 'declined';
+    async (command: StudioExtensionsRequest, flow: Flow): Promise<SendResult> => {
+      if (!flow.valid()) return 'declined';
       if (!carriesSecret(command)) return deliver(command);
-      const turn = secrets.current.then(() => deliverSecret(command, valid, visit));
+      const before = secrets.current;
+      const turn = (async (): Promise<SendResult> => {
+        try {
+          await flow.step(before);
+        } catch (error) {
+          if (error instanceof FlowEnded) return 'declined';
+          throw error;
+        }
+        return deliverSecret(command, flow);
+      })();
       secrets.current = turn.catch((): void => {});
       return turn;
     },
