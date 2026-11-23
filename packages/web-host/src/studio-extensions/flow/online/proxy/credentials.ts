@@ -177,7 +177,13 @@ export async function saveProxyCredentials(
   if (vault.mode !== 'keychain')
     throw new ExtensionFailure('PROXY_CREDENTIALS_NOT_STORED', ['proxy credentials are not kept here']);
   const id = newCredentialId();
-  const sealed = vault.seal(JSON.stringify({ id, proxy, ...credentials })).toString('base64');
+  let sealed: string;
+  try {
+    sealed = vault.seal(JSON.stringify({ id, proxy, ...credentials })).toString('base64');
+  } catch {
+    // The OS keychain refused (access denied, locked, unavailable): nothing is kept.
+    throw new ExtensionFailure('PROXY_CREDENTIALS_NOT_STORED', ['the keychain did not keep the credentials']);
+  }
   const file = sealedFile(layout, id);
   const temporary = await writeTemporary(file, JSON.stringify({ schema: SCHEMA, id, proxy, sealed }, null, 2) + '\n');
   await writer.replace(path.basename(temporary), path.basename(file));

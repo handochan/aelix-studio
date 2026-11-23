@@ -24,7 +24,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { fetchStudioBackend, resolveStandaloneStudioUserDataPath, startWebHost } from '@aionui/web-host';
+import {
+  configureStudioExtensions,
+  disposeStudioExtensions,
+  fetchStudioBackend,
+  resolveStandaloneStudioUserDataPath,
+  startWebHost,
+} from '@aionui/web-host';
 import { verifyDefaultHostBundle } from '../packages/shared-scripts/src/default-host.js';
 import { openBrowserUrl, shouldAutoOpenBrowser } from '../packages/web-cli/src/browser.js';
 import { getStandaloneWebDataFolder } from '../packages/desktop/src/common/config/appIdentity';
@@ -214,12 +220,16 @@ async function main(): Promise<void> {
   console.log('[webui] backend bin:', backendBin);
   console.log(`[webui] launching  : port=${port} allowRemote=${allowRemote}`);
 
+  const userDataPath = await resolveStandaloneStudioUserDataPath(workDir);
+  // The standalone WebUI has no OS keychain: no vault, so proxy credentials are asked at
+  // each install and never kept (Studio #32).
+  configureStudioExtensions({ userDataPath });
   const handle = await startWebHost({
     app: {
       version: '0.0.0',
       isPackaged: false,
       resourcesPath: repoRoot,
-      userDataPath: await resolveStandaloneStudioUserDataPath(workDir),
+      userDataPath,
     },
     staticDir,
     port,
@@ -302,6 +312,7 @@ async function main(): Promise<void> {
     console.log(`\n[webui] received ${signal}, stopping...`);
     try {
       await handle.stop();
+      await disposeStudioExtensions();
     } catch (err) {
       console.error('[webui] stop error:', err);
     } finally {

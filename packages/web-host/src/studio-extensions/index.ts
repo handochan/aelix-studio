@@ -2,7 +2,15 @@
  * Studio extension helper (Studio #32, D04 ADR). A screen module uses the service and the
  * request and reply types below and nothing else from this directory.
  */
-export { ExtensionService, type ExtensionServiceOptions } from './service.js';
+export { ExtensionService, type ExtensionServiceOptions } from './host/service.js';
+export {
+  configureStudioExtensions,
+  disposeStudioExtensions,
+  getStudioExtensionService,
+  studioRuntimeDirectory,
+  type StudioExtensionsConfig,
+} from './host/shared.js';
+export { handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './host/facade.js';
 export { MEMORY_ONLY_VAULT, type ProxyCredentialVault } from './flow/online/proxy/credentials.js';
 export {
   locateStudioExtensionLayout,
@@ -27,4 +35,8 @@ export type {
   ExtensionStatus,
   ProxyCredentialMode,
   ProxyCredentials,
+  StudioExtensionsReply,
+  StudioExtensionsRequest,
+  StudioExtensionsTransport,
+  StudioExtensionsTransportCode,
 } from './types.js';

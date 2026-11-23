@@ -27,6 +27,9 @@ import {
 import { toHostCookieHeader, toStudioSetCookie, usesSharedLoopbackHost } from './studio-auth/cookies.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
+import { handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './studio-extensions/host/facade.js';
+import { createRelayVerdicts, isLoopbackAddress } from './studio-extensions/host/transport.js';
+import { getStudioExtensionService } from './studio-extensions/host/shared.js';
 import {
   MAX_UPGRADE_HEADER_BYTES,
   proxyWebSocket,
@@ -169,7 +172,13 @@ const PEEK_LIMIT_BYTES = 4096;
  * from `client` during peek are replayed to the upstream as the first write,
  * so the endpoint sees the full HTTP request as-sent.
  */
-function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: Buffer): void {
+function spliceToTcpEndpoint(
+  client: Socket,
+  targetPort: number,
+  initialBytes: Buffer,
+  /** Called once connected with the relay connection's local address and port; returns its release. */
+  relayed?: (localAddress: string, localPort: number) => () => void
+): void {
   client.setNoDelay(true);
   client.setKeepAlive(true);
   client.setTimeout(0);
@@ -182,10 +191,15 @@ function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: B
   // span multiple TCP segments) lose their tail bytes and the backend hangs
   // forever waiting for the missing Content-Length (issue #4058).
   client.pause();
-  const upstream = net.connect({ host: '127.0.0.1', port: targetPort });
+  const upstream = net.connect({ host: '127.0.0.1', port: targetPort, localAddress: '127.0.0.1' });
   upstream.setNoDelay(true);
   upstream.setKeepAlive(true);
   upstream.once('connect', () => {
+    // Registered before a byte of the request is relayed, so the internal server finds it.
+    const { localAddress, localPort } = upstream;
+    if (relayed && localAddress !== undefined && localPort !== undefined) {
+      upstream.once('close', relayed(localAddress, localPort));
+    }
     if (initialBytes.length > 0) upstream.write(initialBytes);
     upstream.pipe(client);
     client.pipe(upstream);
@@ -234,6 +248,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   const browserCookieAuthority = (authority: string | undefined): string | undefined =>
     isLoopbackAlias(authority) ? undefined : authority;
 
+  // The listener relays every connection to the internal HTTP server from 127.0.0.1, so that
+  // server cannot see who connected: the listener records its verdict on each relay
+  // connection (see `createRelayVerdicts`).
+  const relayVerdicts = createRelayVerdicts();
+
   // Bun's HTTP server upgrade socket does not reliably write the 101 response
   // (#2824). Keep client upgrades on the TCP listener and use this HTTP
   // listener to parse and validate every ordinary request, including keep-alive.
@@ -271,6 +290,16 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
           backendPort: opts.backendPort,
           origins: [req.headers.origin ?? ''],
           userDataPath: opts.userDataPath,
+        });
+        return;
+      }
+
+      if (req.url.startsWith(STUDIO_EXTENSIONS_ROUTE)) {
+        if (!cookieAuthority) delete req.headers.cookie;
+        await handleStudioExtensions(req, res, {
+          backendPort: opts.backendPort,
+          origins: [req.headers.origin ?? ''],
+          secure: relayVerdicts.fromThisMachine,
         });
         return;
       }
@@ -349,7 +378,10 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
       cleanup();
-      spliceToTcpEndpoint(client, internalPort, peeked);
+      const fromThisMachine = isLoopbackAddress(client.remoteAddress);
+      spliceToTcpEndpoint(client, internalPort, peeked, (localAddress, localPort) =>
+        relayVerdicts.record(localAddress, localPort, fromThisMachine)
+      );
     };
     const close = (): void => {
       cleanup();
@@ -419,6 +451,8 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
     },
     stop: async () => {
       getNativeAuthService().cancelOwner('web:', true);
+      // WebUI users' extension changes end with the listener that started them.
+      getStudioExtensionService()?.cancelOwner('web:', true);
       await closeListeners();
     },
   };

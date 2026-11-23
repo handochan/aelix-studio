@@ -17,7 +17,7 @@ import {
   type FakeRuntimeOptions,
 } from '../../../../tests/fixtures/extensionRuntime';
 import { writeWheel } from '../../../../tests/fixtures/extensionWheels';
-import { ExtensionService, type ExtensionServiceOptions } from '../../service';
+import { ExtensionService, type ExtensionServiceOptions } from '../../host/service';
 import type { ExtensionListing, ExtensionOperation, ExtensionReply, ExtensionSettingsState } from '../../types';
 
 const run = promisify(execFile);
