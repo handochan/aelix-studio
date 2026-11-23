@@ -13,13 +13,15 @@ import { takeScreenshot } from '../../../helpers/screenshots';
 import { SETTINGS_SIDER_ITEM, settingsSiderItemById } from '../../../helpers/selectors';
 
 test.describe('Agent Extensions', () => {
-  test('TC-AEXT-01: sits below Tools in the sidebar and opens its page', async ({ page }) => {
+  test('TC-AEXT-01: sits below Tools in the AI core group and opens its page', async ({ page }) => {
     await goToSettings(page, 'tools');
     await waitForSettle(page);
     const ids = await page
       .locator(SETTINGS_SIDER_ITEM)
       .evaluateAll((items) => items.map((item) => item.getAttribute('data-settings-id')));
-    expect(ids.indexOf('agent-extensions')).toBe(ids.indexOf('tools') + 1);
+    // In the AI core group after Tools; a JS extension's tab anchored after Tools may come between.
+    expect(ids.indexOf('agent-extensions')).toBeGreaterThan(ids.indexOf('tools'));
+    expect(ids.indexOf('agent-extensions')).toBeLessThan(ids.indexOf('appearance'));
 
     await page.locator(settingsSiderItemById('agent-extensions')).first().click();
     await expect(page).toHaveURL(/#\/settings\/agent-extensions$/);
