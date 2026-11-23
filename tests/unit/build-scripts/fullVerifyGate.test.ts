@@ -297,7 +297,7 @@ describe('full verification summary', () => {
   });
 });
 
-type Step = { uses?: string; with?: Record<string, unknown> };
+type Step = { uses?: string; with?: Record<string, unknown>; if?: string; run?: string };
 type Job = {
   if?: string;
   uses?: string;
@@ -381,7 +381,15 @@ describe('full verification workflow wiring', () => {
 
   it('opts in to packaged image acceptance without the full verification matrix', () => {
     const job = prChecks.jobs['image-acceptance'];
-    expect(job.uses).toBe('./.github/workflows/_image-acceptance.yml');
+    expect(job.permissions).toEqual({ contents: 'read' });
+    const [guard, checkout, receipt] = job.steps ?? [];
+    expect(guard.if).toContain("inputs.pr_number != '' || inputs.commit_sha != ''");
+    expect(guard.run).toContain('exit 1');
+    expect(checkout.with).toEqual({
+      ref: '${{ github.event.pull_request.head.sha || github.sha }}',
+      'persist-credentials': false,
+    });
+    expect(receipt.run).toContain('git rev-parse HEAD');
     expect(job.if).toContain("github.event_name == 'workflow_dispatch' && inputs.image_acceptance");
     expect(job.if).toContain("github.event.label.name == 'run-image-acceptance'");
     expect(prChecks.jobs['full-verify-gate'].if).toContain('!inputs.image_acceptance');

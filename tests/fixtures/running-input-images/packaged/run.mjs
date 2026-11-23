@@ -10,7 +10,7 @@ import { _electron as electron, expect } from '@playwright/test';
 import httpBridge from '../../../e2e/helpers/httpBridge.ts';
 import { closeElectron } from '../../../../scripts/studio-preview/host-release/verification.mjs';
 import { attach, clickTimed, observeRenderer, takeAck } from './browser.mjs';
-import { digest, holdMessage, model, providerId, startProvider } from './provider.mjs';
+import { caption, digest, holdMessage, model, providerId, startProvider } from './provider.mjs';
 import { startWebUI, webuiApi } from './webui.mjs';
 
 const scenarios = [
@@ -173,6 +173,17 @@ async function waitForObservation(read) {
   await expect.poll(read, options).toBeTruthy();
 }
 
+async function persistedUserRows(page, scope) {
+  const result = await httpGet(page, scope + '/messages?limit=100&content_mode=full');
+  assert.ok(Array.isArray(result.items) && result.has_more_before === false && result.has_more_after === false);
+  return result.items.filter((item) => item.position === 'right');
+}
+
+async function hostIdle(page, scope) {
+  const { runtime } = await httpGet(page, scope);
+  return runtime?.state === 'idle' && !runtime.is_processing && runtime.turn_id === null;
+}
+
 async function runScenario(page, scenario, row) {
   const check = (next) => {
     stage = next;
@@ -188,6 +199,11 @@ async function runScenario(page, scenario, row) {
   const workspace = path.join(root, scenario.name);
   fs.mkdirSync(workspace);
   const scope = await createConversation(page, scenario.name, workspace);
+  check('initial-user-rows');
+  row.userRowsInitial = (await persistedUserRows(page, scope)).length;
+  assert.equal(row.userRowsInitial, 0);
+  let startingRows = [];
+  let originalTurn;
   const input = page.getByTestId('sendbox-input');
   const send = page.getByTestId('sendbox-send-btn');
   const stop = page.locator('.sendbox-stop-button');
@@ -197,15 +213,26 @@ async function runScenario(page, scenario, row) {
   await page.evaluate(() => {
     const probe = window.__runningImageFixture;
     probe.uploads.length = 0;
+    probe.uploadRefs.length = 0;
     probe.uploadStatuses.length = 0;
     probe.acknowledgments.length = 0;
   });
+  provider.expectPaths();
   check('held-turn');
   if (busy) {
     await input.fill(holdMessage);
     await send.click();
     check('hold-provider');
-    await waitForObservation(() => requests().some(({ held }) => held));
+    await waitForObservation(() => provider.holding && requests().some(({ held }) => held));
+    check('starting-user-row');
+    startingRows = await persistedUserRows(page, scope);
+    assert.equal(startingRows.length, 1);
+    assert.ok(typeof startingRows[0].id === 'string' && startingRows[0].id.length > 0);
+    assert.ok(JSON.stringify(startingRows[0].content).includes(holdMessage));
+    if (stopCase) {
+      originalTurn = (await httpGet(page, scope)).runtime?.turn_id;
+      assert.ok(typeof originalTurn === 'string' && originalTurn.length > 0);
+    }
     // The boot prompt can be accepted by Host before ACP marks its native turn
     // active. A fresh renderer queries the already-running turn without a send.
     await page.reload({ waitUntil: 'domcontentloaded' });
@@ -227,6 +254,7 @@ async function runScenario(page, scenario, row) {
       .click();
     await expect(radio).toBeChecked(options);
   }
+  row.userRowsBeforeSend = startingRows.length;
   check('attach');
   const files = (pathCase ? ['idle.png', 'steer.png', 'caption.png', 'stop.png', 'extra.png'] : [scenario.image]).map(
     (file) => path.join(inputs, file)
@@ -243,6 +271,22 @@ async function runScenario(page, scenario, row) {
     initialUploads.map(({ sha256 }) => sha256).sort(),
     files.map((file) => digest(fs.readFileSync(file)).sha256).sort()
   );
+  if (pathCase) {
+    check('original-path-refs');
+    const uploads = await page.evaluate(() => window.__runningImageFixture.uploadRefs);
+    assert.equal(uploads.length, 5);
+    assert.ok(uploads.every((ref) => typeof ref === 'string' && ref.length > 0));
+    // Resolve the five actual upload references with Host, before the path-only
+    // submission. Keep the comparison values in memory on this runner.
+    const originals = await Promise.all(
+      uploads.map((path) => httpPost(page, '/api/fs/content/metadata', { file: { kind: 'upload', path } }))
+    );
+    const originalPaths = originals.map(({ path }) => path);
+    row.originalPathCount = new Set(originalPaths).size;
+    assert.ok(originalPaths.every((entry) => typeof entry === 'string' && entry.length > 0));
+    assert.equal(row.originalPathCount, 5);
+    provider.expectPaths(originalPaths);
+  }
   if (scenario.notice !== 'caption') await input.fill('Inspect the acceptance attachment.');
   if (stopCase)
     await page.evaluate(() => {
@@ -250,6 +294,9 @@ async function runScenario(page, scenario, row) {
     });
   // Let the attachment and text render settle before taking the submission snapshot.
   await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  await page.evaluate(() => {
+    window.__runningImageFixture.sawPreparing = false;
+  });
   check('send');
   const start = await clickTimed(page, send);
   check('send-ack');
@@ -260,6 +307,13 @@ async function runScenario(page, scenario, row) {
     await expect(blocked).toContainText(/4.*images/, options);
     assert.equal(frames().length, 1);
     assert.equal(requests().length, 1);
+    check('preparing-notice');
+    row.preparingObserved = await page.evaluate(() => window.__runningImageFixture.sawPreparing);
+    assert.equal(row.preparingObserved, true);
+    await page.evaluate(() => {
+      window.__runningImageFixture.sawPreparing = false;
+    });
+    check('path-ack');
     const pathStart = await clickTimed(page, blocked.getByRole('button', { name: 'Send paths only' }));
     ack = await takeAck(page, 'steer', pathStart);
     await expect(
@@ -274,6 +328,13 @@ async function runScenario(page, scenario, row) {
   assert.equal(ack.queued, busy);
   row.ackMs = ack.ms;
   row.captionAdded = ack.captionAdded;
+  if (busy) {
+    check('preparing-notice');
+    const observed = await page.evaluate(() => window.__runningImageFixture.sawPreparing);
+    if (pathCase) row.pathPreparingObserved = observed;
+    else row.preparingObserved = observed;
+    assert.equal(observed, true);
+  }
   assert.equal(ack.captionAdded, scenario.notice === 'caption');
 
   check('notice');
@@ -288,11 +349,18 @@ async function runScenario(page, scenario, row) {
       .filter({ has: page.getByAltText(path.parse(scenario.image).name) });
     await chip.locator(':scope > div.absolute').click();
     await expect(pixel).toHaveAttribute('data-kind', 'pending', options);
+    check('original-turn');
+    const { runtime } = await httpGet(page, scope);
+    assert.equal(runtime?.turn_id === originalTurn && runtime.is_processing && provider.holding, true);
     check('stop-ack');
     const stopStart = await clickTimed(page, stop);
     const stopped = await takeAck(page, 'abort', stopStart);
     assert.equal(stopped.success, true);
     row.stopAckMs = stopped.ms;
+    check('stop-host-ended-while-held');
+    await waitForObservation(() => hostIdle(page, scope));
+    row.stopEndedWhileProviderHeld = provider.holding;
+    assert.equal(row.stopEndedWhileProviderHeld, true);
     await expect(stop).toBeHidden(options);
     await page.evaluate(() => {
       window.__runningImageFixture.holdImageAck = false;
@@ -356,10 +424,23 @@ async function runScenario(page, scenario, row) {
       )
     );
   }
-  await waitForObservation(async () => {
-    const { runtime } = await httpGet(page, scope);
-    return runtime && !runtime.is_processing && runtime.turn_id == null;
-  });
+  await waitForObservation(() => hostIdle(page, scope));
+  check('persisted-user-rows');
+  const finalRows = await persistedUserRows(page, scope);
+  row.userRowsAfterSend = finalRows.length;
+  row.userRowsAdded = finalRows.length - startingRows.length;
+  assert.equal(row.userRowsAdded, busy ? 0 : 1);
+  assert.equal(finalRows.length, 1);
+  if (busy) assert.equal(finalRows[0].id === startingRows[0].id, true);
+  if (scenario.notice === 'caption') {
+    row.captionStoredAsUserMessage = finalRows.some(({ content }) => JSON.stringify(content).includes(caption));
+    assert.equal(row.captionStoredAsUserMessage, false);
+  }
+  if (pathCase) {
+    const delivered = requests().filter(({ pathCount }) => pathCount > 0);
+    row.pathRefsMatch = delivered.length === 1 && delivered[0].pathRefsMatch;
+    assert.equal(row.pathRefsMatch, true);
+  }
   assert.deepEqual(
     frames().map(({ method }) => method),
     expectedCommands
@@ -539,6 +620,16 @@ try {
       stopWrites: null,
       providerImageOccurrences: null,
       pathCount: null,
+      originalPathCount: null,
+      pathRefsMatch: null,
+      preparingObserved: null,
+      pathPreparingObserved: null,
+      userRowsInitial: null,
+      userRowsBeforeSend: null,
+      userRowsAfterSend: null,
+      userRowsAdded: null,
+      captionStoredAsUserMessage: null,
+      stopEndedWhileProviderHeld: null,
       ackMs: null,
       stopAckMs: null,
       noticeAckMs: null,

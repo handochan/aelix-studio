@@ -3,9 +3,29 @@ export function observeRenderer() {
   localStorage.setItem('i18nextLng', 'en-US');
   const fixture = (window.__runningImageFixture = {
     uploads: [],
+    uploadRefs: [],
+    sawPreparing: false,
     uploadStatuses: [],
     acknowledgments: [],
     holdImageAck: false,
+  });
+  const preparing = '[data-testid="running-image-submission"][data-status="preparing"]';
+  new MutationObserver((records) => {
+    fixture.sawPreparing ||= records.some(
+      ({ type, target, oldValue, addedNodes }) =>
+        (type === 'attributes' &&
+          target.matches('[data-testid="running-image-submission"]') &&
+          (target.matches(preparing) || oldValue === 'preparing')) ||
+        [...addedNodes].some(
+          (node) => node instanceof Element && (node.matches(preparing) || node.querySelector(preparing))
+        )
+    );
+  }).observe(document, {
+    subtree: true,
+    childList: true,
+    attributes: true,
+    attributeOldValue: true,
+    attributeFilter: ['data-status'],
   });
   const digest = async (blob) => {
     const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -33,7 +53,11 @@ export function observeRenderer() {
       const image = digest(file).catch(() => null);
       this.addEventListener('load', async () => {
         fixture.uploadStatuses.push(this.status);
-        if (this.status >= 200 && this.status < 300) fixture.uploads.push(await image);
+        if (this.status >= 200 && this.status < 300 && this.responseURL.endsWith('/api/fs/upload')) {
+          const { data: ref } = JSON.parse(this.responseText);
+          fixture.uploadRefs.push(ref);
+          fixture.uploads.push(await image);
+        }
       });
     }
     return send.call(this, body);

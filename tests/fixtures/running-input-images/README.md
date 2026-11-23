@@ -108,6 +108,10 @@ Chromium sandbox setup.
 gh workflow run pr-checks.yml -R handochan/aelix-studio --ref <branch> -f image_acceptance=true
 ```
 
+Image acceptance uses the dispatch ref. The job rejects `pr_number` and
+`commit_sha` when image acceptance is enabled. Each report records the
+checked-out Git SHA.
+
 The test-only launcher lives outside the package. It uses ACP's MockTransport
 pattern to keep the production A-1b route unchanged
 (`openai-codex/gpt-6-luna`, `openai-codex-responses`,
@@ -120,11 +124,20 @@ The runner compares provider bytes with the Studio multipart Blob and the
 bundled ACP's actual native pipe write. It holds the provider's first reply to
 exercise both queues. It reloads the renderer after the provider sees the held
 turn so initial Host acceptance and active ACP state can settle independently.
-For Stop it holds the image ACK, clears the draft to reveal the composer's Stop
-button, stops the turn, then releases the ACK.
-The Stop scenario expects one native image write and zero provider image
-occurrences. The path-only fallback expects five references and zero image
-writes. Each scenario starts its own conversation.
+Each scenario starts with an empty conversation and queries the real Host
+message history. The idle first send adds one stored user row. For running
+scenarios the starting prompt remains the only stored user row, including
+when the image-only send adds a caption for the provider.
+
+The suite observes the preparing notice for running image sends and the
+path-only fallback. It compares the five original upload references with
+the provider's path-only input in memory and records the match and count.
+The fallback expects zero image writes.
+
+For Stop, the suite holds the image ACK, clears the draft to reveal the
+composer's Stop button, and stops the original turn. Host must report idle
+with the provider response still held. The runner then releases the image
+ACK and checks for one native image write and zero provider image occurrences.
 
 For WebUI, a fresh profile obtains a throwaway admin password from the bundled
 Host's password-reset endpoint. The same package starts its `--webui` server on

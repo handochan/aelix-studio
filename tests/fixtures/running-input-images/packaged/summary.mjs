@@ -2,6 +2,7 @@ import fs from 'node:fs';
 
 const {
   PREVIEW_TARGET,
+  DISPATCH_INPUTS,
   DEPENDENCIES,
   PREPARE,
   PACKAGE,
@@ -26,6 +27,7 @@ for (const [surface, artifact] of [
         status: 'failed',
         stage:
           [
+            ['dispatch-inputs', DISPATCH_INPUTS === 'failure' ? 'failure' : 'success'],
             ['dependencies', DEPENDENCIES],
             ['prepare', PREPARE],
             ['package', PACKAGE],

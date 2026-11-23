@@ -15,6 +15,7 @@ export function digest(bytes) {
 export async function startProvider() {
   const requests = [];
   let release;
+  let expectedPaths;
   let failed = false;
   const server = createServer(async (request, response) => {
     try {
@@ -38,14 +39,19 @@ export async function startProvider() {
         .map((part) => part.text)
         .join('');
       const pathMarker = '\n[[AION_FILES]]\n';
-      const pathCount = text.includes(pathMarker) ? text.split(pathMarker)[1].trim().split(/\r?\n/).length : 0;
+      const references = text.includes(pathMarker) ? text.split(pathMarker)[1].trimEnd().split(/\r?\n/) : [];
+      const pathCount = references.length;
+      const pathRefsMatch =
+        expectedPaths !== undefined &&
+        expectedPaths.length === pathCount &&
+        references.sort().every((reference, index) => reference === expectedPaths[index]);
       const held =
         text.includes(holdMessage) &&
         images.length === 0 &&
         !user
           .slice(0, -1)
           .some(({ content }) => content.some((part) => part.type === 'input_text' && part.text.includes(holdMessage)));
-      requests.push({ held, images, captionAdded: text === caption, pathCount });
+      requests.push({ held, images, captionAdded: text === caption, pathCount, pathRefsMatch });
       if (held)
         await new Promise((resolve) => {
           release = resolve;
@@ -76,6 +82,12 @@ export async function startProvider() {
   return {
     url: 'http://127.0.0.1:' + server.address().port + '/responses',
     requests,
+    get holding() {
+      return release !== undefined;
+    },
+    expectPaths(references) {
+      expectedPaths = references?.slice().sort();
+    },
     get failed() {
       return failed;
     },
