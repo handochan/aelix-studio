@@ -70,8 +70,10 @@ vi.mock('../../components/SettingsPageWrapper', () => ({
 
 import AgentExtensionsSettings from './index';
 
-// The screen answers through several async steps (and dialog animations): room for a loaded runner.
-configure({ asyncUtilTimeout: 4000 });
+// The screen answers through several async steps (and dialog animations): room for a loaded
+// runner. Tests with many steps get `LONG`; the rest keep the configured budget (longer on CI).
+configure({ asyncUtilTimeout: 8000 });
+const LONG = process.env.CI ? 60_000 : 30_000;
 import { resetShownOperation } from './state/operation';
 
 const entry = (name: string, extra: Partial<ExtensionEntry> = {}): ExtensionEntry => ({
@@ -274,90 +276,102 @@ describe('the agent extensions screen', () => {
     expect(await screen.findByTestId('terminal-environment')).toBeInTheDocument();
   });
 
-  it('installs by name and follows the change to its end, then lists again', async () => {
-    host.changes.push(['checking', 'installing', 'switched']);
-    render(<AgentExtensionsSettings />);
-    fireEvent.click(await screen.findByTestId('agent-extensions-install'));
-    fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
-    fireEvent.click(screen.getByTestId('install-submit'));
-    await waitFor(() =>
-      expect(sent('install')).toEqual([{ action: 'install', source: { kind: 'index', name: 'aelix-notes' } }])
-    );
-    expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
-    await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 5000 });
-    expect(screen.getByText('settings.agentExtensions.progress.switched')).toBeInTheDocument();
-    expect(sent('poll').length).toBeGreaterThanOrEqual(2);
-    expect(sent('list').length).toBeGreaterThanOrEqual(2);
-  }, 10000);
-
-  it('asks before the first secret over an insecure channel, and sends nothing on no', async () => {
-    host.transport = 'insecure';
-    host.settings = {
-      ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
-      credentialMode: 'memory-only',
-    };
-    render(<AgentExtensionsSettings />);
-    expect(await screen.findByTestId('agent-extensions-insecure')).toBeInTheDocument();
-    const install = async () => {
+  it(
+    'installs by name and follows the change to its end, then lists again',
+    async () => {
+      host.changes.push(['checking', 'installing', 'switched']);
+      render(<AgentExtensionsSettings />);
       fireEvent.click(await screen.findByTestId('agent-extensions-install'));
       fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
       fireEvent.click(screen.getByTestId('install-submit'));
-      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
-      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'sentinel-secret' } });
-      fireEvent.click(screen.getByTestId('credentials-submit'));
-    };
-    await install();
-    fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
-    // The dialog leaves after its exit animation, which can be slow on a busy runner.
-    await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
-      timeout: 4000,
-    });
-    expect(sent('install')).toEqual([]);
+      await waitFor(() =>
+        expect(sent('install')).toEqual([{ action: 'install', source: { kind: 'index', name: 'aelix-notes' } }])
+      );
+      expect(await screen.findByTestId('operation-view')).toBeInTheDocument();
+      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 5000 });
+      expect(screen.getByText('settings.agentExtensions.progress.switched')).toBeInTheDocument();
+      expect(sent('poll').length).toBeGreaterThanOrEqual(2);
+      expect(sent('list').length).toBeGreaterThanOrEqual(2);
+    },
+    LONG
+  );
 
-    await install();
-    fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
-    await waitFor(() =>
-      expect(sent('install')).toEqual([
-        {
-          action: 'install',
-          source: { kind: 'index', name: 'aelix-notes' },
-          proxyCredentials: { username: 'ops', password: 'sentinel-secret' },
-          acknowledgeInsecureTransport: true,
-        },
-      ])
-    );
-  }, 10000);
+  it(
+    'asks before the first secret over an insecure channel, and sends nothing on no',
+    async () => {
+      host.transport = 'insecure';
+      host.settings = {
+        ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
+        credentialMode: 'memory-only',
+      };
+      render(<AgentExtensionsSettings />);
+      expect(await screen.findByTestId('agent-extensions-insecure')).toBeInTheDocument();
+      const install = async () => {
+        fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+        fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
+        fireEvent.click(screen.getByTestId('install-submit'));
+        fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
+        fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'sentinel-secret' } });
+        fireEvent.click(screen.getByTestId('credentials-submit'));
+      };
+      await install();
+      fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
+      // The dialog leaves after its exit animation, which can be slow on a busy runner.
+      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
+        timeout: 4000,
+      });
+      expect(sent('install')).toEqual([]);
 
-  it('asks again for credentials the proxy refused, and sends the change again', async () => {
-    host.settings = {
-      ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
-      credentialMode: 'memory-only',
-    };
-    host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], ['checking', 'switched']);
-    render(<AgentExtensionsSettings />);
-    fireEvent.click(await screen.findByTestId('agent-extensions-install'));
-    fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
-    fireEvent.click(screen.getByTestId('install-submit'));
-    const enter = async (password: string) => {
-      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
-      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: password } });
-      fireEvent.click(screen.getByTestId('credentials-submit'));
-    };
-    await enter('wrong');
-    expect(await screen.findByTestId('operation-failure', {}, { timeout: 4000 })).toHaveTextContent(
-      'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
-    );
-    fireEvent.click(screen.getByTestId('operation-retry'));
-    expect(await screen.findByText('settings.agentExtensions.credentials.rejected')).toBeInTheDocument();
-    // What was typed before is gone once sent; the browser is told not to fill it in.
-    const password = (await screen.findByTestId('credentials-password')) as HTMLInputElement;
-    expect(password.value).toBe('');
-    expect(password).toHaveAttribute('autocomplete', 'new-password');
-    expect((screen.getByTestId('credentials-username') as HTMLInputElement).value).toBe('');
-    await enter('right');
-    await waitFor(() => expect(sent('install')).toHaveLength(2));
-    expect(sent('install')[1]).toMatchObject({ proxyCredentials: { username: 'ops', password: 'right' } });
-  }, 10000);
+      await install();
+      fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
+      await waitFor(() =>
+        expect(sent('install')).toEqual([
+          {
+            action: 'install',
+            source: { kind: 'index', name: 'aelix-notes' },
+            proxyCredentials: { username: 'ops', password: 'sentinel-secret' },
+            acknowledgeInsecureTransport: true,
+          },
+        ])
+      );
+    },
+    LONG
+  );
+
+  it(
+    'asks again for credentials the proxy refused, and sends the change again',
+    async () => {
+      host.settings = {
+        ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
+        credentialMode: 'memory-only',
+      };
+      host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], ['checking', 'switched']);
+      render(<AgentExtensionsSettings />);
+      fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+      fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
+      fireEvent.click(screen.getByTestId('install-submit'));
+      const enter = async (password: string) => {
+        fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
+        fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: password } });
+        fireEvent.click(screen.getByTestId('credentials-submit'));
+      };
+      await enter('wrong');
+      expect(await screen.findByTestId('operation-failure', {}, { timeout: 4000 })).toHaveTextContent(
+        'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
+      );
+      fireEvent.click(screen.getByTestId('operation-retry'));
+      expect(await screen.findByText('settings.agentExtensions.credentials.rejected')).toBeInTheDocument();
+      // What was typed before is gone once sent; the browser is told not to fill it in.
+      const password = (await screen.findByTestId('credentials-password')) as HTMLInputElement;
+      expect(password.value).toBe('');
+      expect(password).toHaveAttribute('autocomplete', 'new-password');
+      expect((screen.getByTestId('credentials-username') as HTMLInputElement).value).toBe('');
+      await enter('right');
+      await waitFor(() => expect(sent('install')).toHaveLength(2));
+      expect(sent('install')[1]).toMatchObject({ proxyCredentials: { username: 'ops', password: 'right' } });
+    },
+    LONG
+  );
 
   it('offers another version for a pinned upgrade, and confirms an unknown version limit', async () => {
     const listing = host.listing as ExtensionListing;
@@ -386,23 +400,29 @@ describe('the agent extensions screen', () => {
     ]);
   });
 
-  it('removes after confirmation, and undoes the last change', async () => {
-    render(<AgentExtensionsSettings />);
-    fireEvent.click(
-      within(await screen.findByTestId('agent-extension-aelix-starter')).getByTestId('agent-extension-remove')
-    );
-    fireEvent.click(
-      await screen.findByText('settings.agentExtensions.actions.remove', { selector: '.arco-popconfirm button span' })
-    );
-    await waitFor(() => expect(sent('remove')).toEqual([{ action: 'remove', name: 'aelix-starter' }]));
-    await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 4000 });
-    fireEvent.click(screen.getByTestId('operation-close'));
-    fireEvent.click(screen.getByTestId('agent-extensions-rollback'));
-    fireEvent.click(
-      await screen.findByText('settings.agentExtensions.actions.rollback', { selector: '.arco-popconfirm button span' })
-    );
-    await waitFor(() => expect(sent('rollback')).toHaveLength(1));
-  }, 10000);
+  it(
+    'removes after confirmation, and undoes the last change',
+    async () => {
+      render(<AgentExtensionsSettings />);
+      fireEvent.click(
+        within(await screen.findByTestId('agent-extension-aelix-starter')).getByTestId('agent-extension-remove')
+      );
+      fireEvent.click(
+        await screen.findByText('settings.agentExtensions.actions.remove', { selector: '.arco-popconfirm button span' })
+      );
+      await waitFor(() => expect(sent('remove')).toEqual([{ action: 'remove', name: 'aelix-starter' }]));
+      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument(), { timeout: 4000 });
+      fireEvent.click(screen.getByTestId('operation-close'));
+      fireEvent.click(screen.getByTestId('agent-extensions-rollback'));
+      fireEvent.click(
+        await screen.findByText('settings.agentExtensions.actions.rollback', {
+          selector: '.arco-popconfirm button span',
+        })
+      );
+      await waitFor(() => expect(sent('rollback')).toHaveLength(1));
+    },
+    LONG
+  );
 
   it('sets the app-wide default for new conversations, only for managed extensions', async () => {
     const listing = host.listing as ExtensionListing;
@@ -512,26 +532,30 @@ describe('the agent extensions screen', () => {
     expect(input.value).not.toContain('sentinel-secret');
   });
 
-  it('keeps no typed password in the address once the save was declined or refused', async () => {
-    host.transport = 'insecure';
-    render(<AgentExtensionsSettings />);
-    const input = await typeProxyWithPassword();
-    fireEvent.click(screen.getByTestId('settings-save'));
-    fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
-    await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
-      timeout: 4000,
-    });
-    expect(sent('set_settings')).toEqual([]);
-    expect(input.value).toBe('http://proxy.corp:3128');
+  it(
+    'keeps no typed password in the address once the save was declined or refused',
+    async () => {
+      host.transport = 'insecure';
+      render(<AgentExtensionsSettings />);
+      const input = await typeProxyWithPassword();
+      fireEvent.click(screen.getByTestId('settings-save'));
+      fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
+      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull(), {
+        timeout: 4000,
+      });
+      expect(sent('set_settings')).toEqual([]);
+      expect(input.value).toBe('http://proxy.corp:3128');
 
-    host.settingsRefusal = 'INVALID_INPUT';
-    fireEvent.change(input, { target: { value: 'http://ops:sentinel-secret@proxy.corp:3128' } });
-    fireEvent.click(screen.getByTestId('settings-save'));
-    fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
-    await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.INVALID_INPUT']));
-    expect(sent('set_settings')).toHaveLength(1);
-    expect(input.value).toBe('http://proxy.corp:3128');
-  }, 10000);
+      host.settingsRefusal = 'INVALID_INPUT';
+      fireEvent.change(input, { target: { value: 'http://ops:sentinel-secret@proxy.corp:3128' } });
+      fireEvent.click(screen.getByTestId('settings-save'));
+      fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
+      await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.INVALID_INPUT']));
+      expect(sent('set_settings')).toHaveLength(1);
+      expect(input.value).toBe('http://proxy.corp:3128');
+    },
+    LONG
+  );
 
   it('asks to turn on proxy authentication before saving an address with a password', async () => {
     render(<AgentExtensionsSettings />);
@@ -547,34 +571,40 @@ describe('the agent extensions screen', () => {
     expect(screen.getByTestId('settings-save')).not.toBeDisabled();
   });
 
-  it('reads the settings again after a proxy refusal, asks once, and stops when refused again', async () => {
-    host.changes.push({ code: 'PROXY_CREDENTIALS_REQUIRED' }, { code: 'PROXY_CREDENTIALS_REQUIRED' });
-    render(<AgentExtensionsSettings />);
-    await screen.findByTestId('agent-extension-aelix-starter');
-    // Another window set a proxy with authentication: what the screen read is stale.
-    host.settings = {
-      ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
-      credentialMode: 'memory-only',
-    };
-    fireEvent.click(screen.getByTestId('agent-extensions-install'));
-    fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
-    fireEvent.click(screen.getByTestId('install-submit'));
-    fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
-    fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'right' } });
-    fireEvent.click(screen.getByTestId('credentials-submit'));
-    await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.PROXY_CREDENTIALS_REQUIRED']));
-    expect(sent('install')).toEqual([
-      { action: 'install', source: { kind: 'index', name: 'aelix-notes' } },
-      {
-        action: 'install',
-        source: { kind: 'index', name: 'aelix-notes' },
-        proxyCredentials: { username: 'ops', password: 'right' },
-      },
-    ]);
-    // Asked once: the prompt leaves (after its exit animation) and does not come back.
-    await waitFor(() => expect(screen.queryByTestId('credentials-password')).toBeNull(), { timeout: 4000 });
-    expect(sent('install')).toHaveLength(2);
-  }, 10000);
+  it(
+    'reads the settings again after a proxy refusal, asks once, and stops when refused again',
+    async () => {
+      host.changes.push({ code: 'PROXY_CREDENTIALS_REQUIRED' }, { code: 'PROXY_CREDENTIALS_REQUIRED' });
+      render(<AgentExtensionsSettings />);
+      await screen.findByTestId('agent-extension-aelix-starter');
+      // Another window set a proxy with authentication: what the screen read is stale.
+      host.settings = {
+        ...settingsState({ proxy: 'http://proxy.corp:3128', proxyAuthentication: true }),
+        credentialMode: 'memory-only',
+      };
+      fireEvent.click(screen.getByTestId('agent-extensions-install'));
+      fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
+      fireEvent.click(screen.getByTestId('install-submit'));
+      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
+      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'right' } });
+      fireEvent.click(screen.getByTestId('credentials-submit'));
+      await waitFor(() =>
+        expect(errorsShown()).toEqual(['settings.agentExtensions.errors.PROXY_CREDENTIALS_REQUIRED'])
+      );
+      expect(sent('install')).toEqual([
+        { action: 'install', source: { kind: 'index', name: 'aelix-notes' } },
+        {
+          action: 'install',
+          source: { kind: 'index', name: 'aelix-notes' },
+          proxyCredentials: { username: 'ops', password: 'right' },
+        },
+      ]);
+      // Asked once: the prompt leaves (after its exit animation) and does not come back.
+      await waitFor(() => expect(screen.queryByTestId('credentials-password')).toBeNull(), { timeout: 4000 });
+      expect(sent('install')).toHaveLength(2);
+    },
+    LONG
+  );
 
   it('names the wheel filter of the file dialog in the screen language', async () => {
     render(<AgentExtensionsSettings />);
@@ -669,45 +699,53 @@ describe('the agent extensions screen', () => {
       fireEvent.click(screen.getByTestId('credentials-submit'));
     };
 
-    it('is sent again once after a proxy refusal, and then ends with the refusal', async () => {
-      proxyWithPassword();
-      host.changes.push(
-        ['checking', 'failed:PROXY_CREDENTIALS_REJECTED'],
-        ['checking', 'failed:PROXY_CREDENTIALS_REJECTED']
-      );
-      render(<AgentExtensionsSettings />);
-      await startInstall();
-      await enterCredentials('wrong');
-      fireEvent.click(await screen.findByTestId('operation-retry'));
-      await enterCredentials('still-wrong');
-      await waitFor(() => expect(sent('install')).toHaveLength(2));
-      await waitFor(() => expect(sent('poll').length).toBeGreaterThanOrEqual(2));
-      expect(await screen.findByTestId('operation-failure')).toHaveTextContent(
-        'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
-      );
-      // The retried change failed again: no third try is offered.
-      await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument());
-      expect(screen.queryByTestId('operation-retry')).toBeNull();
-    }, 15000);
+    it(
+      'is sent again once after a proxy refusal, and then ends with the refusal',
+      async () => {
+        proxyWithPassword();
+        host.changes.push(
+          ['checking', 'failed:PROXY_CREDENTIALS_REJECTED'],
+          ['checking', 'failed:PROXY_CREDENTIALS_REJECTED']
+        );
+        render(<AgentExtensionsSettings />);
+        await startInstall();
+        await enterCredentials('wrong');
+        fireEvent.click(await screen.findByTestId('operation-retry'));
+        await enterCredentials('still-wrong');
+        await waitFor(() => expect(sent('install')).toHaveLength(2));
+        await waitFor(() => expect(sent('poll').length).toBeGreaterThanOrEqual(2));
+        expect(await screen.findByTestId('operation-failure')).toHaveTextContent(
+          'settings.agentExtensions.errors.PROXY_CREDENTIALS_REJECTED'
+        );
+        // The retried change failed again: no third try is offered.
+        await waitFor(() => expect(screen.getByTestId('operation-close')).toBeInTheDocument());
+        expect(screen.queryByTestId('operation-retry')).toBeNull();
+      },
+      LONG
+    );
 
-    it('can still be sent again after a proxy refusal when the screen is opened again', async () => {
-      proxyWithPassword();
-      host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], ['checking', 'switched']);
-      const first = render(<AgentExtensionsSettings />);
-      await startInstall();
-      await enterCredentials('wrong');
-      expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
-      first.unmount();
-      render(<AgentExtensionsSettings />);
-      fireEvent.click(await screen.findByTestId('operation-retry'));
-      await enterCredentials('right');
-      await waitFor(() => expect(sent('install')).toHaveLength(2));
-      expect(sent('install')[1]).toEqual({
-        action: 'install',
-        source: { kind: 'index', name: 'aelix-notes' },
-        proxyCredentials: { username: 'ops', password: 'right' },
-      });
-    }, 15000);
+    it(
+      'can still be sent again after a proxy refusal when the screen is opened again',
+      async () => {
+        proxyWithPassword();
+        host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED'], ['checking', 'switched']);
+        const first = render(<AgentExtensionsSettings />);
+        await startInstall();
+        await enterCredentials('wrong');
+        expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
+        first.unmount();
+        render(<AgentExtensionsSettings />);
+        fireEvent.click(await screen.findByTestId('operation-retry'));
+        await enterCredentials('right');
+        await waitFor(() => expect(sent('install')).toHaveLength(2));
+        expect(sent('install')[1]).toEqual({
+          action: 'install',
+          source: { kind: 'index', name: 'aelix-notes' },
+          proxyCredentials: { username: 'ops', password: 'right' },
+        });
+      },
+      LONG
+    );
 
     it('is not shown to another user who signs in on the same tab', async () => {
       auth.user = { id: 'alice', username: 'alice' };
@@ -741,24 +779,28 @@ describe('the agent extensions screen', () => {
       expect(screen.queryByTestId('operation-view')).toBeNull();
     });
 
-    it('keeps no Git address with a password across visits, so it is not offered again there', async () => {
-      proxyWithPassword();
-      host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED']);
-      const first = render(<AgentExtensionsSettings />);
-      fireEvent.click(await screen.findByTestId('agent-extensions-install'));
-      fireEvent.click(await screen.findByTestId('install-git-tab'));
-      fireEvent.change(await screen.findByTestId('install-git-url'), {
-        target: { value: 'https://ops:git-token@git.example/pack.git' },
-      });
-      fireEvent.click(screen.getByTestId('install-submit'));
-      await enterCredentials('wrong');
-      // In this visit it can be sent again.
-      expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
-      first.unmount();
-      render(<AgentExtensionsSettings />);
-      expect(await screen.findByTestId('operation-failure')).toBeInTheDocument();
-      expect(screen.queryByTestId('operation-retry')).toBeNull();
-    }, 15000);
+    it(
+      'keeps no Git address with a password across visits, so it is not offered again there',
+      async () => {
+        proxyWithPassword();
+        host.changes.push(['checking', 'failed:PROXY_CREDENTIALS_REJECTED']);
+        const first = render(<AgentExtensionsSettings />);
+        fireEvent.click(await screen.findByTestId('agent-extensions-install'));
+        fireEvent.click(await screen.findByTestId('install-git-tab'));
+        fireEvent.change(await screen.findByTestId('install-git-url'), {
+          target: { value: 'https://ops:git-token@git.example/pack.git' },
+        });
+        fireEvent.click(screen.getByTestId('install-submit'));
+        await enterCredentials('wrong');
+        // In this visit it can be sent again.
+        expect(await screen.findByTestId('operation-retry')).toBeInTheDocument();
+        first.unmount();
+        render(<AgentExtensionsSettings />);
+        expect(await screen.findByTestId('operation-failure')).toBeInTheDocument();
+        expect(screen.queryByTestId('operation-retry')).toBeNull();
+      },
+      LONG
+    );
 
     it('is dropped when another user takes the screen, even if the first comes back', async () => {
       auth.user = { id: 'alice', username: 'alice' };
