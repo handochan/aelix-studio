@@ -3,6 +3,10 @@ name: 'PR Checks'
 on:
   workflow_dispatch:
     inputs:
+      image_acceptance:
+        description: 'Run only the packaged Windows and Linux image acceptance matrix'
+        type: boolean
+        default: false
       pr_number:
         description: 'PR number to run checks on'
         required: false
@@ -32,7 +36,7 @@ on:
     - cron: '17 18 * * *'
 
 concurrency:
-  group: pr-checks-${{ github.event.pull_request.number || inputs.pr_number || inputs.commit_sha || github.event_name }}
+  group: pr-checks-${{ (inputs.image_acceptance || github.event.label.name == 'run-image-acceptance') && 'image-' || '' }}${{ github.event.pull_request.number || inputs.pr_number || inputs.commit_sha || github.event_name }}
   cancel-in-progress: true
 
 permissions:
@@ -48,13 +52,139 @@ env:
   AELIX_STUDIO_HOST_NODE_MIRROR: 'https://nodejs.org/dist/'
 
 jobs:
+  image-acceptance:
+    if: >-
+      (github.event_name == 'workflow_dispatch' && inputs.image_acceptance) ||
+      (github.event_name == 'pull_request' && github.event.label.name == 'run-image-acceptance')
+    permissions:
+      contents: read
+    name: Running-input images (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: windows-2022, target: win32-x64 }
+          - { os: ubuntu-latest, target: linux-x64 }
+          - { os: ubuntu-24.04-arm, target: linux-arm64 }
+    defaults:
+      run:
+        shell: bash
+    env:
+      AELIX_STUDIO_HOST_NODE_MIRROR: https://nodejs.org/dist/
+      NODE_OPTIONS: --max-old-space-size=8192
+      CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+    steps:
+      - name: Reject incompatible image acceptance inputs
+        id: dispatch-inputs
+        if: github.event_name == 'workflow_dispatch' && (inputs.pr_number != '' || inputs.commit_sha != '')
+        run: |
+          echo 'Use --ref with image_acceptance=true. Omit pr_number and commit_sha.'
+          exit 1
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Record checked-out commit
+        id: checked-out
+        run: echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: oven-sh/setup-bun@v2
+      - uses: astral-sh/setup-uv@v6
+        with:
+          version: '0.13.5'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install frozen dependencies
+        id: dependencies
+        run: bun install --frozen-lockfile >/dev/null 2>&1
+      - name: Install Linux display dependencies
+        if: runner.os == 'Linux'
+        run: bunx playwright install-deps chromium >/dev/null 2>&1
+      - name: Prepare the pinned Provider Preview runtime
+        id: prepare
+        env:
+          PREVIEW_TARGET: ${{ matrix.target }}
+        run: python -B scripts/studio-preview/prepare.py --target "$PREVIEW_TARGET" >/dev/null 2>&1
+      - name: Build the Provider Preview package without publication
+        id: package
+        env:
+          CSC_FOR_PULL_REQUEST: 'true'
+        run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview >/dev/null 2>&1
+      - name: Run Electron and logged-in WebUI with synthetic images
+        id: scenarios
+        env:
+          IMAGE_PYTHON: python
+        run: |
+          python -m pip install Pillow==11.3.0 psutil==7.0.0 >/dev/null 2>&1
+          python -B tests/fixtures/running-input-images/generate.py --running-input .local/image-acceptance-inputs >/dev/null 2>&1
+          if [[ "$RUNNER_OS" == Linux ]]; then
+            set -- .local/provider-installer/artifacts/*.deb
+            test "$#" -eq 1
+            test -f "$1"
+            package=$(dpkg-deb --field "$1" Package)
+            sudo -n apt-get install -y "$PWD/$1" >/dev/null 2>&1
+            manifest=$(dpkg -L "$package" | awk '/\/resources\/studio-preview\/manifest.json$/')
+            export IMAGE_EXECUTABLE="${manifest%/resources/studio-preview/manifest.json}/aelix-studio"
+            test -x "$IMAGE_EXECUTABLE"
+          fi
+
+          run_probe() {
+            export IMAGE_SURFACE="$1"
+            if [[ "$RUNNER_OS" == Linux ]]; then
+              xvfb-run -a node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
+            else
+              node --import tsx tests/fixtures/running-input-images/packaged/run.mjs >/dev/null 2>&1
+            fi
+          }
+
+          status=0
+          run_probe electron || status=1
+          if IMAGE_CHROMIUM=$(node tests/fixtures/running-input-images/packaged/installBrowser.mjs 2>/dev/null); then
+            export IMAGE_CHROMIUM
+            run_probe webui || status=1
+          else
+            echo 'browser_install=failed' >> "$GITHUB_OUTPUT"
+            status=1
+          fi
+          exit "$status"
+      - name: Summarize acceptance
+        if: always()
+        env:
+          PREVIEW_TARGET: ${{ matrix.target }}
+          ACCEPTANCE_SHA: ${{ steps.checked-out.outputs.commit }}
+          DISPATCH_INPUTS: ${{ steps.dispatch-inputs.outcome }}
+          DEPENDENCIES: ${{ steps.dependencies.outcome }}
+          PREPARE: ${{ steps.prepare.outcome }}
+          PACKAGE: ${{ steps.package.outcome }}
+          SCENARIOS: ${{ steps.scenarios.outcome }}
+          WEBUI_BROWSER_INSTALL: ${{ steps.scenarios.outputs.browser_install }}
+        run: node tests/fixtures/running-input-images/packaged/summary.mjs
+      - name: Upload fixed-field acceptance results
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: image-acceptance-${{ matrix.target }}
+          path: |
+            .local/image-acceptance.json
+            .local/image-acceptance-webui.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 14
+
   # Full verification (io-uring-trace-probe, provider-preview, build-test) runs for every pull
   # request except one whose changed files are all in the skip set (renderer UI, unit tests, docs)
   # and that has no `full-verify` label. It also runs on a manual run and on the daily scheduled
   # run. The decision and the skip set live in the gate action.
   full-verify-gate:
     name: Full verification decision
-    if: github.event_name != 'pull_request' || (github.event.action != 'closed' && github.event.pull_request.draft == false)
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      (github.event_name != 'pull_request' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     outputs:
@@ -252,7 +382,10 @@ jobs:
   # Job 1: Code quality checks (TypeScript, Oxlint, Oxfmt)
   code-quality:
     name: Code Quality
-    if: github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      github.event_name != 'schedule' &&
+      (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -300,7 +433,10 @@ jobs:
   # Job 2: Unit tests across all platforms
   unit-tests:
     name: Unit Tests (${{ matrix.os }})
-    if: github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      github.event_name != 'schedule' &&
+      (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     strategy:
@@ -351,7 +487,10 @@ jobs:
   # Job 3: Coverage test (Linux only)
   coverage-tests:
     name: Coverage Test
-    if: github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      github.event_name != 'schedule' &&
+      (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -437,7 +576,10 @@ jobs:
 
   i18n-check:
     name: I18n Check
-    if: github.event_name != 'schedule' && (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      github.event_name != 'schedule' &&
+      (github.event_name == 'workflow_dispatch' || (github.event.action != 'closed' && github.event.pull_request.draft == false))
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -759,7 +901,9 @@ jobs:
   # Job 5: Test release scripts (fast, no build required)
   release-script-test:
     name: Release Script Test
-    if: github.event_name != 'schedule' && github.event.action != 'closed' && github.event.pull_request.draft == false
+    if: >-
+      !inputs.image_acceptance && github.event.label.name != 'run-image-acceptance' &&
+      github.event_name != 'schedule' && github.event.action != 'closed' && github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

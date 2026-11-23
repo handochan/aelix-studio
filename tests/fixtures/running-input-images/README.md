@@ -91,3 +91,65 @@ sizes and exercises lost responses, lookup, turn change and late ACK after
 Stop. It records sizes and counts at the native edge and checks that the
 Host and Chromium diagnostic output omit raw and escaped private image fixture
 markers.
+
+## Packaged Windows and Linux acceptance
+
+The PR Checks workflow runs the packaged image suite when dispatched
+with `image_acceptance=true` or when a PR receives `run-image-acceptance`.
+Use the manual dispatch for docs-only changes covered by PR Checks'
+`paths-ignore` filter.
+It builds the Provider Preview package on Windows x64, Linux x64 and Linux
+arm64 from the selected commit. Each runner uses the unpacked Windows app or
+installed Linux DEB to exercise both Electron and the logged-in WebUI with
+the pinned Host, ACP wheel, and native runtime. The Linux DEB applies the
+Chromium sandbox setup.
+
+```sh
+gh workflow run pr-checks.yml -R handochan/aelix-studio --ref <branch> -f image_acceptance=true
+```
+
+Image acceptance uses the dispatch ref. The job rejects `pr_number` and
+`commit_sha` when image acceptance is enabled. Each report records the
+checked-out Git SHA.
+
+The test-only launcher lives outside the package. It uses ACP's MockTransport
+pattern to keep the production A-1b route unchanged
+(`openai-codex/gpt-6-luna`, `openai-codex-responses`,
+`https://chatgpt.com/backend-api`). It forwards the actual serialized
+Responses body to a socket listening on IPv4 loopback. The test uses a fresh
+agent directory and a synthetic key. A loopback server hashes each decoded
+image and reports its length, then returns deterministic Responses SSE events.
+
+The runner compares provider bytes with the Studio multipart Blob and the
+bundled ACP's actual native pipe write. It holds the provider's first reply to
+exercise both queues. It reloads the renderer after the provider sees the held
+turn so initial Host acceptance and active ACP state can settle independently.
+Each scenario starts with an empty conversation and queries the real Host
+message history. The idle first send adds one stored user row. For running
+scenarios the starting prompt remains the only stored user row, including
+when the image-only send adds a caption for the provider.
+
+The suite observes the preparing notice for running image sends and the
+path-only fallback. It compares the five original upload references with
+the provider's path-only input in memory and records the match and count.
+The fallback expects zero image writes.
+
+For Stop, the suite holds the image ACK, clears the draft to reveal the
+composer's Stop button, and stops the original turn. Host must report idle
+with the provider response still held. The runner then releases the image
+ACK and checks for one native image write and zero provider image occurrences.
+
+For WebUI, a fresh profile obtains a throwaway admin password from the bundled
+Host's password-reset endpoint. The same package starts its `--webui` server on
+loopback. Headless Chromium submits the real login form and checks that the
+conversation API returns 401 before login and 200 after login. If the Playwright
+installer cannot supply Chromium, the fixture downloads the same version from
+its release archive. Both surfaces run the same scenarios with separate profiles.
+
+`image-acceptance.json` and `image-acceptance-webui.json` contain the fixed
+fields and label their surface. The Actions job summary has a table for each.
+Latency uses the renderer's monotonic clock from the send click until the Host
+response, with a separate timestamp for the Stop notice. RSS is sampled
+every 125 ms. Studio covers the Electron process tree excluding the Host
+subtree and includes the separate Chromium tree for WebUI. Digests and
+lengths describe generated inputs.
