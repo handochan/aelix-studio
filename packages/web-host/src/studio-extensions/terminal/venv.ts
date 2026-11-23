@@ -8,6 +8,7 @@ import {
   mapLimited,
   readBounded,
   realpathOf,
+  statEntry,
   statOf,
   type Scan,
 } from './files.js';
@@ -40,44 +41,83 @@ const ISSUE_ORDER: TerminalCliIssue[] = [
 /** One installed distribution's metadata directory, as `importlib.metadata` finds it. */
 type Distribution = { directory: string; normalized: string; egg: boolean };
 
+/** A metadata directory by its name: what `Lookup` reads from it, before any file is opened. */
+type Candidate = Distribution & {
+  /** The suffix is written exactly `.dist-info` or `.egg-info` (CPython's `_name_from_stem`). */
+  exact: boolean;
+};
+
 /**
- * The distributions of a site directory the way CPython 3.12's `importlib.metadata` sees them
- * (`Lookup`, `_unique`): every `.dist-info` and `.egg-info` entry, the suffix in any case, named
- * by what comes before the first `-`, normalized; the first of each name wins. CPython takes
- * them in the directory's order, which Studio cannot know: it takes them sorted by name.
+ * The metadata directories of a site directory by name, sorted, as CPython 3.12's `Lookup`
+ * finds them: `.dist-info` and `.egg-info` in any case, named by what comes before the first
+ * `-`, normalized.
  */
-function distributionsOf(names: string[]): { distributions: Distribution[]; duplicates: boolean } {
-  const seen = new Set<string>();
-  const distributions: Distribution[] = [];
-  let duplicates = false;
+function candidatesOf(names: string[]): Candidate[] {
+  const candidates: Candidate[] = [];
   for (const name of names) {
     const low = name.toLowerCase();
     const egg = low.endsWith('.egg-info');
     if (!egg && !low.endsWith('.dist-info')) continue;
     const normalized = canonicalName(low.slice(0, low.lastIndexOf('.')).split('-', 1)[0]);
+    const exact = name.endsWith(egg ? '.egg-info' : '.dist-info');
+    candidates.push({ directory: name, normalized, egg, exact });
+  }
+  return candidates;
+}
+
+/**
+ * The distributions of a site directory as `importlib.metadata.distributions()` keeps them
+ * (`_unique`): the first of each normalized name wins, before entry points are looked at. The
+ * name is the directory's, except where its suffix is not written exactly `.dist-info` or
+ * `.egg-info`: there CPython takes the `Name` of its metadata, and so does this. CPython takes
+ * the directories in the file system's order, which Studio cannot know: it takes them sorted.
+ */
+async function distributionsOf(
+  scan: Scan,
+  site: string,
+  root: string,
+  candidates: Candidate[]
+): Promise<{ distributions: Distribution[]; duplicates: boolean }> {
+  const seen = new Set<string>();
+  const distributions: Distribution[] = [];
+  let duplicates = false;
+  for (const candidate of candidates) {
+    const normalized = candidate.exact
+      ? candidate.normalized
+      : // eslint-disable-next-line no-await-in-loop -- only the few with an unusual suffix, in order
+        ((await identityOf(scan, site, candidate, root))?.name ?? candidate.normalized);
     if (seen.has(normalized)) {
       duplicates = true;
       continue;
     }
     seen.add(normalized);
-    distributions.push({ directory: name, normalized, egg });
+    distributions.push({ directory: candidate.directory, normalized, egg: candidate.egg });
   }
   return { distributions, duplicates };
 }
 
-/** The site directories of the environment at `root` that are really inside it (normally one). */
+/**
+ * The site directories of the environment at `root` that are really inside it (normally one).
+ * `lib` itself is resolved and checked to be inside `root` before it is listed.
+ */
 async function sitePackages(scan: Scan, root: string): Promise<{ sites: string[]; truncated: boolean } | 'unreadable'> {
   const candidates: string[] = [];
   let truncated = false;
   // The layout follows the platform; paths are joined by this host's rules, as they are read here.
   if (scan.platform === 'win32') candidates.push(path.join(root, 'Lib', 'site-packages'));
   else {
-    const lib = await listDirectory(scan, path.join(root, 'lib'), 16);
-    if (lib === 'unreadable') return 'unreadable';
-    if (lib !== 'absent') {
-      truncated = lib.truncated;
-      for (const name of lib.names)
-        if (/^python\d+\.\d+t?$/.test(name)) candidates.push(path.join(root, 'lib', name, 'site-packages'));
+    const libPath = path.join(root, 'lib');
+    const entry = await statEntry(scan, libPath);
+    if (entry === 'unreadable') return 'unreadable';
+    const lib = entry === 'absent' ? undefined : await realpathOf(scan, libPath);
+    if (lib && isWithin(lib, root, scan.platform)) {
+      const listing = await listDirectory(scan, lib, 16);
+      if (listing === 'unreadable') return 'unreadable';
+      if (listing !== 'absent') {
+        truncated = listing.truncated;
+        for (const name of listing.names)
+          if (/^python\d+\.\d+t?$/.test(name)) candidates.push(path.join(lib, name, 'site-packages'));
+      }
     }
   }
   const sites: string[] = [];
@@ -116,9 +156,14 @@ async function identityOf(
 async function readSiteForCli(scan: Scan, site: string, root: string): Promise<CliVenv | 'no_cli' | 'unreadable'> {
   const listing = await readSiteNames(scan, site);
   if (listing === 'unreadable') return 'unreadable';
-  const { distributions: all, duplicates } = distributionsOf(listing.names);
-  const distributions = all.slice(0, DISTRIBUTION_LIMIT);
-  const truncated = listing.truncated || all.length > DISTRIBUTION_LIMIT;
+  const candidates = candidatesOf(listing.names);
+  const truncated = listing.truncated || candidates.length > DISTRIBUTION_LIMIT;
+  const { distributions, duplicates } = await distributionsOf(
+    scan,
+    site,
+    root,
+    candidates.slice(0, DISTRIBUTION_LIMIT)
+  );
   const cliDistribution = distributions.find((distribution) => CLI_DISTRIBUTIONS.has(distribution.normalized));
   if (!cliDistribution) return 'no_cli';
   const cli = await identityOf(scan, site, cliDistribution, root);
@@ -187,13 +232,20 @@ export async function readCliVenv(scan: Scan, root: string): Promise<CliVenv | '
 
 /**
  * Whether `root` holds the CLI, from directory names only (no file is read): how a tool
- * directory's other tools are passed over without reading their metadata.
+ * directory's other tools are passed over without reading their metadata. `truncated` when a
+ * directory had more entries than this looks at, so the CLI may have been missed.
  */
-export async function holdsCli(scan: Scan, root: string): Promise<'yes' | 'no' | 'unreadable'> {
-  if (!(await statOf(scan, path.join(root, 'pyvenv.cfg')))?.isFile()) return 'no';
+export async function holdsCli(
+  scan: Scan,
+  root: string
+): Promise<{ held: 'yes' | 'no' | 'unreadable'; truncated: boolean }> {
+  const config = await statEntry(scan, path.join(root, 'pyvenv.cfg'));
+  if (config === 'unreadable') return { held: 'unreadable', truncated: false };
+  if (config === 'absent' || !config.isFile()) return { held: 'no', truncated: false };
   const found = await sitePackages(scan, root);
-  if (found === 'unreadable') return 'unreadable';
+  if (found === 'unreadable') return { held: 'unreadable', truncated: false };
   let unreadable = false;
+  let truncated = found.truncated;
   for (const site of found.sites) {
     // eslint-disable-next-line no-await-in-loop -- stops at the first site that holds the CLI
     const listing = await readSiteNames(scan, site);
@@ -201,8 +253,9 @@ export async function holdsCli(scan: Scan, root: string): Promise<'yes' | 'no' |
       unreadable = true;
       continue;
     }
-    if (distributionsOf(listing.names).distributions.some((entry) => CLI_DISTRIBUTIONS.has(entry.normalized)))
-      return 'yes';
+    truncated ||= listing.truncated;
+    if (candidatesOf(listing.names).some((entry) => CLI_DISTRIBUTIONS.has(entry.normalized)))
+      return { held: 'yes', truncated };
   }
-  return unreadable ? 'unreadable' : 'no';
+  return { held: unreadable ? 'unreadable' : 'no', truncated };
 }

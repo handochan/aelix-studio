@@ -26,12 +26,17 @@ export const PATH_ENTRY_LIMIT = 64;
 /**
  * Locations from Studio's environment, all from here: `~` and `~/…` expanded where the tool
  * expands them, relative values ignored (uv and pipx take them from their own working
- * directory, which Studio does not know), and Windows UNC and device paths refused.
+ * directory, which Studio does not know; on Windows that includes `C:foo` and `\\foo`), and
+ * Windows UNC and device paths refused.
  */
 function location(platform: NodeJS.Platform, home: string) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
+  // On Windows only a drive path is fully absolute: `C:foo` and `\\foo` depend on a current
+  // drive or directory, and UNC and device paths are refused.
+  const absolute = (value: string): boolean =>
+    platform === 'win32' ? /^[A-Za-z]:[\\/]/.test(value) : paths.isAbsolute(value);
   const usable = (value: string | undefined): string | undefined =>
-    value && paths.isAbsolute(value) && !isUncOrDevice(value, platform) ? paths.normalize(value) : undefined;
+    value && absolute(value) && !isUncOrDevice(value, platform) ? paths.normalize(value) : undefined;
   const expanded = (value: string | undefined): string | undefined => {
     if (!value) return undefined;
     if (value === '~') return usable(home);

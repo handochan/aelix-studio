@@ -129,6 +129,22 @@ describe('where the terminal CLI is looked for', () => {
       'pipx C:\\Users\\u\\pipx\\venvs',
     ]);
     expect(locations.agentDirectory).toBeUndefined();
+    // Drive-relative and root-relative paths depend on a current drive or directory.
+    expect(
+      roots(
+        searchLocations(
+          { UV_TOOL_DIR: '\\tools', PIPX_HOME: 'C:pipx', LOCALAPPDATA: '/local', APPDATA: 'D:roaming' },
+          'C:\\Users\\u',
+          'win32'
+        )
+      )
+    ).toEqual([
+      'uv_tool C:\\Users\\u\\AppData\\Roaming\\uv\\data\\tools',
+      'uv_tool C:\\Users\\u\\AppData\\Roaming\\uv\\tools',
+      'pipx C:\\Users\\u\\AppData\\Local\\pipx\\pipx\\venvs',
+      'pipx C:\\Users\\u\\.local\\pipx\\venvs',
+      'pipx C:\\Users\\u\\pipx\\venvs',
+    ]);
     // A UNC home gives nothing to search.
     expect(searchLocations({}, '\\\\server\\home\\u', 'win32').toolRoots).toEqual([]);
   });

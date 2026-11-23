@@ -10,7 +10,15 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cliVenv, distribution, launcherScript, link, ranAnything, write } from '../../../tests/fixtures/terminalCli';
 
-const fsWatch = vi.hoisted(() => ({ active: 0, peak: 0, calls: 0, delayMs: 0, delayFor: '' }));
+const fsWatch = vi.hoisted(() => ({
+  active: 0,
+  peak: 0,
+  calls: 0,
+  delayMs: 0,
+  delayFor: '',
+  /** Further delays: the first whose text is in the path applies. */
+  delays: [] as [string, number][],
+}));
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:fs/promises')>();
   const watched =
@@ -20,8 +28,12 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       fsWatch.active += 1;
       fsWatch.peak = Math.max(fsWatch.peak, fsWatch.active);
       try {
-        if (fsWatch.delayMs && String(args[0]).includes(fsWatch.delayFor))
-          await new Promise((resolve) => setTimeout(resolve, fsWatch.delayMs));
+        const target = String(args[0]);
+        const delay =
+          fsWatch.delayMs && target.includes(fsWatch.delayFor)
+            ? fsWatch.delayMs
+            : (fsWatch.delays.find(([part]) => target.includes(part))?.[1] ?? 0);
+        if (delay) await new Promise((resolve) => setTimeout(resolve, delay));
         return await call(...args);
       } finally {
         fsWatch.active -= 1;
@@ -60,7 +72,7 @@ describe.runIf(posix)('the terminal CLI list', () => {
     scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-terminal-list-')));
     home = path.join(scratch, 'home', 'alice');
     venvModule.failFor = undefined;
-    Object.assign(fsWatch, { active: 0, peak: 0, calls: 0, delayMs: 0, delayFor: '' });
+    Object.assign(fsWatch, { active: 0, peak: 0, calls: 0, delayMs: 0, delayFor: '', delays: [] });
   });
   afterEach(async () => {
     await terminalScanEnded();
@@ -192,6 +204,41 @@ describe.runIf(posix)('the terminal CLI list', () => {
     );
   });
 
+  it('leaves fields with fixed values alone when the user name is one of them', async () => {
+    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch, { 'aelix-notes': 'notes' });
+    await write(path.join(home, '.aelix', 'agent', 'extensions', 'hello.py'));
+    for (const username of ['listed', 'uv_tool', 'file']) {
+      // eslint-disable-next-line no-await-in-loop -- one scan after another: scans are shared while one runs
+      const listing = await listTerminalCli({ env: { PATH: '' }, home, platform: 'linux', username });
+      expect(listing.environments[0]).toMatchObject({ status: 'listed', foundBy: ['uv_tool'] });
+      expect(listing.globalExtensions).toMatchObject({ status: 'listed', extensions: [{ kind: 'file' }] });
+      // eslint-disable-next-line no-await-in-loop -- as above
+      await terminalScanEnded();
+    }
+  });
+
+  it.runIf(process.getuid?.() !== 0)('reports a launcher directory or a --user folder it cannot read', async () => {
+    const lockedBin = path.join(scratch, 'opt', 'locked-bin');
+    await write(path.join(lockedBin, 'aelix'), '#!/usr/bin/python3\n');
+    const userPython = path.join(home, 'Library', 'Python');
+    await write(path.join(userPython, '3.12', 'bin', '.keep'));
+    await chmod(lockedBin, 0o000);
+    await chmod(userPython, 0o000);
+    try {
+      const listing = await list({ PATH: lockedBin }, undefined, 'darwin');
+      expect(listing.environments).toEqual([
+        expect.objectContaining({
+          status: 'unreadable',
+          location: '<scratch>/opt/locked-bin/aelix'.replace('<scratch>', scratch),
+        }),
+      ]);
+      expect(listing.truncated).toBe(true);
+    } finally {
+      await chmod(lockedBin, 0o755);
+      await chmod(userPython, 0o755);
+    }
+  });
+
   it('answers with an empty list and the places it looked when there is no terminal CLI', async () => {
     const listing = await list({ PATH: '' });
     expect(listing.environments).toEqual([]);
@@ -263,6 +310,29 @@ describe.runIf(posix)('the terminal CLI list', () => {
     }
   });
 
+  it.runIf(process.getuid?.() !== 0)('reports a tool it cannot look into, instead of passing it over', async () => {
+    const other = path.join(home, '.local', 'share', 'uv', 'tools', 'other');
+    await cliVenv(other, scratch, {}, { cli: false });
+    await chmod(other, 0o000);
+    try {
+      expect((await list({ PATH: '' })).environments).toEqual([
+        expect.objectContaining({ status: 'unreadable', location: '~/.local/share/uv/tools/other' }),
+      ]);
+    } finally {
+      await chmod(other, 0o755);
+    }
+  });
+
+  it('says it stopped short when a tool has more to look at than is read', async () => {
+    const other = path.join(home, '.local', 'share', 'uv', 'tools', 'other');
+    await cliVenv(other, scratch, {}, { cli: false });
+    await Promise.all(
+      Array.from({ length: 16 }, (_, index) => write(path.join(other, 'lib', `extra-${index}`, '.keep')))
+    );
+    const listing = await list({ PATH: '' });
+    expect(listing).toMatchObject({ environments: [], truncated: true });
+  });
+
   it.runIf(process.getuid?.() !== 0)(
     'reports an environment whose CLI metadata cannot be read as unreadable',
     async () => {
@@ -317,6 +387,27 @@ describe.runIf(posix)('the terminal CLI list', () => {
     expect(fsWatch.calls).toBe(callsAtEnd);
   });
 
+  it('ends a timed-out scan only once its slow reads have settled, and starts no other before', async () => {
+    const packs = Object.fromEntries(Array.from({ length: 40 }, (_, index) => [`pack-${index}`, `pack-${index}`]));
+    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch, { ...packs, early: 'early' });
+    // One distribution's files answer long after the deadline; the others keep workers busy past it.
+    fsWatch.delays = [
+      ['early-1.0.0.dist-info', 900],
+      ['pack_', 40],
+    ];
+    const late = await list({ PATH: '' }, 250);
+    expect(late.timedOut).toBe(true);
+    let ended = false;
+    const ending = terminalScanEnded().then(() => (ended = true));
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    // Workers stopped at the deadline, the slow read is still out: the scan has not ended.
+    expect(fsWatch.active).toBeGreaterThan(0);
+    expect(ended).toBe(false);
+    expect(await list({ PATH: '' })).toBe(late);
+    await ending;
+    expect(fsWatch.active).toBe(0);
+  });
+
   it('shares one scan: callers at the same time, and after a timed-out answer until the scan ended', async () => {
     await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch);
     const [first, second] = await Promise.all([list({ PATH: '' }), list({ PATH: '' })]);
@@ -360,6 +451,15 @@ describe('text in a reply', () => {
     ).toBe('~\\pipx\\venvs\\aelix');
     // A home of `/` labels nothing.
     expect(labelPath('/usr/bin/aelix', { homes: ['/'], platform: 'linux' })).toBe('/usr/bin/aelix');
+    // Whatever follows the home that cannot continue its name ends it: quotes, punctuation.
+    expect(maskText('"/home/alice"', masks)).toBe('"~"');
+    expect(maskText("('/home/alice', 1)", masks)).toBe("('~', 1)");
+    expect(maskText('/home/alice.bak/x', masks)).toBe('/home/<user>.bak/x');
+    // On Windows either separator matches either.
+    const windows = { homes: ['C:\\Users\\Alice'], username: 'alice', platform: 'win32' as const };
+    expect(maskText('"C:/Users/alice/x"', windows)).toBe('"~/x"');
+    expect(maskText('file:///c:/users/ALICE', windows)).toBe('file:///~');
+    expect(maskText('C:\\Users\\alice\\x', windows)).toBe('~\\x');
   });
 });
 
@@ -378,7 +478,7 @@ describe('nothing is run', () => {
     for (const name of sources) {
       const text = await readFile(path.join(directory, name), 'utf8');
       expect(text, name).not.toMatch(
-        /child_process|node:net|node:http|node:https|node:dgram|node:vm|worker_threads|\bfetch\(|\bspawn|(?<![.\w])exec(File)?(Sync)?\(|\bimport\(|\brequire\(|\beval\(|new Function|writeFile|appendFile|mkdir|\brm\(|unlink|rename|symlink|chmod/
+        /child_process|node:net|node:http|node:https|node:dgram|node:vm|worker_threads|\bfetch\s*\(|\bspawn|(?<![.\w])exec(File)?(Sync)?\s*\(|\bimport\s*\(|\brequire\s*\(|\beval\s*\(|new\s+Function|writeFile|appendFile|mkdir|\brm\s*\(|unlink|rename|symlink|chmod/
       );
     }
   });
