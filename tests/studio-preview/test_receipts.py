@@ -217,7 +217,7 @@ class FailedAuditReceiptTests(unittest.TestCase):
             audits.enabled = True
 
             def fail_extension(receipt, capture_timeout):
-                self.assertEqual(capture_timeout, 300)
+                self.assertEqual(capture_timeout, 420)
                 checkpoint = json.loads(output.read_text())
                 self.assertEqual((checkpoint['status'], checkpoint['smokeStatus']), ('running', 'passed'))
                 self.assertEqual(checkpoint['outboundControls'], smoke['outboundControls'])
@@ -238,7 +238,7 @@ class FailedAuditReceiptTests(unittest.TestCase):
             extension = saved['extensionQualification']
             self.assertEqual(extension['status'], 'failed')
             self.assertEqual(extension['audit']['unparsedRecords'], 2)
-            self.assertEqual((extension['captureTimeoutSeconds'], extension['totalTimeoutSeconds']), (300, 780))
+            self.assertEqual((extension['captureTimeoutSeconds'], extension['totalTimeoutSeconds']), (420, 1020))
             self.assertEqual(extension['timeoutScope'], 'audit-supervisor')
             self.assertTrue(extension['bundleInventoryOutsideTimeout'])
             self.assertGreaterEqual(extension['elapsedSeconds'], 0)
@@ -246,7 +246,7 @@ class FailedAuditReceiptTests(unittest.TestCase):
     def test_extension_capture_timeout_matches_the_installer_target_and_receipt(self):
         for target, capture_timeout, total_timeout in (
                 ('darwin-x64', 420, 420), ('darwin-arm64', 300, 300), ('win32-x64', 300, 300),
-                ('linux-x64', 300, 780), ('linux-arm64', 300, 780)):
+                ('linux-x64', 420, 1020), ('linux-arm64', 420, 1020)):
             with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)
                 output = root / 'acceptance.json'
