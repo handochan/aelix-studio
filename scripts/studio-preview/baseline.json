@@ -33,34 +33,34 @@
   },
   "aioncore": {
     "repository": "handochan/aelix-studio-host",
-    "tag": "host-v0.2.2-aelix.8",
-    "commit": "cb63e444a2616608806f503ac77d0a60e6e62b9b",
-    "tree": "b056cea5f9a3c5165a998e619d0cc8881e3b9424",
-    "provenanceFile": "aelix-studio-host-0.2.2-aelix.8-provenance.json",
-    "provenanceSha256": "b65c43fb8c21452bfffd649f3481f834e840fb09cdeb28da23b79027913af8ed",
+    "tag": "host-v0.2.2-aelix.9",
+    "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
+    "tree": "60f0526a2792b846119b49a767cc865cc612c2bc",
+    "provenanceFile": "aelix-studio-host-0.2.2-aelix.9-provenance.json",
+    "provenanceSha256": "e600a51143aeae9a484da7585b2419cb924bdfb03f25dc76fe085ea8ef7eddbe",
     "assets": {
       "darwin-arm64": {
-        "filename": "aelix-studio-host-0.2.2-aelix.8-aarch64-apple-darwin.tar.gz",
-        "sha256": "e3f8acd3bca3048d9a12429ce1c4ae47aeabf755d8a8ee1ceb49cff44623726a"
+        "filename": "aelix-studio-host-0.2.2-aelix.9-aarch64-apple-darwin.tar.gz",
+        "sha256": "14d6a5f5b377571f636fedc03b5ae39ffc5e9a5270924c0ef7f0bec5e05ecdad"
       },
       "darwin-x64": {
-        "filename": "aelix-studio-host-0.2.2-aelix.8-x86_64-apple-darwin.tar.gz",
-        "sha256": "a347cd10db15c6b27179d4162a0d6376d97cd338dfc46d062dddadde322f7636"
+        "filename": "aelix-studio-host-0.2.2-aelix.9-x86_64-apple-darwin.tar.gz",
+        "sha256": "13e14ec5de6b64b677ef6bace52dc7b8cd9c2b57ae744143e6aa87c20237834c"
       },
       "linux-arm64": {
-        "filename": "aelix-studio-host-0.2.2-aelix.8-aarch64-unknown-linux-gnu.tar.gz",
-        "sha256": "4367aa64ca11bec049b3f0a089417d18d39b2b4a6cb4f5f13f776edf8a266fd9"
+        "filename": "aelix-studio-host-0.2.2-aelix.9-aarch64-unknown-linux-gnu.tar.gz",
+        "sha256": "b49cd5134652a681896a6d3f8d57e152f9b2ce803cbdb45981021ed0cd67017d"
       },
       "linux-x64": {
-        "filename": "aelix-studio-host-0.2.2-aelix.8-x86_64-unknown-linux-gnu.tar.gz",
-        "sha256": "5f59d89fa17bea7c56592e715d0efdf7f7ba1735ed1b7d912c1c4522def078ea"
+        "filename": "aelix-studio-host-0.2.2-aelix.9-x86_64-unknown-linux-gnu.tar.gz",
+        "sha256": "3c167df215accd23e9bf2ef3436abe65c580811d6ec12ead83342a7e10561ccc"
       },
       "win32-x64": {
-        "filename": "aelix-studio-host-0.2.2-aelix.8-x86_64-pc-windows-msvc.zip",
-        "sha256": "1bd0cf504ca73bac4617d8298700dcb240e4bc23ebfa7b7f86c020652bf64033"
+        "filename": "aelix-studio-host-0.2.2-aelix.9-x86_64-pc-windows-msvc.zip",
+        "sha256": "c378a9d582c76ded85c2f97dc706a46143afa96401cd5157303cb8e74da660f1"
       }
     },
-    "sourceManifestSha256": "b4e110e7cb8cd9a6bcd3520874868d8a04907202644ee7a37f79a1d4c1bf4a88"
+    "sourceManifestSha256": "2a37d49f6e447487bed10bcd66a0d525e59f15528e06d0c37054c5e71343f02b"
   },
   "acceptance": {
     "hostTargets": [],
