@@ -408,6 +408,44 @@ describe('image container and digest', () => {
     expect(bitmap.close).toHaveBeenCalledOnce();
   });
 
+  it('checks the decoded frame size in headless Chromium', async () => {
+    class Canvas {
+      getContext() {
+        return {};
+      }
+      convertToBlob() {}
+    }
+    const image = { codedWidth: 3000, codedHeight: 2000, close: vi.fn() };
+    const decode = vi.fn().mockResolvedValue({ image, complete: true });
+    class Decoder {
+      static isTypeSupported = vi.fn().mockResolvedValue(true);
+      decode = decode;
+      close() {}
+    }
+
+    vi.stubGlobal('isSecureContext', true);
+    vi.stubGlobal('navigator', { userAgent: 'Mozilla/5.0 HeadlessChrome/145.0.0.0' });
+    vi.stubGlobal('OffscreenCanvas', Canvas);
+    vi.stubGlobal('createImageBitmap', vi.fn());
+    vi.stubGlobal('ImageDecoder', Decoder);
+
+    await expect(
+      encodeImage(
+        {
+          kind: 'encode',
+          source: jpegOriginal,
+          header: { mime: 'image/jpeg', width: 6000, height: 4000, orientation: 1 },
+          byteLimit: 3,
+          edgeLimit: 8000,
+          residentBytes: jpegOriginal.size,
+        },
+        () => {}
+      )
+    ).rejects.toMatchObject({ code: 'codec-unavailable' });
+    expect(decode).toHaveBeenCalledExactlyOnceWith({ completeFramesOnly: true });
+    expect(image.close).toHaveBeenCalledOnce();
+  });
+
   it('hashes bytes in chunks and matches an independent SHA-256', async () => {
     const input = new Uint8Array(600_001).fill(0xc7);
     const updates: number[] = [];

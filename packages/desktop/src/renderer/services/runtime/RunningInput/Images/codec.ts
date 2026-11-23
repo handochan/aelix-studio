@@ -61,7 +61,7 @@ async function decodeScaledJpeg(blob: Blob, header: ImageHeader, target: Dimensi
   // The requested size must reach the JPEG decoder before raster allocation. This is
   // qualified on Blink and also checked against the returned coded dimensions.
   if (
-    !/\b(?:Chrome|Chromium)\/\d+/.test(navigator.userAgent) ||
+    !/\b(?:HeadlessChrome|Chrome|Chromium)\/\d+/.test(navigator.userAgent) ||
     !Decoder ||
     !(await Decoder.isTypeSupported('image/jpeg'))
   ) {
