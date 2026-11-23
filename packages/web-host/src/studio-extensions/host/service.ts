@@ -68,6 +68,12 @@ export type ExtensionServiceOptions = {
   proxyVault?: ProxyCredentialVault;
 };
 
+/**
+ * What a host without the Studio runtime can do about it, as for native auth: the standalone
+ * WebUI package ships none, and its operator points `AELIX_STUDIO_RUNTIME` at a prepared one.
+ */
+export const RUNTIME_HINT = 'the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime';
+
 type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
 
 const TIMEOUTS: FlowContext['timeouts'] = {
@@ -218,7 +224,7 @@ export class ExtensionService {
       if (command.action === 'poll' || command.action === 'cancel') return this.control(owner, command);
       if (command.action === 'list') {
         const context = await this.context();
-        return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE');
+        return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
       }
       if (command.action === 'get_settings')
         return { ok: true, data: await this.settingsState(await this.storedSettings()) };
@@ -304,7 +310,7 @@ export class ExtensionService {
       if (!context || abort.signal.aborted) this.changing = false;
     }
     if (abort.signal.aborted) return fail('CANCELLED');
-    if (!context) return fail('RUNTIME_UNAVAILABLE');
+    if (!context) return fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
     const tracked: Tracked = {
       owner,
       state: { operationId: randomUUID(), action: change.action, phase: 'checking' },
@@ -319,7 +325,7 @@ export class ExtensionService {
   private async runDirect(command: DirectCommand, signal: AbortSignal): Promise<ExtensionReply> {
     try {
       const context = await this.context(signal);
-      if (!context) return fail('RUNTIME_UNAVAILABLE');
+      if (!context) return fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
       if (command.action === 'set_default')
         return { ok: true, data: await setDefault(context, command.extensionId, command.enabled) };
       if (command.action === 'set_settings')

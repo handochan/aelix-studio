@@ -16,6 +16,47 @@ vi.mock('node:os', async (importOriginal) => {
   return { ...actual, networkInterfaces: vi.fn<typeof actual.networkInterfaces>(() => ({})) };
 });
 
+/** This machine's own LAN IPv4 address, if it has one: a peer the listener sees as remote. */
+const LAN_ADDRESS = Object.values((await vi.importActual<typeof import('node:os')>('node:os')).networkInterfaces())
+  .flatMap((entries) => entries ?? [])
+  .find((entry) => entry.family === 'IPv4' && !entry.internal)?.address;
+
+/** One raw request to `connectTo`, from `localAddress`, naming `authority` as Host and Origin. */
+function postFrom(
+  connectTo: string,
+  port: number,
+  localAddress: string,
+  body: unknown,
+  authority = `${connectTo}:${port}`
+): Promise<{ status: number; json: Record<string, unknown> }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        host: connectTo,
+        port,
+        localAddress,
+        method: 'POST',
+        path: '/api/studio/extensions',
+        headers: {
+          host: authority,
+          origin: `http://${authority}`,
+          'content-type': 'application/json',
+          'x-studio-extensions': '1',
+          cookie: 'aelix-studio-session=valid',
+        },
+      },
+      (res) => {
+        let text = '';
+        res.on('data', (chunk: Buffer) => (text += chunk.toString()));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, json: JSON.parse(text || '{}') }));
+      }
+    );
+    req.on('error', reject);
+    req.setTimeout(5000, () => req.destroy(new Error('HTTP response timeout')));
+    req.end(JSON.stringify(body));
+  });
+}
+
 function setLanAddress(address: string): void {
   vi.mocked(networkInterfaces).mockReturnValue({
     lan: [{ address, family: 'IPv4', internal: false, netmask: '255.255.255.0', cidr: address + '/24', mac: '' }],
@@ -577,6 +618,62 @@ describe('static-server', () => {
       await fs.rm(scratch, { recursive: true, force: true });
     }
   });
+
+  it.runIf(LAN_ADDRESS)(
+    'decides at the listener, from the real peer, whether proxy credentials may travel',
+    async () => {
+      const lan = String(LAN_ADDRESS);
+      const backend = await startMockBackend((req, res) => {
+        res.writeHead(req.headers.cookie === 'aionui-session=valid' ? 200 : 401, {
+          'content-type': 'application/json',
+        });
+        res.end(JSON.stringify({ success: true, user: { id: 'operator' } }));
+      });
+      stopBackend = backend.close;
+      const scratch = await fs.mkdtemp(join(os.tmpdir(), 'studio-static-transport-'));
+      try {
+        const bundle = await createFakeBundle(join(scratch, 'bundle'));
+        const service = configureStudioExtensions({
+          userDataPath: join(scratch, 'user data'),
+          runtime: bundle,
+          service: { spawn: fakeRuntime({ bundle }) },
+        });
+        const request = vi.spyOn(service, 'request');
+        setLanAddress(lan);
+        handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0, allowRemote: true });
+        const port = handle.port;
+        const secret = {
+          action: 'set_proxy_credentials',
+          credentials: { username: 'ops', password: 'sentinel-secret' },
+        };
+
+        // From another address of this machine's network: every relayed request comes from
+        // 127.0.0.1 to the internal server, but the listener saw the LAN peer.
+        const settings = await postFrom(lan, port, lan, { action: 'get_settings' });
+        expect(settings).toMatchObject({ status: 200, json: { ok: true, transport: 'insecure' } });
+        request.mockClear();
+        const refused = await postFrom(lan, port, lan, secret);
+        expect(refused).toEqual({
+          status: 200,
+          json: { ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' },
+        });
+        expect(request).not.toHaveBeenCalled();
+        const acknowledged = await postFrom(lan, port, lan, { ...secret, acknowledgeInsecureTransport: true });
+        expect(acknowledged).toMatchObject({ status: 200, json: { transport: 'insecure' } });
+        expect(request).toHaveBeenCalledWith('web:operator', secret);
+
+        // From this machine, at the server's own local origin: no flag needed.
+        request.mockClear();
+        const local = await postFrom('127.0.0.1', port, '127.0.0.1', secret, new URL(handle.localUrl).host);
+        expect(local).toMatchObject({ status: 200, json: { transport: 'secure' } });
+        expect(local.json.code).not.toBe('INSECURE_TRANSPORT');
+        expect(request).toHaveBeenCalledWith('web:operator', secret);
+      } finally {
+        await disposeStudioExtensions();
+        await fs.rm(scratch, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('/logout reverse-proxies to backend (no local handler)', async () => {
     const backend = await startMockBackend((req, res) => {

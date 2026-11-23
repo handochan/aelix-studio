@@ -403,17 +403,19 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect(await readdir(path.join(root, 'generations'))).toEqual([before.generation]);
   });
 
-  it('reports the runtime as unavailable when there is no bundle, for every kind of request', async () => {
+  it('reports the runtime as unavailable when there is no bundle, for every kind of request, with the fix', async () => {
     const missing = new ExtensionService({ runtime: path.join(scratch, 'absent'), root, spawn });
-    expect(await missing.request('window:1', { action: 'list' })).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
-    expect(await missing.request('window:1', { action: 'rollback' })).toEqual({
+    const unavailable = {
       ok: false,
       code: 'RUNTIME_UNAVAILABLE',
-    });
+      detail: ['the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime'],
+    };
+    expect(await missing.request('window:1', { action: 'list' })).toEqual(unavailable);
+    expect(await missing.request('window:1', { action: 'rollback' })).toEqual(unavailable);
     const install = await installRequest({ name: 'demo-one' });
-    expect(await missing.request('window:1', install)).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await missing.request('window:1', install)).toEqual(unavailable);
     // A refused start is not a running change: the next request is not answered with BUSY.
-    expect(await missing.request('window:1', install)).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await missing.request('window:1', install)).toEqual(unavailable);
     expect(spawn.calls).toEqual([]);
   });
 

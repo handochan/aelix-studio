@@ -697,15 +697,22 @@ HTTP 요청을 하는 pack을 오프라인 설정으로 반입하니 로드 검�
     한다. JSON POST(`application/json`과 매개변수만, `application/jsonx` 같은 것은 아님), `X-Studio-Extensions: 1`, 페이지
     자신의 origin, cross-site 아님, 실제 WebUI 로그인, 60 kB, 10초다. 로그인한 사용자가 owner(`web:<user>`)다. listener가
     멈추면 WebUI 사용자의 변경을 취소한다. 별도 WebUI(`scripts/webui.ts`, 배포 패키지 `aelix-studio-web`)는 vault 없이
-    설정되어 memory-only이고, 멈출 때 서비스를 정리한다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할
+    설정되어 memory-only이고, 멈출 때 서비스를 정리한다. 배포 패키지에는 Studio runtime이 없다. native auth와 같이
+    운영자가 준비한 runtime을 `AELIX_STUDIO_RUNTIME`으로 가리킨다. 없으면 `RUNTIME_UNAVAILABLE`과 그 방법이 적힌 detail로
+    답한다. 화면은 이것을 "이 환경에 runtime이 없음"으로 보여 준다. 데스크톱이 띄운 WebUI는 데스크톱 서비스를 쓰므로 키체인에 저장할
     수 있다(2026-11-22 사용자 결정, 저장한 값은 돌려주지 않는다).
-  - **암호화되지 않은 원격 연결.** proxy 인증 정보를 싣는 요청(`set_proxy_credentials`, `proxyCredentials`가 있는 요청,
-    사용자 부분이 있는 proxy 주소의 `set_settings`)이 다른 기계에서 평문 HTTP로 오면 `INSECURE_TRANSPORT`로 답한다. 화면은
-    인증 정보가 암호화되지 않은 채 네트워크를 지난다고 경고하고, 사용자가 계속하면 `acknowledgeInsecureTransport: true`를
-    붙여 다시 보낸다(2026-11-22 사용자 결정: 경고한 뒤 허용). 안전한지는 socket으로만 판단한다. TLS이거나 상대 주소가
-    loopback(127.0.0.0/8, ::1, IPv4-mapped 포함)이면 안전하고, `X-Forwarded-*` 같은 header는 보지 않는다. 그래서 다른
-    기계의 TLS reverse proxy 뒤라도 평문 구간이 있으면 묻는다. 데스크톱 창과 이 기계의 WebUI는 표시가 필요 없다. 표시는
-    helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
+  - **암호화되지 않은 원격 연결(2026-11-23 사용자 결정: 경고한 뒤 허용).**
+    - **판단.** 안전한지는 연결 자체로만 정한다. TLS이거나 상대 주소가 loopback(127.0.0.0/8, ::1, IPv4-mapped 포함)이면
+      안전하고, `X-Forwarded-*` 같은 header는 보지 않는다. WebUI listener는 모든 연결을 127.0.0.1에서 내부 HTTP 서버로
+      잇는다. 그래서 내부 서버의 socket은 늘 loopback이다. 판단은 연결을 받은 listener가 실제 상대 주소로 한다. 그 결과는
+      내부 서버로 잇는 연결의 local port에 걸어 둔다. 내부 서버는 요청 socket의 remote port로 그것을 찾고, 없으면 원격으로
+      본다(fail closed). 다른 기계의 TLS reverse proxy 뒤라도 평문 구간이 있으면 원격이다.
+    - **순서.** 채널의 모든 답에 `transport: 'secure' | 'insecure'`가 붙는다. 화면은 열 때 읽는 설정의 답에서 그것을
+      먼저 안다. `insecure`이면 proxy 인증 정보를 싣는 요청(`set_proxy_credentials`, `proxyCredentials`가 있는 요청,
+      사용자 부분이 있는 proxy 주소의 `set_settings`)을 보내기 **전에** 인증 정보가 암호화되지 않은 채 네트워크를 지난다고
+      경고한다. 사용자가 계속하면 `acknowledgeInsecureTransport: true`를 붙여 보낸다. 서버는 둘째 방어선으로, 표시 없이
+      그런 요청이 오면 `INSECURE_TRANSPORT`로 답한다. 데스크톱 창(`transport: 'secure'`)과 이 기계의 WebUI는 표시가 필요
+      없다. 표시는 helper에 넘기기 전에 뗀다. 저장된 인증 정보를 원격에서 쓰는 설치는 비밀이 오가지 않으므로 묻지 않는다.
   - **화면 client.** 데스크톱 창이면 전용 채널, 아니면 WebUI route로 보낸다. 본문을 다시 보내게 되는 redirect는 따르지
     않는다(`redirect: 'error'`). 답을 잃거나 redirect되면 `CONNECTION_LOST`로 끝내고 다시 보내지 않는다. 이미 바뀐 뒤일 수
     있기 때문이다. 채널 자체의 답(`FORBIDDEN`, `UNAUTHENTICATED`, `FRAME_LIMIT`, `UNAVAILABLE`, `CONNECTION_LOST`,
@@ -1177,6 +1184,14 @@ proxy의 헤더와 본문이 설치 도구까지 갔다. 407은 `PROXY_CREDENTIA
 - 번들 찾기를 native auth와 같게 했다.
 - client는 redirect를 따르지 않는다.
 - JSON 형식 검사를 정확히 했다.
+
+**2026-11-23, PR A 재확인(blocking 1, should-fix 2, nit 1).**
+
+- WebUI listener가 연결을 127.0.0.1에서 잇기 때문에 loopback 판단이 무력했다. 판단을 listener가 실제 상대 주소로 하도록
+  옮겼다. 실제 listener를 LAN 주소로 거치는 시험으로 확인했다.
+- 모든 답에 `transport`를 붙였다. 화면은 비밀을 보내기 전에 경고한다.
+- 배포 패키지 WebUI의 runtime은 native auth와 같이 `AELIX_STUDIO_RUNTIME`으로 정한다는 것을 적었다.
+- 결정 날짜를 고쳤다(11-23).
 
 **2026-11-22, 같은 리뷰어의 두 번째 재확인(should-fix 3, nit 1).** relay가 407에 자신의 502로 답한 뒤에도
 사용자 proxy의 끝나지 않는 본문을 계속 읽으며 연결 자리를 잡고 있던 것을 고쳤다. 이제 답하는 즉시 그 연결을 끊는다.

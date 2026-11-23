@@ -1,7 +1,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { TLSSocket } from 'node:tls';
 import { admitStudioRequest, respondStudio } from '../../studio-auth/request.js';
-import type { ExtensionService } from './service.js';
+import { RUNTIME_HINT, type ExtensionService } from './service.js';
 import { getStudioExtensionService } from './shared.js';
 
 export const STUDIO_EXTENSIONS_ROUTE = '/api/studio/extensions';
@@ -19,6 +19,8 @@ export function isLoopbackAddress(address: string | undefined): boolean {
 /**
  * Whether a connection can carry a secret without it crossing a network in the clear: TLS,
  * or a peer on this machine. Read from the socket, never from headers a client or proxy sets.
+ * Behind the WebUI listener's relay every request comes from 127.0.0.1: the static server
+ * passes its own verdict from the accepted socket instead (`secure`).
  */
 export function secureTransport(req: IncomingMessage): boolean {
   return Boolean((req.socket as Partial<TLSSocket>).encrypted) || isLoopbackAddress(req.socket.remoteAddress);
@@ -43,10 +45,12 @@ export function carriesProxyCredentials(command: unknown): boolean {
  * carry proxy credentials, so nothing of a request or a reply is logged here.
  *
  * Proxy credentials sent over plain HTTP from another machine would cross the network in the
- * clear (2026-11-22 user decision: warn, then allow). Such a request is answered
- * `INSECURE_TRANSPORT` unless it carries `acknowledgeInsecureTransport: true`, which the
- * screen adds only after the user confirmed the warning. The flag is removed before the
- * helper sees the request. Saved credentials used remotely travel nowhere and need no flag.
+ * clear (2026-11-23 user decision: warn, then allow). Every reply says which (`transport`),
+ * so the screen warns before it sends a secret, and adds `acknowledgeInsecureTransport: true`
+ * once the user confirmed. A request that carries credentials without the flag over such a
+ * connection is still answered `INSECURE_TRANSPORT`, as a second line. The flag is removed
+ * before the helper sees the request. Saved credentials used remotely travel nowhere and
+ * need no flag.
  */
 export async function handleStudioExtensions(
   req: IncomingMessage,
@@ -55,7 +59,7 @@ export async function handleStudioExtensions(
     backendPort: number;
     origins: string[];
     service?: ExtensionService;
-    /** For tests: whether the connection is secure; by default from the socket. */
+    /** Whether the connection is secure; by default from the socket (see `secureTransport`). */
     secure?: (req: IncomingMessage) => boolean;
   }
 ): Promise<void> {
@@ -67,15 +71,12 @@ export async function handleStudioExtensions(
       origins: options.origins,
     });
     if (!admitted) return;
+    const transport = (options.secure ?? secureTransport)(req) ? 'secure' : 'insecure';
     let command = admitted.body;
     if (isObject(command)) {
       const { acknowledgeInsecureTransport, ...rest } = command;
-      if (
-        carriesProxyCredentials(rest) &&
-        acknowledgeInsecureTransport !== true &&
-        !(options.secure ?? secureTransport)(req)
-      ) {
-        respondStudio(res, 200, { ok: false, code: 'INSECURE_TRANSPORT' });
+      if (transport === 'insecure' && carriesProxyCredentials(rest) && acknowledgeInsecureTransport !== true) {
+        respondStudio(res, 200, { ok: false, code: 'INSECURE_TRANSPORT', transport });
         return;
       }
       command = rest;
@@ -83,8 +84,8 @@ export async function handleStudioExtensions(
     const service = options.service ?? getStudioExtensionService();
     const reply = service
       ? await service.request(`web:${admitted.userId}`, command)
-      : { ok: false, code: 'RUNTIME_UNAVAILABLE' };
-    respondStudio(res, 200, reply);
+      : { ok: false, code: 'RUNTIME_UNAVAILABLE', detail: [RUNTIME_HINT] };
+    respondStudio(res, 200, { ...reply, transport });
   } catch {
     respondStudio(res, 503, { ok: false, code: 'UNAVAILABLE' });
   }

@@ -112,7 +112,8 @@ describe('the extension helper on the WebUI listener', () => {
     authenticate = true;
     const response = await request({ cookie: 'aelix-studio-session=valid' });
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({ ok: true, data: { settings: {} } });
+    // Every reply says whether the connection may carry a secret: this one is on this machine.
+    expect(await response.json()).toEqual({ ok: true, data: { settings: {} }, transport: 'secure' });
     expect(handler).toHaveBeenCalledWith('web:operator', { action: 'get_settings' });
     expect(response.headers.get('cache-control')).toBe('no-store');
     expect(response.headers.get('referrer-policy')).toBe('no-referrer');
@@ -141,7 +142,7 @@ describe('the extension helper on the WebUI listener', () => {
       secure = false;
       const refused = await request({ cookie: 'aelix-studio-session=valid' }, JSON.stringify(command));
       expect(refused.status).toBe(200);
-      expect(await refused.json()).toEqual({ ok: false, code: 'INSECURE_TRANSPORT' });
+      expect(await refused.json()).toEqual({ ok: false, code: 'INSECURE_TRANSPORT', transport: 'insecure' });
       expect(handler).not.toHaveBeenCalled();
       // With the acknowledgement the helper gets the request, without the flag.
       const sent = await request(
@@ -150,6 +151,13 @@ describe('the extension helper on the WebUI listener', () => {
       );
       expect(sent.status).toBe(200);
       expect(handler).toHaveBeenCalledWith('web:operator', command);
+    });
+
+    it('says on every reply that the connection is insecure, so the screen can warn before a secret', async () => {
+      authenticate = true;
+      secure = false;
+      const response = await request({ cookie: 'aelix-studio-session=valid' });
+      expect(await response.json()).toEqual({ ok: true, data: { settings: {} }, transport: 'insecure' });
     });
 
     it('lets everything else through without a flag, saved credentials included, and the flag never reaches the helper', async () => {
@@ -232,7 +240,12 @@ describe('the extension helper on the WebUI listener', () => {
     authenticate = true;
     configured = undefined;
     const response = await request({ cookie: 'aelix-studio-session=valid' });
-    expect(await response.json()).toEqual({ ok: false, code: 'RUNTIME_UNAVAILABLE' });
+    expect(await response.json()).toEqual({
+      ok: false,
+      code: 'RUNTIME_UNAVAILABLE',
+      detail: ['the Studio runtime was not found; set AELIX_STUDIO_RUNTIME to a prepared runtime'],
+      transport: 'secure',
+    });
   });
 
   it('answers UNAVAILABLE, and nothing of the error, when the helper throws', async () => {

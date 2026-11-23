@@ -46,6 +46,7 @@ export type {
   StudioExtensionsConfig,
   StudioExtensionsReply,
   StudioExtensionsRequest,
+  StudioExtensionsTransport,
   StudioExtensionsTransportCode,
 } from './studio-extensions/index.js';
 

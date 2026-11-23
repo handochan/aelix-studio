@@ -27,7 +27,7 @@ import {
 import { toHostCookieHeader, toStudioSetCookie, usesSharedLoopbackHost } from './studio-auth/cookies.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
-import { handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './studio-extensions/host/facade.js';
+import { handleStudioExtensions, isLoopbackAddress, STUDIO_EXTENSIONS_ROUTE } from './studio-extensions/host/facade.js';
 import { getStudioExtensionService } from './studio-extensions/host/shared.js';
 import {
   MAX_UPGRADE_HEADER_BYTES,
@@ -171,7 +171,12 @@ const PEEK_LIMIT_BYTES = 4096;
  * from `client` during peek are replayed to the upstream as the first write,
  * so the endpoint sees the full HTTP request as-sent.
  */
-function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: Buffer): void {
+function spliceToTcpEndpoint(
+  client: Socket,
+  targetPort: number,
+  initialBytes: Buffer,
+  relayed?: { add(localPort: number): void; remove(localPort: number): void }
+): void {
   client.setNoDelay(true);
   client.setKeepAlive(true);
   client.setTimeout(0);
@@ -188,6 +193,12 @@ function spliceToTcpEndpoint(client: Socket, targetPort: number, initialBytes: B
   upstream.setNoDelay(true);
   upstream.setKeepAlive(true);
   upstream.once('connect', () => {
+    // Registered before a byte of the request is relayed, so the internal server finds it.
+    const localPort = upstream.localPort;
+    if (relayed && localPort !== undefined) {
+      relayed.add(localPort);
+      upstream.once('close', () => relayed.remove(localPort));
+    }
     if (initialBytes.length > 0) upstream.write(initialBytes);
     upstream.pipe(client);
     client.pipe(upstream);
@@ -236,6 +247,18 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
   const browserCookieAuthority = (authority: string | undefined): string | undefined =>
     isLoopbackAlias(authority) ? undefined : authority;
 
+  // The listener relays every connection to the internal HTTP server from 127.0.0.1, so that
+  // server cannot see who connected. The listener decides at accept time, from the peer
+  // address of the accepted socket, and records the verdict under the relay connection's
+  // local port: the internal server finds it as its request socket's remote port. Nothing a
+  // client sends can set it. A request with no verdict (not relayed by this listener) is
+  // treated as remote.
+  const relayedFromThisMachine = new Map<number, boolean>();
+  const fromThisMachine = (req: IncomingMessage): boolean =>
+    isLoopbackAddress(req.socket.remoteAddress) &&
+    req.socket.remotePort !== undefined &&
+    relayedFromThisMachine.get(req.socket.remotePort) === true;
+
   // Bun's HTTP server upgrade socket does not reliably write the 101 response
   // (#2824). Keep client upgrades on the TCP listener and use this HTTP
   // listener to parse and validate every ordinary request, including keep-alive.
@@ -279,7 +302,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
 
       if (req.url.startsWith(STUDIO_EXTENSIONS_ROUTE)) {
         if (!cookieAuthority) delete req.headers.cookie;
-        await handleStudioExtensions(req, res, { backendPort: opts.backendPort, origins: [req.headers.origin ?? ''] });
+        await handleStudioExtensions(req, res, {
+          backendPort: opts.backendPort,
+          origins: [req.headers.origin ?? ''],
+          secure: fromThisMachine,
+        });
         return;
       }
 
@@ -357,7 +384,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
       cleanup();
-      spliceToTcpEndpoint(client, internalPort, peeked);
+      const local = isLoopbackAddress(client.remoteAddress);
+      spliceToTcpEndpoint(client, internalPort, peeked, {
+        add: (localPort) => relayedFromThisMachine.set(localPort, local),
+        remove: (localPort) => relayedFromThisMachine.delete(localPort),
+      });
     };
     const close = (): void => {
       cleanup();

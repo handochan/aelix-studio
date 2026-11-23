@@ -79,7 +79,8 @@ export function studioExtensionsIpcHandler(
     const { acknowledgeInsecureTransport: _acknowledged, ...request } = command as Record<string, unknown>;
     const current = service();
     if (!current) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
-    return current.request(`desktop:${event.sender.id}`, request);
+    // A window of this app is on this machine: a secret never crosses a network on this channel.
+    return { ...(await current.request(`desktop:${event.sender.id}`, request)), transport: 'secure' };
   };
 }
 

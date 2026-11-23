@@ -75,6 +75,13 @@ command at `~/.local/bin/aelix-studio-web`. The data and logs default to
 resetting with an alternate data directory, use the same `--data-dir` or
 `AIONUI_DATA_DIR` both times. The flag takes priority over the environment.
 
+The package does not include the Studio runtime that native Provider sign-in
+and Agent Extensions use. As with native Provider sign-in, point
+`AELIX_STUDIO_RUNTIME` at a prepared runtime ([Providers](providers.md#runtime-and-usage))
+before you start the WebUI. Without it, those screens report that the runtime is
+not available here. Agent Extensions in the standalone WebUI never keep proxy
+credentials: they are asked at each install.
+
 On Linux with a systemd user manager, start the WebUI in a terminal first to
 read the generated operator password. After stopping that instance with
 Ctrl+C, you can run the packaged unit in the background.

@@ -56,7 +56,11 @@ describe('the desktop channel of the extension helper', () => {
     const handle = studioExtensionsIpcHandler(trusted, () => service);
     expect(await handle(event(8), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN' });
     expect(request).not.toHaveBeenCalled();
-    expect(await handle(event(7), { action: 'list' })).toEqual({ ok: true, data: { current: null } });
+    expect(await handle(event(7), { action: 'list' })).toEqual({
+      ok: true,
+      data: { current: null },
+      transport: 'secure',
+    });
     expect(request).toHaveBeenCalledWith('desktop:7', { action: 'list' });
   });
 
@@ -84,7 +88,7 @@ describe('the desktop channel of the extension helper', () => {
     ])
       expect(await handle(event(7), value)).toEqual({ ok: false, code: 'INVALID_INPUT' });
     expect(request).not.toHaveBeenCalled();
-    expect(await handle(event(7), install('é'.repeat(100)))).toEqual({ ok: true, data: {} });
+    expect(await handle(event(7), install('é'.repeat(100)))).toEqual({ ok: true, data: {}, transport: 'secure' });
   });
 
   it('refuses the window while its DevTools are open in a packaged app, not in a development build', async () => {
@@ -97,13 +101,13 @@ describe('the desktop channel of the extension helper', () => {
     );
     expect(await packaged(event(7, true), { action: 'list' })).toEqual({ ok: false, code: 'FORBIDDEN' });
     expect(request).not.toHaveBeenCalled();
-    expect(await packaged(event(7, false), { action: 'list' })).toEqual({ ok: true, data: {} });
+    expect(await packaged(event(7, false), { action: 'list' })).toEqual({ ok: true, data: {}, transport: 'secure' });
     const development = studioExtensionsIpcHandler(
       () => true,
       service,
       () => false
     );
-    expect(await development(event(7, true), { action: 'list' })).toEqual({ ok: true, data: {} });
+    expect(await development(event(7, true), { action: 'list' })).toEqual({ ok: true, data: {}, transport: 'secure' });
   });
 
   it('answers RUNTIME_UNAVAILABLE until the helper is started', async () => {
