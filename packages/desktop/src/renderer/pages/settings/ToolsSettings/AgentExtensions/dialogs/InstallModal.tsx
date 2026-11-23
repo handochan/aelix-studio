@@ -232,7 +232,7 @@ const InstallModal: React.FC<Props> = ({
                 data-testid='install-wheel'
               />
               <Button
-                icon={<FolderOpen theme='outline' size='14' />}
+                icon={<FolderOpen theme='outline' size='14' fill='currentColor' />}
                 onClick={() => void chooseWheel()}
                 data-testid='install-pick-wheel'
               >

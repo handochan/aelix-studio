@@ -569,6 +569,7 @@
       "proxyHint": "Las instalaciones en línea solo usan este proxy. No se usan los proxies del sistema ni del entorno.",
       "credentialsNeedAuthentication": "Esta dirección incluye usuario y contraseña. Active «El proxy requiere contraseña» para guardarla.",
       "proxyAuthentication": "El proxy requiere contraseña",
+      "proxyAuthenticationNeedsProxy": "Primero introduzca una dirección de proxy.",
       "keychainHint": "El usuario y la contraseña se pueden guardar en el llavero del sistema.",
       "memoryOnlyHint": "Aquí no se guarda nada: los introduces en cada instalación.",
       "credentialsSaved": "Guardadas",

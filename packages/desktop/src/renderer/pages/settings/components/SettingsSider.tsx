@@ -26,6 +26,16 @@ import { Tooltip } from '@arco-design/web-react';
 import { getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
 
 /** Builtin settings tab IDs in display order (must match router paths). */
+/**
+ * Whether the sider item at `path` is the page shown: its own route or a page under it
+ * (`agent/<id>/repair`), never another item whose path only starts the same (`agent` is not
+ * `agent-extensions`).
+ */
+export function isSiderItemSelected(pathname: string, path: string): boolean {
+  const shown = pathname.replace(/^\/settings\/?/, '');
+  return shown === path || shown.startsWith(`${path}/`);
+}
+
 export const BUILTIN_TAB_IDS = [
   'agent',
   'model',
@@ -215,7 +225,7 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
       })}
     >
       {menus.map((item, index) => {
-        const isSelected = pathname.includes(item.path);
+        const isSelected = isSiderItemSelected(pathname, item.path);
         const groupHeaderKey = groupHeaderAt.get(index);
         const groupHeader =
           groupHeaderKey && !collapsed ? (

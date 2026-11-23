@@ -654,6 +654,17 @@ describe('the agent extensions screen', () => {
     LONG
   );
 
+  it('shows the proxy password switch, off and locked, and why, while there is no proxy', async () => {
+    render(<AgentExtensionsSettings />);
+    const lockedSwitch = await screen.findByTestId('settings-proxy-auth');
+    expect(lockedSwitch).toHaveClass('!bg-fill-3');
+    expect(screen.getByText('settings.agentExtensions.settings.proxyAuthenticationNeedsProxy')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('settings-proxy'), { target: { value: 'http://proxy.corp:3128' } });
+    expect(screen.getByTestId('settings-proxy-auth')).not.toHaveClass('!bg-fill-3');
+    expect(screen.queryByText('settings.agentExtensions.settings.proxyAuthenticationNeedsProxy')).toBeNull();
+    expect(screen.getByText('settings.agentExtensions.settings.keychainHint')).toBeInTheDocument();
+  });
+
   it('asks to turn on proxy authentication before saving an address with a password', async () => {
     render(<AgentExtensionsSettings />);
     fireEvent.change(await screen.findByTestId('settings-proxy'), {

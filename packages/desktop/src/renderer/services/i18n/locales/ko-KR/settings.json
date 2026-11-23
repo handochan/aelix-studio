@@ -581,6 +581,7 @@
       "proxyHint": "온라인 설치는 이 프록시만 씁니다. 시스템·환경 프록시는 쓰지 않습니다.",
       "credentialsNeedAuthentication": "이 주소에 사용자 이름과 비밀번호가 있습니다. 저장하려면 \"프록시 비밀번호 필요\"를 켜세요.",
       "proxyAuthentication": "프록시 비밀번호 필요",
+      "proxyAuthenticationNeedsProxy": "먼저 프록시 주소를 입력하세요.",
       "keychainHint": "사용자 이름과 비밀번호를 시스템 키체인에 저장할 수 있습니다.",
       "memoryOnlyHint": "이 환경은 저장하지 않습니다. 설치할 때마다 입력합니다.",
       "credentialsSaved": "저장됨",

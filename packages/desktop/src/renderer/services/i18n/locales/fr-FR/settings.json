@@ -581,6 +581,7 @@
       "proxyHint": "Les installations en ligne n'utilisent que ce proxy. Les proxys du système et de l'environnement ne sont pas utilisés.",
       "credentialsNeedAuthentication": "Cette adresse contient un nom d’utilisateur et un mot de passe. Activez « Le proxy demande un mot de passe » pour l’enregistrer.",
       "proxyAuthentication": "Le proxy demande un mot de passe",
+      "proxyAuthenticationNeedsProxy": "Saisissez d’abord une adresse de proxy.",
       "keychainHint": "Le nom d'utilisateur et le mot de passe peuvent être conservés dans le trousseau du système.",
       "memoryOnlyHint": "Rien n'est conservé ici : vous les saisissez à chaque installation.",
       "credentialsSaved": "Enregistrés",

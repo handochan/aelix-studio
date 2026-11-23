@@ -178,7 +178,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
                   onOk={() => void actions.rollback()}
                 >
                   <Button
-                    icon={<Return theme='outline' size='14' />}
+                    icon={<Return theme='outline' size='14' fill='currentColor' />}
                     disabled={busy}
                     data-testid='agent-extensions-rollback'
                   >
@@ -188,7 +188,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
               )}
               <Button
                 type='primary'
-                icon={<Plus theme='outline' size='14' />}
+                icon={<Plus theme='outline' size='14' fill='currentColor' />}
                 disabled={busy || runtimeUnavailable || !listing}
                 onClick={() => setInstall({ tab: onlineAllowed ? 'index' : 'file' })}
                 data-testid='agent-extensions-install'

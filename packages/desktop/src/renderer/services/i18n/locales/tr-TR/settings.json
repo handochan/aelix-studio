@@ -581,6 +581,7 @@
       "proxyHint": "Çevrimiçi kurulumlar yalnızca bu proxy'yi kullanır. Sistem ve ortam proxy'leri kullanılmaz.",
       "credentialsNeedAuthentication": "Bu adreste kullanıcı adı ve parola var. Kaydetmek için “Proxy parola istiyor” seçeneğini açın.",
       "proxyAuthentication": "Proxy parola istiyor",
+      "proxyAuthenticationNeedsProxy": "Önce bir proxy adresi girin.",
       "keychainHint": "Kullanıcı adı ve parola sistem anahtar zincirinde saklanabilir.",
       "memoryOnlyHint": "Burada hiçbir şey saklanmaz: her kurulumda girersiniz.",
       "credentialsSaved": "Kaydedildi",

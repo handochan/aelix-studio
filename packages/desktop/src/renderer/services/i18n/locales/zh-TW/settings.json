@@ -581,6 +581,7 @@
       "proxyHint": "線上安裝只使用此代理伺服器，不使用系統或環境的代理伺服器。",
       "credentialsNeedAuthentication": "此位址包含使用者名稱與密碼。請開啟「代理伺服器需要密碼」後再儲存。",
       "proxyAuthentication": "代理伺服器需要密碼",
+      "proxyAuthenticationNeedsProxy": "請先填寫代理伺服器位址。",
       "keychainHint": "使用者名稱和密碼可以儲存在系統鑰匙圈中。",
       "memoryOnlyHint": "此環境不會儲存，每次安裝時輸入。",
       "credentialsSaved": "已儲存",

@@ -571,6 +571,7 @@
       "proxyHint": "Online-Installationen verwenden nur diesen Proxy. System- und Umgebungs-Proxys werden nicht verwendet.",
       "credentialsNeedAuthentication": "Diese Adresse enthält Benutzername und Passwort. Schalten Sie „Proxy braucht ein Passwort“ ein, um sie zu speichern.",
       "proxyAuthentication": "Proxy braucht ein Passwort",
+      "proxyAuthenticationNeedsProxy": "Geben Sie zuerst eine Proxy-Adresse ein.",
       "keychainHint": "Benutzername und Passwort können im System-Schlüsselbund gespeichert werden.",
       "memoryOnlyHint": "Hier wird nichts gespeichert: Sie geben sie bei jeder Installation ein.",
       "credentialsSaved": "Gespeichert",

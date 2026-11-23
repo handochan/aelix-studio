@@ -1758,6 +1758,7 @@ export type I18nKey =
   | 'settings.agentExtensions.settings.privateGitHint'
   | 'settings.agentExtensions.settings.proxy'
   | 'settings.agentExtensions.settings.proxyAuthentication'
+  | 'settings.agentExtensions.settings.proxyAuthenticationNeedsProxy'
   | 'settings.agentExtensions.settings.proxyHint'
   | 'settings.agentExtensions.settings.title'
   | 'settings.agentExtensions.settings.unreadable'

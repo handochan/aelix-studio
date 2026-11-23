@@ -10,6 +10,13 @@ import React, { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { hasUserPart, withoutUserPart } from './state/secrets';
 
+/**
+ * A switch that is off and cannot be turned on shows its track a step darker than the section
+ * behind it (Arco's disabled track is the section's own fill): its shape stays visible.
+ */
+export const offAndLocked = (checked: boolean, disabled: boolean): string | undefined =>
+  disabled && !checked ? '!bg-fill-3' : undefined;
+
 type Props = {
   state: ExtensionSettingsState;
   /**
@@ -96,6 +103,7 @@ const InstallSettings: React.FC<Props> = ({
         <Switch
           checked={draft.onlineInstall && !state.onlineInstallLocked}
           disabled={state.onlineInstallLocked}
+          className={offAndLocked(draft.onlineInstall && !state.onlineInstallLocked, state.onlineInstallLocked)}
           onChange={(onlineInstall) => setDraft({ ...draft, onlineInstall })}
           data-testid='settings-online'
         />
@@ -119,15 +127,19 @@ const InstallSettings: React.FC<Props> = ({
       <Row
         label={t('settings.agentExtensions.settings.proxyAuthentication')}
         hint={
-          state.credentialMode === 'keychain'
-            ? t('settings.agentExtensions.settings.keychainHint')
-            : t('settings.agentExtensions.settings.memoryOnlyHint')
+          // Why it cannot be turned on yet, while there is no proxy to sign in to.
+          !hasProxy
+            ? t('settings.agentExtensions.settings.proxyAuthenticationNeedsProxy')
+            : state.credentialMode === 'keychain'
+              ? t('settings.agentExtensions.settings.keychainHint')
+              : t('settings.agentExtensions.settings.memoryOnlyHint')
         }
       >
         <div className='flex flex-col items-end gap-8px'>
           <Switch
             checked={settings.proxyAuthentication}
             disabled={!hasProxy}
+            className={offAndLocked(settings.proxyAuthentication, !hasProxy)}
             onChange={(proxyAuthentication) => setDraft({ ...draft, proxyAuthentication })}
             data-testid='settings-proxy-auth'
           />

@@ -581,6 +581,7 @@
       "proxyHint": "オンラインインストールはこのプロキシのみを使います。システムや環境のプロキシは使いません。",
       "credentialsNeedAuthentication": "このアドレスにはユーザー名とパスワードが含まれています。保存するには「プロキシにパスワードが必要」をオンにしてください。",
       "proxyAuthentication": "プロキシにパスワードが必要",
+      "proxyAuthenticationNeedsProxy": "先にプロキシのアドレスを入力してください。",
       "keychainHint": "ユーザー名とパスワードをシステムのキーチェーンに保存できます。",
       "memoryOnlyHint": "この環境では保存しません。インストールのたびに入力します。",
       "credentialsSaved": "保存済み",

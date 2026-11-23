@@ -581,6 +581,7 @@
       "proxyHint": "Online installs use this proxy only. System and environment proxies are not used.",
       "credentialsNeedAuthentication": "This address has a user name and password. Turn on “Proxy needs a password” to save it.",
       "proxyAuthentication": "Proxy needs a password",
+      "proxyAuthenticationNeedsProxy": "Enter a proxy address first.",
       "keychainHint": "The user name and password can be kept in the system keychain.",
       "memoryOnlyHint": "Nothing is kept here: you enter them for each install.",
       "credentialsSaved": "Saved",

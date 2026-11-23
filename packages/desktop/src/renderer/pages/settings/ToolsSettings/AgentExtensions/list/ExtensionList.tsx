@@ -9,6 +9,7 @@ import { Button, Popconfirm, Switch, Tag, Tooltip } from '@arco-design/web-react
 import { Delete, Refresh, Upload } from '@icon-park/react';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { offAndLocked } from '../InstallSettings';
 
 /** Status tags in the theme's meaning colors: ready, needs attention, broken. */
 const STATUS_CLASS: Record<ExtensionStatus, string> = {
@@ -111,6 +112,7 @@ const ExtensionList: React.FC<Props> = ({
                     size='small'
                     checked={entry.defaultEnabled ?? true}
                     disabled={busy}
+                    className={offAndLocked(entry.defaultEnabled ?? true, busy)}
                     onChange={(enabled) => onToggleDefault(entry, enabled)}
                     data-testid='agent-extension-default'
                   />
@@ -123,7 +125,7 @@ const ExtensionList: React.FC<Props> = ({
                   <span className='inline-flex' data-testid='agent-extension-upgrade-wrapper'>
                     <Button
                       size='small'
-                      icon={<Refresh theme='outline' size='14' />}
+                      icon={<Refresh theme='outline' size='14' fill='currentColor' />}
                       disabled={busy || !onlineAllowed}
                       onClick={() => onUpgrade(entry)}
                       data-testid='agent-extension-upgrade'
@@ -136,7 +138,7 @@ const ExtensionList: React.FC<Props> = ({
               {entry.origin?.kind === 'file' && (
                 <Button
                   size='small'
-                  icon={<Upload theme='outline' size='14' />}
+                  icon={<Upload theme='outline' size='14' fill='currentColor' />}
                   disabled={busy}
                   onClick={() => onUpdateFromFile(entry)}
                   data-testid='agent-extension-update'
@@ -156,7 +158,7 @@ const ExtensionList: React.FC<Props> = ({
                 <Button
                   size='small'
                   status='danger'
-                  icon={<Delete theme='outline' size='14' />}
+                  icon={<Delete theme='outline' size='14' fill='currentColor' />}
                   disabled={busy}
                   data-testid='agent-extension-remove'
                 >

@@ -581,6 +581,7 @@
       "proxyHint": "在线安装只使用此代理，不使用系统或环境代理。",
       "credentialsNeedAuthentication": "此地址包含用户名和密码。请打开“代理需要密码”后再保存。",
       "proxyAuthentication": "代理需要密码",
+      "proxyAuthenticationNeedsProxy": "请先填写代理地址。",
       "keychainHint": "用户名和密码可以保存在系统钥匙串中。",
       "memoryOnlyHint": "此环境不保存，每次安装时输入。",
       "credentialsSaved": "已保存",

@@ -581,6 +581,7 @@
       "proxyHint": "As instalações online usam somente este proxy. Proxies do sistema e do ambiente não são usados.",
       "credentialsNeedAuthentication": "Este endereço tem usuário e senha. Ative “O proxy exige senha” para salvá-lo.",
       "proxyAuthentication": "O proxy exige senha",
+      "proxyAuthenticationNeedsProxy": "Primeiro informe um endereço de proxy.",
       "keychainHint": "O usuário e a senha podem ser guardados no chaveiro do sistema.",
       "memoryOnlyHint": "Nada é guardado aqui: você os informa a cada instalação.",
       "credentialsSaved": "Salvas",

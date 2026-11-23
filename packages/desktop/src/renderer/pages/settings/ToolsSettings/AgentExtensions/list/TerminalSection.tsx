@@ -116,7 +116,7 @@ const TerminalSection: React.FC<Props> = ({ listing, loading, failure, onRefresh
         </div>
         <Button
           size='small'
-          icon={<Refresh theme='outline' size='14' />}
+          icon={<Refresh theme='outline' size='14' fill='currentColor' />}
           loading={loading}
           onClick={onRefresh}
           data-testid='terminal-refresh'
