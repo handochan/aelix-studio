@@ -134,9 +134,21 @@ def generate(output, p3):
     image.save(output / "animated.png", save_all=True, append_images=[Image.new("RGB", image.size, "white")], duration=50)
 
 
+def generate_running_input(output):
+    output.mkdir(parents=True, exist_ok=True)
+    for index, name in enumerate(("idle", "steer", "caption", "stop", "extra")):
+        corners(160 + index, 120).save(output / f"{name}.png")
+    corners(320, 240).save(output / "follow-up.jpg", quality=92)
+    corners(6000, 4000).save(output / "large.jpg", quality=92)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("output", type=Path)
     parser.add_argument("--p3", type=Path)
+    parser.add_argument("--running-input", action="store_true")
     args = parser.parse_args()
-    generate(args.output, args.p3)
+    if args.running_input:
+        generate_running_input(args.output)
+    else:
+        generate(args.output, args.p3)

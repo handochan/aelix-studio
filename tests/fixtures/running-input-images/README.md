@@ -91,3 +91,32 @@ sizes and exercises lost responses, lookup, turn change and late ACK after
 Stop. It records sizes and counts at the native edge and checks that the
 Host and Chromium diagnostic output omit raw and escaped private image fixture
 markers.
+
+## Packaged Windows and Linux acceptance
+
+The PR Checks workflow runs the packaged image suite when dispatched
+with `image_acceptance=true` or when a PR receives `run-image-acceptance`.
+It builds the Provider Preview package on Windows x64, Linux x64 and Linux
+arm64 from the selected commit and launches the unpacked Electron app with its
+pinned Host, ACP wheel and native runtime.
+
+The test-only launcher lives outside the package. It uses ACP's MockTransport
+pattern to keep the production A-1b route unchanged
+(`openai-codex/gpt-6-luna`, `openai-codex-responses`,
+`https://chatgpt.com/backend-api`). It forwards the actual serialized
+Responses body to a socket listening on IPv4 loopback. The test uses a fresh
+agent directory and a synthetic key. A loopback server hashes each decoded
+image and reports its length, then returns deterministic Responses SSE events.
+
+The runner compares provider bytes with the Studio multipart Blob and the
+bundled ACP's actual native pipe write. It holds the provider's first reply to
+exercise both queues, and holds the renderer's image ACK for the Stop case.
+The Stop scenario expects one native image write and zero provider image
+occurrences. The path-only fallback expects five references and zero image
+writes. Each scenario starts its own conversation.
+
+`image-acceptance.json` and the Actions summary report fixed fields. Latency
+uses the renderer's monotonic clock from the send click until the Host
+response, with a separate timestamp for the Stop notice. RSS is sampled
+every 125 ms in bytes, with Studio covering the Electron process tree
+excluding the Host subtree. Digests and lengths describe generated inputs.
