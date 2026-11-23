@@ -31,6 +31,7 @@ type Message = {
 
 type Evidence = {
   checks: string[];
+  phaseDurationsMs: Record<string, number>;
   windowsPathLengths?: { dataFilePathUtf16Units: number; consoleExePathUtf16Units: number; shebangUtf8Bytes: number };
 };
 
@@ -378,7 +379,12 @@ async function qualify(payload: string, scratch: string, evidence: Evidence): Pr
  * pip reaches the proxy through the change's loopback relay, which signs in: the credentials
  * are never in an argument, an environment, a reply or a file.
  */
-async function qualifyProxyCredentials(payload: string, scratch: string, checks: string[]): Promise<void> {
+async function qualifyProxyCredentials(
+  payload: string,
+  scratch: string,
+  checks: string[],
+  checkpoint: (phase: string) => void
+): Promise<void> {
   const bundle = await resolveBundle(payload);
   assert(bundle, 'installed Preview bundle did not resolve');
   const env = { ...baseEnvironment(process.env, process.platform), HOME: scratch, USERPROFILE: scratch };
@@ -465,12 +471,14 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
       source: { kind: 'index', name: 'studio-os-proxied-memory', indexUrl: index },
     });
     assert.deepEqual(asked, { ok: false, code: 'PROXY_CREDENTIALS_REQUIRED' });
+    checkpoint('proxy-memory-setup');
     await install(memory, {
       action: 'install',
       source: { kind: 'index', name: 'studio-os-proxied-memory', indexUrl: index },
       proxyCredentials: login,
     });
     assert(headers.includes(signedIn), 'pip never signed in to the proxy');
+    checkpoint('proxy-memory-install');
 
     const port = (proxy.address() as AddressInfo).port;
     const saved = await settings(keychain, { action: 'set_settings', settings: { proxy: typed + port } });
@@ -481,13 +489,16 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
     assert.equal((await sealedFiles()).length, 1);
     assert((await lstat(path.join(roots[1], (await sealedFiles())[0]))).isFile());
     const before = headers.length;
+    checkpoint('proxy-keychain-save');
     await install(keychain, {
       action: 'install',
       source: { kind: 'index', name: 'studio-os-proxied-keychain', indexUrl: index },
     });
     assert(headers.slice(before).includes(signedIn), 'pip did not sign in with the saved credentials');
+    checkpoint('proxy-keychain-install');
     for (const text of [...(await files(roots[0])), ...(await files(roots[1])), JSON.stringify(replies), ...argv])
       for (const secret of secrets) assert(!text.includes(secret), 'a proxy credential left the environment');
+    checkpoint('proxy-secret-scan');
     const dropped = await settings(keychain, { action: 'set_settings', settings: { proxy: null } });
     assert(!dropped.hasSavedCredentials && !dropped.settings.proxyAuthentication, JSON.stringify(dropped));
     assert.deepEqual(await sealedFiles(), [], 'the lock holder kept dropped credentials');
@@ -505,10 +516,21 @@ async function qualifyProxyCredentials(payload: string, scratch: string, checks:
 const [payload, report] = process.argv.slice(2);
 assert(payload && report, 'usage: extensionInstallerQualification.ts INSTALLED_PAYLOAD REPORT');
 const scratch = await realpath(await mkdtemp(path.join(windows ? os.tmpdir() : '/tmp', 'studio-ext-')));
-const evidence: Evidence = { checks: [] };
+const evidence: Evidence = { checks: [], phaseDurationsMs: {} };
+let phaseStarted = performance.now();
+const checkpoint = (phase: string) => {
+  const now = performance.now();
+  const elapsedMs = Math.round(now - phaseStarted);
+  phaseStarted = now;
+  evidence.phaseDurationsMs[phase] = elapsedMs;
+  // Print only a fixed label and a duration so completed phases survive a qualifier timeout.
+  console.log('Extension qualification timing', JSON.stringify({ phase, elapsedMs }));
+};
 try {
   await qualify(payload, scratch, evidence);
-  await qualifyProxyCredentials(payload, scratch, evidence.checks);
+  checkpoint('installed-runtime-checks');
+  await qualifyProxyCredentials(payload, scratch, evidence.checks, checkpoint);
+  checkpoint('proxy-keychain-drop-and-cleanup');
   await writeFile(report, JSON.stringify({ status: 'passed', ...evidence }, null, 2) + '\n');
 } catch (error) {
   await writeFile(report, JSON.stringify({ status: 'failed', ...evidence, error: String(error) }, null, 2) + '\n');

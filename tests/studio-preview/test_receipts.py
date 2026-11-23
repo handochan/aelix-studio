@@ -209,14 +209,15 @@ class FailedAuditReceiptTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             output = root / 'acceptance.json'
-            smoke = dict(status='passed', failedAudits=[], permissionChecks=25,
+            smoke = dict(status='passed', target='linux-x64', failedAudits=[], permissionChecks=25,
                          auditedSessions=[dict(name='permission', status='passed')],
                          outboundControls=[dict(name='positive-control', status='passed')],
                          auditedSessionsSha256='smoke-evidence')
             audits = acceptance.AuditedSessions(root/'host', root/'python', root, ledger='outbound-extensions-sessions.json')
             audits.enabled = True
 
-            def fail_extension(receipt):
+            def fail_extension(receipt, capture_timeout):
+                self.assertEqual(capture_timeout, 180)
                 checkpoint = json.loads(output.read_text())
                 self.assertEqual((checkpoint['status'], checkpoint['smokeStatus']), ('running', 'passed'))
                 self.assertEqual(checkpoint['outboundControls'], smoke['outboundControls'])
@@ -241,6 +242,37 @@ class FailedAuditReceiptTests(unittest.TestCase):
             self.assertEqual(extension['timeoutScope'], 'audit-supervisor')
             self.assertTrue(extension['bundleInventoryOutsideTimeout'])
             self.assertGreaterEqual(extension['elapsedSeconds'], 0)
+
+    def test_extension_capture_timeout_matches_the_installer_target_and_receipt(self):
+        for target, capture_timeout, total_timeout in (
+                ('darwin-x64', 300, 300), ('darwin-arm64', 180, 180), ('win32-x64', 180, 180),
+                ('linux-x64', 180, 540), ('linux-arm64', 180, 540)):
+            with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                output = root / 'acceptance.json'
+                payload = root / 'payload'
+                payload.mkdir()
+                python = payload / 'python'
+                audits = acceptance.AuditedSessions(root / 'host', python, root)
+                audits.enabled = target.startswith('linux-')
+
+                def run_qualifier(_name, command, **_options):
+                    Path(command[-1]).write_text('{"status": "passed"}')
+                    if audits.enabled:
+                        audits.sessions.append(dict(name='extensions', status='passed',
+                                                    wholeAppExternalAttempts=0, wholeAppUnparsedRecords=0,
+                                                    wholeAppClassificationErrors=0))
+
+                with patch.object(audits, 'run', side_effect=run_qualifier) as run:
+                    acceptance.record_extension_qualification(
+                        dict(status='passed', target=target, failedAudits=[]), output, audits,
+                        lambda receipt, timeout: acceptance.qualify_extensions(
+                            audits, {}, payload, root, 'test', python, receipt, capture_timeout=timeout))
+                verdict = json.loads(output.read_text())['extensionQualification']
+                self.assertEqual(verdict['status'], 'passed')
+                self.assertEqual(verdict['captureTimeoutSeconds'], capture_timeout)
+                self.assertEqual(verdict['totalTimeoutSeconds'], total_timeout)
+                self.assertEqual(run.call_args.kwargs['timeout'], capture_timeout)
 
     def test_installer_start_clears_only_stale_extension_receipts_and_snapshots(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -269,8 +301,8 @@ class FailedAuditReceiptTests(unittest.TestCase):
             output = root / 'acceptance.json'
             audits = acceptance.AuditedSessions(root/'host', root/'python', root)
             acceptance.record_extension_qualification(
-                dict(status='failed', failedAudits=['provider']), output, audits,
-                lambda receipt: receipt.write_text('{"status": "passed"}'))
+                dict(status='failed', target='linux-x64', failedAudits=['provider']), output, audits,
+                lambda receipt, timeout: receipt.write_text('{"status": "passed"}'))
             saved = json.loads(output.read_text())
             self.assertEqual((saved['status'], saved['smokeStatus'], saved['extensionQualification']['status']),
                              ('failed', 'failed', 'passed'))
