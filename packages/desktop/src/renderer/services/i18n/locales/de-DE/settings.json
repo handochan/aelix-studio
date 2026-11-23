@@ -457,6 +457,247 @@
   "skills": "Skills",
   "tools": "Tools",
   "toolsDescription": "MCP-Server und integrierte Tools wie die Bildgenerierung konfigurieren. Die Bildgenerierung kann erst aktiviert werden, nachdem auf der Modellseite ein bildfähiges Modell konfiguriert wurde.",
+  "agentExtensions": {
+    "navLabel": "Agent-Erweiterungen",
+    "title": "Agent-Erweiterungen",
+    "description": "Python-Erweiterungen, die Aelix-Agenten Befehle, Werkzeuge und MCP-Server hinzufügen. Studio installiert sie in einem eigenen Bereich; die App und das aelix im Terminal bleiben unverändert.",
+    "appliesAt": "Änderungen gelten ab dem nächsten Agentenstart: in einer neuen Unterhaltung oder wenn ein Agent neu startet. Laufende Unterhaltungen behalten ihren Stand.",
+    "empty": "Noch keine Agent-Erweiterungen installiert.",
+    "reconcileBanner": "Studio wurde aktualisiert. Einige Erweiterungen müssen für diese Version neu eingerichtet werden.",
+    "status": {
+      "ready": "Bereit",
+      "manifest_unbound": "Deklarierte Funktionen aus",
+      "reinstall_needed": "Neuinstallation nötig"
+    },
+    "statusHint": {
+      "ready": "Wird in neuen Unterhaltungen geladen.",
+      "manifest_unbound": "Der Code wird geladen, aber die im Manifest deklarierten MCP-Server, Themes und Hooks bleiben aus.",
+      "reinstall_needed": "Wurde für eine andere Studio-Version installiert und wird nicht verwendet."
+    },
+    "origin": {
+      "file": "Datei",
+      "index": "Paketindex",
+      "git": "Git",
+      "unknown": "Unbekannte Quelle"
+    },
+    "actions": {
+      "install": "Installieren",
+      "rollback": "Letzte Änderung rückgängig",
+      "refresh": "Aktualisieren",
+      "updateFromFile": "Aus Datei aktualisieren",
+      "upgrade": "Auf neueste Version",
+      "remove": "Entfernen",
+      "reconcile": "Neu einrichten",
+      "cancel": "Abbrechen",
+      "close": "Schließen",
+      "continue": "Weiter",
+      "save": "Speichern",
+      "enterCredentials": "Zugangsdaten eingeben",
+      "replaceAndInstall": "Ersetzen und installieren"
+    },
+    "remove": {
+      "title": "{{name}} entfernen?",
+      "body": "Sie fehlt dann in neuen Unterhaltungen. Mit „Letzte Änderung rückgängig“ lässt sich das zurücknehmen."
+    },
+    "rollback": {
+      "title": "Letzte Änderung rückgängig machen?",
+      "body": "Die Erweiterungen kehren zum Stand vor der letzten Änderung zurück. Nur ein Schritt lässt sich zurücknehmen."
+    },
+    "replace": {
+      "title": "Erweiterungen der anderen Studio-Version ersetzen?",
+      "body": "Die für die andere Version installierten Erweiterungen werden verworfen, und nur diese wird installiert."
+    },
+    "runtime": {
+      "title": "Die Studio-Runtime ist hier nicht verfügbar",
+      "body": "Agent-Erweiterungen brauchen das Studio-Runtime-Paket. Die Terminal-Liste unten funktioniert weiterhin.",
+      "details": "Details"
+    },
+    "install": {
+      "title": "Agent-Erweiterung installieren",
+      "tabs": {
+        "index": "Nach Name",
+        "git": "Aus Git",
+        "file": "Aus Datei"
+      },
+      "onlineNotice": "Eine Online-Installation verbindet sich mit dem Paketindex und auch mit Adressen, auf die das Paket verweist, sowie mit den Quellen seiner Build-Werkzeuge.",
+      "proxyNotice": "Nur über den Proxy {{proxy}}.",
+      "directNotice": "Direkt, ohne Proxy.",
+      "onlineDisabled": "Online-Installationen sind aus. Importieren Sie eine Wheel-Datei oder schalten Sie Online-Installationen in den Installationseinstellungen ein.",
+      "name": "Paketname",
+      "namePlaceholder": "Paketname, z. B. aelix-starter",
+      "version": "Version",
+      "versionPlaceholder": "Version (optional)",
+      "indexUrl": "URL des Paketindex",
+      "indexUrlPlaceholder": "URL des Paketindex (optional, Standard PyPI)",
+      "gitUrl": "URL des Git-Repositorys",
+      "gitUrlPlaceholder": "https://host/owner/repo.git, bei Bedarf mit @ref",
+      "subdirectory": "Unterverzeichnis",
+      "subdirectoryPlaceholder": "Unterverzeichnis im Repository (optional)",
+      "windowsGit": "Die Installation aus Git ist unter Windows noch nicht verfügbar.",
+      "fileNotice": "Der Import einer Datei verbindet sich nie mit dem Netzwerk.",
+      "wheel": "Wheel-Datei",
+      "wheelPlaceholder": "Pfad zu einer .whl-Datei auf dem Studio-Host",
+      "choose": "Auswählen",
+      "folderOption": "Abhängigkeiten aus anderen Wheels im selben Ordner nehmen"
+    },
+    "progress": {
+      "title": {
+        "install": "Wird installiert",
+        "update": "Wird aktualisiert",
+        "upgrade": "Wird auf neueste Version aktualisiert",
+        "remove": "Wird entfernt"
+      },
+      "phases": {
+        "checking": "Prüfen",
+        "preparing": "Vorbereiten",
+        "installing": "Anwenden",
+        "verifying": "Verifizieren",
+        "switched": "Fertig"
+      },
+      "cancel": "Stoppen",
+      "switched": "Fertig. Gilt ab dem nächsten Agentenstart.",
+      "alreadyLatest": "Bereits aktuell.",
+      "cancelled": "Gestoppt. Nichts wurde geändert.",
+      "output": "Ausgabe des Installationsprogramms"
+    },
+    "settings": {
+      "title": "Installationseinstellungen",
+      "unreadable": "Die gespeicherten Einstellungen konnten nicht gelesen werden. Online-Installationen warten, bis sie erneut gespeichert werden.",
+      "onlineInstall": "Online-Installationen (Name und Git)",
+      "onlineInstallHint": "Aus: Nur Wheel-Dateien können importiert werden.",
+      "onlineInstallLocked": "Durch eine Studio-Richtlinie ausgeschaltet.",
+      "proxy": "Proxy",
+      "proxyHint": "Online-Installationen verwenden nur diesen Proxy. System- und Umgebungs-Proxys werden nicht verwendet.",
+      "proxyAuthentication": "Proxy braucht ein Passwort",
+      "keychainHint": "Benutzername und Passwort können im System-Schlüsselbund gespeichert werden.",
+      "memoryOnlyHint": "Hier wird nichts gespeichert: Sie geben sie bei jeder Installation ein.",
+      "credentialsSaved": "Gespeichert",
+      "credentialsNotSaved": "Nicht gespeichert",
+      "changeCredentials": "Ändern",
+      "addCredentials": "Hinzufügen",
+      "clearCredentials": "Löschen",
+      "privateGit": "Privates Git",
+      "privateGitHint": "Git-Installationen dürfen Ihren SSH-Agent, Ihre Schlüssel und Git-Credential-Helper verwenden."
+    },
+    "credentials": {
+      "title": "Anmeldung am Proxy",
+      "body": "{{proxy}} verlangt Benutzername und Passwort.",
+      "rejected": "Der Proxy hat sie abgelehnt. Geben Sie sie erneut ein.",
+      "changed": "Die Proxy-Adresse hat sich geändert. Geben Sie die Zugangsdaten für diesen Proxy ein.",
+      "username": "Benutzername",
+      "password": "Passwort",
+      "rule": "Nur druckbare ASCII-Zeichen; kein Doppelpunkt im Benutzernamen.",
+      "save": "Im System-Schlüsselbund speichern",
+      "memoryOnly": "Nur für diese Installation verwendet und nicht gespeichert."
+    },
+    "insecure": {
+      "banner": "Diese Verbindung zu Studio ist nicht verschlüsselt. Vor dem Senden eines Proxy-Passworts werden Sie gefragt.",
+      "title": "Passwort unverschlüsselt senden?",
+      "body": "Diese Seite erreicht Studio über einfaches HTTP von einem anderen Rechner. Proxy-Benutzername und -Passwort würden das Netzwerk unverschlüsselt durchqueren.",
+      "confirm": "Trotzdem senden"
+    },
+    "upgrade": {
+      "unpinTitle": "Ohne Versionsgrenze aktualisieren?",
+      "unpinBody": "Studio weiß nicht, auf welche Versionen {{name}} bei der Installation begrenzt war. Beim Aktualisieren wird die neueste Version installiert.",
+      "unpinConfirm": "Auf neueste Version",
+      "pinnedTitle": "Festgelegte Version",
+      "pinnedBody": "{{name}} ist auf eine Version festgelegt. Um sie zu ändern, installieren Sie die gewünschte Version nach Name.",
+      "installOther": "Andere Version installieren"
+    },
+    "terminal": {
+      "title": "aelix im Terminal (nur lesen)",
+      "description": "Erweiterungen, die für aelix in Ihrem Terminal installiert sind. Studio-Unterhaltungen verwenden sie nicht. Installieren und entfernen Sie sie mit aelix im Terminal.",
+      "status": {
+        "listed": "Gelesen",
+        "not_a_venv": "Nicht gelesen: außerhalb einer virtuellen Umgebung",
+        "unresolved_launcher": "Nicht gelesen: Startdatei nicht verstanden",
+        "no_cli": "Kein aelix hier",
+        "unreadable": "Nicht lesbar"
+      },
+      "foundBy": {
+        "uv_tool": "uv tool",
+        "pipx": "pipx",
+        "launcher": "aelix-Startdatei"
+      },
+      "nativeVersion": "aelix {{version}}",
+      "launchers": "Startdateien: {{launchers}}",
+      "noExtensions": "Keine Erweiterungen installiert.",
+      "issues": {
+        "ENTRY_POINTS_TOO_LARGE": "Die Entry Points eines Pakets waren zu groß zum Lesen",
+        "METADATA_UNREADABLE": "Die Metadaten eines Pakets konnten nicht gelesen werden",
+        "DUPLICATE_DISTRIBUTION": "Ein Paket ist doppelt installiert",
+        "DUPLICATE_ENTRY": "Zwei Pakete verwenden denselben Erweiterungsnamen"
+      },
+      "truncatedDistributions": "Nicht alle Pakete wurden gelesen",
+      "timedOut": "Das Lesen dauerte zu lange; das ist der rechtzeitig gelesene Stand.",
+      "truncated": "Es gab mehr Orte, als Studio liest; nicht alle werden angezeigt.",
+      "none": "Kein aelix im Terminal gefunden.",
+      "globalTitle": "Globaler Erweiterungsordner: {{location}}",
+      "globalEmpty": "Leer.",
+      "kinds": {
+        "file": "Datei",
+        "manifest": "Plugin",
+        "pyproject": "pyproject",
+        "package": "Paket"
+      },
+      "truncatedGlobal": "Nicht alle Einträge wurden gelesen.",
+      "searched": "Durchsuchte Orte"
+    },
+    "errors": {
+      "NOT_A_WHEEL": "Diese Datei ist kein Python-Wheel (.whl).",
+      "INVALID_WHEEL": "Dieses Wheel konnte nicht gelesen werden.",
+      "DIRECT_REFERENCE": "Dieses Wheel hängt von einem Paket per direkter URL ab; Studio importiert solche Wheels nicht.",
+      "NOT_AN_EXTENSION": "Dieses Paket ist keine Aelix-Agent-Erweiterung.",
+      "STARTUP_CODE": "Dieses Paket führt beim Start von Python Code aus; Studio lässt das nicht zu.",
+      "BUNDLE_OVERLAP": "Dieses Paket enthält ein Modul mit demselben Namen wie eines in Studio.",
+      "BUNDLE_VERSION_CONFLICT": "Diese Erweiterung braucht eine andere Version einer Bibliothek, die Studio mitbringt.",
+      "INSTALLER_FAILED": "Das Installationsprogramm ist fehlgeschlagen. Details stehen in seiner Ausgabe.",
+      "INSTALLER_NOT_RUN": "Das Installationsprogramm konnte nicht starten.",
+      "GENERATION_MODIFIED": "Dateien, die Studio für Erweiterungen geschrieben hat, wurden geändert. Versuchen Sie es erneut.",
+      "UNSAFE_ROOT": "Der Erweiterungsordner von Studio liegt nicht dort, wo Studio ihn erwartet; nichts wurde geändert.",
+      "AMBIGUOUS_NAME": "Mehr als eine installierte Erweiterung passt zu diesem Namen.",
+      "UNSUPPORTED_PLATFORM": "Diese Art der Installation ist auf diesem System noch nicht verfügbar.",
+      "REQUEST_MISMATCH": "Das Ergebnis weicht von der Anfrage ab und wurde daher nicht verwendet.",
+      "LOAD_ERROR": "Die Erweiterung konnte nicht geladen werden und wurde daher nicht verwendet.",
+      "MANAGED_EXTENSION_INVALID": "Studio konnte diese Erweiterung nicht für Unterhaltungen registrieren.",
+      "VERIFICATION_FAILED": "Die Erweiterungen haben die Prüfung nicht bestanden; die Änderung wurde nicht übernommen.",
+      "NO_CHANGE": "Nichts geändert: Diese Version ist bereits installiert.",
+      "NOT_INSTALLED": "Diese Erweiterung ist nicht installiert.",
+      "NOTHING_TO_ROLL_BACK": "Es gibt keinen früheren Stand, zu dem zurückgekehrt werden kann.",
+      "ONLINE_INSTALL_DISABLED": "Online-Installationen sind aus. Schalten Sie sie in den Installationseinstellungen ein oder importieren Sie eine Wheel-Datei.",
+      "SETTINGS_UNREADABLE": "Die Installationseinstellungen konnten nicht gelesen werden. Speichern Sie sie erneut, um fortzufahren.",
+      "INVALID_PROXY": "Geben Sie den Proxy als http://host:port oder https://host:port ein.",
+      "PROXY_CREDENTIALS_REQUIRED": "Der Proxy braucht Benutzername und Passwort.",
+      "PROXY_CREDENTIALS_NOT_STORED": "Zugangsdaten können hier nicht gespeichert werden. Geben Sie sie bei jeder Installation ein.",
+      "PROXY_CREDENTIALS_REJECTED": "Der Proxy hat Benutzername und Passwort abgelehnt.",
+      "PROXY_CHANGED": "Die Proxy-Adresse hat sich inzwischen geändert. Geben Sie die Zugangsdaten für den neuen Proxy ein.",
+      "GIT_FETCH_FAILED": "Das Git-Repository oder die angeforderte Revision konnte nicht abgerufen werden.",
+      "SUBDIRECTORY_INVALID": "Das Unterverzeichnis fehlt im Repository oder ist kein einfacher Ordner.",
+      "BUNDLE_CHANGED": "Die installierten Erweiterungen gehören zu einer anderen Studio-Version. Richten Sie sie zuerst neu ein.",
+      "BUSY": "Eine andere Änderung läuft. Versuchen Sie es erneut, wenn sie beendet ist.",
+      "CONFLICT": "Die Erweiterungen haben sich inzwischen geändert. Versuchen Sie es erneut.",
+      "CANCELLED": "Gestoppt.",
+      "TIMEOUT": "Das hat zu lange gedauert und wurde gestoppt.",
+      "RUNTIME_UNAVAILABLE": "Die Studio-Runtime ist hier nicht verfügbar.",
+      "INVALID_INPUT": "Einige Werte sind ungültig.",
+      "UNSUPPORTED": "Diese Anfrage wird nicht unterstützt.",
+      "NOT_FOUND": "Studio kennt diese Änderung nicht mehr. Prüfen Sie die Liste.",
+      "INTERNAL": "In Studio ist etwas schiefgelaufen. Versuchen Sie es erneut.",
+      "UPGRADE_UNAVAILABLE": "Diese Erweiterung kann nicht online aktualisiert werden.",
+      "UPGRADE_SOURCE_MISMATCH": "Die gespeicherte Quelle passt nicht mehr zur installierten Erweiterung. Installieren Sie sie neu, um die Quelle zu erneuern.",
+      "SHARED_DISTRIBUTION_FILES": "Ein anderes installiertes Paket teilt Dateien mit diesem und kann daher nicht ersetzt werden.",
+      "UPGRADE_RESPONSE_TOO_LARGE": "Der Paketindex hat mehr Daten als erlaubt gesendet.",
+      "PINNED": "Diese Erweiterung ist auf eine Version festgelegt.",
+      "PIN_UNKNOWN": "Die Versionsgrenze dieser Erweiterung ist unbekannt.",
+      "FORBIDDEN": "Studio hat diese Anfrage von dieser Seite abgelehnt.",
+      "UNAUTHENTICATED": "Melden Sie sich erneut bei der WebUI an.",
+      "FRAME_LIMIT": "Die Anfrage ist zu groß.",
+      "UNAVAILABLE": "Studio konnte nicht antworten. Versuchen Sie es erneut.",
+      "CONNECTION_LOST": "Die Verbindung brach vor der Antwort ab. Prüfen Sie die Liste, bevor Sie es erneut versuchen.",
+      "INSECURE_TRANSPORT": "Die Proxy-Zugangsdaten wurden über diese unverschlüsselte Verbindung nicht gesendet.",
+      "UNKNOWN": "Etwas Unerwartetes ist passiert."
+    }
+  },
   "modelDescription": "LLM-Anbieter und API-Schlüssel für alle Assistenten konfigurieren. Nur Aion CLI unterstützt eigene Modelle; andere Agenten nutzen ihre integrierten Modelle.",
   "capabilities": "Fähigkeiten",
   "capabilitiesTab": {

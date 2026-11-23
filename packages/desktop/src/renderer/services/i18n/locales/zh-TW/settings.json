@@ -467,6 +467,247 @@
   "skills": "技能",
   "tools": "工具",
   "toolsDescription": "設定 MCP 伺服器與內建工具（如圖像生成）。圖像生成需先在「模型」頁設定支援圖像的模型後才能啟用。",
+  "agentExtensions": {
+    "navLabel": "代理程式擴充",
+    "title": "代理程式擴充",
+    "description": "為 Aelix 代理程式加入指令、工具和 MCP 伺服器的 Python 擴充。Studio 將其安裝在自己的空間中，不會更動應用程式和終端機中的 aelix。",
+    "appliesAt": "變更從下一次代理程式啟動時生效：新對話，或代理程式重新啟動時。進行中的對話維持開始時的狀態。",
+    "empty": "尚未安裝代理程式擴充。",
+    "reconcileBanner": "Studio 已更新。有些擴充需要為此版本重新設定。",
+    "status": {
+      "ready": "就緒",
+      "manifest_unbound": "宣告的功能已關閉",
+      "reinstall_needed": "需要重新安裝"
+    },
+    "statusHint": {
+      "ready": "會在新對話中載入。",
+      "manifest_unbound": "程式碼會載入，但 manifest 中宣告的 MCP 伺服器、主題和掛鉤維持關閉。",
+      "reinstall_needed": "它是為另一個 Studio 版本安裝的，不會被使用。"
+    },
+    "origin": {
+      "file": "檔案",
+      "index": "套件索引",
+      "git": "Git",
+      "unknown": "來源不明"
+    },
+    "actions": {
+      "install": "安裝",
+      "rollback": "復原上次變更",
+      "refresh": "重新整理",
+      "updateFromFile": "從檔案更新",
+      "upgrade": "更新到最新",
+      "remove": "移除",
+      "reconcile": "重新設定",
+      "cancel": "取消",
+      "close": "關閉",
+      "continue": "繼續",
+      "save": "儲存",
+      "enterCredentials": "輸入憑證",
+      "replaceAndInstall": "取代並安裝"
+    },
+    "remove": {
+      "title": "要移除 {{name}} 嗎？",
+      "body": "它將不再出現在新對話中。可以用「復原上次變更」還原。"
+    },
+    "rollback": {
+      "title": "要復原上次變更嗎？",
+      "body": "擴充會回到上次變更之前的狀態。只能復原一步。"
+    },
+    "replace": {
+      "title": "要取代另一個 Studio 版本的擴充嗎？",
+      "body": "為另一個版本安裝的擴充會被捨棄，只安裝這個擴充。"
+    },
+    "runtime": {
+      "title": "此環境中沒有 Studio runtime",
+      "body": "代理程式擴充需要 Studio runtime 套件。下方的終端機清單仍可檢視。",
+      "details": "詳細資料"
+    },
+    "install": {
+      "title": "安裝代理程式擴充",
+      "tabs": {
+        "index": "依名稱",
+        "git": "從 Git",
+        "file": "從檔案"
+      },
+      "onlineNotice": "線上安裝會連線到套件索引，也可能連線到套件指向的位址以及取得建置工具的位置。",
+      "proxyNotice": "只經由代理伺服器 {{proxy}}。",
+      "directNotice": "不使用代理伺服器，直接連線。",
+      "onlineDisabled": "線上安裝已關閉。請匯入 wheel 檔案，或在安裝設定中開啟線上安裝。",
+      "name": "套件名稱",
+      "namePlaceholder": "套件名稱，例如 aelix-starter",
+      "version": "版本",
+      "versionPlaceholder": "版本（選填）",
+      "indexUrl": "套件索引網址",
+      "indexUrlPlaceholder": "套件索引網址（選填，預設為 PyPI）",
+      "gitUrl": "Git 儲存庫網址",
+      "gitUrlPlaceholder": "https://host/owner/repo.git，需要時加上 @ref",
+      "subdirectory": "子目錄",
+      "subdirectoryPlaceholder": "儲存庫中的子目錄（選填）",
+      "windowsGit": "Windows 上暫不支援從 Git 安裝。",
+      "fileNotice": "匯入檔案不會連線網路。",
+      "wheel": "wheel 檔案",
+      "wheelPlaceholder": "Studio 主機上 .whl 檔案的路徑",
+      "choose": "選擇",
+      "folderOption": "以同一資料夾中的其他 wheel 滿足相依套件"
+    },
+    "progress": {
+      "title": {
+        "install": "正在安裝",
+        "update": "正在更新",
+        "upgrade": "正在更新到最新",
+        "remove": "正在移除"
+      },
+      "phases": {
+        "checking": "檢查",
+        "preparing": "準備",
+        "installing": "套用",
+        "verifying": "驗證",
+        "switched": "完成"
+      },
+      "cancel": "停止",
+      "switched": "已完成。從下一次代理程式啟動時生效。",
+      "alreadyLatest": "已是最新。",
+      "cancelled": "已停止，沒有任何變更。",
+      "output": "安裝程式輸出"
+    },
+    "settings": {
+      "title": "安裝設定",
+      "unreadable": "無法讀取已儲存的設定。重新儲存之前，線上安裝會等待。",
+      "onlineInstall": "線上安裝（名稱與 Git）",
+      "onlineInstallHint": "關閉後只能匯入 wheel 檔案。",
+      "onlineInstallLocked": "已被 Studio 政策關閉。",
+      "proxy": "代理伺服器",
+      "proxyHint": "線上安裝只使用此代理伺服器，不使用系統或環境的代理伺服器。",
+      "proxyAuthentication": "代理伺服器需要密碼",
+      "keychainHint": "使用者名稱和密碼可以儲存在系統鑰匙圈中。",
+      "memoryOnlyHint": "此環境不會儲存，每次安裝時輸入。",
+      "credentialsSaved": "已儲存",
+      "credentialsNotSaved": "未儲存",
+      "changeCredentials": "變更",
+      "addCredentials": "新增",
+      "clearCredentials": "刪除",
+      "privateGit": "私人 Git",
+      "privateGitHint": "Git 安裝可以使用你的 SSH agent、金鑰和 Git 憑證協助程式。"
+    },
+    "credentials": {
+      "title": "代理伺服器登入",
+      "body": "{{proxy}} 要求提供使用者名稱和密碼。",
+      "rejected": "代理伺服器拒絕了憑證，請重新輸入。",
+      "changed": "代理伺服器位址已變更，請輸入此代理伺服器的憑證。",
+      "username": "使用者名稱",
+      "password": "密碼",
+      "rule": "僅限可列印的 ASCII 字元，使用者名稱中不能有冒號。",
+      "save": "儲存到系統鑰匙圈",
+      "memoryOnly": "僅用於本次安裝，不會儲存。"
+    },
+    "insecure": {
+      "banner": "與 Studio 的連線未加密。傳送代理伺服器密碼前會先確認。",
+      "title": "要以未加密方式傳送密碼嗎？",
+      "body": "此頁面從另一台電腦以一般 HTTP 連線到 Studio。代理伺服器的使用者名稱和密碼會以未加密方式經過網路。",
+      "confirm": "仍要傳送"
+    },
+    "upgrade": {
+      "unpinTitle": "要不限制版本地更新嗎？",
+      "unpinBody": "Studio 不知道安裝 {{name}} 時的版本限制。更新會安裝最新版本。",
+      "unpinConfirm": "更新到最新",
+      "pinnedTitle": "固定版本",
+      "pinnedBody": "{{name}} 固定在一個版本上。若要變更，請依名稱安裝想要的版本。",
+      "installOther": "安裝其他版本"
+    },
+    "terminal": {
+      "title": "終端機 aelix（唯讀）",
+      "description": "為終端機中的 aelix 安裝的擴充。Studio 對話不會使用它們。請在終端機中以 aelix 安裝和移除。",
+      "status": {
+        "listed": "已讀取",
+        "not_a_venv": "未讀取：不在虛擬環境中",
+        "unresolved_launcher": "未讀取：無法解析啟動程式",
+        "no_cli": "這裡沒有 aelix",
+        "unreadable": "無法讀取"
+      },
+      "foundBy": {
+        "uv_tool": "uv tool",
+        "pipx": "pipx",
+        "launcher": "aelix 啟動程式"
+      },
+      "nativeVersion": "aelix {{version}}",
+      "launchers": "啟動程式：{{launchers}}",
+      "noExtensions": "沒有安裝擴充。",
+      "issues": {
+        "ENTRY_POINTS_TOO_LARGE": "某個套件的進入點過大，無法讀取",
+        "METADATA_UNREADABLE": "無法讀取某個套件的中繼資料",
+        "DUPLICATE_DISTRIBUTION": "同一套件安裝了兩次",
+        "DUPLICATE_ENTRY": "兩個套件使用相同的擴充名稱"
+      },
+      "truncatedDistributions": "未能讀取所有套件",
+      "timedOut": "讀取耗時過長；這是及時讀取到的內容。",
+      "truncated": "位置數量超過 Studio 讀取的上限，僅顯示部分。",
+      "none": "找不到終端機 aelix。",
+      "globalTitle": "全域擴充資料夾：{{location}}",
+      "globalEmpty": "空的。",
+      "kinds": {
+        "file": "檔案",
+        "manifest": "外掛程式",
+        "pyproject": "pyproject",
+        "package": "套件"
+      },
+      "truncatedGlobal": "未能讀取所有項目。",
+      "searched": "尋找過的位置"
+    },
+    "errors": {
+      "NOT_A_WHEEL": "此檔案不是 Python wheel（.whl）。",
+      "INVALID_WHEEL": "無法讀取此 wheel。",
+      "DIRECT_REFERENCE": "此 wheel 相依於以 URL 直接指定的套件，Studio 不匯入此類 wheel。",
+      "NOT_AN_EXTENSION": "此套件不是 Aelix 代理程式擴充。",
+      "STARTUP_CODE": "此套件會在 Python 啟動時執行程式碼，Studio 不允許這麼做。",
+      "BUNDLE_OVERLAP": "此套件含有與 Studio 中模組同名的模組。",
+      "BUNDLE_VERSION_CONFLICT": "此擴充需要與 Studio 內建程式庫不同的版本。",
+      "INSTALLER_FAILED": "安裝程式失敗。詳情請見安裝程式輸出。",
+      "INSTALLER_NOT_RUN": "無法啟動安裝程式。",
+      "GENERATION_MODIFIED": "Studio 為擴充寫入的檔案已被變更，請重試。",
+      "UNSAFE_ROOT": "Studio 的擴充資料夾不在預期位置，因此沒有做任何變更。",
+      "AMBIGUOUS_NAME": "有多個已安裝的擴充符合此名稱。",
+      "UNSUPPORTED_PLATFORM": "此系統暫不支援這種安裝方式。",
+      "REQUEST_MISMATCH": "結果與要求不同，因此未使用。",
+      "LOAD_ERROR": "擴充載入失敗，因此未使用。",
+      "MANAGED_EXTENSION_INVALID": "無法為對話註冊此擴充。",
+      "VERIFICATION_FAILED": "擴充驗證失敗，因此未套用變更。",
+      "NO_CHANGE": "沒有變更：已安裝此版本。",
+      "NOT_INSTALLED": "此擴充未安裝。",
+      "NOTHING_TO_ROLL_BACK": "沒有可以還原的先前狀態。",
+      "ONLINE_INSTALL_DISABLED": "線上安裝已關閉。請在安裝設定中開啟，或匯入 wheel 檔案。",
+      "SETTINGS_UNREADABLE": "無法讀取安裝設定。重新儲存後即可繼續。",
+      "INVALID_PROXY": "請以 http://host:port 或 https://host:port 的格式輸入代理伺服器。",
+      "PROXY_CREDENTIALS_REQUIRED": "代理伺服器需要使用者名稱和密碼。",
+      "PROXY_CREDENTIALS_NOT_STORED": "此環境無法儲存憑證，請在每次安裝時輸入。",
+      "PROXY_CREDENTIALS_REJECTED": "代理伺服器拒絕了使用者名稱和密碼。",
+      "PROXY_CHANGED": "期間代理伺服器位址已變更。請輸入新代理伺服器的憑證。",
+      "GIT_FETCH_FAILED": "無法取得 Git 儲存庫或要求的修訂版本。",
+      "SUBDIRECTORY_INVALID": "儲存庫中沒有該子目錄，或它不是一般資料夾。",
+      "BUNDLE_CHANGED": "已安裝的擴充屬於另一個 Studio 版本。請先重新設定。",
+      "BUSY": "另一項變更正在進行，請在其結束後重試。",
+      "CONFLICT": "期間擴充已變更，請重試。",
+      "CANCELLED": "已停止。",
+      "TIMEOUT": "耗時過長，已停止。",
+      "RUNTIME_UNAVAILABLE": "此環境中沒有 Studio runtime。",
+      "INVALID_INPUT": "有些值無效。",
+      "UNSUPPORTED": "不支援此要求。",
+      "NOT_FOUND": "Studio 已不再知道此變更。請查看清單。",
+      "INTERNAL": "Studio 發生問題，請重試。",
+      "UPGRADE_UNAVAILABLE": "此擴充無法線上更新。",
+      "UPGRADE_SOURCE_MISMATCH": "儲存的來源與已安裝的擴充不一致。重新安裝即可更新來源。",
+      "SHARED_DISTRIBUTION_FILES": "另一個已安裝的套件與此套件共用檔案，因此無法取代。",
+      "UPGRADE_RESPONSE_TOO_LARGE": "套件索引傳送的資料超過允許的大小。",
+      "PINNED": "此擴充固定在一個版本上。",
+      "PIN_UNKNOWN": "此擴充的版本限制不明。",
+      "FORBIDDEN": "Studio 拒絕了來自此頁面的要求。",
+      "UNAUTHENTICATED": "請重新登入 WebUI。",
+      "FRAME_LIMIT": "要求過大。",
+      "UNAVAILABLE": "Studio 無法回應，請重試。",
+      "CONNECTION_LOST": "收到回應前連線已中斷。重試前請先查看清單。",
+      "INSECURE_TRANSPORT": "由於連線未加密，未傳送代理伺服器憑證。",
+      "UNKNOWN": "發生了未預期的問題。"
+    }
+  },
   "modelDescription": "設定大模型服務商與 API Key，供所有助手使用。目前僅 Aion CLI 支援自訂模型，其它 Agent 使用各自內建的模型。",
   "capabilities": "能力擴展",
   "capabilitiesTab": {

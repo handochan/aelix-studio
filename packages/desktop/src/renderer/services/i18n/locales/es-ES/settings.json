@@ -455,6 +455,247 @@
   "skills": "Habilidades",
   "tools": "Herramientas",
   "toolsDescription": "Configura servidores MCP y herramientas integradas como la generación de imágenes. La generación de imágenes solo se puede activar tras configurar un modelo compatible con imágenes en la página de Modelos.",
+  "agentExtensions": {
+    "navLabel": "Extensiones de agente",
+    "title": "Extensiones de agente",
+    "description": "Extensiones de Python que añaden comandos, herramientas y servidores MCP a los agentes de Aelix. Studio las instala en su propio espacio; la app y el aelix de tu terminal no cambian.",
+    "appliesAt": "Los cambios se aplican desde el siguiente inicio del agente: una conversación nueva o cuando un agente se reinicia. Las conversaciones en curso mantienen su estado inicial.",
+    "empty": "Aún no hay extensiones de agente instaladas.",
+    "reconcileBanner": "Studio se actualizó. Algunas extensiones deben configurarse de nuevo para esta versión.",
+    "status": {
+      "ready": "Lista",
+      "manifest_unbound": "Funciones declaradas desactivadas",
+      "reinstall_needed": "Requiere reinstalación"
+    },
+    "statusHint": {
+      "ready": "Se carga en las conversaciones nuevas.",
+      "manifest_unbound": "Su código se carga, pero los servidores MCP, temas y hooks que declara su manifiesto siguen desactivados.",
+      "reinstall_needed": "Se instaló para otra versión de Studio y no se usa."
+    },
+    "origin": {
+      "file": "Archivo",
+      "index": "Índice de paquetes",
+      "git": "Git",
+      "unknown": "Origen desconocido"
+    },
+    "actions": {
+      "install": "Instalar",
+      "rollback": "Deshacer el último cambio",
+      "refresh": "Actualizar",
+      "updateFromFile": "Actualizar desde archivo",
+      "upgrade": "Actualizar a la última",
+      "remove": "Quitar",
+      "reconcile": "Configurar de nuevo",
+      "cancel": "Cancelar",
+      "close": "Cerrar",
+      "continue": "Continuar",
+      "save": "Guardar",
+      "enterCredentials": "Introducir credenciales",
+      "replaceAndInstall": "Reemplazar e instalar"
+    },
+    "remove": {
+      "title": "¿Quitar {{name}}?",
+      "body": "Dejará de estar en las conversaciones nuevas. Puedes revertirlo con «Deshacer el último cambio»."
+    },
+    "rollback": {
+      "title": "¿Deshacer el último cambio?",
+      "body": "Las extensiones vuelven al estado anterior al último cambio. Solo se puede deshacer un paso."
+    },
+    "replace": {
+      "title": "¿Reemplazar las extensiones de la otra versión de Studio?",
+      "body": "Se descartan las extensiones instaladas para la otra versión y se instala solo esta."
+    },
+    "runtime": {
+      "title": "El runtime de Studio no está disponible aquí",
+      "body": "Las extensiones de agente necesitan el paquete del runtime de Studio. La lista del terminal de abajo sigue funcionando.",
+      "details": "Detalles"
+    },
+    "install": {
+      "title": "Instalar una extensión de agente",
+      "tabs": {
+        "index": "Por nombre",
+        "git": "Desde Git",
+        "file": "Desde un archivo"
+      },
+      "onlineNotice": "La instalación en línea se conecta al índice de paquetes y también a las direcciones a las que apunta el paquete y a los orígenes de sus herramientas de compilación.",
+      "proxyNotice": "Solo a través del proxy {{proxy}}.",
+      "directNotice": "Directamente, sin proxy.",
+      "onlineDisabled": "Las instalaciones en línea están desactivadas. Importa un archivo wheel o actívalas en la configuración de instalación.",
+      "name": "Nombre del paquete",
+      "namePlaceholder": "Nombre del paquete, p. ej. aelix-starter",
+      "version": "Versión",
+      "versionPlaceholder": "Versión (opcional)",
+      "indexUrl": "URL del índice de paquetes",
+      "indexUrlPlaceholder": "URL del índice de paquetes (opcional, PyPI por defecto)",
+      "gitUrl": "URL del repositorio Git",
+      "gitUrlPlaceholder": "https://host/owner/repo.git, con @ref si hace falta",
+      "subdirectory": "Subdirectorio",
+      "subdirectoryPlaceholder": "Subdirectorio del repositorio (opcional)",
+      "windowsGit": "La instalación desde Git aún no está disponible en Windows.",
+      "fileNotice": "Importar un archivo nunca se conecta a la red.",
+      "wheel": "Archivo wheel",
+      "wheelPlaceholder": "Ruta a un archivo .whl en el host de Studio",
+      "choose": "Elegir",
+      "folderOption": "Usar otros wheels de la misma carpeta para las dependencias"
+    },
+    "progress": {
+      "title": {
+        "install": "Instalando",
+        "update": "Actualizando",
+        "upgrade": "Actualizando a la última",
+        "remove": "Quitando"
+      },
+      "phases": {
+        "checking": "Comprobar",
+        "preparing": "Preparar",
+        "installing": "Aplicar",
+        "verifying": "Verificar",
+        "switched": "Listo"
+      },
+      "cancel": "Detener",
+      "switched": "Listo. Se aplica desde el siguiente inicio del agente.",
+      "alreadyLatest": "Ya está al día.",
+      "cancelled": "Detenido. No se cambió nada.",
+      "output": "Salida del instalador"
+    },
+    "settings": {
+      "title": "Configuración de instalación",
+      "unreadable": "No se pudo leer la configuración guardada. Las instalaciones en línea esperan hasta que se guarde de nuevo.",
+      "onlineInstall": "Instalaciones en línea (nombre y Git)",
+      "onlineInstallHint": "Desactivadas: solo se pueden importar archivos wheel.",
+      "onlineInstallLocked": "Desactivadas por la política de Studio.",
+      "proxy": "Proxy",
+      "proxyHint": "Las instalaciones en línea solo usan este proxy. No se usan los proxies del sistema ni del entorno.",
+      "proxyAuthentication": "El proxy requiere contraseña",
+      "keychainHint": "El usuario y la contraseña se pueden guardar en el llavero del sistema.",
+      "memoryOnlyHint": "Aquí no se guarda nada: los introduces en cada instalación.",
+      "credentialsSaved": "Guardadas",
+      "credentialsNotSaved": "Sin guardar",
+      "changeCredentials": "Cambiar",
+      "addCredentials": "Añadir",
+      "clearCredentials": "Eliminar",
+      "privateGit": "Git privado",
+      "privateGitHint": "Las instalaciones desde Git pueden usar tu agente SSH, tus claves y los asistentes de credenciales de Git."
+    },
+    "credentials": {
+      "title": "Inicio de sesión en el proxy",
+      "body": "{{proxy}} pide un usuario y una contraseña.",
+      "rejected": "El proxy los rechazó. Introdúcelos de nuevo.",
+      "changed": "La dirección del proxy cambió. Introduce las credenciales de este proxy.",
+      "username": "Usuario",
+      "password": "Contraseña",
+      "rule": "Solo ASCII imprimible; sin dos puntos en el usuario.",
+      "save": "Guardar en el llavero del sistema",
+      "memoryOnly": "Solo se usan para esta instalación y no se guardan."
+    },
+    "insecure": {
+      "banner": "Esta conexión con Studio no está cifrada. Se te preguntará antes de enviar una contraseña del proxy.",
+      "title": "¿Enviar la contraseña sin cifrar?",
+      "body": "Esta página llega a Studio por HTTP simple desde otra máquina. El usuario y la contraseña del proxy cruzarían la red sin cifrar.",
+      "confirm": "Enviar de todos modos"
+    },
+    "upgrade": {
+      "unpinTitle": "¿Actualizar sin límite de versión?",
+      "unpinBody": "Studio no sabe a qué versiones estaba limitado {{name}} al instalarse. Al actualizar se instala la última versión.",
+      "unpinConfirm": "Actualizar a la última",
+      "pinnedTitle": "Versión fijada",
+      "pinnedBody": "{{name}} está fijado a una versión. Para cambiarla, instala por nombre la versión que quieras.",
+      "installOther": "Instalar otra versión"
+    },
+    "terminal": {
+      "title": "aelix del terminal (solo lectura)",
+      "description": "Extensiones instaladas para aelix en tu terminal. Las conversaciones de Studio no las usan. Instálalas y quítalas con aelix en el terminal.",
+      "status": {
+        "listed": "Leído",
+        "not_a_venv": "No leído: fuera de un entorno virtual",
+        "unresolved_launcher": "No leído: lanzador no reconocido",
+        "no_cli": "No hay aelix aquí",
+        "unreadable": "No se pudo leer"
+      },
+      "foundBy": {
+        "uv_tool": "uv tool",
+        "pipx": "pipx",
+        "launcher": "lanzador de aelix"
+      },
+      "nativeVersion": "aelix {{version}}",
+      "launchers": "Lanzadores: {{launchers}}",
+      "noExtensions": "No hay extensiones instaladas.",
+      "issues": {
+        "ENTRY_POINTS_TOO_LARGE": "Los entry points de un paquete eran demasiado grandes para leerlos",
+        "METADATA_UNREADABLE": "No se pudieron leer los metadatos de un paquete",
+        "DUPLICATE_DISTRIBUTION": "Un paquete está instalado dos veces",
+        "DUPLICATE_ENTRY": "Dos paquetes usan el mismo nombre de extensión"
+      },
+      "truncatedDistributions": "No se leyeron todos los paquetes",
+      "timedOut": "La lectura tardó demasiado; esto es lo que se leyó a tiempo.",
+      "truncated": "Había más ubicaciones de las que Studio lee; no se muestran todas.",
+      "none": "No se encontró ningún aelix de terminal.",
+      "globalTitle": "Carpeta global de extensiones: {{location}}",
+      "globalEmpty": "Vacía.",
+      "kinds": {
+        "file": "archivo",
+        "manifest": "plugin",
+        "pyproject": "pyproject",
+        "package": "paquete"
+      },
+      "truncatedGlobal": "No se leyeron todas las entradas.",
+      "searched": "Ubicaciones revisadas"
+    },
+    "errors": {
+      "NOT_A_WHEEL": "Este archivo no es un wheel de Python (.whl).",
+      "INVALID_WHEEL": "No se pudo leer este wheel.",
+      "DIRECT_REFERENCE": "Este wheel depende de un paquete por URL directa; Studio no importa ese tipo de wheels.",
+      "NOT_AN_EXTENSION": "Este paquete no es una extensión de agente de Aelix.",
+      "STARTUP_CODE": "Este paquete ejecuta código al iniciarse Python; Studio no lo permite.",
+      "BUNDLE_OVERLAP": "Este paquete tiene un módulo con el mismo nombre que uno de Studio.",
+      "BUNDLE_VERSION_CONFLICT": "Esta extensión necesita otra versión de una biblioteca que incluye Studio.",
+      "INSTALLER_FAILED": "El instalador falló. Los detalles están en su salida.",
+      "INSTALLER_NOT_RUN": "No se pudo iniciar el instalador.",
+      "GENERATION_MODIFIED": "Se modificaron archivos que Studio escribió para las extensiones. Inténtalo de nuevo.",
+      "UNSAFE_ROOT": "La carpeta de extensiones de Studio no está donde Studio la espera, así que no se cambió nada.",
+      "AMBIGUOUS_NAME": "Más de una extensión instalada coincide con este nombre.",
+      "UNSUPPORTED_PLATFORM": "Este tipo de instalación aún no está disponible en este sistema.",
+      "REQUEST_MISMATCH": "El resultado difiere de lo pedido, así que no se usó.",
+      "LOAD_ERROR": "La extensión no se pudo cargar, así que no se usó.",
+      "MANAGED_EXTENSION_INVALID": "Studio no pudo registrar esta extensión para las conversaciones.",
+      "VERIFICATION_FAILED": "Las extensiones no superaron la verificación; el cambio no se aplicó.",
+      "NO_CHANGE": "Nada cambió: esta versión ya está instalada.",
+      "NOT_INSTALLED": "Esta extensión no está instalada.",
+      "NOTHING_TO_ROLL_BACK": "No hay un estado anterior al que volver.",
+      "ONLINE_INSTALL_DISABLED": "Las instalaciones en línea están desactivadas. Actívalas en la configuración de instalación o importa un archivo wheel.",
+      "SETTINGS_UNREADABLE": "No se pudo leer la configuración de instalación. Guárdala de nuevo para continuar.",
+      "INVALID_PROXY": "Introduce el proxy como http://host:puerto o https://host:puerto.",
+      "PROXY_CREDENTIALS_REQUIRED": "El proxy necesita un usuario y una contraseña.",
+      "PROXY_CREDENTIALS_NOT_STORED": "Aquí no se pueden guardar credenciales. Introdúcelas en cada instalación.",
+      "PROXY_CREDENTIALS_REJECTED": "El proxy rechazó el usuario y la contraseña.",
+      "PROXY_CHANGED": "La dirección del proxy cambió mientras tanto. Introduce las credenciales del nuevo proxy.",
+      "GIT_FETCH_FAILED": "No se pudo obtener el repositorio Git o la revisión pedida.",
+      "SUBDIRECTORY_INVALID": "El subdirectorio no existe en el repositorio o no es una carpeta normal.",
+      "BUNDLE_CHANGED": "Las extensiones instaladas pertenecen a otra versión de Studio. Configúralas de nuevo primero.",
+      "BUSY": "Hay otro cambio en curso. Inténtalo de nuevo cuando termine.",
+      "CONFLICT": "Las extensiones cambiaron mientras tanto. Inténtalo de nuevo.",
+      "CANCELLED": "Detenido.",
+      "TIMEOUT": "Tardó demasiado y se detuvo.",
+      "RUNTIME_UNAVAILABLE": "El runtime de Studio no está disponible aquí.",
+      "INVALID_INPUT": "Algunos valores no son válidos.",
+      "UNSUPPORTED": "Esta solicitud no es compatible.",
+      "NOT_FOUND": "Studio ya no conoce este cambio. Revisa la lista.",
+      "INTERNAL": "Algo falló en Studio. Inténtalo de nuevo.",
+      "UPGRADE_UNAVAILABLE": "Esta extensión no se puede actualizar en línea.",
+      "UPGRADE_SOURCE_MISMATCH": "El origen guardado ya no coincide con la extensión instalada. Reinstálala para renovar el origen.",
+      "SHARED_DISTRIBUTION_FILES": "Otro paquete instalado comparte archivos con este, así que no se puede reemplazar.",
+      "UPGRADE_RESPONSE_TOO_LARGE": "El índice de paquetes envió más datos de los permitidos.",
+      "PINNED": "Esta extensión está fijada a una versión.",
+      "PIN_UNKNOWN": "Se desconoce el límite de versión de esta extensión.",
+      "FORBIDDEN": "Studio rechazó esta solicitud desde esta página.",
+      "UNAUTHENTICATED": "Vuelve a iniciar sesión en la WebUI.",
+      "FRAME_LIMIT": "La solicitud es demasiado grande.",
+      "UNAVAILABLE": "Studio no pudo responder. Inténtalo de nuevo.",
+      "CONNECTION_LOST": "La conexión se perdió antes de la respuesta. Revisa la lista antes de reintentar.",
+      "INSECURE_TRANSPORT": "Las credenciales del proxy no se enviaron por esta conexión sin cifrar.",
+      "UNKNOWN": "Ocurrió algo inesperado."
+    }
+  },
   "modelDescription": "Configura proveedores de LLM y claves de API para usar en todos los asistentes. Solo Aion CLI admite modelos personalizados; los demás agentes usan sus modelos integrados.",
   "capabilities": "Capacidades",
   "capabilitiesTab": {

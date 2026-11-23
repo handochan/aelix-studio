@@ -30,6 +30,7 @@ export const BUILTIN_TAB_IDS = [
   'model',
   'skills',
   'tools',
+  'agent-extensions',
   'appearance',
   'webui',
   'pet',
@@ -103,6 +104,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.tools', { defaultValue: 'Tools' }),
         icon: <Toolkit />,
         path: 'tools',
+      },
+      'agent-extensions': {
+        id: 'agent-extensions',
+        label: t('settings.agentExtensions.navLabel'),
+        icon: <Puzzle />,
+        path: 'agent-extensions',
       },
       appearance: { id: 'appearance', label: t('settings.appearancePanel'), icon: <Computer />, path: 'appearance' },
       webui: {

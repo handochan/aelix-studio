@@ -65,6 +65,12 @@ export function getBuiltinSettingsNavItems(isDesktop: boolean, t: TranslateFn): 
       icon: <Toolkit theme='outline' size='16' />,
       path: 'tools',
     },
+    'agent-extensions': {
+      id: 'agent-extensions',
+      label: t('settings.agentExtensions.navLabel'),
+      icon: <Puzzle theme='outline' size='16' />,
+      path: 'agent-extensions',
+    },
     appearance: {
       id: 'appearance',
       label: t('settings.appearancePanel'),

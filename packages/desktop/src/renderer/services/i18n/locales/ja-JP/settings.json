@@ -467,6 +467,247 @@
   "skills": "スキル",
   "tools": "ツール",
   "toolsDescription": "MCP サーバーと画像生成などの組み込みツールを設定します。画像生成は、モデルページで画像対応モデルを設定した後にのみ有効化できます。",
+  "agentExtensions": {
+    "navLabel": "エージェント拡張",
+    "title": "エージェント拡張",
+    "description": "Aelix エージェントにコマンド・ツール・MCP サーバーを追加する Python 拡張です。Studio は専用の領域にインストールし、アプリやターミナルの aelix は変更しません。",
+    "appliesAt": "変更は次のエージェント起動から適用されます（新しい会話、またはエージェントの再起動時）。実行中の会話は開始時の状態のままです。",
+    "empty": "エージェント拡張はまだインストールされていません。",
+    "reconcileBanner": "Studio が更新されました。このバージョン向けに再設定が必要な拡張があります。",
+    "status": {
+      "ready": "準備完了",
+      "manifest_unbound": "宣言機能オフ",
+      "reinstall_needed": "再インストールが必要"
+    },
+    "statusHint": {
+      "ready": "新しい会話で読み込まれます。",
+      "manifest_unbound": "コードは読み込まれますが、manifest で宣言した MCP サーバー・テーマ・フックはオフのままです。",
+      "reinstall_needed": "別の Studio バージョン向けにインストールされたため使われません。"
+    },
+    "origin": {
+      "file": "ファイル",
+      "index": "パッケージインデックス",
+      "git": "Git",
+      "unknown": "出所不明"
+    },
+    "actions": {
+      "install": "インストール",
+      "rollback": "直前の変更を元に戻す",
+      "refresh": "再読み込み",
+      "updateFromFile": "ファイルで更新",
+      "upgrade": "最新に更新",
+      "remove": "削除",
+      "reconcile": "再設定",
+      "cancel": "キャンセル",
+      "close": "閉じる",
+      "continue": "続行",
+      "save": "保存",
+      "enterCredentials": "認証情報を入力",
+      "replaceAndInstall": "置き換えてインストール"
+    },
+    "remove": {
+      "title": "{{name}} を削除しますか？",
+      "body": "新しい会話から外れます。「直前の変更を元に戻す」で戻せます。"
+    },
+    "rollback": {
+      "title": "直前の変更を元に戻しますか？",
+      "body": "拡張が直前の変更前の状態に戻ります。戻せるのは 1 段階だけです。"
+    },
+    "replace": {
+      "title": "別の Studio バージョンの拡張を置き換えますか？",
+      "body": "別のバージョン向けにインストールされた拡張は破棄され、この拡張だけがインストールされます。"
+    },
+    "runtime": {
+      "title": "この環境には Studio runtime がありません",
+      "body": "エージェント拡張には Studio runtime バンドルが必要です。下のターミナル一覧は引き続き表示できます。",
+      "details": "詳細"
+    },
+    "install": {
+      "title": "エージェント拡張をインストール",
+      "tabs": {
+        "index": "名前で",
+        "git": "Git から",
+        "file": "ファイルから"
+      },
+      "onlineNotice": "オンラインインストールはパッケージインデックスのほか、パッケージが指すアドレスやビルドツールの取得先に接続することがあります。",
+      "proxyNotice": "プロキシ {{proxy}} のみを経由します。",
+      "directNotice": "プロキシを使わず直接接続します。",
+      "onlineDisabled": "オンラインインストールはオフです。wheel ファイルを取り込むか、インストール設定でオンにしてください。",
+      "name": "パッケージ名",
+      "namePlaceholder": "パッケージ名（例: aelix-starter）",
+      "version": "バージョン",
+      "versionPlaceholder": "バージョン（任意）",
+      "indexUrl": "パッケージインデックスの URL",
+      "indexUrlPlaceholder": "パッケージインデックスの URL（任意、既定は PyPI）",
+      "gitUrl": "Git リポジトリの URL",
+      "gitUrlPlaceholder": "https://host/owner/repo.git、必要なら @ref",
+      "subdirectory": "サブディレクトリ",
+      "subdirectoryPlaceholder": "リポジトリ内のサブディレクトリ（任意）",
+      "windowsGit": "Windows ではまだ Git からインストールできません。",
+      "fileNotice": "ファイルの取り込みはネットワークに接続しません。",
+      "wheel": "wheel ファイル",
+      "wheelPlaceholder": "Studio ホスト上の .whl ファイルのパス",
+      "choose": "選択",
+      "folderOption": "同じフォルダーの他の wheel で依存関係を満たす"
+    },
+    "progress": {
+      "title": {
+        "install": "インストール中",
+        "update": "更新中",
+        "upgrade": "最新に更新中",
+        "remove": "削除中"
+      },
+      "phases": {
+        "checking": "確認",
+        "preparing": "準備",
+        "installing": "適用",
+        "verifying": "検証",
+        "switched": "完了"
+      },
+      "cancel": "中止",
+      "switched": "完了しました。次のエージェント起動から適用されます。",
+      "alreadyLatest": "すでに最新です。",
+      "cancelled": "中止しました。何も変更されていません。",
+      "output": "インストーラーの出力"
+    },
+    "settings": {
+      "title": "インストール設定",
+      "unreadable": "保存された設定を読み取れません。再度保存するまでオンラインインストールは待機します。",
+      "onlineInstall": "オンラインインストール（名前・Git）",
+      "onlineInstallHint": "オフにすると wheel ファイルの取り込みのみになります。",
+      "onlineInstallLocked": "Studio のポリシーでオフになっています。",
+      "proxy": "プロキシ",
+      "proxyHint": "オンラインインストールはこのプロキシのみを使います。システムや環境のプロキシは使いません。",
+      "proxyAuthentication": "プロキシにパスワードが必要",
+      "keychainHint": "ユーザー名とパスワードをシステムのキーチェーンに保存できます。",
+      "memoryOnlyHint": "この環境では保存しません。インストールのたびに入力します。",
+      "credentialsSaved": "保存済み",
+      "credentialsNotSaved": "未保存",
+      "changeCredentials": "変更",
+      "addCredentials": "追加",
+      "clearCredentials": "削除",
+      "privateGit": "プライベート Git",
+      "privateGitHint": "Git インストールで SSH エージェント・鍵・Git の credential helper を使えるようにします。"
+    },
+    "credentials": {
+      "title": "プロキシへのサインイン",
+      "body": "{{proxy}} がユーザー名とパスワードを求めています。",
+      "rejected": "プロキシに拒否されました。もう一度入力してください。",
+      "changed": "プロキシのアドレスが変わりました。このプロキシの認証情報を入力してください。",
+      "username": "ユーザー名",
+      "password": "パスワード",
+      "rule": "印字可能な ASCII 文字のみ。ユーザー名にコロン（:）は使えません。",
+      "save": "システムのキーチェーンに保存",
+      "memoryOnly": "今回のインストールにのみ使い、保存しません。"
+    },
+    "insecure": {
+      "banner": "Studio への接続は暗号化されていません。プロキシのパスワードを送る前に確認します。",
+      "title": "パスワードを暗号化せずに送信しますか？",
+      "body": "このページは別のマシンから通常の HTTP で Studio に接続しています。プロキシのユーザー名とパスワードが暗号化されずにネットワークを通ります。",
+      "confirm": "それでも送信"
+    },
+    "upgrade": {
+      "unpinTitle": "バージョン制限なしで更新しますか？",
+      "unpinBody": "{{name}} をインストールしたときのバージョン制限を Studio は把握していません。更新すると最新バージョンがインストールされます。",
+      "unpinConfirm": "最新に更新",
+      "pinnedTitle": "固定されたバージョン",
+      "pinnedBody": "{{name}} は 1 つのバージョンに固定されています。変更するには、目的のバージョンを名前でインストールしてください。",
+      "installOther": "別のバージョンをインストール"
+    },
+    "terminal": {
+      "title": "ターミナルの aelix（読み取り専用）",
+      "description": "ターミナルの aelix にインストールされた拡張です。Studio の会話では使われません。インストールと削除はターミナルの aelix で行ってください。",
+      "status": {
+        "listed": "読み取り済み",
+        "not_a_venv": "未読み取り: 仮想環境の外",
+        "unresolved_launcher": "未読み取り: 起動ファイルを解釈できない",
+        "no_cli": "aelix なし",
+        "unreadable": "読み取れません"
+      },
+      "foundBy": {
+        "uv_tool": "uv tool",
+        "pipx": "pipx",
+        "launcher": "aelix 起動ファイル"
+      },
+      "nativeVersion": "aelix {{version}}",
+      "launchers": "起動ファイル: {{launchers}}",
+      "noExtensions": "インストールされた拡張はありません。",
+      "issues": {
+        "ENTRY_POINTS_TOO_LARGE": "パッケージのエントリポイントが大きすぎて読み取れませんでした",
+        "METADATA_UNREADABLE": "パッケージのメタデータを読み取れませんでした",
+        "DUPLICATE_DISTRIBUTION": "同じパッケージが 2 回インストールされています",
+        "DUPLICATE_ENTRY": "2 つのパッケージが同じ拡張名を使っています"
+      },
+      "truncatedDistributions": "すべてのパッケージは読み取れませんでした",
+      "timedOut": "読み取りに時間がかかりすぎました。それまでに読み取った内容です。",
+      "truncated": "Studio が読み取る上限より場所が多いため、一部のみ表示しています。",
+      "none": "ターミナルの aelix が見つかりませんでした。",
+      "globalTitle": "グローバル拡張フォルダー: {{location}}",
+      "globalEmpty": "空です。",
+      "kinds": {
+        "file": "ファイル",
+        "manifest": "プラグイン",
+        "pyproject": "pyproject",
+        "package": "パッケージ"
+      },
+      "truncatedGlobal": "すべての項目は読み取れませんでした。",
+      "searched": "探した場所"
+    },
+    "errors": {
+      "NOT_A_WHEEL": "Python wheel（.whl）ファイルではありません。",
+      "INVALID_WHEEL": "この wheel を読み取れません。",
+      "DIRECT_REFERENCE": "この wheel は URL で直接指定したパッケージに依存しています。Studio はこのような wheel を取り込みません。",
+      "NOT_AN_EXTENSION": "Aelix エージェント拡張ではないパッケージです。",
+      "STARTUP_CODE": "Python の起動時にコードを実行するパッケージです。Studio では許可していません。",
+      "BUNDLE_OVERLAP": "Studio にあるモジュールと同じ名前のモジュールが含まれています。",
+      "BUNDLE_VERSION_CONFLICT": "Studio に含まれるライブラリとは別のバージョンを必要とする拡張です。",
+      "INSTALLER_FAILED": "インストーラーが失敗しました。詳細はインストーラーの出力にあります。",
+      "INSTALLER_NOT_RUN": "インストーラーを起動できませんでした。",
+      "GENERATION_MODIFIED": "Studio が拡張用に書いたファイルが変更されました。もう一度お試しください。",
+      "UNSAFE_ROOT": "Studio の拡張フォルダーが想定した場所にないため、何も変更していません。",
+      "AMBIGUOUS_NAME": "この名前に一致するインストール済みの拡張が複数あります。",
+      "UNSUPPORTED_PLATFORM": "このシステムではまだこの方法でインストールできません。",
+      "REQUEST_MISMATCH": "結果が要求と異なるため使用しませんでした。",
+      "LOAD_ERROR": "拡張を読み込めなかったため使用しませんでした。",
+      "MANAGED_EXTENSION_INVALID": "この拡張を会話用に登録できませんでした。",
+      "VERIFICATION_FAILED": "拡張の検証に失敗したため、変更を適用しませんでした。",
+      "NO_CHANGE": "変更はありません。このバージョンはすでにインストールされています。",
+      "NOT_INSTALLED": "インストールされていない拡張です。",
+      "NOTHING_TO_ROLL_BACK": "戻せる以前の状態がありません。",
+      "ONLINE_INSTALL_DISABLED": "オンラインインストールはオフです。インストール設定でオンにするか、wheel ファイルを取り込んでください。",
+      "SETTINGS_UNREADABLE": "インストール設定を読み取れません。再度保存すると続行できます。",
+      "INVALID_PROXY": "プロキシは http://host:port または https://host:port の形式で入力してください。",
+      "PROXY_CREDENTIALS_REQUIRED": "プロキシにユーザー名とパスワードが必要です。",
+      "PROXY_CREDENTIALS_NOT_STORED": "この環境では認証情報を保存できません。インストールのたびに入力してください。",
+      "PROXY_CREDENTIALS_REJECTED": "プロキシがユーザー名とパスワードを拒否しました。",
+      "PROXY_CHANGED": "その間にプロキシのアドレスが変わりました。新しいプロキシの認証情報を入力してください。",
+      "GIT_FETCH_FAILED": "Git リポジトリまたは要求したリビジョンを取得できませんでした。",
+      "SUBDIRECTORY_INVALID": "サブディレクトリがリポジトリにないか、通常のフォルダーではありません。",
+      "BUNDLE_CHANGED": "インストール済みの拡張は別の Studio バージョンのものです。先に再設定してください。",
+      "BUSY": "別の変更が実行中です。終わってからもう一度お試しください。",
+      "CONFLICT": "その間に拡張が変わりました。もう一度お試しください。",
+      "CANCELLED": "中止しました。",
+      "TIMEOUT": "時間がかかりすぎたため中止しました。",
+      "RUNTIME_UNAVAILABLE": "この環境には Studio runtime がありません。",
+      "INVALID_INPUT": "正しくない値があります。",
+      "UNSUPPORTED": "サポートされていない要求です。",
+      "NOT_FOUND": "Studio はこの変更をもう把握していません。一覧を確認してください。",
+      "INTERNAL": "Studio で問題が発生しました。もう一度お試しください。",
+      "UPGRADE_UNAVAILABLE": "この拡張はオンラインで更新できません。",
+      "UPGRADE_SOURCE_MISMATCH": "保存された出所がインストール済みの拡張と一致しません。再インストールすると出所が記録し直されます。",
+      "SHARED_DISTRIBUTION_FILES": "別のインストール済みパッケージとファイルを共有しているため置き換えられません。",
+      "UPGRADE_RESPONSE_TOO_LARGE": "パッケージインデックスが許容量を超えるデータを送りました。",
+      "PINNED": "1 つのバージョンに固定された拡張です。",
+      "PIN_UNKNOWN": "この拡張のバージョン制限が不明です。",
+      "FORBIDDEN": "Studio がこのページからの要求を拒否しました。",
+      "UNAUTHENTICATED": "WebUI にもう一度サインインしてください。",
+      "FRAME_LIMIT": "要求が大きすぎます。",
+      "UNAVAILABLE": "Studio が応答できませんでした。もう一度お試しください。",
+      "CONNECTION_LOST": "応答を受け取る前に接続が切れました。再試行の前に一覧を確認してください。",
+      "INSECURE_TRANSPORT": "暗号化されていない接続のため、プロキシの認証情報を送信しませんでした。",
+      "UNKNOWN": "予期しない問題が発生しました。"
+    }
+  },
   "modelDescription": "すべてのアシスタントで使用する LLM プロバイダーと API キーを設定します。カスタムモデルに対応するのは Aion CLI のみで、他のエージェントは各自の組み込みモデルを使用します。",
   "capabilities": "能力拡張",
   "capabilitiesTab": {
