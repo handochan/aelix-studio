@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { isUncOrDevice } from './files.js';
 
 /** How a terminal CLI environment was found. */
 export type FoundBy = 'uv_tool' | 'pipx' | 'launcher';
@@ -10,28 +11,36 @@ export type SearchLocations = {
   toolRoots: ToolRoot[];
   /** Directories that may hold an `aelix` launcher. Not used on Windows. */
   launcherDirectories: string[];
-  /** The terminal CLI's agent directory (its global extensions are in `extensions`). */
-  agentDirectory: string;
+  /**
+   * The terminal CLI's agent directory (its global extensions are in `extensions`); undefined
+   * when `AELIX_CODING_AGENT_DIR` is set to something Studio cannot place (relative, UNC).
+   */
+  agentDirectory?: string;
+  /** Studio's own `PATH` had more entries than `PATH_ENTRY_LIMIT`: the rest were not looked in. */
+  truncated: boolean;
 };
 
 /** The most entries of Studio's own `PATH` this looks at. */
 export const PATH_ENTRY_LIMIT = 64;
 
-/** An absolute path from an environment variable; undefined when unset, empty or relative. */
-const absolute = (value: string | undefined, platform: NodeJS.Platform): string | undefined => {
-  if (!value) return undefined;
+/**
+ * Locations from Studio's environment, all from here: `~` and `~/…` expanded where the tool
+ * expands them, relative values ignored (uv and pipx take them from their own working
+ * directory, which Studio does not know), and Windows UNC and device paths refused.
+ */
+function location(platform: NodeJS.Platform, home: string) {
   const paths = platform === 'win32' ? path.win32 : path.posix;
-  return paths.isAbsolute(value) ? paths.normalize(value) : undefined;
-};
-
-/** `~` and `~/…` as native's `expand_tilde_path` reads them. */
-const expandTilde = (value: string, home: string, platform: NodeJS.Platform): string => {
-  const paths = platform === 'win32' ? path.win32 : path.posix;
-  if (value === '~') return home;
-  if (value.startsWith('~/') || (platform === 'win32' && value.startsWith('~\\')))
-    return paths.join(home, value.slice(2));
-  return value;
-};
+  const usable = (value: string | undefined): string | undefined =>
+    value && paths.isAbsolute(value) && !isUncOrDevice(value, platform) ? paths.normalize(value) : undefined;
+  const expanded = (value: string | undefined): string | undefined => {
+    if (!value) return undefined;
+    if (value === '~') return usable(home);
+    if (value.startsWith('~/') || (platform === 'win32' && value.startsWith('~\\')))
+      return usable(paths.join(home, value.slice(2)));
+    return usable(value);
+  };
+  return { paths, usable, expanded };
+}
 
 const unique = (values: (string | undefined)[]): string[] => [
   ...new Set(values.filter((value): value is string => Boolean(value))),
@@ -39,19 +48,22 @@ const unique = (values: (string | undefined)[]): string[] => [
 
 /**
  * Where the terminal CLI can be, from Studio's own environment, the home directory and the
- * platform. Nothing is read here. Studio sees its own environment, not the user's shell's:
- * a variable set only in a shell profile is not seen.
+ * platform. Nothing is read here. Studio sees its own environment, not the user's shell's: a
+ * variable set only in a shell profile is not seen.
  *
  * - uv tools (uv 0.13.9 `uv tool dir`): `UV_TOOL_DIR`; else `$XDG_DATA_HOME/uv/tools` or
- *   `~/.local/share/uv/tools`, and the older macOS `~/Library/Application Support/uv/tools`;
- *   on Windows `%APPDATA%\uv\data\tools` and `%APPDATA%\uv\tools`.
- * - pipx (pipx 1.19.0 `paths.py`, platformdirs 4.14.8): `PIPX_HOME`; else the user data
- *   directory (`$XDG_DATA_HOME/pipx`, `~/.local/share/pipx` on Linux,
+ *   `~/.local/share/uv/tools`, and the older macOS `~/Library/Application Support/uv/tools`; on
+ *   Windows `%APPDATA%\uv\data\tools` and `%APPDATA%\uv\tools`.
+ * - pipx (pipx 1.19.0 `paths.py`, platformdirs 4.14.8): `PIPX_HOME` (with `~`); else the user
+ *   data directory (`$XDG_DATA_HOME/pipx`, `~/.local/share/pipx` on Linux,
  *   `~/Library/Application Support/pipx` on macOS, `%LOCALAPPDATA%\pipx\pipx` on Windows) and
  *   the older `~/.local/pipx` (and `~\pipx` on Windows); each `<home>/venvs`.
+ * - On Windows without `APPDATA` or `LOCALAPPDATA`, the usual `~\AppData\Roaming` and
+ *   `~\AppData\Local`: uv and platformdirs ask Windows for the known folder, which Studio does
+ *   not (no API call or command).
  * - Launchers (not on Windows, where they are binary): `UV_TOOL_BIN_DIR`, `XDG_BIN_HOME`,
  *   `$XDG_DATA_HOME/../bin`, `PIPX_BIN_DIR`, `~/.local/bin`, Homebrew's and the system's bin
- *   directories, and Studio's own `PATH` (at most `PATH_ENTRY_LIMIT` entries).
+ *   directories, and Studio's own `PATH` (at most `PATH_ENTRY_LIMIT` entries, `truncated` past).
  * - The agent directory: `AELIX_CODING_AGENT_DIR` (with `~` expanded, as native does), else
  *   `~/.aelix/agent`.
  *
@@ -59,34 +71,32 @@ const unique = (values: (string | undefined)[]): string[] => [
  * on its version and on what already exists.
  */
 export function searchLocations(env: NodeJS.ProcessEnv, home: string, platform: NodeJS.Platform): SearchLocations {
-  const paths = platform === 'win32' ? path.win32 : path.posix;
-  const at = (...parts: string[]): string => paths.join(home, ...parts);
-  const xdgData = platform === 'win32' ? undefined : absolute(env.XDG_DATA_HOME, platform);
-  const uvToolDir = env.UV_TOOL_DIR ? paths.resolve(home, env.UV_TOOL_DIR) : undefined;
-  const pipxHome = env.PIPX_HOME ? paths.resolve(home, expandTilde(env.PIPX_HOME, home, platform)) : undefined;
+  const { paths, usable, expanded } = location(platform, home);
+  const homeDirectory = usable(home);
+  const at = (...parts: string[]): string | undefined => homeDirectory && paths.join(homeDirectory, ...parts);
+  const xdgData = platform === 'win32' ? undefined : usable(env.XDG_DATA_HOME);
+  const appData = usable(env.APPDATA) ?? at('AppData', 'Roaming');
+  const localAppData = usable(env.LOCALAPPDATA) ?? at('AppData', 'Local');
 
   const uv =
     platform === 'win32'
       ? unique([
-          uvToolDir,
-          ...(env.APPDATA && paths.isAbsolute(env.APPDATA)
-            ? [paths.join(env.APPDATA, 'uv', 'data', 'tools'), paths.join(env.APPDATA, 'uv', 'tools')]
-            : []),
+          usable(env.UV_TOOL_DIR),
+          appData && paths.join(appData, 'uv', 'data', 'tools'),
+          appData && paths.join(appData, 'uv', 'tools'),
         ])
       : unique([
-          uvToolDir,
+          usable(env.UV_TOOL_DIR),
           xdgData && paths.join(xdgData, 'uv', 'tools'),
           at('.local', 'share', 'uv', 'tools'),
           platform === 'darwin' ? at('Library', 'Application Support', 'uv', 'tools') : undefined,
         ]);
   const pipx = unique([
-    pipxHome,
+    expanded(env.PIPX_HOME),
     xdgData && paths.join(xdgData, 'pipx'),
     platform === 'darwin' ? at('Library', 'Application Support', 'pipx') : undefined,
     platform === 'win32'
-      ? env.LOCALAPPDATA && paths.isAbsolute(env.LOCALAPPDATA)
-        ? paths.join(env.LOCALAPPDATA, 'pipx', 'pipx')
-        : undefined
+      ? localAppData && paths.join(localAppData, 'pipx', 'pipx')
       : platform === 'darwin'
         ? undefined
         : at('.local', 'share', 'pipx'),
@@ -94,33 +104,29 @@ export function searchLocations(env: NodeJS.ProcessEnv, home: string, platform: 
     platform === 'win32' ? at('pipx') : undefined,
   ]).map((directory) => paths.join(directory, 'venvs'));
 
+  const pathEntries = (env.PATH ?? '').split(':').filter(Boolean);
   const launcherDirectories =
     platform === 'win32'
       ? []
       : unique([
-          absolute(env.UV_TOOL_BIN_DIR, platform),
-          absolute(env.XDG_BIN_HOME, platform),
+          usable(env.UV_TOOL_BIN_DIR),
+          usable(env.XDG_BIN_HOME),
           xdgData && paths.normalize(paths.join(xdgData, '..', 'bin')),
-          absolute(env.PIPX_BIN_DIR && expandTilde(env.PIPX_BIN_DIR, home, platform), platform),
+          expanded(env.PIPX_BIN_DIR),
           at('.local', 'bin'),
           ...(platform === 'darwin' ? ['/opt/homebrew/bin'] : ['/home/linuxbrew/.linuxbrew/bin']),
           '/usr/local/bin',
           '/usr/bin',
-          ...(env.PATH ?? '')
-            .split(':')
-            .slice(0, PATH_ENTRY_LIMIT)
-            .map((entry) => absolute(entry, platform)),
+          ...pathEntries.slice(0, PATH_ENTRY_LIMIT).map(usable),
         ]);
 
-  const agent = env.AELIX_CODING_AGENT_DIR
-    ? expandTilde(env.AELIX_CODING_AGENT_DIR, home, platform)
-    : at('.aelix', 'agent');
   return {
     toolRoots: [
       ...uv.map((directory): ToolRoot => ({ directory, foundBy: 'uv_tool' })),
       ...pipx.map((directory): ToolRoot => ({ directory, foundBy: 'pipx' })),
     ],
     launcherDirectories,
-    agentDirectory: paths.resolve(home, agent),
+    agentDirectory: env.AELIX_CODING_AGENT_DIR ? expanded(env.AELIX_CODING_AGENT_DIR) : at('.aelix', 'agent'),
+    truncated: platform !== 'win32' && pathEntries.length > PATH_ENTRY_LIMIT,
   };
 }

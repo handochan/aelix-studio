@@ -325,10 +325,12 @@ export type TerminalCliEnvironment = {
 /**
  * How native's directory tier takes an entry of the global extension directory, first match
  * wins for a directory: `file`, a `*.py` file; `manifest`, a directory with `aelix-plugin.toml`;
- * `pyproject`, one whose `pyproject.toml` has a `[tool.aelix]` table; `package`, one with
- * `__init__.py`. Nothing is parsed further: a broken manifest is listed and fails in native.
+ * `pyproject`, one whose `pyproject.toml` declares `[tool.aelix] extensions` with a path that
+ * exists; `package`, one with `__init__.py`. `unknown`: its `pyproject.toml` names that table in
+ * a form Studio reads only with a TOML parser (quoted or dotted keys, inline tables), or is too
+ * large. Manifests are not parsed: a broken one is listed and fails in native.
  */
-export type TerminalGlobalExtensionKind = 'file' | 'manifest' | 'pyproject' | 'package';
+export type TerminalGlobalExtensionKind = 'file' | 'manifest' | 'pyproject' | 'package' | 'unknown';
 
 export type TerminalGlobalExtension = { name: string; kind: TerminalGlobalExtensionKind };
 
@@ -343,7 +345,8 @@ export type TerminalCliListing = {
   /** `<agent dir>/extensions`, which native loads in the terminal but not in Studio conversations. */
   globalExtensions: {
     location: string;
-    status: 'listed' | 'absent';
+    /** `absent`: no such directory (or no agent directory Studio can place); `unreadable`: it cannot be read. */
+    status: 'listed' | 'absent' | 'unreadable';
     extensions: TerminalGlobalExtension[];
     /** More than 500 entries: the rest were not looked at. */
     truncated: boolean;
