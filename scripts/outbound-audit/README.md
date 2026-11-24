@@ -34,21 +34,29 @@ Reports distinguish `outcome: evidence_incomplete` (exit 87) from
 `external_attempts` (exit 86) and `command_failed`. Incomplete evidence may be
 recaptured **once**, using the driver's fresh isolated state. Both reports and
 first provisional counts survive in `*.capture-N.json` and `captureAttempts`;
-a second incomplete capture fails. Only these explicit reasons permit replay:
+a second incomplete capture fails with exit 87. A capture passes when it is
+complete, the command succeeds, and enforcement-scope external attempts and
+unparsed records are both zero.
 
-- classification: `unknown_record`, `kernel_network_strace_entry_missing`;
-- derivative capture markers: `io_uring_kernel_capture_incomplete`,
-  `kernel_network_capture_incomplete`, `udp_socket_capture_incomplete`, only
-  with kernel reason `kernel_bpf_program_recursion_lost`;
-- per-process record kind: `register_stub`.
+The strace-gap path requires a complete, drained kernel capture with zero perf
+event loss, no BPF recursion miss, and zero external attempts in the enforcement
+scope. It allows exactly these strace gaps:
 
-With an incomplete kernel capture, recording holes must be **zero**: no
-`register_stub`, `unknown_record` or missing strace entry may accompany the
-kernel loss. Only the derivative markers are eligible. A complete kernel capture
-retains the recording-hole recapture path. Perf event loss
-(`io_uring_kernel_events_lost`, `lostEvents > 0`) is not eligible: the real parser
-also marks PID namespace verification false, so it cannot establish the proof
-needed for recapture.
+- `unknown_record` means the parser could not classify a strace record.
+- `kernel_network_strace_entry_missing` means kernel evidence has a syscall
+  entry that has no matching strace entry.
+- `unknown_fork_result` means strace could not establish the fork result,
+  including an unpaired clone restart.
+- `register_stub` means the attributable strace record is missing register data.
+- `result:close` means strace could not decode the return value of a close call.
+
+The kernel-loss path allows only `io_uring_kernel_capture_incomplete`,
+`kernel_network_capture_incomplete`, and `udp_socket_capture_incomplete` with
+kernel reason `kernel_bpf_program_recursion_lost`. Any strace hole alongside
+kernel loss blocks recapture. The kernel-loss path still permits provisional
+unsent UDP association counts under the existing diagnostics checks. Perf event
+loss (`io_uring_kernel_events_lost`, `lostEvents > 0`) also invalidates PID
+namespace verification and blocks recapture.
 
 Every issue and unparsed record must be covered by that list. Kernel namespace,
 diagnostics, error counters and already-observed forbidden opcodes cannot

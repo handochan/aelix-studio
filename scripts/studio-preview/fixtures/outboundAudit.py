@@ -93,12 +93,16 @@ def unsupported_personalities(stderr):
 
 
 
-# Only known recording gaps may replay an isolated command. An unlisted reason,
-# including any undecodable network destination/peer, remains a first-pass failure.
-RECAPTURE_ISSUES = frozenset({'unknown_record', 'kernel_network_strace_entry_missing',
-    'io_uring_kernel_capture_incomplete', 'kernel_network_capture_incomplete', 'udp_socket_capture_incomplete'})
+# Only these strace gaps and the separate recursion-loss case may replay an
+# isolated command. Undecodable network destinations/peers block replay.
+RECAPTURE_STRACE_ISSUES = frozenset({
+    'unknown_record', 'kernel_network_strace_entry_missing', 'unknown_fork_result',
+})
+RECAPTURE_STRACE_RECORD_KINDS = frozenset({'register_stub', 'result:close'})
+RECAPTURE_KERNEL_ISSUES = frozenset({
+    'io_uring_kernel_capture_incomplete', 'kernel_network_capture_incomplete', 'udp_socket_capture_incomplete',
+})
 RECAPTURE_KERNEL_LOSSES = frozenset({'kernel_bpf_program_recursion_lost'})
-RECAPTURE_RECORD_KINDS = frozenset({'register_stub'})
 CAPTURE_TIMEOUT = 480
 CAPTURE_CLEANUP = 75
 SUPERVISOR_CLEANUP = 15
@@ -113,26 +117,29 @@ OWNED_SIGNAL = "import os, sys\nfrom pathlib import Path\ntry:\n    fields = (Pa
 def recapture_reasons_allowed(report):
     if report.get('observedRejectedOpcodes'): return False
     issues = report.get('classificationIssues', [])
-    if any(item.get('reason') not in RECAPTURE_ISSUES for item in issues): return False
+    reasons = {item.get('reason') for item in issues}
+    if reasons - (RECAPTURE_STRACE_ISSUES | RECAPTURE_KERNEL_ISSUES): return False
     kinds = [p.get('unparsedRecordKinds', {}) for p in report.get('processes', [])]
-    if any(key not in RECAPTURE_RECORD_KINDS for counts in kinds for key in counts): return False
+    if any(counts.keys() - RECAPTURE_STRACE_RECORD_KINDS for counts in kinds): return False
     if any(p.get('unparsedRecords', 0) != sum(p.get('unparsedRecordKinds', {}).values())
            for p in report.get('processes', [])): return False
     if report.get('unparsedRecords') != len(issues) + sum(sum(counts.values()) for counts in kinds): return False
     capture = report.get('ioUring', {}).get('capture', {})
-    incomplete_kernel = any(i['reason'] in RECAPTURE_ISSUES - {'unknown_record', 'kernel_network_strace_entry_missing'} for i in issues)
-    if incomplete_kernel or capture and not capture.get('complete'):
+    if reasons & RECAPTURE_KERNEL_ISSUES or capture and not capture.get('complete'):
         # Missing kernel proof cannot validate a simultaneous strace hole.
-        if any(kinds) or any(i['reason'] in ('unknown_record', 'kernel_network_strace_entry_missing') for i in issues): return False
+        if any(kinds) or reasons & RECAPTURE_STRACE_ISSUES: return False
         if capture.get('reason') not in RECAPTURE_KERNEL_LOSSES or not capture.get('pidNamespaceVerified'): return False
         if capture.get('diagnostics'): return False
         counters = capture.get('kernelCounts') or {}
         if any(counters.get(key, 0) for key in ('namespace_error', 'unsupported_abi', 'pre_mismatch',
                'network_return_id_error', 'raw_state_overlap', 'pre_layout_error', 'socket_layout_error',
                'worker_error', 'udp_object_error', 'untracked_sqpoll', 'unmatched_completion')): return False
-    if any(not isinstance(item, dict) or item.get('reason') not in RECAPTURE_KERNEL_LOSSES
-           for item in capture.get('recordErrors', [])): return False
-    return bool(issues or any(kinds))
+        return bool(issues) and all(isinstance(item, dict) and item.get('reason') in RECAPTURE_KERNEL_LOSSES
+                                    for item in capture.get('recordErrors', []))
+    return (bool(issues or any(kinds)) and report.get('externalAttempts') == 0
+            and capture.get('complete') is True and capture.get('drained') is True
+            and capture.get('lostEvents') == 0 and capture.get('pidNamespaceVerified') is True
+            and not capture.get('programLoss') and not capture.get('recordErrors'))
 
 
 def should_recapture(report):
