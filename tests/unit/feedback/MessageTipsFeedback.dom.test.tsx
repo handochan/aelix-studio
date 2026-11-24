@@ -64,9 +64,10 @@ vi.mock('@renderer/components/chat/CollapsibleContent', () => ({
 
 // MarkdownView pulls in a heavy markdown pipeline — replace with a passthrough.
 vi.mock('@renderer/components/Markdown', () => ({
-  default: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
+  default: vi.fn(({ children }: { children: React.ReactNode }) => <div>{children}</div>),
 }));
 
+import MarkdownView from '@renderer/components/Markdown';
 import MessageTips from '@/renderer/pages/conversation/Messages/components/MessageTips';
 import { normalizeDbMessage } from '@/renderer/pages/conversation/Messages/hooks';
 import type { AgentStreamErrorInfo, IMessageTips } from '@/common/chat/chatLib';
@@ -782,6 +783,7 @@ const mcpWarning = (content: string, params?: IMessageTips['content']['params'])
 
 describe.each(['live', 'history', 'serialized history'] as const)('MCP warning text from %s', (source) => {
   beforeEach(async () => {
+    vi.mocked(MarkdownView).mockClear();
     await i18n.changeLanguage('ko-KR');
   });
 
@@ -802,7 +804,9 @@ describe.each(['live', 'history', 'serialized history'] as const)('MCP warning t
             content: source === 'history' ? tip : JSON.stringify(tip),
           } as IMessageTips);
     if (message?.type !== 'tips') throw new Error('Expected an MCP warning tip');
-    return render(<MessageTips message={message} />);
+    const result = render(<MessageTips message={message} />);
+    expect(MarkdownView).not.toHaveBeenCalled();
+    return result;
   };
 
   it('localizes unavailable MCP settings without the host’s placeholder server name', () => {
