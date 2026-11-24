@@ -798,9 +798,8 @@ export const autoUpdate = {
 // Dialog — native IPC picker on Electron, server-side picker on WebUI
 // ---------------------------------------------------------------------------
 
-export type ShowOpenOptions =
-  | { defaultPath?: string; properties?: OpenDialogOptions['properties']; filters?: OpenDialogOptions['filters'] }
-  | undefined;
+/** The subset of Electron dialog options exposed to renderer callers. */
+export type ShowOpenOptions = Pick<OpenDialogOptions, 'defaultPath' | 'properties' | 'filters'> | undefined;
 
 export type ShowOpenHandler = (options: ShowOpenOptions) => Promise<string[] | undefined>;
 

@@ -746,15 +746,19 @@ describe('the agent extensions screen', () => {
     LONG
   );
 
-  it('names the wheel filter of the file dialog in the screen language', async () => {
+  it('requests a single file with a localized wheel filter when updating from file', async () => {
     render(<AgentExtensionsSettings />);
     fireEvent.click(
       within(await screen.findByTestId('agent-extension-local-demo')).getByTestId('agent-extension-update')
     );
-    await waitFor(() => expect(bridge.opened).toHaveLength(1));
-    expect(bridge.opened[0]).toMatchObject({
-      filters: [{ name: 'settings.agentExtensions.install.wheelFilter', extensions: ['whl'] }],
-    });
+    await waitFor(() =>
+      expect(bridge.opened).toEqual([
+        {
+          properties: ['openFile'],
+          filters: [{ name: 'settings.agentExtensions.install.wheelFilter', extensions: ['whl'] }],
+        },
+      ])
+    );
   });
 
   it('takes nothing from answers that arrive after the user signed out: banner, platform, saving', async () => {
