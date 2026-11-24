@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation, NativeAuthSelection } from '@aionui/web-host';
 import { ipcBridge } from '@/common';
+import { AELIX_MARK_DATA_URL } from '@/renderer/utils/model/agentLogo';
 import { requestNativeAuth } from './nativeAuth';
 
 /** Reuses Provider settings while keeping native credentials outside Aion's Provider DB. */
@@ -158,6 +159,7 @@ export default function NativeProviders({
       agent ??= await ipcBridge.acpConversation.createCustomAgent.invoke({
         name: `Aelix · ${provider}/${model}`,
         command: launch.command,
+        icon: AELIX_MARK_DATA_URL,
         args: launch.args,
         env: launch.env,
       });

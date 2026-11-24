@@ -240,6 +240,27 @@ function buildPresetInfoFromConversationAssistant(
   };
 }
 
+const GENERATED_ASSISTANT_PREFIX = 'bare:';
+
+/**
+ * A generated assistant is its agent's own entry. The host keeps data and remote URL
+ * icons on the agent but omits them from assistant avatars, so a generated assistant
+ * without a usable avatar shows its agent's catalog icon (for example the Aelix mark
+ * that native Aelix agents store).
+ */
+function resolveGeneratedAssistantAgentLogo(conversation: TChatConversation, logos: AgentLogoMap): string | null {
+  const assistant = conversation.assistant;
+  if (assistant?.source !== 'generated') return null;
+  const extraAgentId = (conversation.extra as { agent_id?: unknown } | undefined)?.agent_id;
+  const agentId =
+    typeof extraAgentId === 'string' && extraAgentId.trim()
+      ? extraAgentId.trim()
+      : assistant.id.startsWith(GENERATED_ASSISTANT_PREFIX)
+        ? assistant.id.slice(GENERATED_ASSISTANT_PREFIX.length)
+        : '';
+  return agentId ? resolveAgentLogo(logos, { backend: agentId }) : null;
+}
+
 function inferLegacyAssistantInfo(
   conversation: TChatConversation,
   locale: string,
@@ -319,8 +340,10 @@ export function usePresetAssistantInfo(conversation: TChatConversation | undefin
         if (isLoadingAssistants) return { info: null, isLoading: true };
       }
 
+      const info = buildPresetInfoFromConversationAssistant(conversation.assistant);
+      const agentLogo = info.isFallback ? resolveGeneratedAssistantAgentLogo(conversation, logos) : null;
       return {
-        info: buildPresetInfoFromConversationAssistant(conversation.assistant),
+        info: agentLogo ? { ...info, logo: agentLogo, isEmoji: false, isFallback: false } : info,
         isLoading: false,
       };
     }

@@ -13,7 +13,7 @@ import { useAssistantOrder } from '@/renderer/hooks/assistant/useAssistantOrder'
 import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManagedAgents';
 import { managedAgentSearchText } from '@/renderer/utils/model/agentTypes';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { resolveRuntimeAssistantAvatar } from '@/renderer/utils/model/agentLogo';
+import { resolveRuntimeAssistantAvatar, useAgentLogos } from '@/renderer/utils/model/agentLogo';
 import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import { selectableAssistants } from '@/renderer/utils/model/assistantSelection';
 import { useTranslation } from 'react-i18next';
@@ -73,6 +73,7 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
 }) => {
   const { t } = useTranslation();
   const { assistantOrder } = useAssistantOrder();
+  const agentLogos = useAgentLogos();
   const [moreVisible, setMoreVisible] = useState(false);
   const [search, setSearch] = useState('');
   const [availableWidth, setAvailableWidth] = useState(() => (typeof window === 'undefined' ? 800 : window.innerWidth));
@@ -222,7 +223,10 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
   if (enabledAssistants.length === 0) return null;
 
   const renderAssistantPill = (assistant: Assistant, testId: string, fullWidth = false) => {
-    const avatar = resolveRuntimeAssistantAvatar(assistant.avatar, assistantRuntimeKey(assistant));
+    const avatar = resolveRuntimeAssistantAvatar(agentLogos, {
+      ...assistant,
+      runtime: assistantRuntimeKey(assistant),
+    });
     const isSelected = selectedId === assistant.id;
     const label = assistant.name_i18n?.[localeKey] || assistant.name;
 

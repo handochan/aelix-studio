@@ -143,9 +143,13 @@ describe('native provider settings', () => {
     expect(mocks.createAgent).toHaveBeenCalledWith({
       name: 'Aelix · anthropic/test-model',
       command: launch.command,
+      icon: expect.stringMatching(/^data:image\/svg\+xml;charset=utf-8,/),
       args: launch.args,
       env: launch.env,
     });
+    // The stored icon is the official mark itself, not a build-specific asset path.
+    const { icon } = mocks.createAgent.mock.calls[0][0] as { icon: string };
+    expect(decodeURIComponent(icon.slice(icon.indexOf(',') + 1))).toContain('aria-label="Aelix mark"');
     expect(opened).toHaveBeenCalledTimes(1);
   });
 

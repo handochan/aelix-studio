@@ -13,7 +13,10 @@ import {
   isDefaultModel,
   getModelDisplayLabel,
   resolveRuntimeAssistantAvatar,
+  resolveGeneratedAssistantLogo,
+  AELIX_MARK_DATA_URL,
 } from '@/renderer/utils/model/agentLogo';
+import { resolveAssistantAvatar } from '@/renderer/utils/model/assistantAvatar';
 
 const bridgeMocks = vi.hoisted(() => ({
   getManagedAgents: vi.fn(),
@@ -243,7 +246,7 @@ describe('agentLogo', () => {
 });
 
 const isAelixMark = (value: string | null | undefined) =>
-  decodeURIComponent(value ?? '').includes("aria-label='Aelix mark'");
+  /aria-label=['"]Aelix mark['"]/.test(decodeURIComponent(value ?? ''));
 
 describe('Aelix agent logo', () => {
   it('uses the bundled Aelix mark for the aelix backend, ahead of the catalog', () => {
@@ -270,9 +273,36 @@ describe('Aelix agent logo', () => {
   });
 
   it('fills only a missing avatar of an Aelix-runtime assistant', () => {
-    const aelix = resolveRuntimeAssistantAvatar(undefined, 'aelix');
+    const assistant = { avatar: undefined, source: 'user' as const, agent_id: 'claude' };
+    const aelix = resolveRuntimeAssistantAvatar(LOGOS, { ...assistant, runtime: 'aelix' });
     expect(aelix.kind === 'image' && isAelixMark(aelix.value)).toBe(true);
-    expect(resolveRuntimeAssistantAvatar('🧪', 'aelix')).toEqual({ kind: 'emoji', value: '🧪' });
-    expect(resolveRuntimeAssistantAvatar(undefined, 'claude')).toEqual({ kind: 'fallback' });
+    expect(resolveRuntimeAssistantAvatar(LOGOS, { ...assistant, avatar: '🧪', runtime: 'aelix' })).toEqual({
+      kind: 'emoji',
+      value: '🧪',
+    });
+    expect(resolveRuntimeAssistantAvatar(LOGOS, { ...assistant, runtime: 'claude' })).toEqual({ kind: 'fallback' });
+  });
+
+  it('stores the mark as an agent icon that renders as an image', () => {
+    expect(resolveAgentLogo({}, { icon: AELIX_MARK_DATA_URL })).toBe(AELIX_MARK_DATA_URL);
+    expect(resolveAgentAvatar({}, { icon: AELIX_MARK_DATA_URL })).toEqual({
+      kind: 'image',
+      value: AELIX_MARK_DATA_URL,
+    });
+    expect(resolveAssistantAvatar(AELIX_MARK_DATA_URL)).toEqual({ kind: 'image', value: AELIX_MARK_DATA_URL });
+    expect(isAelixMark(AELIX_MARK_DATA_URL)).toBe(true);
+  });
+
+  it("gives a generated assistant without an avatar its agent's icon", () => {
+    // The host keeps a native Aelix agent's data URL icon on the agent row only.
+    const logos: AgentLogoMap = { ...LOGOS, '77905fd1': AELIX_MARK_DATA_URL };
+    const generated = { avatar: '', source: 'generated' as const, agent_id: '77905fd1', runtime: 'acp' };
+    expect(resolveGeneratedAssistantLogo(logos, { source: 'generated', agentId: '77905fd1' })).toBe(
+      AELIX_MARK_DATA_URL
+    );
+    expect(resolveRuntimeAssistantAvatar(logos, generated)).toEqual({ kind: 'image', value: AELIX_MARK_DATA_URL });
+    // A user's own assistant on the same agent keeps the regular fallback.
+    expect(resolveGeneratedAssistantLogo(logos, { source: 'user', agentId: '77905fd1' })).toBeNull();
+    expect(resolveRuntimeAssistantAvatar(logos, { ...generated, source: 'user' })).toEqual({ kind: 'fallback' });
   });
 });

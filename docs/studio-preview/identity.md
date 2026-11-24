@@ -146,8 +146,10 @@ root. Any previous Studio version is kept beside the install root in an
 - The Studio mark, wordmarks and lockups are copied byte-for-byte from the
   [Aelix brand sources](https://github.com/handochan/aelix-ai/tree/1c2a4a7c70c0bcb1bb103e6fbabd8967fd65e21c/docs/assets/brand).
   The sidebar and WebUI login show the lockup that matches the active
-  appearance; the collapsed sidebar shows the mark alone. Conversations and
-  assistant pickers show the mark for the `aelix` agent backend.
+  appearance; the collapsed sidebar shows the mark alone. An Aelix agent
+  started from the native Provider settings stores the mark as its icon, so its
+  conversations, assistant and agent settings show it; the `aelix` agent
+  backend also resolves to the mark.
 
 ## Brand appearance
 

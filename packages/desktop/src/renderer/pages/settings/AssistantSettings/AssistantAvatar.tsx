@@ -7,6 +7,7 @@ import { Robot } from '@icon-park/react';
 import React from 'react';
 import { isEmoji, resolveAvatarImageSrc } from './assistantUtils';
 import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
+import { resolveGeneratedAssistantLogo, useAgentLogos } from '@/renderer/utils/model/agentLogo';
 
 type AssistantAvatarProps = {
   assistant: AssistantListItem;
@@ -21,9 +22,15 @@ const AssistantAvatar: React.FC<AssistantAvatarProps> = ({
   shape = 'square',
   size = 32,
 }) => {
+  const logos = useAgentLogos();
   const resolvedAvatar = assistant.avatar?.trim();
   const hasEmojiAvatar = Boolean(resolvedAvatar && isEmoji(resolvedAvatar));
-  const avatarImage = resolveAvatarImageSrc(resolvedAvatar);
+  // Without its own avatar, a generated assistant shows its agent's icon (such as the Aelix mark).
+  const avatarImage =
+    resolveAvatarImageSrc(resolvedAvatar) ??
+    (hasEmojiAvatar
+      ? undefined
+      : (resolveGeneratedAssistantLogo(logos, { source: assistant.source, agentId: assistant.agent_id }) ?? undefined));
   const iconSize = Math.floor(size * 0.5);
   const emojiSize = Math.floor(size * 0.6);
 

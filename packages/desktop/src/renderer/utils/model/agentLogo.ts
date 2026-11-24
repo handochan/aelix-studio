@@ -19,6 +19,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import type { Assistant } from '@/common/types/agent/assistantTypes';
 import type { AssistantAvatar } from '@/renderer/utils/model/assistantAvatar';
 import {
   isBackendRelativeAssetPath,
@@ -28,7 +29,16 @@ import {
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
 import { resolveBackendAssetUrl } from '@/renderer/utils/platform';
 import aelixMark from '@renderer/assets/logo.svg';
+import aelixMarkSource from '@renderer/assets/logo.svg?raw';
 import useSWR from 'swr';
+
+/**
+ * The official Aelix mark as a self-contained data URL. Agents created for the
+ * native Aelix runtime store it as their icon: the host copies an agent's icon to
+ * its generated assistant, so chats, pickers and settings show the mark without
+ * depending on a build-specific asset path.
+ */
+export const AELIX_MARK_DATA_URL = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(aelixMarkSource)}`;
 
 /** Map of lowercased backend id -> logo URL. */
 export type AgentLogoMap = Record<string, string>;
@@ -168,16 +178,33 @@ export function resolveAgentAvatar(
 }
 
 /**
- * An assistant's own avatar, falling back to the Aelix mark when the assistant runs
- * on the Aelix agent and has none. Other runtimes keep the caller's fallback icon.
+ * The icon a generated assistant borrows from its agent. A generated assistant is its
+ * agent's own entry; the host keeps data and remote URL icons on the agent but omits
+ * them from assistant avatars (a native Aelix agent stores the Aelix mark this way).
+ */
+export function resolveGeneratedAssistantLogo(
+  logos: AgentLogoMap,
+  assistant: { source?: string | null; agentId?: string | null }
+): string | null {
+  const agentId = assistant.agentId?.trim();
+  if (assistant.source !== 'generated' || !agentId) return null;
+  return lookupBackendLogo(logos, agentId);
+}
+
+/**
+ * An assistant's own avatar. Without one, a generated assistant shows its agent's icon
+ * and an assistant on the Aelix agent shows the Aelix mark; others keep the caller's
+ * fallback icon.
  */
 export function resolveRuntimeAssistantAvatar(
-  avatar: string | undefined,
-  backend: string | undefined | null
+  logos: AgentLogoMap,
+  assistant: Pick<Assistant, 'avatar' | 'source' | 'agent_id'> & { runtime?: string | null }
 ): AssistantAvatar {
-  const resolved = resolveAssistantAvatar(avatar);
-  if (resolved.kind === 'fallback' && isAelixBackend(backend)) return { kind: 'image', value: aelixMark };
-  return resolved;
+  const resolved = resolveAssistantAvatar(assistant.avatar);
+  if (resolved.kind !== 'fallback') return resolved;
+  if (isAelixBackend(assistant.runtime)) return { kind: 'image', value: aelixMark };
+  const agentLogo = resolveGeneratedAssistantLogo(logos, { source: assistant.source, agentId: assistant.agent_id });
+  return agentLogo ? { kind: 'image', value: agentLogo } : resolved;
 }
 
 /**
