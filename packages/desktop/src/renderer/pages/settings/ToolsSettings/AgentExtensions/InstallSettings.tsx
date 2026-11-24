@@ -6,7 +6,7 @@
 
 import type { ExtensionSettings, ExtensionSettingsState } from '@aionui/web-host';
 import { Alert, Button, Input, Switch } from '@arco-design/web-react';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { hasUserPart, withoutUserPart } from './state/secrets';
 
@@ -64,10 +64,14 @@ const InstallSettings: React.FC<Props> = ({
   const { t } = useTranslation();
   const [draft, setDraft] = useState<ExtensionSettings>(state.settings);
   const [proxy, setProxy] = useState(state.settings.proxy ?? '');
-  useEffect(() => {
+  const [readSettings, setReadSettings] = useState(state.settings);
+  if (readSettings !== state.settings) {
+    // Settings read again replace the draft in this same render. An effect would do it a frame
+    // late, and on the first frame it would undo what was typed before it ran.
+    setReadSettings(state.settings);
     setDraft(state.settings);
     setProxy(state.settings.proxy ?? '');
-  }, [state.settings]);
+  }
 
   const hasProxy = proxy.trim() !== '';
   const settings: ExtensionSettings = {
