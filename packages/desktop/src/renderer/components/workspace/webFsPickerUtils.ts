@@ -54,8 +54,8 @@ export const parentOf = (dir: string): string => {
  */
 export const matchesFilters = (name: string, filters: NonNullable<ShowOpenOptions>['filters']): boolean => {
   if (!filters || filters.length === 0) return true;
-  const exts = filters.flatMap((f) => f.extensions ?? []).filter((e) => e && e !== '*');
-  if (exts.length === 0) return true;
+  const exts = filters.flatMap((f) => f.extensions ?? []).filter(Boolean);
+  if (exts.length === 0 || exts.includes('*')) return true;
   const lower = name.toLowerCase();
   return exts.some((ext) => lower.endsWith(`.${ext.toLowerCase()}`));
 };

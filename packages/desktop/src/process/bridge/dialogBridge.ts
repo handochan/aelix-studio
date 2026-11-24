@@ -7,10 +7,35 @@
 import { BrowserWindow, dialog, type FileFilter } from 'electron';
 import { ipcBridge } from '@/common';
 
+type DialogOptions = NonNullable<ipcBridge.ShowOpenOptions>;
+type DialogProperties = NonNullable<DialogOptions['properties']>;
+
+const OPEN_DIALOG_PROPERTIES: ReadonlySet<unknown> = new Set<DialogProperties[number]>([
+  'openFile',
+  'openDirectory',
+  'multiSelections',
+  'showHiddenFiles',
+  'createDirectory',
+  'promptToCreate',
+  'noResolveAliases',
+  'treatPackageAsDirectory',
+  'dontAddToRecent',
+]);
+
 const MAX_FILE_FILTERS = 32;
 const MAX_EXTENSIONS_PER_FILTER = 64;
 const MAX_FILTER_NAME_LENGTH = 128;
 const MAX_EXTENSION_LENGTH = 64;
+
+function isValidDialogProperties(properties: unknown): properties is DialogProperties {
+  if (!Array.isArray(properties)) return false;
+
+  for (const property of properties as unknown[]) {
+    if (!OPEN_DIALOG_PROPERTIES.has(property)) return false;
+  }
+
+  return true;
+}
 
 function isValidFileFilters(filters: unknown): filters is FileFilter[] {
   if (!Array.isArray(filters) || filters.length > MAX_FILE_FILTERS) return false;
@@ -39,25 +64,23 @@ function isValidFileFilters(filters: unknown): filters is FileFilter[] {
 }
 
 export function initDialogBridge(): void {
-  ipcBridge.dialog.showOpen.provider((options) => {
-    // Get the focused window or the first available window as parent
-    // This ensures the dialog appears in front on Windows and has proper modal behavior
-    const parentWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
-    const dialogOptions: NonNullable<ipcBridge.ShowOpenOptions> = {
-      defaultPath: options?.defaultPath,
-      properties: options?.properties,
-    };
-    const filters = options?.filters;
-    if (isValidFileFilters(filters)) {
-      dialogOptions.filters = filters;
+  ipcBridge.dialog.showOpen.provider(async (options) => {
+    try {
+      const { defaultPath, properties, filters } = options ?? {};
+      const dialogOptions: DialogOptions = {};
+      if (typeof defaultPath === 'string') dialogOptions.defaultPath = defaultPath;
+      if (isValidDialogProperties(properties)) dialogOptions.properties = properties;
+      if (isValidFileFilters(filters)) dialogOptions.filters = filters;
+
+      // Parent the picker so it appears in front on Windows and behaves modally.
+      const parentWindow = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];
+      const result = await (parentWindow
+        ? dialog.showOpenDialog(parentWindow, dialogOptions)
+        : dialog.showOpenDialog(dialogOptions));
+      return result.filePaths;
+    } catch (error) {
+      console.error('[DialogBridge] Failed to open file dialog:', error);
+      return [];
     }
-
-    const showDialogPromise = parentWindow
-      ? dialog.showOpenDialog(parentWindow, dialogOptions)
-      : dialog.showOpenDialog(dialogOptions);
-
-    return showDialogPromise.then((res) => {
-      return res.filePaths;
-    });
   });
 }

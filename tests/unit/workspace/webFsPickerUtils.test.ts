@@ -106,6 +106,14 @@ describe('matchesFilters', () => {
     expect(matchesFilters('notes.md', [{ name: 'All', extensions: ['*'] }])).toBe(true);
   });
 
+  it('accepts every file when a wildcard is offered alongside specific extensions', () => {
+    const filters = [
+      { name: 'Archives', extensions: ['zip'] },
+      { name: 'All', extensions: ['*'] },
+    ];
+    expect(matchesFilters('notes.md', filters)).toBe(true);
+  });
+
   it('does not hide every candidate when a filter carries no usable extension', () => {
     expect(matchesFilters('notes.md', [{ name: 'Broken', extensions: [] }])).toBe(true);
   });

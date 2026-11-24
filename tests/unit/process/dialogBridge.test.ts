@@ -6,7 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import { initDialogBridge } from '@process/bridge/dialogBridge';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { getFocusedWindow, getAllWindows, showOpenDialog } = vi.hoisted(() => ({
   getFocusedWindow: vi.fn(),
@@ -32,6 +32,10 @@ beforeEach(() => {
   getAllWindows.mockReturnValue([]);
   showOpenDialog.mockResolvedValue({ canceled: true, filePaths: [] });
   initDialogBridge();
+});
+
+afterEach(() => {
+  vi.restoreAllMocks();
 });
 
 describe('native open dialog', () => {
@@ -69,6 +73,48 @@ describe('native open dialog', () => {
 
     await expect(open(options)).resolves.toEqual([]);
     expect(showOpenDialog).toHaveBeenCalledExactlyOnceWith(options);
+  });
+
+  it('uses the default path when a non-string path is supplied', async () => {
+    const options = { properties: ['openDirectory'] };
+
+    await expect(open({ ...options, defaultPath: 42 })).resolves.toEqual([]);
+    expect(showOpenDialog.mock.calls).toStrictEqual([[options]]);
+  });
+
+  const sparseProperties = ['openFile'];
+  sparseProperties.length = 2;
+  it.each([
+    { label: 'a non-array', properties: 'openFile' },
+    { label: 'a non-string element', properties: ['openFile', 42] },
+    { label: 'an unsupported property', properties: ['openFile', 'showOverwriteConfirmation'] },
+    { label: 'a sparse array', properties: sparseProperties },
+  ])('uses the default dialog properties for $label', async ({ properties }) => {
+    const options = { defaultPath: '/tmp', filters: [{ name: 'Wheel', extensions: ['whl'] }] };
+
+    await expect(open({ ...options, properties })).resolves.toEqual([]);
+    expect(showOpenDialog.mock.calls).toStrictEqual([[options]]);
+  });
+
+  it('opens the default picker when every option is malformed', async () => {
+    await expect(open({ defaultPath: 42, properties: 'openFile', filters: false })).resolves.toEqual([]);
+
+    expect(showOpenDialog.mock.calls).toStrictEqual([[{}]]);
+  });
+
+  it.each([
+    {
+      label: 'throws synchronously',
+      fail: () => {
+        throw new Error('Dialog failed');
+      },
+    },
+    { label: 'rejects asynchronously', fail: () => Promise.reject(new Error('Dialog failed')) },
+  ])('resolves with no selection when Electron $label', async ({ fail }) => {
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    showOpenDialog.mockImplementationOnce(fail);
+
+    await expect(open()).resolves.toEqual([]);
   });
 
   it.each([
