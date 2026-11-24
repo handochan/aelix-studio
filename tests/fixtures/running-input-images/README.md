@@ -134,6 +134,14 @@ path-only fallback. It compares the five original upload references with
 the provider's path-only input in memory and records the match and count.
 The fallback expects zero image writes.
 
+The nine scenarios include idle JPEG and follow-up PNG. The follow-up PNG
+shares its send with a text file and a conversation selected through the
+`@@` picker. The Host grant request names only the uploaded PNG, and its
+single grant matches the image bytes. The pipe observer checks that the
+same native frame carries the original file path and the formatted conversation
+row. Reference comparisons stay in memory and the reports record counts and
+match booleans.
+
 For Stop, the suite holds the image ACK, clears the draft to reveal the
 composer's Stop button, and stops the original turn. Host must report idle
 with the provider response still held. The runner then releases the image

@@ -4,6 +4,7 @@ export function observeRenderer() {
   const fixture = (window.__runningImageFixture = {
     uploads: [],
     uploadRefs: [],
+    mixedGrants: [],
     sawPreparing: false,
     uploadStatuses: [],
     acknowledgments: [],
@@ -85,12 +86,27 @@ export function observeRenderer() {
         '_aelix/session/input/follow-up': 'follow-up',
       }[envelope.method];
     }
+    let mixedGrant;
+    if (kind === 'grant' && fixture.expectedGrantPath) {
+      mixedGrant = { requestedPngOnly: false, images: null };
+      fixture.mixedGrants.push(mixedGrant);
+      try {
+        const { refs } = JSON.parse(options.body);
+        mixedGrant.requestedPngOnly =
+          refs.length === 1 && refs[0].kind === 'upload' && refs[0].path === fixture.expectedGrantPath;
+      } catch {
+        // Count malformed requests as issued and let the real fetch proceed.
+      }
+    }
     const response = await fetch(...args);
     if (kind) {
       const body = await response
         .clone()
         .json()
         .catch(() => undefined);
+      if (mixedGrant && response.ok && body?.success === true && Array.isArray(body.data?.grants)) {
+        mixedGrant.images = body.data.grants.map((grant) => ({ bytes: grant?.byteLength, sha256: grant?.sha256 }));
+      }
       fixture.acknowledgments.push({
         kind,
         status: response.status,
@@ -137,17 +153,19 @@ export async function attach(page, paths, expectedUploads, stage) {
   await page.waitForFunction((count) => window.__runningImageFixture.uploads.length === count, expectedUploads);
 }
 
-export async function clickTimed(page, button) {
-  await button.evaluate((element) => {
-    window.__runningImageFixture.clickTime = null;
+export async function clickTimed(page, button, expectedGrantPath) {
+  await button.evaluate((element, grantPath) => {
+    const fixture = window.__runningImageFixture;
+    fixture.clickTime = null;
     element.addEventListener(
       'click',
       () => {
-        window.__runningImageFixture.clickTime = performance.now();
+        fixture.clickTime = performance.now();
+        fixture.expectedGrantPath = grantPath;
       },
       { capture: true, once: true }
     );
-  });
+  }, expectedGrantPath);
   await button.click();
   const start = await page.evaluate(() => window.__runningImageFixture.clickTime);
   if (!Number.isFinite(start)) throw new Error('Click timestamp missing');
