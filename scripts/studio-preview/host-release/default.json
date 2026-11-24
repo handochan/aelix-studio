@@ -1,29 +1,29 @@
 {
   "repository": "handochan/aelix-studio-host",
-  "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-  "tree": "60f0526a2792b846119b49a767cc865cc612c2bc",
+  "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+  "tree": "9a536617b9b2f558d032932ea712164edc289b5b",
   "upstream": {
     "repository": "iOfficeAI/AionCore",
     "tag": "v0.2.2",
     "commit": "47e66d0d151123e973b3fd1e77afcb5671b3f8c5",
-    "commitsSinceUpstream": 171
+    "commitsSinceUpstream": 180
   },
   "rustToolchain": "1.95.0",
-  "cargoLockSha256": "d7fd693a97aa903ad3f31211c2d1ad1b487390d052ff246850ec8ea31e1f6c57",
+  "cargoLockSha256": "5e6ead348bf447cca2bc7ba988f4106a92af762f8c23509cec51e85e124422bb",
   "licenseSha256": "a515d5a76da6c082f0d3d33a597bf82e32ecdac8841ed1783ac081ebd6d62ebf",
-  "noticeSha256": "71a13b8d813f6a81805972b796141aaeccde761b71afc06b56672cd276113c3f",
+  "noticeSha256": "158080aa23449dd5a259f2d254e1ab18d4ad3e250c54b40e656b7e8a596dade3",
   "schema": "aelix-studio.host-release/1",
-  "tag": "host-v0.2.2-aelix.9",
-  "provenanceFile": "aelix-studio-host-0.2.2-aelix.9-provenance.json",
-  "provenanceSha256": "e600a51143aeae9a484da7585b2419cb924bdfb03f25dc76fe085ea8ef7eddbe",
+  "tag": "host-v0.2.2-aelix.10",
+  "provenanceFile": "aelix-studio-host-0.2.2-aelix.10-provenance.json",
+  "provenanceSha256": "b3f3b7767804676ff151500f1aed40cacaa9ca7afbce54363aa55ec76e05a4bb",
   "targets": {
     "darwin-arm64": {
       "rustTarget": "aarch64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.9-aarch64-apple-darwin.tar.gz",
-      "archiveSha256": "14d6a5f5b377571f636fedc03b5ae39ffc5e9a5270924c0ef7f0bec5e05ecdad",
+      "archive": "aelix-studio-host-0.2.2-aelix.10-aarch64-apple-darwin.tar.gz",
+      "archiveSha256": "210475bff7044d366666a39ed475e819375547ea38536d85635e301b37bd14fd",
       "binary": "aelix-studio-host",
-      "binarySha256": "1988b017e8b6013e57b622fadd7da69538035d7dc4f5561dc59e48f4e23b454f",
-      "binaryCodeSha256": "e65074190d5dab93237f46fe73acfb9aa53c3b8d813ce283094256ec83a99909",
+      "binarySha256": "bf1dcff966e51da551a169c63f576a30daaad276afbf43f6ce699a3806470dd2",
+      "binaryCodeSha256": "8c0486580ebf6e7e6d354840725ab77795d58d2f85741e2f9ba06a270e1378c4",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -171,10 +171,10 @@
         "errorDiagnostics": 0,
         "exitCode": 0,
         "files": {
-          "THIRD-PARTY-NOTICES.txt": "9514c0000d5f23db56fb43c51f445c0812454edf2129ae84cab57dc982769d2c",
-          "third-party-licenses.json": "6867b8f7262a52afcd7dc6813ea24cd5838f9e7f0f0be1f080d5f2fbe7408644"
+          "THIRD-PARTY-NOTICES.txt": "542c81e26892fd9a667ebdb0a612bf9786953b1b40cc6162d771219797502c08",
+          "third-party-licenses.json": "fe3357413506eaf72d1d6e1122f2e69be5a162b420cafbf280b1123629a3b3d9"
         },
-        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "generatorSha256": "7caedc66cef3806b413b31ee560c7171a45d7db1ba9f6547f5a8de5e174d6b02",
         "helperSha256": {
           "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
           "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
@@ -184,18 +184,18 @@
         "missingNotices": [],
         "nativePackageCount": 13,
         "policySha256": {
-          "license-sources.json": "c609f567d96208161021da0d951bbfc0ff0830549be6e184733f7b577af80854",
+          "license-sources.json": "d604608eba8a4b43d600e2c3f1d499c6a4f34706cc25f8f8a83d6546ba83d30f",
           "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
           "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
         },
-        "rawResultSha256": "2e5e45d27df6a502044c0db55930df54d966304f6c030e6f452a1def9966c635",
+        "rawResultSha256": "f30b43ce13dde6513d1583a26ab717722b75532e9832750c6031ca9c548ea37a",
         "rustTarget": "aarch64-apple-darwin",
         "sourceRelease": {
-          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/README.md#rebuilding-with-modified-lgpl-sources",
-          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/Cargo.lock",
-          "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-          "label": "host-v0.2.2-aelix.9",
-          "releaseTag": "host-v0.2.2-aelix.9",
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/Cargo.lock",
+          "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+          "label": "host-v0.2.2-aelix.10",
+          "releaseTag": "host-v0.2.2-aelix.10",
           "repository": "https://github.com/handochan/aelix-studio-host",
           "sourceAsset": {
             "crate": "libgit2-sys",
@@ -204,7 +204,7 @@
             "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
             "version": "0.18.4+1.9.3"
           },
-          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.9"
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.10"
         },
         "status": "passed",
         "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -244,11 +244,11 @@
     },
     "darwin-x64": {
       "rustTarget": "x86_64-apple-darwin",
-      "archive": "aelix-studio-host-0.2.2-aelix.9-x86_64-apple-darwin.tar.gz",
-      "archiveSha256": "13e14ec5de6b64b677ef6bace52dc7b8cd9c2b57ae744143e6aa87c20237834c",
+      "archive": "aelix-studio-host-0.2.2-aelix.10-x86_64-apple-darwin.tar.gz",
+      "archiveSha256": "a81be1192cfe6525dc9ed6cd35706f2cc81151b7377e4f60641a9994dd2f01e2",
       "binary": "aelix-studio-host",
-      "binarySha256": "0dc77838127a6508883551563702620ae19aff3a347521cfbcfa20ebf903904e",
-      "binaryCodeSha256": "016b9ef130f83fc385f4235a0ab869589da249b2eed040abdde9bc8ed5258360",
+      "binarySha256": "335d63a322befe641dd9cdd63e6f7822d559d13d72c88b11ba0c2d8d82b3a492",
+      "binaryCodeSha256": "77f5d77e3080e7e672f3b3b186c5baac43daa8b374790aa984724fda23326242",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -396,10 +396,10 @@
         "errorDiagnostics": 0,
         "exitCode": 0,
         "files": {
-          "THIRD-PARTY-NOTICES.txt": "14ab9972c61593e147fab18a2f45d51aa34c05c759baff438d8d405285e31712",
-          "third-party-licenses.json": "639ffca3fb76cea972be46f99e6cfe813b9729a19670e6de0a3862e68acefcb3"
+          "THIRD-PARTY-NOTICES.txt": "88f98c371e198f82f6bf2a1ba6c4ba4513fd7c93aa26647c7374a41f9c6c3cf6",
+          "third-party-licenses.json": "7abe0f6b7f538b2edde293357b7319e11fbb5306d2948c43c7e22fc53d7d3d50"
         },
-        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "generatorSha256": "7caedc66cef3806b413b31ee560c7171a45d7db1ba9f6547f5a8de5e174d6b02",
         "helperSha256": {
           "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
           "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
@@ -409,18 +409,18 @@
         "missingNotices": [],
         "nativePackageCount": 13,
         "policySha256": {
-          "license-sources.json": "c609f567d96208161021da0d951bbfc0ff0830549be6e184733f7b577af80854",
+          "license-sources.json": "d604608eba8a4b43d600e2c3f1d499c6a4f34706cc25f8f8a83d6546ba83d30f",
           "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
           "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
         },
-        "rawResultSha256": "2e7461b441c7cf0a5d97f00b2b95e7339a46afac21e38b616dbad49dfc77181f",
+        "rawResultSha256": "83a25a794da1a630e39647aad7442876138523207454b547f17a10e4761f4629",
         "rustTarget": "x86_64-apple-darwin",
         "sourceRelease": {
-          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/README.md#rebuilding-with-modified-lgpl-sources",
-          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/Cargo.lock",
-          "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-          "label": "host-v0.2.2-aelix.9",
-          "releaseTag": "host-v0.2.2-aelix.9",
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/Cargo.lock",
+          "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+          "label": "host-v0.2.2-aelix.10",
+          "releaseTag": "host-v0.2.2-aelix.10",
           "repository": "https://github.com/handochan/aelix-studio-host",
           "sourceAsset": {
             "crate": "libgit2-sys",
@@ -429,7 +429,7 @@
             "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
             "version": "0.18.4+1.9.3"
           },
-          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.9"
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.10"
         },
         "status": "passed",
         "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -469,17 +469,17 @@
     },
     "linux-arm64": {
       "rustTarget": "aarch64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.9-aarch64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "b49cd5134652a681896a6d3f8d57e152f9b2ce803cbdb45981021ed0cd67017d",
+      "archive": "aelix-studio-host-0.2.2-aelix.10-aarch64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "fb3ff5576e15d7ff835402346d743f9bfbbe5a526d7a5f08231bf75472992e9a",
       "binary": "aelix-studio-host",
-      "binarySha256": "c4a432d3755812725a2f4f788f243c80c77e5e31e204bfe34b8e1e4ac9c79c27",
-      "binaryCodeSha256": "c4a432d3755812725a2f4f788f243c80c77e5e31e204bfe34b8e1e4ac9c79c27",
+      "binarySha256": "7f91953251437e49bbc7b336fb51e4c590fa81130f3666ec8b46acd47938911e",
+      "binaryCodeSha256": "7f91953251437e49bbc7b336fb51e4c590fa81130f3666ec8b46acd47938911e",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:9fdf39a22da8858b751e540f5ce86fc9a6e5d2a6687ce380ee8f043f501d4314",
+        "imageId": "sha256:06c091984b8d4ccd6c50f21b6253a68db9650eb9456c4466e48faf3a8b3b258a",
         "platform": "linux/arm64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
@@ -626,10 +626,10 @@
         "errorDiagnostics": 0,
         "exitCode": 0,
         "files": {
-          "THIRD-PARTY-NOTICES.txt": "c03079d320104584ac0b46167dddb49462e56b1802045e013b5e4802938517fb",
-          "third-party-licenses.json": "d5bc24f550eee81092df0fa4e110fcfeb3b4b150d60d4f504ab4b1ced4ec2e4f"
+          "THIRD-PARTY-NOTICES.txt": "ac144564a9b630829178cdbe3bbdfcb84bba6390083db9beb08f622016dc8cb2",
+          "third-party-licenses.json": "561a6bccbbf66ed98a5f896c0e5fd8c618331740c15c872c1a1ce0b39faa9140"
         },
-        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "generatorSha256": "7caedc66cef3806b413b31ee560c7171a45d7db1ba9f6547f5a8de5e174d6b02",
         "helperSha256": {
           "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
           "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
@@ -639,18 +639,18 @@
         "missingNotices": [],
         "nativePackageCount": 12,
         "policySha256": {
-          "license-sources.json": "c609f567d96208161021da0d951bbfc0ff0830549be6e184733f7b577af80854",
+          "license-sources.json": "d604608eba8a4b43d600e2c3f1d499c6a4f34706cc25f8f8a83d6546ba83d30f",
           "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
           "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
         },
-        "rawResultSha256": "ab4b9414cfd6e8445c30b932854828d7864de69be884776057b1b40ea9516112",
+        "rawResultSha256": "1e04063eee2f9c120f526fb4138448c3c15774994a2c623edf69a201a468dbfa",
         "rustTarget": "aarch64-unknown-linux-gnu",
         "sourceRelease": {
-          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/README.md#rebuilding-with-modified-lgpl-sources",
-          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/Cargo.lock",
-          "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-          "label": "host-v0.2.2-aelix.9",
-          "releaseTag": "host-v0.2.2-aelix.9",
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/Cargo.lock",
+          "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+          "label": "host-v0.2.2-aelix.10",
+          "releaseTag": "host-v0.2.2-aelix.10",
           "repository": "https://github.com/handochan/aelix-studio-host",
           "sourceAsset": {
             "crate": "libgit2-sys",
@@ -659,7 +659,7 @@
             "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
             "version": "0.18.4+1.9.3"
           },
-          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.9"
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.10"
         },
         "status": "passed",
         "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -699,17 +699,17 @@
     },
     "linux-x64": {
       "rustTarget": "x86_64-unknown-linux-gnu",
-      "archive": "aelix-studio-host-0.2.2-aelix.9-x86_64-unknown-linux-gnu.tar.gz",
-      "archiveSha256": "3c167df215accd23e9bf2ef3436abe65c580811d6ec12ead83342a7e10561ccc",
+      "archive": "aelix-studio-host-0.2.2-aelix.10-x86_64-unknown-linux-gnu.tar.gz",
+      "archiveSha256": "6c36399381dc42176e064a8331ee424fd186d2a027a221d962a0ef58d06339fb",
       "binary": "aelix-studio-host",
-      "binarySha256": "ab20f1d04800269c8b3812df6607d304fbe2b1eafcc97da3dd6e568b1d5d7281",
-      "binaryCodeSha256": "ab20f1d04800269c8b3812df6607d304fbe2b1eafcc97da3dd6e568b1d5d7281",
+      "binarySha256": "e0d7f703f67f51902914e871c7d221817209178cbe5ff652461b63041d72717e",
+      "binaryCodeSha256": "e0d7f703f67f51902914e871c7d221817209178cbe5ff652461b63041d72717e",
       "rustFlags": "",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-unknown-linux-gnu\nrelease: 1.95.0\nLLVM version: 22.1.2",
       "buildContainer": {
         "recipeSha256": "48000135672f1464b6fe0b6f21836b09a4d3f99ddfe43d9d52b157d435bfe2fd",
-        "imageId": "sha256:d34b3890a320ee438a68f0504ba9d9d439419edd1747ebf3bb1963dad319c08d",
+        "imageId": "sha256:5d188f88187b94deb8d8c6858b1daf2a68ea7bca40376dc87755b2d800d36d7d",
         "platform": "linux/amd64",
         "osRelease": "PRETTY_NAME=\"Debian GNU/Linux 11 (bullseye)\"\nNAME=\"Debian GNU/Linux\"\nVERSION_ID=\"11\"\nVERSION=\"11 (bullseye)\"\nVERSION_CODENAME=bullseye\nID=debian\nHOME_URL=\"https://www.debian.org/\"\nSUPPORT_URL=\"https://www.debian.org/support\"\nBUG_REPORT_URL=\"https://bugs.debian.org/\""
       },
@@ -856,10 +856,10 @@
         "errorDiagnostics": 0,
         "exitCode": 0,
         "files": {
-          "THIRD-PARTY-NOTICES.txt": "e005f093a29f80cfe513c0d9346d9368838ba08c6ada5b5b110950e539b7afa7",
-          "third-party-licenses.json": "fc1005306e057772d3eb5b4637fe8faf68747e30b37fc828d172f2bb89e45219"
+          "THIRD-PARTY-NOTICES.txt": "8cbf21f13cff78f0d07a019a687e62d92b4a64f95560d52677c055a721111f8a",
+          "third-party-licenses.json": "f5ca5fd1fbcd8d149655df1757295a814be6be20e69255c6a161b7ea7860d4f7"
         },
-        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "generatorSha256": "7caedc66cef3806b413b31ee560c7171a45d7db1ba9f6547f5a8de5e174d6b02",
         "helperSha256": {
           "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
           "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
@@ -869,18 +869,18 @@
         "missingNotices": [],
         "nativePackageCount": 12,
         "policySha256": {
-          "license-sources.json": "c609f567d96208161021da0d951bbfc0ff0830549be6e184733f7b577af80854",
+          "license-sources.json": "d604608eba8a4b43d600e2c3f1d499c6a4f34706cc25f8f8a83d6546ba83d30f",
           "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
           "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
         },
-        "rawResultSha256": "4b2f07a0b45be528ade92a4e1f08618e55c5e003cdc8d03e7354e3d448468f99",
+        "rawResultSha256": "01df3a0b032f7e47444c63d8d2dd5471ecd3b928efa59be23dba52103911f505",
         "rustTarget": "x86_64-unknown-linux-gnu",
         "sourceRelease": {
-          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/README.md#rebuilding-with-modified-lgpl-sources",
-          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/Cargo.lock",
-          "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-          "label": "host-v0.2.2-aelix.9",
-          "releaseTag": "host-v0.2.2-aelix.9",
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/Cargo.lock",
+          "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+          "label": "host-v0.2.2-aelix.10",
+          "releaseTag": "host-v0.2.2-aelix.10",
           "repository": "https://github.com/handochan/aelix-studio-host",
           "sourceAsset": {
             "crate": "libgit2-sys",
@@ -889,7 +889,7 @@
             "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
             "version": "0.18.4+1.9.3"
           },
-          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.9"
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.10"
         },
         "status": "passed",
         "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
@@ -929,11 +929,11 @@
     },
     "win32-x64": {
       "rustTarget": "x86_64-pc-windows-msvc",
-      "archive": "aelix-studio-host-0.2.2-aelix.9-x86_64-pc-windows-msvc.zip",
-      "archiveSha256": "c378a9d582c76ded85c2f97dc706a46143afa96401cd5157303cb8e74da660f1",
+      "archive": "aelix-studio-host-0.2.2-aelix.10-x86_64-pc-windows-msvc.zip",
+      "archiveSha256": "09783b431fa6bc81e0ffd841455e6f505a5729c8190c5364a625fe57b2deca3b",
       "binary": "aelix-studio-host.exe",
-      "binarySha256": "6ae692069d26246dcd19b52dd926d8b27b78bb80b5fe11df1aa168b8a2b8d14e",
-      "binaryCodeSha256": "6ae692069d26246dcd19b52dd926d8b27b78bb80b5fe11df1aa168b8a2b8d14e",
+      "binarySha256": "444ebc54cb809cd03c832ba8a961665e1b66051f43a0dbc8deb585754faa4560",
+      "binaryCodeSha256": "444ebc54cb809cd03c832ba8a961665e1b66051f43a0dbc8deb585754faa4560",
       "rustFlags": "-C target-feature=+crt-static",
       "cargoVersion": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)",
       "rustcVersionVerbose": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: x86_64-pc-windows-msvc\nrelease: 1.95.0\nLLVM version: 22.1.2",
@@ -1081,10 +1081,10 @@
         "errorDiagnostics": 0,
         "exitCode": 0,
         "files": {
-          "THIRD-PARTY-NOTICES.txt": "f3ad8373f6613821c815b57c3d18ba43aa74c00d4882d98535b0b3b2de97753f",
-          "third-party-licenses.json": "068cab8e71cc9bf293d92fa02163645891ea1a47635c5f3ef72bdc5620ced4d5"
+          "THIRD-PARTY-NOTICES.txt": "b4f6ce4e10d5eb30d430fcffe7ed470dc630168d6e05ab76aa19777f87b83116",
+          "third-party-licenses.json": "c3ce536a2b40d5faea11fcf35a1d121e4c5bed9c97f29762a76ae5dbd054af6a"
         },
-        "generatorSha256": "687e539c2ef74ec8d1758bb6e7db0e3ebe61ee97ee69135e02988d3d0e17599c",
+        "generatorSha256": "7caedc66cef3806b413b31ee560c7171a45d7db1ba9f6547f5a8de5e174d6b02",
         "helperSha256": {
           "lgpl_notice.py": "333d36d1126490451edea3837277df8e62551d6fed7cd0b46e8e6b46a79538dd",
           "license_policy.py": "ceeb4d8c25f604cebc5adf4c5fbb3e07a33806a3395c67b420ba4b72b5c11753",
@@ -1094,18 +1094,18 @@
         "missingNotices": [],
         "nativePackageCount": 15,
         "policySha256": {
-          "license-sources.json": "c609f567d96208161021da0d951bbfc0ff0830549be6e184733f7b577af80854",
+          "license-sources.json": "d604608eba8a4b43d600e2c3f1d499c6a4f34706cc25f8f8a83d6546ba83d30f",
           "license-tools.json": "cb453eabb29c7ff0465fd8e26d139268ecbc9b1188e51c9b794c9672da41a59b",
           "native-sources.json": "4b63d746a913bdb3bf836c78af95c773911312d87d530c14d8b471c0568b1f8a"
         },
-        "rawResultSha256": "8c3f855e9d1bdb94cb347b5b5ebca2ad153b760a509a360caaf1a4efdaee578a",
+        "rawResultSha256": "07775ee8e90ec17b2f47bfc4b1bcb999595d7f2485cdaf8b7a2a62cb5c45fc12",
         "rustTarget": "x86_64-pc-windows-msvc",
         "sourceRelease": {
-          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/README.md#rebuilding-with-modified-lgpl-sources",
-          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.9/Cargo.lock",
-          "commit": "40ff80a4ae6cabe07e3d45043c92cbb60d2c7875",
-          "label": "host-v0.2.2-aelix.9",
-          "releaseTag": "host-v0.2.2-aelix.9",
+          "buildUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/README.md#rebuilding-with-modified-lgpl-sources",
+          "cargoLockUrl": "https://github.com/handochan/aelix-studio-host/blob/host-v0.2.2-aelix.10/Cargo.lock",
+          "commit": "11fa314ca3cf7a24c5ff566a4e65a24b2d8049e2",
+          "label": "host-v0.2.2-aelix.10",
+          "releaseTag": "host-v0.2.2-aelix.10",
           "repository": "https://github.com/handochan/aelix-studio-host",
           "sourceAsset": {
             "crate": "libgit2-sys",
@@ -1114,7 +1114,7 @@
             "url": "https://static.crates.io/crates/libgit2-sys/libgit2-sys-0.18.4+1.9.3.crate",
             "version": "0.18.4+1.9.3"
           },
-          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.9"
+          "sourceUrl": "https://github.com/handochan/aelix-studio-host/tree/host-v0.2.2-aelix.10"
         },
         "status": "passed",
         "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
