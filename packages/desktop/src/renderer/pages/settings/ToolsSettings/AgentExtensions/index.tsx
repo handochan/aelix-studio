@@ -312,6 +312,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         onOk={() => open.insecure?.answer(true)}
         onCancel={() => open.insecure?.answer(false)}
         data-testid='agent-extensions-insecure-confirm'
+        data-open={open.insecure !== undefined}
       >
         {t('settings.agentExtensions.insecure.body')}
       </Modal>
