@@ -125,31 +125,50 @@ class RecaptureTests(unittest.TestCase):
         self.audit_stdout = output.getvalue()
         return code, json.loads(path.read_text()), run.call_count
 
-    def incomplete(self, **fields):
-        return dict(outcome='evidence_incomplete', externalAttempts=29, unparsedRecords=2,
-                    classificationIssues=[{'reason':'unknown_record'}, {'reason':'kernel_network_strace_entry_missing'}],
-                    externalOperationDiagnostics=[dict(syscall='connect',straceSocketKind='udp',
-                        udpWriteAssociations=[]) for _ in range(29)],
-                    commandStarted=True, commandExitCode=0, **fields)
-
     KERNEL_RAW = ('READY\nROOT|1|100|100|10|1\nSTATE|5|1|1|0|0\n'
                   'T|5|100|100|10|10|1|0|0|0\nOBJECTS|1\nDONE\n'
                   '@root_count: 1\n@state_count: 1\n@born_count: 1\n@dead_count: 1\n'
                   '@task_count: 1\n@udp_task_exit_enter: 1\n@udp_task_exit_return: 1\n')
 
-    def kernel_loss(self):
+    STRACE_HOLES = (
+        ('classificationIssues', 'unknown_record'),
+        ('classificationIssues', 'kernel_network_strace_entry_missing'),
+        ('classificationIssues', 'unknown_fork_result'),
+        ('unparsedRecordKinds', 'register_stub'),
+        ('unparsedRecordKinds', 'result:close'),
+    )
+
+    def incomplete(self):
         from uring.capture import parse
         capture = parse(self.KERNEL_RAW, '', 0, 1)
         self.assertTrue(capture['complete'])
-        # The real ip_local_out failure occurred after a complete, drained parse.
-        capture.update(complete=False, status='failed', reason='kernel_bpf_program_recursion_lost',
-            programLoss={'stage':'after-detach','programs':[{'prog_type':26,'programName':'ip_local_out','recursion_misses':1}]})
+        return dict(outcome='evidence_incomplete', externalAttempts=0, unparsedRecords=0,
+                    classificationIssues=[], externalOperationDiagnostics=[],
+                    processes=[{'pid':10,'unparsedRecords':0,'unparsedRecordKinds':{}}],
+                    ioUring={'capture':capture}, observedRejectedOpcodes=[],
+                    commandStarted=True, commandExitCode=0)
+
+    def add_hole(self, report, field, hole):
+        report['unparsedRecords'] += 1
+        if field == 'classificationIssues':
+            report[field].append({'reason':hole})
+        else:
+            process = report['processes'][0]
+            process['unparsedRecords'] += 1
+            process[field][hole] = 1
+
+    def strace_gap(self):
         report = self.incomplete()
-        report.update(externalAttempts=0, externalOperationDiagnostics=[], unparsedRecords=3,
-            classificationIssues=[{'reason':reason} for reason in ('io_uring_kernel_capture_incomplete',
-                'udp_socket_capture_incomplete','kernel_network_capture_incomplete')],
-            processes=[{'pid':10,'unparsedRecords':0,'unparsedRecordKinds':{}}],
-            ioUring={'capture':capture}, observedRejectedOpcodes=[])
+        self.add_hole(report, 'unparsedRecordKinds', 'result:close')
+        return report
+
+    def kernel_loss(self):
+        report = self.incomplete()
+        # The real ip_local_out failure occurred after a complete, drained parse.
+        report['ioUring']['capture'].update(complete=False, status='failed', reason='kernel_bpf_program_recursion_lost',
+            programLoss={'stage':'after-detach','programs':[{'prog_type':26,'programName':'ip_local_out','recursion_misses':1}]})
+        for reason in ('io_uring_kernel_capture_incomplete', 'udp_socket_capture_incomplete', 'kernel_network_capture_incomplete'):
+            self.add_hole(report, 'classificationIssues', reason)
         return report
 
     def assert_no_recapture(self, report):
@@ -160,9 +179,13 @@ class RecaptureTests(unittest.TestCase):
 
     def test_real_bpf_loss_without_record_holes_can_recapture_and_keeps_warning(self):
         with tempfile.TemporaryDirectory() as directory:
-            code,report,count = self.run_attempts(Path(directory), [(87,self.kernel_loss()),
+            measurement = self.kernel_loss()
+            measurement.update(externalAttempts=1, externalOperationDiagnostics=[
+                dict(syscall='connect', straceSocketKind='udp', udpWriteAssociations=[])])
+            code,report,count = self.run_attempts(Path(directory), [(87,measurement),
                 (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
         self.assertEqual((code,count,report['recaptures']),(0,2,1))
+        self.assertEqual(report['captureAttempts'][0]['externalAttempts'],1)
         # The producer still emits the real annotation; this test captures it.
         self.assertIn('::warning title=Outbound audit recapture::', self.audit_stdout)
 
@@ -173,12 +196,11 @@ class RecaptureTests(unittest.TestCase):
     def test_unparsed_accounting_must_match_process_and_report_totals(self):
         for mismatch in ('process','report'):
             with self.subTest(mismatch=mismatch):
-                report=self.incomplete()
-                report['ioUring']={'capture':{'complete':True,'recordErrors':[]}}
-                if mismatch=='process':
-                    report['processes']=[{'unparsedRecords':1,'unparsedRecordKinds':{'register_stub':2}}]
-                    report['unparsedRecords']=4
-                else:report['unparsedRecords']=3
+                report = self.strace_gap()
+                if mismatch == 'process':
+                    report['processes'][0]['unparsedRecords'] += 1
+                else:
+                    report['unparsedRecords'] += 1
                 self.assert_no_recapture(report)
 
     def test_kernel_reason_namespace_and_diagnostics_must_allow_recapture(self):
@@ -203,10 +225,7 @@ class RecaptureTests(unittest.TestCase):
                 self.assert_no_recapture(report)
 
     def test_incomplete_report_without_any_reason_is_not_recaptured(self):
-        report=self.incomplete()
-        report.update(externalAttempts=0,externalOperationDiagnostics=[],unparsedRecords=0,
-            classificationIssues=[],processes=[],ioUring={'capture':{'complete':True,'recordErrors':[]}})
-        self.assert_no_recapture(report)
+        self.assert_no_recapture(self.incomplete())
 
     def test_actual_perf_loss_parser_shape_is_not_recaptured(self):
         from uring.capture import parse
@@ -219,27 +238,40 @@ class RecaptureTests(unittest.TestCase):
         self.assert_no_recapture(report)
 
     def test_incomplete_kernel_with_any_record_hole_fails_first_capture(self):
-        for hole in ('register_stub','unknown_record','kernel_network_strace_entry_missing'):
+        for field, hole in self.STRACE_HOLES:
             with self.subTest(hole=hole):
-                report=self.kernel_loss()
-                report['unparsedRecords']+=1
-                if hole=='register_stub':
-                    report['processes'][0].update(unparsedRecords=1,unparsedRecordKinds={'register_stub':1})
-                else:report['classificationIssues'].append({'reason':hole})
+                report = self.kernel_loss()
+                self.add_hole(report, field, hole)
                 self.assert_no_recapture(report)
 
-    def test_complete_kernel_keeps_record_hole_recapture(self):
-        from uring.capture import parse
-        for hole in ('register_stub','unknown_record','kernel_network_strace_entry_missing'):
+    def test_complete_kernel_can_recapture_each_allowed_strace_gap(self):
+        for field, hole in self.STRACE_HOLES:
             with self.subTest(hole=hole), tempfile.TemporaryDirectory() as directory:
-                report=self.kernel_loss();report['ioUring']['capture']=parse(self.KERNEL_RAW,'',0,1)
-                report.update(unparsedRecords=1,classificationIssues=[])
-                if hole=='register_stub':
-                    report['processes'][0].update(unparsedRecords=1,unparsedRecordKinds={'register_stub':1})
-                else:report['classificationIssues']=[{'reason':hole}]
-                code,_,count=self.run_attempts(Path(directory),[(87,report),
+                report = self.incomplete()
+                self.add_hole(report, field, hole)
+                code, _, count = self.run_attempts(Path(directory), [(87,report),
                     (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
                 self.assertEqual((code,count),(0,2))
+
+    def test_strace_gap_requires_complete_kernel_proof(self):
+        for fields in (
+            {'complete':False}, {'drained':False}, {'lostEvents':1}, {'pidNamespaceVerified':False},
+            {'programLoss':{'stage':'after-detach','programs':[{'recursion_misses':1}]}},
+            {'recordErrors':[{'reason':'kernel_bpf_program_recursion_lost'}]},
+        ):
+            with self.subTest(fields=fields):
+                report = self.strace_gap()
+                report['ioUring']['capture'].update(fields)
+                self.assert_no_recapture(report)
+        report = self.strace_gap()
+        report.pop('ioUring')
+        self.assert_no_recapture(report)
+
+    def test_strace_gap_with_external_attempt_fails_even_if_udp_is_provisional(self):
+        report = self.strace_gap()
+        report.update(externalAttempts=1, externalOperationDiagnostics=[
+            dict(syscall='connect', straceSocketKind='udp', udpWriteAssociations=[])])
+        self.assert_no_recapture(report)
 
     def test_observed_or_undecodable_network_operations_never_replay(self):
         cases = [
@@ -259,30 +291,19 @@ class RecaptureTests(unittest.TestCase):
                 code,_,count=self.run_attempts(root,[(87,measured)])
                 self.assertEqual((code,count),(87,1))
 
-    def test_mixed_allowed_gap_and_unlisted_issue_cannot_replay(self):
-        with tempfile.TemporaryDirectory() as directory:
-            measured=self.incomplete()
-            measured['classificationIssues'].append({'reason':'unsupported_external_accept'})
-            measured['unparsedRecords']+=1
-            code,_,count=self.run_attempts(Path(directory),[(87,measured)])
-            self.assertEqual((code,count),(87,1))
-
-    def test_two_incomplete_measurements_fail_after_exactly_one_recapture(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            code, report, calls=self.run_attempts(root, [(87,self.incomplete()), (87,self.incomplete())])
-            self.assertEqual((code,calls,report['recaptures']), (87,2,1))
-            self.assertEqual(report['externalAttempts'],29)
-            self.assertEqual(len(list(root.glob('audit.capture-*.json'))),2)
-
-    def test_complete_recapture_retains_first_incomplete_counts(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root=Path(directory)
-            code, report, calls=self.run_attempts(root, [(87,self.incomplete()),
-                (0,dict(outcome='passed',externalAttempts=0,unparsedRecords=0))])
-            self.assertEqual((code,calls), (0,2))
-            self.assertEqual(report['captureAttempts'][0]['externalAttempts'],29)
-            self.assertEqual(json.loads((root/'audit.capture-1.json').read_text())['unparsedRecords'],2)
+    def test_strace_gap_with_unlisted_unknown_fails_first_capture(self):
+        for field, reason in (
+            ('classificationIssues', 'unknown_syscall'),
+            ('classificationIssues', 'unknown_unfinished_syscall'),
+            ('classificationIssues', 'unknown_exec_result'),
+            ('classificationIssues', 'missing_terminal_record'),
+            ('classificationIssues', 'unsupported_external_accept'),
+            ('unparsedRecordKinds', 'result:connect'),
+        ):
+            with self.subTest(reason=reason):
+                report = self.strace_gap()
+                self.add_hole(report, field, reason)
+                self.assert_no_recapture(report)
 
     def test_complete_external_attempt_is_not_retried_or_erased(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -292,16 +313,16 @@ class RecaptureTests(unittest.TestCase):
 
     def test_external_attempt_in_second_capture_still_fails(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, report, calls=self.run_attempts(Path(directory), [(87,self.incomplete()),
+            code, report, calls=self.run_attempts(Path(directory), [(87,self.strace_gap()),
                 (86,dict(outcome='external_attempts',externalAttempts=2,unparsedRecords=0))])
             self.assertEqual((code,calls,report['recaptures']), (86,2,1))
 
     def test_functional_failure_and_known_forbidden_operation_cannot_be_hidden(self):
-        for change in (dict(commandExitCode=1), dict(classificationIssues=[{'reason':'io_uring_opcode_not_allowed'}])):
-            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
-                measurement=self.incomplete();measurement.update(change)
-                code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
-                self.assertEqual((code,calls), (87,1))
+        for change in (dict(commandExitCode=1), dict(observedRejectedOpcodes=[16])):
+            with self.subTest(change=change):
+                report = self.strace_gap()
+                report.update(change)
+                self.assert_no_recapture(report)
 
     def test_configuration_refusal_is_not_recaptured(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -310,24 +331,24 @@ class RecaptureTests(unittest.TestCase):
 
     def test_one_shot_negative_control_still_fails_on_first_incomplete_capture(self):
         with tempfile.TemporaryDirectory() as directory:
-            code, report, calls=self.run_attempts(Path(directory), [(87,self.incomplete())],recapture=False)
+            code, report, calls=self.run_attempts(Path(directory), [(87,self.strace_gap())],recapture=False)
             self.assertEqual((code,calls,report['recaptures']), (87,1,0))
 
-    def test_incomplete_capture_cannot_erase_known_tcp_or_udp_writes(self):
+    def test_kernel_loss_cannot_erase_known_tcp_or_udp_writes(self):
         for change in (dict(syscall='sendto'), dict(straceSocketKind='tcp'),
                        dict(udpWriteAssociations=[{'syscall':'write'}]),
                        dict(kernel={'socketHooks':['tcp_v6_connect']})):
-            with self.subTest(change=change), tempfile.TemporaryDirectory() as directory:
-                measurement=self.incomplete()
-                measurement['externalOperationDiagnostics'][0].update(change)
-                code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
-                self.assertEqual((code,calls), (87,1))
+            with self.subTest(change=change):
+                report = self.kernel_loss()
+                diagnostic = dict(syscall='connect', straceSocketKind='udp', udpWriteAssociations=[])
+                diagnostic.update(change)
+                report.update(externalAttempts=1, externalOperationDiagnostics=[diagnostic])
+                self.assert_no_recapture(report)
 
-    def test_incomplete_capture_without_destination_diagnostics_is_not_retried(self):
-        with tempfile.TemporaryDirectory() as directory:
-            measurement=self.incomplete();measurement['externalOperationDiagnostics']=[]
-            code, _, calls=self.run_attempts(Path(directory), [(87,measurement)])
-            self.assertEqual((code,calls), (87,1))
+    def test_kernel_loss_without_destination_diagnostics_is_not_retried(self):
+        report = self.kernel_loss()
+        report['externalAttempts'] = 1
+        self.assert_no_recapture(report)
 
 
 @unittest.skipUnless(hasattr(audit.signal,'setitimer'),'POSIX capture deadline required')
@@ -466,14 +487,27 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
         self.assertEqual(report['taskEvidenceStatus'], status)
         self.assertNotIn('taskEvidence', report)
 
-    def test_unresolved_clone_restart_fails_the_audit_without_recapture(self):
+    def test_close_and_fork_holes_recapture_once_and_keep_both_reports(self):
+        gaps = ['close(7) = ?', CLONE_RESTART]
         for scoped in (False, True):
-            with self.subTest(scoped=scoped):
-                self.assertEqual(self.audit_traces([[CLONE_RESTART]], scoped=scoped), (87, 1))
-                report = self.read()
-                self.assertEqual(report['cloneRestartResults'], 1)
-                self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
-                              report['classificationIssues'])
+            for second_has_gap in (False, True):
+                with self.subTest(scoped=scoped, second_has_gap=second_has_gap):
+                    expected = 87 if second_has_gap else 0
+                    second = [CLONE_RESTART] if second_has_gap else []
+                    self.assertEqual(self.audit_traces([gaps, second], scoped=scoped), (expected, 2))
+                    report = self.read()
+                    self.assertEqual(report['recaptures'], 1)
+                    self.assertEqual([entry['exitCode'] for entry in report['captureAttempts']], [87, expected])
+                    self.assertEqual(report['evidenceComplete'], not second_has_gap)
+                    for stem in ('audit', 'whole') if scoped else ('audit',):
+                        first = self.read(self.root / f'{stem}.capture-1.json')
+                        final = self.read(self.root / f'{stem}.capture-2.json')
+                        self.assertEqual(first['processes'][0]['unparsedRecordKinds'], {'result:close':1})
+                        self.assertEqual(first['classificationIssues'],
+                                         [dict(reason='unknown_fork_result', pid=1, syscall='clone')])
+                        self.assertEqual((first['externalAttempts'], first['unparsedRecords']), (0, 2))
+                        self.assertEqual((final['externalAttempts'], final['unparsedRecords']),
+                                         (0, 1 if second_has_gap else 0))
 
     def test_clone_restart_rejects_impossible_signal_exits(self):
         for signal in ('SIGBOGUS', 'SIGSTOP', 'SIGTSTP', 'SIGTTIN', 'SIGTTOU', 'SIGCONT',
@@ -481,7 +515,7 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                        'SIGKILL (core dumped)'):
             with self.subTest(signal=signal):
                 terminal = f'+++ killed by {signal} +++'
-                self.assertEqual(self.audit_traces([[CLONE_RESTART]], terminal=terminal), (87, 1))
+                self.assertEqual(self.audit_traces([[CLONE_RESTART]] * 2, terminal=terminal), (87, 2))
                 self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
                               self.read()['classificationIssues'])
 
@@ -496,7 +530,8 @@ class TaskEvidenceIsolationTests(unittest.TestCase):
                       '(errno 0)', '(errno 011)', '(errno 11)', '(errno 512)', '(errno 513)',
                       '(errno 514)', '(errno 516)', '(errno 4096)', '(errno 4095) = ?'):
             with self.subTest(error=error):
-                self.assertEqual(self.audit_traces([[CLONE_RESTART, f'{CLONE_CALL} = -1 {error}']]), (87, 1))
+                trace = [CLONE_RESTART, f'{CLONE_CALL} = -1 {error}']
+                self.assertEqual(self.audit_traces([trace, trace]), (87, 2))
                 self.assertIn(dict(reason='unknown_fork_result', pid=1, syscall='clone'),
                               self.read()['classificationIssues'])
 
