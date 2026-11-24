@@ -623,6 +623,13 @@
     "hintWithSessions": "/ 로 명령, @ 로 파일, @@ 로 대화 참조, ↑/↓ 로 기록"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "MCP 설정을 불러오지 못했습니다.",
+      "invalidConfiguration": "MCP 서버의 연결 설정이 올바르지 않습니다.",
+      "invalidConfigurationWithName": "MCP 서버 ‘{{serverName}}’의 연결 설정이 올바르지 않습니다.",
+      "runtimeUnavailable": "MCP 서버의 명령 또는 실행 환경을 준비하지 못했습니다.",
+      "runtimeUnavailableWithName": "MCP 서버 ‘{{serverName}}’의 명령 또는 실행 환경을 준비하지 못했습니다."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "이번 요청에서는 표시할 수 있는 응답이 없었습니다."

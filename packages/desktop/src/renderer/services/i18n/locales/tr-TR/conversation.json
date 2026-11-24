@@ -625,6 +625,13 @@
     "hintWithSessions": "Komutlar için /, dosyalar için @, sohbetler için @@, geçmiş için ↑/↓"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "MCP ayarları yüklenemedi.",
+      "invalidConfiguration": "Bir MCP sunucusunun bağlantı ayarları geçersiz.",
+      "invalidConfigurationWithName": "“{{serverName}}” adlı MCP sunucusunun bağlantı ayarları geçersiz.",
+      "runtimeUnavailable": "Bir MCP sunucusunun komutu veya çalışma ortamı hazırlanamadı.",
+      "runtimeUnavailableWithName": "“{{serverName}}” adlı MCP sunucusunun komutu veya çalışma ortamı hazırlanamadı."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Bu istek görünür bir yanıt üretmedi."

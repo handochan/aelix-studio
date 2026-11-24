@@ -623,6 +623,13 @@
     "hintWithSessions": "/ برای دستورات، @ برای فایل‌ها، @@ برای گفتگوها، ↑/↓ برای تاریخچه"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "بارگیری تنظیمات MCP ممکن نبود.",
+      "invalidConfiguration": "تنظیمات اتصال یکی از سرورهای MCP معتبر نیست.",
+      "invalidConfigurationWithName": "تنظیمات اتصال سرور MCP «{{serverName}}» معتبر نیست.",
+      "runtimeUnavailable": "آماده‌سازی فرمان یا محیط اجرای یکی از سرورهای MCP ممکن نبود.",
+      "runtimeUnavailableWithName": "آماده‌سازی فرمان یا محیط اجرای سرور MCP «{{serverName}}» ممکن نبود."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "این درخواست پاسخ قابل مشاهده‌ای تولید نکرد."

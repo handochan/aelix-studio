@@ -623,6 +623,13 @@
     "hintWithSessions": "/ pour les commandes, @ pour les fichiers, @@ pour les conversations, ↑/↓ pour l’historique"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "Impossible de charger les paramètres MCP.",
+      "invalidConfiguration": "Les paramètres de connexion d’un serveur MCP sont incorrects.",
+      "invalidConfigurationWithName": "Les paramètres de connexion du serveur MCP « {{serverName}} » sont incorrects.",
+      "runtimeUnavailable": "Impossible de préparer la commande ou l’environnement d’exécution d’un serveur MCP.",
+      "runtimeUnavailableWithName": "Impossible de préparer la commande ou l’environnement d’exécution du serveur MCP « {{serverName}} »."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Cette demande n'a produit aucune réponse visible."

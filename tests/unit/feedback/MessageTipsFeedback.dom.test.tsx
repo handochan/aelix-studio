@@ -8,11 +8,14 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { cleanup, render, screen } from '@testing-library/react';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
+import { cleanup, render as renderComponent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { createInstance } from 'i18next';
+import { I18nextProvider } from 'react-i18next';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import koConversation from '@renderer/services/i18n/locales/ko-KR/conversation.json';
 
 const enConversation = JSON.parse(
   readFileSync(
@@ -30,27 +33,20 @@ const i18nConfig = JSON.parse(
 
 const supportedLocaleNames = i18nConfig.supportedLanguages;
 
-const resolveKey = (key: string): unknown => {
-  const [module, ...parts] = key.split('.');
-  const locale = module === 'conversation' ? enConversation : module === 'acp' ? enAcp : undefined;
-  return parts.reduce<unknown>((current, part) => {
-    if (!current || typeof current !== 'object') return undefined;
-    return (current as Record<string, unknown>)[part];
-  }, locale);
-};
-
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({
-    t: (key: string, options?: { defaultValue?: string }) => {
-      const value = resolveKey(key);
-      const text = typeof value === 'string' ? value : (options?.defaultValue ?? key);
-      return text.replace(/{{(\w+)}}/g, (_match, name: string) =>
-        String((options as Record<string, unknown>)?.[name] ?? '')
-      );
+const i18n = createInstance();
+beforeAll(async () => {
+  await i18n.init({
+    lng: 'en-US',
+    fallbackLng: 'en-US',
+    resources: {
+      'en-US': { translation: { conversation: enConversation, acp: enAcp } },
+      'ko-KR': { translation: { conversation: koConversation } },
     },
-    i18n: { language: 'en' },
-  }),
-}));
+    interpolation: { escapeValue: false },
+  });
+});
+
+const render = (node: React.ReactNode) => renderComponent(<I18nextProvider i18n={i18n}>{node}</I18nextProvider>);
 
 const talkToButlerMock = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock('@/renderer/hooks/assistant/useTalkToButler', () => ({ useTalkToButler: () => talkToButlerMock }));
@@ -72,7 +68,8 @@ vi.mock('@renderer/components/Markdown', () => ({
 }));
 
 import MessageTips from '@/renderer/pages/conversation/Messages/components/MessageTips';
-import type { AgentStreamErrorInfo, IMessageTips, IResponseMessage } from '@/common/chat/chatLib';
+import { normalizeDbMessage } from '@/renderer/pages/conversation/Messages/hooks';
+import type { AgentStreamErrorInfo, IMessageTips } from '@/common/chat/chatLib';
 import { composeMessage, transformMessage } from '@/common/chat/chatLib';
 
 const requiredAgentErrorCodes = [
@@ -759,7 +756,7 @@ describe('live MCP warning replacement', () => {
           params: { server_id: server },
           supersedes_key: `mcp-unavailable:${server}`,
         },
-      } as unknown as IResponseMessage) as IMessageTips;
+      }) as IMessageTips;
     let list = composeMessage(notice('one', 'old reason'), []);
     list = composeMessage(notice('two', 'other reason'), list);
     list = composeMessage(notice('one', 'new reason'), list);
@@ -773,5 +770,100 @@ describe('live MCP warning replacement', () => {
     expect(screen.queryByText('one: old reason')).not.toBeInTheDocument();
     expect(screen.getByText('one: new reason')).toBeInTheDocument();
     expect(screen.getByText('two: other reason')).toBeInTheDocument();
+  });
+});
+
+const mcpWarning = (content: string, params?: IMessageTips['content']['params']): IMessageTips['content'] => ({
+  content,
+  type: 'warning',
+  code: 'MCP_SERVER_UNAVAILABLE',
+  ...(params ? { params } : {}),
+});
+
+describe.each(['live', 'history', 'serialized history'] as const)('MCP warning text from %s', (source) => {
+  beforeEach(async () => {
+    await i18n.changeLanguage('ko-KR');
+  });
+
+  afterEach(async () => {
+    cleanup();
+    await i18n.changeLanguage('en-US');
+  });
+
+  const renderWarning = (tip: IMessageTips['content']) => {
+    const metadata = { type: 'tips' as const, conversation_id: 'conversation-1', msg_id: 'tip-1' };
+    // The realtime bridge removes the message.stream envelope before transformation.
+    const message =
+      source === 'live'
+        ? transformMessage({ ...metadata, data: tip })
+        : normalizeDbMessage({
+            ...metadata,
+            id: 'tip-1',
+            content: source === 'history' ? tip : JSON.stringify(tip),
+          } as IMessageTips);
+    if (message?.type !== 'tips') throw new Error('Expected an MCP warning tip');
+    return render(<MessageTips message={message} />);
+  };
+
+  it('localizes unavailable MCP settings without the host’s placeholder server name', () => {
+    renderWarning(
+      mcpWarning('Could not load the MCP settings.', {
+        reason_code: 'configuration_unavailable',
+        server_id: '',
+        server_name: 'Configured MCP servers',
+      })
+    );
+    expect(screen.getByText('MCP 설정을 불러오지 못했습니다.')).toBeInTheDocument();
+  });
+
+  it('localizes an invalid transport from a session snapshot using its server name', () => {
+    renderWarning(
+      mcpWarning("MCP server '문서 검색': server configuration is invalid", {
+        reason_code: 'invalid_configuration',
+        server_id: 'snapshot-mcp-1',
+        server_name: '문서 검색',
+      })
+    );
+    expect(screen.getByText('MCP 서버 ‘문서 검색’의 연결 설정이 올바르지 않습니다.')).toBeInTheDocument();
+  });
+
+  it('localizes a runtime preparation failure using the server name as literal text', () => {
+    const serverName = '<strong>Files & tools</strong>';
+    const { container } = renderWarning(
+      mcpWarning('Could not prepare the configured runtime.', {
+        reason_code: 'runtime_unavailable',
+        server_id: 'files',
+        server_name: serverName,
+      })
+    );
+    expect(
+      screen.getByText(`MCP 서버 ‘${serverName}’의 명령 또는 실행 환경을 준비하지 못했습니다.`)
+    ).toBeInTheDocument();
+    expect(container.querySelector('strong')).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['invalid_configuration', 'MCP 서버의 연결 설정이 올바르지 않습니다.'],
+    ['runtime_unavailable', 'MCP 서버의 명령 또는 실행 환경을 준비하지 못했습니다.'],
+  ])('localizes %s when the server is unnamed', (reason_code, expected) => {
+    renderWarning(mcpWarning('The MCP server is unavailable.', { reason_code, server_id: '', server_name: '' }));
+    expect(screen.getByText(expected)).toBeInTheDocument();
+  });
+
+  it.each([
+    ['an unknown reason code', { reason_code: 'future_reason', server_name: 'Files' }],
+    ['an old tip without a reason code', { server_id: 'files' }],
+    ['a tip without params', undefined],
+  ] as const)('shows the original English content for %s', (_scenario, params) => {
+    const content = "MCP server '<strong>{{server_name}}</strong>': unavailable";
+    const { container } = renderWarning(mcpWarning(content, params));
+    expect(screen.getByText(content)).toBeInTheDocument();
+    expect(container.querySelector('strong')).not.toBeInTheDocument();
+  });
+
+  it('shows JSON-shaped fallback content as plain text', () => {
+    const content = '{"message":"MCP server unavailable"}';
+    renderWarning(mcpWarning(content));
+    expect(screen.getByText(content)).toBeInTheDocument();
   });
 });

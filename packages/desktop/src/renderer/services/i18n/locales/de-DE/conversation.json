@@ -624,6 +624,13 @@
     "hintWithSessions": "/ für Befehle, @ für Dateien, @@ für Unterhaltungen, ↑/↓ für Verlauf"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "Die MCP-Einstellungen konnten nicht geladen werden.",
+      "invalidConfiguration": "Die Verbindungseinstellungen eines MCP-Servers sind ungültig.",
+      "invalidConfigurationWithName": "Die Verbindungseinstellungen für den MCP-Server „{{serverName}}“ sind ungültig.",
+      "runtimeUnavailable": "Der Befehl oder die Laufzeitumgebung für einen MCP-Server konnte nicht vorbereitet werden.",
+      "runtimeUnavailableWithName": "Der Befehl oder die Laufzeitumgebung für den MCP-Server „{{serverName}}“ konnte nicht vorbereitet werden."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Diese Anfrage hat keine sichtbare Antwort erzeugt."

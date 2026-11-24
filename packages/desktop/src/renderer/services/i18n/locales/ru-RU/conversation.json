@@ -631,6 +631,13 @@
     "hintWithSessions": "/ — команды, @ — файлы, @@ — беседы, ↑/↓ — история"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "Не удалось загрузить настройки MCP.",
+      "invalidConfiguration": "Неверные настройки подключения к одному из MCP-серверов.",
+      "invalidConfigurationWithName": "Неверные настройки подключения к MCP-серверу «{{serverName}}».",
+      "runtimeUnavailable": "Не удалось подготовить команду или среду выполнения для одного из MCP-серверов.",
+      "runtimeUnavailableWithName": "Не удалось подготовить команду или среду выполнения для MCP-сервера «{{serverName}}»."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Этот запрос завершился без видимого ответа."

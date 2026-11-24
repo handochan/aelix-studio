@@ -27,8 +27,11 @@ export const icon = {
   error: <Attention theme='filled' size='16' strokeLinejoin='bevel' className='m-t-2px' fill={iconColors.danger} />,
 };
 
-const useFormatContent = (content: string) => {
+const MCP_SERVER_UNAVAILABLE = 'MCP_SERVER_UNAVAILABLE';
+
+const useFormatContent = (content: string, parseJson: boolean) => {
   return useMemo(() => {
+    if (!parseJson) return { data: content };
     try {
       const json = JSON.parse(content);
       return {
@@ -38,7 +41,7 @@ const useFormatContent = (content: string) => {
     } catch {
       return { data: content };
     }
-  }, [content]);
+  }, [content, parseJson]);
 };
 
 const ownershipColor = {
@@ -54,6 +57,23 @@ const resolveAgentTipBody = (
   params: IMessageTips['content']['params'],
   t: ReturnType<typeof useTranslation>['t']
 ) => {
+  if (code === MCP_SERVER_UNAVAILABLE) {
+    const serverName = typeof params?.server_name === 'string' ? params.server_name : '';
+    switch (params?.reason_code) {
+      case 'configuration_unavailable':
+        return t('conversation.agentTip.mcpUnavailable.configurationUnavailable');
+      case 'invalid_configuration':
+        return serverName.trim()
+          ? t('conversation.agentTip.mcpUnavailable.invalidConfigurationWithName', { serverName })
+          : t('conversation.agentTip.mcpUnavailable.invalidConfiguration');
+      case 'runtime_unavailable':
+        return serverName.trim()
+          ? t('conversation.agentTip.mcpUnavailable.runtimeUnavailableWithName', { serverName })
+          : t('conversation.agentTip.mcpUnavailable.runtimeUnavailable');
+      default:
+        return content;
+    }
+  }
   if (!code) return content;
   return t(`conversation.agentTip.codes.${code}.body`, {
     ...params,
@@ -66,7 +86,7 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
   const { content, type, code, params } = message.content;
   const structuredError = type === 'error' ? message.content.error : undefined;
   const localizedTipBody = resolveAgentTipBody(content, code, params, t);
-  const { json, data } = useFormatContent(localizedTipBody);
+  const { json, data } = useFormatContent(localizedTipBody, code !== MCP_SERVER_UNAVAILABLE);
 
   const displayContent = json ? '' : localizedTipBody;
   // The report chip stays hidden for errors that opt out via
