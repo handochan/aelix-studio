@@ -15,7 +15,7 @@ import type {
 } from '@aionui/web-host';
 import { Message } from '@arco-design/web-react';
 import { act, cleanup, configure, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import React from 'react';
+import React, { useLayoutEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -1211,82 +1211,97 @@ const Slow: React.FC = () => {
   return null;
 };
 
-/**
- * Shows `ui` the way an answer from the helper does (outside `act`) on a busy machine, and runs
- * `first` on the element `testId` as soon as it is on screen: before React ran the effects of that
- * first frame, as a user who acts at once.
- */
-async function actOnFirstFrame(
-  ui: React.ReactElement,
-  testId: string,
-  first: (element: HTMLElement) => void
-): Promise<() => void> {
-  const container = document.body.appendChild(document.createElement('div'));
-  const root = createRoot(container);
-  const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
-  const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
-  env.IS_REACT_ACT_ENVIRONMENT = false;
-  try {
-    await new Promise<void>((resolve) => {
-      const observer = new MutationObserver(() => {
-        const element = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
-        if (!element) return;
-        observer.disconnect();
-        first(element);
-        resolve();
-      });
-      observer.observe(container, { childList: true, subtree: true });
-      root.render(
-        <>
-          {ui}
-          <Slow />
-        </>
-      );
-    });
-    // The effects React held back run now.
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  } finally {
-    env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
-  }
-  return () => {
-    act(() => root.unmount());
-    container.remove();
-  };
-}
+/** Runs `onCommit` at each commit it is part of, before React runs that commit's effects. */
+const CommitProbe: React.FC<{ onCommit: () => void }> = ({ onCommit }) => {
+  useLayoutEffect(() => {
+    onCommit();
+  });
+  return null;
+};
 
 describe('the install settings form', () => {
+  const props = { windows: false, saving: false, onSaveCredentials: () => {}, onClearCredentials: () => {} };
+  /** Roots shown outside `render`: unmounted after each test, whether it passed or not. */
+  const roots: Array<() => void> = [];
+  afterEach(() => {
+    for (const unmount of roots.splice(0)) unmount();
+  });
+
+  /**
+   * Shows `ui` the way an answer from the helper does (outside `act`) on a busy machine, and runs
+   * `first` on the element `testId` as soon as it is on screen: before React ran the effects of
+   * that first frame, as a user who acts at once.
+   */
+  const actOnFirstFrame = async (
+    ui: React.ReactElement,
+    testId: string,
+    first: (element: HTMLElement) => void
+  ): Promise<void> => {
+    const container = document.body.appendChild(document.createElement('div'));
+    const root = createRoot(container);
+    roots.push(() => {
+      act(() => root.unmount());
+      container.remove();
+    });
+    const env = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    const actEnvironment = env.IS_REACT_ACT_ENVIRONMENT;
+    env.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const observer = new MutationObserver(() => {
+          const element = container.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
+          if (!element) return;
+          observer.disconnect();
+          try {
+            first(element);
+            resolve();
+          } catch (error) {
+            reject(error);
+          }
+        });
+        observer.observe(container, { childList: true, subtree: true });
+        root.render(
+          <>
+            {ui}
+            <Slow />
+          </>
+        );
+      });
+      // The effects React held back run now.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    } finally {
+      env.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+    }
+  };
+
   it('keeps what was typed on its first frame', async () => {
     const onSave = vi.fn();
-    const unmount = await actOnFirstFrame(
-      <InstallSettings
-        state={settingsState()}
-        windows={false}
-        saving={false}
-        onSave={onSave}
-        onSaveCredentials={() => {}}
-        onClearCredentials={() => {}}
-      />,
+    await actOnFirstFrame(
+      <InstallSettings {...props} state={settingsState()} onSave={onSave} />,
       'settings-proxy',
       (input) => fireEvent.change(input, { target: { value: 'http://proxy.corp:3128' } })
     );
     expect((screen.getByTestId('settings-proxy') as HTMLInputElement).value).toBe('http://proxy.corp:3128');
     fireEvent.click(screen.getByTestId('settings-save'));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ proxy: 'http://proxy.corp:3128' }));
-    unmount();
   });
 
-  it('shows settings read again in place of what was typed', () => {
-    const props = {
-      windows: false,
-      saving: false,
-      onSave: vi.fn(),
-      onSaveCredentials: vi.fn(),
-      onClearCredentials: vi.fn(),
-    };
-    const view = render(<InstallSettings {...props} state={settingsState()} />);
+  it('shows settings read again in place of what was typed, from the first frame after they came', () => {
+    /** What the proxy field held at each commit, before that commit's effects ran. */
+    const committed: string[] = [];
+    const shown = (state: ExtensionSettingsState): React.ReactElement => (
+      <>
+        <InstallSettings {...props} state={state} onSave={vi.fn()} />
+        <CommitProbe
+          onCommit={() => committed.push((screen.getByTestId('settings-proxy') as HTMLInputElement).value)}
+        />
+      </>
+    );
+    const view = render(shown(settingsState()));
     fireEvent.change(screen.getByTestId('settings-proxy'), { target: { value: 'http://typed.proxy:3128' } });
-    // The same settings read again (a new answer) put back what the helper holds.
-    view.rerender(<InstallSettings {...props} state={settingsState({ proxy: 'http://saved.proxy:3128' })} />);
+    // The settings read again (a new answer) put back what the helper holds.
+    view.rerender(shown(settingsState({ proxy: 'http://saved.proxy:3128' })));
+    expect(committed.at(-1)).toBe('http://saved.proxy:3128');
     expect((screen.getByTestId('settings-proxy') as HTMLInputElement).value).toBe('http://saved.proxy:3128');
   });
 });
