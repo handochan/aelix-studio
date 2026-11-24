@@ -123,11 +123,13 @@ NORMALIZE
             '$skb=(struct sk_buff*)arg1; $sk=$skb->sk;' if argument=='skb1' else
             '$skb=(struct sk_buff*)arg0; $sk=$skb->sk;' if argument=='skb0' else '$sk=(struct sock*)arg0;')
         if argument == 'file2': argument_source=argument_source.replace('arg0','arg1')
+        # Keep watching known sockets regardless of the current task. On the
+        # global IP-output hooks, unrelated traffic can skip the root lookup.
         source += r'''
 kprobe:HOOK {
   SOCK
   $key=(uint64)$sk;
-  if ($key && (@udp_generation[$key] || (tid != @audit_root_tid && @tracked[tid] &&
+  if ($key && (@udp_generation[$key] || (@tracked[tid] && tid != @audit_root_tid &&
        $sk->sk_type==2 && $sk->sk_protocol==17 &&
        ($sk->__sk_common.skc_family==2 || $sk->__sk_common.skc_family==10)))) {
 NORMALIZE
