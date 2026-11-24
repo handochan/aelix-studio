@@ -9,8 +9,9 @@ import {
   type FakeRuntimeOptions,
 } from '../../../tests/fixtures/extensionRuntime';
 import { writeWheel, type WheelSpec } from '../../../tests/fixtures/extensionWheels';
+import { cliVenv } from '../../../tests/fixtures/terminalCli';
 import { ExtensionService, RUNTIME_HINT } from './service';
-import type { ExtensionListing, ExtensionOperation, ExtensionReply } from '../types';
+import type { ExtensionListing, ExtensionOperation, ExtensionReply, TerminalCliListing } from '../types';
 
 // These fixtures assert POSIX paths and installer environment. Preview installer CI runs real Windows.
 describe.skipIf(process.platform === 'win32')('the extension helper service', () => {
@@ -426,6 +427,45 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     // The fix names what the bundle needs and where it goes.
     for (const part of ['manifest.json', 'native-site', 'AELIX_STUDIO_RUNTIME']) expect(RUNTIME_HINT).toContain(part);
     expect(spawn.calls).toEqual([]);
+  });
+
+  it('lists the terminal CLI without the runtime, the lock or a generation, and shares a listing in progress', async () => {
+    const home = path.join(scratch, 'home');
+    await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), scratch, { 'aelix-memory': 'memory' });
+    const terminal = { env: { PATH: '' }, home, platform: 'linux' as const, username: 'nobody' };
+    const missing = new ExtensionService({ runtime: path.join(scratch, 'absent'), root, spawn, terminal });
+    expect(await missing.request('window:1', { action: 'list' })).toMatchObject({ code: 'RUNTIME_UNAVAILABLE' });
+    const [first, second] = await Promise.all([
+      missing.request('window:1', { action: 'list_terminal' }),
+      missing.request('web:operator', { action: 'list_terminal' }),
+    ]);
+    const data = (first as { ok: true; data: TerminalCliListing }).data;
+    expect(data.environments).toEqual([
+      expect.objectContaining({
+        status: 'listed',
+        location: '~/.local/share/uv/tools/aelix',
+        extensions: [expect.objectContaining({ name: 'memory', distribution: 'aelix-memory' })],
+      }),
+    ]);
+    // Two callers at once: one reading, the same answer.
+    expect((second as { ok: true; data: TerminalCliListing }).data).toBe(data);
+    // A later call reads again.
+    const third = await missing.request('window:1', { action: 'list_terminal' });
+    expect((third as { ok: true; data: TerminalCliListing }).data).not.toBe(data);
+    await missing.dispose();
+
+    // During a change, with the lock held: still answered.
+    const release = holdInstaller();
+    const busy = new ExtensionService({ runtime: runtime.bundle, root, spawn, terminal });
+    const started = await busy.request('window:1', await installRequest({ name: 'demo-one' }));
+    expect(await busy.request('window:2', { action: 'list_terminal' })).toMatchObject({ ok: true });
+    release();
+    let state = operation(started);
+    for (let round = 0; round < 500 && !['switched', 'failed', 'cancelled'].includes(state.phase); round += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      state = operation(await busy.request('window:1', { action: 'poll', operationId: state.operationId }));
+    }
+    await busy.dispose();
   });
 
   it('runs one change at a time and still lists while it runs', async () => {

@@ -4,6 +4,7 @@
  */
 export { ExtensionService, type ExtensionServiceOptions } from './host/service.js';
 export {
+  answerWithoutService as answerStudioExtensionsWithoutService,
   configureStudioExtensions,
   disposeStudioExtensions,
   getStudioExtensionService,
@@ -39,4 +40,11 @@ export type {
   StudioExtensionsRequest,
   StudioExtensionsTransport,
   StudioExtensionsTransportCode,
+  TerminalCliEnvironment,
+  TerminalCliExtension,
+  TerminalCliFoundBy,
+  TerminalCliIssue,
+  TerminalCliListing,
+  TerminalGlobalExtension,
+  TerminalGlobalExtensionKind,
 } from './types.js';

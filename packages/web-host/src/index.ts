@@ -14,6 +14,7 @@ export type {
   NativeAuthSelection,
 } from './studio-auth/types.js';
 export {
+  answerStudioExtensionsWithoutService,
   configureStudioExtensions,
   disposeStudioExtensions,
   ExtensionService,
@@ -48,6 +49,13 @@ export type {
   StudioExtensionsRequest,
   StudioExtensionsTransport,
   StudioExtensionsTransportCode,
+  TerminalCliEnvironment,
+  TerminalCliExtension,
+  TerminalCliFoundBy,
+  TerminalCliIssue,
+  TerminalCliListing,
+  TerminalGlobalExtension,
+  TerminalGlobalExtensionKind,
 } from './studio-extensions/index.js';
 
 // Backend launcher exports (M4)

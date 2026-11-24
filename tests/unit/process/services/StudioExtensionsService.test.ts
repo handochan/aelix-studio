@@ -144,13 +144,37 @@ describe('the desktop channel of the extension helper', () => {
     expect(await development(event(7, true), upgrade)).toEqual({ ok: true, data: {}, transport: 'secure' });
   });
 
-  it('answers RUNTIME_UNAVAILABLE until the helper is started', async () => {
+  it('answers RUNTIME_UNAVAILABLE until the helper is started, but lists the terminal CLI', async () => {
     const handle = studioExtensionsIpcHandler(() => true);
     expect(await handle(event(7), { action: 'list' })).toEqual({
       ok: false,
       code: 'RUNTIME_UNAVAILABLE',
       transport: 'secure',
     });
+    // Read from files only, needing no helper: an empty home here, so nothing is found.
+    const home = await mkdtemp(path.join(os.tmpdir(), 'studio-ipc-terminal-'));
+    try {
+      for (const name of [
+        'UV_TOOL_DIR',
+        'PIPX_HOME',
+        'XDG_DATA_HOME',
+        'XDG_BIN_HOME',
+        'UV_TOOL_BIN_DIR',
+        'PIPX_BIN_DIR',
+        'AELIX_CODING_AGENT_DIR',
+        'APPDATA',
+        'LOCALAPPDATA',
+      ])
+        vi.stubEnv(name, '');
+      vi.stubEnv('HOME', home);
+      vi.stubEnv('USERPROFILE', home);
+      vi.stubEnv('PATH', '');
+      const reply = await handle(event(7), { action: 'list_terminal' });
+      expect(reply).toMatchObject({ ok: true, transport: 'secure', data: { environments: [], timedOut: false } });
+    } finally {
+      vi.unstubAllEnvs();
+      await rm(home, { recursive: true, force: true });
+    }
   });
 
   it('starts the helper in the user data directory with the safeStorage vault, and stops it on quit', async () => {

@@ -6,6 +6,7 @@
 
 import { app, type IpcMainInvokeEvent } from 'electron';
 import {
+  answerStudioExtensionsWithoutService,
   configureStudioExtensions,
   disposeStudioExtensions,
   getStudioExtensionService,
@@ -79,7 +80,8 @@ export function studioExtensionsIpcHandler(
     // The window is on this machine: no network to warn about, and the helper never sees the flag.
     const { acknowledgeInsecureTransport: _acknowledged, ...request } = command as Record<string, unknown>;
     const current = service();
-    if (!current) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
+    if (!current)
+      return (await answerStudioExtensionsWithoutService(request)) ?? { ok: false, code: 'RUNTIME_UNAVAILABLE' };
     return current.request(`desktop:${event.sender.id}`, request);
   };
   return async (event, command) => ({ ...(await answer(event, command)), transport: 'secure' });

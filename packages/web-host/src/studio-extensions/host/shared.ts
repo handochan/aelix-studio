@@ -2,6 +2,8 @@ import path from 'node:path';
 import { resolveNativeRuntime } from '../../studio-auth/runtime.js';
 import type { ProxyCredentialVault } from '../flow/online/proxy/credentials.js';
 import { STATE_DIRECTORY } from '../store/layout.js';
+import { listTerminalCli } from '../terminal/list.js';
+import type { ExtensionReply } from '../types.js';
 import { ExtensionService, type ExtensionServiceOptions } from './service.js';
 
 /**
@@ -66,6 +68,16 @@ export function configureStudioExtensions(config: StudioExtensionsConfig): Exten
 /** The configured service, or undefined before the host configured it. */
 export function getStudioExtensionService(): ExtensionService | undefined {
   return shared;
+}
+
+/**
+ * What a host answers while no service is configured, for the one request that needs none:
+ * `list_terminal` reads the terminal CLI from files only (ADR 9). Undefined for every other
+ * request, which the host answers `RUNTIME_UNAVAILABLE` as before.
+ */
+export async function answerWithoutService(command: unknown): Promise<ExtensionReply | undefined> {
+  const action = typeof command === 'object' && command !== null ? (command as { action?: unknown }).action : undefined;
+  return action === 'list_terminal' ? { ok: true, data: await listTerminalCli() } : undefined;
 }
 
 /** Stop what runs and forget the service (host shutdown, tests). */

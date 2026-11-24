@@ -3,11 +3,15 @@
  * login, the page's own origin, the marker header, a size cap), then the signed-in user as
  * the owner. The service is stubbed; the routing of the static server has its own test.
  */
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import http from 'node:http';
 import type { AddressInfo } from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RUNTIME_HINT, type ExtensionService } from './service';
 import { carriesProxyCredentials, handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './facade';
+import { cliVenv } from '../../../tests/fixtures/terminalCli';
 
 describe('the extension helper on the WebUI listener', () => {
   let server: http.Server;
@@ -269,6 +273,40 @@ describe('the extension helper on the WebUI listener', () => {
       transport: 'secure',
     });
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'lists the terminal CLI even while the host has not configured the helper',
+    async () => {
+      authenticate = true;
+      configured = undefined;
+      const home = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-facade-terminal-')));
+      try {
+        await cliVenv(path.join(home, '.local', 'share', 'uv', 'tools', 'aelix'), home, { 'aelix-memory': 'memory' });
+        // The listing reads this process's environment: point it at the fixture home only.
+        for (const name of [
+          'UV_TOOL_DIR',
+          'PIPX_HOME',
+          'XDG_DATA_HOME',
+          'XDG_BIN_HOME',
+          'UV_TOOL_BIN_DIR',
+          'PIPX_BIN_DIR',
+          'AELIX_CODING_AGENT_DIR',
+        ])
+          vi.stubEnv(name, '');
+        vi.stubEnv('HOME', home);
+        vi.stubEnv('PATH', '');
+        const response = await request({ cookie: 'aelix-studio-session=valid' }, '{"action":"list_terminal"}');
+        const reply = await response.json();
+        expect(reply).toMatchObject({ ok: true, transport: 'secure' });
+        expect(reply.data.environments).toEqual([
+          expect.objectContaining({ status: 'listed', location: '~/.local/share/uv/tools/aelix' }),
+        ]);
+      } finally {
+        vi.unstubAllEnvs();
+        await rm(home, { recursive: true, force: true });
+      }
+    }
+  );
 
   it('answers UNAVAILABLE, and nothing of the error, when the helper throws', async () => {
     authenticate = true;

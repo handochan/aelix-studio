@@ -29,6 +29,7 @@ import {
 import { parseOnlineSource } from '../flow/online/source.js';
 import { redactUrlCredentials, spawnChild, windowsChildSpawn, type Spawn } from '../process.js';
 import { locateLayout, resolveBundle, verifyLayout } from '../store/layout.js';
+import { listTerminalCli, type TerminalListingOptions } from '../terminal/list.js';
 import { isManagedId } from '../launch/managedCatalog.js';
 import {
   ExtensionFailure,
@@ -66,6 +67,8 @@ export type ExtensionServiceOptions = {
    * standalone WebUI, nothing is kept and each online install brings its credentials.
    */
   proxyVault?: ProxyCredentialVault;
+  /** Where `list_terminal` looks; by default this process's environment and home directory. */
+  terminal?: TerminalListingOptions;
 };
 
 /**
@@ -105,6 +108,7 @@ const ACTIONS = new Set([
   'reconcile_bundle',
   'poll',
   'cancel',
+  'list_terminal',
 ]);
 const FINISHED = new Set(['switched', 'already_latest', 'failed', 'cancelled']);
 const fail = (code: ExtensionFailureCode, detail?: string[]): ExtensionReply => ({
@@ -156,7 +160,6 @@ export class ExtensionService {
    */
   private readonly starting = new Set<{ owner: string; abort: AbortController }>();
   private changing = false;
-
   constructor(private readonly options: ExtensionServiceOptions) {}
 
   private get platform(): NodeJS.Platform {
@@ -231,6 +234,9 @@ export class ExtensionService {
       const command = input as ExtensionCommand;
       if (!ACTIONS.has(command.action)) return fail('UNSUPPORTED');
       if (command.action === 'poll' || command.action === 'cancel') return this.control(owner, command);
+      // Read only, from files: no runtime, no lock, no generation (ADR 9).
+      // One scan for the whole process, shared with the hosts' answer before a service exists.
+      if (command.action === 'list_terminal') return { ok: true, data: await listTerminalCli(this.options.terminal) };
       if (command.action === 'list') {
         const context = await this.context();
         return context ? { ok: true, data: await describe(context) } : fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
