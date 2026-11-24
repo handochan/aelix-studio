@@ -25,6 +25,7 @@ const COMMON_RUNTIME = 'packages/desktop/src/common/platform/ElectronPlatformSer
 // The re-review's cases: renderer-tree files that are more than screens.
 const LOCALE_ENTRY = `${LOCALES}/en-US/index.ts`;
 const PACKAGED_LOGO = 'packages/desktop/src/renderer/assets/logos/brand/app.png';
+const MESSAGE_TIPS = 'packages/desktop/src/renderer/pages/conversation/Messages/components/MessageTips.tsx';
 
 describe('full verification skip set', () => {
   const skippable: [string, string][] = [
@@ -63,6 +64,8 @@ describe('full verification skip set', () => {
     [`${PROVIDER_UI}/nativeAuth.ts`, `${PROVIDER_UI}/**`],
     [`${LOCALES}/en-US/settings.json`, `${LOCALES}/*/settings.json`],
     [`${LOCALES}/ko-KR/settings.json`, `${LOCALES}/*/settings.json`],
+    [`${LOCALES}/en-US/conversation.json`, `${LOCALES}/en-US/conversation.json`],
+    [MESSAGE_TIPS, MESSAGE_TIPS],
   ];
 
   it.each(forced)('%s always runs although it is renderer code', (file, pattern) => {
