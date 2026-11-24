@@ -75,6 +75,14 @@ export const FORCED_PATHS = [
     pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/settings.json',
     reason: 'strings scripts/studio-preview/providerHostSmoke.mjs reads to drive the Provider settings UI',
   },
+  {
+    pattern: 'packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json',
+    reason: 'locale strings the installed-app smoke reads to assert MCP warnings',
+  },
+  {
+    pattern: 'packages/desktop/src/renderer/pages/conversation/Messages/components/MessageTips.tsx',
+    reason: 'renders the MCP warning the installed-app smoke checks',
+  },
 ];
 
 /**
@@ -86,7 +94,7 @@ export const ACCEPTED_MAIN_BUNDLE_DATA = [
   {
     pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/*.json',
     reason:
-      'translation text only (settings.json is forced above); the always-on I18n Check parses it on every pull request that changes it, and the daily run on main covers the rest',
+      'translation text outside the forced entries; the always-on I18n Check parses it on every pull request that changes it, and the daily run on main covers the rest',
   },
 ];
 

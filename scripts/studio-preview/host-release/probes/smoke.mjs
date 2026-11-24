@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { _electron as electron, expect } from '@playwright/test';
+import enConversation from '../../../../packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json' with { type: 'json' };
 import { qualifyRecoveredProfile } from '../../../../tests/manual/recoveredProfile.mjs';
 import { createProcessTimeline } from './processTimeline.mjs';
 import {
@@ -214,8 +215,9 @@ try {
   assert.equal(imageDenial.code, 'REMOTE_IMAGE_DISABLED');
   checks.push('remote_images_disabled_with_reason');
   // An unavailable local MCP command must produce a persisted warning, never a download.
+  const blockedMcpName = 'Synthetic unavailable MCP';
   const blockedMcp = await api('/api/mcp/servers', 'POST', {
-    name: 'Synthetic unavailable MCP',
+    name: blockedMcpName,
     transport: { type: 'stdio', command: path.join(sandbox, 'missing-mcp-command'), args: [], env: {} },
   });
   const conv = await api('/api/conversations', 'POST', {
@@ -239,9 +241,11 @@ try {
   await expect(page.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
   await expect(selector).toHaveAttribute('data-current-mode', 'default', { timeout: 30000 });
   checks.push('renderer_starts_ask');
-  const mcpWarning = page.getByText(
-    /MCP server 'Synthetic unavailable MCP': The configured MCP command or runtime is unavailable/
+  const mcpWarningText = enConversation.agentTip.mcpUnavailable.runtimeUnavailableWithName.replaceAll(
+    '{{serverName}}',
+    blockedMcpName
   );
+  const mcpWarning = page.getByText(mcpWarningText, { exact: true });
   await expect(mcpWarning).toBeVisible({ timeout: 30000 });
   checks.push('unavailable_mcp_reason_visible');
   await api(`${route}/runtime/restart`, 'POST');
