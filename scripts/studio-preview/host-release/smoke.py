@@ -120,7 +120,7 @@ def setup(api):
         from urllib.parse import quote
         config = sandbox / 'studio/config/aionui-config.txt'
         config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False}), safe='').encode()).decode())
+        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False, 'language': 'en-US'}), safe='').encode()).decode())
         command = [*prefix, 'acp', '--aelix', str(python), '--aelix-arg=-I', '--aelix-arg=-S', '--aelix-arg=-B',
                    '--aelix-arg=-Xutf8', '--aelix-arg=' + str(wrapper), '--provider', 'fixture', '--model', 'one',
                    '--state-dir', str(sandbox / 'acp')]
@@ -187,7 +187,8 @@ def main():
               'recordedAt': datetime.datetime.now(datetime.timezone.utc).isoformat(),
               'nativePatches': [], 'realProvider': False, 'installer': False, 'provider': 'synthetic loopback',
               'harnessSha256': {name: digest(HERE / name) for name in ('smoke.py', 'probes/smoke.mjs', 'verification.mjs',
-                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/linuxProcesses.mjs', 'probes/windowsProcesses.mjs', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs')}}
+                  'probes/protocolDiagnostics.mjs', 'probes/processTimeline.mjs', 'probes/linuxProcesses.mjs', 'probes/windowsProcesses.mjs', '../fixtures/nativeFailure.py', '../../../tests/manual/recoveredProfile.mjs',
+                  '../../../packages/desktop/src/renderer/services/i18n/locales/en-US/conversation.json')}}
     try:
         if not __debug__:
             raise RuntimeError('Permission recovery qualification requires Python without -O')
