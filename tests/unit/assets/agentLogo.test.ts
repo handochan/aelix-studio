@@ -12,6 +12,7 @@ import {
   resolveAgentLogo,
   isDefaultModel,
   getModelDisplayLabel,
+  resolveRuntimeAssistantAvatar,
 } from '@/renderer/utils/model/agentLogo';
 
 const bridgeMocks = vi.hoisted(() => ({
@@ -238,5 +239,40 @@ describe('agentLogo', () => {
       });
       expect(result).toBe('Fallback');
     });
+  });
+});
+
+const isAelixMark = (value: string | null | undefined) =>
+  decodeURIComponent(value ?? '').includes("aria-label='Aelix mark'");
+
+describe('Aelix agent logo', () => {
+  it('uses the bundled Aelix mark for the aelix backend, ahead of the catalog', () => {
+    const logos: AgentLogoMap = { ...LOGOS, aelix: '/api/assets/logos/tools/other.svg' };
+    expect(isAelixMark(resolveAgentLogo(logos, { backend: 'Aelix' }))).toBe(true);
+    expect(isAelixMark(resolveAgentLogo({}, { backend: 'aelix' }))).toBe(true);
+  });
+
+  it('keeps an explicit icon over the Aelix mark', () => {
+    expect(resolveAgentLogo(LOGOS, { icon: '/api/assets/custom.svg', backend: 'aelix' })).toBe(
+      '/api/assets/custom.svg'
+    );
+  });
+
+  it('returns the Aelix mark as an image avatar unless the assistant has its own', () => {
+    const avatar = resolveAgentAvatar(LOGOS, { backend: 'aelix' });
+    expect(avatar.kind).toBe('image');
+    expect(avatar.kind === 'image' && isAelixMark(avatar.value)).toBe(true);
+    expect(resolveAgentAvatar(LOGOS, { icon: '🧬', backend: 'aelix' })).toEqual({ kind: 'emoji', value: '🧬' });
+  });
+
+  it('does not change other backends', () => {
+    expect(isAelixMark(resolveAgentLogo(LOGOS, { backend: 'claude' }))).toBe(false);
+  });
+
+  it('fills only a missing avatar of an Aelix-runtime assistant', () => {
+    const aelix = resolveRuntimeAssistantAvatar(undefined, 'aelix');
+    expect(aelix.kind === 'image' && isAelixMark(aelix.value)).toBe(true);
+    expect(resolveRuntimeAssistantAvatar('🧪', 'aelix')).toEqual({ kind: 'emoji', value: '🧪' });
+    expect(resolveRuntimeAssistantAvatar(undefined, 'claude')).toEqual({ kind: 'fallback' });
   });
 });

@@ -37,6 +37,14 @@ describe('startSystemThemeWatcher', () => {
     expect(setActiveTheme).toHaveBeenCalledWith(SYSTEM_THEME_ID);
   });
 
+  it('follows the OS when no theme has been stored (system is the default)', () => {
+    const media = installMatchMedia();
+    configGet.mockReturnValue(undefined);
+    startSystemThemeWatcher();
+    media.fire(true);
+    expect(setActiveTheme).toHaveBeenCalledWith(SYSTEM_THEME_ID);
+  });
+
   it('does nothing when a non-system theme is active', () => {
     const media = installMatchMedia();
     configGet.mockReturnValue('misaka-mikoto-theme');

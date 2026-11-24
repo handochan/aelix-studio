@@ -153,23 +153,50 @@ describe('Layout sider brand Home button', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('renders the wordmark as a non-actionable element in a non-settings route', () => {
+  it('renders the lockup as a non-actionable element in a non-settings route', () => {
     currentPathname = '/guid';
     renderLayout();
 
     // No actionable role/label in chat routes.
     expect(screen.queryByLabelText(BACK_KEY)).toBeNull();
-    const wordmark = screen.getByText('login.brand');
-    fireEvent.click(wordmark);
+    const lockup = screen.getAllByAltText('login.brand')[0];
+    fireEvent.click(lockup);
     expect(navigate).not.toHaveBeenCalled();
   });
 
-  it('does not navigate when the wordmark is clicked in a non-settings route', () => {
+  it('does not navigate when the lockup is clicked in a non-settings route', () => {
     currentPathname = '/conversation/xyz';
     renderLayout();
 
-    fireEvent.click(screen.getByText('login.brand'));
+    fireEvent.click(screen.getAllByAltText('login.brand')[0]);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it('renders the official Aelix lockup for each appearance when expanded', () => {
+    currentPathname = '/guid';
+    renderLayout();
+
+    const lockups = screen.getAllByAltText('login.brand') as HTMLImageElement[];
+    expect(lockups.map((img) => img.className)).toEqual([
+      expect.stringContaining('aelix-lockup--light'),
+      expect.stringContaining('aelix-lockup--dark'),
+    ]);
+    // Vitest inlines the SVGs: the light lockup carries ink letters, the dark one paper letters.
+    const [lightSrc, darkSrc] = lockups.map((img) => decodeURIComponent(img.getAttribute('src') ?? ''));
+    expect(lightSrc).toContain("viewBox='0 0 952 272'");
+    expect(lightSrc).toContain('#0B1220');
+    expect(darkSrc).toContain("viewBox='0 0 952 272'");
+    expect(darkSrc).toContain('#F6FAFB');
+  });
+
+  it('shows the Aelix mark alone when the sider is collapsed', () => {
+    currentPathname = '/conversation/xyz';
+    renderLayout();
+
+    act(() => shortcutMocks.params?.toggleSider());
+    const marks = screen.getAllByAltText('login.brand') as HTMLImageElement[];
+    expect(marks).toHaveLength(1);
+    expect(decodeURIComponent(marks[0].getAttribute('src') ?? '')).toContain("viewBox='0 0 256 256'");
   });
 
   it('provides common shortcuts with a functional sider toggle', () => {
@@ -196,15 +223,12 @@ describe('Layout sider brand Home button', () => {
     expect(shortcutMocks.params?.toggleSider).toEqual(expect.any(Function));
   });
 
-  it('clicking the logo icon counts toward the devtools easter-egg and never navigates', () => {
-    currentPathname = '/settings/about';
-    sessionStorage.setItem('aion:last-non-settings-path', '/conversation/abc');
-    const { container } = renderLayout();
+  it('clicking the lockup in a chat route counts toward the devtools easter-egg and never navigates', () => {
+    currentPathname = '/conversation/abc';
+    renderLayout();
 
-    // The icon is the mark-wrapping div (bg-black), separate from the wordmark.
-    const icon = container.querySelector('.bg-black') as HTMLElement;
-    expect(icon).toBeTruthy();
-    for (let i = 0; i < 4; i++) fireEvent.click(icon);
+    const lockup = screen.getAllByAltText('login.brand')[0];
+    for (let i = 0; i < 4; i++) fireEvent.click(lockup);
     expect(openDevTools).toHaveBeenCalled();
     expect(navigate).not.toHaveBeenCalled();
   });

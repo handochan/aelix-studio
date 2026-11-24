@@ -122,6 +122,22 @@ body,
   }
 }
 
+/*
+ * The official Aelix lockups are drawn for a known ground (BRAND.md): render
+ * both and show the one matching the active appearance. Never recolor them.
+ */
+.aelix-lockup--dark {
+  display: none;
+}
+
+[data-theme='dark'] .aelix-lockup--light {
+  display: none;
+}
+
+[data-theme='dark'] .aelix-lockup--dark {
+  display: block;
+}
+
 /* Safe area utilities for mobile devices */
 /* iOS 17+ Chrome, Safari need env() in CSS, not inline styles */
 @supports (padding-bottom: env(safe-area-inset-bottom)) {

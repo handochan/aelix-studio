@@ -13,7 +13,7 @@ import { useAssistantOrder } from '@/renderer/hooks/assistant/useAssistantOrder'
 import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManagedAgents';
 import { managedAgentSearchText } from '@/renderer/utils/model/agentTypes';
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { resolveAssistantAvatar } from '@/renderer/utils/model/assistantAvatar';
+import { resolveRuntimeAssistantAvatar } from '@/renderer/utils/model/agentLogo';
 import ThemedLogo from '@/renderer/components/agent/ThemedLogo';
 import { selectableAssistants } from '@/renderer/utils/model/assistantSelection';
 import { useTranslation } from 'react-i18next';
@@ -222,7 +222,7 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
   if (enabledAssistants.length === 0) return null;
 
   const renderAssistantPill = (assistant: Assistant, testId: string, fullWidth = false) => {
-    const avatar = resolveAssistantAvatar(assistant.avatar);
+    const avatar = resolveRuntimeAssistantAvatar(assistant.avatar, assistantRuntimeKey(assistant));
     const isSelected = selectedId === assistant.id;
     const label = assistant.name_i18n?.[localeKey] || assistant.name;
 

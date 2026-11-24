@@ -14,12 +14,19 @@
     <link rel="apple-touch-icon" href="./pwa/icon-180.png" />
     <title>Aelix Studio</title>
     <script>
-      // Synchronously restore theme appearance from localStorage to prevent theme flash
+      // Synchronously restore theme appearance from localStorage to prevent theme flash.
+      // Without a cached appearance (first launch, login page), follow the OS like the default theme.
       (function () {
+        var theme = null;
         try {
-          var theme = localStorage.getItem('__aionui_theme');
-          if (theme) document.documentElement.setAttribute('data-theme', theme);
+          theme = localStorage.getItem('__aionui_theme');
         } catch (e) {}
+        if (!theme) {
+          try {
+            theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          } catch (e) {}
+        }
+        if (theme) document.documentElement.setAttribute('data-theme', theme);
       })();
     </script>
     <style>
@@ -36,9 +43,9 @@
   </head>
   <body>
     <script>
-      // Set arco-theme on body synchronously
+      // Set arco-theme on body synchronously from the appearance chosen in <head>
       try {
-        var t = localStorage.getItem('__aionui_theme');
+        var t = document.documentElement.getAttribute('data-theme');
         if (t) document.body.setAttribute('arco-theme', t);
       } catch (e) {}
     </script>

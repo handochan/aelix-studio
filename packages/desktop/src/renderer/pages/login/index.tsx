@@ -1,4 +1,5 @@
-import loginLogo from '@renderer/assets/logos/brand/app.png';
+import lockupDark from '@renderer/assets/logos/brand/lockup-dark.svg';
+import lockupLight from '@renderer/assets/logos/brand/lockup-light.svg';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { changeLanguage } from '@/renderer/services/i18n';
@@ -216,8 +217,10 @@ const LoginPage: React.FC = () => {
         </label>
 
         <div className='login-page__header'>
+          {/* Official Aelix lockup for the active appearance; the product name stays as the heading. */}
           <div className='login-page__logo'>
-            <img src={loginLogo} alt={t('login.brand')} />
+            <img className='aelix-lockup--light' src={lockupLight} alt={t('login.brand')} />
+            <img className='aelix-lockup--dark' src={lockupDark} alt={t('login.brand')} />
           </div>
           <h1 className='login-page__title'>{t('login.brand')}</h1>
           <p className='login-page__subtitle'>{t('login.subtitle')}</p>

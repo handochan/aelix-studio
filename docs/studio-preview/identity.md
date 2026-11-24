@@ -143,7 +143,23 @@ root. Any previous Studio version is kept beside the install root in an
   and historical documentation retain their original attribution. Studio is
   derived from [AionUi](https://github.com/iOfficeAI/AionUi) under
   [Apache-2.0](../../LICENSE).
-- The Studio mark and wordmarks are copied from the
+- The Studio mark, wordmarks and lockups are copied byte-for-byte from the
   [Aelix brand sources](https://github.com/handochan/aelix-ai/tree/1c2a4a7c70c0bcb1bb103e6fbabd8967fd65e21c/docs/assets/brand).
-  App and PWA raster assets use the original mark from the Studio bootstrap
-  commit `41a1016f8`.
+  The sidebar and WebUI login show the lockup that matches the active
+  appearance; the collapsed sidebar shows the mark alone. Conversations and
+  assistant pickers show the mark for the `aelix` agent backend.
+
+## Brand appearance
+
+- App, installer, PWA and notification icons are rendered from the unmodified
+  `mark.svg` on the brand ground `#0B0F14` at the proportions of the official
+  `avatar.png` (mark ink width 344/512 of the plate). macOS and Linux use the
+  1024 px macOS grid (824 px plate, 22.5% corner radius); Windows ICO
+  (16–256 px), PWA and notification icons use a rounded full plate; the
+  apple-touch icon uses a square plate for the iOS mask.
+- The default theme follows the operating system's light or dark appearance
+  until a theme is chosen in Settings. The first paint uses the same choice.
+- The default color scheme uses the Aelix cyan ramp from `BRAND.md` (glow
+  `#22D3EE`, current `#06B6D4`, deep `#0E7490`) for brand and Arco primary
+  colors and for the composer focus ring and glow. Light mode buttons use the
+  deep tone for white text contrast.

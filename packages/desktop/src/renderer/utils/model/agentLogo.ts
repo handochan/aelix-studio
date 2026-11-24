@@ -27,6 +27,7 @@ import {
 } from '@/renderer/utils/model/assistantAvatar';
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
 import { resolveBackendAssetUrl } from '@/renderer/utils/platform';
+import aelixMark from '@renderer/assets/logo.svg';
 import useSWR from 'swr';
 
 /** Map of lowercased backend id -> logo URL. */
@@ -87,17 +88,31 @@ function normalizeLogoUrl(logo: string): string | null {
   return isImage ? resolved : null;
 }
 
+/** Backend id of the Studio-owned Aelix ACP agent. */
+const AELIX_BACKEND = 'aelix';
+
+/**
+ * The Aelix agent always shows the bundled official Aelix mark, whatever the
+ * host catalog carries. The bundled asset URL is already renderer-relative, so
+ * it bypasses the backend asset normalization below.
+ */
+function isAelixBackend(backend: string | undefined | null): boolean {
+  return typeof backend === 'string' && backend.trim().toLowerCase() === AELIX_BACKEND;
+}
+
 function lookupBackendLogoValue(logos: AgentLogoMap, backend: string | undefined | null): string | null {
   if (!backend || typeof backend !== 'string') return null;
   return logos?.[backend.toLowerCase()] ?? null;
 }
 
 function lookupBackendLogo(logos: AgentLogoMap, backend: string | undefined | null): string | null {
+  if (isAelixBackend(backend)) return aelixMark;
   const logo = lookupBackendLogoValue(logos, backend);
   return logo ? normalizeLogoUrl(logo) : null;
 }
 
 function lookupBackendAvatar(logos: AgentLogoMap, backend: string | undefined | null): AssistantAvatar {
+  if (isAelixBackend(backend)) return { kind: 'image', value: aelixMark };
   const logo = lookupBackendLogoValue(logos, backend);
   return resolveAssistantAvatar(logo || undefined);
 }
@@ -108,7 +123,7 @@ function lookupBackendAvatar(logos: AgentLogoMap, backend: string | undefined | 
  * Pure — pass the map from {@link useAgentLogos}. Priority:
  *   1. Explicit icon/avatar (if provided)
  *   2. Adapter ID from custom_agent_id (`ext:extensionName:adapterId`) → catalog
- *   3. Backend ID → catalog
+ *   3. Backend ID → catalog (the Aelix backend → bundled Aelix mark)
  *   4. null (caller renders its own fallback)
  */
 export function resolveAgentLogo(
@@ -150,6 +165,19 @@ export function resolveAgentAvatar(
   }
 
   return lookupBackendAvatar(logos, opts.backend);
+}
+
+/**
+ * An assistant's own avatar, falling back to the Aelix mark when the assistant runs
+ * on the Aelix agent and has none. Other runtimes keep the caller's fallback icon.
+ */
+export function resolveRuntimeAssistantAvatar(
+  avatar: string | undefined,
+  backend: string | undefined | null
+): AssistantAvatar {
+  const resolved = resolveAssistantAvatar(avatar);
+  if (resolved.kind === 'fallback' && isAelixBackend(backend)) return { kind: 'image', value: aelixMark };
+  return resolved;
 }
 
 /**
