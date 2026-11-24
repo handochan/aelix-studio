@@ -623,6 +623,13 @@
     "hintWithSessions": "/ でコマンド、@ でファイル、@@ で会話を参照、↑/↓ で履歴"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "MCP 設定を読み込めませんでした。",
+      "invalidConfiguration": "MCP サーバーの接続設定に問題があります。",
+      "invalidConfigurationWithName": "MCP サーバー「{{serverName}}」の接続設定に問題があります。",
+      "runtimeUnavailable": "MCP サーバーのコマンドまたは実行環境を準備できませんでした。",
+      "runtimeUnavailableWithName": "MCP サーバー「{{serverName}}」のコマンドまたは実行環境を準備できませんでした。"
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "このリクエストでは、表示できる返信はありませんでした。"

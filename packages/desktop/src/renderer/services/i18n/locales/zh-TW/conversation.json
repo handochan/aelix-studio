@@ -623,6 +623,13 @@
     "hintWithSessions": "輸入 / 喚起命令，@ 引用檔案，@@ 引用對話，↑/↓ 切換歷史訊息"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "無法載入 MCP 設定。",
+      "invalidConfiguration": "有一個 MCP 伺服器的連線設定有誤。",
+      "invalidConfigurationWithName": "MCP 伺服器「{{serverName}}」的連線設定有誤。",
+      "runtimeUnavailable": "無法為某個 MCP 伺服器準備指令或執行環境。",
+      "runtimeUnavailableWithName": "無法為 MCP 伺服器「{{serverName}}」準備指令或執行環境。"
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "這次請求沒有產生任何可見回覆。"

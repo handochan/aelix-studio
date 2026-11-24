@@ -623,6 +623,13 @@
     "hintWithSessions": "Type / for commands, @ for files, @@ for conversations, ↑/↓ for history"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "Could not load MCP settings.",
+      "invalidConfiguration": "An MCP server has invalid connection settings.",
+      "invalidConfigurationWithName": "The connection settings for MCP server “{{serverName}}” are invalid.",
+      "runtimeUnavailable": "Could not prepare the command or runtime for an MCP server.",
+      "runtimeUnavailableWithName": "Could not prepare the command or runtime for MCP server “{{serverName}}”."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "This request produced no visible reply."

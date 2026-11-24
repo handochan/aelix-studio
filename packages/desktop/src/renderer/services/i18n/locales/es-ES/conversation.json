@@ -624,6 +624,13 @@
     "hintWithSessions": "/ para comandos, @ para archivos, @@ para conversaciones, ↑/↓ para el historial"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "No se pudo cargar la configuración de MCP.",
+      "invalidConfiguration": "La configuración de conexión de un servidor MCP no es válida.",
+      "invalidConfigurationWithName": "La configuración de conexión del servidor MCP «{{serverName}}» no es válida.",
+      "runtimeUnavailable": "No se pudo preparar el comando o el entorno de ejecución de un servidor MCP.",
+      "runtimeUnavailableWithName": "No se pudo preparar el comando o el entorno de ejecución del servidor MCP «{{serverName}}»."
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "Esta solicitud no produjo ninguna respuesta visible."

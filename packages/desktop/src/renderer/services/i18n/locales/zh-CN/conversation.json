@@ -623,6 +623,13 @@
     "hintWithSessions": "输入 / 唤起命令，@ 引用文件，@@ 引用会话，↑/↓ 切换历史消息"
   },
   "agentTip": {
+    "mcpUnavailable": {
+      "configurationUnavailable": "无法加载 MCP 设置。",
+      "invalidConfiguration": "有一个 MCP 服务器的连接配置无效。",
+      "invalidConfigurationWithName": "MCP 服务器“{{serverName}}”的连接配置无效。",
+      "runtimeUnavailable": "无法准备某个 MCP 服务器所需的命令或运行环境。",
+      "runtimeUnavailableWithName": "无法准备 MCP 服务器“{{serverName}}”所需的命令或运行环境。"
+    },
     "codes": {
       "ACP_EMPTY_TURN": {
         "body": "这次请求没有产生任何可见回复。"
