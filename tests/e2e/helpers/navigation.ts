@@ -18,6 +18,7 @@ export const ROUTES = {
     assistants: '#/settings/assistants',
     skills: '#/settings/skills',
     tools: '#/settings/tools',
+    agentExtensions: '#/settings/agent-extensions',
     display: '#/settings/appearance',
     webui: '#/settings/webui',
     system: '#/settings/system',

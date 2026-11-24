@@ -47,6 +47,24 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
+/**
+ * State kept in memory for the signed-in user (outside React state, so it outlives a page)
+ * registers here to be dropped when that user signs out or another user is signed in.
+ */
+const userChangeHandlers = new Set<() => void>();
+
+/** Run `handler` whenever the signed-in user signs out or changes; returns the unsubscribe. */
+export function onUserChange(handler: () => void): () => void {
+  userChangeHandlers.add(handler);
+  return () => {
+    userChangeHandlers.delete(handler);
+  };
+}
+
+const notifyUserChange = (): void => {
+  for (const handler of userChangeHandlers) handler();
+};
+
 const AUTH_USER_ENDPOINT = '/api/auth/user';
 
 const isDesktopRuntime = typeof window !== 'undefined' && Boolean(window.electronAPI);
@@ -133,6 +151,14 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
   const [status, setStatus] = useState<AuthStatus>('checking');
   const [ready, setReady] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
+  const userIdRef = useRef<string | null>(null);
+
+  /** The signed-in user, telling what kept their state when it is no longer them. */
+  const changeUser = useCallback((next: AuthUser | null) => {
+    if (userIdRef.current !== null && userIdRef.current !== (next?.id ?? null)) notifyUserChange();
+    userIdRef.current = next?.id ?? null;
+    setUser(next);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (isDesktopRuntime) {
@@ -148,15 +174,17 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     setStatus('checking');
 
     const currentUser = await fetchCurrentUser(controller.signal);
+    // A newer check took this one's place: its answer (null when aborted) says nothing.
+    if (controller.signal.aborted) return;
     if (currentUser) {
-      setUser(currentUser);
+      changeUser(currentUser);
       setStatus('authenticated');
     } else {
-      setUser(null);
+      changeUser(null);
       setStatus('unauthenticated');
     }
     setReady(true);
-  }, []);
+  }, [changeUser]);
 
   useEffect(() => {
     void refresh();
@@ -165,108 +193,111 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     };
   }, [refresh]);
 
-  const login = useCallback(async ({ username, password, remember }: LoginParams): Promise<LoginResult> => {
-    try {
-      if (isDesktopRuntime) {
-        setReady(true);
-        return { success: true };
-      }
-
-      // Check CSRF token availability before login
-      // If token is missing, clear cache and inform user
-      const csrfTokenValid = hasValidCsrfToken();
-      if (!csrfTokenValid) {
-        console.warn('CSRF token missing or invalid, clearing cache');
-        clearAuthCache();
-        // Allow login to proceed anyway - server will set new token
-      }
-
-      // P1 安全修复：登录请求需要 CSRF Token / P1 Security fix: Login needs CSRF token
-      // Backend route is /login; web-host's static-server explicitly proxies it.
-      const response = await fetch('/login', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        credentials: 'include',
-        body: JSON.stringify(withCsrfToken({ username, password, remember })),
-      });
-
-      const data = (await response.json()) as {
-        success: boolean;
-        message?: string;
-        user?: AuthUser;
-      };
-
-      if (!response.ok || !data.success || !data.user) {
-        let code: LoginErrorCode = 'unknown';
-        let message = data?.message ?? 'Login failed';
-        let shouldClearCache = false;
-
-        if (response.status === 401) {
-          code = 'invalidCredentials';
-        } else if (response.status === 403) {
-          // CSRF validation failed - clear cache
-          code = 'csrfError';
-          message = 'Security token expired. Please try again.';
-          shouldClearCache = true;
-        } else if (response.status === 429) {
-          code = 'tooManyAttempts';
-        } else if (response.status >= 500) {
-          code = 'serverError';
-        } else if (!csrfTokenValid) {
-          // If we knew CSRF was invalid and login failed, suggest cache clear
-          code = 'csrfError';
-          message = 'Login failed due to cached data. Please clear your browser cache and try again.';
-          shouldClearCache = true;
+  const login = useCallback(
+    async ({ username, password, remember }: LoginParams): Promise<LoginResult> => {
+      try {
+        if (isDesktopRuntime) {
+          setReady(true);
+          return { success: true };
         }
 
-        // Clear cache on CSRF-related errors
-        if (shouldClearCache) {
+        // Check CSRF token availability before login
+        // If token is missing, clear cache and inform user
+        const csrfTokenValid = hasValidCsrfToken();
+        if (!csrfTokenValid) {
+          console.warn('CSRF token missing or invalid, clearing cache');
           clearAuthCache();
+          // Allow login to proceed anyway - server will set new token
+        }
+
+        // P1 安全修复：登录请求需要 CSRF Token / P1 Security fix: Login needs CSRF token
+        // Backend route is /login; web-host's static-server explicitly proxies it.
+        const response = await fetch('/login', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          credentials: 'include',
+          body: JSON.stringify(withCsrfToken({ username, password, remember })),
+        });
+
+        const data = (await response.json()) as {
+          success: boolean;
+          message?: string;
+          user?: AuthUser;
+        };
+
+        if (!response.ok || !data.success || !data.user) {
+          let code: LoginErrorCode = 'unknown';
+          let message = data?.message ?? 'Login failed';
+          let shouldClearCache = false;
+
+          if (response.status === 401) {
+            code = 'invalidCredentials';
+          } else if (response.status === 403) {
+            // CSRF validation failed - clear cache
+            code = 'csrfError';
+            message = 'Security token expired. Please try again.';
+            shouldClearCache = true;
+          } else if (response.status === 429) {
+            code = 'tooManyAttempts';
+          } else if (response.status >= 500) {
+            code = 'serverError';
+          } else if (!csrfTokenValid) {
+            // If we knew CSRF was invalid and login failed, suggest cache clear
+            code = 'csrfError';
+            message = 'Login failed due to cached data. Please clear your browser cache and try again.';
+            shouldClearCache = true;
+          }
+
+          // Clear cache on CSRF-related errors
+          if (shouldClearCache) {
+            clearAuthCache();
+          }
+
+          return {
+            success: false,
+            message,
+            code,
+            shouldClearCache,
+          };
+        }
+
+        changeUser(data.user);
+        setStatus('authenticated');
+        setReady(true);
+
+        // Re-enable WebSocket reconnection after successful login (WebUI mode only)
+        if (typeof window !== 'undefined' && (window as any).__websocketReconnect) {
+          (window as any).__websocketReconnect();
+        }
+
+        return { success: true };
+      } catch (error) {
+        console.error('Login request failed');
+
+        // Check if error is related to CSRF token parsing
+        const errorMessage = (error as Error).message;
+        if (errorMessage?.includes('parse') || errorMessage?.includes('csrf') || errorMessage?.includes('cookie')) {
+          // CSRF or cookie parsing error - clear cache
+          clearAuthCache();
+          return {
+            success: false,
+            message: 'Login failed due to cached data. Please clear your browser cache and try again.',
+            code: 'csrfError',
+            shouldClearCache: true,
+          };
         }
 
         return {
           success: false,
-          message,
-          code,
-          shouldClearCache,
+          message: 'Network error. Please try again.',
+          code: 'networkError',
         };
       }
-
-      setUser(data.user);
-      setStatus('authenticated');
-      setReady(true);
-
-      // Re-enable WebSocket reconnection after successful login (WebUI mode only)
-      if (typeof window !== 'undefined' && (window as any).__websocketReconnect) {
-        (window as any).__websocketReconnect();
-      }
-
-      return { success: true };
-    } catch (error) {
-      console.error('Login request failed');
-
-      // Check if error is related to CSRF token parsing
-      const errorMessage = (error as Error).message;
-      if (errorMessage?.includes('parse') || errorMessage?.includes('csrf') || errorMessage?.includes('cookie')) {
-        // CSRF or cookie parsing error - clear cache
-        clearAuthCache();
-        return {
-          success: false,
-          message: 'Login failed due to cached data. Please clear your browser cache and try again.',
-          code: 'csrfError',
-          shouldClearCache: true,
-        };
-      }
-
-      return {
-        success: false,
-        message: 'Network error. Please try again.',
-        code: 'networkError',
-      };
-    }
-  }, []);
+    },
+    [changeUser]
+  );
 
   const logout = useCallback(async () => {
     if (isDesktopRuntime) {
@@ -289,12 +320,12 @@ export const AuthProvider: React.FC<React.PropsWithChildren> = ({ children }) =>
     } catch {
       console.error('Logout request failed');
     } finally {
-      setUser(null);
+      changeUser(null);
       setStatus('unauthenticated');
       // Clear cache on logout for security
       clearAuthCache();
     }
-  }, []);
+  }, [changeUser]);
 
   const value = useMemo<AuthContextValue>(
     () => ({

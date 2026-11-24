@@ -12,6 +12,7 @@ import {
   Info,
   Lightning,
   LinkCloud,
+  PlugOne,
   Puzzle,
   Speed,
   System,
@@ -24,12 +25,23 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { Tooltip } from '@arco-design/web-react';
 import { getSiderTooltipProps } from '@/renderer/utils/ui/siderTooltip';
 
+/**
+ * Whether the settings menu item at `path` (in the sider or the mobile top menu) is the page
+ * shown: its own route or a page under it (`agent/<id>/repair`), never another item whose path
+ * only starts the same (`agent` is not `agent-extensions`).
+ */
+export function isSiderItemSelected(pathname: string, path: string): boolean {
+  const shown = pathname.replace(/^\/settings\/?/, '');
+  return shown === path || shown.startsWith(`${path}/`);
+}
+
 /** Builtin settings tab IDs in display order (must match router paths). */
 export const BUILTIN_TAB_IDS = [
   'agent',
   'model',
   'skills',
   'tools',
+  'agent-extensions',
   'appearance',
   'webui',
   'pet',
@@ -103,6 +115,12 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
         label: t('settings.tools', { defaultValue: 'Tools' }),
         icon: <Toolkit />,
         path: 'tools',
+      },
+      'agent-extensions': {
+        id: 'agent-extensions',
+        label: t('settings.agentExtensions.navLabel'),
+        icon: <PlugOne />,
+        path: 'agent-extensions',
       },
       appearance: { id: 'appearance', label: t('settings.appearancePanel'), icon: <Computer />, path: 'appearance' },
       webui: {
@@ -207,7 +225,7 @@ const SettingsSider: React.FC<{ collapsed?: boolean; tooltipEnabled?: boolean }>
       })}
     >
       {menus.map((item, index) => {
-        const isSelected = pathname.includes(item.path);
+        const isSelected = isSiderItemSelected(pathname, item.path);
         const groupHeaderKey = groupHeaderAt.get(index);
         const groupHeader =
           groupHeaderKey && !collapsed ? (
