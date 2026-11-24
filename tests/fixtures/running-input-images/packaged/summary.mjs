@@ -65,6 +65,6 @@ for (const [surface, artifact] of [
     '',
   ];
   fs.appendFileSync(GITHUB_STEP_SUMMARY, table.join('\n'));
-  if (report.status !== 'passed' || report.surface !== surface || report.scenarios.length !== 7) process.exitCode = 1;
+  if (report.status !== 'passed' || report.surface !== surface || report.scenarios.length !== 9) process.exitCode = 1;
 }
 if (SCENARIOS !== 'success') process.exitCode = 1;

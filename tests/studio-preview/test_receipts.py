@@ -245,7 +245,7 @@ class FailedAuditReceiptTests(unittest.TestCase):
 
     def test_extension_capture_timeout_matches_the_installer_target_and_receipt(self):
         for target, capture_timeout, total_timeout in (
-                ('darwin-x64', 420, 420), ('darwin-arm64', 300, 300), ('win32-x64', 300, 300),
+                ('darwin-x64', 600, 600), ('darwin-arm64', 300, 300), ('win32-x64', 300, 300),
                 ('linux-x64', 420, 1020), ('linux-arm64', 420, 1020)):
             with self.subTest(target=target), tempfile.TemporaryDirectory() as directory:
                 root = Path(directory)

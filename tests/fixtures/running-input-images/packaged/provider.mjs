@@ -16,9 +16,15 @@ export async function startProvider() {
   const requests = [];
   let release;
   let expectedPaths;
+  let mixedReferences;
   let failed = false;
   const server = createServer(async (request, response) => {
     try {
+      if (request.method === 'GET' && request.url === '/fixture/mixed-references' && mixedReferences) {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify(mixedReferences));
+        return;
+      }
       if (request.method !== 'POST' || request.url !== '/responses') throw new Error('method');
       const chunks = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -84,6 +90,9 @@ export async function startProvider() {
     requests,
     get holding() {
       return release !== undefined;
+    },
+    expectMixedReferences(references) {
+      mixedReferences = references;
     },
     expectPaths(references) {
       expectedPaths = references?.slice().sort();
