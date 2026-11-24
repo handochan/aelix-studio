@@ -92,7 +92,7 @@ const CredentialsPrompt: React.FC<Props> = ({ question, visible, reason, proxy, 
         </>
       }
     >
-      <div className='flex flex-col gap-12px' data-testid='credentials-prompt'>
+      <div className='flex flex-col gap-12px' data-testid='credentials-prompt' data-open={visible}>
         <span className='text-13px text-t-primary'>{t('settings.agentExtensions.credentials.body', { proxy })}</span>
         {reason === 'rejected' && <Alert type='error' content={t('settings.agentExtensions.credentials.rejected')} />}
         {reason === 'changed' && <Alert type='warning' content={t('settings.agentExtensions.credentials.changed')} />}

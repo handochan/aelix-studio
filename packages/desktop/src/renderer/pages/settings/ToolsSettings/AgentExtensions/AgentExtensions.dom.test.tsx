@@ -217,6 +217,39 @@ const sent = (action: string) => host.requests.filter((request) => request.actio
 /** The failure texts shown as messages. */
 const errorsShown = () => vi.mocked(Message.error).mock.calls.map(([text]) => text);
 
+/**
+ * The dialog `testId` while it asks a question: never one that was answered and is still leaving
+ * (its exit animation can take long on a busy machine, and it has the same buttons).
+ */
+const askingDialog = (testId: string): HTMLElement | null =>
+  document.querySelector<HTMLElement>(`[data-testid="${testId}"][data-open="true"]`);
+const findAskingDialog = (testId: string): Promise<HTMLElement> =>
+  waitFor(() => {
+    const dialog = askingDialog(testId);
+    if (!dialog) throw new Error(`${testId} asks nothing`);
+    return dialog;
+  });
+const INSECURE = 'agent-extensions-insecure-confirm';
+/** Answers the insecure-channel question asked now; its dialog then asks nothing more. */
+const answerInsecure = async (send: boolean): Promise<void> => {
+  const dialog = await findAskingDialog(INSECURE);
+  const button = send ? 'settings.agentExtensions.insecure.confirm' : 'settings.agentExtensions.actions.cancel';
+  fireEvent.click(within(dialog).getByText(button, { selector: 'button span' }));
+  expect(askingDialog(INSECURE)).toBeNull();
+};
+/** Gives the credentials prompt that asks now a user name and password, and sends them. */
+const giveCredentials = async (password: string): Promise<void> => {
+  const prompt = await findAskingDialog('credentials-prompt');
+  fireEvent.change(within(prompt).getByTestId('credentials-username'), { target: { value: 'ops' } });
+  fireEvent.change(within(prompt).getByTestId('credentials-password'), { target: { value: password } });
+  fireEvent.click(screen.getByTestId('credentials-submit'));
+};
+/** Lets what an answer started run on, so that a send it should not make would be seen. */
+const settle = (): Promise<void> =>
+  act(async () => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  });
+
 beforeEach(() => {
   resetShownOperation();
   bridge.platform = 'darwin';
@@ -325,18 +358,16 @@ describe('the agent extensions screen', () => {
         fireEvent.click(await screen.findByTestId('agent-extensions-install'));
         fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
         fireEvent.click(screen.getByTestId('install-submit'));
-        fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
-        fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'sentinel-secret' } });
-        fireEvent.click(screen.getByTestId('credentials-submit'));
+        await giveCredentials('sentinel-secret');
       };
       await install();
-      fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
-      // The dialog leaves after its exit animation, which can be slow on a busy runner.
-      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
+      await answerInsecure(false);
+      await settle();
       expect(sent('install')).toEqual([]);
 
+      // Asked again at once: the answered dialog may still be leaving.
       await install();
-      fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
+      await answerInsecure(true);
       await waitFor(() =>
         expect(sent('install')).toEqual([
           {
@@ -640,15 +671,15 @@ describe('the agent extensions screen', () => {
       render(<AgentExtensionsSettings />);
       const input = await typeProxyWithPassword();
       fireEvent.click(screen.getByTestId('settings-save'));
-      fireEvent.click(await screen.findByText('settings.agentExtensions.actions.cancel', { selector: 'button span' }));
-      await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
+      await answerInsecure(false);
+      await settle();
       expect(sent('set_settings')).toEqual([]);
       expect(input.value).toBe('http://proxy.corp:3128');
 
       host.settingsRefusal = 'INVALID_INPUT';
       fireEvent.change(input, { target: { value: 'http://ops:sentinel-secret@proxy.corp:3128' } });
       fireEvent.click(screen.getByTestId('settings-save'));
-      fireEvent.click(await screen.findByText('settings.agentExtensions.insecure.confirm'));
+      await answerInsecure(true);
       await waitFor(() => expect(errorsShown()).toEqual(['settings.agentExtensions.errors.INVALID_INPUT']));
       expect(sent('set_settings')).toHaveLength(1);
       expect(input.value).toBe('http://proxy.corp:3128');
@@ -695,9 +726,7 @@ describe('the agent extensions screen', () => {
       fireEvent.click(screen.getByTestId('agent-extensions-install'));
       fireEvent.change(await screen.findByTestId('install-name'), { target: { value: 'aelix-notes' } });
       fireEvent.click(screen.getByTestId('install-submit'));
-      fireEvent.change(await screen.findByTestId('credentials-username'), { target: { value: 'ops' } });
-      fireEvent.change(screen.getByTestId('credentials-password'), { target: { value: 'right' } });
-      fireEvent.click(screen.getByTestId('credentials-submit'));
+      await giveCredentials('right');
       await waitFor(() =>
         expect(errorsShown()).toEqual(['settings.agentExtensions.errors.PROXY_CREDENTIALS_REQUIRED'])
       );
@@ -709,8 +738,9 @@ describe('the agent extensions screen', () => {
           proxyCredentials: { username: 'ops', password: 'right' },
         },
       ]);
-      // Asked once: the prompt leaves (after its exit animation) and does not come back.
-      await waitFor(() => expect(screen.queryByTestId('credentials-password')).toBeNull());
+      // Asked once: the prompt asks nothing more, and nothing more is sent.
+      await settle();
+      expect(askingDialog('credentials-prompt')).toBeNull();
       expect(sent('install')).toHaveLength(2);
     },
     LONG
@@ -1145,13 +1175,8 @@ describe('the agent extensions screen', () => {
         const url = await openGit();
         fireEvent.change(url, { target: { value: 'https://ops:git-token@git.example/pack.git' } });
         fireEvent.click(screen.getByTestId('install-submit'));
-        const question = (await screen.findByText('settings.agentExtensions.insecure.body')).closest('.arco-modal');
-        fireEvent.click(
-          within(question as HTMLElement).getByText('settings.agentExtensions.actions.cancel', {
-            selector: 'button span',
-          })
-        );
-        await waitFor(() => expect(screen.queryByText('settings.agentExtensions.insecure.body')).toBeNull());
+        await answerInsecure(false);
+        await settle();
         expect(sent('install')).toEqual([]);
         // Opened again: the address is there without its user part.
         expect((await openGit()).value).toBe('https://git.example/pack.git');
