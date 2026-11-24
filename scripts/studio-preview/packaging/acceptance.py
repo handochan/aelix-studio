@@ -33,7 +33,9 @@ INSTALL_PROBE_TIMEOUT = 5
 # hit the qualifier's 180s deadline in PR Checks run 44986691773 (Studio #116).
 # The upgrade qualification adds real pip installs, an index lookup and Git fetches.
 EXTENSIONS_CAPTURE_TIMEOUT = 300
-DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 420
+# Studio #126 measured 108s for runtime checks, 55s for proxy installs, and
+# 256s for online upgrades on macOS Intel, nearly 420s before qualifier cleanup.
+DARWIN_X64_EXTENSIONS_CAPTURE_TIMEOUT = 600
 LINUX_EXTENSIONS_CAPTURE_TIMEOUT = 420
 EXTENSIONS_SIGNATURE_TIMEOUT = 60
 
