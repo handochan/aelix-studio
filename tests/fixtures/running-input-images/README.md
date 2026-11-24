@@ -92,6 +92,19 @@ Stop. It records sizes and counts at the native edge and checks that the
 Host and Chromium diagnostic output omit raw and escaped private image fixture
 markers.
 
+At the 6 MiB raw boundary, base64 alone fills at least 8 MiB. The JSON
+envelope puts all three raw boundary cases in `realHost.ts` over the JSONL
+limit. The [Studio preflight test](../../unit/renderer/conversation/acp/runningInputComposer.dom.test.tsx)
+uses a stubbed JSONL estimate to verify 6 MiB − 1 B, exactly 6 MiB, and
+6 MiB + 1 B independently. The over-limit case shows the local `limits`
+notice and performs zero uploads, grant requests, or queue writes.
+
+The pinned Host starts [each copy batch](https://github.com/handochan/aelix-studio-host/blob/40ff80a4ae6cabe07e3d45043c92cbb60d2c7875/crates/aionui-conversation/src/byte_grant_snapshot.rs#L34-L71)
+with [a 6 MiB budget](https://github.com/handochan/aelix-studio-host/blob/40ff80a4ae6cabe07e3d45043c92cbb60d2c7875/crates/aionui-ai-agent/src/protocol/byte_grants.rs#L20)
+and debits each file. Its [copy boundary test](https://github.com/handochan/aelix-studio-host/blob/40ff80a4ae6cabe07e3d45043c92cbb60d2c7875/crates/aionui-conversation/src/byte_grant_snapshot.rs#L239-L249)
+covers a single copy at its 4-byte remaining budget and one byte over.
+The Host test suite has no dedicated 6 MiB aggregate boundary case.
+
 ## Packaged Windows and Linux acceptance
 
 The PR Checks workflow runs the packaged image suite when dispatched

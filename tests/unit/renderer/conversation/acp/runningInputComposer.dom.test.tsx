@@ -28,6 +28,9 @@ import type { UseRunningInputOptions } from '@/renderer/pages/conversation/runti
 import { emitter } from '@/renderer/utils/emitter';
 import type { RunningInputReferences } from '@/renderer/services/runtime/RunningInput';
 import * as runningImages from '@/renderer/services/runtime/RunningInput/Images';
+import * as imageBudget from '@/renderer/services/runtime/RunningInput/Images/budget';
+import * as imageTransfer from '@/renderer/services/runtime/RunningInput/Images/transfer';
+import * as imageWorker from '@/renderer/services/runtime/RunningInput/Images/workerClient';
 import referencesFixture from './runningInputReferences.fixture.json';
 
 vi.mock('react-i18next', () => ({
@@ -614,8 +617,11 @@ describe('running input in the composer', () => {
     });
   });
 
-  /** A vision turn whose image write answer comes from `steerImages`; lookups answer from `lookup`. */
-  async function mountVisionTurn(steerImages: () => Response | Promise<Response>, lookup?: () => Response) {
+  /** A vision turn whose image write answer comes from `steerImages`. */
+  function offerVisionTurn(
+    steerImages: () => Response | Promise<Response>,
+    { lookup, rawBytes = 6 << 20 }: { lookup?: () => Response; rawBytes?: number } = {}
+  ) {
     server.discovery = () =>
       success({
         version: 1,
@@ -629,12 +635,16 @@ describe('running input in the composer', () => {
           available: true,
           model: 'fixture/vision',
           turnId: server.turn.turnId,
-          remaining: { count: 4, rawBytes: 6 << 20, imageBytes: 3_750_000, sidePixels: 8000, nativeLineBytes: 8 << 20 },
+          remaining: { count: 4, rawBytes, imageBytes: 3_750_000, sidePixels: 8000, nativeLineBytes: 8 << 20 },
         });
       if (method === STEER_IMAGES) return steerImages();
       if (method === LOOKUP && lookup) return lookup();
       return accepted(payload.turnId);
     });
+  }
+
+  async function mountVisionTurn(steerImages: () => Response | Promise<Response>, lookup?: () => Response) {
+    offerVisionTurn(steerImages, { lookup });
     const digest = { sha256: 'b'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
     const size = { width: 64, height: 1, bytes: 64, digest };
     vi.spyOn(runningImages, 'createImagePreparation').mockImplementation(({ requestId }) => ({
@@ -670,6 +680,87 @@ describe('running input in the composer', () => {
     );
     await mount({ enablePixels: true });
   }
+
+  it.each([-1, 0, 1])('enforces the raw submission limit at 6 MiB with a %i-byte offset', async (offset) => {
+    const totalBytes = 6 * 1024 * 1024 + offset;
+    const sizes = [3_000_000, totalBytes - 3_000_000];
+    const files = [
+      { kind: 'upload', path: '/client/first.png' },
+      { kind: 'upload', path: '/client/second.png' },
+    ] as const;
+    const header = { mime: 'image/png', width: 64, height: 1, orientation: 1 } as const;
+    const digest = { sha256: 'b'.repeat(64), algorithm: 'js', elapsedMs: 0 } as const;
+
+    // Price raw bytes 1:1 at both JSONL budget checks so only the raw total can bind.
+    vi.spyOn(imageBudget, 'base64Bytes').mockImplementation((bytes) => bytes);
+    vi.spyOn(imageBudget, 'nativeLineBytes').mockImplementation(
+      (line, sizes) => new TextEncoder().encode(line).length + sizes.reduce((sum, bytes) => sum + bytes, 0)
+    );
+    const read = vi.spyOn(imageTransfer, 'readReferencedImage');
+    for (const bytes of sizes) read.mockResolvedValueOnce(new Blob([new Uint8Array(bytes + 1)], { type: header.mime }));
+    // Return both derivatives even when their combined size exceeds the preparation budget.
+    vi.spyOn(imageWorker, 'runImageWorker').mockImplementation(async ({ kind, source }) => ({
+      elapsedMs: 0,
+      result:
+        kind === 'inspect'
+          ? { kind: 'inspected', header }
+          : {
+              kind: 'encoded',
+              result: {
+                output: source.slice(0, -1, header.mime),
+                originalDigest: digest,
+                outputDigest: digest,
+                dimensions: header,
+                changed: true,
+                secureContext: false,
+                plannedBytes: 64,
+              },
+            },
+    }));
+    const upload = vi
+      .spyOn(imageTransfer, 'uploadPreparedImage')
+      .mockResolvedValueOnce(files[0])
+      .mockResolvedValueOnce(files[1]);
+    const grant = vi.fn(() =>
+      success({
+        expiresInMs: 60_000,
+        grants: sizes.map((byteLength, index) => ({
+          id: `grant-${index}`,
+          byteLength,
+          sha256: digest.sha256,
+        })),
+      })
+    );
+    offerVisionTurn(
+      () =>
+        result({
+          accepted: true,
+          delivery: 'native-queue',
+          turnId: 'turn-1',
+          inputKind: 'pixels',
+          captionAdded: false,
+        }),
+      { rawBytes: 7 << 20 }
+    );
+    const fetchHost = fetchMock.getMockImplementation()!;
+    fetchMock.mockImplementation(async (url, init) => (url.endsWith('/byte-grants') ? grant() : fetchHost(url, init)));
+    await mount({ enablePixels: true });
+
+    const route = await submit('caption', { files, sessions: [] });
+    if (offset > 0) {
+      expect(route).toBe('kept');
+      const notice = screen.getByTestId('running-image-submission');
+      expect(notice.getAttribute('data-reason')).toBe('limits');
+      expect(notice.textContent).toContain('acp.runningInput.images.reason.limits');
+      expect(upload).not.toHaveBeenCalled();
+      expect(grant).not.toHaveBeenCalled();
+      expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([]);
+    } else {
+      expect(route).toBe('sent');
+      expect(controller.images.receipts[0].receipt.pixels?.images.map(({ sent }) => sent.bytes)).toEqual(sizes);
+      expect(writes().filter((method) => method !== IMAGE_STATE)).toEqual([STEER_IMAGES]);
+    }
+  });
 
   async function expectPathOnlyAfter(reason: string) {
     const [{ receipt }] = controller.images.receipts;
