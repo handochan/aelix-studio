@@ -36,10 +36,10 @@ vi.mock('@/renderer/components/agent/AgentModeSelector', () => ({
 }));
 
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: ({ entries }: { entries: Array<{ key: string; label: string; onClick?: () => void }> }) => (
+  default: ({ entries }: { entries: Array<{ key: string; label: string; meta?: string; onClick?: () => void }> }) => (
     <div data-testid='mobile-action-sheet'>
       {entries.map((entry) => (
-        <button key={entry.key} type='button' data-testid={entry.key} onClick={entry.onClick}>
+        <button key={entry.key} type='button' data-testid={entry.key} data-meta={entry.meta} onClick={entry.onClick}>
           {entry.label}
         </button>
       ))}
@@ -140,7 +140,15 @@ vi.mock('@arco-design/web-react', () => {
     ),
     Menu,
     Message: { success: vi.fn(), error: vi.fn() },
-    Tooltip: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+    Tooltip: ({
+      children,
+      content,
+      disabled,
+    }: {
+      children?: React.ReactNode;
+      content?: React.ReactNode;
+      disabled?: boolean;
+    }) => <span data-tooltip={disabled ? undefined : (content as string | undefined)}>{children}</span>,
   };
 });
 
@@ -178,6 +186,59 @@ const renderActionRow = (overrides: Partial<React.ComponentProps<typeof GuidActi
       {...overrides}
     />
   );
+
+describe('GuidActionRow send gating', () => {
+  beforeEach(() => {
+    environment.isMobile = false;
+  });
+
+  it('explains a disabled Send on hover and shows no hint otherwise', () => {
+    const { rerender } = renderActionRow({ isButtonDisabled: true, sendDisabledHint: 'Pick a model first' });
+    expect(screen.getByTestId('guid-send-btn')).toBeDisabled();
+    expect(screen.getByTestId('guid-send-hint').parentElement).toHaveAttribute('data-tooltip', 'Pick a model first');
+    rerender(
+      <GuidActionRow
+        files={[]}
+        onFilesUploaded={vi.fn()}
+        modelSelectorNode={null}
+        isGeminiMode={false}
+        modelList={[]}
+        current_model={undefined}
+        setCurrentModel={vi.fn()}
+        currentAcpCachedModelInfo={null}
+        selectedAcpModel={null}
+        setSelectedAcpModel={vi.fn()}
+        selectedMode=''
+        onModeSelect={vi.fn()}
+        allSkills={[]}
+        disabledBuiltinSkills={[]}
+        enabledSkills={[]}
+        onToggleSkill={vi.fn()}
+        mcpServers={[]}
+        selectedMcpServerIds={[]}
+        onToggleMcpServer={vi.fn()}
+        loading={false}
+        isButtonDisabled={false}
+        onSend={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('guid-send-hint').parentElement).not.toHaveAttribute('data-tooltip');
+  });
+
+  it('asks for a model in the mobile sheet instead of naming the first advertised one', () => {
+    environment.isMobile = true;
+    const currentAcpCachedModelInfo = {
+      current_model_id: 'fixture/one',
+      current_model_label: 'Loopback one',
+      available_models: [
+        { id: 'fixture/one', label: 'Loopback one' },
+        { id: 'fixture/two', label: 'Loopback two' },
+      ],
+    };
+    renderActionRow({ currentAcpCachedModelInfo, modelSelectionRequired: true });
+    expect(screen.getByTestId('model')).toHaveAttribute('data-meta', 'conversation.welcome.selectModel');
+  });
+});
 
 describe('GuidActionRow skill/MCP submenu search', () => {
   beforeEach(() => {

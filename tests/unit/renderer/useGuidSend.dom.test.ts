@@ -99,6 +99,24 @@ describe('useGuidSend', () => {
     expect(deps.setInput).not.toHaveBeenCalled();
   });
 
+  it('keeps the draft and sends nothing while builtin Aelix waits for a model pick', async () => {
+    const deps = {
+      ...createDeps(),
+      selectedAssistantId: 'bare:builtin-aelix',
+      selectedAssistantBackend: 'aelix',
+      selectedBuiltinAelix: true,
+      selectedAcpModel: null,
+      modelSelectionRequired: true,
+    };
+    const { result } = renderHook(() => useGuidSend(deps));
+    expect(result.current.isButtonDisabled).toBe(true);
+    // Enter reaches the handler even while the button is disabled.
+    act(() => result.current.sendMessageHandler());
+    await act(() => result.current.handleSend());
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.setInput).not.toHaveBeenCalled();
+  });
+
   it('blocks the queued first prompt when ACP only advertises a fallback model', async () => {
     const deps = {
       ...createDeps(),

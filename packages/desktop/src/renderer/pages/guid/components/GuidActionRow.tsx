@@ -89,6 +89,8 @@ type GuidActionRowProps = {
   setCurrentModel: (model: TProviderWithModel) => Promise<void>;
   currentAcpCachedModelInfo: AcpModelInfo | null;
   selectedAcpModel: string | null;
+  /** No model is in use until the user picks one. */
+  modelSelectionRequired?: boolean;
   setSelectedAcpModel: (model: string | null) => void;
 
   // Thought level (mobile action sheet; only present for ACP agents)
@@ -113,6 +115,8 @@ type GuidActionRowProps = {
   // Send button
   loading: boolean;
   isButtonDisabled: boolean;
+  /** Why Send is disabled, shown on hover. */
+  sendDisabledHint?: string;
   speechInputNode?: React.ReactNode;
   onSend: () => void;
 };
@@ -128,6 +132,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   setCurrentModel,
   currentAcpCachedModelInfo,
   selectedAcpModel,
+  modelSelectionRequired = false,
   setSelectedAcpModel,
   thoughtLevelOption,
   onThoughtLevelSelect,
@@ -144,6 +149,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   onToggleMcpServer,
   loading,
   isButtonDisabled,
+  sendDisabledHint,
   speechInputNode,
   onSend,
 }) => {
@@ -256,11 +262,12 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         description: model.description,
         active: model.id === selectedAcpModel,
       }));
-      currentModelLabel =
-        available.find((m) => m.id === selectedAcpModel)?.label ||
-        selectedAcpModel ||
-        currentAcpCachedModelInfo?.current_model_label ||
-        '';
+      currentModelLabel = modelSelectionRequired
+        ? t('conversation.welcome.selectModel')
+        : available.find((m) => m.id === selectedAcpModel)?.label ||
+          selectedAcpModel ||
+          currentAcpCachedModelInfo?.current_model_label ||
+          '';
       onModelSelect = (key) => setSelectedAcpModel(key);
     }
     if (modelOptions.length > 0) {
@@ -412,6 +419,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     setCurrentModel,
     currentAcpCachedModelInfo,
     selectedAcpModel,
+    modelSelectionRequired,
     setSelectedAcpModel,
     thoughtLevelOption,
     onThoughtLevelSelect,
@@ -653,20 +661,25 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         )}
 
         {speechInputNode}
-        <Button
-          shape='circle'
-          type='primary'
-          loading={loading}
-          disabled={isButtonDisabled}
-          className='send-button-custom'
-          style={{
-            backgroundColor: isButtonDisabled ? undefined : '#000000',
-            borderColor: isButtonDisabled ? undefined : '#000000',
-          }}
-          icon={<ArrowUp theme='filled' size='14' fill='white' strokeWidth={5} />}
-          onClick={onSend}
-          data-testid='guid-send-btn'
-        />
+        <Tooltip content={sendDisabledHint} disabled={!sendDisabledHint} position='top'>
+          {/* A disabled button receives no hover events; the wrapper carries the hint. */}
+          <span className='inline-flex' data-testid='guid-send-hint' aria-label={sendDisabledHint}>
+            <Button
+              shape='circle'
+              type='primary'
+              loading={loading}
+              disabled={isButtonDisabled}
+              className='send-button-custom'
+              style={{
+                backgroundColor: isButtonDisabled ? undefined : '#000000',
+                borderColor: isButtonDisabled ? undefined : '#000000',
+              }}
+              icon={<ArrowUp theme='filled' size='14' fill='white' strokeWidth={5} />}
+              onClick={onSend}
+              data-testid='guid-send-btn'
+            />
+          </span>
+        </Tooltip>
       </div>
     </div>
   );

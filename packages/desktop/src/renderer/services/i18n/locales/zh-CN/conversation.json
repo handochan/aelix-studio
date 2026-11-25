@@ -6,6 +6,7 @@
     "newConversation": "新会话",
     "selectModel": "选择模型",
     "useCliModel": "选择模型",
+    "selectModelToSend": "发送前请先选择模型。",
     "modelSwitchNotSupported": "首次连接后将显示可用模型列表。请先发送消息以连接并加载可用模型。",
     "specifyWorkspace": "选择项目",
     "currentWorkspace": "当前项目",

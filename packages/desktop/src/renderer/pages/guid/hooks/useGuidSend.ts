@@ -33,6 +33,8 @@ export type GuidSendDeps = {
   selectedAssistantId: string | null;
   selectedAssistantAvailable: boolean;
   selectedBuiltinAelix?: boolean;
+  /** Send waits for a model pick (builtin Aelix with no reported model). */
+  modelSelectionRequired?: boolean;
   selectedAssistantBackend: string;
   selectedMode: string;
   selectedAcpModel: string | null;
@@ -82,6 +84,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAssistantId,
     selectedAssistantAvailable,
     selectedBuiltinAelix,
+    modelSelectionRequired = false,
     selectedAssistantBackend,
     selectedMode,
     selectedAcpModel,
@@ -105,7 +108,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const sendingRef = useRef(false);
 
   const handleSend = useCallback(async () => {
-    if (!selectedAssistantId || !selectedAssistantAvailable) {
+    if (!selectedAssistantId || !selectedAssistantAvailable || modelSelectionRequired) {
       return;
     }
 
@@ -299,6 +302,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAssistantId,
     selectedAssistantAvailable,
     selectedBuiltinAelix,
+    modelSelectionRequired,
     selectedAssistantBackend,
     selectedMode,
     selectedAcpModel,
@@ -317,7 +321,9 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   ]);
 
   const sendMessageHandler = useCallback(() => {
-    if (loading || !selectedAssistantId || !selectedAssistantAvailable || sendingRef.current) return;
+    // Keep the draft: a send that waits for a model pick must not clear the input.
+    if (loading || !selectedAssistantId || !selectedAssistantAvailable || modelSelectionRequired || sendingRef.current)
+      return;
     sendingRef.current = true;
     setLoading(true);
     handleSend()
@@ -346,6 +352,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     loading,
     selectedAssistantId,
     selectedAssistantAvailable,
+    modelSelectionRequired,
     handleSend,
     setLoading,
     setInput,
@@ -362,7 +369,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   // Calculate button disabled state. Empty input is allowed once an assistant is
   // picked — that path creates an empty conversation ("start chat") rather than
   // sending a message, so the gate only blocks while loading or with no assistant.
-  const isButtonDisabled = loading || !selectedAssistantId || !selectedAssistantAvailable;
+  const isButtonDisabled = loading || !selectedAssistantId || !selectedAssistantAvailable || modelSelectionRequired;
 
   return {
     handleSend,

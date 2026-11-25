@@ -6,6 +6,7 @@
     "newConversation": "新しいチャット",
     "selectModel": "モデルを選択",
     "useCliModel": "モデルを選択",
+    "selectModelToSend": "送信する前にモデルを選択してください。",
     "modelSwitchNotSupported": "初回接続後に利用可能なモデルリストが表示されます。まずメッセージを送信して接続し、利用可能なモデルを読み込んでください。",
     "specifyWorkspace": "プロジェクトを選択",
     "currentWorkspace": "現在のプロジェクト",

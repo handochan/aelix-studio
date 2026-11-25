@@ -6,6 +6,7 @@
     "newConversation": "Yeni Sohbet",
     "selectModel": "Model Seç",
     "useCliModel": "Model Seç",
+    "selectModelToSend": "Göndermeden önce bir model seçin.",
     "modelSwitchNotSupported": "Model listesi ilk bağlantıdan sonra kullanılabilir olacaktır. Bağlanmak ve mevcut modelleri yüklemek için önce bir mesaj gönderin.",
     "specifyWorkspace": "Projede Sohbet Et",
     "currentWorkspace": "Mevcut Proje",

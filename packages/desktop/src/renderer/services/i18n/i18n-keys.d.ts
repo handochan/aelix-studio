@@ -1006,6 +1006,7 @@ export type I18nKey =
   | 'conversation.welcome.quickActionStar'
   | 'conversation.welcome.quickActionsTitle'
   | 'conversation.welcome.selectModel'
+  | 'conversation.welcome.selectModelToSend'
   | 'conversation.welcome.skillsMarket'
   | 'conversation.welcome.skillsMarketDesc'
   | 'conversation.welcome.skillsMarketDetails'

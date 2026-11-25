@@ -116,6 +116,30 @@ describe('GuidModelSelector', () => {
     ],
   };
 
+  it('asks for a model instead of naming the first advertised one while a pick is required', () => {
+    const props = {
+      isGeminiMode: false,
+      modelList: [],
+      current_model: undefined,
+      setCurrentModel: vi.fn(),
+      currentAcpCachedModelInfo: {
+        current_model_id: 'fixture/one',
+        current_model_label: 'Loopback one',
+        available_models: [
+          { id: 'fixture/one', label: 'Loopback one' },
+          { id: 'fixture/two', label: 'Loopback two' },
+        ],
+      },
+      selectedAcpModel: null,
+      setSelectedAcpModel: vi.fn(),
+    };
+    const { container, rerender } = render(<GuidModelSelector {...props} modelSelectionRequired />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('conversation.welcome.selectModel');
+
+    rerender(<GuidModelSelector {...props} modelSelectionRequired={false} />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('Loopback one');
+  });
+
   it('shows ACP model descriptions in option tooltips', () => {
     render(
       <GuidModelSelector

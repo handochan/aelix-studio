@@ -152,6 +152,23 @@ function buildModelInfoFromConfigOptions(configOptions: AcpSessionConfigOption[]
   };
 }
 
+/**
+ * The model the agent itself reports as current, or null when it reports none.
+ * Unlike {@link buildAgentRuntimeModelInfo}, an empty current value does not fall
+ * back to the first advertised model.
+ */
+export function getReportedCurrentModelId(agent: AgentRuntimeCatalog | null | undefined): string | null {
+  if (!agent) return null;
+  const modelOption = normalizeConfigOptions(agent.config_options).find(
+    (option) => option.category === 'model' && option.type === 'select'
+  );
+  if (modelOption) return getConfigOptionCurrentValue(modelOption) || null;
+  const payload = parseJsonPayload(agent.available_models);
+  if (!isRecord(payload)) return null;
+  const current = payload.current_model_id ?? payload.currentModelId;
+  return typeof current === 'string' && current ? current : null;
+}
+
 export function buildAgentRuntimeModelInfo(agent: AgentRuntimeCatalog | null | undefined): AcpModelInfo | null {
   if (!agent) return null;
 

@@ -38,6 +38,8 @@ type GuidModelSelectorProps = {
   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
   thoughtLevelOption?: AgentRuntimeDerivedOption | null;
   onThoughtLevelSelect?: (value: string) => void;
+  /** No model is in use until the user picks one; label the picker as a prompt. */
+  modelSelectionRequired?: boolean;
 };
 
 /** Composite id for a provider+model pair, so the shared flat model list can track selection. */
@@ -53,10 +55,11 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   setSelectedAcpModel,
   thoughtLevelOption,
   onThoughtLevelSelect,
+  modelSelectionRequired = false,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const defaultModelLabel = t('common.defaultModel');
+  const defaultModelLabel = modelSelectionRequired ? t('conversation.welcome.selectModel') : t('common.defaultModel');
 
   // 过滤掉被禁用的 provider
   const enabledModelList = React.useMemo(() => {
@@ -93,13 +96,21 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   ]);
 
   const acpButtonLabel = React.useMemo(() => {
+    // The runtime's first advertised model is not in use; do not present it as chosen.
+    if (modelSelectionRequired) return defaultModelLabel;
     return getModelDisplayLabel({
       selected_value: selectedAcpModel || currentAcpCachedModelInfo?.current_model_id,
       selectedLabel: acpSelectedLabel,
       defaultModelLabel,
       fallbackLabel: defaultModelLabel,
     });
-  }, [acpSelectedLabel, currentAcpCachedModelInfo?.current_model_id, defaultModelLabel, selectedAcpModel]);
+  }, [
+    acpSelectedLabel,
+    currentAcpCachedModelInfo?.current_model_id,
+    defaultModelLabel,
+    modelSelectionRequired,
+    selectedAcpModel,
+  ]);
   const selectedThoughtLevelValue = thoughtLevelOption?.currentValue || thoughtLevelOption?.options[0]?.value || '';
   const normalizedThoughtLevelOption =
     thoughtLevelOption && thoughtLevelOption.options.length > 0

@@ -260,6 +260,7 @@ const GuidPage: React.FC = () => {
     selectedAssistantId: agentSelection.selectedAssistantId,
     selectedAssistantAvailable: agentSelection.selectedAssistantAvailable,
     selectedBuiltinAelix: isBuiltinAelixAssistant(agentSelection.selectedAssistant),
+    modelSelectionRequired: agentSelection.modelSelectionRequired,
     selectedAssistantBackend: agentSelection.selectedAssistantBackend,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
@@ -602,6 +603,7 @@ const GuidPage: React.FC = () => {
       setSelectedAcpModel={setGuidSelectedAcpModel}
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
+      modelSelectionRequired={agentSelection.modelSelectionRequired}
     />
   );
 
@@ -626,6 +628,7 @@ const GuidPage: React.FC = () => {
       setCurrentModel={setGuidCurrentModel}
       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
       selectedAcpModel={agentSelection.selectedAcpModel}
+      modelSelectionRequired={agentSelection.modelSelectionRequired}
       setSelectedAcpModel={setGuidSelectedAcpModel}
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
@@ -645,6 +648,7 @@ const GuidPage: React.FC = () => {
       }
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}
+      sendDisabledHint={agentSelection.modelSelectionRequired ? t('conversation.welcome.selectModelToSend') : undefined}
       onSend={send.sendMessageHandler}
     />
   );

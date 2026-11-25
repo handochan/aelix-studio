@@ -395,6 +395,10 @@ const AcpSendBox: React.FC<{
 
   const firstModelAcceptedRef = useRef<string | null>(null);
   const keepsInitialModelDraft = hasInitialModel && firstModelAcceptedRef.current !== conversation_id;
+  // Aelix refuses a prompt while native has no model, and the header then asks for one.
+  // A pending first-prompt choice is applied before dispatch, so it does not count.
+  const modelSelectionRequired =
+    backend === 'aelix' && !keepsInitialModelDraft && runtimeConfig.model !== null && !runtimeConfig.model.currentValue;
   const loadFreshConfig = viewConfigPort?.loadFresh;
   const submitPrompt = useCallback(
     (dispatch: () => Promise<void>) => {
@@ -647,6 +651,10 @@ Please check your local CLI tool authentication status`,
       return false;
     }
     if (deferDraftClear && !message.trim()) return false;
+    if (modelSelectionRequired) {
+      Message.warning(t('conversation.welcome.selectModelToSend'));
+      return false;
+    }
 
     if (!deferDraftClear && !keepsInitialModelDraft) {
       clearFiles();
@@ -1058,14 +1066,16 @@ Please check your local CLI tool authentication status`,
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={sendBlocked}
-        sendDisabled={!supportsMidturnDelivery && isBusy && !runningInputSendable}
+        sendDisabled={(!supportsMidturnDelivery && isBusy && !runningInputSendable) || modelSelectionRequired}
         sendDisabledTooltip={
           !supportsMidturnDelivery && isBusy && !runningInputSendable
             ? t('conversation.commandQueue.midturnBlockedSendHint', {
                 defaultValue:
                   'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
               })
-            : undefined
+            : modelSelectionRequired
+              ? t('conversation.welcome.selectModelToSend')
+              : undefined
         }
         placeholder={
           sendBlocked

@@ -19,6 +19,7 @@ import {
   buildAgentRuntimeModelInfo,
   buildAgentRuntimeSlashCommands,
   buildAgentRuntimeThoughtLevelOption,
+  getReportedCurrentModelId,
   type AgentRuntimeCatalog,
   type AgentRuntimeDerivedOption,
 } from '@/renderer/utils/model/agentRuntimeCatalog';
@@ -53,6 +54,8 @@ export type GuidAssistantSelectionResult = {
     options?: { persistPreference?: boolean; explicit?: boolean }
   ) => void;
   currentAcpCachedModelInfo: AcpModelInfo | null;
+  /** Builtin Aelix has no model to use until the user picks one. */
+  modelSelectionRequired: boolean;
   currentAgentAvailableCommands: SlashCommandItem[];
   currentAgentModeOptions: AgentModeOption[];
   currentThoughtLevelOption: AgentRuntimeDerivedOption | null;
@@ -317,6 +320,12 @@ export const useGuidAssistantSelection = ({
   const currentAgentModeOptions = selectedAgentRuntimeModeState.options;
 
   const selectedAssistantAvailable = Boolean(selectedAssistant);
+  // Aelix refuses a prompt while native has no model. Without a pick, Send needs the
+  // runtime to report one (a fresh profile has no runtime report at all).
+  const modelSelectionRequired =
+    isBuiltinAelixAssistant(selectedAssistant) &&
+    !selectedAcpModel &&
+    !getReportedCurrentModelId(selectedManagedAgentRuntimeCatalog);
 
   const modelSelectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
@@ -416,6 +425,7 @@ export const useGuidAssistantSelection = ({
     selectedAcpModel,
     setSelectedAcpModel,
     currentAcpCachedModelInfo,
+    modelSelectionRequired,
     currentAgentAvailableCommands,
     currentAgentModeOptions,
     currentThoughtLevelOption,

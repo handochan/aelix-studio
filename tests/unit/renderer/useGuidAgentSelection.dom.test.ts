@@ -203,6 +203,73 @@ describe('useGuidAssistantSelection', () => {
     expect(result.current.selectedAcpModel).toBe('provider-b/fresh');
   });
 
+  describe('builtin Aelix model requirement', () => {
+    const helperCatalog = {
+      providers: [
+        {
+          id: 'fixture',
+          name: 'Fixture',
+          models: [
+            { id: 'one', name: 'Loopback one', available: true },
+            { id: 'two', name: 'Loopback two', available: true },
+          ],
+        },
+      ],
+    };
+    const runtimeReporting = (current: string): ManagedAgent =>
+      ({
+        id: 'builtin-aelix',
+        config_options: [
+          {
+            id: 'model',
+            category: 'model',
+            type: 'select',
+            current_value: current,
+            options: [{ value: 'fixture/one' }, { value: 'fixture/two' }],
+          },
+        ],
+      }) as ManagedAgent;
+    const renderSelection = () =>
+      renderHook(() => useGuidAssistantSelection({ resetAssistant: false }), {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
+      });
+
+    it('requires a pick on a fresh profile and clears once the user picks', async () => {
+      mockAssistants = [builtinAelix()];
+      loadCatalogMock.mockResolvedValue(helperCatalog);
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.currentAcpCachedModelInfo?.available_models).toHaveLength(2));
+      expect(result.current.modelSelectionRequired).toBe(true);
+      act(() => result.current.setSelectedAcpModel('fixture/two', { explicit: true }));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
+    it('requires a pick when the runtime reports an empty current model, not its first model', async () => {
+      mockAssistants = [builtinAelix()];
+      mockManagedAgents = [runtimeReporting('')];
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      // The display info still falls back to the first model; the requirement must not.
+      expect(result.current.currentAcpCachedModelInfo?.current_model_id).toBe('fixture/one');
+      expect(result.current.modelSelectionRequired).toBe(true);
+    });
+
+    it('keeps the existing behaviour when the runtime reports a current model', async () => {
+      mockAssistants = [builtinAelix()];
+      mockManagedAgents = [runtimeReporting('fixture/two')];
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
+    it('never requires a pick for other assistants', async () => {
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('assistant-claude'));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+  });
+
   describe('after a failed session left builtin Aelix offline', () => {
     const offlineAelix = () => ({ ...builtinAelix(), agent_status: 'offline' as const });
 

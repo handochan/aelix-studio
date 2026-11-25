@@ -847,6 +847,45 @@ describe('AcpSendBox', () => {
     });
   });
 
+  it.each([
+    ['reports no current model', '', false, true],
+    ['reports a current model', 'fixture/one', false, false],
+    ['has a first-prompt choice pending', '', true, false],
+  ])('blocks Send for builtin Aelix only when the runtime %s', async (_case, current, pending, blocked) => {
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: null,
+      thoughtLevel: null,
+      reload: vi.fn(),
+      setConfigOption: vi.fn(),
+      model: {
+        id: 'model',
+        category: 'model',
+        currentValue: current,
+        options: [{ value: 'fixture/one', label: 'Loopback one' }],
+      },
+    });
+    sendMessageInvokeMock.mockResolvedValue({ turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' });
+    getConversationInvokeMock.mockResolvedValue({ extra: {} });
+    render(
+      <AcpSendBox
+        conversation_id={`conv-model-required-${String(blocked)}-${String(pending)}`}
+        backend='aelix'
+        hasInitialModel={pending}
+        messageState={makeMessageState()}
+      />
+    );
+    expect(sendBoxPropsSpy.mock.calls.at(-1)![0].sendDisabled).toBe(blocked);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'send' })));
+    if (blocked) {
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(messageWarningMock).toHaveBeenCalledWith('conversation.welcome.selectModelToSend');
+    } else {
+      await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+      expect(messageWarningMock).not.toHaveBeenCalled();
+    }
+  });
+
   it('puts an automatic first prompt rejected before dispatch back into the composer', async () => {
     const actual = await vi.importActual<typeof import('@/renderer/utils/file/messageFiles')>(
       '@/renderer/utils/file/messageFiles'

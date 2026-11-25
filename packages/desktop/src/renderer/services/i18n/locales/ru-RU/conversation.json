@@ -6,6 +6,7 @@
     "newConversation": "Новый чат",
     "selectModel": "Выбрать модель",
     "useCliModel": "Выбрать модель",
+    "selectModelToSend": "Выберите модель перед отправкой.",
     "modelSwitchNotSupported": "Список моделей будет доступен после первого подключения. Отправьте сообщение для подключения и загрузки доступных моделей.",
     "specifyWorkspace": "Чат в проекте",
     "currentWorkspace": "Текущий проект",
