@@ -4,10 +4,23 @@ import { PassThrough } from 'node:stream';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeAuthService } from './service';
+import { buildStudioAelixLaunch } from './runtime';
 
-const mocks = vi.hoisted(() => ({ spawn: vi.fn(), existsSync: vi.fn(() => true), readFileSync: vi.fn() }));
+const mocks = vi.hoisted(() => ({
+  spawn: vi.fn(),
+  existsSync: vi.fn(() => true),
+  readFileSync: vi.fn(),
+  statSync: vi.fn(() => ({ isFile: () => true })),
+  accessSync: vi.fn(),
+}));
 vi.mock('node:child_process', () => ({ spawn: mocks.spawn }));
-vi.mock('node:fs', () => ({ existsSync: mocks.existsSync, readFileSync: mocks.readFileSync }));
+vi.mock('node:fs', () => ({
+  existsSync: mocks.existsSync,
+  readFileSync: mocks.readFileSync,
+  statSync: mocks.statSync,
+  accessSync: mocks.accessSync,
+  constants: { X_OK: 1 },
+}));
 
 class Helper extends EventEmitter {
   stdin = new PassThrough();
@@ -43,6 +56,27 @@ describe('sessionless native auth ownership and lifecycle', () => {
     Object.defineProperty(process, 'platform', platform);
     service.dispose();
     vi.clearAllMocks();
+    vi.unstubAllEnvs();
+  });
+
+  it('passes the same absolute Windows backslash-tilde agent root to ACP and to the helper', async () => {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('AELIX_STUDIO_RUNTIME', runtime);
+    vi.stubEnv('USERPROFILE', 'C:\\Users\\Studio');
+    vi.stubEnv('AELIX_CODING_AGENT_DIR', '~\\Studio\\agent');
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(
+      JSON.stringify({ schema: 'aelix.studio-preview.runtime/1', target: `win32-${process.arch}` })
+    );
+
+    const descriptor = JSON.parse(buildStudioAelixLaunch(runtime)!);
+    const pending = service.request('one', { action: 'catalog' });
+    helper.frame({ result: { providers: [] } });
+    helper.emit('close', 0);
+    await pending;
+    const helperRoot = mocks.spawn.mock.calls[0][2].env.AELIX_CODING_AGENT_DIR;
+    expect(helperRoot).toBe('C:\\Users\\Studio\\Studio\\agent');
+    expect(descriptor.env.AELIX_CODING_AGENT_DIR).toBe(helperRoot);
   });
 
   it('fails without an installed runtime instead of discovering a different Python', async () => {

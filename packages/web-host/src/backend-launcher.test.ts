@@ -358,6 +358,10 @@ describe('BackendLifecycleManager.start (success path)', () => {
     const runtimePath = process.platform === 'win32' ? 'C:/prepared-runtime' : '/prepared-runtime';
     vi.stubEnv('AELIX_STUDIO_RUNTIME', runtimePath);
     vi.mocked(existsSync).mockImplementation((file) => !String(file).endsWith('manifest.json'));
+    const statImplementation = vi.mocked(statSync).getMockImplementation();
+    vi.mocked(statSync).mockReturnValue({ isFile: () => true, isDirectory: () => false } as ReturnType<
+      typeof statSync
+    >);
     const child = Object.assign(makeFakeChild(), { pid: undefined });
     vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
     const mgr = new BackendLifecycleManager(APP_META_PACKAGED, () => '/abs/path/aioncore');
@@ -377,16 +381,26 @@ describe('BackendLifecycleManager.start (success path)', () => {
     vi.mocked(existsSync).mockReturnValue(false);
     const secondChild = Object.assign(makeFakeChild(), { pid: undefined });
     vi.mocked(spawn).mockReturnValue(secondChild as unknown as ChildProcess);
-    const secondStart = mgr.start('/db/path');
-    secondChild.stdout?.emit(
-      'data',
-      Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55556}\nAIONCORE_READY\n')
-    );
-    await secondStart;
-    expect(vi.mocked(spawn).mock.calls[1][2]!.env).not.toHaveProperty(key);
-    const secondStop = mgr.stop();
-    secondChild.emit('exit', 0);
-    await secondStop;
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('Aionui_Studio_Aelix_Launch', 'stale mixed-case descriptor');
+    try {
+      const secondStart = mgr.start('/db/path');
+      secondChild.stdout?.emit(
+        'data',
+        Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55556}\nAIONCORE_READY\n')
+      );
+      await secondStart;
+      const secondEnv = vi.mocked(spawn).mock.calls[1][2]!.env!;
+      expect(Object.keys(secondEnv).filter((name) => name.toUpperCase() === key)).toEqual([]);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      if (statImplementation) vi.mocked(statSync).mockImplementation(statImplementation);
+      else vi.mocked(statSync).mockReset();
+      const secondStop = mgr.stop();
+      secondChild.emit('exit', 0);
+      await secondStop;
+    }
   });
 
   it('lets aioncore choose the backend port and waits for the reported listening event', async () => {

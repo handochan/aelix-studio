@@ -228,7 +228,7 @@ async function main(): Promise<void> {
     app: {
       version: '0.0.0',
       isPackaged: false,
-      resourcesPath: repoRoot,
+      resourcesPath: path.join(repoRoot, 'resources'),
       userDataPath,
     },
     staticDir,

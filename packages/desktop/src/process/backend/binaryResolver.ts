@@ -7,9 +7,10 @@
  * Explicit overrides are opt-in; the default release policy never falls back to PATH.
  */
 
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { verifyDefaultHostBundle } from '../../../../shared-scripts/src/default-host.js';
+import { resolveBundledStudioNode } from '../../../../web-host/src/studio-auth/runtime.js';
 
 const BINARY_NAME = 'aelix-studio-host';
 const BIN_ENV_VAR = 'AIONUI_BACKEND_BIN';
@@ -49,7 +50,8 @@ function getRuntimeKey(): string {
   return `${process.platform}-${process.arch}`;
 }
 
-function getResourcesPath(): string {
+/** Locate the resources directory that owns Studio's default host bundle. */
+export function getBackendResourcesPath(): string {
   const electronProcess = process as NodeJS.Process & { resourcesPath?: string; defaultApp?: boolean };
   return electronProcess.resourcesPath && !electronProcess.defaultApp
     ? electronProcess.resourcesPath
@@ -58,18 +60,7 @@ function getResourcesPath(): string {
 
 /** Resolve Studio's verified bundled Node without consulting PATH or a backend override. */
 export function resolveBundledNodePath(): string {
-  const runtimeKey = getRuntimeKey();
-  const directory = join(getResourcesPath(), 'bundled-aioncore', runtimeKey);
-  verifyDefaultHostBundle(directory, runtimeKey);
-  const root = join(directory, 'managed-resources');
-  const contract = JSON.parse(readFileSync(join(root, 'manifest.json'), 'utf8')) as {
-    node: { root: string; executable: string };
-  };
-  const executable = resolve(root, contract.node.root, contract.node.executable);
-  if (!executable.startsWith(root + sep) || !existsSync(executable)) {
-    throw new Error('Verified bundled Node executable is unavailable');
-  }
-  return executable;
+  return resolveBundledStudioNode(getBackendResourcesPath());
 }
 
 function listDirEntries(dirPath: string): string[] | undefined {
@@ -140,7 +131,7 @@ function bundledPath(
   binaryName: string,
   diagnostics: BackendBinaryResolveDiagnostics
 ): string | null {
-  const resourcesPath = getResourcesPath();
+  const resourcesPath = getBackendResourcesPath();
   if (!resourcesPath) return null;
   diagnostics.resourcesPath = resourcesPath;
 

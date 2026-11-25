@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { locateStudioExtensionLayout, STATE_ENVIRONMENT } from '../studio-extensions/store/layout.js';
 import { NATIVE_AUTH_HELPER } from './helperSource.js';
-import { selectNativeRuntime, type NativeRuntime } from './runtime.js';
+import { normalizeStudioAgentDir, selectNativeRuntime, type NativeRuntime } from './runtime.js';
 import type { NativeAuthCommand, NativeAuthData, NativeAuthOperation, NativeAuthReply } from './types.js';
 
 type Operation = {
@@ -149,7 +149,11 @@ export class NativeAuthService {
   private run(runtime: NativeRuntime, command: NativeAuthCommand, operation?: Operation): Promise<NativeAuthReply> {
     return new Promise((resolve) => {
       const child = spawn(runtime.python, [...runtime.helperArgs, '-c', NATIVE_AUTH_HELPER], {
-        env: { ...(this.options.env ?? process.env), PYTHONDONTWRITEBYTECODE: '1' },
+        env: {
+          ...(this.options.env ?? process.env),
+          AELIX_CODING_AGENT_DIR: normalizeStudioAgentDir(this.options.env),
+          PYTHONDONTWRITEBYTECODE: '1',
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,

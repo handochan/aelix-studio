@@ -1,1 +1,1 @@
-export { resolveBinaryPath } from './binaryResolver';
+export { getBackendResourcesPath, resolveBinaryPath } from './binaryResolver';
