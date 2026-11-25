@@ -64,6 +64,11 @@ NETWORK_EVENTS = {
 }
 DENIED = []
 
+def refuse_denied():
+    """Stop before a commit if native code swallowed a refused process or network attempt."""
+    if DENIED:
+        raise Refusal("HELPER_UNAVAILABLE")
+
 def protect_native_io(event, args):
     if event in PROCESS_EVENTS or event in NETWORK_EVENTS:
         # Native code may catch the refusal and carry on. main() still fails closed.
@@ -349,7 +354,10 @@ def lookup_private_group(gid):
                 or any(member != user.pw_name for member in group.gr_mem)):
             return False
         # gr_mem lists supplementary members only. An account whose primary
-        # group this is shares it too (Debian user-group-modes).
+        # group this is shares it too (Debian user-group-modes). getpwall()
+        # sees only what NSS enumerates: with enumeration off (the SSSD
+        # default), directory accounts are not listed, as in Debian's rule.
+        # The scan runs at most once per gid per helper process.
         return all(entry.pw_gid != gid or entry.pw_uid == user.pw_uid for entry in pwd.getpwall())
     except Exception:
         return False
@@ -359,7 +367,8 @@ def posix_acl(path):
 
     With an access ACL the group bits are the ACL mask, so S_IWGRP means a named
     user or group may write. macOS ACLs are not visible in the mode bits and
-    Python cannot list them; like OpenSSH, they are not inspected.
+    Python cannot list them; like OpenSSH, they are not inspected. NFSv4 and
+    CIFS ACLs (system.nfs4_acl and similar) are not inspected either.
     """
     listxattr = getattr(os, "listxattr", None)
     if listxattr is None:
@@ -648,6 +657,7 @@ class GuardedSettings(FileSettingsStorage):
             replacement = self.paths.regular(src, True)
             if replacement is None:
                 raise Refusal("STORE_UNREADABLE")
+            refuse_denied()
             native_replace(src, dst)
             self.committed = True
             self.target_key = replacement
@@ -852,6 +862,7 @@ def mcp(command):
                 if len(new) > STORE_BYTES:
                     raise Refusal("RESULT_TOO_LARGE")
                 if new != data:
+                    refuse_denied()
                     mcp_writer._replace_file(here.real, label, info, data, new, abandoned)
                     committed = True
             current, after, _ = snapshot()
@@ -895,7 +906,8 @@ with contextlib.redirect_stdout(sys.stderr):
     request = json.loads(sys.stdin.buffer.readline(60002))
     reply = main(request)
     if DENIED and reply["ok"]:
-        # A swallowed process or network attempt still fails the request closed.
+        # Writes stop before their commit (refuse_denied). An attempt after the
+        # commit, or during a read, still fails the request closed here.
         write = request["action"] == "selections/set"
         reply = dict(ok=False, code="OUTCOME_UNKNOWN", retryable=False) if write else dict(ok=False, code="HELPER_UNAVAILABLE")
 # Bound encoding as well: Markdown can reuse the same long YAML scalar many times.

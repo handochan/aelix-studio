@@ -1199,41 +1199,71 @@ McpSelection._load = retarget_then_load
   );
 
   it.each([
-    ['connect', 'list'],
-    ['connect', 'write'],
-    ['swallowed lookup', 'list'],
-    ['swallowed lookup', 'write'],
+    ['connect', 'tool list', 'main', 'helper_unavailable'],
+    ['connect', 'tool write', 'main', 'helper_unavailable'],
+    ['swallowed lookup', 'tool list', 'main', 'helper_unavailable'],
+    ['swallowed lookup', 'tool write', 'build', 'helper_unavailable'],
+    ['swallowed lookup', 'MCP write', 'build', 'helper_unavailable'],
+    ['swallowed lookup', 'tool write', 'after commit', 'outcome_unknown'],
   ] as const)(
-    'fails closed on a helper network %s during a %s',
-    async (attempt, action) => {
+    'fails closed on a helper network %s during a %s (%s)',
+    async (attempt, action, stage, code) => {
       let connections = 0;
       const listener = createServer((_req, res) => res.writeHead(500).end());
       listener.on('connection', () => connections++);
       await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
       const port = (listener.address() as AddressInfo).port;
+      const initialMcp = '{ "mcpServers": { "local-docs": {"command":"unused","enabled":true} } }\n';
+      await writeFile(mcpPath(), initialMcp);
       try {
-        const old = await current(tool);
+        const kind = action === 'MCP write' ? mcp : tool;
+        const target = action === 'MCP write' ? mcpPath() : settingsPath();
+        const before = await readFile(target, 'utf8');
+        const old = await current(kind);
         const probe =
           attempt === 'connect'
-            ? `socket.create_connection(("127.0.0.1", ${port}), timeout=5).close()`
-            : `try:\n            socket.getaddrinfo("localhost", ${port})\n        except Exception:\n            pass`;
+            ? [`socket.create_connection(("127.0.0.1", ${port}), timeout=5).close()`]
+            : ['try:', `    socket.getaddrinfo("localhost", ${port})`, 'except Exception:', '    pass'];
+        // Insert lines before an anchor line, at its indentation.
+        const insertBefore = (source: string, anchor: string, lines: string[]) => {
+          const at = source.indexOf(anchor);
+          if (at < 0 || source.indexOf(anchor, at + 1) >= 0) throw new Error('Seam anchor is not unique: ' + anchor);
+          const start = source.lastIndexOf('\n', at) + 1;
+          const indent = source.slice(start, at);
+          return source.slice(0, start) + lines.map((line) => indent + line + '\n').join('') + source.slice(start);
+        };
         // Fault-inject native network use; the audit hook must refuse it even when native code swallows the error.
         const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
-        injectNative(real, (source) =>
-          source.replace(
-            'if command["action"].startswith("profiles/"):',
-            `import socket\n        ${probe}\n        if command["action"].startswith("profiles/"):`
-          )
-        );
-        const request = action === 'list' ? tool : { ...command('helper-set-tool'), expectedRevision: old.revision };
-        const expected =
-          action === 'write' && attempt !== 'connect'
-            ? 'helper-error-outcome_unknown'
-            : 'helper-error-helper_unavailable';
-        expect(await service.request(owner, request)).toEqual(reply(expected));
-        if (action === 'write' && attempt === 'connect') {
-          expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
-        }
+        injectNative(real, (source) => {
+          if (stage === 'main') {
+            return insertBefore(source, 'if command["action"].startswith("profiles/"):', ['import socket', ...probe]);
+          }
+          if (stage === 'build') {
+            const anchor =
+              action === 'MCP write' ? 'new = mcp_writer.edit_enabled(data, wanted)' : 'for name, want in wanted:';
+            return insertBefore(source, anchor, ['import socket', ...probe]);
+          }
+          return insertBefore(source, 'def diagnostic(', [
+            'import socket',
+            'from aelix_ai.settings import storage as seam_storage',
+            'real_replace = seam_storage._replace',
+            'def replace_then_lookup(src, dst):',
+            '    real_replace(src, dst)',
+            ...probe.map((line) => '    ' + line),
+            'seam_storage._replace = replace_then_lookup',
+          ]);
+        });
+        const request =
+          action === 'tool list'
+            ? tool
+            : {
+                ...command(action === 'MCP write' ? 'helper-set-mcp' : 'helper-set-tool'),
+                expectedRevision: old.revision,
+              };
+        expect(await service.request(owner, request)).toEqual(reply('helper-error-' + code));
+        // A refusal before the commit writes nothing; only a post-commit attempt leaves the landed write.
+        if (stage === 'after commit') expect(await readFile(target, 'utf8')).not.toBe(before);
+        else expect(await readFile(target, 'utf8')).toBe(before);
         expect(connections).toBe(0);
       } finally {
         listener.closeAllConnections();
