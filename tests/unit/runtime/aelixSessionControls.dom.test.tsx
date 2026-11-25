@@ -681,15 +681,15 @@ describe('Aelix conversation controls: labels', () => {
   });
 });
 
-describe('Aelix conversation controls: stale responses', () => {
-  function hold() {
-    let release!: () => void;
-    const gate = new Promise<void>((resolve) => {
-      release = resolve;
-    });
-    return { gate, release };
-  }
+function hold() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { gate, release };
+}
 
+describe('Aelix conversation controls: stale responses', () => {
   it('ignores a late re-read preview after the user picked another profile', async () => {
     const view = render(<Harness />);
     await settle();
