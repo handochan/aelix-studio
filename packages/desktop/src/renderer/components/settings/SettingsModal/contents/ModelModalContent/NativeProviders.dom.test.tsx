@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   request: vi.fn(),
   navigate: vi.fn(),
   agents: vi.fn(),
+  checkAgentHealth: vi.fn(),
   createAgent: vi.fn(),
   assistants: vi.fn(),
   createConversation: vi.fn(),
@@ -26,6 +27,7 @@ vi.mock('@/common', () => ({
   ipcBridge: {
     acpConversation: {
       getManagedAgents: { invoke: mocks.agents },
+      checkManagedAgentHealthById: { invoke: mocks.checkAgentHealth },
       createCustomAgent: { invoke: mocks.createAgent },
       setConfigOption: { invoke: mocks.setConfigOption },
     },
@@ -195,6 +197,100 @@ describe('native provider settings', () => {
     render(<NativeProviders />);
     fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
     expect(await screen.findByText(english.nativeAuth.unavailable)).toBeVisible();
+    expect(mocks.createConversation).not.toHaveBeenCalled();
+  });
+
+  it('opens another builtin conversation after replacing a key the provider rejected', async () => {
+    const assistant = {
+      id: 'bare:builtin-aelix',
+      agent_id: 'builtin-aelix',
+      source: 'generated',
+      name: 'Aelix',
+      enabled: true,
+      agent_status: 'online',
+    };
+    let agentStatus = 'online';
+    mocks.assistants.mockImplementation(async () => [{ ...assistant, agent_status: agentStatus }]);
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.createConversation
+      .mockResolvedValueOnce({ id: 'rejected-chat' })
+      .mockResolvedValueOnce({ id: 'repaired-chat' });
+    mocks.agents.mockResolvedValue([
+      {
+        id: 'builtin-aelix',
+        installed: true,
+        enabled: true,
+        status: 'offline',
+        last_check_error_code: 'auth_required',
+      },
+    ]);
+    mocks.checkAgentHealth.mockImplementation(async () => {
+      agentStatus = 'online';
+      return { id: 'builtin-aelix', status: 'online' };
+    });
+    render(<NativeProviders />);
+    const start = await screen.findByRole('button', { name: english.nativeAuth.startConversation });
+    fireEvent.click(start);
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/conversation/rejected-chat'));
+    // The host records the first turn's provider rejection in its availability snapshot.
+    agentStatus = 'offline';
+    fireEvent.click(screen.getByText(english.nativeAuth.exclusive));
+    const key = screen.getByLabelText(english.nativeAuth.key);
+    fireEvent.change(key, { target: { value: 'corrected-fixture-key' } });
+    fireEvent.click(screen.getByRole('button', { name: english.nativeAuth.saveKey }));
+    // Saving the key re-probes the host, so every picker sees Aelix again.
+    await waitFor(() => expect(mocks.checkAgentHealth).toHaveBeenCalledExactlyOnceWith({ id: 'builtin-aelix' }));
+    await waitFor(() => expect(start).toBeEnabled());
+    fireEvent.click(start);
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/conversation/repaired-chat'));
+    expect(mocks.checkAgentHealth).toHaveBeenCalledOnce();
+  });
+
+  it('re-probes an Aelix the host marked offline for a sign-in failure before starting', async () => {
+    let agentStatus = 'offline';
+    mocks.assistants.mockImplementation(async () => [
+      {
+        id: 'bare:builtin-aelix',
+        agent_id: 'builtin-aelix',
+        source: 'generated',
+        name: 'Aelix',
+        enabled: true,
+        agent_status: agentStatus,
+      },
+    ]);
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.agents.mockResolvedValue([
+      { id: 'builtin-aelix', enabled: true, status: 'offline', last_check_error_code: 'auth_required' },
+    ]);
+    mocks.checkAgentHealth.mockImplementation(async () => {
+      agentStatus = 'online';
+      return { id: 'builtin-aelix', status: 'online' };
+    });
+    render(<NativeProviders />);
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+    await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/conversation/native-conversation'));
+    expect(mocks.checkAgentHealth).toHaveBeenCalledExactlyOnceWith({ id: 'builtin-aelix' });
+  });
+
+  it('keeps an Aelix that is offline for another reason unavailable without probing it', async () => {
+    mocks.assistants.mockResolvedValue([
+      {
+        id: 'bare:builtin-aelix',
+        agent_id: 'builtin-aelix',
+        source: 'generated',
+        name: 'Aelix',
+        enabled: true,
+        agent_status: 'offline',
+      },
+    ]);
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.agents.mockResolvedValue([
+      { id: 'builtin-aelix', enabled: true, status: 'offline', last_check_error_code: 'acp_init_failed' },
+    ]);
+    render(<NativeProviders />);
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+    expect(await screen.findByText(english.nativeAuth.unavailable)).toBeVisible();
+    expect(mocks.checkAgentHealth).not.toHaveBeenCalled();
     expect(mocks.createConversation).not.toHaveBeenCalled();
   });
 

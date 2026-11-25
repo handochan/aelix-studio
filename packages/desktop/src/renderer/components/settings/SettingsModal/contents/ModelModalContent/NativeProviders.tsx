@@ -7,6 +7,7 @@ import { ipcBridge } from '@/common';
 import { canStartAssistantConversation, isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
 import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
 import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
+import { recheckAelixAfterAuthFailure } from '@/renderer/services/runtime/aelixAvailability';
 import { emitter } from '@/renderer/utils/emitter';
 import { mutate } from 'swr';
 
@@ -68,6 +69,11 @@ export default function NativeProviders({
     setModel(selected?.models[0]?.id ?? '');
   }, [provider, selected?.models[0]?.id]);
 
+  // A corrected credential must not stay behind the host's earlier sign-in failure.
+  const recheckAvailability = (): void => {
+    void recheckAelixAfterAuthFailure().catch(() => false);
+  };
+
   const perform = async (command: NativeAuthCommand): Promise<void> => {
     setBusy(true);
     setError('');
@@ -84,6 +90,7 @@ export default function NativeProviders({
     } else if ('providers' in reply.data) {
       setCatalog(reply.data);
       void mutate(NATIVE_AUTH_CATALOG_KEY, reply.data, { revalidate: false });
+      if (command.action === 'setKey' || command.action === 'endpoint') recheckAvailability();
       if (command.action === 'endpoint') {
         setProvider(command.provider);
         setModel(command.model);
@@ -91,6 +98,7 @@ export default function NativeProviders({
     } else if ('operationId' in reply.data) {
       currentOperation.current = reply.data;
       setOperation(reply.data);
+      if (reply.data.phase === 'complete') recheckAvailability();
       if (reply.data.phase !== 'pending') await refresh();
     }
     setBusy(false);
@@ -114,6 +122,7 @@ export default function NativeProviders({
         if (reply.data.phase !== 'pending') {
           setValue('');
           if (reply.data.phase === 'failed') setError(reply.data.code ?? 'NATIVE_FAILED');
+          if (reply.data.phase === 'complete') recheckAvailability();
           await refresh();
           return;
         }
@@ -143,8 +152,15 @@ export default function NativeProviders({
     setBusy(true);
     setError('');
     try {
-      const assistants = await ipcBridge.assistants.list.invoke();
-      const assistant = assistants.find(isBuiltinAelixAssistant);
+      let assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
+      // The rejection may be recorded after the key was corrected, or the key fixed outside Studio.
+      if (
+        assistant &&
+        !canStartAssistantConversation(assistant) &&
+        (await recheckAelixAfterAuthFailure().catch(() => false))
+      ) {
+        assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
+      }
       if (!assistant || !canStartAssistantConversation(assistant)) {
         setError('RUNTIME_UNAVAILABLE');
         return;
