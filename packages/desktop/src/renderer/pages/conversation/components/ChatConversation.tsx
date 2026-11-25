@@ -300,7 +300,15 @@ const ChatConversation: React.FC<{
       sessionView && {
         load: async () => (await sessionView.ensure()).config_options,
         loadFresh: async () => (await sessionView.ensure({ fresh: true })).config_options,
-        ...(hasInitialModel && { setConfigOption: setAelixInitialModelConfigOption }),
+        ...(hasInitialModel && {
+          setConfigOption: (conversation_id: string, option_id: string, value: string) =>
+            setAelixInitialModelConfigOption(
+              conversation_id,
+              option_id,
+              value,
+              async () => (await sessionView.ensure({ fresh: true })).config_options
+            ),
+        }),
       },
     [hasInitialModel, sessionView]
   );

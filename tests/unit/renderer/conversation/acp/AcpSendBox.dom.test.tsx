@@ -737,6 +737,116 @@ describe('AcpSendBox', () => {
     expect(storedModel).toBeNull();
   });
 
+  describe('a header model change the host reports as failed', () => {
+    const setup = (conversationId: string) => {
+      const state = { stored: 'fixture/a' as string | null, current: 'fixture/a' };
+      const options = (): AcpConfigOptionDto[] => [
+        {
+          id: 'model',
+          category: 'model',
+          type: 'select',
+          current_value: state.current,
+          options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+        },
+        {
+          id: 'thought',
+          category: 'thought_level',
+          type: 'select',
+          current_value: 'low',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ];
+      getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: state.stored } }));
+      updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+        state.stored = updates.extra.studio_initial_model;
+        return true;
+      });
+      const loadFresh = async () => options();
+      const dispatchedOn = vi.fn();
+      const send = () =>
+        submitAelixInitialPrompt(conversationId, async () => dispatchedOn(state.current), vi.fn(), loadFresh);
+      return { state, options, loadFresh, dispatchedOn, send };
+    };
+
+    it('sends the first prompt on the model a failing native hook already applied', async () => {
+      const { useAcpConfigOptions: useRealConfigOptions, classifyConfigSetError: classify } = await vi.importActual<
+        typeof import('@/renderer/hooks/agent/useAcpConfigOptions')
+      >('@/renderer/hooks/agent/useAcpConfigOptions');
+      const { state, options, loadFresh, dispatchedOn, send } = setup('conv-hook-error');
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: '/api/conversations/conv-hook-error/config-options/model',
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+        state.current = value;
+        throw hookError;
+      });
+      const port = {
+        load: async () => options(),
+        loadFresh,
+        setConfigOption: (id: string, option: string, value: string) =>
+          setAelixInitialModelConfigOption(id, option, value, loadFresh),
+      };
+      const { result } = renderHook(() =>
+        useRealConfigOptions({ conversation_id: 'conv-hook-error', configOptionsPort: port })
+      );
+      let headerError: unknown;
+      await act(async () => {
+        headerError = await result.current.setConfigOptionWithConfirmation('model', 'fixture/b').catch((e) => e);
+      });
+      expect(classify(headerError)).toBe('model_change_observed_with_error');
+      expect(state.stored).toBe('fixture/b');
+
+      await send();
+      expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith('fixture/b');
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledOnce();
+      expect(state.stored).toBeNull();
+    });
+
+    it.each([
+      ['lands late', 'fixture/b'],
+      ['never lands', 'fixture/a'],
+    ])('sends the first prompt on what the runtime reports when a timed-out switch %s', async (_case, expected) => {
+      const conversationId = `conv-timeout-${expected}`;
+      const { state, loadFresh, dispatchedOn, send } = setup(conversationId);
+      const timeout = new BackendHttpError({
+        method: 'PUT',
+        path: `/api/conversations/${conversationId}/config-options/model`,
+        status: 504,
+        body: { success: false, error: 'The agent did not confirm the change.', code: 'confirmation_timeout' },
+      });
+      setConfigOptionInvokeMock.mockRejectedValue(timeout);
+      await expect(setAelixInitialModelConfigOption(conversationId, 'model', 'fixture/b', loadFresh)).rejects.toBe(
+        timeout
+      );
+      expect(state.stored).toBe('fixture/a');
+      state.current = expected;
+      setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+        state.current = value;
+        return { confirmation: 'observed', config_options: await loadFresh() };
+      });
+
+      await send();
+      expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith(expected);
+      // No switch back: the prompt goes out on the model the header shows.
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledOnce();
+    });
+
+    it('reads the first-prompt metadata only after an observed model change', async () => {
+      const { state, loadFresh } = setup('conv-metadata-reads');
+      setConfigOptionInvokeMock.mockImplementation(async ({ option_id, value }) => {
+        if (option_id === 'model') state.current = value;
+        return { confirmation: option_id === 'model' ? 'command_ack' : 'observed', config_options: await loadFresh() };
+      });
+      await setAelixInitialModelConfigOption('conv-metadata-reads', 'thought', 'high', loadFresh);
+      await setAelixInitialModelConfigOption('conv-metadata-reads', 'model', 'fixture/b', loadFresh);
+      expect(getConversationInvokeMock).not.toHaveBeenCalled();
+      expect(state.stored).toBe('fixture/a');
+    });
+  });
+
   it('puts an automatic first prompt rejected before dispatch back into the composer', async () => {
     const actual = await vi.importActual<typeof import('@/renderer/utils/file/messageFiles')>(
       '@/renderer/utils/file/messageFiles'
