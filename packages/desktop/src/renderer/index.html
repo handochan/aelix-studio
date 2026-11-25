@@ -14,14 +14,16 @@
     <link rel="apple-touch-icon" href="./pwa/icon-180.png" />
     <title>Aelix Studio</title>
     <script>
-      // Synchronously restore theme appearance from localStorage to prevent theme flash.
-      // Without a cached appearance (first launch, login page), follow the OS like the default theme.
+      // Synchronously restore the theme selection cached by useTheme to prevent theme flash.
+      // 'light' or 'dark' is a fixed choice. 'system', no cached value (first launch, login page)
+      // or an unknown value follows the OS like the default theme.
       (function () {
         var theme = null;
         try {
           theme = localStorage.getItem('__aionui_theme');
         } catch (e) {}
-        if (!theme) {
+        if (theme !== 'light' && theme !== 'dark') {
+          theme = null;
           try {
             theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
           } catch (e) {}
