@@ -947,6 +947,19 @@ mcp_writer._platform_lock = traced_lock`;
       } else {
         await openToOthers(agent, '0757');
       }
+      if (!onWindows && kind.startsWith('group-writable')) {
+        // The runner's primary group may be a genuine private group, which the rule accepts.
+        // Present every group as shared with another member so these cases test the refusal.
+        const seam = `import grp
+from types import SimpleNamespace
+real_getgrgid = grp.getgrgid
+def shared_group(gid):
+    group = real_getgrgid(gid)
+    return SimpleNamespace(gr_name=group.gr_name, gr_mem=[*group.gr_mem, "studio-shared-member"])
+grp.getgrgid = shared_group`;
+        const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+        injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
+      }
       const old = await current(tool);
       expect(old).toMatchObject({ writable: false, reason: 'read-only' });
       expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(

@@ -400,7 +400,11 @@ def private_directory(path, info):
         # the DACL rule trusts anyway. No other owner is accepted.
         if security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) not in (user, ADMINISTRATORS) or acl is None:
             return False
-        trusted = {user, "S-1-5-18", ADMINISTRATORS}
+        # OWNER RIGHTS (S-1-3-4) applies to the owner checked above; Python's
+        # os.mkdir(path, 0o700) grants it, SYSTEM and Administrators. CREATOR
+        # OWNER and CREATOR GROUP (S-1-3-0/1) only matter for inheritance and
+        # never match a token.
+        trusted = {user, "S-1-5-18", ADMINISTRATORS, "S-1-3-4", "S-1-3-0", "S-1-3-1"}
         for index in range(acl.GetAceCount()):
             ace = acl.GetAce(index)
             kind, flags = ace[0]
@@ -437,8 +441,8 @@ def opened_id(fd):
 #      directory must be real directories (no link, junction or reparse point).
 #      The resolved root and those directories must be owned by this user (on
 #      Windows, the token user or Administrators) and not writable by others
-#      (on Windows, no write ACE for anyone but the token user, SYSTEM and
-#      Administrators).
+#      (on Windows, no write ACE for anyone but the token user, SYSTEM,
+#      Administrators and OWNER RIGHTS).
 #      Group write is allowed only for this user's
 #      private group: the user's primary gid, named after the user, with no
 #      other supplementary member and no other account's primary group, and no
