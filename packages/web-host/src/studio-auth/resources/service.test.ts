@@ -960,6 +960,29 @@ mcp_writer._platform_lock = traced_lock`;
     90000
   );
 
+  it.runIf(onWindows).each([
+    ['Users', '*S-1-5-32-545', false],
+    ['Administrators', '*S-1-5-32-544', true],
+  ] as const)(
+    'applies the Windows owner rule to a lock directory owned by %s',
+    async (_label, sid, allowed) => {
+      const sidecar = path.join(agent, 'locks');
+      await mkdir(sidecar);
+      await exec('icacls', [sidecar, '/setowner', sid]);
+      const old = await current(tool);
+      expect(old).toMatchObject(allowed ? { writable: true, reason: null } : { writable: false, reason: 'read-only' });
+      const result = await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision });
+      if (allowed) {
+        expect(result).toMatchObject({ ok: true, data: { saved: true } });
+        expect(await readFile(settingsPath(), 'utf8')).not.toBe(initialSettings);
+      } else {
+        expect(result).toEqual(reply('helper-error-scope_readonly'));
+        expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
+      }
+    },
+    90000
+  );
+
   // The user-private-group rule reads POSIX NSS; Windows uses owner and DACL checks instead.
   it.skipIf(onWindows).each([
     ['private group', {}, true],
@@ -1230,6 +1253,7 @@ McpSelection._load = retarget_then_load
     ['swallowed lookup', 'tool write', 'build', 'helper_unavailable'],
     ['swallowed lookup', 'MCP write', 'build', 'helper_unavailable'],
     ['swallowed lookup', 'tool write', 'after commit', 'outcome_unknown'],
+    ['swallowed lookup', 'no-op tool write', 'main', 'helper_unavailable'],
   ] as const)(
     'fails closed on a helper network %s during a %s (%s)',
     async (attempt, action, stage, code) => {
@@ -1283,6 +1307,8 @@ McpSelection._load = retarget_then_load
             ? tool
             : {
                 ...command(action === 'MCP write' ? 'helper-set-mcp' : 'helper-set-tool'),
+                // "read" is already on, so the no-op write commits nothing.
+                ...(action === 'no-op tool write' ? { changes: [{ key: 'read', on: true }] } : {}),
                 expectedRevision: old.revision,
               };
         expect(await service.request(owner, request)).toEqual(reply('helper-error-' + code));

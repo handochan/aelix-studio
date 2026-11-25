@@ -63,6 +63,8 @@ NETWORK_EVENTS = {
     "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo",
 }
 DENIED = []
+# Whether this command replaced a store. A denial with nothing committed is HELPER_UNAVAILABLE.
+COMMITTED = []
 
 def refuse_denied():
     """Stop before a commit if native code swallowed a refused process or network attempt."""
@@ -320,21 +322,17 @@ def saved(command, revision, before, after):
 def text_of(raw):
     return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else None
 
-@cache
-def windows_owners():
-    """The token user, and the default owner it gives new objects.
+ADMINISTRATORS = "S-1-5-32-544"
 
-    An elevated administrator's token owns what it creates as BUILTIN\Administrators,
-    which the DACL check already trusts.
-    """
+@cache
+def windows_user():
+    """The token user's SID string."""
     import win32api
     import win32con
     import win32security
     token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
     try:
-        user = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
-        default = win32security.GetTokenInformation(token, win32security.TokenOwner)
-        return {win32security.ConvertSidToStringSid(user), win32security.ConvertSidToStringSid(default)}
+        return win32security.ConvertSidToStringSid(win32security.GetTokenInformation(token, win32security.TokenUser)[0])
     finally:
         token.Close()
 
@@ -394,13 +392,15 @@ def private_directory(path, info):
             and (not info.st_mode & stat.S_IWGRP or (not posix_acl(path) and private_group(info.st_gid))))
     try:
         import win32security as security
-        owners = windows_owners()
+        user = windows_user()
         descriptor = security.GetNamedSecurityInfo(str(path), security.SE_FILE_OBJECT,
             security.OWNER_SECURITY_INFORMATION | security.DACL_SECURITY_INFORMATION)
         acl = descriptor.GetSecurityDescriptorDacl()
-        if security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) not in owners or acl is None:
+        # An elevated administrator creates objects owned by Administrators, which
+        # the DACL rule trusts anyway. No other owner is accepted.
+        if security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) not in (user, ADMINISTRATORS) or acl is None:
             return False
-        trusted = owners | {"S-1-5-18", "S-1-5-32-544"}
+        trusted = {user, "S-1-5-18", ADMINISTRATORS}
         for index in range(acl.GetAceCount()):
             ace = acl.GetAce(index)
             kind, flags = ace[0]
@@ -436,8 +436,9 @@ def opened_id(fd):
 #      allowed. Below that resolved root, the lock directory and every settings
 #      directory must be real directories (no link, junction or reparse point).
 #      The resolved root and those directories must be owned by this user (on
-#      Windows, the token user or its default owner) and not writable by others
-#      (on Windows, no write ACE for anyone but those, SYSTEM and Administrators).
+#      Windows, the token user or Administrators) and not writable by others
+#      (on Windows, no write ACE for anyone but the token user, SYSTEM and
+#      Administrators).
 #      Group write is allowed only for this user's
 #      private group: the user's primary gid, named after the user, with no
 #      other supplementary member and no other account's primary group, and no
@@ -669,6 +670,7 @@ class GuardedSettings(FileSettingsStorage):
             refuse_denied()
             native_replace(src, dst)
             self.committed = True
+            COMMITTED.append("settings")
             self.target_key = replacement
             self.verify_locked(path)
         try:
@@ -874,6 +876,7 @@ def mcp(command):
                     refuse_denied()
                     mcp_writer._replace_file(here.real, label, info, data, new, abandoned)
                     committed = True
+                    COMMITTED.append("mcp")
             current, after, _ = snapshot()
             if current != here:
                 raise Refusal("REVISION_CONFLICT", currentRevision=after["revision"])
@@ -915,10 +918,10 @@ with contextlib.redirect_stdout(sys.stderr):
     request = json.loads(sys.stdin.buffer.readline(60002))
     reply = main(request)
     if DENIED and reply["ok"]:
-        # Writes stop before their commit (refuse_denied). An attempt after the
-        # commit, or during a read, still fails the request closed here.
-        write = request["action"] == "selections/set"
-        reply = dict(ok=False, code="OUTCOME_UNKNOWN", retryable=False) if write else dict(ok=False, code="HELPER_UNAVAILABLE")
+        # Writes stop before their commit (refuse_denied). An attempt after a
+        # commit leaves its outcome unknown; anything else (a read, or a write
+        # that changed nothing) fails the request closed as unavailable.
+        reply = dict(ok=False, code="OUTCOME_UNKNOWN", retryable=False) if COMMITTED else dict(ok=False, code="HELPER_UNAVAILABLE")
 # Bound encoding as well: Markdown can reuse the same long YAML scalar many times.
 encoder = json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":"))
 with io.StringIO() as frame:
