@@ -42,6 +42,7 @@
 
   /* Semantic Colors - Light Mode */
   --primary: #0e7490;
+  --text-on-primary: #ffffff; /* Text and icons on a --primary fill (5.4:1) */
   --success: #00b42a;
   --warning: #ff7d00;
   --danger: #f53f3f;
@@ -120,6 +121,7 @@
 
   /* Semantic Colors - Dark Mode */
   --primary: #22d3ee;
+  --text-on-primary: #0e0e0e; /* Ink on the bright --primary fill (10.7:1) */
   --success: #23c343;
   --warning: #ff9a2e;
   --danger: #f76560;

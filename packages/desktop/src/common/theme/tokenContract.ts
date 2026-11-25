@@ -61,6 +61,12 @@ export const THEME_TOKENS: readonly ThemeTokenDescriptor[] = [
   { key: '--text-secondary', group: 'text', scope: 'appearance-scoped', description: 'Secondary text' },
   { key: '--text-disabled', group: 'text', scope: 'appearance-scoped', description: 'Disabled text' },
   { key: '--text-white', group: 'text', scope: 'appearance-invariant', description: 'Always-white text' },
+  {
+    key: '--text-on-primary',
+    group: 'text',
+    scope: 'appearance-scoped',
+    description: 'Text and icons on a --primary fill',
+  },
 
   // Border
   { key: '--border-base', group: 'border', scope: 'appearance-scoped', description: 'Base border' },
@@ -98,6 +104,24 @@ export const THEME_TOKENS: readonly ThemeTokenDescriptor[] = [
     group: 'component',
     scope: 'appearance-scoped',
     description: 'Thinking panel background gradient',
+  },
+  {
+    key: '--composer-ring-active',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer border while focused',
+  },
+  {
+    key: '--composer-ring-inactive',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer border while not focused',
+  },
+  {
+    key: '--composer-ambient',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer ambient glow (box-shadow) while focused',
   },
 
   // Special

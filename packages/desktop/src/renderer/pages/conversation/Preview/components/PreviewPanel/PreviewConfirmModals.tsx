@@ -157,7 +157,7 @@ const PreviewConfirmModals: React.FC<PreviewConfirmModalsProps> = ({
               {t('preview.closeWithoutSave')}
             </button>
             <button
-              className='px-16px py-6px cursor-pointer border-none bg-primary text-white hover:opacity-80 transition-opacity text-14px'
+              className='px-16px py-6px cursor-pointer border-none bg-primary text-on-primary hover:bg-aou-8 transition-colors text-14px'
               onClick={onSaveAndCloseTab}
             >
               {t('preview.saveAndClose')}
@@ -190,7 +190,7 @@ const PreviewConfirmModals: React.FC<PreviewConfirmModalsProps> = ({
               {t('common.cancel')}
             </button>
             <button
-              className='px-16px py-6px cursor-pointer border-none bg-primary text-white hover:opacity-80 transition-opacity text-14px'
+              className='px-16px py-6px cursor-pointer border-none bg-primary text-on-primary hover:bg-aou-8 transition-colors text-14px'
               onClick={onRefreshWithoutSave}
             >
               {t('preview.refresh.discardAndRefresh')}

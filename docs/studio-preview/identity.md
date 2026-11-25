@@ -160,7 +160,10 @@ root. Any previous Studio version is kept beside the install root in an
   (16–256 px), PWA and notification icons use a rounded full plate; the
   apple-touch icon uses a square plate for the iOS mask.
 - The default theme follows the operating system's light or dark appearance
-  until a theme is chosen in Settings. The first paint uses the same choice.
+  until a theme is chosen in Settings. While it does, the first paint and the
+  desktop window background use the current OS appearance, also after the OS
+  changed while Studio was closed. A chosen theme keeps its appearance from the
+  first frame.
 - The default color scheme uses the Aelix cyan ramp from `BRAND.md` (glow
   `#22D3EE`, current `#06B6D4`, deep `#0E7490`) for brand and Arco primary
   colors and for the composer focus ring and glow. Light mode buttons use the

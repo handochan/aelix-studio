@@ -11,12 +11,14 @@ import { ConfigProvider } from '@arco-design/web-react';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import AssistantSelectionArea from '@/renderer/pages/guid/components/AssistantSelectionArea';
 import aelixMark from '@/renderer/assets/logo.svg';
+import { AELIX_MARK_DATA_URL } from '@/renderer/utils/model/agentLogo';
 
 const { runtimeCatalog } = vi.hoisted(() => ({
   runtimeCatalog: vi.fn((): unknown[] => [
     { id: 'agent-antigravity', name: 'Antigravity', backend: 'antigravity', command: 'agy' },
   ]),
 }));
+const logoMocks = vi.hoisted(() => ({ logos: {} as Record<string, string> }));
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -26,6 +28,12 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/renderer/utils/platform', () => ({
   resolveExtensionAssetUrl: vi.fn(() => null),
+  resolveBackendAssetUrl: (url: string) => url,
+}));
+
+vi.mock('@/renderer/utils/model/agentLogo', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/renderer/utils/model/agentLogo')>()),
+  useAgentLogos: () => logoMocks.logos,
 }));
 
 vi.mock('@/renderer/hooks/agent/useManagedAgents', () => ({
@@ -177,6 +185,38 @@ describe('AssistantSelectionArea', () => {
 
     expect(screen.getByTestId('assistant-overflow-antigravity')).toBeInTheDocument();
     expect(screen.queryByTestId('assistant-overflow-filler-10')).not.toBeInTheDocument();
+  });
+});
+
+describe('AssistantSelectionArea agent icons', () => {
+  const generated = (id: string, avatar: string): Assistant =>
+    ({
+      ...overflowAssistant(id, `Aelix ${id}`, 1),
+      source: 'generated',
+      agent_id: 'native-aelix',
+      avatar,
+    }) as Assistant;
+
+  it("shows a generated assistant's agent icon when it has no avatar, and keeps its own emoji", () => {
+    // The host keeps the native Aelix agent's data URL icon on the agent row only.
+    logoMocks.logos = { 'native-aelix': AELIX_MARK_DATA_URL };
+
+    render(
+      <ConfigProvider>
+        <AssistantSelectionArea
+          selectedAssistantId={null}
+          assistants={[generated('plain', ''), generated('emoji', '🧬')]}
+          localeKey='en-US'
+          onSelectAssistant={vi.fn()}
+        />
+      </ConfigProvider>
+    );
+
+    const plainPill = screen.getByTestId('preset-pill-plain');
+    expect(plainPill.querySelector('img')?.getAttribute('src')).toBe(AELIX_MARK_DATA_URL);
+    const emojiPill = screen.getByTestId('preset-pill-emoji');
+    expect(emojiPill).toHaveTextContent('🧬');
+    expect(emojiPill.querySelector('img')).toBeNull();
   });
 });
 

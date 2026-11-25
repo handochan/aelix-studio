@@ -16,6 +16,9 @@ import { watchSystemPrefersDark } from './systemAppearance';
  */
 export function startSystemThemeWatcher(): () => void {
   return watchSystemPrefersDark(() => {
+    // Until settings load, the selection is unknown and an explicit choice could be
+    // overwritten; the initial theme resolution reads the OS appearance itself.
+    if (!configService.isInitialized()) return;
     const activeId = (configService.get('theme.activeId') as string | undefined) || DEFAULT_THEME_ID;
     if (activeId !== SYSTEM_THEME_ID) return;
     void setActiveTheme(SYSTEM_THEME_ID).catch((e) => console.error('re-apply system theme failed', e));

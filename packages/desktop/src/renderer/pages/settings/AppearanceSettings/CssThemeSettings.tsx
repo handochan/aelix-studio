@@ -17,7 +17,7 @@ import CssThemeModal from './CssThemeModal.tsx';
 import { BUILTIN_THEMES, DEFAULT_THEME_ID } from './presets.ts';
 import { BACKGROUND_BLOCK_START, injectBackgroundCssBlock } from './backgroundUtils.ts';
 import { resolveExtensionAssetUrl } from '@renderer/utils/platform.ts';
-import { LIGHT_THEME_ID, SYSTEM_THEME_ID } from '@/common/theme/constants';
+import { SYSTEM_THEME_ID } from '@/common/theme/constants';
 
 interface ThemePreviewPalette {
   appBg: string;
@@ -416,9 +416,9 @@ const CssThemeSettings: React.FC = () => {
             const userThemes = updatedThemes.filter((t) => !t.builtin);
             await configService.set('theme.userThemes', userThemes);
 
-            // 如果删除的是当前激活主题，回退到 Light / If deleting active theme, fall back to Light
+            // 如果删除的是当前激活主题，回退到默认（跟随系统）/ If deleting the active theme, fall back to the default (follow system)
             if (activeThemeId === themeId) {
-              await selectTheme(LIGHT_THEME_ID);
+              await selectTheme(DEFAULT_THEME_ID);
             }
 
             setThemes(updatedThemes);

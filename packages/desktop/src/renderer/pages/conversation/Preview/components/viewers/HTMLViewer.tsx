@@ -325,7 +325,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
             {/* 编辑按钮 */}
             <button
               onClick={handleToggleEdit}
-              className={`px-12px py-4px rd-4px text-12px transition-colors ${editMode ? 'bg-primary text-white' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
+              className={`px-12px py-4px rd-4px text-12px transition-colors ${editMode ? 'bg-primary text-on-primary' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
             >
               {editMode ? `💾 ${t('common.save')}` : `✏️ ${t('common.edit')}`}
             </button>
@@ -333,7 +333,7 @@ const HTMLPreview: React.FC<HTMLPreviewProps> = ({ content, file_path, hideToolb
             {/* 元素选择器按钮 */}
             <button
               onClick={handleToggleInspector}
-              className={`px-12px py-4px rd-4px text-12px transition-colors ${inspectorMode ? 'bg-primary text-white' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
+              className={`px-12px py-4px rd-4px text-12px transition-colors ${inspectorMode ? 'bg-primary text-on-primary' : 'bg-bg-3 text-t-primary hover:bg-bg-4'}`}
               title={t('preview.html.inspectorTooltip')}
             >
               🔍 {inspectorMode ? t('preview.html.inspecting') : t('preview.html.inspectorButton')}

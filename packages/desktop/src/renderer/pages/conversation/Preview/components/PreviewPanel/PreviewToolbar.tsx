@@ -206,7 +206,7 @@ const PreviewToolbar: React.FC<PreviewToolbarProps> = ({
 
   const toolbarBtn =
     'flex items-center gap-2px px-8px py-3px rd-4px cursor-pointer transition-colors duration-150 text-12px font-medium text-t-secondary hover:text-t-primary hover:bg-bg-3';
-  const toolbarBtnActive = '!text-white bg-brand hover:!text-white hover:bg-brand-hover';
+  const toolbarBtnActive = '!text-on-primary bg-primary hover:!text-on-primary hover:!bg-aou-8';
   const toolbarIconSize = 12;
 
   return (
@@ -405,7 +405,7 @@ const PreviewToolbar: React.FC<PreviewToolbarProps> = ({
                 strokeWidth='2'
                 strokeLinecap='round'
                 strokeLinejoin='round'
-                className={inspectMode ? 'text-white' : 'text-t-secondary'}
+                className={inspectMode ? 'text-on-primary' : 'text-t-secondary'}
               >
                 <path d='M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z' />
                 <path d='M13 13l6 6' />
