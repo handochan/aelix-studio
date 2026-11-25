@@ -38,6 +38,7 @@ export const presentSubagentTool = (
   return {
     progress: { ...progress, children },
     parentStatus: projectParent ? 'canceled' : parentStatus,
+    callStatus: parentStatus,
     interrupted: children.some(
       (child) => child.state === 'stopped' || child.state === 'error' || child.state === 'ended'
     ),

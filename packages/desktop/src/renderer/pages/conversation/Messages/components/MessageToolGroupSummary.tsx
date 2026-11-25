@@ -10,9 +10,17 @@ import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/co
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
-import SubagentProgressPanel, { presentSubagentTool, type SubagentPresentation } from '../acp/SubagentProgress';
+import SubagentProgressPanel, {
+  presentCancelReport,
+  presentSubagentTool,
+  type SubagentPresentation,
+} from '../acp/SubagentProgress';
 import { readAcpCompaction, type AcpCompaction } from '../acp/compaction';
 import './MessageToolGroupSummary.css';
+
+/** Fetches of a compact row before its stored copy is treated as unavailable. */
+const FULL_LOAD_ATTEMPTS = 3;
+const FULL_LOAD_RETRY_MS = 400;
 
 const statusToBadge = (status: NormalizedToolStatus): BadgeProps['status'] => {
   switch (status) {
@@ -37,10 +45,10 @@ const ToolItemDetail: React.FC<{
 }> = ({ item, subagents, compaction }) => {
   const { t, i18n } = useTranslation();
   const interrupted = subagents?.interrupted ?? false;
-  const [expanded, setExpanded] = useState(interrupted);
-  useEffect(() => {
-    if (interrupted) setExpanded(true);
-  }, [interrupted]);
+  // The call's own status: a parent projected from stopped rows has not delivered its result yet.
+  const callStatus = subagents?.callStatus ?? item.status;
+  const callEnded = callStatus === 'completed' || callStatus === 'error' || callStatus === 'canceled';
+  const [userExpanded, setUserExpanded] = useState<boolean | null>(null);
   const [fullItem, setFullItem] = useState<NormalizedToolCall | null>(null);
   const [loadingFull, setLoadingFull] = useState(false);
   const [loadError, setLoadError] = useState(false);
@@ -60,32 +68,70 @@ const ToolItemDetail: React.FC<{
     [messageApi, t]
   );
 
+  // A live update supersedes whatever was fetched for an earlier version of this call.
+  const version = `${callStatus}\u0000${item.output ?? ''}`;
+  const currentVersion = useRef(version);
+  currentVersion.current = version;
+  useEffect(() => {
+    setFullItem(null);
+    setLoadError(false);
+  }, [version]);
+
   const loadFullItem = useCallback(async () => {
-    if (!item.truncated || fullItem || loadingFull || !item.conversationId || !item.messageId) return;
+    if (!item.truncated || fullItem || loadingFull) return;
+    if (!item.conversationId || !item.messageId) {
+      setLoadError(true);
+      return;
+    }
+    const requested = currentVersion.current;
     setLoadingFull(true);
     setLoadError(false);
     try {
-      const message = await ipcBridge.database.getConversationMessage.invoke({
-        conversation_id: item.conversationId,
-        message_id: item.messageId,
-      });
-      const next = normalizeToolMessages([message as ToolMessage]).find((candidate) => candidate.key === item.key);
-      if (next) setFullItem(next);
-      else if (interrupted) setLoadError(true);
-    } catch {
+      // The stored row can trail the live update that ended the call by one write.
+      for (let attempt = 0; attempt < FULL_LOAD_ATTEMPTS; attempt += 1) {
+        if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, FULL_LOAD_RETRY_MS));
+        const message = await ipcBridge.database.getConversationMessage.invoke({
+          conversation_id: item.conversationId,
+          message_id: item.messageId,
+        });
+        if (currentVersion.current !== requested) return;
+        const next = normalizeToolMessages([message as ToolMessage]).find((candidate) => candidate.key === item.key);
+        if (!next) break;
+        if (next.status === callStatus) {
+          setFullItem(next);
+          return;
+        }
+      }
       setLoadError(true);
+    } catch {
+      if (currentVersion.current === requested) setLoadError(true);
     } finally {
       setLoadingFull(false);
     }
-  }, [item, fullItem, loadingFull, interrupted]);
+  }, [item, fullItem, loadingFull, callStatus]);
 
+  // A delegating call's full result is fetched once the call itself ended, expanded or not.
   useEffect(() => {
-    if (interrupted && expanded && item.truncated && !loadError) void loadFullItem();
-  }, [interrupted, expanded, item.truncated, loadError, loadFullItem]);
+    if (subagents && callEnded && item.truncated && !fullItem && !loadError) void loadFullItem();
+  }, [subagents, callEnded, item.truncated, fullItem, loadError, loadFullItem]);
+
+  const pendingFull = item.truncated === true && fullItem === null;
+  const report = useMemo(
+    () =>
+      subagents
+        ? presentCancelReport(subagents, displayItem.output, { pending: pendingFull, loadFailed: loadError })
+        : null,
+    [subagents, displayItem.output, pendingFull, loadError]
+  );
+  // A parsed report already shows the children's work; only a notice falls back to the raw output.
+  const reportShown = report?.kind === 'single' || report?.kind === 'batch';
+  const waitingForFull = subagents !== undefined && subagents !== null && pendingFull && !loadError;
+  const autoExpanded = interrupted && callEnded && !reportShown && !waitingForFull;
+  const expanded = userExpanded ?? autoExpanded;
 
   const toggleExpanded = () => {
     const nextExpanded = !expanded;
-    setExpanded(nextExpanded);
+    setUserExpanded(nextExpanded);
     if (nextExpanded) void loadFullItem();
   };
 
@@ -134,7 +180,7 @@ const ToolItemDetail: React.FC<{
           </span>
         )}
       </div>
-      {subagents && <SubagentProgressPanel progress={subagents.progress} />}
+      {subagents && <SubagentProgressPanel progress={subagents.progress} report={report} />}
       {expanded && hasDetail && (
         <div className='tool-detail-panel m-l-20px m-t-4px'>
           {loadingFull && <div className='tool-detail-label'>Loading...</div>}

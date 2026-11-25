@@ -64,7 +64,17 @@
       "unknown": "未知",
       "ended": "回合已結束，未回報最終狀態"
     },
-    "elapsedReported": "上次回報耗時：{{value}} 秒"
+    "elapsedReported": "上次回報耗時：{{value}} 秒",
+    "report": {
+      "title": "已停止的代理完成的工作",
+      "task": "任務 {{index}}/{{total}}",
+      "step": "步驟 {{index}}/{{total}}",
+      "lost": "該代理因內部錯誤結束，報告中沒有它已完成的工作。",
+      "idle": "取消回合時沒有代理在執行：尚未開始或尚未輪到。",
+      "missing": "未傳回已停止代理的工作報告。",
+      "unreadable": "無法將報告逐一對應到各任務。完整內容請見工具輸出。",
+      "loadFailed": "無法載入完整報告。"
+    }
   },
   "runningInput": {
     "mode": {
