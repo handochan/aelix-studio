@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -893,6 +893,136 @@ mcp_writer._platform_lock = traced_lock`;
     },
     90000
   );
+
+  it.each(['group-writable lock', 'linked lock', 'group-writable settings ancestor', 'world-writable agent root'])(
+    'reports and refuses a %s directory before writing',
+    async (kind) => {
+      const sidecar = path.join(agent, 'locks');
+      const relocated = path.join(agent, 'relocated');
+      const target =
+        kind === 'group-writable settings ancestor' ? path.join(relocated, 'settings.json') : settingsPath();
+      if (kind === 'group-writable lock') {
+        await mkdir(sidecar);
+        await exec('chmod', ['0775', sidecar]);
+      } else if (kind === 'linked lock') {
+        const outside = path.join(root, 'redirect');
+        await mkdir(outside);
+        await symlink(outside, sidecar, 'dir');
+      } else if (kind === 'group-writable settings ancestor') {
+        await mkdir(relocated, { mode: 0o700 });
+        await rename(settingsPath(), target);
+        await symlink(target, settingsPath());
+        await exec('chmod', ['0770', relocated]);
+      } else {
+        await exec('chmod', ['0757', agent]);
+      }
+      const old = await current(tool);
+      expect(old).toMatchObject({ writable: false, reason: 'read-only' });
+      expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(
+        reply('helper-error-scope_readonly')
+      );
+      expect(await readFile(target, 'utf8')).toBe(initialSettings);
+      if (kind !== 'linked lock' && kind !== 'group-writable lock') {
+        await expect(lstat(sidecar)).rejects.toMatchObject({ code: 'ENOENT' });
+      }
+    },
+    90000
+  );
+
+  it('creates a missing agent root privately on the first write', async () => {
+    await rm(agent, { recursive: true });
+    const old = await current(tool);
+    expect(old).toMatchObject({ exists: false, writable: true });
+    await current({ ...command('helper-set-tool'), expectedRevision: old.revision });
+    expect(JSON.parse(await readFile(settingsPath(), 'utf8'))).toEqual({ defaultTools: ['-read'] });
+    expect((await lstat(agent)).mode & 0o777).toBe(0o700);
+    expect((await lstat(path.join(agent, 'locks'))).mode & 0o777).toBe(0o700);
+  }, 90000);
+
+  it.each(['lock-open', 'lock-leaf', 'settings-ancestor', 'after-replace', 'same-bytes substitution'])(
+    'detects a same-user swap at the %s boundary',
+    async (boundary) => {
+      const targetDir = path.join(agent, 'relocated');
+      const target = path.join(targetDir, 'settings.json');
+      await mkdir(targetDir);
+      await rename(settingsPath(), target);
+      await symlink(target, settingsPath());
+      const old = await current(tool);
+      const directory = path.join(agent, 'locks');
+      const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      const lockSwap = `original_open = os.open
+def swap_at_open(file, flags, *args, **kwargs):
+    lock_dir = Path(${JSON.stringify(directory)})
+    if isinstance(file, (str, Path)) and Path(file).parent == lock_dir and flags & os.O_CREAT:
+        lock_dir.rename(lock_dir.with_name("moved-locks"))
+        lock_dir.mkdir(mode=0o700)
+    return original_open(file, flags, *args, **kwargs)
+os.open = swap_at_open`;
+      const leafSwap = `original_lock = FileSettingsStorage._lock_fd
+def swap_after_lock(fd, label):
+    original_lock(fd, label)
+    lock_dir = Path(${JSON.stringify(directory)})
+    for entry in lock_dir.glob("*.lock"):
+        if entry.stat().st_ino == os.fstat(fd).st_ino:
+            entry.rename(entry.with_suffix(".saved"))
+            entry.touch()
+FileSettingsStorage._lock_fd = staticmethod(swap_after_lock)`;
+      const replaceSwap = `from aelix_ai.settings import storage
+original_replace = storage._replace
+def swap_at_replace(src, dst):
+    delivery = ${JSON.stringify(boundary)}
+    if delivery == "settings-ancestor":
+        parent = dst.parent
+        parked = parent.with_name("parked")
+        parent.rename(parked)
+        parent.mkdir(mode=0o700)
+        (parent / dst.name).write_bytes((parked / dst.name).read_bytes())
+        (parent / src.name).write_bytes((parked / src.name).read_bytes())
+    original_replace(src, dst)
+    if delivery == "after-replace":
+        parent = dst.parent
+        parked = parent.with_name("parked")
+        parent.rename(parked)
+        parent.mkdir(mode=0o700)
+        (parent / dst.name).write_bytes((parked / dst.name).read_bytes())
+    if delivery == "same-bytes substitution":
+        foreign = dst.with_suffix(".foreign")
+        foreign.write_bytes(dst.read_bytes())
+        os.replace(foreign, dst)
+storage._replace = swap_at_replace`;
+      const seam = { 'lock-open': lockSwap, 'lock-leaf': leafSwap }[boundary] ?? replaceSwap;
+      injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
+      const result = await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision });
+      expect(result).toEqual(
+        reply(boundary.startsWith('lock') ? 'helper-error-store_unreadable' : 'helper-error-outcome_unknown')
+      );
+      if (boundary.startsWith('lock')) expect(await readFile(target, 'utf8')).toBe(initialSettings);
+    },
+    90000
+  );
+
+  it('refuses a write if the acquired lock has no verifiable file ID', async () => {
+    const old = await current(tool);
+    const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    const seam = `from types import SimpleNamespace
+unsafe_fd = None
+original_lock = FileSettingsStorage._lock_fd
+original_fstat = os.fstat
+def lock_without_identity(fd, path):
+    global unsafe_fd
+    original_lock(fd, path)
+    if unsafe_fd is None:
+        unsafe_fd = fd
+def unverified_fstat(fd):
+    return SimpleNamespace(st_dev=0, st_ino=0) if fd == unsafe_fd else original_fstat(fd)
+FileSettingsStorage._lock_fd = staticmethod(lock_without_identity)
+os.fstat = unverified_fstat`;
+    injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
+    expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(
+      reply('helper-error-store_unreadable')
+    );
+    expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
+  }, 90000);
 
   it('refuses an MCP link retargeted outside the admitted root during native discovery', async () => {
     const outside = path.join(root, 'outside-mcp.json');

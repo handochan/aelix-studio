@@ -10,6 +10,7 @@ import os
 import stat
 import sys
 import threading
+from functools import cache
 from pathlib import Path
 from urllib.parse import quote
 
@@ -67,6 +68,7 @@ def protect_native_io(event, args):
 sys.addaudithook(protect_native_io)
 with contextlib.redirect_stdout(sys.stderr):
     from aelix_ai.settings.settings_manager import Settings, SettingsManager, SettingsFileError
+    from aelix_ai.settings import storage as native_storage
     from aelix_ai.settings.storage import FileSettingsStorage
     from aelix_coding_agent.agents.discovery import builtin_agents_dir, complete_profile, discover_profiles, ProfileDiscoveryResult, ProfileError
     from aelix_coding_agent.agents.profile import parse_profile
@@ -299,8 +301,180 @@ def saved(command, revision, before, after):
 def text_of(raw):
     return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else None
 
+@cache
+def windows_user():
+    import win32api
+    import win32con
+    import win32security
+    token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+    try:
+        return win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+    finally:
+        token.Close()
+
+def private_directory(path, info):
+    if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        return False
+    if os.name != "nt":
+        return info.st_uid == os.geteuid() and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+    try:
+        import win32security as security
+        owner = windows_user()
+        descriptor = security.GetNamedSecurityInfo(str(path), security.SE_FILE_OBJECT,
+            security.OWNER_SECURITY_INFORMATION | security.DACL_SECURITY_INFORMATION)
+        acl = descriptor.GetSecurityDescriptorDacl()
+        if descriptor.GetSecurityDescriptorOwner() != owner or acl is None:
+            return False
+        trusted = {security.ConvertSidToStringSid(owner), "S-1-5-18", "S-1-5-32-544"}
+        for index in range(acl.GetAceCount()):
+            ace = acl.GetAce(index)
+            kind, flags = ace[0]
+            if flags & 0x08:  # INHERIT_ONLY_ACE
+                continue
+            if kind not in (0, 1, 5, 6):
+                return False
+            if kind in (0, 5) and ace[1] & 0x500D0156 and security.ConvertSidToStringSid(ace[-1]) not in trusted:
+                return False
+        return True
+    except Exception:
+        return False
+
+def file_id(info, code):
+    if not info.st_ino or (os.name == "nt" and not info.st_dev):
+        raise Refusal(code)
+    return identity(info)
+
+def opened_id(fd):
+    info = os.fstat(fd)
+    if os.name != "nt" or (info.st_dev and info.st_ino):
+        return file_id(info, "STORE_UNREADABLE")
+    try:
+        import msvcrt
+        import win32file
+        _, _, _, _, volume, _, _, _, high, low = win32file.GetFileInformationByHandle(msvcrt.get_osfhandle(fd))
+        if volume and (high or low):
+            return volume, (high << 32) | low
+    except Exception:
+        pass
+    raise Refusal("STORE_UNREADABLE")
+
+# Same-user threat model for global settings writes.
+#
+# The attacker is another local process running as this user. It cannot be
+# confined: it can edit the files itself. What it must not do is redirect a
+# Studio write, or make Studio report a save that did not land on the admitted
+# file. The native writer opens the sidecar lock and the temp file by path, and
+# Studio keeps that writer instead of reimplementing it. So, as defence in depth:
+#   1. Before writing, the lock directory and every settings directory from the
+#      agent root down are real directories (no link, junction or reparse
+#      point), owned by this user and not writable by group or others. Anything
+#      else is refused with SCOPE_READONLY.
+#   2. On POSIX those directories stay open (O_DIRECTORY|O_NOFOLLOW) for the
+#      whole transaction, and each child is opened relative to its pinned parent.
+#   3. After the native lock is taken, around the replacement and after it, the
+#      identities (st_dev/st_ino, or the Windows volume and file ID) of the lock
+#      file, the settings target and those directories are checked again. A
+#      mismatch fails closed: STORE_UNREADABLE before the commit, OUTCOME_UNKNOWN
+#      after it. An unavailable file ID counts as a mismatch, on Windows too.
+# A same-user process that swaps and restores a path between two checks can
+# still win. These checks catch every swap that is still visible.
+class SettingsPaths:
+    """Hold identities (and POSIX directory handles) across the native transaction."""
+    def __init__(self, stack):
+        self.stack = stack
+        self.directories = {}
+
+    def pin_store(self, store, real, create):
+        """Pin the configured chain, the real target's chain and the lock directory."""
+        configured = store.global_path.parent
+        anchor = ROOT if configured.is_relative_to(ROOT) else store.anchor
+        if not os.path.lexists(anchor):
+            if not create:
+                return
+            # The native writer would create the root with its parents.
+            try:
+                os.makedirs(anchor, 0o700, exist_ok=True)
+            except OSError:
+                raise Refusal("SCOPE_READONLY") from None
+        self.pin_chain(configured, anchor)
+        self.pin_chain(real.parent, anchor.resolve())
+        locks = configured / "locks"
+        if create or os.path.lexists(locks):
+            self.pin(locks, create=create)
+
+    def pin_chain(self, directory, anchor):
+        cursor = anchor
+        self.pin(cursor)
+        try:
+            parts = directory.relative_to(anchor).parts
+        except ValueError:
+            raise Refusal("SCOPE_READONLY") from None
+        for part in parts:
+            cursor = cursor / part
+            self.pin(cursor)
+
+    def pin(self, path, create=False):
+        if path in self.directories:
+            return
+        parent = self.directories.get(path.parent, (None, None))[1]
+        fd = None
+        try:
+            if create:
+                try:
+                    os.mkdir(path.name if parent is not None else path, 0o700, dir_fd=parent)
+                except FileExistsError:
+                    pass
+            info = path.lstat()
+            if not private_directory(path, info):
+                raise Refusal("SCOPE_READONLY")
+            key = file_id(info, "SCOPE_READONLY")
+            if hasattr(os, "O_DIRECTORY") and hasattr(os, "O_NOFOLLOW") and os.name != "nt":
+                fd = os.open(path.name if parent is not None else path,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=parent)
+                self.stack.callback(os.close, fd)
+                pinned = os.fstat(fd)
+                if file_id(pinned, "SCOPE_READONLY") != key or not private_directory(path, pinned):
+                    raise Refusal("SCOPE_READONLY")
+            self.directories[path] = key, fd
+        except OSError:
+            raise Refusal("SCOPE_READONLY") from None
+
+    def verify(self):
+        for path, (expected, fd) in self.directories.items():
+            try:
+                live = path.lstat()
+                if not private_directory(path, live) or file_id(live, "STORE_UNREADABLE") != expected:
+                    raise Refusal("STORE_UNREADABLE")
+                if fd is not None and opened_id(fd) != expected:
+                    raise Refusal("STORE_UNREADABLE")
+            except OSError:
+                raise Refusal("STORE_UNREADABLE") from None
+
+    def regular(self, path, single_link=False):
+        fd = self.directories[path.parent][1]
+        try:
+            info = path.lstat() if fd is None else os.stat(path.name, dir_fd=fd, follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        if (not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+                or credential(info) or (single_link and info.st_nlink != 1)):
+            raise Refusal("STORE_UNREADABLE")
+        return file_id(info, "STORE_UNREADABLE")
+
+def private_settings(store):
+    """Apply the write path's directory policy to a listing without creating anything."""
+    try:
+        with contextlib.ExitStack() as stack:
+            SettingsPaths(stack).pin_store(store, store.selection(), create=False)
+        return True
+    except Refusal:
+        return False
+
 class GuardedSettings(FileSettingsStorage):
-    """Use edit_list's native transaction and capture the exact, locked revisions."""
+    """Use the native CLI's transaction, sidecar and atomic writer.
+
+    See the same-user threat model above SettingsPaths for what is pinned and rechecked.
+    """
     def __init__(self, path, anchor, guard):
         super().__init__(CWD, ROOT, global_path=path)
         self.anchor = anchor
@@ -308,6 +482,7 @@ class GuardedSettings(FileSettingsStorage):
         self.committed = False
         self.revision = None
         self.locked = None
+        self.lock_fd = None
 
     def selection(self):
         return admit_store(self.global_path, self.anchor)
@@ -315,53 +490,102 @@ class GuardedSettings(FileSettingsStorage):
     def target(self, scope):
         return self.locked if self.locked is not None else super().target(scope)
 
+    def _lock_fd(self, fd, path):
+        self.paths.verify()
+        if self.lock_fd is None:
+            opened = opened_id(fd)
+            if self.paths.regular(self.sidecar, True) != opened or (self.lock_key is not None and self.lock_key != opened):
+                raise Refusal("STORE_UNREADABLE")
+            super()._lock_fd(fd, path)
+            self.lock_fd = fd
+            self.lock_key = opened
+            self.check_target(path)
+            # A cooperating CLI can replace the target while we wait. Its new
+            # identity is the one whose revision is checked under this lock.
+            self.target_key = self.paths.regular(path)
+        else:
+            if opened_id(fd) != self.target_key:
+                raise Refusal("STORE_UNREADABLE")
+            super()._lock_fd(fd, path)
+        self.verify_locked(path)
+
     @contextlib.contextmanager
     def _sidecar_lock(self, path):
-        # Native keys the sidecar to the target but puts it beside the configured entry.
-        sidecar = self._sidecar_path(path)
-        parent = resolve_entry(self.global_path.parent)
-        real = admit_store(sidecar, self.global_path.parent)
-        info = file_info(real)
-        if real != parent / "locks" / sidecar.name or (info is not None and info.st_nlink != 1):
-            raise Refusal("STORE_UNREADABLE")
-        with super()._sidecar_lock(path):
-            self.check_target(path)
-            yield
+        self.sidecar = self._sidecar_path(path)
+        self.paths.pin(self.sidecar.parent, create=True)
+        self.paths.verify()
+        self.lock_key = self.paths.regular(self.sidecar, True)
+        try:
+            with super()._sidecar_lock(path):
+                self.verify_locked(path)
+                yield
+                self.verify_locked(path)
+        finally:
+            self.lock_fd = None
 
     def check_target(self, path):
         current = self.selection()
         if current != path:
             raise Refusal("REVISION_CONFLICT", currentRevision=store_version(current, "settings")[1])
 
+    def verify_locked(self, path):
+        self.paths.verify()
+        self.check_target(path)
+        if (self.lock_fd is None or opened_id(self.lock_fd) != self.lock_key
+                or self.paths.regular(self.sidecar, True) != self.lock_key
+                or self.paths.regular(path) != self.target_key):
+            raise Refusal("STORE_UNREADABLE")
+
     def _read_text_strict(self, path):
+        self.verify_locked(path)
         return text_of(raw_file(path, follow=False)[0])
 
     def transact(self, scope, build):
         self.locked = self.selection()
-        def checked(current):
-            self.check_target(self.locked)
-            raw, current_revision = store_version(self.locked, "settings")
-            if text_of(raw) != current:
-                raise Refusal("REVISION_CONFLICT", currentRevision=current_revision)
-            self.revision = current_revision
-            self.guard(current, current_revision)
-            return build(current)
         try:
-            super().transact(scope, checked)
+            with contextlib.ExitStack() as stack:
+                self.paths = SettingsPaths(stack)
+                self.paths.pin_store(self, self.locked, create=True)
+                def checked(current):
+                    self.verify_locked(self.locked)
+                    raw, current_revision = store_version(self.locked, "settings")
+                    if text_of(raw) != current:
+                        raise Refusal("REVISION_CONFLICT", currentRevision=current_revision)
+                    self.revision = current_revision
+                    self.guard(current, current_revision)
+                    return build(current)
+                super().transact(scope, checked)
         finally:
             self.locked = None
 
     def _write_text_atomic(self, path, payload):
-        self.check_target(path)
+        self.verify_locked(path)
         if len(payload.encode("utf-8")) > STORE_BYTES:
             raise Refusal("RESULT_TOO_LARGE")
+        native_replace = native_storage._replace
+        def witnessed_replace(src, dst):
+            self.verify_locked(path)
+            if dst != path or src.parent != path.parent:
+                raise Refusal("STORE_UNREADABLE")
+            replacement = self.paths.regular(src, True)
+            if replacement is None:
+                raise Refusal("STORE_UNREADABLE")
+            native_replace(src, dst)
+            self.committed = True
+            self.target_key = replacement
+            self.verify_locked(path)
         try:
+            # The helper runs one command. Use the native writer and witness
+            # its actual temp file, including the intentional inode change.
+            native_storage._replace = witnessed_replace
             super()._write_text_atomic(path, payload)
         except OSError:
             raise Refusal("SAVE_FAILED") from None
-        self.committed = True
+        finally:
+            native_storage._replace = native_replace
+        self.verify_locked(path)
         data, self.revision = store_version(path, "settings")
-        if self.selection() != path or data != payload.encode("utf-8"):
+        if data != payload.encode("utf-8"):
             raise Refusal("OUTCOME_UNKNOWN", retryable=False)
 
 def writable_store(target):
@@ -439,7 +663,7 @@ def settings(command):
     manager = SettingsManager(store, Settings(), Settings(), project_trusted=False)
     try:
         if mutation:
-            if not writable_store(store.selection()):
+            if not writable_store(store.selection()) or not private_settings(store):
                 check_revision(command, revision)
                 raise Refusal("SCOPE_READONLY")
             asyncio.run(manager.edit_list("global", key, edit, nullable=grammar.nullable))
@@ -448,7 +672,8 @@ def settings(command):
         if raw is not None and (not isinstance(raw, list) or any(not isinstance(e, str) for e in raw)):
             raise Refusal("STORE_UNREADABLE")
         _, rows, diagnostics = view(raw)
-        return listing(kind, revision, data is not None, rows, diagnostics, None if writable_store(store.selection()) else "read-only")
+        writable = writable_store(store.selection()) and private_settings(store)
+        return listing(kind, revision, data is not None, rows, diagnostics, None if writable else "read-only")
     except (SettingsFileError, UnicodeError):
         raise Refusal("STORE_UNREADABLE") from None
     except EditRefused:
