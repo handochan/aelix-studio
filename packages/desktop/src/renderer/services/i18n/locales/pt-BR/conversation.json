@@ -866,10 +866,10 @@
       "title": "Ferramentas desta conversa",
       "inherited": "Herdadas",
       "none": "Sem ferramentas",
-      "count": "{{total}} ferramentas",
+      "count": "{{count}} ferramentas",
       "modeInherited": "Herdadas do perfil e dos padrões",
       "modeNone": "Sem ferramentas nesta conversa",
-      "modeExplicit": "{{total}} ferramentas escolhidas para esta conversa",
+      "modeExplicit": "{{count}} ferramentas escolhidas para esta conversa",
       "effectNext": "As alterações valem a partir da próxima solicitação.",
       "effectRestart": "As alterações valem após reiniciar o Aelix.",
       "policyPending": "Uma alteração de política aguarda aplicação.",
@@ -881,7 +881,11 @@
       "selectNone": "Desmarcar todas",
       "save": "Salvar para esta conversa",
       "listChanged": "A lista de ferramentas mudou durante a edição. Revise sua seleção antes de salvar.",
-      "discard": "Descartar minhas alterações"
+      "discard": "Descartar minhas alterações",
+      "count_one": "{{count}} ferramenta",
+      "count_other": "{{count}} ferramentas",
+      "modeExplicit_one": "{{count}} ferramenta escolhida para esta conversa",
+      "modeExplicit_other": "{{count}} ferramentas escolhidas para esta conversa"
     },
     "scope": {
       "bundled": "Incluído",
@@ -954,7 +958,7 @@
     "notice": {
       "profileApplied": "Esta conversa agora usa o perfil {{name}}.",
       "profileCleared": "Esta conversa não usa mais um perfil.",
-      "toolsSaved": "{{total}} ferramentas salvas para esta conversa.",
+      "toolsSaved": "{{count}} ferramentas salvas para esta conversa.",
       "toolsSavedEmpty": "Salvo: esta conversa não usa ferramentas.",
       "restored": "Os itens selecionados foram restaurados.",
       "outcomeUnknown": "O resultado é desconhecido. O estado atual foi lido novamente; escolha de novo se necessário.",
@@ -970,7 +974,9 @@
       "writeFailed": "Não foi possível salvar a alteração.",
       "profileFailed": "Não foi possível aplicar o perfil.",
       "toolsFailed": "Não foi possível salvar as ferramentas.",
-      "toolsInherited": "Esta conversa agora usa ferramentas herdadas."
+      "toolsInherited": "Esta conversa agora usa ferramentas herdadas.",
+      "toolsSaved_one": "{{count}} ferramenta salva para esta conversa.",
+      "toolsSaved_other": "{{count}} ferramentas salvas para esta conversa."
     },
     "change": {
       "title": "Este perfil mudou",
@@ -1039,6 +1045,20 @@
       "empty": "Nenhum",
       "yes": "Sim",
       "no": "Não"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "O valor salvo difere do que o Aelix informa",
+        "nativeMismatch": "O Aelix informou uma diferença"
+      },
+      "diagnostic": {
+        "invalidProfile": "Arquivo de perfil inválido",
+        "envConfig": "Definido pela configuração de ambiente"
+      },
+      "approval": {
+        "inherit": "Herdar"
+      },
+      "other": "Outro ({{code}})"
     }
   }
 }

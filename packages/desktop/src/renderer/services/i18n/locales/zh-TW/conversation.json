@@ -860,10 +860,10 @@
       "title": "此對話的工具",
       "inherited": "繼承",
       "none": "無工具",
-      "count": "{{total}} 個工具",
+      "count": "{{count}} 個工具",
       "modeInherited": "繼承自設定檔與預設值",
       "modeNone": "此對話不使用工具",
-      "modeExplicit": "此對話選擇了 {{total}} 個工具",
+      "modeExplicit": "此對話選擇了 {{count}} 個工具",
       "effectNext": "變更將從下一次請求開始生效。",
       "effectRestart": "變更將在 Aelix 重新啟動後生效。",
       "policyPending": "有政策變更正在等待套用。",
@@ -875,7 +875,11 @@
       "selectNone": "全部取消",
       "save": "儲存到此對話",
       "listChanged": "編輯期間工具清單已變更。儲存前請檢查你的選擇。",
-      "discard": "捨棄我的變更"
+      "discard": "捨棄我的變更",
+      "count_one": "{{count}} 個工具",
+      "count_other": "{{count}} 個工具",
+      "modeExplicit_one": "此對話選擇了 {{count}} 個工具",
+      "modeExplicit_other": "此對話選擇了 {{count}} 個工具"
     },
     "scope": {
       "bundled": "內建",
@@ -948,7 +952,7 @@
     "notice": {
       "profileApplied": "此對話現在使用設定檔 {{name}}。",
       "profileCleared": "此對話不再使用設定檔。",
-      "toolsSaved": "已為此對話儲存 {{total}} 個工具。",
+      "toolsSaved": "已為此對話儲存 {{count}} 個工具。",
       "toolsSavedEmpty": "已儲存：此對話不使用工具。",
       "restored": "已還原所選項目。",
       "outcomeUnknown": "結果未知。已重新讀取目前狀態，如有需要請重新選擇。",
@@ -964,7 +968,9 @@
       "writeFailed": "無法儲存變更。",
       "profileFailed": "無法套用設定檔。",
       "toolsFailed": "無法儲存工具。",
-      "toolsInherited": "此對話現在使用繼承的工具。"
+      "toolsInherited": "此對話現在使用繼承的工具。",
+      "toolsSaved_one": "已為此對話儲存 {{count}} 個工具。",
+      "toolsSaved_other": "已為此對話儲存 {{count}} 個工具。"
     },
     "change": {
       "title": "此設定檔已變更",
@@ -1033,6 +1039,20 @@
       "empty": "無",
       "yes": "是",
       "no": "否"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "儲存的值與 Aelix 回報不一致",
+        "nativeMismatch": "Aelix 回報了差異"
+      },
+      "diagnostic": {
+        "invalidProfile": "無效的設定檔",
+        "envConfig": "由環境設定指定"
+      },
+      "approval": {
+        "inherit": "繼承"
+      },
+      "other": "其他（{{code}}）"
     }
   }
 }

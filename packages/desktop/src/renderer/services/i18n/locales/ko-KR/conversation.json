@@ -860,10 +860,10 @@
       "title": "이 대화의 도구",
       "inherited": "상속",
       "none": "도구 없음",
-      "count": "도구 {{total}}개",
+      "count": "도구 {{count}}개",
       "modeInherited": "프로필과 기본값에서 상속",
       "modeNone": "이 대화에서 도구를 사용하지 않음",
-      "modeExplicit": "이 대화에서 고른 도구 {{total}}개",
+      "modeExplicit": "이 대화에서 고른 도구 {{count}}개",
       "effectNext": "변경 사항은 다음 요청부터 적용됩니다.",
       "effectRestart": "변경 사항은 Aelix를 다시 시작한 뒤 적용됩니다.",
       "policyPending": "적용을 기다리는 정책 변경이 있습니다.",
@@ -875,7 +875,11 @@
       "selectNone": "모두 해제",
       "save": "이 대화에 저장",
       "listChanged": "편집하는 동안 도구 목록이 바뀌었습니다. 저장하기 전에 선택을 확인하세요.",
-      "discard": "변경 취소"
+      "discard": "변경 취소",
+      "count_one": "도구 {{count}}개",
+      "count_other": "도구 {{count}}개",
+      "modeExplicit_one": "이 대화에서 고른 도구 {{count}}개",
+      "modeExplicit_other": "이 대화에서 고른 도구 {{count}}개"
     },
     "scope": {
       "bundled": "내장",
@@ -948,7 +952,7 @@
     "notice": {
       "profileApplied": "이 대화에서 {{name}} 프로필을 사용합니다.",
       "profileCleared": "이 대화에서 더 이상 프로필을 사용하지 않습니다.",
-      "toolsSaved": "이 대화에 도구 {{total}}개를 저장했습니다.",
+      "toolsSaved": "이 대화에 도구 {{count}}개를 저장했습니다.",
       "toolsSavedEmpty": "저장했습니다. 이 대화는 도구를 사용하지 않습니다.",
       "restored": "선택한 항목을 복원했습니다.",
       "outcomeUnknown": "결과를 알 수 없습니다. 현재 상태를 다시 읽었으니 필요하면 다시 고르세요.",
@@ -964,7 +968,9 @@
       "writeFailed": "변경 사항을 저장하지 못했습니다.",
       "profileFailed": "프로필을 적용하지 못했습니다.",
       "toolsFailed": "도구를 저장하지 못했습니다.",
-      "toolsInherited": "이 대화는 이제 상속된 도구를 사용합니다."
+      "toolsInherited": "이 대화는 이제 상속된 도구를 사용합니다.",
+      "toolsSaved_one": "이 대화에 도구 {{count}}개를 저장했습니다.",
+      "toolsSaved_other": "이 대화에 도구 {{count}}개를 저장했습니다."
     },
     "change": {
       "title": "프로필이 바뀌었습니다",
@@ -1033,6 +1039,20 @@
       "empty": "없음",
       "yes": "예",
       "no": "아니요"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "저장된 값이 Aelix 보고와 다름",
+        "nativeMismatch": "Aelix가 차이를 보고함"
+      },
+      "diagnostic": {
+        "invalidProfile": "잘못된 프로필 파일",
+        "envConfig": "환경 설정으로 지정됨"
+      },
+      "approval": {
+        "inherit": "상속"
+      },
+      "other": "기타 ({{code}})"
     }
   }
 }

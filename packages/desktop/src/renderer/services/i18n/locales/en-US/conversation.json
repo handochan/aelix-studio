@@ -860,10 +860,10 @@
       "title": "This conversation's tools",
       "inherited": "Inherited",
       "none": "No tools",
-      "count": "{{total}} tools",
+      "count": "{{count}} tools",
       "modeInherited": "Inherited from the profile and defaults",
       "modeNone": "No tools for this conversation",
-      "modeExplicit": "{{total}} tools chosen for this conversation",
+      "modeExplicit": "{{count}} tools chosen for this conversation",
       "effectNext": "Changes apply from the next request.",
       "effectRestart": "Changes apply after Aelix restarts.",
       "policyPending": "A policy change is waiting to be applied.",
@@ -875,7 +875,11 @@
       "selectNone": "Select none",
       "save": "Save for this conversation",
       "listChanged": "The tool list changed while you were editing. Review your selection before saving.",
-      "discard": "Discard my changes"
+      "discard": "Discard my changes",
+      "count_one": "{{count}} tool",
+      "count_other": "{{count}} tools",
+      "modeExplicit_one": "{{count}} tool chosen for this conversation",
+      "modeExplicit_other": "{{count}} tools chosen for this conversation"
     },
     "scope": {
       "bundled": "Bundled",
@@ -948,7 +952,7 @@
     "notice": {
       "profileApplied": "Profile {{name}} is now used in this conversation.",
       "profileCleared": "This conversation no longer uses a profile.",
-      "toolsSaved": "Saved {{total}} tools for this conversation.",
+      "toolsSaved": "Saved {{count}} tools for this conversation.",
       "toolsSavedEmpty": "Saved: this conversation uses no tools.",
       "restored": "The selected items were restored.",
       "outcomeUnknown": "The result is unknown. The current state was read again; choose again if needed.",
@@ -964,7 +968,9 @@
       "writeFailed": "The change could not be saved.",
       "profileFailed": "The profile could not be applied.",
       "toolsFailed": "The tools could not be saved.",
-      "toolsInherited": "This conversation now uses inherited tools."
+      "toolsInherited": "This conversation now uses inherited tools.",
+      "toolsSaved_one": "Saved {{count}} tool for this conversation.",
+      "toolsSaved_other": "Saved {{count}} tools for this conversation."
     },
     "change": {
       "title": "This profile changed",
@@ -1033,6 +1039,20 @@
       "empty": "None",
       "yes": "Yes",
       "no": "No"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "Saved value differs from what Aelix reports",
+        "nativeMismatch": "Aelix reported a difference"
+      },
+      "diagnostic": {
+        "invalidProfile": "Invalid profile file",
+        "envConfig": "Set by environment configuration"
+      },
+      "approval": {
+        "inherit": "Inherit"
+      },
+      "other": "Other ({{code}})"
     }
   }
 }

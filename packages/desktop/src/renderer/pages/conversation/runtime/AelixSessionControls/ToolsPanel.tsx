@@ -10,7 +10,7 @@ import { Lock } from '@icon-park/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AvailabilityNotice, { UpdateRequired, writeBlockedText } from './AvailabilityNotice';
-import { KEY, lockReason } from './labels';
+import { diagnosticLabel, KEY, lockReason, mismatchLabel } from './labels';
 import type { AelixSessionControls } from './useAelixSessionControls';
 import WriteOutcome from './WriteOutcome';
 
@@ -49,12 +49,12 @@ const RowState: React.FC<{ row: ResourceRow; effect: SessionSelections['effect']
       )}
       {row.problem && (
         <Tag size='small' color='red'>
-          {t(`${KEY}.row.problem`, { code: row.problem })}
+          {t(`${KEY}.row.problem`, { code: diagnosticLabel(t, row.problem) })}
         </Tag>
       )}
       {row.mismatches.map((mismatch) => (
         <Tag key={mismatch.reason} size='small' color='orange' data-testid={`aelix-tool-mismatch-${row.key}`}>
-          {t(`${KEY}.row.mismatch`, { reason: mismatch.reason })}
+          {t(`${KEY}.row.mismatch`, { reason: mismatchLabel(t, mismatch.reason) })}
         </Tag>
       ))}
     </div>
@@ -141,7 +141,7 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             ? t(`${KEY}.tools.modeInherited`)
             : override.length === 0
               ? t(`${KEY}.tools.modeNone`)
-              : t(`${KEY}.tools.modeExplicit`, { total: String(override.length) })}
+              : t(`${KEY}.tools.modeExplicit`, { count: override.length })}
         </div>
         <div className='text-12px text-t-secondary'>
           {t(tools?.effect === 'restart' ? `${KEY}.tools.effectRestart` : `${KEY}.tools.effectNext`)}

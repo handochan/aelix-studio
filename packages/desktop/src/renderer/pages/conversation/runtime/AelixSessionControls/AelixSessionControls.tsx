@@ -37,7 +37,7 @@ export function controlSummary(t: TFunction, controls: Controls, panel: Controls
   if (override === undefined) return t(`${KEY}.summary.checking`);
   if (override === null) return t(`${KEY}.tools.inherited`);
   if (override.length === 0) return t(`${KEY}.tools.none`);
-  return t(`${KEY}.tools.count`, { total: String(override.length) });
+  return t(`${KEY}.tools.count`, { count: override.length });
 }
 
 const PANEL_TITLES: Record<ControlsPanel, string> = {

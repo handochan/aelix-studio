@@ -861,10 +861,10 @@
       "title": "Werkzeuge dieser Unterhaltung",
       "inherited": "Geerbt",
       "none": "Keine Werkzeuge",
-      "count": "{{total}} Werkzeuge",
+      "count": "{{count}} Werkzeuge",
       "modeInherited": "Vom Profil und den Standards geerbt",
       "modeNone": "Keine Werkzeuge in dieser Unterhaltung",
-      "modeExplicit": "{{total}} Werkzeuge für diese Unterhaltung gewählt",
+      "modeExplicit": "{{count}} Werkzeuge für diese Unterhaltung gewählt",
       "effectNext": "Änderungen gelten ab der nächsten Anfrage.",
       "effectRestart": "Änderungen gelten nach einem Neustart von Aelix.",
       "policyPending": "Eine Richtlinienänderung wartet auf ihre Anwendung.",
@@ -876,7 +876,11 @@
       "selectNone": "Keine auswählen",
       "save": "Für diese Unterhaltung speichern",
       "listChanged": "Die Werkzeugliste hat sich während der Bearbeitung geändert. Prüfe deine Auswahl vor dem Speichern.",
-      "discard": "Meine Änderungen verwerfen"
+      "discard": "Meine Änderungen verwerfen",
+      "count_one": "{{count}} Werkzeug",
+      "count_other": "{{count}} Werkzeuge",
+      "modeExplicit_one": "{{count}} Werkzeug für diese Unterhaltung gewählt",
+      "modeExplicit_other": "{{count}} Werkzeuge für diese Unterhaltung gewählt"
     },
     "scope": {
       "bundled": "Mitgeliefert",
@@ -949,7 +953,7 @@
     "notice": {
       "profileApplied": "Diese Unterhaltung verwendet jetzt das Profil {{name}}.",
       "profileCleared": "Diese Unterhaltung verwendet kein Profil mehr.",
-      "toolsSaved": "{{total}} Werkzeuge für diese Unterhaltung gespeichert.",
+      "toolsSaved": "{{count}} Werkzeuge für diese Unterhaltung gespeichert.",
       "toolsSavedEmpty": "Gespeichert: Diese Unterhaltung verwendet keine Werkzeuge.",
       "restored": "Die ausgewählten Elemente wurden wiederhergestellt.",
       "outcomeUnknown": "Das Ergebnis ist unbekannt. Der aktuelle Zustand wurde neu gelesen; wähle bei Bedarf erneut.",
@@ -965,7 +969,9 @@
       "writeFailed": "Die Änderung konnte nicht gespeichert werden.",
       "profileFailed": "Das Profil konnte nicht angewendet werden.",
       "toolsFailed": "Die Werkzeuge konnten nicht gespeichert werden.",
-      "toolsInherited": "Diese Unterhaltung verwendet jetzt geerbte Werkzeuge."
+      "toolsInherited": "Diese Unterhaltung verwendet jetzt geerbte Werkzeuge.",
+      "toolsSaved_one": "{{count}} Werkzeug für diese Unterhaltung gespeichert.",
+      "toolsSaved_other": "{{count}} Werkzeuge für diese Unterhaltung gespeichert."
     },
     "change": {
       "title": "Dieses Profil wurde geändert",
@@ -1034,6 +1040,20 @@
       "empty": "Keine",
       "yes": "Ja",
       "no": "Nein"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "Gespeicherter Wert weicht von Aelix ab",
+        "nativeMismatch": "Aelix hat eine Abweichung gemeldet"
+      },
+      "diagnostic": {
+        "invalidProfile": "Ungültige Profildatei",
+        "envConfig": "Durch Umgebungskonfiguration festgelegt"
+      },
+      "approval": {
+        "inherit": "Erben"
+      },
+      "other": "Sonstiges ({{code}})"
     }
   }
 }

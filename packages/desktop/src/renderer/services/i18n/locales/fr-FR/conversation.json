@@ -860,10 +860,10 @@
       "title": "Outils de cette conversation",
       "inherited": "Hérités",
       "none": "Aucun outil",
-      "count": "{{total}} outils",
+      "count": "{{count}} outils",
       "modeInherited": "Hérités du profil et des valeurs par défaut",
       "modeNone": "Aucun outil pour cette conversation",
-      "modeExplicit": "{{total}} outils choisis pour cette conversation",
+      "modeExplicit": "{{count}} outils choisis pour cette conversation",
       "effectNext": "Les modifications s'appliquent à partir de la prochaine requête.",
       "effectRestart": "Les modifications s'appliquent après le redémarrage d'Aelix.",
       "policyPending": "Un changement de politique attend d'être appliqué.",
@@ -875,7 +875,11 @@
       "selectNone": "Ne rien sélectionner",
       "save": "Enregistrer pour cette conversation",
       "listChanged": "La liste des outils a changé pendant la modification. Vérifiez votre sélection avant d'enregistrer.",
-      "discard": "Annuler mes modifications"
+      "discard": "Annuler mes modifications",
+      "count_one": "{{count}} outil",
+      "count_other": "{{count}} outils",
+      "modeExplicit_one": "{{count}} outil choisi pour cette conversation",
+      "modeExplicit_other": "{{count}} outils choisis pour cette conversation"
     },
     "scope": {
       "bundled": "Intégré",
@@ -948,7 +952,7 @@
     "notice": {
       "profileApplied": "Cette conversation utilise maintenant le profil {{name}}.",
       "profileCleared": "Cette conversation n'utilise plus de profil.",
-      "toolsSaved": "{{total}} outils enregistrés pour cette conversation.",
+      "toolsSaved": "{{count}} outils enregistrés pour cette conversation.",
       "toolsSavedEmpty": "Enregistré : cette conversation n'utilise aucun outil.",
       "restored": "Les éléments sélectionnés ont été restaurés.",
       "outcomeUnknown": "Le résultat est inconnu. L'état actuel a été relu ; choisissez à nouveau si besoin.",
@@ -964,7 +968,9 @@
       "writeFailed": "La modification n'a pas pu être enregistrée.",
       "profileFailed": "Le profil n'a pas pu être appliqué.",
       "toolsFailed": "Les outils n'ont pas pu être enregistrés.",
-      "toolsInherited": "Cette conversation utilise maintenant les outils hérités."
+      "toolsInherited": "Cette conversation utilise maintenant les outils hérités.",
+      "toolsSaved_one": "{{count}} outil enregistré pour cette conversation.",
+      "toolsSaved_other": "{{count}} outils enregistrés pour cette conversation."
     },
     "change": {
       "title": "Ce profil a changé",
@@ -1033,6 +1039,20 @@
       "empty": "Aucun",
       "yes": "Oui",
       "no": "Non"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "La valeur enregistrée diffère de ce qu'Aelix signale",
+        "nativeMismatch": "Aelix a signalé un écart"
+      },
+      "diagnostic": {
+        "invalidProfile": "Fichier de profil non valide",
+        "envConfig": "Défini par la configuration d'environnement"
+      },
+      "approval": {
+        "inherit": "Hériter"
+      },
+      "other": "Autre ({{code}})"
     }
   }
 }

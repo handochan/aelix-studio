@@ -862,10 +862,10 @@
       "title": "Bu sohbetin araçları",
       "inherited": "Devralınan",
       "none": "Araç yok",
-      "count": "{{total}} araç",
+      "count": "{{count}} araç",
       "modeInherited": "Profilden ve varsayılanlardan devralınır",
       "modeNone": "Bu sohbette araç kullanılmaz",
-      "modeExplicit": "Bu sohbet için {{total}} araç seçildi",
+      "modeExplicit": "Bu sohbet için {{count}} araç seçildi",
       "effectNext": "Değişiklikler bir sonraki istekten itibaren geçerli olur.",
       "effectRestart": "Değişiklikler Aelix yeniden başlatıldıktan sonra geçerli olur.",
       "policyPending": "Uygulanmayı bekleyen bir ilke değişikliği var.",
@@ -877,7 +877,11 @@
       "selectNone": "Hiçbirini seçme",
       "save": "Bu sohbet için kaydet",
       "listChanged": "Siz düzenlerken araç listesi değişti. Kaydetmeden önce seçiminizi gözden geçirin.",
-      "discard": "Değişikliklerimi at"
+      "discard": "Değişikliklerimi at",
+      "count_one": "{{count}} araç",
+      "count_other": "{{count}} araç",
+      "modeExplicit_one": "Bu sohbet için {{count}} araç seçildi",
+      "modeExplicit_other": "Bu sohbet için {{count}} araç seçildi"
     },
     "scope": {
       "bundled": "Paketle gelen",
@@ -950,7 +954,7 @@
     "notice": {
       "profileApplied": "Bu sohbet artık {{name}} profilini kullanıyor.",
       "profileCleared": "Bu sohbet artık profil kullanmıyor.",
-      "toolsSaved": "Bu sohbet için {{total}} araç kaydedildi.",
+      "toolsSaved": "Bu sohbet için {{count}} araç kaydedildi.",
       "toolsSavedEmpty": "Kaydedildi: bu sohbet araç kullanmıyor.",
       "restored": "Seçilen öğeler geri yüklendi.",
       "outcomeUnknown": "Sonuç bilinmiyor. Geçerli durum yeniden okundu; gerekirse yeniden seçin.",
@@ -966,7 +970,9 @@
       "writeFailed": "Değişiklik kaydedilemedi.",
       "profileFailed": "Profil uygulanamadı.",
       "toolsFailed": "Araçlar kaydedilemedi.",
-      "toolsInherited": "Bu sohbet artık devralınan araçları kullanıyor."
+      "toolsInherited": "Bu sohbet artık devralınan araçları kullanıyor.",
+      "toolsSaved_one": "Bu sohbet için {{count}} araç kaydedildi.",
+      "toolsSaved_other": "Bu sohbet için {{count}} araç kaydedildi."
     },
     "change": {
       "title": "Bu profil değişti",
@@ -1035,6 +1041,20 @@
       "empty": "Yok",
       "yes": "Evet",
       "no": "Hayır"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "Kayıtlı değer Aelix'in bildirdiğinden farklı",
+        "nativeMismatch": "Aelix bir fark bildirdi"
+      },
+      "diagnostic": {
+        "invalidProfile": "Geçersiz profil dosyası",
+        "envConfig": "Ortam yapılandırmasıyla ayarlandı"
+      },
+      "approval": {
+        "inherit": "Devral"
+      },
+      "other": "Diğer ({{code}})"
     }
   }
 }

@@ -9,7 +9,16 @@ import { Alert, Button, Radio, Spin, Tag, Tooltip } from '@arco-design/web-react
 import React from 'react';
 import { useTranslation } from 'react-i18next';
 import AvailabilityNotice, { UpdateRequired, writeBlockedText } from './AvailabilityNotice';
-import { KEY, refLabel, sameRef, scopeLabel, shortRevision, toolRestriction } from './labels';
+import {
+  approvalLabel,
+  diagnosticLabel,
+  KEY,
+  refLabel,
+  sameRef,
+  scopeLabel,
+  shortRevision,
+  toolRestriction,
+} from './labels';
 import type { AelixSessionControls } from './useAelixSessionControls';
 import WriteOutcome from './WriteOutcome';
 
@@ -26,7 +35,7 @@ const PreviewDetails: React.FC<{ preview: ProfilePreview }> = ({ preview }) => {
         : preview.skills.join(', ') || t(`${KEY}.preview.noSkills`),
     ],
     [t(`${KEY}.preview.model`), preview.model ?? t(`${KEY}.preview.inheritModel`)],
-    [t(`${KEY}.preview.approval`), preview.approvalMode],
+    [t(`${KEY}.preview.approval`), approvalLabel(t, preview.approvalMode)],
   ];
   if (preview.policy.excludeTools.length > 0) {
     rows.push([t(`${KEY}.preview.excludedTools`), preview.policy.excludeTools.join(', ')]);
@@ -114,7 +123,9 @@ const ProfilePanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }
           type='warning'
           data-testid='aelix-profile-diagnostics'
           content={t(`${KEY}.profile.diagnostics`, {
-            codes: profiles.diagnostics.map(({ code, key }) => (key ? `${key}: ${code}` : code)).join(', '),
+            codes: profiles.diagnostics
+              .map(({ code, key }) => (key ? `${key}: ${diagnosticLabel(t, code)}` : diagnosticLabel(t, code)))
+              .join(', '),
           })}
         />
       )}

@@ -860,10 +860,10 @@
       "title": "この会話のツール",
       "inherited": "継承",
       "none": "ツールなし",
-      "count": "ツール {{total}} 個",
+      "count": "ツール {{count}} 個",
       "modeInherited": "プロファイルと既定値から継承",
       "modeNone": "この会話ではツールを使わない",
-      "modeExplicit": "この会話で選んだツール {{total}} 個",
+      "modeExplicit": "この会話で選んだツール {{count}} 個",
       "effectNext": "変更は次のリクエストから適用されます。",
       "effectRestart": "変更は Aelix の再起動後に適用されます。",
       "policyPending": "適用待ちのポリシー変更があります。",
@@ -875,7 +875,11 @@
       "selectNone": "すべて解除",
       "save": "この会話に保存",
       "listChanged": "編集中にツール一覧が変わりました。保存前に選択を確認してください。",
-      "discard": "変更を破棄"
+      "discard": "変更を破棄",
+      "count_one": "ツール {{count}} 個",
+      "count_other": "ツール {{count}} 個",
+      "modeExplicit_one": "この会話で選んだツール {{count}} 個",
+      "modeExplicit_other": "この会話で選んだツール {{count}} 個"
     },
     "scope": {
       "bundled": "同梱",
@@ -948,7 +952,7 @@
     "notice": {
       "profileApplied": "この会話でプロファイル {{name}} を使用します。",
       "profileCleared": "この会話ではプロファイルを使用しなくなりました。",
-      "toolsSaved": "この会話にツールを {{total}} 個保存しました。",
+      "toolsSaved": "この会話にツールを {{count}} 個保存しました。",
       "toolsSavedEmpty": "保存しました。この会話ではツールを使いません。",
       "restored": "選択した項目を復元しました。",
       "outcomeUnknown": "結果が不明です。現在の状態を再読み込みしたので、必要なら選び直してください。",
@@ -964,7 +968,9 @@
       "writeFailed": "変更を保存できませんでした。",
       "profileFailed": "プロファイルを適用できませんでした。",
       "toolsFailed": "ツールを保存できませんでした。",
-      "toolsInherited": "この会話は継承したツールを使うようになりました。"
+      "toolsInherited": "この会話は継承したツールを使うようになりました。",
+      "toolsSaved_one": "この会話にツールを {{count}} 個保存しました。",
+      "toolsSaved_other": "この会話にツールを {{count}} 個保存しました。"
     },
     "change": {
       "title": "このプロファイルは変更されています",
@@ -1033,6 +1039,20 @@
       "empty": "なし",
       "yes": "はい",
       "no": "いいえ"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "保存値が Aelix の報告と異なる",
+        "nativeMismatch": "Aelix が差分を報告"
+      },
+      "diagnostic": {
+        "invalidProfile": "無効なプロファイルファイル",
+        "envConfig": "環境設定で指定"
+      },
+      "approval": {
+        "inherit": "継承"
+      },
+      "other": "その他（{{code}}）"
     }
   }
 }

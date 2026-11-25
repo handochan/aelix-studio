@@ -20,6 +20,9 @@ import { restorePlan } from '@/renderer/pages/conversation/runtime/AelixSessionC
 import type { ProfileCatalogView, ResourceFailure, SessionProfiles } from '@/renderer/services/runtime/NativeResources';
 import type { HostTurnState } from '@/renderer/services/runtime/RunningInput/decideSend';
 import fixtures from '@/renderer/services/runtime/NativeResources/studio-7-d16-v1.json';
+import { createInstance } from 'i18next';
+import enConversation from '@/renderer/services/i18n/locales/en-US/conversation.json';
+import ruConversation from '@/renderer/services/i18n/locales/ru-RU/conversation.json';
 
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
@@ -616,5 +619,47 @@ describe('Aelix conversation controls: legacy name-only recovery', () => {
     const original = screen.getByTestId('aelix-recovery-original');
     expect(original).toHaveTextContent(`${K}.profile.legacy`);
     expect(original).not.toHaveTextContent(`${K}.profile.none`);
+  });
+});
+
+describe('Aelix conversation controls: labels', () => {
+  it('shows known native codes as labels instead of raw codes', async () => {
+    replies.set(LIST, () =>
+      relay({
+        profiles: [{ ref: QUIET, description: 'Review only' }],
+        activeAgent: 'quiet',
+        activeRef: QUIET,
+        diagnostics: [{ code: 'invalid-profile', key: 'broken', source: null }],
+        nextCursor: null,
+      })
+    );
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+
+    const diagnostics = screen.getByTestId('aelix-profile-diagnostics');
+    expect(diagnostics).toHaveTextContent(`${K}.code.diagnostic.invalidProfile`);
+    expect(diagnostics).not.toHaveTextContent('invalid-profile');
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent(`${K}.code.approval.inherit`);
+  });
+
+  it('passes a numeric count so tool totals use plural forms', async () => {
+    state.toolOverride = ['read'];
+    render(<Harness />);
+    await settle();
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.count {"count":1}`);
+
+    const i18n = createInstance();
+    await i18n.init({
+      lng: 'en-US',
+      resources: {
+        'en-US': { translation: { conversation: enConversation } },
+        'ru-RU': { translation: { conversation: ruConversation } },
+      },
+    });
+    expect(i18n.t(`${K}.tools.count`, { count: 1 })).toBe('1 tool');
+    expect(i18n.t(`${K}.tools.count`, { count: 2 })).toBe('2 tools');
+    expect(i18n.t(`${K}.tools.count`, { count: 5, lng: 'ru-RU' })).toBe('5 инструментов');
   });
 });

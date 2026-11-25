@@ -14,7 +14,7 @@ export function sameRef(a: ProfileRef | null | undefined, b: ProfileRef | null |
   return a.name === b.name && a.scope === b.scope && a.revision === b.revision;
 }
 
-/** `sha256:1db1f596…` → `1db1f596`. The full value stays in the tooltip. */
+/** `sha256:1db1f596…` → `1db1f596`, for display only. Comparisons always use the full revision. */
 export function shortRevision(revision: string): string {
   return revision.replace(/^sha256:/, '').slice(0, 8);
 }
@@ -99,4 +99,26 @@ export function recoveryTitle(t: TFunction, status: string, reason: string): str
   if (!RECOVERY_CAUSES.has(reason)) return t(`${KEY}.recovery.cause.other`);
   const key = reason.replace(/-([a-z])/g, (_match, letter: string) => letter.toUpperCase());
   return t(`${KEY}.recovery.cause.${key}`);
+}
+
+/** Map a known native code to its label; anything else is shown as "Other (code)". */
+function codeLabel(t: TFunction, group: string, labels: Record<string, string>, code: string): string {
+  return Object.hasOwn(labels, code) ? t(`${KEY}.code.${group}.${labels[code]}`) : t(`${KEY}.code.other`, { code });
+}
+
+export function mismatchLabel(t: TFunction, reason: string): string {
+  return codeLabel(
+    t,
+    'mismatch',
+    { 'saved-value-differs': 'savedValueDiffers', 'native-mismatch': 'nativeMismatch' },
+    reason
+  );
+}
+
+export function diagnosticLabel(t: TFunction, code: string): string {
+  return codeLabel(t, 'diagnostic', { 'invalid-profile': 'invalidProfile', 'env-config': 'envConfig' }, code);
+}
+
+export function approvalLabel(t: TFunction, mode: string): string {
+  return codeLabel(t, 'approval', { inherit: 'inherit' }, mode);
 }

@@ -40,7 +40,7 @@ export type ControlsNotice = {
   tone: 'success' | 'info' | 'warning' | 'error';
   /** Key under `conversation.aelixControls.notice`. */
   key: string;
-  values?: Record<string, string>;
+  values?: Record<string, string | number>;
 };
 
 /** What the user last confirmed before a write, kept so recovery can restore only picked items. */
@@ -507,7 +507,7 @@ export function useAelixSessionControls({
         before,
         names.length === 0
           ? { tone: 'success', key: 'toolsSavedEmpty' }
-          : { tone: 'success', key: 'toolsSaved', values: { total: String(names.length) } }
+          : { tone: 'success', key: 'toolsSaved', values: { count: names.length } }
       );
       return report.outcome.status === 'success';
     },
