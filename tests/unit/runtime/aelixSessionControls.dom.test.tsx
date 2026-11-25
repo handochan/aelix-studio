@@ -739,3 +739,30 @@ describe('Aelix conversation controls: stale responses', () => {
     expect(fetchMock.mock.calls.some(([url]) => url.includes('/c-18/'))).toBe(true);
   });
 });
+
+describe('Aelix conversation controls: accessibility', () => {
+  it('marks the pill as a dialog trigger and moves focus into the opened panel', async () => {
+    render(<Harness />);
+    await settle();
+    const pill = screen.getByTestId('aelix-profile-pill');
+    expect(pill).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+
+    await openPanel('profile');
+    const panel = screen.getByTestId('aelix-profile-popover');
+    expect(pill).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).toHaveAttribute('role', 'dialog');
+    expect(panel).toHaveFocus();
+  });
+
+  it('closes the panel with Escape', async () => {
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    fireEvent.keyDown(screen.getByTestId('aelix-profile-popover'), { key: 'Escape', keyCode: 27 });
+    await settle();
+    const pill = screen.getByTestId('aelix-profile-pill');
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+    expect(pill).toHaveFocus();
+  });
+});

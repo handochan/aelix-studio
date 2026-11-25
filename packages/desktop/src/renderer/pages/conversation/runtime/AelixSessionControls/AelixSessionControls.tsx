@@ -10,7 +10,7 @@ import { iconColors } from '@/renderer/styles/colors';
 import { Drawer, Popover } from '@arco-design/web-react';
 import { Down, Tool, User } from '@icon-park/react';
 import type { TFunction } from 'i18next';
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useTranslation } from 'react-i18next';
 import { KEY } from './labels';
 import ProfilePanel from './ProfilePanel';
@@ -48,9 +48,46 @@ const PANEL_TITLES: Record<ControlsPanel, string> = {
 const PanelBody: React.FC<{ controls: Controls; panel: ControlsPanel }> = ({ controls, panel }) =>
   panel === 'profile' ? <ProfilePanel controls={controls} /> : <ToolsPanel controls={controls} />;
 
+/** The panel as a labelled dialog that takes focus when it opens, so keyboard users land inside it. */
+const FocusPanel: React.FC<{
+  label: string;
+  testId: string;
+  className?: string;
+  /** Escape inside the panel closes it; the popup is portalled, so the trigger never sees the key. */
+  onEscape?: () => void;
+  children: React.ReactNode;
+}> = ({ label, testId, className, onEscape, children }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    ref.current?.focus({ preventScroll: true });
+  }, []);
+  return (
+    <div
+      ref={ref}
+      role='dialog'
+      aria-label={label}
+      tabIndex={-1}
+      className={className}
+      data-testid={testId}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || !onEscape) return;
+        event.stopPropagation();
+        onEscape();
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
 const ControlPill: React.FC<{ controls: Controls; panel: ControlsPanel }> = ({ controls, panel }) => {
   const { t } = useTranslation();
   const open = controls.panel === panel;
+  const trigger = useRef<HTMLSpanElement>(null);
+  const close = () => {
+    controls.openPanel(null);
+    trigger.current?.querySelector('button')?.focus();
+  };
   const icon =
     panel === 'profile' ? (
       <User theme='outline' size='14' fill={iconColors.secondary} />
@@ -62,15 +99,21 @@ const ControlPill: React.FC<{ controls: Controls; panel: ControlsPanel }> = ({ c
       trigger='click'
       position='top'
       popupVisible={open}
+      escToClose
       onVisibleChange={(visible) => controls.openPanel(visible ? panel : null)}
       title={t(PANEL_TITLES[panel])}
       content={
-        <div className='w-340px max-w-[80vw] max-h-[60vh] overflow-auto' data-testid={`aelix-${panel}-popover`}>
+        <FocusPanel
+          label={t(PANEL_TITLES[panel])}
+          testId={`aelix-${panel}-popover`}
+          onEscape={close}
+          className='w-340px max-w-[80vw] max-h-[60vh] overflow-auto outline-none'
+        >
           <PanelBody controls={controls} panel={panel} />
-        </div>
+        </FocusPanel>
       }
     >
-      <span className='inline-flex'>
+      <span className='inline-flex' ref={trigger}>
         <RuntimeSelectorPill
           testId={`aelix-${panel}-pill`}
           className='sendbox-model-btn agent-mode-compact-pill'
@@ -78,6 +121,8 @@ const ControlPill: React.FC<{ controls: Controls; panel: ControlsPanel }> = ({ c
           leading={<span className='shrink-0 inline-flex items-center'>{icon}</span>}
           trailing={<Down size={12} className='text-t-tertiary shrink-0' />}
           loading={controls.writing !== null}
+          aria-haspopup='dialog'
+          aria-expanded={open}
         />
       </span>
     </Popover>
@@ -111,9 +156,9 @@ export const AelixSessionDrawer: React.FC<{ controls: Controls }> = ({ controls 
       onCancel={() => controls.openPanel(null)}
     >
       {panel && (
-        <div data-testid={`aelix-${panel}-drawer`}>
+        <FocusPanel label={t(PANEL_TITLES[panel])} testId={`aelix-${panel}-drawer`} className='outline-none'>
           <PanelBody controls={controls} panel={panel} />
-        </div>
+        </FocusPanel>
       )}
     </Drawer>
   );
