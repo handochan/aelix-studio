@@ -838,5 +838,195 @@
       "body": "Studio couldn't confirm that no other process is using this session, so sending and the Draft Box are paused. Check again to continue."
     },
     "paused": "Sending and the Draft Box stay paused until a check succeeds."
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "Profile",
+      "title": "Profile",
+      "none": "No profile",
+      "current": "Current: {{profile}}",
+      "currentLegacy": "Current: {{name}} (recorded by name only)",
+      "active": "Active",
+      "apply": "Apply profile",
+      "clear": "Use no profile",
+      "empty": "No profiles were found. Create one with the Aelix CLI.",
+      "partial": "Only part of the profile list could be read.",
+      "diagnostics": "Some profiles could not be read: {{codes}}"
+    },
+    "tools": {
+      "label": "Tools",
+      "title": "This conversation's tools",
+      "inherited": "Inherited",
+      "none": "No tools",
+      "count": "{{total}} tools",
+      "modeInherited": "Inherited from the profile and defaults",
+      "modeNone": "No tools for this conversation",
+      "modeExplicit": "{{total}} tools chosen for this conversation",
+      "effectNext": "Changes apply from the next request.",
+      "effectRestart": "Changes apply after Aelix restarts.",
+      "policyPending": "A policy change is waiting to be applied.",
+      "partial": "The tool list is incomplete, so it cannot be saved yet.",
+      "mismatch": "The saved selection differs from what Aelix reports.",
+      "empty": "Aelix reported no tools.",
+      "skills": "Skills in use: {{skills}}",
+      "inherit": "Use inherited tools",
+      "selectNone": "Select none",
+      "save": "Save for this conversation"
+    },
+    "scope": {
+      "bundled": "Bundled",
+      "user": "User",
+      "project": "Project"
+    },
+    "summary": {
+      "checking": "Checking",
+      "openFirst": "After opening",
+      "updateRequired": "Update needed",
+      "unavailable": "Unavailable"
+    },
+    "status": {
+      "checking": "Checking what Aelix supports...",
+      "openFirst": "Use this after the conversation is open. It will be checked again once Aelix attaches.",
+      "updateRequiredTitle": "Requires an Aelix update",
+      "updateRequired": "This Aelix runtime does not support this control yet. Update Aelix to use it.",
+      "signIn": "Sign in again to read these settings.",
+      "readFailed": "Could not read these settings.",
+      "busy": "Available when Aelix is idle.",
+      "notIdle": "Available once the conversation is open and idle.",
+      "writing": "Another change is in progress.",
+      "applying": "Applying... If Aelix asks for approval, answer it in the conversation.",
+      "saving": "Saving..."
+    },
+    "action": {
+      "retry": "Retry",
+      "close": "Close"
+    },
+    "preview": {
+      "source": "Source",
+      "revision": "Revision",
+      "tools": "Tools",
+      "skills": "Skills",
+      "model": "Model",
+      "approval": "Approval",
+      "excludedTools": "Excluded tools",
+      "allTools": "All tools",
+      "noTools": "No tools",
+      "allSkills": "All skills",
+      "noSkills": "No skills",
+      "inheritModel": "Current model",
+      "truncated": "(shortened)",
+      "failed": "Could not load the preview."
+    },
+    "row": {
+      "saved": "Saved: {{value}}",
+      "applied": "Applied: {{value}}",
+      "live": "Live: {{value}}",
+      "on": "on",
+      "off": "off",
+      "unobserved": "not observed",
+      "decidedBy": {
+        "global": "global",
+        "project": "project"
+      },
+      "notLoaded": "Not loaded",
+      "pendingNext": "Next request",
+      "pendingRestart": "Waiting for restart",
+      "problem": "Problem: {{code}}",
+      "mismatch": "Mismatch: {{reason}}"
+    },
+    "lock": {
+      "launch": "Locked by the launch options",
+      "env": "Locked by environment settings",
+      "helper": "Managed in Settings",
+      "other": "Locked ({{reason}})"
+    },
+    "notice": {
+      "profileApplied": "Profile {{name}} is now used in this conversation.",
+      "profileCleared": "This conversation no longer uses a profile.",
+      "toolsSaved": "Saved {{total}} tools for this conversation.",
+      "toolsSavedEmpty": "Saved: this conversation uses no tools.",
+      "restored": "The selected items were restored.",
+      "outcomeUnknown": "The result is unknown. The current state was read again; choose again if needed.",
+      "openFirst": "Use this after the conversation is open.",
+      "stale": "The conversation reconnected. The current state was read again.",
+      "signIn": "Sign in again, then try again.",
+      "updateRequired": "This needs an Aelix update.",
+      "busy": "Aelix is busy. Try again when it is idle.",
+      "toolLocked": "{{name}} is locked and cannot be changed here.",
+      "toolUnavailable": "{{name}} is not loaded in this conversation.",
+      "profileUnavailable": "Profile {{name}} is no longer available.",
+      "profileRefused": "Aelix refused this profile.",
+      "writeFailed": "The change could not be saved.",
+      "profileFailed": "The profile could not be applied.",
+      "toolsFailed": "The tools could not be saved."
+    },
+    "change": {
+      "title": "This profile changed",
+      "description": "Its source or revision changed since it was last chosen. Review the differences and choose it again to use it.",
+      "recorded": "Before",
+      "candidate": "Now",
+      "missing": "Not available",
+      "field": "Field",
+      "before": "Before",
+      "after": "Now",
+      "noCandidate": "The profile can no longer be found.",
+      "keep": "Keep current environment",
+      "reselect": "Choose the changed profile"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "The profile change was declined",
+        "cancelled": "The profile change was cancelled",
+        "unanswered": "The approval was not answered",
+        "changedAgain": "The profile changed again before it was applied",
+        "profileUnavailable": "The profile is no longer available",
+        "guardUnavailable": "This Aelix runtime cannot apply a checked profile",
+        "invalidRecord": "The recorded profile could not be read",
+        "profileChanged": "The changed profile was not chosen",
+        "unknown": "The result of the change is unknown",
+        "other": "The change was not applied"
+      },
+      "noResend": "No prompt is sent again and no permissions are widened.",
+      "original": "Original environment: {{profile}}",
+      "unchanged": "Nothing in this conversation was changed.",
+      "restoreProfile": "Restore profile {{profile}}",
+      "restoreTools": "Restore this conversation's tools: {{tools}}",
+      "toolsWithProfile": "Inherited tools return together with the profile.",
+      "profileResetsTools": "Restoring the profile resets this conversation's tools to inherited.",
+      "restoreFileAndReopen": "The original profile file changed. Restore it with the Aelix CLI, then reopen this conversation.",
+      "unknownOriginal": "The original profile was recorded by name only. Choose it again from the list.",
+      "restoreSelected": "Restore selected"
+    },
+    "field": {
+      "source": "Source",
+      "revision": "Revision",
+      "description": "Description",
+      "promptMode": "Prompt mode",
+      "promptPreview": "Prompt",
+      "promptTruncated": "Prompt shortened",
+      "omittedPrompt": "Hidden part of the prompt",
+      "provider": "Provider",
+      "model": "Model",
+      "tools": "Tools",
+      "skills": "Skills",
+      "approvalMode": "Approval",
+      "builtinTools": "Built-in tools",
+      "excludeTools": "Excluded tools",
+      "inheritSkills": "Inherit skills",
+      "extensions": "Extensions",
+      "inheritExtensions": "Inherit extensions",
+      "contextFiles": "Context files",
+      "thinking": "Thinking",
+      "role": "Role",
+      "outputCap": "Output limit",
+      "timeoutMs": "Timeout (ms)",
+      "agents": "Agents"
+    },
+    "value": {
+      "unset": "Not set",
+      "empty": "None",
+      "yes": "Yes",
+      "no": "No"
+    }
   }
 }

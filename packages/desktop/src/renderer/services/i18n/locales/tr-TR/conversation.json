@@ -840,5 +840,195 @@
       "body": "Studio bu oturumu başka bir işlemin kullanmadığını doğrulayamadı; gönderme ve taslak kutusu duraklatıldı. Devam etmek için yeniden denetleyin."
     },
     "paused": "Bir denetim başarılı olana kadar gönderme ve taslak kutusu duraklatılmış kalır."
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "Profil",
+      "title": "Profil",
+      "none": "Profil yok",
+      "current": "Şu an: {{profile}}",
+      "currentLegacy": "Şu an: {{name}} (yalnızca adıyla kayıtlı)",
+      "active": "Etkin",
+      "apply": "Profili uygula",
+      "clear": "Profil kullanma",
+      "empty": "Profil bulunamadı. Aelix CLI ile bir profil oluşturun.",
+      "partial": "Profil listesinin yalnızca bir kısmı okunabildi.",
+      "diagnostics": "Bazı profiller okunamadı: {{codes}}"
+    },
+    "tools": {
+      "label": "Araçlar",
+      "title": "Bu sohbetin araçları",
+      "inherited": "Devralınan",
+      "none": "Araç yok",
+      "count": "{{total}} araç",
+      "modeInherited": "Profilden ve varsayılanlardan devralınır",
+      "modeNone": "Bu sohbette araç kullanılmaz",
+      "modeExplicit": "Bu sohbet için {{total}} araç seçildi",
+      "effectNext": "Değişiklikler bir sonraki istekten itibaren geçerli olur.",
+      "effectRestart": "Değişiklikler Aelix yeniden başlatıldıktan sonra geçerli olur.",
+      "policyPending": "Uygulanmayı bekleyen bir ilke değişikliği var.",
+      "partial": "Araç listesi eksik olduğundan henüz kaydedilemez.",
+      "mismatch": "Kaydedilen seçim Aelix'in bildirdiğinden farklı.",
+      "empty": "Aelix hiç araç bildirmedi.",
+      "skills": "Kullanılan beceriler: {{skills}}",
+      "inherit": "Devralınan araçları kullan",
+      "selectNone": "Hiçbirini seçme",
+      "save": "Bu sohbet için kaydet"
+    },
+    "scope": {
+      "bundled": "Paketle gelen",
+      "user": "Kullanıcı",
+      "project": "Proje"
+    },
+    "summary": {
+      "checking": "Kontrol ediliyor",
+      "openFirst": "Açıldıktan sonra",
+      "updateRequired": "Güncelleme gerekli",
+      "unavailable": "Kullanılamıyor"
+    },
+    "status": {
+      "checking": "Aelix'in neleri desteklediği kontrol ediliyor...",
+      "openFirst": "Bunu sohbet açıldıktan sonra kullanın. Aelix bağlandığında yeniden kontrol edilir.",
+      "updateRequiredTitle": "Aelix güncellemesi gerekli",
+      "updateRequired": "Bu Aelix çalışma ortamı bu denetimi henüz desteklemiyor. Kullanmak için Aelix'i güncelleyin.",
+      "signIn": "Bu ayarları okumak için yeniden oturum açın.",
+      "readFailed": "Bu ayarlar okunamadı.",
+      "busy": "Aelix boştayken kullanılabilir.",
+      "notIdle": "Sohbet açık ve boştayken kullanılabilir.",
+      "writing": "Başka bir değişiklik sürüyor.",
+      "applying": "Uygulanıyor... Aelix onay isterse sohbette yanıtlayın.",
+      "saving": "Kaydediliyor..."
+    },
+    "action": {
+      "retry": "Yeniden dene",
+      "close": "Kapat"
+    },
+    "preview": {
+      "source": "Kaynak",
+      "revision": "Revizyon",
+      "tools": "Araçlar",
+      "skills": "Beceriler",
+      "model": "Model",
+      "approval": "Onay",
+      "excludedTools": "Hariç tutulan araçlar",
+      "allTools": "Tüm araçlar",
+      "noTools": "Araç yok",
+      "allSkills": "Tüm beceriler",
+      "noSkills": "Beceri yok",
+      "inheritModel": "Geçerli model",
+      "truncated": "(kısaltıldı)",
+      "failed": "Önizleme yüklenemedi."
+    },
+    "row": {
+      "saved": "Kayıtlı: {{value}}",
+      "applied": "Uygulanan: {{value}}",
+      "live": "Fiili: {{value}}",
+      "on": "açık",
+      "off": "kapalı",
+      "unobserved": "gözlemlenmedi",
+      "decidedBy": {
+        "global": "genel",
+        "project": "proje"
+      },
+      "notLoaded": "Yüklenmedi",
+      "pendingNext": "Sonraki istek",
+      "pendingRestart": "Yeniden başlatma bekleniyor",
+      "problem": "Sorun: {{code}}",
+      "mismatch": "Uyuşmazlık: {{reason}}"
+    },
+    "lock": {
+      "launch": "Başlatma seçenekleriyle kilitli",
+      "env": "Ortam ayarlarıyla kilitli",
+      "helper": "Ayarlar'da yönetilir",
+      "other": "Kilitli ({{reason}})"
+    },
+    "notice": {
+      "profileApplied": "Bu sohbet artık {{name}} profilini kullanıyor.",
+      "profileCleared": "Bu sohbet artık profil kullanmıyor.",
+      "toolsSaved": "Bu sohbet için {{total}} araç kaydedildi.",
+      "toolsSavedEmpty": "Kaydedildi: bu sohbet araç kullanmıyor.",
+      "restored": "Seçilen öğeler geri yüklendi.",
+      "outcomeUnknown": "Sonuç bilinmiyor. Geçerli durum yeniden okundu; gerekirse yeniden seçin.",
+      "openFirst": "Bunu sohbet açıldıktan sonra kullanın.",
+      "stale": "Sohbet yeniden bağlandı. Geçerli durum yeniden okundu.",
+      "signIn": "Yeniden oturum açıp tekrar deneyin.",
+      "updateRequired": "Bunun için Aelix güncellemesi gerekiyor.",
+      "busy": "Aelix meşgul. Boşa çıktığında yeniden deneyin.",
+      "toolLocked": "{{name}} kilitli ve burada değiştirilemez.",
+      "toolUnavailable": "{{name}} bu sohbette yüklü değil.",
+      "profileUnavailable": "{{name}} profili artık kullanılamıyor.",
+      "profileRefused": "Aelix bu profili reddetti.",
+      "writeFailed": "Değişiklik kaydedilemedi.",
+      "profileFailed": "Profil uygulanamadı.",
+      "toolsFailed": "Araçlar kaydedilemedi."
+    },
+    "change": {
+      "title": "Bu profil değişti",
+      "description": "Son seçimden bu yana kaynağı veya revizyonu değişti. Farkları inceleyin ve kullanmak için yeniden seçin.",
+      "recorded": "Önce",
+      "candidate": "Şimdi",
+      "missing": "Kullanılamıyor",
+      "field": "Alan",
+      "before": "Önce",
+      "after": "Şimdi",
+      "noCandidate": "Profil artık bulunamıyor.",
+      "keep": "Geçerli ortamı koru",
+      "reselect": "Değişen profili seç"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "Profil değişikliği reddedildi",
+        "cancelled": "Profil değişikliği iptal edildi",
+        "unanswered": "Onay isteği yanıtlanmadı",
+        "changedAgain": "Profil uygulanmadan önce yeniden değişti",
+        "profileUnavailable": "Profil artık kullanılamıyor",
+        "guardUnavailable": "Bu Aelix çalışma ortamı doğrulanmış bir profili uygulayamıyor",
+        "invalidRecord": "Kayıtlı profil okunamadı",
+        "profileChanged": "Değişen profil seçilmedi",
+        "unknown": "Değişikliğin sonucu bilinmiyor",
+        "other": "Değişiklik uygulanmadı"
+      },
+      "noResend": "Hiçbir istem yeniden gönderilmez ve hiçbir izin genişletilmez.",
+      "original": "Özgün ortam: {{profile}}",
+      "unchanged": "Bu sohbette hiçbir şey değişmedi.",
+      "restoreProfile": "{{profile}} profilini geri yükle",
+      "restoreTools": "Bu sohbetin araçlarını geri yükle: {{tools}}",
+      "toolsWithProfile": "Devralınan araçlar profille birlikte geri gelir.",
+      "profileResetsTools": "Profili geri yüklemek bu sohbetin araçlarını devralınana döndürür.",
+      "restoreFileAndReopen": "Özgün profil dosyası değişti. Aelix CLI ile geri yükleyin, ardından bu sohbeti yeniden açın.",
+      "unknownOriginal": "Özgün profil yalnızca adıyla kaydedilmiş. Listeden yeniden seçin.",
+      "restoreSelected": "Seçilenleri geri yükle"
+    },
+    "field": {
+      "source": "Kaynak",
+      "revision": "Revizyon",
+      "description": "Açıklama",
+      "promptMode": "İstem modu",
+      "promptPreview": "İstem",
+      "promptTruncated": "İstem kısaltıldı",
+      "omittedPrompt": "İstemin gizli kısmı",
+      "provider": "Sağlayıcı",
+      "model": "Model",
+      "tools": "Araçlar",
+      "skills": "Beceriler",
+      "approvalMode": "Onay",
+      "builtinTools": "Yerleşik araçlar",
+      "excludeTools": "Hariç tutulan araçlar",
+      "inheritSkills": "Becerileri devral",
+      "extensions": "Uzantılar",
+      "inheritExtensions": "Uzantıları devral",
+      "contextFiles": "Bağlam dosyaları",
+      "thinking": "Düşünme",
+      "role": "Rol",
+      "outputCap": "Çıktı sınırı",
+      "timeoutMs": "Zaman aşımı (ms)",
+      "agents": "Ajanlar"
+    },
+    "value": {
+      "unset": "Ayarlanmadı",
+      "empty": "Yok",
+      "yes": "Evet",
+      "no": "Hayır"
+    }
   }
 }

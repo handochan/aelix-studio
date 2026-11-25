@@ -39,6 +39,12 @@ import {
 } from '@/renderer/pages/conversation/platforms/useConversationCommandQueue';
 import { usePreviewContext } from '@/renderer/pages/conversation/Preview';
 import {
+  AelixSessionDrawer,
+  AelixSessionPills,
+  aelixSheetEntries,
+  useAelixSessionControls,
+} from '@/renderer/pages/conversation/runtime/AelixSessionControls';
+import {
   RunningInputModeSwitch,
   RunningInputNotices,
   RunningInputStack,
@@ -371,6 +377,17 @@ const AcpSendBox: React.FC<{
     paused: sendBlocked || manualCompactionRunning || compactionStopBlocked,
   });
   const runningInputSendable = runningInput.available && !supportsMidturnDelivery;
+  // Builtin Aelix profile and per-conversation tools (#7). Discovery only reads; writes need idle.
+  const reloadRuntimeConfig = runtimeConfig.reload;
+  const rereadModel = useCallback((): void => {
+    reloadRuntimeConfig().catch((): undefined => undefined);
+  }, [reloadRuntimeConfig]);
+  const aelixControls = useAelixSessionControls({
+    conversationId: conversation_id,
+    enabled: backend === 'aelix' && !teamRuntime && !teamSendMessage && !teamPermission,
+    hostState: hostTurnState(getConversationRuntimeViewSnapshot(conversation_id)),
+    onProfileApplied: rereadModel,
+  });
   const runningImagePaths = useRunningImagePaths(runningInput.images, runningInputDraftVersion);
 
   // Register handler for adding text from preview panel to sendbox
@@ -844,6 +861,8 @@ Please check your local CLI tool authentication status`,
       });
     }
 
+    entries.push(...aelixSheetEntries(t, aelixControls));
+
     attachEntries.forEach((entry, idx) => {
       entries.push({
         ...entry,
@@ -899,6 +918,7 @@ Please check your local CLI tool authentication status`,
 
     return entries;
   }, [
+    aelixControls,
     attachEntries,
     canSwitchModel,
     currentMode,
@@ -1126,6 +1146,7 @@ Please check your local CLI tool authentication status`,
                 configOptionsPort={teamPermission?.configOptionsPort ?? viewConfigPort}
               />
             )}
+            {!isMobile && <AelixSessionPills controls={aelixControls} />}
           </div>
         }
         prefix={
@@ -1218,6 +1239,7 @@ Please check your local CLI tool authentication status`,
             title={t('common.more', { defaultValue: 'More' })}
             entries={sheetEntries}
           />
+          <AelixSessionDrawer controls={aelixControls} />
           {attachHiddenInput}
         </>
       )}

@@ -839,5 +839,195 @@
       "body": "Studio no pudo confirmar que ningún otro proceso use esta sesión, así que el envío y la bandeja de borradores están en pausa. Compruebe de nuevo para continuar."
     },
     "paused": "El envío y la bandeja de borradores seguirán en pausa hasta que una comprobación tenga éxito."
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "Perfil",
+      "title": "Perfil",
+      "none": "Sin perfil",
+      "current": "Actual: {{profile}}",
+      "currentLegacy": "Actual: {{name}} (registrado solo por nombre)",
+      "active": "Activo",
+      "apply": "Aplicar perfil",
+      "clear": "No usar perfil",
+      "empty": "No se encontraron perfiles. Crea uno con la CLI de Aelix.",
+      "partial": "Solo se pudo leer parte de la lista de perfiles.",
+      "diagnostics": "No se pudieron leer algunos perfiles: {{codes}}"
+    },
+    "tools": {
+      "label": "Herramientas",
+      "title": "Herramientas de esta conversación",
+      "inherited": "Heredadas",
+      "none": "Sin herramientas",
+      "count": "{{total}} herramientas",
+      "modeInherited": "Heredadas del perfil y los valores predeterminados",
+      "modeNone": "Sin herramientas en esta conversación",
+      "modeExplicit": "{{total}} herramientas elegidas para esta conversación",
+      "effectNext": "Los cambios se aplican desde la próxima solicitud.",
+      "effectRestart": "Los cambios se aplican tras reiniciar Aelix.",
+      "policyPending": "Hay un cambio de política pendiente de aplicar.",
+      "partial": "La lista de herramientas está incompleta y aún no se puede guardar.",
+      "mismatch": "La selección guardada no coincide con lo que informa Aelix.",
+      "empty": "Aelix no informó ninguna herramienta.",
+      "skills": "Habilidades en uso: {{skills}}",
+      "inherit": "Usar herramientas heredadas",
+      "selectNone": "No seleccionar ninguna",
+      "save": "Guardar para esta conversación"
+    },
+    "scope": {
+      "bundled": "Incluido",
+      "user": "Usuario",
+      "project": "Proyecto"
+    },
+    "summary": {
+      "checking": "Comprobando",
+      "openFirst": "Tras abrirla",
+      "updateRequired": "Requiere actualizar",
+      "unavailable": "No disponible"
+    },
+    "status": {
+      "checking": "Comprobando qué admite Aelix...",
+      "openFirst": "Úsalo cuando la conversación esté abierta. Se volverá a comprobar cuando Aelix se conecte.",
+      "updateRequiredTitle": "Requiere actualizar Aelix",
+      "updateRequired": "Este entorno de Aelix aún no admite este control. Actualiza Aelix para usarlo.",
+      "signIn": "Vuelve a iniciar sesión para leer esta configuración.",
+      "readFailed": "No se pudo leer esta configuración.",
+      "busy": "Disponible cuando Aelix esté inactivo.",
+      "notIdle": "Disponible cuando la conversación esté abierta e inactiva.",
+      "writing": "Hay otro cambio en curso.",
+      "applying": "Aplicando... Si Aelix pide aprobación, respóndela en la conversación.",
+      "saving": "Guardando..."
+    },
+    "action": {
+      "retry": "Reintentar",
+      "close": "Cerrar"
+    },
+    "preview": {
+      "source": "Origen",
+      "revision": "Revisión",
+      "tools": "Herramientas",
+      "skills": "Habilidades",
+      "model": "Modelo",
+      "approval": "Aprobación",
+      "excludedTools": "Herramientas excluidas",
+      "allTools": "Todas las herramientas",
+      "noTools": "Sin herramientas",
+      "allSkills": "Todas las habilidades",
+      "noSkills": "Sin habilidades",
+      "inheritModel": "Modelo actual",
+      "truncated": "(acortado)",
+      "failed": "No se pudo cargar la vista previa."
+    },
+    "row": {
+      "saved": "Guardado: {{value}}",
+      "applied": "Aplicado: {{value}}",
+      "live": "En uso: {{value}}",
+      "on": "sí",
+      "off": "no",
+      "unobserved": "sin observar",
+      "decidedBy": {
+        "global": "global",
+        "project": "proyecto"
+      },
+      "notLoaded": "No cargada",
+      "pendingNext": "Próxima solicitud",
+      "pendingRestart": "Esperando reinicio",
+      "problem": "Problema: {{code}}",
+      "mismatch": "Discrepancia: {{reason}}"
+    },
+    "lock": {
+      "launch": "Bloqueada por las opciones de inicio",
+      "env": "Bloqueada por la configuración del entorno",
+      "helper": "Gestionada en Ajustes",
+      "other": "Bloqueada ({{reason}})"
+    },
+    "notice": {
+      "profileApplied": "Esta conversación ahora usa el perfil {{name}}.",
+      "profileCleared": "Esta conversación ya no usa ningún perfil.",
+      "toolsSaved": "Se guardaron {{total}} herramientas para esta conversación.",
+      "toolsSavedEmpty": "Guardado: esta conversación no usa herramientas.",
+      "restored": "Se restauraron los elementos seleccionados.",
+      "outcomeUnknown": "El resultado es desconocido. Se volvió a leer el estado actual; elige de nuevo si hace falta.",
+      "openFirst": "Úsalo cuando la conversación esté abierta.",
+      "stale": "La conversación se reconectó. Se volvió a leer el estado actual.",
+      "signIn": "Vuelve a iniciar sesión e inténtalo de nuevo.",
+      "updateRequired": "Esto requiere actualizar Aelix.",
+      "busy": "Aelix está ocupado. Inténtalo cuando esté inactivo.",
+      "toolLocked": "{{name}} está bloqueada y no se puede cambiar aquí.",
+      "toolUnavailable": "{{name}} no está cargada en esta conversación.",
+      "profileUnavailable": "El perfil {{name}} ya no está disponible.",
+      "profileRefused": "Aelix rechazó este perfil.",
+      "writeFailed": "No se pudo guardar el cambio.",
+      "profileFailed": "No se pudo aplicar el perfil.",
+      "toolsFailed": "No se pudieron guardar las herramientas."
+    },
+    "change": {
+      "title": "Este perfil cambió",
+      "description": "Su origen o revisión cambió desde la última vez que se eligió. Revisa las diferencias y vuelve a elegirlo para usarlo.",
+      "recorded": "Antes",
+      "candidate": "Ahora",
+      "missing": "No disponible",
+      "field": "Campo",
+      "before": "Antes",
+      "after": "Ahora",
+      "noCandidate": "Ya no se encuentra el perfil.",
+      "keep": "Mantener el entorno actual",
+      "reselect": "Elegir el perfil modificado"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "Se rechazó el cambio de perfil",
+        "cancelled": "Se canceló el cambio de perfil",
+        "unanswered": "No se respondió a la aprobación",
+        "changedAgain": "El perfil volvió a cambiar antes de aplicarse",
+        "profileUnavailable": "El perfil ya no está disponible",
+        "guardUnavailable": "Este entorno de Aelix no puede aplicar un perfil verificado",
+        "invalidRecord": "No se pudo leer el perfil registrado",
+        "profileChanged": "No se eligió el perfil modificado",
+        "unknown": "El resultado del cambio es desconocido",
+        "other": "El cambio no se aplicó"
+      },
+      "noResend": "No se reenvía ningún prompt ni se amplían los permisos.",
+      "original": "Entorno original: {{profile}}",
+      "unchanged": "No se cambió nada en esta conversación.",
+      "restoreProfile": "Restaurar el perfil {{profile}}",
+      "restoreTools": "Restaurar las herramientas de esta conversación: {{tools}}",
+      "toolsWithProfile": "Las herramientas heredadas vuelven junto con el perfil.",
+      "profileResetsTools": "Restaurar el perfil devuelve las herramientas de esta conversación a heredadas.",
+      "restoreFileAndReopen": "El archivo de perfil original cambió. Restáuralo con la CLI de Aelix y vuelve a abrir esta conversación.",
+      "unknownOriginal": "El perfil original se registró solo por nombre. Vuelve a elegirlo de la lista.",
+      "restoreSelected": "Restaurar selección"
+    },
+    "field": {
+      "source": "Origen",
+      "revision": "Revisión",
+      "description": "Descripción",
+      "promptMode": "Modo de prompt",
+      "promptPreview": "Prompt",
+      "promptTruncated": "Prompt acortado",
+      "omittedPrompt": "Parte omitida del prompt",
+      "provider": "Proveedor",
+      "model": "Modelo",
+      "tools": "Herramientas",
+      "skills": "Habilidades",
+      "approvalMode": "Aprobación",
+      "builtinTools": "Herramientas integradas",
+      "excludeTools": "Herramientas excluidas",
+      "inheritSkills": "Heredar habilidades",
+      "extensions": "Extensiones",
+      "inheritExtensions": "Heredar extensiones",
+      "contextFiles": "Archivos de contexto",
+      "thinking": "Razonamiento",
+      "role": "Rol",
+      "outputCap": "Límite de salida",
+      "timeoutMs": "Tiempo límite (ms)",
+      "agents": "Agentes"
+    },
+    "value": {
+      "unset": "Sin definir",
+      "empty": "Ninguno",
+      "yes": "Sí",
+      "no": "No"
+    }
   }
 }
