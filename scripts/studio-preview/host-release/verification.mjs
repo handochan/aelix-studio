@@ -6,10 +6,9 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installProtocolDiagnostics } from './probes/protocolDiagnostics.mjs';
 
-/** Atomically replace a complete renderer result using a sibling temporary file. */
-export function writeRendererResult(output, value, { platform = process.platform } = {}) {
-  const file = path.join(output, 'renderer-result.json');
-  const temporary = path.join(output, `.renderer-result-${process.pid}-${randomUUID()}.tmp`);
+/** Atomically replace a complete verification receipt using a sibling temporary file. */
+function writeVerificationReceipt(file, value, { platform = process.platform } = {}) {
+  const temporary = path.join(path.dirname(file), `.${path.basename(file)}-${process.pid}-${randomUUID()}.tmp`);
   try {
     fs.writeFileSync(temporary, JSON.stringify(value, null, 2) + '\n', { flag: 'wx' });
     for (let attempt = 0; ; attempt++) {
@@ -29,6 +28,11 @@ export function writeRendererResult(output, value, { platform = process.platform
       /* absent after rename; preserve the original write error */
     }
   }
+}
+
+/** Write the renderer probe's complete result. */
+export function writeRendererResult(output, value, options) {
+  writeVerificationReceipt(path.join(output, 'renderer-result.json'), value, options);
 }
 
 /** Merge diagnostics into the uploaded result; journal only supplied lifecycle changes. */
@@ -79,20 +83,21 @@ export function verifyConfigPreserved(file, { phase, launch, record }) {
   return result;
 }
 
-/** Wait for a fixture result with a finite, logged harness deadline. */
+/** Wait with a finite deadline. A lazy operation starts after its pending observation is recorded. */
 export async function boundedWait(
   work,
   label,
-  { timeoutMs = 20000, deadline = null, log = console.log, launch = null, pid = null, phase = 'fixture' } = {}
+  { timeoutMs = 20000, deadline = null, log = console.log, launch = null, pid = null, phase = 'fixture', record } = {}
 ) {
   const started = performance.now();
-  const startedAt = new Date().toISOString();
+  const observation = { wait: label, launch, pid, phase, startedAt: new Date().toISOString(), timeoutMs };
+  record?.({ ...observation, endedAt: null, elapsedMs: null, status: 'pending' });
   let timer;
   let status = 'passed';
   const timeoutError = () => new Error(`${label}: bounded wait elapsed (${timeoutMs}ms)`);
   try {
     const value = await Promise.race([
-      work,
+      typeof work === 'function' ? work() : work,
       new Promise((_, reject) => {
         timer = setTimeout(() => reject(timeoutError()), timeoutMs);
       }),
@@ -105,19 +110,14 @@ export async function boundedWait(
     throw error;
   } finally {
     clearTimeout(timer);
-    log(
-      JSON.stringify({
-        wait: label,
-        launch,
-        pid,
-        phase,
-        startedAt,
-        endedAt: new Date().toISOString(),
-        elapsedMs: Math.round(performance.now() - started),
-        timeoutMs,
-        status,
-      })
-    );
+    const settled = {
+      ...observation,
+      endedAt: new Date().toISOString(),
+      elapsedMs: Math.round(performance.now() - started),
+      status,
+    };
+    record?.(settled);
+    log(JSON.stringify(settled));
   }
 }
 
@@ -278,6 +278,26 @@ function inspectorPromiseCollected(error) {
 /** Verify that an installed app did not use the development backend override. */
 export function verifyInstalledBackend(identity) {
   assert.equal(identity.backendOverride, undefined);
+}
+
+/** Wait for the Provider window inside the existing Provider host stage budget. */
+export function waitForProviderWindow(app, launch, report, { platform = process.platform, arch = process.arch } = {}) {
+  // Intel macOS runners can hit Playwright's default first-window limit during startup.
+  const timeoutMs = platform === 'darwin' && arch === 'x64' ? 60000 : 30000;
+  return boundedWait(() => app.firstWindow({ timeout: timeoutMs }), 'provider-first-window', {
+    timeoutMs,
+    launch,
+    pid: app.process().pid ?? null,
+    phase: 'startup',
+    record(observation) {
+      report.waits[launch - 1] = observation;
+      try {
+        writeVerificationReceipt(report.file, report.waits);
+      } catch {
+        console.warn('Could not save Provider first-window evidence');
+      }
+    },
+  });
 }
 
 /** Share the launch timeout with first-window readiness before evaluating identity. */

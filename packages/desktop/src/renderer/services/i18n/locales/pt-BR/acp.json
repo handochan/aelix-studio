@@ -64,7 +64,17 @@
       "unknown": "Desconhecido",
       "ended": "Turno encerrado; estado final não informado"
     },
-    "elapsedReported": "Último tempo informado: {{value}} s"
+    "elapsedReported": "Último tempo informado: {{value}} s",
+    "report": {
+      "title": "O que os agentes interrompidos fizeram",
+      "task": "Tarefa {{index}} de {{total}}",
+      "step": "Etapa {{index}} de {{total}}",
+      "lost": "O agente terminou com um erro interno; o que ele havia feito não está no relatório.",
+      "idle": "Nenhum agente estava em execução para ela quando o turno foi cancelado: não iniciada ou não alcançada.",
+      "missing": "Nenhum relatório do que os agentes interrompidos fizeram foi retornado.",
+      "unreadable": "Não foi possível associar o relatório a cada tarefa. O texto completo está na saída da ferramenta.",
+      "loadFailed": "Não foi possível carregar o relatório completo."
+    }
   },
   "runningInput": {
     "mode": {

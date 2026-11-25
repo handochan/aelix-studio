@@ -64,7 +64,17 @@
       "unknown": "Inconnu",
       "ended": "Tour terminé ; état final non signalé"
     },
-    "elapsedReported": "Dernière durée signalée : {{value}} s"
+    "elapsedReported": "Dernière durée signalée : {{value}} s",
+    "report": {
+      "title": "Ce qu'ont fait les agents arrêtés",
+      "task": "Tâche {{index}} sur {{total}}",
+      "step": "Étape {{index}} sur {{total}}",
+      "lost": "Son agent s'est terminé sur une erreur interne ; ce qu'il avait fait ne figure pas dans le rapport.",
+      "idle": "Aucun agent ne s'exécutait pour elle à l'annulation du tour : non démarrée ou non atteinte.",
+      "missing": "Aucun rapport sur ce qu'ont fait les agents arrêtés n'a été renvoyé.",
+      "unreadable": "Le rapport n'a pas pu être associé à chaque tâche. Son texte complet se trouve dans la sortie de l'outil.",
+      "loadFailed": "Le rapport complet n'a pas pu être chargé."
+    }
   },
   "runningInput": {
     "mode": {

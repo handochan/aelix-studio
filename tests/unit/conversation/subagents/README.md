@@ -59,3 +59,27 @@ No store change or new subscription is used. A stopped child followed by a new
 child is unreachable in the pinned native and remains outside these fixtures
 until S3. Before the first metadata frame, the item remains an ordinary tool;
 identifying it needs a per-call subagent/lifecycle signal rather than a title guess.
+
+`cancelReports.json` holds cancelled-delegation reports rendered by the pinned
+native's own `aelix_agents.aggregate.render_cancel_report`
+([`83714045`](https://github.com/handochan/aelix-ai/blob/83714045439478b17ab0c61248dc5c414435927a/packages/aelix-coding-agent/src/aelix_agents/aggregate.py)),
+with synthetic envelopes: two stopped tasks, a lost and an idle position, a
+single call, a chain, a child that wrote nothing, and two forged headings. Since
+aelix-ai #800 that report is the cancelled `agent` call's own result, so it is
+the content of the call's last `tool_call_update` and of its reopened history
+row. Regenerate it with a Python that has the pinned native installed (a built
+Studio runtime's `native-site`), without writing bytecode into it:
+
+```sh
+python3 -I -B renderCancelReports.py <native-site> > cancelReports.json
+```
+
+`nativeFrames.json` scenario `cancelledReport` is the real persisted row of a
+two-task cancel from `subagentSmoke.mjs` (host aelix.11, ACP `7a2ca0e8`, native
+`83714045`): status `failed`, the report as the call's text content, and the
+stopped children in `_meta`. The sandbox temp path is replaced with `<sandbox>`.
+
+Batch reports name members by submitted position only; progress rows carry no
+position, so the panel lists the report by task/step and never matches it to a
+row. A split is shown only when every position appears exactly once, in order,
+across the blocks and the notes after the fence; anything else is unreadable.

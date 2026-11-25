@@ -6,10 +6,12 @@ import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation } from '
 import { ipcBridge } from '@/common';
 import { canStartAssistantConversation, isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
 import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
-import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
+import { confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
 import { recheckAelixAfterSessionFailure } from '@/renderer/services/runtime/aelixAvailability';
 import { emitter } from '@/renderer/utils/emitter';
 import { mutate } from 'swr';
+import { ensureConversationRuntime } from '@/renderer/pages/conversation/utils/ensureConversationRuntime';
+import { getAelixStartErrorMessage } from './aelixStartError';
 
 /** Reuses Provider settings while keeping native credentials outside Aion's Provider DB. */
 export default function NativeProviders({
@@ -25,7 +27,7 @@ export default function NativeProviders({
   const [key, setKey] = useState('');
   const [exclusive, setExclusive] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState<string | { startFailure: unknown; startingRuntime: boolean }>('');
   const [operation, setOperation] = useState<NativeAuthOperation>();
   const [value, setValue] = useState('');
   const [custom, setCustom] = useState(false);
@@ -151,6 +153,7 @@ export default function NativeProviders({
   const startConversation = async (): Promise<void> => {
     setBusy(true);
     setError('');
+    let startingRuntime = false;
     try {
       let assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
       // The rejection may be recorded after the key was corrected, or the key fixed outside Studio.
@@ -172,25 +175,28 @@ export default function NativeProviders({
         extra: { studio_initial_model: modelId },
       });
       emitter.emit('chat.history.refresh');
-      await confirmAelixInitialModel(conversation.id, modelId);
+      startingRuntime = true;
+      const runtime = await ensureConversationRuntime(conversation.id, { fresh: true });
+      startingRuntime = false;
+      await confirmAelixInitialModel(conversation.id, modelId, async () => runtime.config_options);
       onOpenConversation?.();
       void navigate(`/conversation/${conversation.id}`);
     } catch (error) {
-      setError(error instanceof AelixInitialModelUnconfirmed ? 'MODEL_UNCONFIRMED' : 'CONNECTION_LOST');
+      setError({ startFailure: error, startingRuntime });
     } finally {
       if (mounted.current) setBusy(false);
     }
   };
 
   const errorText =
-    error === 'CONFLICT'
-      ? t('settings.nativeAuth.conflict')
-      : error === 'RUNTIME_UNAVAILABLE'
-        ? t('settings.nativeAuth.unavailable')
-        : error === 'UNAUTHENTICATED'
-          ? t('settings.nativeAuth.unauthenticated')
-          : error === 'MODEL_UNCONFIRMED'
-            ? t('agent.model.switchFailed')
+    typeof error === 'object'
+      ? getAelixStartErrorMessage(error.startFailure, t, error.startingRuntime)
+      : error === 'CONFLICT'
+        ? t('settings.nativeAuth.conflict')
+        : error === 'RUNTIME_UNAVAILABLE'
+          ? t('settings.nativeAuth.unavailable')
+          : error === 'UNAUTHENTICATED'
+            ? t('settings.nativeAuth.unauthenticated')
             : t('settings.nativeAuth.failed', { code: error });
 
   return (
