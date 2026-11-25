@@ -10,7 +10,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { verifyDefaultHostBundle } from '../../../../shared-scripts/src/default-host.js';
-import { resolveBundledStudioNode } from '../../../../web-host/src/studio-auth/runtime.js';
+import { resolveBundledStudioNode, studioHostBundleDirectory } from '../../../../web-host/src/studio-auth/runtime.js';
 
 const BINARY_NAME = 'aelix-studio-host';
 const BIN_ENV_VAR = 'AIONUI_BACKEND_BIN';
@@ -60,7 +60,7 @@ export function getBackendResourcesPath(): string {
 
 /** Resolve Studio's verified bundled Node without consulting PATH or a backend override. */
 export function resolveBundledNodePath(): string {
-  return resolveBundledStudioNode(getBackendResourcesPath());
+  return resolveBundledStudioNode(studioHostBundleDirectory(getBackendResourcesPath()));
 }
 
 function listDirEntries(dirPath: string): string[] | undefined {

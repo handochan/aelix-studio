@@ -30,10 +30,16 @@ vi.mock('./agent-process-registry.js', () => ({
   cleanupRegisteredAgentProcesses: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('./studio-auth/runtime.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./studio-auth/runtime.js')>();
+  return { ...actual, buildStudioAelixLaunch: vi.fn(actual.buildStudioAelixLaunch) };
+});
+
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
+import { buildStudioAelixLaunch, studioHostBundleDirectory } from './studio-auth/runtime.js';
 import {
   buildSpawnArgs,
   buildSpawnEnv,
@@ -401,6 +407,25 @@ describe('BackendLifecycleManager.start (success path)', () => {
       secondChild.emit('exit', 0);
       await secondStop;
     }
+  });
+
+  it.each([
+    ['the default resources bundle', undefined],
+    ['an alternate verified bundle', '/alternate/bundled-aioncore/target'],
+  ])('resolves Aelix Node from %s', async (_name, bundledHostDirectory) => {
+    const child = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    const mgr = new BackendLifecycleManager({ ...APP_META_PACKAGED, bundledHostDirectory }, () => '/abs/path/aioncore');
+    const started = mgr.start('/db/path');
+    child.stdout?.emit('data', Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55557}\nAIONCORE_READY\n'));
+    await started;
+    expect(buildStudioAelixLaunch).toHaveBeenCalledExactlyOnceWith(
+      APP_META.userDataPath,
+      bundledHostDirectory ?? studioHostBundleDirectory(APP_META.resourcesPath)
+    );
+    const stopped = mgr.stop();
+    child.emit('exit', 0);
+    await stopped;
   });
 
   it('lets aioncore choose the backend port and waits for the reported listening event', async () => {

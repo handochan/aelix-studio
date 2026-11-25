@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { homedir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { buildStudioAelixLaunch, resolveNativeRuntime } from './runtime';
+import { buildStudioAelixLaunch, resolveNativeRuntime, studioHostBundleDirectory } from './runtime';
 
 const mocks = vi.hoisted(() => ({
   existsSync: vi.fn(),
@@ -101,7 +101,7 @@ describe('portable native runtime resolution', () => {
         if (file !== bundledNode) throw new Error('No system Node');
       });
       mocks.readFileSync.mockReturnValue(JSON.stringify({ node: { root: 'node/pinned', executable } }));
-      const launch = buildStudioAelixLaunch(root, resources);
+      const launch = buildStudioAelixLaunch(root, studioHostBundleDirectory(resources));
       expect(launch && JSON.parse(launch)).toMatchObject({
         command: bundledNode,
         args: [path.join(root, 'launch.cjs'), '--profile', 'coding'],

@@ -50,10 +50,14 @@ export function selectNativeRuntime(explicit = process.env.AELIX_STUDIO_RUNTIME)
   return bundled ?? resolveNativeRuntime('.local/studio-preview');
 }
 
-/** Resolve the Node executable from Studio's verified host bundle. */
-export function resolveBundledStudioNode(resourcesPath: string): string {
+/** Locate this platform's default host bundle under Studio's resources directory. */
+export function studioHostBundleDirectory(resourcesPath: string): string {
+  return path.resolve(resourcesPath, 'bundled-aioncore', `${process.platform}-${process.arch}`);
+}
+
+/** Resolve the Node executable from a verified Studio host bundle directory. */
+export function resolveBundledStudioNode(directory: string): string {
   const target = `${process.platform}-${process.arch}`;
-  const directory = path.resolve(resourcesPath, 'bundled-aioncore', target);
   verifyDefaultHostBundle(directory, target);
   const root = path.join(directory, 'managed-resources');
   const contract = JSON.parse(readFileSync(path.join(root, 'manifest.json'), 'utf8')) as {
@@ -75,10 +79,10 @@ function isExecutableFile(file: string): boolean {
   }
 }
 
-function resolveNode(resourcesPath?: string): string | undefined {
-  if (resourcesPath) {
+function resolveNode(hostBundleDirectory?: string): string | undefined {
+  if (hostBundleDirectory) {
     try {
-      const bundled = resolveBundledStudioNode(resourcesPath);
+      const bundled = resolveBundledStudioNode(hostBundleDirectory);
       if (isExecutableFile(bundled)) return bundled;
     } catch {
       // A developer runtime can be used without an installed host bundle.
@@ -106,13 +110,16 @@ export function normalizeStudioAgentDir(env = process.env): string {
   return paths.resolve(expandsHome ? paths.join(home, agentDir.slice(2)) : agentDir);
 }
 
-/** Build the D16 launch descriptor from paths alone, without calling the auth helper. */
-export function buildStudioAelixLaunch(userDataPath: string, resourcesPath?: string): string | undefined {
+/**
+ * Build the D16 launch descriptor from paths alone, without calling the auth helper.
+ * Node comes from the same verified host bundle directory as the host binary.
+ */
+export function buildStudioAelixLaunch(userDataPath: string, hostBundleDirectory?: string): string | undefined {
   const runtime = selectNativeRuntime();
   if (!runtime) return undefined;
 
   const launcher = runtime.acpArgs?.at(-2) ?? runtime.launcher;
-  const command = runtime.acpArgs ? runtime.python : resolveNode(resourcesPath);
+  const command = runtime.acpArgs ? runtime.python : resolveNode(hostBundleDirectory);
   if (!command || (process.platform === 'win32' && path.extname(command).toLowerCase() !== '.exe')) return undefined;
   try {
     if (!statSync(launcher).isFile() || (runtime.acpArgs && !isExecutableFile(command))) return undefined;

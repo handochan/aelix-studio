@@ -8,6 +8,8 @@ export type AppMetadata = {
   isPackaged: boolean;
   resourcesPath: string;
   userDataPath: string;
+  /** Verified host bundle for this platform when it is not `<resourcesPath>/bundled-aioncore/<platform>-<arch>`. */
+  bundledHostDirectory?: string;
 };
 
 /**
