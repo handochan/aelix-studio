@@ -1087,6 +1087,9 @@ McpSelection._load = retarget_then_load
     listener.on('connection', () => mcpConnections++);
     await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
     const url = 'http://127.0.0.1:' + (listener.address() as AddressInfo).port;
+    delete env.PI_OFFLINE;
+    env.AELIX_MODEL_CATALOG_URL = url + '/catalog';
+    env.AELIX_DEFAULT_CATALOG = url + '/extensions/catalog.json';
     const launchMarker = path.join(root, 'stdio-mcp-started');
     const sentinel = [
       '-I',
@@ -1096,6 +1099,28 @@ McpSelection._load = retarget_then_load
       launchMarker,
     ];
     try {
+      await exec(
+        python,
+        [
+          '-I',
+          '-B',
+          '-c',
+          `
+from urllib.request import urlopen
+from urllib.error import HTTPError
+from aelix_coding_agent.hosted_catalog_source import catalog_base_url, index_url
+from aelix_coding_agent.model_refresh import startup_refresh_allowed
+assert startup_refresh_allowed()
+try:
+    urlopen(index_url(catalog_base_url()), timeout=5)
+except HTTPError as error:
+    assert error.code == 500
+`,
+        ],
+        { env, cwd: root }
+      );
+      expect(mcpConnections).toBe(1);
+      mcpConnections = 0;
       await exec(python, sentinel, { env, cwd: root });
       expect((await lstat(launchMarker)).isFile()).toBe(true);
       await rm(launchMarker);
