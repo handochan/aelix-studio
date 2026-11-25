@@ -881,7 +881,9 @@
       "count_one": "{{count}} araç",
       "count_other": "{{count}} araç",
       "modeExplicit_one": "Bu sohbet için {{count}} araç seçildi",
-      "modeExplicit_other": "Bu sohbet için {{count}} araç seçildi"
+      "modeExplicit_other": "Bu sohbet için {{count}} araç seçildi",
+      "projectTools": "Ayarlar'da proje araç varsayılanları",
+      "projectSkills": "Ayarlar'da proje becerileri"
     },
     "scope": {
       "bundled": "Paketle gelen",

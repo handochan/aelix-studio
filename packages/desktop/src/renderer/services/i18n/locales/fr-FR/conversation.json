@@ -879,7 +879,9 @@
       "count_one": "{{count}} outil",
       "count_other": "{{count}} outils",
       "modeExplicit_one": "{{count}} outil choisi pour cette conversation",
-      "modeExplicit_other": "{{count}} outils choisis pour cette conversation"
+      "modeExplicit_other": "{{count}} outils choisis pour cette conversation",
+      "projectTools": "Outils par défaut du projet dans les Paramètres",
+      "projectSkills": "Compétences du projet dans les Paramètres"
     },
     "scope": {
       "bundled": "Intégré",

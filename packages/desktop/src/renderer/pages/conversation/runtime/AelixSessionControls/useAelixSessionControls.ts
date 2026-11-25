@@ -64,6 +64,7 @@ export type AelixSessionControlsOptions = {
 };
 
 export type AelixSessionControls = {
+  conversationId: string;
   enabled: boolean;
   availability: Availability;
   profiles?: ProfileCatalogView<SessionProfiles>;
@@ -97,6 +98,7 @@ export type AelixSessionControls = {
 
 type State = Omit<
   AelixSessionControls,
+  | 'conversationId'
   | 'enabled'
   | 'writeBlocked'
   | 'panel'
@@ -586,6 +588,7 @@ export function useAelixSessionControls({
 
   return useMemo(
     () => ({
+      conversationId,
       enabled,
       ...state,
       writeBlocked,
@@ -602,6 +605,7 @@ export function useAelixSessionControls({
       dismissRecovery,
     }),
     [
+      conversationId,
       enabled,
       state,
       writeBlocked,

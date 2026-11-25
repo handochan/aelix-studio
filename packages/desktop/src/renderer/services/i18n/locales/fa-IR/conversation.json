@@ -879,7 +879,9 @@
       "count_one": "{{count}} ابزار",
       "count_other": "{{count}} ابزار",
       "modeExplicit_one": "{{count}} ابزار برای این گفتگو انتخاب شده",
-      "modeExplicit_other": "{{count}} ابزار برای این گفتگو انتخاب شده"
+      "modeExplicit_other": "{{count}} ابزار برای این گفتگو انتخاب شده",
+      "projectTools": "پیش‌فرض‌های ابزار پروژه در تنظیمات",
+      "projectSkills": "مهارت‌های پروژه در تنظیمات"
     },
     "scope": {
       "bundled": "همراه برنامه",

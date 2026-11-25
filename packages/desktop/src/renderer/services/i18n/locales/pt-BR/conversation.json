@@ -885,7 +885,9 @@
       "count_one": "{{count}} ferramenta",
       "count_other": "{{count}} ferramentas",
       "modeExplicit_one": "{{count}} ferramenta escolhida para esta conversa",
-      "modeExplicit_other": "{{count}} ferramentas escolhidas para esta conversa"
+      "modeExplicit_other": "{{count}} ferramentas escolhidas para esta conversa",
+      "projectTools": "Ferramentas padrão do projeto nas Configurações",
+      "projectSkills": "Habilidades do projeto nas Configurações"
     },
     "scope": {
       "bundled": "Incluído",

@@ -9,6 +9,7 @@ import { Alert, Button, Checkbox, Tag, Tooltip } from '@arco-design/web-react';
 import { Lock } from '@icon-park/react';
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import AvailabilityNotice, { UpdateRequired, writeBlockedText } from './AvailabilityNotice';
 import { diagnosticLabel, KEY, lockReason, mismatchLabel } from './labels';
 import type { AelixSessionControls } from './useAelixSessionControls';
@@ -92,6 +93,7 @@ function sameNames(a: readonly string[], b: readonly string[]): boolean {
 const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) => {
   const { t } = useTranslation();
   const { availability, tools, skills, profiles } = controls;
+  const navigate = useNavigate();
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
   const [editBase, setEditBase] = useState<string | null>(null);
@@ -206,6 +208,23 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
           })}
         </div>
       )}
+      <div className='flex flex-wrap gap-4px'>
+        {(['tools', 'skills'] as const).map((page) => (
+          <Button
+            key={page}
+            size='mini'
+            type='text'
+            data-testid={`aelix-settings-${page}`}
+            onClick={() => {
+              // "This project" defaults for this conversation's workspace live in Settings.
+              controls.openPanel(null);
+              void navigate(`/settings/${page}?conversation=${encodeURIComponent(controls.conversationId)}`);
+            }}
+          >
+            {t(`${KEY}.tools.${page === 'tools' ? 'projectTools' : 'projectSkills'}`)}
+          </Button>
+        ))}
+      </div>
       <div className='flex flex-wrap justify-end gap-8px'>
         {canInherit && (
           <Tooltip content={blocked} disabled={!blocked}>

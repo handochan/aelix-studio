@@ -879,7 +879,9 @@
       "count_one": "{{count}} tool",
       "count_other": "{{count}} tools",
       "modeExplicit_one": "{{count}} tool chosen for this conversation",
-      "modeExplicit_other": "{{count}} tools chosen for this conversation"
+      "modeExplicit_other": "{{count}} tools chosen for this conversation",
+      "projectTools": "Project tool defaults in Settings",
+      "projectSkills": "Project skills in Settings"
     },
     "scope": {
       "bundled": "Bundled",

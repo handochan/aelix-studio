@@ -648,6 +648,8 @@ export type I18nKey =
   | 'conversation.aelixControls.tools.none'
   | 'conversation.aelixControls.tools.partial'
   | 'conversation.aelixControls.tools.policyPending'
+  | 'conversation.aelixControls.tools.projectSkills'
+  | 'conversation.aelixControls.tools.projectTools'
   | 'conversation.aelixControls.tools.save'
   | 'conversation.aelixControls.tools.selectNone'
   | 'conversation.aelixControls.tools.skills'

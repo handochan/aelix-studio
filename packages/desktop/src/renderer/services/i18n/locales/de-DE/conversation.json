@@ -880,7 +880,9 @@
       "count_one": "{{count}} Werkzeug",
       "count_other": "{{count}} Werkzeuge",
       "modeExplicit_one": "{{count}} Werkzeug für diese Unterhaltung gewählt",
-      "modeExplicit_other": "{{count}} Werkzeuge für diese Unterhaltung gewählt"
+      "modeExplicit_other": "{{count}} Werkzeuge für diese Unterhaltung gewählt",
+      "projectTools": "Projekt-Werkzeugstandards in den Einstellungen",
+      "projectSkills": "Projekt-Skills in den Einstellungen"
     },
     "scope": {
       "bundled": "Mitgeliefert",

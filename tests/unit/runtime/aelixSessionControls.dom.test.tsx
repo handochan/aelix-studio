@@ -8,6 +8,7 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 import MobileActionSheet from '@/renderer/components/chat/MobileActionSheet';
 import {
   AelixSessionDrawer,
@@ -164,14 +165,31 @@ const Harness: React.FC<{
 }> = ({ hostState = 'idle', mobile = false, onProfileApplied, conversationId = 'c-17' }) => {
   const controls = useAelixSessionControls({ conversationId, enabled: true, hostState, onProfileApplied });
   const { t } = useTranslation();
-  if (!mobile) return <AelixSessionPills controls={controls} />;
   return (
     <>
-      <MobileActionSheet open onClose={() => {}} entries={aelixSheetEntries(t, controls)} />
-      <AelixSessionDrawer controls={controls} />
+      {mobile ? (
+        <>
+          <MobileActionSheet open onClose={() => {}} entries={aelixSheetEntries(t, controls)} />
+          <AelixSessionDrawer controls={controls} />
+        </>
+      ) : (
+        <AelixSessionPills controls={controls} />
+      )}
+      <LocationProbe />
     </>
   );
 };
+
+const LocationProbe = () => {
+  const location = useLocation();
+  return <output data-testid='location'>{location.pathname + location.search}</output>;
+};
+
+const Routed: React.FC<React.ComponentProps<typeof Harness>> = (props) => (
+  <MemoryRouter initialEntries={['/conversation/c-17']}>
+    <Harness {...props} />
+  </MemoryRouter>
+);
 
 async function settle() {
   for (let round = 0; round < 8; round++) {
@@ -224,7 +242,7 @@ afterEach(() => {
 describe('Aelix conversation controls: attach and availability', () => {
   it('shows "use after opening" while no live task exists, then re-reads after attach without writing', async () => {
     discovery = () => failure(409, 'EXT_NO_LIVE_TASK');
-    const view = render(<Harness hostState='unknown' />);
+    const view = render(<Routed hostState='unknown' />);
     await settle();
     expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent(`${K}.summary.openFirst`);
     const panel = await openPanel('profile');
@@ -233,7 +251,7 @@ describe('Aelix conversation controls: attach and availability', () => {
     expect(fetchMock.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
 
     discovery = discovered;
-    view.rerender(<Harness hostState='idle' />);
+    view.rerender(<Routed hostState='idle' />);
     await settle();
 
     expect(await screen.findByTestId('aelix-profile-list')).toBeInTheDocument();
@@ -242,7 +260,7 @@ describe('Aelix conversation controls: attach and availability', () => {
 
   it('shows an update-required state when the host does not offer the relay', async () => {
     discovery = () => new Response(null, { status: 404 });
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.summary.updateRequired`);
     const panel = await openPanel('tools');
@@ -252,7 +270,7 @@ describe('Aelix conversation controls: attach and availability', () => {
   it('says the lists could not be read instead of "No profile" or "Checking"', async () => {
     replies.set(LIST, () => failure(500, 'INTERNAL_ERROR'));
     replies.set(SELECTIONS, () => failure(500, 'INTERNAL_ERROR'));
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent(`${K}.summary.readFailed`);
     expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.summary.readFailed`);
@@ -266,7 +284,7 @@ describe('Aelix conversation controls: attach and availability', () => {
       const body = fixture<Json>('relay-discovery', '/response/body');
       return Response.json({ ...body, data: { ...(body.data as Json), requests } });
     };
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
 
@@ -283,7 +301,7 @@ describe('Aelix conversation controls: attach and availability', () => {
       const body = fixture<Json>('relay-discovery', '/response/body');
       return Response.json({ ...body, data: { ...(body.data as Json), requests } });
     };
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
 
@@ -295,7 +313,7 @@ describe('Aelix conversation controls: attach and availability', () => {
     state.activeRef = WRITER;
     state.activeAgent = 'writer';
     replies.set(USE, () => relay({ accepted: false, reason: 'unsupported' }));
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('quiet');
@@ -311,7 +329,7 @@ describe('Aelix conversation controls: attach and availability', () => {
 describe('Aelix conversation controls: profile', () => {
   it('previews source and tool restriction, applies while idle, and re-reads model, tools and skills', async () => {
     const applied = vi.fn();
-    render(<Harness onProfileApplied={applied} />);
+    render(<Routed onProfileApplied={applied} />);
     await settle();
     expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent('quiet');
     await openPanel('profile');
@@ -333,14 +351,14 @@ describe('Aelix conversation controls: profile', () => {
 
   it('warns that changing the profile resets an explicit tool choice, including none', async () => {
     state.toolOverride = [];
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     expect(screen.getByTestId('aelix-profile-resets-tools')).toHaveTextContent(`${K}.profile.resetsTools`);
   });
 
   it('does not warn about tools when they are inherited', async () => {
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
@@ -348,7 +366,7 @@ describe('Aelix conversation controls: profile', () => {
   });
 
   it('keeps apply disabled while Aelix is busy and sends no write', async () => {
-    render(<Harness hostState='busy' />);
+    render(<Routed hostState='busy' />);
     await settle();
     await openPanel('profile');
     await inspect('writer');
@@ -362,7 +380,7 @@ describe('Aelix conversation controls: profile', () => {
 
   it('shows a busy refusal from the runtime without retrying', async () => {
     replies.set(USE, () => relay({ accepted: false, reason: 'busy' }));
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('writer');
@@ -376,7 +394,7 @@ describe('Aelix conversation controls: profile', () => {
 
 describe('Aelix conversation controls: tools', () => {
   it('saves an explicit empty selection distinctly from inherit', async () => {
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.inherited`);
     await openPanel('tools');
@@ -392,15 +410,15 @@ describe('Aelix conversation controls: tools', () => {
   });
 
   it('keeps an unsaved draft when the list is read again and says the list changed', async () => {
-    const view = render(<Harness />);
+    const view = render(<Routed />);
     await settle();
     await openPanel('tools');
     fireEvent.click(screen.getByTestId('aelix-tools-none'));
 
     state.activeTools = ['read', 'write'];
-    view.rerender(<Harness hostState='unknown' />);
+    view.rerender(<Routed hostState='unknown' />);
     await settle();
-    view.rerender(<Harness hostState='idle' />);
+    view.rerender(<Routed hostState='idle' />);
     await settle();
 
     expect(screen.getByTestId('aelix-tools-list-changed')).toHaveTextContent(`${K}.tools.listChanged`);
@@ -411,7 +429,7 @@ describe('Aelix conversation controls: tools', () => {
 
   it('confirms inherited tools with a tools notice, not a profile notice', async () => {
     state.toolOverride = ['read'];
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('tools');
     fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
@@ -434,7 +452,7 @@ describe('Aelix conversation controls: tools', () => {
         ],
       });
     });
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('tools');
 
@@ -459,7 +477,7 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
       state.activeRef = ref;
       return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
     });
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('quiet');
@@ -486,7 +504,7 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
           : fixture('use-changed-again', '/result')
       )
     );
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('quiet');
@@ -509,7 +527,7 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
           : fixture('use-permission-deny', '/result')
       )
     );
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('quiet');
@@ -538,7 +556,7 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
       return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
     });
     replies.set(LOOKUP, () => relay({ status: 'unknown' }));
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('writer');
@@ -561,7 +579,7 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
 
 describe('Aelix conversation controls: mobile composer', () => {
   it('opens the profile panel in a drawer from the action sheet', async () => {
-    render(<Harness mobile />);
+    render(<Routed mobile />);
     await settle();
     expect(screen.queryByTestId('aelix-profile-pill')).toBeNull();
 
@@ -573,7 +591,7 @@ describe('Aelix conversation controls: mobile composer', () => {
   });
 
   it("opens this conversation's tools in a drawer and saves from it", async () => {
-    render(<Harness mobile />);
+    render(<Routed mobile />);
     await settle();
     fireEvent.click(screen.getByText(`${K}.tools.title`));
     await settle();
@@ -650,7 +668,7 @@ describe('Aelix conversation controls: labels', () => {
         nextCursor: null,
       })
     );
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('quiet');
@@ -663,7 +681,7 @@ describe('Aelix conversation controls: labels', () => {
 
   it('passes a numeric count so tool totals use plural forms', async () => {
     state.toolOverride = ['read'];
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.count {"count":1}`);
 
@@ -691,7 +709,7 @@ function hold() {
 
 describe('Aelix conversation controls: stale responses', () => {
   it('ignores a late re-read preview after the user picked another profile', async () => {
-    const view = render(<Harness />);
+    const view = render(<Routed />);
     await settle();
     await openPanel('profile');
     await inspect('writer');
@@ -701,7 +719,7 @@ describe('Aelix conversation controls: stale responses', () => {
       if (name === 'writer') await late.gate;
       return relay(name === 'writer' ? writerPreview() : fixture('profiles-show', '/result'));
     });
-    view.rerender(<Harness hostState='unknown' />);
+    view.rerender(<Routed hostState='unknown' />);
     await settle();
     fireEvent.click(within(screen.getByTestId('aelix-profile-list')).getByText('quiet'));
     await settle();
@@ -727,9 +745,9 @@ describe('Aelix conversation controls: stale responses', () => {
         nextCursor: null,
       });
     });
-    const view = render(<Harness conversationId='c-17' />);
+    const view = render(<Routed conversationId='c-17' />);
     await settle();
-    view.rerender(<Harness conversationId='c-18' />);
+    view.rerender(<Routed conversationId='c-18' />);
     await settle();
     late.release();
     await settle();
@@ -742,7 +760,7 @@ describe('Aelix conversation controls: stale responses', () => {
 
 describe('Aelix conversation controls: accessibility', () => {
   it('marks the pill as a dialog trigger and moves focus into the opened panel', async () => {
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     const pill = screen.getByTestId('aelix-profile-pill');
     expect(pill).toHaveAttribute('aria-haspopup', 'dialog');
@@ -756,7 +774,7 @@ describe('Aelix conversation controls: accessibility', () => {
   });
 
   it('closes the panel with Escape', async () => {
-    render(<Harness />);
+    render(<Routed />);
     await settle();
     await openPanel('profile');
     fireEvent.keyDown(screen.getByTestId('aelix-profile-popover'), { key: 'Escape', keyCode: 27 });
@@ -764,5 +782,21 @@ describe('Aelix conversation controls: accessibility', () => {
     const pill = screen.getByTestId('aelix-profile-pill');
     expect(pill).toHaveAttribute('aria-expanded', 'false');
     expect(pill).toHaveFocus();
+  });
+});
+
+describe('Aelix conversation controls: settings links', () => {
+  it('opens tools and skills settings scoped to this conversation', async () => {
+    render(<Routed conversationId='c-18' />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-settings-tools'));
+    await settle();
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings/tools?conversation=c-18');
+
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-settings-skills'));
+    await settle();
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings/skills?conversation=c-18');
   });
 });

@@ -879,7 +879,9 @@
       "count_one": "ツール {{count}} 個",
       "count_other": "ツール {{count}} 個",
       "modeExplicit_one": "この会話で選んだツール {{count}} 個",
-      "modeExplicit_other": "この会話で選んだツール {{count}} 個"
+      "modeExplicit_other": "この会話で選んだツール {{count}} 個",
+      "projectTools": "設定でプロジェクトのツール既定値",
+      "projectSkills": "設定でプロジェクトのスキル"
     },
     "scope": {
       "bundled": "同梱",

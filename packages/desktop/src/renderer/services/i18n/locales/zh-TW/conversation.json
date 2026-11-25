@@ -879,7 +879,9 @@
       "count_one": "{{count}} 個工具",
       "count_other": "{{count}} 個工具",
       "modeExplicit_one": "此對話選擇了 {{count}} 個工具",
-      "modeExplicit_other": "此對話選擇了 {{count}} 個工具"
+      "modeExplicit_other": "此對話選擇了 {{count}} 個工具",
+      "projectTools": "在設定中查看專案工具預設值",
+      "projectSkills": "在設定中查看專案技能"
     },
     "scope": {
       "bundled": "內建",

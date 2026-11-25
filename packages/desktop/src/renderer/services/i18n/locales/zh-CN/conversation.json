@@ -879,7 +879,9 @@
       "count_one": "{{count}} 个工具",
       "count_other": "{{count}} 个工具",
       "modeExplicit_one": "本对话选择了 {{count}} 个工具",
-      "modeExplicit_other": "本对话选择了 {{count}} 个工具"
+      "modeExplicit_other": "本对话选择了 {{count}} 个工具",
+      "projectTools": "在设置中查看项目工具默认值",
+      "projectSkills": "在设置中查看项目技能"
     },
     "scope": {
       "bundled": "内置",

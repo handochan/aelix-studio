@@ -879,7 +879,9 @@
       "count_one": "도구 {{count}}개",
       "count_other": "도구 {{count}}개",
       "modeExplicit_one": "이 대화에서 고른 도구 {{count}}개",
-      "modeExplicit_other": "이 대화에서 고른 도구 {{count}}개"
+      "modeExplicit_other": "이 대화에서 고른 도구 {{count}}개",
+      "projectTools": "설정에서 프로젝트 도구 기본값",
+      "projectSkills": "설정에서 프로젝트 스킬"
     },
     "scope": {
       "bundled": "내장",
