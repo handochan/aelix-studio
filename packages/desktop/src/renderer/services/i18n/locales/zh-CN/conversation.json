@@ -851,7 +851,8 @@
       "clear": "不使用配置",
       "empty": "未找到配置。请使用 Aelix CLI 创建。",
       "partial": "只读取到部分配置列表。",
-      "diagnostics": "部分配置无法读取：{{codes}}"
+      "diagnostics": "部分配置无法读取：{{codes}}",
+      "legacy": "{{name}}（仅记录名称）"
     },
     "tools": {
       "label": "工具",

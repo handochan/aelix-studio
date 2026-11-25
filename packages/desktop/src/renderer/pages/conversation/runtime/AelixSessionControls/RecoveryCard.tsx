@@ -51,7 +51,9 @@ const RecoveryCard: React.FC<RecoveryCardProps> = ({
   const toolsViaProfile = plan.tools.reason === 'with-profile' && choice.profile && plan.profile.restorable;
   const picked = (choice.profile && plan.profile.restorable) || (choice.tools && plan.tools.restorable);
   const nothingDiffers = !plan.profile.differs && !plan.tools.differs;
-  const original = plan.profile.ref;
+  const originalLabel = plan.profile.legacyName
+    ? t(`${KEY}.profile.legacy`, { name: plan.profile.legacyName })
+    : refLabel(t, plan.profile.ref);
 
   return (
     <div
@@ -63,7 +65,7 @@ const RecoveryCard: React.FC<RecoveryCardProps> = ({
       </div>
       <div className='text-12px text-t-secondary'>{t(`${KEY}.recovery.noResend`)}</div>
       <div className='text-12px text-t-secondary' data-testid='aelix-recovery-original'>
-        {t(`${KEY}.recovery.original`, { profile: refLabel(t, original) })}
+        {t(`${KEY}.recovery.original`, { profile: originalLabel })}
       </div>
       {nothingDiffers && (
         <div className='text-12px text-t-primary' data-testid='aelix-recovery-unchanged'>
@@ -78,7 +80,7 @@ const RecoveryCard: React.FC<RecoveryCardProps> = ({
             onChange={(checked: boolean) => setChoice((previous) => ({ ...previous, profile: checked }))}
             data-testid='aelix-recovery-pick-profile'
           >
-            {t(`${KEY}.recovery.restoreProfile`, { profile: refLabel(t, original) })}
+            {t(`${KEY}.recovery.restoreProfile`, { profile: originalLabel })}
           </Checkbox>
           {!plan.profile.restorable && (
             <div className='pl-24px text-12px text-t-secondary' data-testid='aelix-recovery-reopen'>

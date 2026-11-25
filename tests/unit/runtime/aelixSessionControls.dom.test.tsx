@@ -15,6 +15,9 @@ import {
   aelixSheetEntries,
   useAelixSessionControls,
 } from '@/renderer/pages/conversation/runtime/AelixSessionControls';
+import RecoveryCard from '@/renderer/pages/conversation/runtime/AelixSessionControls/RecoveryCard';
+import { restorePlan } from '@/renderer/pages/conversation/runtime/AelixSessionControls/useAelixSessionControls';
+import type { ProfileCatalogView, ResourceFailure, SessionProfiles } from '@/renderer/services/runtime/NativeResources';
 import type { HostTurnState } from '@/renderer/services/runtime/RunningInput/decideSend';
 import fixtures from '@/renderer/services/runtime/NativeResources/studio-7-d16-v1.json';
 
@@ -505,5 +508,58 @@ describe('Aelix conversation controls: mobile composer', () => {
     fireEvent.click(within(drawer).getByTestId('aelix-tools-save'));
     await settle();
     expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
+  });
+});
+
+describe('Aelix conversation controls: legacy name-only recovery', () => {
+  const declined: ResourceFailure = {
+    status: 'recovery-required',
+    reason: 'declined',
+    action: 'restore-original-and-reopen',
+    retryWrite: false,
+    original: null,
+  };
+  const legacy = { failure: declined, baseline: { profile: null, activeAgent: 'quiet', toolOverride: undefined } };
+  const catalog = (activeRef: Ref | null, activeAgent: string | null) =>
+    ({
+      source: 'session',
+      conversationId: 'c-17',
+      bindingId: 'b-21',
+      complete: true,
+      nextCursor: null,
+      activeAgent,
+      activeRef,
+      inspected: null,
+      profiles: [{ ref: QUIET, description: 'Review only' }],
+      diagnostics: [],
+    }) as unknown as ProfileCatalogView<SessionProfiles>;
+
+  it('treats the same name-only profile as unchanged', () => {
+    expect(restorePlan(legacy, catalog(null, 'quiet')).profile).toMatchObject({ differs: false, legacyName: 'quiet' });
+  });
+
+  it('offers the name-only profile as changed when another profile is active, without a restorable ref', () => {
+    expect(restorePlan(legacy, catalog(WRITER, 'writer')).profile).toMatchObject({
+      differs: true,
+      restorable: false,
+      reason: 'unknown',
+      legacyName: 'quiet',
+    });
+  });
+
+  it('labels the original with its recorded name instead of "no profile"', () => {
+    render(
+      <RecoveryCard
+        recovery={legacy}
+        profiles={catalog(WRITER, 'writer')}
+        blocked={null}
+        restoring={false}
+        onRestore={() => {}}
+        onClose={() => {}}
+      />
+    );
+    const original = screen.getByTestId('aelix-recovery-original');
+    expect(original).toHaveTextContent(`${K}.profile.legacy`);
+    expect(original).not.toHaveTextContent(`${K}.profile.none`);
   });
 });

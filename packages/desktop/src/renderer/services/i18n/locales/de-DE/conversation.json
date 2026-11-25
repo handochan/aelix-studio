@@ -852,7 +852,8 @@
       "clear": "Kein Profil verwenden",
       "empty": "Keine Profile gefunden. Erstelle eines mit der Aelix CLI.",
       "partial": "Die Profilliste konnte nur teilweise gelesen werden.",
-      "diagnostics": "Einige Profile konnten nicht gelesen werden: {{codes}}"
+      "diagnostics": "Einige Profile konnten nicht gelesen werden: {{codes}}",
+      "legacy": "{{name}} (nur mit Namen gespeichert)"
     },
     "tools": {
       "label": "Werkzeuge",

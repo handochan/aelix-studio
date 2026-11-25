@@ -857,7 +857,8 @@
       "clear": "Não usar perfil",
       "empty": "Nenhum perfil encontrado. Crie um com a CLI do Aelix.",
       "partial": "Só foi possível ler parte da lista de perfis.",
-      "diagnostics": "Alguns perfis não puderam ser lidos: {{codes}}"
+      "diagnostics": "Alguns perfis não puderam ser lidos: {{codes}}",
+      "legacy": "{{name}} (registrado apenas pelo nome)"
     },
     "tools": {
       "label": "Ferramentas",

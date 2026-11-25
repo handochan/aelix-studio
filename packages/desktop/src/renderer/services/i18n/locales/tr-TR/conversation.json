@@ -853,7 +853,8 @@
       "clear": "Profil kullanma",
       "empty": "Profil bulunamadı. Aelix CLI ile bir profil oluşturun.",
       "partial": "Profil listesinin yalnızca bir kısmı okunabildi.",
-      "diagnostics": "Bazı profiller okunamadı: {{codes}}"
+      "diagnostics": "Bazı profiller okunamadı: {{codes}}",
+      "legacy": "{{name}} (yalnızca adıyla kayıtlı)"
     },
     "tools": {
       "label": "Araçlar",

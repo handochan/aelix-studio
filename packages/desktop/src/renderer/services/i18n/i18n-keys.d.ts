@@ -562,6 +562,7 @@ export type I18nKey =
   | 'conversation.aelixControls.profile.diagnostics'
   | 'conversation.aelixControls.profile.empty'
   | 'conversation.aelixControls.profile.label'
+  | 'conversation.aelixControls.profile.legacy'
   | 'conversation.aelixControls.profile.none'
   | 'conversation.aelixControls.profile.partial'
   | 'conversation.aelixControls.profile.title'

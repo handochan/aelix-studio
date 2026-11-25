@@ -851,7 +851,8 @@
       "clear": "N'utiliser aucun profil",
       "empty": "Aucun profil trouvé. Créez-en un avec la CLI Aelix.",
       "partial": "Seule une partie de la liste des profils a pu être lue.",
-      "diagnostics": "Certains profils n'ont pas pu être lus : {{codes}}"
+      "diagnostics": "Certains profils n'ont pas pu être lus : {{codes}}",
+      "legacy": "{{name}} (enregistré par nom uniquement)"
     },
     "tools": {
       "label": "Outils",

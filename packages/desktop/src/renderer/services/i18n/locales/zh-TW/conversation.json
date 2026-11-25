@@ -851,7 +851,8 @@
       "clear": "不使用設定檔",
       "empty": "找不到設定檔。請使用 Aelix CLI 建立。",
       "partial": "只讀取到部分設定檔清單。",
-      "diagnostics": "部分設定檔無法讀取：{{codes}}"
+      "diagnostics": "部分設定檔無法讀取：{{codes}}",
+      "legacy": "{{name}}（僅記錄名稱）"
     },
     "tools": {
       "label": "工具",

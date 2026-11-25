@@ -851,7 +851,8 @@
       "clear": "프로필 사용 안 함",
       "empty": "프로필이 없습니다. Aelix CLI로 만드세요.",
       "partial": "프로필 목록의 일부만 읽었습니다.",
-      "diagnostics": "일부 프로필을 읽지 못했습니다: {{codes}}"
+      "diagnostics": "일부 프로필을 읽지 못했습니다: {{codes}}",
+      "legacy": "{{name}} (이름만 기록됨)"
     },
     "tools": {
       "label": "도구",

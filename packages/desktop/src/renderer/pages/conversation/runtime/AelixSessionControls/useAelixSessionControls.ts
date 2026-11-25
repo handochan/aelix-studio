@@ -626,6 +626,8 @@ export type RestorePlan = {
     /** The catalog still offers this exact source and revision (always true for "no profile"). */
     offered: boolean;
     ref: ProfileRef | null;
+    /** Set when the original was recorded by name only. */
+    legacyName?: string;
     reason?: 'changed' | 'unknown';
   };
   tools: {
@@ -650,17 +652,24 @@ export function restorePlan(
   const original =
     failure.original !== undefined ? failure.original : failure.recovery ? failure.recovery.original : baseline.profile;
   const currentRef = profiles?.activeRef ?? null;
-  const legacyName = original === null && baseline.activeAgent !== null;
+  const currentAgent = profiles?.activeAgent ?? null;
+  // A session recorded by name only has no ref; compare it by name.
+  const legacyName = original === null ? baseline.activeAgent : null;
   const profileDiffers =
-    !sameRef(original, currentRef) || (original === null && (profiles?.activeAgent ?? null) !== null);
+    legacyName !== null
+      ? currentRef !== null || currentAgent !== legacyName
+      : !sameRef(original, currentRef) || (original === null && currentAgent !== null);
   const offered =
-    original === null ? !legacyName : (profiles?.profiles.some(({ ref }) => sameRef(ref, original)) ?? false);
+    original === null ? legacyName === null : (profiles?.profiles.some(({ ref }) => sameRef(ref, original)) ?? false);
   const profile: RestorePlan['profile'] = {
     differs: profileDiffers,
     restorable: profileDiffers && offered,
     offered,
     ref: original,
-    ...(profileDiffers && !offered ? { reason: legacyName ? ('unknown' as const) : ('changed' as const) } : {}),
+    ...(legacyName !== null ? { legacyName } : {}),
+    ...(profileDiffers && !offered
+      ? { reason: legacyName !== null ? ('unknown' as const) : ('changed' as const) }
+      : {}),
   };
   return { profile, tools: toolPlan(baseline.toolOverride) };
 }

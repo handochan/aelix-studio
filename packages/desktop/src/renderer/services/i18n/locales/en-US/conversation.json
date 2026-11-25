@@ -851,7 +851,8 @@
       "clear": "Use no profile",
       "empty": "No profiles were found. Create one with the Aelix CLI.",
       "partial": "Only part of the profile list could be read.",
-      "diagnostics": "Some profiles could not be read: {{codes}}"
+      "diagnostics": "Some profiles could not be read: {{codes}}",
+      "legacy": "{{name}} (recorded by name only)"
     },
     "tools": {
       "label": "Tools",
