@@ -425,7 +425,8 @@ export function useAelixSessionControls({
             status: 'recovery-required',
             reason: 'changed-again',
             action: 'restore-original-and-reopen',
-            original: outcome.recovery?.original ?? before.profile,
+            // An explicit `original: null` from the runtime means no profile; keep it.
+            original: outcome.recovery ? outcome.recovery.original : before.profile,
           };
           patch(target, {
             conflict: undefined,
@@ -668,8 +669,9 @@ export function restorePlan(
     failure.original !== undefined ? failure.original : failure.recovery ? failure.recovery.original : baseline.profile;
   const currentRef = profiles?.activeRef ?? null;
   const currentAgent = profiles?.activeAgent ?? null;
-  // A session recorded by name only has no ref; compare it by name.
-  const legacyName = original === null ? baseline.activeAgent : null;
+  // A session recorded by name only has no ref; compare it by name. When the baseline had a ref,
+  // a null original is the runtime saying "no profile", not a name-only record.
+  const legacyName = original === null && baseline.profile === null ? baseline.activeAgent : null;
   const profileDiffers =
     legacyName !== null
       ? currentRef !== null || currentAgent !== legacyName

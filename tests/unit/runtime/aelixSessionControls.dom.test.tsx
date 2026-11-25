@@ -520,6 +520,26 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
     expect(screen.queryByTestId('aelix-change-reselect')).toBeNull();
   });
 
+  it('keeps an explicit null original from a second change instead of the previous profile', async () => {
+    replies.set(USE, ({ profile }) => {
+      if ((profile as Ref).revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      const result = fixture<Json>('use-changed-again', '/result');
+      return relay({ ...result, recovery: { action: 'restore-original-and-reopen', original: null } });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    const original = screen.getByTestId('aelix-recovery-original');
+    expect(original).toHaveTextContent(`${K}.profile.none`);
+    expect(original).not.toHaveTextContent('writer');
+  });
+
   it('offers recovery after the approval is declined and sends nothing more', async () => {
     replies.set(USE, ({ profile }) =>
       relay(
