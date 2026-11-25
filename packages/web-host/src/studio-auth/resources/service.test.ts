@@ -996,11 +996,30 @@ grp.getgrgid = shared_group`;
     90000
   );
 
-  it.runIf(onWindows)(
-    'refuses an agent root that grants CREATOR GROUP modify',
-    async () => {
+  it.runIf(onWindows).each(['icacls grant', 'verbatim ACE'] as const)(
+    'refuses an agent root that grants CREATOR GROUP modify (%s)',
+    async (form) => {
       // CREATOR GROUP inherits as the creator's primary group, so new settings files would be shared.
-      await exec('icacls', [agent, '/grant', '*S-1-3-1:(OI)(CI)M']);
+      if (form === 'icacls grant') {
+        // Windows stores this as an inherit-only CREATOR GROUP ACE plus an effective ACE for the
+        // directory's own primary group, which is refused as another principal.
+        await exec('icacls', [agent, '/grant', '*S-1-3-1:(OI)(CI)M']);
+      } else {
+        // SetFileSecurity stores the ACE as given: CREATOR GROUP itself, effective on the directory.
+        const script = `import sys
+import win32security as security
+path = sys.argv[1]
+group = security.ConvertStringSidToSid("S-1-3-1")
+descriptor = security.GetFileSecurity(path, security.DACL_SECURITY_INFORMATION)
+acl = descriptor.GetSecurityDescriptorDacl()
+acl.AddAccessAllowedAceEx(security.ACL_REVISION, 0x3, 0x1301BF, group)
+descriptor.SetSecurityDescriptorDacl(1, acl, 0)
+security.SetFileSecurity(path, security.DACL_SECURITY_INFORMATION, descriptor)
+stored = security.GetFileSecurity(path, security.DACL_SECURITY_INFORMATION).GetSecurityDescriptorDacl()
+aces = [stored.GetAce(index) for index in range(stored.GetAceCount())]
+assert any(ace[0][1] & 0x8 == 0 and security.ConvertSidToStringSid(ace[-1]) == "S-1-3-1" for ace in aces)`;
+        await exec(python, ['-I', '-B', '-c', script, agent], { env });
+      }
       const old = await current(tool);
       expect(old).toMatchObject({ writable: false, reason: 'read-only' });
       expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(
