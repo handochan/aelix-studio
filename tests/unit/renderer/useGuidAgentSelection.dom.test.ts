@@ -5,6 +5,9 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { SWRConfig, useSWRConfig } from 'swr';
+import { NATIVE_AUTH_CATALOG_KEY } from '@/renderer/services/runtime/nativeAuth';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
@@ -20,9 +23,15 @@ import {
 let mockAssistants: Assistant[] = [];
 let mockManagedAgents: ManagedAgent[] = [];
 
-const { configGetMock, configSetMock } = vi.hoisted(() => ({
+const { configGetMock, configSetMock, loadCatalogMock, recheckAelixMock } = vi.hoisted(() => ({
   configGetMock: vi.fn(),
   configSetMock: vi.fn(),
+  loadCatalogMock: vi.fn(),
+  recheckAelixMock: vi.fn(),
+}));
+
+vi.mock('@/renderer/services/runtime/aelixAvailability', () => ({
+  recheckAelixAfterSessionFailure: recheckAelixMock,
 }));
 
 vi.mock('@/common/config/configService', () => ({
@@ -42,10 +51,22 @@ vi.mock('@/renderer/hooks/agent/useManagedAgents', () => ({
   useManagedAgentRuntimeCatalog: () => mockManagedAgents,
 }));
 
+vi.mock('@/renderer/services/runtime/nativeAuth', async (original) => ({
+  ...(await original<typeof import('@/renderer/services/runtime/nativeAuth')>()),
+  loadNativeAuthCatalog: loadCatalogMock,
+}));
+
+const builtinAelix = () => ({
+  ...assistantFixture({ id: 'bare:builtin-aelix', runtimeKey: 'aelix', source: 'generated', sortOrder: 0 }),
+  agent_id: 'builtin-aelix',
+});
+
 describe('useGuidAssistantSelection', () => {
   beforeEach(() => {
     configGetMock.mockReturnValue(undefined);
     configSetMock.mockResolvedValue(undefined);
+    loadCatalogMock.mockReset().mockResolvedValue(null);
+    recheckAelixMock.mockReset().mockResolvedValue(false);
     mockManagedAgents = [];
     mockAssistants = [
       {
@@ -92,6 +113,239 @@ describe('useGuidAssistantSelection', () => {
         { id: 'claude-opus', label: 'claude-opus' },
         { id: 'claude-sonnet', label: 'claude-sonnet' },
       ],
+    });
+  });
+
+  it.each(['missing', 'offline', 'disabled'] as const)(
+    'rejects a %s saved, explicitly requested, or previously selected assistant',
+    async (availability) => {
+      const aelix = builtinAelix();
+      const unavailable: Assistant =
+        availability === 'disabled' ? { ...aelix, enabled: false } : { ...aelix, agent_status: availability };
+      const fallback = mockAssistants[0];
+      mockAssistants = [unavailable, fallback];
+      configGetMock.mockReturnValue(aelix.id);
+      const { result, rerender } = renderHook(({ resetAssistant }) => useGuidAssistantSelection({ resetAssistant }), {
+        initialProps: { resetAssistant: true },
+      });
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+      configSetMock.mockClear();
+      act(() => result.current.setSelectedAssistantId(aelix.id));
+      expect(configSetMock).not.toHaveBeenCalled();
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+
+      mockAssistants = [aelix, fallback];
+      rerender({ resetAssistant: true });
+      act(() => result.current.setSelectedAssistantId(aelix.id));
+      expect(result.current.selectedAssistantId).toBe(aelix.id);
+      mockAssistants = [unavailable, fallback];
+      rerender({ resetAssistant: true });
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+    }
+  );
+
+  it('adds freshly configured helper models to the ACP catalog without replacing its extension model', async () => {
+    const aelix = builtinAelix();
+    mockAssistants = [aelix];
+    loadCatalogMock.mockResolvedValue({
+      providers: [{ id: 'fixture', name: 'Fixture', models: [{ id: 'helper', name: 'Helper', available: true }] }],
+    });
+    const { result, rerender } = renderHook(
+      () => ({
+        ...useGuidAssistantSelection({ resetAssistant: false }),
+        mutateCatalog: useSWRConfig().mutate,
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
+      }
+    );
+    await waitFor(() =>
+      expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id }) => id)).toEqual(['fixture/helper'])
+    );
+    act(() => result.current.setSelectedAcpModel('fixture/helper', { explicit: true }));
+    mockManagedAgents = [
+      {
+        id: aelix.agent_id,
+        available_models: {
+          current_model_id: 'extension/live',
+          available_models: [
+            { id: 'extension/live', label: 'Extension model' },
+            { id: 'fixture/helper', label: 'Model A from ACP' },
+          ],
+        },
+      } as ManagedAgent,
+    ];
+    rerender();
+    await act(() =>
+      result.current.mutateCatalog(
+        NATIVE_AUTH_CATALOG_KEY,
+        {
+          providers: [
+            {
+              id: 'fixture',
+              name: 'Fixture',
+              models: [{ id: 'helper', name: 'Model A from helper', available: true }],
+            },
+            { id: 'provider-b', name: 'Provider B', models: [{ id: 'fresh', name: 'Model B', available: true }] },
+          ],
+        },
+        { revalidate: false }
+      )
+    );
+    expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'extension/live', label: 'Extension model' },
+      { id: 'fixture/helper', label: 'Model A from ACP' },
+      { id: 'provider-b/fresh', label: 'Model B' },
+    ]);
+    expect(result.current.selectedAcpModel).toBe('fixture/helper');
+    act(() => result.current.setSelectedAcpModel('provider-b/fresh', { explicit: true }));
+    expect(result.current.selectedAcpModel).toBe('provider-b/fresh');
+  });
+
+  describe('builtin Aelix model requirement', () => {
+    const helperCatalog = {
+      providers: [
+        {
+          id: 'fixture',
+          name: 'Fixture',
+          models: [
+            { id: 'one', name: 'Loopback one', available: true },
+            { id: 'two', name: 'Loopback two', available: true },
+          ],
+        },
+      ],
+    };
+    const runtimeReporting = (current: string): ManagedAgent =>
+      ({
+        id: 'builtin-aelix',
+        config_options: [
+          {
+            id: 'model',
+            category: 'model',
+            type: 'select',
+            current_value: current,
+            options: [{ value: 'fixture/one' }, { value: 'fixture/two' }],
+          },
+        ],
+      }) as ManagedAgent;
+    const renderSelection = () =>
+      renderHook(() => useGuidAssistantSelection({ resetAssistant: false }), {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
+      });
+
+    it.each([
+      ['no provider is configured', { providers: [] }],
+      [
+        'no provider has a usable model',
+        {
+          providers: [
+            { ...helperCatalog.providers[0], models: [{ id: 'one', name: 'Loopback one', available: false }] },
+          ],
+        },
+      ],
+      ['the helper catalog failed', null],
+    ])('asks to add a model once loaded when %s', async (_case, catalog) => {
+      mockAssistants = [builtinAelix()];
+      let finish!: (value: unknown) => void;
+      loadCatalogMock.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      // Still loading: not yet a dead end.
+      expect(result.current.modelSelectionRequired).toBe(true);
+      expect(result.current.modelSetupRequired).toBe(false);
+      await act(async () => finish(catalog));
+      await waitFor(() => expect(result.current.modelSetupRequired).toBe(true));
+    });
+
+    it('requires a pick on a fresh profile and clears once the user picks', async () => {
+      mockAssistants = [builtinAelix()];
+      loadCatalogMock.mockResolvedValue(helperCatalog);
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.currentAcpCachedModelInfo?.available_models).toHaveLength(2));
+      expect(result.current.modelSelectionRequired).toBe(true);
+      expect(result.current.modelSetupRequired).toBe(false);
+      act(() => result.current.setSelectedAcpModel('fixture/two', { explicit: true }));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
+    it('counts the saved last model New Chat applies as the pick', async () => {
+      mockAssistants = [builtinAelix()];
+      loadCatalogMock.mockResolvedValue(helperCatalog);
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.currentAcpCachedModelInfo?.available_models).toHaveLength(2));
+      // GuidPage applies the saved preference without marking it explicit.
+      act(() => result.current.setSelectedAcpModel('fixture/two', { persistPreference: false }));
+      expect(result.current.selectedAcpModel).toBe('fixture/two');
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
+    it('requires a pick when the runtime reports an empty current model, not its first model', async () => {
+      mockAssistants = [builtinAelix()];
+      mockManagedAgents = [runtimeReporting('')];
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      // The display info still falls back to the first model; the requirement must not.
+      expect(result.current.currentAcpCachedModelInfo?.current_model_id).toBe('fixture/one');
+      expect(result.current.modelSelectionRequired).toBe(true);
+    });
+
+    it('keeps the existing behaviour when the runtime reports a current model', async () => {
+      mockAssistants = [builtinAelix()];
+      mockManagedAgents = [runtimeReporting('fixture/two')];
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
+    it('never requires a pick for other assistants', async () => {
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('assistant-claude'));
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+  });
+
+  describe('after a failed session left builtin Aelix offline', () => {
+    const offlineAelix = () => ({ ...builtinAelix(), agent_status: 'offline' as const });
+
+    it('re-probes once and makes Aelix the default again when it comes back', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      recheckAelixMock.mockResolvedValue(true);
+      const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+      await waitFor(() => expect(recheckAelixMock).toHaveBeenCalledOnce());
+
+      // The refreshed list still shows Aelix offline: no second probe from this page.
+      mockAssistants = [offlineAelix(), fallback];
+      rerender();
+      mockAssistants = [builtinAelix(), fallback];
+      rerender();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      expect(recheckAelixMock).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the assistant the user picked while the probe ran', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      let finishProbe!: (probed: boolean) => void;
+      recheckAelixMock.mockReturnValue(new Promise<boolean>((resolve) => (finishProbe = resolve)));
+      const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      act(() => result.current.setSelectedAssistantId(fallback.id));
+      await act(async () => finishProbe(true));
+      mockAssistants = [builtinAelix(), fallback];
+      rerender();
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+    });
+
+    it('does not probe when the saved choice is another assistant', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      configGetMock.mockReturnValue(fallback.id);
+      renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      await act(async () => {});
+      expect(recheckAelixMock).not.toHaveBeenCalled();
     });
   });
 

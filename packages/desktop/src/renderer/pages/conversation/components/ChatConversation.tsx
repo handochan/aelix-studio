@@ -15,6 +15,7 @@ import {
   type AcpConfigOptionsPort,
   useAcpConfigOptions,
 } from '@/renderer/hooks/agent/useAcpConfigOptions';
+import { readAelixInitialModel, setAelixInitialModelConfigOption } from '@/renderer/services/runtime/aelixInitialModel';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
@@ -293,13 +294,23 @@ const ChatConversation: React.FC<{
   const usesHolderView = !resolvedHideSendBox && (conversation?.type === 'acp' || conversation?.type === 'antigravity');
   useActiveLease({ type: 'conversation', id: usesHolderView ? undefined : conversation?.id });
   const sessionView = useSessionLockView(usesHolderView ? conversation?.id : undefined);
+  const hasInitialModel = Boolean(readAelixInitialModel(conversation?.extra));
   const viewConfigPort = useMemo<AcpConfigOptionsPort | undefined>(
     () =>
       sessionView && {
         load: async () => (await sessionView.ensure()).config_options,
         loadFresh: async () => (await sessionView.ensure({ fresh: true })).config_options,
+        ...(hasInitialModel && {
+          setConfigOption: (conversation_id: string, option_id: string, value: string) =>
+            setAelixInitialModelConfigOption(
+              conversation_id,
+              option_id,
+              value,
+              async () => (await sessionView.ensure({ fresh: true })).config_options
+            ),
+        }),
       },
-    [sessionView]
+    [hasInitialModel, sessionView]
   );
 
   // 使用统一的 Hook 获取预设助手信息（ACP/Codex 会话）
@@ -346,6 +357,7 @@ const ChatConversation: React.FC<{
             hideSendBox={resolvedHideSendBox}
             sessionView={sessionView}
             viewConfigPort={viewConfigPort}
+            hasInitialModel={hasInitialModel}
             emptySlot={emptySlot}
             loadedSkills={(conversation.extra as { skills?: string[] } | undefined)?.skills}
             loadedMcpServers={(conversation.extra as { mcp_servers?: string[] } | undefined)?.mcp_servers}
@@ -370,6 +382,7 @@ const ChatConversation: React.FC<{
     resolvedHideSendBox,
     sessionView,
     viewConfigPort,
+    hasInitialModel,
     acpAssistantId,
   ]);
 

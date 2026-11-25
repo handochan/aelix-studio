@@ -21,6 +21,11 @@ ROOT = Path(__file__).resolve().parents[2]
 FORK_PARENT = 'SYNTHETIC_HEAD_FORK_PARENT'
 FORK_CHILD = 'SYNTHETIC_HEAD_FORK_CHILD'
 FORK_RESTART = 'SYNTHETIC_HEAD_FORK_RESTART'
+# The UI flow's provider calls: fork parent, fork child, restarted child and the LAN
+# WebUI reply succeed; the first wrong key is the only rejection. The unreachable
+# endpoint must not reach the fixture at all, so any other count is an unrelated failure.
+EXPECTED_ACCEPTED_REQUESTS = 4
+EXPECTED_REJECTED_REQUESTS = 1
 
 def phase_timeout(deadline, limit):
     """Bound each phase by both its own limit and the shared deadline."""
@@ -254,8 +259,10 @@ async def main(args):
             async with asyncio.timeout(host_timeout):
                 if await process.wait():
                     raise RuntimeError('Studio Provider UI qualification failed')
-            if fixture.accepted < 1 or fixture.rejected < 1:
-                raise AssertionError('Expected first response and rejected invalid key')
+            if (fixture.accepted, fixture.rejected) != (EXPECTED_ACCEPTED_REQUESTS, EXPECTED_REJECTED_REQUESTS):
+                raise AssertionError(f'Expected {EXPECTED_ACCEPTED_REQUESTS} provider replies and '
+                                     f'{EXPECTED_REJECTED_REQUESTS} rejected key, got {fixture.accepted} and '
+                                     f'{fixture.rejected}')
             after = installed_bytes()
             if before != after:
                 raise AssertionError('Installed wheel payload changed')
@@ -288,7 +295,8 @@ async def main(args):
                        Path(__file__).with_name('host-release') / 'verification.mjs']
             sources += sorted((ROOT / 'packages/web-host/src/studio-auth').glob('*.ts'))
             sources += sorted((ROOT / 'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent').glob('*.ts*'))
-            sources += [ROOT / 'packages/desktop/src/index.ts', ROOT / 'packages/desktop/src/preload/main.ts',
+            sources += [ROOT / 'packages/desktop/src/renderer/services/runtime/nativeAuth.ts',
+                        ROOT / 'packages/desktop/src/index.ts', ROOT / 'packages/desktop/src/preload/main.ts',
                         ROOT / 'packages/desktop/src/process/bridge/index.ts']
             report['sourceSha256'] = {file.relative_to(ROOT).as_posix(): digest(file) for file in sources}
             report['builtAppSha256'] = {name: digest(ROOT / name) for name in ('out/main/index.js', 'out/preload/index.js')}

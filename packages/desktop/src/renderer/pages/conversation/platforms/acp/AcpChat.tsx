@@ -42,6 +42,7 @@ const AcpChat: React.FC<{
   hideSendBox?: boolean;
   sessionView?: SessionLockView;
   viewConfigPort?: AcpConfigOptionsPort;
+  hasInitialModel?: boolean;
   emptySlot?: React.ReactNode;
   loadedSkills?: string[];
   loadedMcpServers?: string[];
@@ -61,6 +62,7 @@ const AcpChat: React.FC<{
   hideSendBox,
   sessionView,
   viewConfigPort,
+  hasInitialModel,
   emptySlot,
   loadedSkills,
   loadedMcpServers,
@@ -91,6 +93,7 @@ const AcpChat: React.FC<{
       teamRuntime={teamRuntime}
       sendBlocked={sendBlocked}
       viewConfigPort={viewConfigPort}
+      hasInitialModel={hasInitialModel}
     ></AcpSendBox>
   );
 

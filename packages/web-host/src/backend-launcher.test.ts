@@ -14,7 +14,9 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 
-vi.mock('node:fs', () => ({
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+  existsSync: vi.fn(),
   mkdirSync: vi.fn(),
   statSync: vi.fn(),
 }));
@@ -28,10 +30,16 @@ vi.mock('./agent-process-registry.js', () => ({
   cleanupRegisteredAgentProcesses: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('./studio-auth/runtime.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./studio-auth/runtime.js')>();
+  return { ...actual, buildStudioAelixLaunch: vi.fn(actual.buildStudioAelixLaunch) };
+});
+
 import { spawn } from 'node:child_process';
-import { mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
+import { buildStudioAelixLaunch, studioHostBundleDirectory } from './studio-auth/runtime.js';
 import {
   buildSpawnArgs,
   buildSpawnEnv,
@@ -112,6 +120,7 @@ beforeEach(() => {
 afterEach(() => {
   // Do NOT call restoreAllMocks; it would remove vi.mock() module factories.
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe('buildSpawnArgs', () => {
@@ -349,6 +358,76 @@ describe('findAvailablePort', () => {
 });
 
 describe('BackendLifecycleManager.start (success path)', () => {
+  it('resolves the Aelix launch descriptor for each host start and omits it without a runtime', async () => {
+    const key = 'AIONUI_STUDIO_AELIX_LAUNCH';
+    vi.stubEnv(key, 'stale inherited descriptor');
+    const runtimePath = process.platform === 'win32' ? 'C:/prepared-runtime' : '/prepared-runtime';
+    vi.stubEnv('AELIX_STUDIO_RUNTIME', runtimePath);
+    vi.mocked(existsSync).mockImplementation((file) => !String(file).endsWith('manifest.json'));
+    const statImplementation = vi.mocked(statSync).getMockImplementation();
+    vi.mocked(statSync).mockReturnValue({ isFile: () => true, isDirectory: () => false } as ReturnType<
+      typeof statSync
+    >);
+    const child = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    const mgr = new BackendLifecycleManager(APP_META_PACKAGED, () => '/abs/path/aioncore');
+
+    const firstStart = mgr.start('/db/path');
+    child.stdout?.emit('data', Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55555}\nAIONCORE_READY\n'));
+    await firstStart;
+    const launch = JSON.parse(vi.mocked(spawn).mock.calls[0][2]!.env![key]!);
+    expect(launch).toMatchObject({
+      command: process.execPath,
+      args: [expect.stringContaining('launch.cjs'), '--profile', 'coding'],
+    });
+    const firstStop = mgr.stop();
+    child.emit('exit', 0);
+    await firstStop;
+
+    vi.mocked(existsSync).mockReturnValue(false);
+    const secondChild = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(secondChild as unknown as ChildProcess);
+    const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    vi.stubEnv('Aionui_Studio_Aelix_Launch', 'stale mixed-case descriptor');
+    try {
+      const secondStart = mgr.start('/db/path');
+      secondChild.stdout?.emit(
+        'data',
+        Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55556}\nAIONCORE_READY\n')
+      );
+      await secondStart;
+      const secondEnv = vi.mocked(spawn).mock.calls[1][2]!.env!;
+      expect(Object.keys(secondEnv).filter((name) => name.toUpperCase() === key)).toEqual([]);
+    } finally {
+      Object.defineProperty(process, 'platform', platform);
+      if (statImplementation) vi.mocked(statSync).mockImplementation(statImplementation);
+      else vi.mocked(statSync).mockReset();
+      const secondStop = mgr.stop();
+      secondChild.emit('exit', 0);
+      await secondStop;
+    }
+  });
+
+  it.each([
+    ['the default resources bundle', undefined],
+    ['an alternate verified bundle', '/alternate/bundled-aioncore/target'],
+  ])('resolves Aelix Node from %s', async (_name, bundledHostDirectory) => {
+    const child = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    const mgr = new BackendLifecycleManager({ ...APP_META_PACKAGED, bundledHostDirectory }, () => '/abs/path/aioncore');
+    const started = mgr.start('/db/path');
+    child.stdout?.emit('data', Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55557}\nAIONCORE_READY\n'));
+    await started;
+    expect(buildStudioAelixLaunch).toHaveBeenCalledExactlyOnceWith(
+      APP_META.userDataPath,
+      bundledHostDirectory ?? studioHostBundleDirectory(APP_META.resourcesPath)
+    );
+    const stopped = mgr.stop();
+    child.emit('exit', 0);
+    await stopped;
+  });
+
   it('lets aioncore choose the backend port and waits for the reported listening event', async () => {
     vi.mocked(createServer).mockImplementation(() => {
       throw new Error('launcher must not pre-bind backend ports');

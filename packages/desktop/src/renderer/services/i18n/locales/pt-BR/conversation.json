@@ -6,6 +6,8 @@
     "newConversation": "Novo Chat",
     "selectModel": "Selecionar Modelo",
     "useCliModel": "Selecionar Modelo",
+    "selectModelToSend": "Selecione um modelo antes de enviar.",
+    "addModelToSend": "Adicione um modelo em Configurações → Modelo antes de enviar.",
     "modelSwitchNotSupported": "A lista de modelos estará disponível após a primeira conexão. Envie uma mensagem para conectar e carregar os modelos disponíveis.",
     "specifyWorkspace": "Conversar no Projeto",
     "currentWorkspace": "Projeto Atual",

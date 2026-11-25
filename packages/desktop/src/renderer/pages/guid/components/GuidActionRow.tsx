@@ -34,7 +34,7 @@ import {
   Shield,
   UploadOne,
 } from '@icon-park/react';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css';
 
@@ -89,6 +89,12 @@ type GuidActionRowProps = {
   setCurrentModel: (model: TProviderWithModel) => Promise<void>;
   currentAcpCachedModelInfo: AcpModelInfo | null;
   selectedAcpModel: string | null;
+  /** No model is in use until the user picks one. */
+  modelSelectionRequired?: boolean;
+  /** A pick is required but there is nothing to pick; offer to add a model instead. */
+  modelSetupRequired?: boolean;
+  /** Opens Settings → Model. */
+  onAddModel?: () => void;
   setSelectedAcpModel: (model: string | null) => void;
 
   // Thought level (mobile action sheet; only present for ACP agents)
@@ -113,6 +119,8 @@ type GuidActionRowProps = {
   // Send button
   loading: boolean;
   isButtonDisabled: boolean;
+  /** Why Send is disabled, shown on hover. */
+  sendDisabledHint?: string;
   speechInputNode?: React.ReactNode;
   onSend: () => void;
 };
@@ -128,6 +136,9 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   setCurrentModel,
   currentAcpCachedModelInfo,
   selectedAcpModel,
+  modelSelectionRequired = false,
+  modelSetupRequired = false,
+  onAddModel,
   setSelectedAcpModel,
   thoughtLevelOption,
   onThoughtLevelSelect,
@@ -144,10 +155,12 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   onToggleMcpServer,
   loading,
   isButtonDisabled,
+  sendDisabledHint,
   speechInputNode,
   onSend,
 }) => {
   const { t } = useTranslation();
+  const sendHintId = useId();
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
   const [isPlusDropdownOpen, setIsPlusDropdownOpen] = useState(false);
@@ -256,11 +269,23 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         description: model.description,
         active: model.id === selectedAcpModel,
       }));
-      currentModelLabel =
-        available.find((m) => m.id === selectedAcpModel)?.label || currentAcpCachedModelInfo?.current_model_label || '';
+      currentModelLabel = modelSelectionRequired
+        ? t('conversation.welcome.selectModel')
+        : available.find((m) => m.id === selectedAcpModel)?.label ||
+          selectedAcpModel ||
+          currentAcpCachedModelInfo?.current_model_label ||
+          '';
       onModelSelect = (key) => setSelectedAcpModel(key);
     }
-    if (modelOptions.length > 0) {
+    if (modelOptions.length === 0 && modelSetupRequired && onAddModel) {
+      entries.push({
+        key: 'model',
+        icon: <Brain theme='outline' size='16' />,
+        label: t('common.model', { defaultValue: 'Model' }),
+        meta: t('settings.addModel'),
+        onClick: onAddModel,
+      });
+    } else if (modelOptions.length > 0) {
       entries.push({
         key: 'model',
         icon: <Brain theme='outline' size='16' />,
@@ -409,6 +434,9 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     setCurrentModel,
     currentAcpCachedModelInfo,
     selectedAcpModel,
+    modelSelectionRequired,
+    modelSetupRequired,
+    onAddModel,
     setSelectedAcpModel,
     thoughtLevelOption,
     onThoughtLevelSelect,
@@ -650,20 +678,31 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         )}
 
         {speechInputNode}
-        <Button
-          shape='circle'
-          type='primary'
-          loading={loading}
-          disabled={isButtonDisabled}
-          className='send-button-custom'
-          style={{
-            backgroundColor: isButtonDisabled ? undefined : '#000000',
-            borderColor: isButtonDisabled ? undefined : '#000000',
-          }}
-          icon={<ArrowUp theme='filled' size='14' fill='white' strokeWidth={5} />}
-          onClick={onSend}
-          data-testid='guid-send-btn'
-        />
+        {sendDisabledHint && (
+          <span id={sendHintId} className='sr-only'>
+            {sendDisabledHint}
+          </span>
+        )}
+        <Tooltip content={sendDisabledHint} disabled={!sendDisabledHint} position='top'>
+          {/* A disabled button receives no hover events; the wrapper carries the tooltip. */}
+          <span className='inline-flex' data-testid='guid-send-hint'>
+            <Button
+              aria-describedby={sendDisabledHint ? sendHintId : undefined}
+              shape='circle'
+              type='primary'
+              loading={loading}
+              disabled={isButtonDisabled}
+              className='send-button-custom'
+              style={{
+                backgroundColor: isButtonDisabled ? undefined : '#000000',
+                borderColor: isButtonDisabled ? undefined : '#000000',
+              }}
+              icon={<ArrowUp theme='filled' size='14' fill='white' strokeWidth={5} />}
+              onClick={onSend}
+              data-testid='guid-send-btn'
+            />
+          </span>
+        </Tooltip>
       </div>
     </div>
   );

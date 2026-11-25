@@ -9,7 +9,7 @@ import { buildGuidSlashCommands } from '@/common/chat/slash/guidSlashCommands';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { resolveLocaleKey } from '@/common/utils';
-import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
+import { isBuiltinAelixAssistant, type AssistantDetail } from '@/common/types/agent/assistantTypes';
 
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
 import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
@@ -245,6 +245,16 @@ const GuidPage: React.FC = () => {
     [slashController.filteredCommands, slashController.query]
   );
 
+  // Why Send waits: nothing to pick yet (add a model in Settings), or a pick is due.
+  const modelSelectionHint = agentSelection.modelSetupRequired
+    ? t('conversation.welcome.addModelToSend')
+    : agentSelection.modelSelectionRequired
+      ? t('conversation.welcome.selectModelToSend')
+      : undefined;
+  const openModelSettings = useCallback(() => {
+    void navigate('/settings/model');
+  }, [navigate]);
+
   const send = useGuidSend({
     // Input state
     input: guidInput.input,
@@ -258,6 +268,10 @@ const GuidPage: React.FC = () => {
 
     // Agent state
     selectedAssistantId: agentSelection.selectedAssistantId,
+    selectedAssistantAvailable: agentSelection.selectedAssistantAvailable,
+    selectedBuiltinAelix: isBuiltinAelixAssistant(agentSelection.selectedAssistant),
+    modelSelectionRequired: agentSelection.modelSelectionRequired,
+    modelSelectionHint,
     selectedAssistantBackend: agentSelection.selectedAssistantBackend,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
@@ -419,12 +433,12 @@ const GuidPage: React.FC = () => {
         }
       } else if (shouldApplyDefaultModel && resolvedDefaults.modelId) {
         const availableModelIds = new Set(agentSelection.currentAcpCachedModelInfo?.available_models.map((m) => m.id));
-        agentSelection.setSelectedAcpModel(
-          availableModelIds.size === 0 || availableModelIds.has(resolvedDefaults.modelId)
-            ? resolvedDefaults.modelId
-            : null,
-          { persistPreference: false }
-        );
+        // Builtin Aelix sends this as its model pick, so it must be one the catalog offers
+        // (the catalog may still be loading). Other agents keep the saved model until then.
+        const usable =
+          availableModelIds.has(resolvedDefaults.modelId) ||
+          (availableModelIds.size === 0 && !isBuiltinAelixAssistant(agentSelection.selectedAssistant));
+        agentSelection.setSelectedAcpModel(usable ? resolvedDefaults.modelId : null, { persistPreference: false });
       } else if (shouldApplyDefaultModel) {
         agentSelection.setSelectedAcpModel(null, { persistPreference: false });
       }
@@ -464,6 +478,7 @@ const GuidPage: React.FC = () => {
     agentSelection.currentAcpCachedModelInfo?.available_models,
     agentSelection.currentAgentModeOptions,
     agentSelection.currentThoughtLevelOption,
+    agentSelection.selectedAssistant,
     agentSelection.selectedAssistantBackend,
     agentSelection.setSelectedAcpModel,
     agentSelection.setSelectedMode,
@@ -484,7 +499,7 @@ const GuidPage: React.FC = () => {
   const setGuidSelectedAcpModel = useCallback(
     (model: React.SetStateAction<string | null>) => {
       manualModelSelectionAssistantRef.current = selectedAssistantId;
-      agentSelection.setSelectedAcpModel(model, { persistPreference: !hasSelectedAssistant });
+      agentSelection.setSelectedAcpModel(model, { persistPreference: !hasSelectedAssistant, explicit: true });
     },
     [agentSelection, hasSelectedAssistant, selectedAssistantId]
   );
@@ -600,6 +615,8 @@ const GuidPage: React.FC = () => {
       setSelectedAcpModel={setGuidSelectedAcpModel}
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
+      modelSelectionRequired={agentSelection.modelSelectionRequired}
+      modelSetupRequired={agentSelection.modelSetupRequired}
     />
   );
 
@@ -624,6 +641,9 @@ const GuidPage: React.FC = () => {
       setCurrentModel={setGuidCurrentModel}
       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
       selectedAcpModel={agentSelection.selectedAcpModel}
+      modelSelectionRequired={agentSelection.modelSelectionRequired}
+      modelSetupRequired={agentSelection.modelSetupRequired}
+      onAddModel={openModelSettings}
       setSelectedAcpModel={setGuidSelectedAcpModel}
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
@@ -643,6 +663,7 @@ const GuidPage: React.FC = () => {
       }
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}
+      sendDisabledHint={modelSelectionHint}
       onSend={send.sendMessageHandler}
     />
   );

@@ -5,7 +5,13 @@
  */
 
 import styles from '../index.module.css';
-import { assistantRuntimeKey, type Assistant } from '@/common/types/agent/assistantTypes';
+import {
+  assistantRuntimeKey,
+  BUILTIN_AELIX_AGENT_ID,
+  canStartAssistantConversation,
+  isBuiltinAelixAssistant,
+  type Assistant,
+} from '@/common/types/agent/assistantTypes';
 import { Down, Robot } from '@icon-park/react';
 import { Button } from '@arco-design/web-react';
 import { AionSearchInput } from '@/renderer/components/base';
@@ -24,7 +30,7 @@ import { useTranslation } from 'react-i18next';
  * so both surfaces find the same agents for the same query.
  */
 export function assistantMatchesSearch(
-  assistant: Assistant,
+  assistant: Pick<Assistant, 'name' | 'name_i18n' | 'description' | 'description_i18n'>,
   localeKey: string,
   query: string,
   agentSearchText?: string
@@ -64,6 +70,21 @@ type AssistantSelectionAreaProps = {
   onSelectAssistant: (assistantId: string) => void;
 };
 
+type AssistantPill = Pick<
+  Assistant,
+  | 'id'
+  | 'agent_id'
+  | 'agent'
+  | 'agent_status'
+  | 'enabled'
+  | 'name'
+  | 'name_i18n'
+  | 'source'
+  | 'avatar'
+  | 'description'
+  | 'description_i18n'
+>;
+
 const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
   selectedAssistantId,
   assistants,
@@ -85,10 +106,32 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
   const widthVisibleLimit = Math.min(Math.max(1, maxVisibleAssistants), resolveAssistantVisibleLimit(availableWidth));
   const [adaptiveVisibleLimit, setAdaptiveVisibleLimit] = useState(widthVisibleLimit);
   const visibleLimit = Math.min(widthVisibleLimit, adaptiveVisibleLimit);
-  const enabledAssistants = useMemo(
-    () => selectableAssistants(assistants, assistantOrder),
-    [assistantOrder, assistants]
-  );
+  const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
+  const enabledAssistants = useMemo<AssistantPill[]>(() => {
+    const ordered = selectableAssistants(assistants, assistantOrder);
+    const aelix = ordered.find(isBuiltinAelixAssistant);
+    if (aelix) return [aelix, ...ordered.filter((assistant) => assistant !== aelix)];
+
+    // Host hides uninstalled generated assistants from the assistant list.
+    const missing = managedAgentRuntimeCatalog.find(
+      (agent) => agent.id === BUILTIN_AELIX_AGENT_ID && agent.status === 'missing' && agent.enabled
+    );
+    if (!missing) return ordered;
+    return [
+      {
+        id: `bare:${missing.id}`,
+        agent_id: missing.id,
+        agent: { type: 'acp', source: 'builtin', acp_backend: 'aelix' },
+        agent_status: 'missing',
+        enabled: true,
+        source: 'generated',
+        name: missing.name,
+        name_i18n: {},
+        description_i18n: {},
+      },
+      ...ordered,
+    ];
+  }, [assistantOrder, assistants, managedAgentRuntimeCatalog]);
 
   useEffect(() => {
     setAdaptiveVisibleLimit(widthVisibleLimit);
@@ -178,8 +221,13 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
       return enabledAssistants.slice(0, visibleLimit);
     }
 
-    return [...enabledAssistants.slice(0, visibleLimit - 1), enabledAssistants[selectedIndex]];
-  }, [enabledAssistants, selectedId, visibleLimit]);
+    // Keep the selected agent visible alongside Aelix at the narrowest width.
+    const leadingCount =
+      visibleLimit === 1 && maxVisibleAssistants > 1 && isBuiltinAelixAssistant(enabledAssistants[0])
+        ? 1
+        : visibleLimit - 1;
+    return [...enabledAssistants.slice(0, leadingCount), enabledAssistants[selectedIndex]];
+  }, [enabledAssistants, maxVisibleAssistants, selectedId, visibleLimit]);
 
   useLayoutEffect(() => {
     if (visibleLimit <= 1 || !hasTruncatedAssistantLabels(containerRef.current)) {
@@ -197,7 +245,6 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
   const overflowColumns = widthVisibleLimit;
   // Search only earns its row when the unfiltered list is long enough to scan.
   const showOverflowSearch = Math.ceil(overflowAssistants.length / overflowColumns) > 5;
-  const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
   // Same haystack as the Agent settings search: joining the runtime catalog row
   // adds backend/command/binary fields, so e.g. "ag" finds Antigravity (`agy`).
   const agentSearchTextById = useMemo(() => {
@@ -222,13 +269,15 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
 
   if (enabledAssistants.length === 0) return null;
 
-  const renderAssistantPill = (assistant: Assistant, testId: string, fullWidth = false) => {
+  const renderAssistantPill = (assistant: AssistantPill, testId: string, fullWidth = false) => {
     const avatar = resolveRuntimeAssistantAvatar(agentLogos, {
       ...assistant,
       runtime: assistantRuntimeKey(assistant),
     });
     const isSelected = selectedId === assistant.id;
-    const label = assistant.name_i18n?.[localeKey] || assistant.name;
+    const unavailable = !canStartAssistantConversation(assistant);
+    const name = assistant.name_i18n?.[localeKey] || assistant.name;
+    const label = unavailable ? `${name} · ${t('settings.agentManagement.filterUnavailable')}` : name;
 
     return (
       <Button
@@ -237,6 +286,16 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
         data-assistant-id={assistant.id}
         data-assistant-backend={assistantRuntimeKey(assistant)}
         data-assistant-selected={isSelected ? 'true' : 'false'}
+        disabled={unavailable}
+        title={
+          unavailable
+            ? t(
+                assistant.agent_status === 'missing'
+                  ? 'settings.assistantAgentMissing'
+                  : 'settings.assistantAgentUnavailable'
+              )
+            : undefined
+        }
         type='text'
         className={`!inline-flex !min-w-0 !h-auto !items-center !gap-6px !rounded-999px !border-none !px-12px !py-8px !text-13px transition-all ${
           fullWidth ? '!w-full !justify-start' : ''

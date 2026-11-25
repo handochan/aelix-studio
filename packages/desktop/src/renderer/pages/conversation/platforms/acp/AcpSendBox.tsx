@@ -1,4 +1,5 @@
 import { ipcBridge } from '@/common';
+import { AelixInitialModelUnconfirmed, submitAelixInitialPrompt } from '@/renderer/services/runtime/aelixInitialModel';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { chatFileRefKey, uploadFileRef, type ChatFileRef } from '@/common/types/chatFile';
@@ -64,7 +65,7 @@ import { localSelectionItems, mergeFileSelectionItems } from '@/renderer/utils/f
 import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/messageFiles';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
@@ -118,6 +119,22 @@ const useSendBoxDraft = (conversation_id: string) => {
     [data, mutate]
   );
 
+  const restoreDraft = useCallback(
+    (input: string, files: ChatFileRef[]) => {
+      mutate((draft) => {
+        const existing = new Set(collectChatFileRefs(draft.uploadFile, draft.atPath).map(chatFileRefKey));
+        const restored = splitChatFileRefs(files.filter((file) => !existing.has(chatFileRefKey(file))));
+        return {
+          ...draft,
+          content: draft.content === input ? input : [input, draft.content].filter(Boolean).join('\n'),
+          uploadFile: [...restored.uploadFiles, ...draft.uploadFile],
+          atPath: [...restored.atPath, ...draft.atPath],
+        };
+      });
+    },
+    [mutate]
+  );
+
   const removeSubmittedFiles = (files: ChatFileRef[]) => {
     if (!files.length) return;
     const sent = new Set(files.map(chatFileRefKey));
@@ -133,6 +150,7 @@ const useSendBoxDraft = (conversation_id: string) => {
 
   return {
     removeSubmittedFiles,
+    restoreDraft,
     atPath,
     uploadFile,
     setAtPath,
@@ -153,6 +171,7 @@ const AcpSendBox: React.FC<{
   /** Blocks typing, sending, and the stored first message (e.g. while the session holder is unknown). */
   sendBlocked?: boolean;
   viewConfigPort?: AcpConfigOptionsPort;
+  hasInitialModel?: boolean;
 }> = ({
   conversation_id,
   backend,
@@ -163,6 +182,7 @@ const AcpSendBox: React.FC<{
   teamRuntime,
   sendBlocked = false,
   viewConfigPort,
+  hasInitialModel,
 }) => {
   const {
     aiProcessing,
@@ -181,7 +201,7 @@ const AcpSendBox: React.FC<{
   const showModeSelector = true;
   const isLeaderInTeam = teamPermission && conversation_id === teamPermission.leaderConversationId;
   const { checkAndUpdateTitle } = useAutoTitle();
-  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, removeSubmittedFiles } =
+  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, removeSubmittedFiles, restoreDraft } =
     useSendBoxDraft(conversation_id);
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
@@ -373,6 +393,34 @@ const AcpSendBox: React.FC<{
     []
   );
 
+  const firstModelAcceptedRef = useRef<string | null>(null);
+  const keepsInitialModelDraft = hasInitialModel && firstModelAcceptedRef.current !== conversation_id;
+  // Aelix refuses a prompt while native has no model, and the header then asks for one.
+  // A pending first-prompt choice is applied before dispatch, so it does not count.
+  const modelSelectionRequired =
+    backend === 'aelix' && !keepsInitialModelDraft && runtimeConfig.model !== null && !runtimeConfig.model.currentValue;
+  // With no models to choose from, the header cannot help: a model must be added in Settings.
+  const modelSelectionHint = !modelSelectionRequired
+    ? undefined
+    : runtimeConfig.model?.options.length
+      ? t('conversation.welcome.selectModelToSend')
+      : t('conversation.welcome.addModelToSend');
+  const loadFreshConfig = viewConfigPort?.loadFresh;
+  const submitPrompt = useCallback(
+    (dispatch: () => Promise<void>) => {
+      if (!hasInitialModel || firstModelAcceptedRef.current === conversation_id) return dispatch();
+      return submitAelixInitialPrompt(
+        conversation_id,
+        dispatch,
+        () => {
+          firstModelAcceptedRef.current = conversation_id;
+        },
+        loadFreshConfig && (() => loadFreshConfig(conversation_id))
+      );
+    },
+    [conversation_id, hasInitialModel, loadFreshConfig]
+  );
+
   // Check for and send initial message from guid page
   useAcpInitialMessage({
     conversation_id: conversation_id,
@@ -386,6 +434,8 @@ const AcpSendBox: React.FC<{
     beginCompactionSubmission,
     checkAndUpdateTitle,
     addOrUpdateMessage: addOrUpdateMessageRef.current,
+    submitPrompt,
+    restoreDraft,
   });
 
   const executeCommand = useCallback(
@@ -405,19 +455,25 @@ const AcpSendBox: React.FC<{
           return;
         }
 
-        markSendStarted();
-        setAiProcessing(true);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id,
-          files,
-          // `@@` references. Dropping this here is a silent failure: the agent
-          // simply never receives the session block.
-          sessions,
+        await submitPrompt(async () => {
+          markSendStarted();
+          setAiProcessing(true);
+          const result = await ipcBridge.acpConversation.sendMessage.invoke({
+            input,
+            conversation_id,
+            files,
+            // `@@` references. Dropping this here is a silent failure: the agent
+            // simply never receives the session block.
+            sessions,
+          });
+          markSendAccepted(result.turn_id, result.runtime, result.msg_id);
         });
-        markSendAccepted(result.turn_id, result.runtime, result.msg_id);
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
+        if (error instanceof AelixInitialModelUnconfirmed) {
+          Message.error(t('agent.model.switchFailed'));
+          throw error;
+        }
         const errorMsg =
           getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
@@ -507,6 +563,7 @@ Please check your local CLI tool authentication status`,
       markSendAccepted,
       markSendFailed,
       markSendStarted,
+      submitPrompt,
       resetState,
       setAiProcessing,
       t,
@@ -600,16 +657,21 @@ Please check your local CLI tool authentication status`,
       return false;
     }
     if (deferDraftClear && !message.trim()) return false;
+    if (modelSelectionRequired) {
+      Message.warning(modelSelectionHint);
+      return false;
+    }
 
-    if (!deferDraftClear) {
+    if (!deferDraftClear && !keepsInitialModelDraft) {
       clearFiles();
       setSelectedSessions([]);
       emitter.emit('acp.selected.file.clear');
     }
     try {
       await executeCommand({ input: message, files, sessions: sessions.length > 0 ? sessions : undefined });
-      if (deferDraftClear) removeSubmitted();
+      if (deferDraftClear || keepsInitialModelDraft) removeSubmitted();
     } catch (error) {
+      if (error instanceof AelixInitialModelUnconfirmed) return false;
       if (!deferDraftClear || !classifyConversationBusyError(error)) throw error;
       Message.warning(t('acp.runningInput.ordinaryBusyKept'));
       return false;
@@ -1010,14 +1072,14 @@ Please check your local CLI tool authentication status`,
         active={teamRuntime?.isActive}
         onFocused={teamRuntime?.onFocus}
         disabled={sendBlocked}
-        sendDisabled={!supportsMidturnDelivery && isBusy && !runningInputSendable}
+        sendDisabled={(!supportsMidturnDelivery && isBusy && !runningInputSendable) || modelSelectionRequired}
         sendDisabledTooltip={
           !supportsMidturnDelivery && isBusy && !runningInputSendable
             ? t('conversation.commandQueue.midturnBlockedSendHint', {
                 defaultValue:
                   'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
               })
-            : undefined
+            : modelSelectionHint
         }
         placeholder={
           sendBlocked
@@ -1034,7 +1096,7 @@ Please check your local CLI tool authentication status`,
         allowAttachmentOnlySend={
           runningInputSendable && (uploadFile.length > 0 || atPath.length > 0 || selectedSessions.length > 0)
         }
-        deferDraftClear={deferDraftClear}
+        deferDraftClear={deferDraftClear || keepsInitialModelDraft}
         enableBtw={isSideQuestionSupported({ type: 'acp', backend })}
         supportedExts={allSupportedExts}
         defaultMultiLine={!isMobile}

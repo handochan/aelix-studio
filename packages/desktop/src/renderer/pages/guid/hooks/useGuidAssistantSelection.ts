@@ -4,7 +4,13 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { assistantRuntimeKey, isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
+import {
+  assistantRuntimeKey,
+  canStartAssistantConversation,
+  isAionrsAssistant,
+  isBuiltinAelixAssistant,
+  type Assistant,
+} from '@/common/types/agent/assistantTypes';
 import { configService } from '@/common/config/configService';
 import type { AcpModelInfo } from '../types';
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
@@ -13,12 +19,16 @@ import {
   buildAgentRuntimeModelInfo,
   buildAgentRuntimeSlashCommands,
   buildAgentRuntimeThoughtLevelOption,
+  getReportedCurrentModelId,
   type AgentRuntimeCatalog,
   type AgentRuntimeDerivedOption,
 } from '@/renderer/utils/model/agentRuntimeCatalog';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManagedAgents';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import useSWR from 'swr';
+import { aelixModelId, loadNativeAuthCatalog, NATIVE_AUTH_CATALOG_KEY } from '@/renderer/services/runtime/nativeAuth';
+import { recheckAelixAfterSessionFailure } from '@/renderer/services/runtime/aelixAvailability';
 import { useCustomAgentsLoader } from './useCustomAgentsLoader';
 
 export {
@@ -39,8 +49,15 @@ export type GuidAssistantSelectionResult = {
   selectedMode: string;
   setSelectedMode: (mode: React.SetStateAction<string>, options?: { persistPreference?: boolean }) => void;
   selectedAcpModel: string | null;
-  setSelectedAcpModel: (model: React.SetStateAction<string | null>, options?: { persistPreference?: boolean }) => void;
+  setSelectedAcpModel: (
+    model: React.SetStateAction<string | null>,
+    options?: { persistPreference?: boolean; explicit?: boolean }
+  ) => void;
   currentAcpCachedModelInfo: AcpModelInfo | null;
+  /** Builtin Aelix has no model to use until the user picks one. */
+  modelSelectionRequired: boolean;
+  /** A pick is required but there is nothing to pick: a model must be added in Settings. */
+  modelSetupRequired: boolean;
   currentAgentAvailableCommands: SlashCommandItem[];
   currentAgentModeOptions: AgentModeOption[];
   currentThoughtLevelOption: AgentRuntimeDerivedOption | null;
@@ -76,23 +93,13 @@ export function resolveAssistantSelectionKey(
   assistants: Assistant[]
 ): string | undefined {
   if (!savedKey) return undefined;
-
-  if (savedKey.startsWith('custom:')) {
-    const assistantId = savedKey.slice(7);
-    return assistants.some((assistant) => assistant.id === assistantId) ? assistantId : undefined;
-  }
-
-  if (assistants.some((assistant) => assistant.id === savedKey)) {
-    return savedKey;
-  }
-
-  return undefined;
+  const id = savedKey.startsWith('custom:') ? savedKey.slice(7) : savedKey;
+  return assistants.find((assistant) => assistant.id === id && canStartAssistantConversation(assistant))?.id;
 }
 
 function readPersistedGuidAssistantSelectionKey(assistants: Assistant[]): string | undefined {
   const savedKey = configService.get('guid.lastAssistantId');
-  const enabledAssistants = assistants.filter((assistant) => assistant.enabled !== false);
-  return resolveAssistantSelectionKey(savedKey, enabledAssistants);
+  return resolveAssistantSelectionKey(savedKey, assistants);
 }
 
 function persistGuidAssistantSelectionKey(assistantId: string): void {
@@ -102,12 +109,25 @@ function persistGuidAssistantSelectionKey(assistantId: string): void {
 }
 
 export function pickDefaultAssistantSelectionKey(assistants: Assistant[]): string | null {
-  const enabledAssistants = assistants.filter((assistant) => assistant.enabled !== false);
+  const enabledAssistants = assistants.filter(canStartAssistantConversation);
   const preferred =
+    enabledAssistants.find(isBuiltinAelixAssistant) ??
     enabledAssistants.find((assistant) => assistant.source === 'generated' && isAionrsAssistant(assistant)) ??
     enabledAssistants.find((assistant) => isAionrsAssistant(assistant)) ??
     enabledAssistants[0];
   return preferred?.id ?? null;
+}
+
+/** Whether this page would choose `candidate` (preselected, saved, or default) if it were available. */
+function wouldSelect(candidate: Assistant, assistants: Assistant[], preselectAssistantId?: string): boolean {
+  const available = assistants.map((assistant) =>
+    assistant.id === candidate.id ? { ...assistant, agent_status: 'online' as const } : assistant
+  );
+  const preferred =
+    resolveAssistantSelectionKey(preselectAssistantId, available) ??
+    readPersistedGuidAssistantSelectionKey(available) ??
+    pickDefaultAssistantSelectionKey(available);
+  return preferred === candidate.id;
 }
 
 type UseGuidAssistantSelectionOptions = {
@@ -127,6 +147,8 @@ export const useGuidAssistantSelection = ({
   const [selectedThoughtLevelValue, _setSelectedThoughtLevelValue] = useState<string>('');
   const { assistants } = useCustomAgentsLoader();
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
+  const explicitModelAssistantRef = useRef<string | null>(null);
+  const userPickedAssistantRef = useRef(false);
 
   const setSelectedMode = useCallback(
     (mode: React.SetStateAction<string>, _options?: { persistPreference?: boolean }) => {
@@ -139,13 +161,14 @@ export const useGuidAssistantSelection = ({
   );
 
   const setSelectedAcpModel = useCallback(
-    (modelId: React.SetStateAction<string | null>, _options?: { persistPreference?: boolean }) => {
+    (modelId: React.SetStateAction<string | null>, options?: { persistPreference?: boolean; explicit?: boolean }) => {
+      if (options?.explicit) explicitModelAssistantRef.current = selectedAssistantIdState;
       _setSelectedAcpModel((prev) => {
         const nextModelId = typeof modelId === 'function' ? modelId(prev) : modelId;
         return nextModelId;
       });
     },
-    []
+    [selectedAssistantIdState]
   );
 
   const setSelectedThoughtLevelValue = useCallback(
@@ -160,7 +183,9 @@ export const useGuidAssistantSelection = ({
 
   const setSelectedAssistantId = useCallback(
     (assistantId: string) => {
-      const normalizedId = resolveAssistantSelectionKey(assistantId, assistants) ?? assistantId;
+      const normalizedId = resolveAssistantSelectionKey(assistantId, assistants);
+      if (!normalizedId) return;
+      userPickedAssistantRef.current = true;
       _setSelectedAssistantId(normalizedId);
       persistGuidAssistantSelectionKey(normalizedId);
     },
@@ -175,40 +200,62 @@ export const useGuidAssistantSelection = ({
   }
 
   useLayoutEffect(() => {
-    if (assistants.length === 0) return;
-    if (resetHandledRef.current) return;
-
-    if (preselectAssistantId) {
+    if (!resetHandledRef.current && assistants.length > 0) {
       const resolvedPreselect = resolveAssistantSelectionKey(preselectAssistantId, assistants);
       if (resolvedPreselect) {
         resetHandledRef.current = true;
         _setSelectedAssistantId(resolvedPreselect);
         return;
       }
+
+      if (resetAssistant) {
+        resetHandledRef.current = true;
+        _setSelectedAssistantId(
+          readPersistedGuidAssistantSelectionKey(assistants) ?? pickDefaultAssistantSelectionKey(assistants)
+        );
+        return;
+      }
     }
 
-    if (resetAssistant) {
-      resetHandledRef.current = true;
-      const fallbackId =
-        readPersistedGuidAssistantSelectionKey(assistants) ?? pickDefaultAssistantSelectionKey(assistants);
-      _setSelectedAssistantId(fallbackId);
-    }
-  }, [assistants, preselectAssistantId, resetAssistant]);
-
-  useEffect(() => {
-    if (assistants.length === 0) return;
-    if (resetAssistant) return;
-    if (preselectAssistantId && resolveAssistantSelectionKey(preselectAssistantId, assistants)) return;
-    if (!selectedAssistantIdState || !assistants.some((assistant) => assistant.id === selectedAssistantIdState)) {
+    if (!resolveAssistantSelectionKey(selectedAssistantIdState ?? undefined, assistants)) {
       _setSelectedAssistantId(
         readPersistedGuidAssistantSelectionKey(assistants) ?? pickDefaultAssistantSelectionKey(assistants)
       );
     }
-  }, [assistants, preselectAssistantId, resetAssistant, selectedAssistantIdState]);
+  }, [assistants, locationKey, preselectAssistantId, resetAssistant, selectedAssistantIdState]);
+
+  // One failed session (even a transient network error) leaves Aelix offline until a probe.
+  // Probe once per visit when Aelix would be the choice; the probe records a non-session
+  // verdict, so a still-broken Aelix is not probed again.
+  const aelixRecheckStartedRef = useRef(false);
+  const [aelixProbed, setAelixProbed] = useState(false);
+  useEffect(() => {
+    if (aelixRecheckStartedRef.current) return;
+    const aelix = assistants.find(isBuiltinAelixAssistant);
+    if (!aelix || aelix.enabled === false || aelix.agent_status !== 'offline') return;
+    if (!wouldSelect(aelix, assistants, preselectAssistantId)) return;
+    aelixRecheckStartedRef.current = true;
+    void recheckAelixAfterSessionFailure()
+      .catch(() => false)
+      .then((probed) => {
+        if (probed) setAelixProbed(true);
+      });
+  }, [assistants, preselectAssistantId]);
+
+  // Restore Aelix as the choice once the refreshed list shows it, unless the user picked another.
+  useLayoutEffect(() => {
+    if (!aelixProbed) return;
+    const aelix = assistants.find(isBuiltinAelixAssistant);
+    if (!aelix || !canStartAssistantConversation(aelix)) return;
+    setAelixProbed(false);
+    if (!userPickedAssistantRef.current) _setSelectedAssistantId(aelix.id);
+  }, [aelixProbed, assistants]);
 
   const selectedAssistant = useMemo(
     () =>
-      selectedAssistantIdState ? assistants.find((assistant) => assistant.id === selectedAssistantIdState) : undefined,
+      assistants.find(
+        (assistant) => assistant.id === selectedAssistantIdState && canStartAssistantConversation(assistant)
+      ),
     [assistants, selectedAssistantIdState]
   );
   const selectedAssistantId = selectedAssistant?.id ?? null;
@@ -221,10 +268,38 @@ export const useGuidAssistantSelection = ({
         : undefined,
     [managedAgentRuntimeCatalog, selectedAssistant?.agent_id]
   );
-  const selectedAgentRuntimeModelInfo = useMemo(
+  const cachedAgentRuntimeModelInfo = useMemo(
     () => buildAgentRuntimeModelInfo(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
+  // The ACP catalog is a snapshot from the last session: a fresh profile has none, and it
+  // misses providers configured since. The helper lists them; Send still confirms live.
+  const { data: nativeCatalog, isLoading: nativeCatalogLoading } = useSWR(
+    isBuiltinAelixAssistant(selectedAssistant) ? NATIVE_AUTH_CATALOG_KEY : null,
+    loadNativeAuthCatalog
+  );
+  const selectedAgentRuntimeModelInfo = useMemo<AcpModelInfo | null>(() => {
+    if (!nativeCatalog) return cachedAgentRuntimeModelInfo;
+    const advertised = new Set(cachedAgentRuntimeModelInfo?.available_models.map((model) => model.id));
+    const configured = nativeCatalog.providers.flatMap((provider) =>
+      provider.models
+        .filter((model) => model.available)
+        .map((model) => ({
+          id: aelixModelId(provider.id, model.id),
+          label: model.name,
+          description: provider.name,
+        }))
+        .filter((model) => !advertised.has(model.id))
+    );
+    if (!cachedAgentRuntimeModelInfo) {
+      return { current_model_id: null, current_model_label: null, available_models: configured };
+    }
+    if (configured.length === 0) return cachedAgentRuntimeModelInfo;
+    return {
+      ...cachedAgentRuntimeModelInfo,
+      available_models: [...cachedAgentRuntimeModelInfo.available_models, ...configured],
+    };
+  }, [cachedAgentRuntimeModelInfo, nativeCatalog]);
   const currentAgentAvailableCommands = useMemo(
     () => buildAgentRuntimeSlashCommands(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
@@ -246,9 +321,17 @@ export const useGuidAssistantSelection = ({
   }, [selectedAgentRuntimeThoughtLevelOption, selectedThoughtLevelValue]);
   const currentAgentModeOptions = selectedAgentRuntimeModeState.options;
 
-  const selectedAssistantAvailable = useMemo(() => {
-    return selectedAssistant?.agent_status === 'online';
-  }, [selectedAssistant]);
+  const selectedAssistantAvailable = Boolean(selectedAssistant);
+  // Aelix refuses a prompt while native has no model. Without a pick, Send needs the
+  // runtime to report one (a fresh profile has no runtime report at all).
+  const modelSelectionRequired =
+    isBuiltinAelixAssistant(selectedAssistant) &&
+    !selectedAcpModel &&
+    !getReportedCurrentModelId(selectedManagedAgentRuntimeCatalog);
+  // Once the catalogs have loaded and offer nothing (no provider yet, or the helper failed),
+  // picking cannot help: the user needs to add a model first.
+  const modelSetupRequired =
+    modelSelectionRequired && !nativeCatalogLoading && !selectedAgentRuntimeModelInfo?.available_models.length;
 
   const modelSelectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
@@ -275,22 +358,24 @@ export const useGuidAssistantSelection = ({
       selectedAgentRuntimeModelInfo?.available_models.map((model) => model.id) ?? selectedAssistantModels
     );
     const selectionScope = selectedAssistantId ?? '';
+    const scopeChanged = modelSelectionScopeRef.current !== selectionScope;
+    modelSelectionScopeRef.current = selectionScope;
+    if (scopeChanged) explicitModelAssistantRef.current = null;
+    const retainExplicitModel =
+      isBuiltinAelixAssistant(selectedAssistant) && explicitModelAssistantRef.current === selectedAssistantId;
 
     _setSelectedAcpModel((previousModelId) => {
-      const scopeChanged = modelSelectionScopeRef.current !== selectionScope;
-      modelSelectionScopeRef.current = selectionScope;
-
       if (
         !scopeChanged &&
         previousModelId &&
-        (availableModelIds.size === 0 || availableModelIds.has(previousModelId))
+        (retainExplicitModel || availableModelIds.size === 0 || availableModelIds.has(previousModelId))
       ) {
         return previousModelId;
       }
 
       return fallbackModelId;
     });
-  }, [selectedAssistantId, selectedAssistantModels, selectedAgentRuntimeModelInfo]);
+  }, [selectedAssistant, selectedAssistantId, selectedAssistantModels, selectedAgentRuntimeModelInfo]);
 
   useEffect(() => {
     const fallbackMode =
@@ -346,6 +431,8 @@ export const useGuidAssistantSelection = ({
     selectedAcpModel,
     setSelectedAcpModel,
     currentAcpCachedModelInfo,
+    modelSelectionRequired,
+    modelSetupRequired,
     currentAgentAvailableCommands,
     currentAgentModeOptions,
     currentThoughtLevelOption,

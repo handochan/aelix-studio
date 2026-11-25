@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { Message } from '@arco-design/web-react';
@@ -16,6 +16,12 @@ import AcpSendBox from '@/renderer/pages/conversation/platforms/acp/AcpSendBox';
 import type { UseAcpMessageReturn } from '@/renderer/pages/conversation/platforms/acp/useAcpMessage';
 import type { MobileActionSheetEntry } from '@/renderer/components/chat/MobileActionSheet/types';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
+import {
+  setAelixInitialModelConfigOption,
+  submitAelixInitialPrompt,
+} from '@/renderer/services/runtime/aelixInitialModel';
+import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
+import type { ChatFileRef } from '@/common/types/chatFile';
 
 const {
   sendMessageInvokeMock,
@@ -46,6 +52,9 @@ const {
   stopInvokeMock,
   getMessagesInvokeMock,
   getConversationOrNullMock,
+  getConversationInvokeMock,
+  updateConversationInvokeMock,
+  setConfigOptionInvokeMock,
 } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
   addOrUpdateMessageMock: vi.fn(),
@@ -91,34 +100,43 @@ const {
   stopInvokeMock: vi.fn().mockResolvedValue(undefined),
   getMessagesInvokeMock: vi.fn(),
   getConversationOrNullMock: vi.fn(),
+  getConversationInvokeMock: vi.fn(),
+  updateConversationInvokeMock: vi.fn(),
+  setConfigOptionInvokeMock: vi.fn(),
 }));
 
-const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock, imagePathsMock, noticesPropsSpy } = vi.hoisted(
-  () => ({
-    runningInputMock: {
-      available: false,
-      handlesSubmit: false,
-      modes: ['steer', 'follow-up'],
-      mode: 'follow-up',
-      setMode: vi.fn(),
-      notices: [],
-      submit: vi.fn(),
-      beginStop: vi.fn(),
-      finishStop: vi.fn(),
-      dismiss: vi.fn(),
-      check: vi.fn(),
-      images: { modes: ['steer'], receipts: [] },
-    },
-    useRunningInputSpy: vi.fn(),
-    collectChatFileRefsMock: vi.fn((): object[] => []),
-    imagePathsMock: {
-      remember: vi.fn(),
-      available: false,
-      send: vi.fn(async () => ({ sent: false, decorationsCurrent: false })),
-    },
-    noticesPropsSpy: vi.fn(),
-  })
-);
+const {
+  runningInputMock,
+  useRunningInputSpy,
+  collectChatFileRefsMock,
+  splitChatFileRefsMock,
+  imagePathsMock,
+  noticesPropsSpy,
+} = vi.hoisted(() => ({
+  runningInputMock: {
+    available: false,
+    handlesSubmit: false,
+    modes: ['steer', 'follow-up'],
+    mode: 'follow-up',
+    setMode: vi.fn(),
+    notices: [],
+    submit: vi.fn(),
+    beginStop: vi.fn(),
+    finishStop: vi.fn(),
+    dismiss: vi.fn(),
+    check: vi.fn(),
+    images: { modes: ['steer'], receipts: [] },
+  },
+  useRunningInputSpy: vi.fn(),
+  collectChatFileRefsMock: vi.fn((): object[] => []),
+  splitChatFileRefsMock: vi.fn((): { uploadFiles: string[]; atPath: object[] } => ({ uploadFiles: [], atPath: [] })),
+  imagePathsMock: {
+    remember: vi.fn(),
+    available: false,
+    send: vi.fn(async () => ({ sent: false, decorationsCurrent: false })),
+  },
+  noticesPropsSpy: vi.fn(),
+}));
 
 vi.mock('@/renderer/pages/conversation/runtime/RunningInput', async () => ({
   // The real layout, so the order test below checks what the composer renders.
@@ -157,8 +175,11 @@ vi.mock('@/common', () => ({
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
+      setConfigOption: { invoke: setConfigOptionInvokeMock },
     },
     conversation: {
+      get: { invoke: getConversationInvokeMock },
+      update: { invoke: updateConversationInvokeMock },
       stop: {
         invoke: stopInvokeMock,
       },
@@ -287,7 +308,8 @@ vi.mock('@/renderer/hooks/agent/useAcpModelInfo', () => ({
     selectModel: vi.fn(),
   }),
 }));
-vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', () => ({
+vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', async (original) => ({
+  ...(await original<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>()),
   classifyConfigSetError: () => 'unknown',
   useAcpConfigOptions: useAcpConfigOptionsMock,
 }));
@@ -393,7 +415,7 @@ vi.mock('@/renderer/utils/file/fileSelection', () => ({
 }));
 vi.mock('@/renderer/utils/file/messageFiles', () => ({
   collectChatFileRefs: collectChatFileRefsMock,
-  splitChatFileRefs: () => ({ uploadFiles: [], atPath: [] }),
+  splitChatFileRefs: splitChatFileRefsMock,
 }));
 vi.mock('@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage', () => ({
   useAcpInitialMessage: vi.fn(),
@@ -501,6 +523,401 @@ describe('AcpSendBox', () => {
     await waitFor(() => {
       expect(resetStateMock).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('waits for the chosen model to be observed before dispatching the first prompt to it', async () => {
+    const modelOption = (current: string): AcpConfigOptionDto => ({
+      id: 'runtime-model',
+      category: 'model',
+      type: 'select',
+      current_value: current,
+      options: [{ value: 'provider-a/model' }, { value: 'provider-b/model' }],
+    });
+    getConversationInvokeMock.mockResolvedValue({ extra: { studio_initial_model: 'provider-b/model' } });
+    updateConversationInvokeMock.mockResolvedValue(true);
+    let currentModel = 'provider-a/model';
+    let observe!: () => void;
+    setConfigOptionInvokeMock.mockReturnValue(
+      new Promise((resolve) => {
+        observe = () => {
+          currentModel = 'provider-b/model';
+          resolve({ confirmation: 'observed', config_options: [modelOption(currentModel)] });
+        };
+      })
+    );
+    const receivedBy = vi.fn();
+    sendMessageInvokeMock.mockImplementation(async () => {
+      receivedBy(currentModel);
+      return { turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' };
+    });
+    const load = async () => [modelOption(currentModel)];
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={{ load, loadFresh: load }}
+        messageState={makeMessageState()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+    await waitFor(() =>
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        option_id: 'runtime-model',
+        value: 'provider-b/model',
+      })
+    );
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    await act(async () => observe());
+    expect(receivedBy).toHaveBeenCalledExactlyOnceWith('provider-b/model');
+    expect(updateConversationInvokeMock).toHaveBeenCalledWith({
+      id: 'conv-1',
+      merge_extra: true,
+      updates: { extra: { studio_initial_model: null } },
+    });
+  });
+
+  it('keeps a manual first prompt unsent when ACP only reports another model', async () => {
+    getConversationInvokeMock.mockResolvedValue({ extra: { studio_initial_model: 'provider-b/model' } });
+    const load = async (): Promise<AcpConfigOptionDto[]> => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: 'provider-a/model',
+        options: [{ value: 'provider-a/model' }],
+      },
+    ];
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={{ load, loadFresh: load }}
+        messageState={makeMessageState()}
+      />
+    );
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+    expect(Message.error).toHaveBeenCalledWith('agent.model.switchFailed');
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(clearFilesMock).not.toHaveBeenCalled();
+  });
+
+  it('holds Send behind a header change until the observed choice is saved', async () => {
+    let storedModel: string | null = 'fixture/a';
+    let currentModel = 'fixture/a';
+    const load = async (): Promise<AcpConfigOptionDto[]> => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: currentModel,
+        options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+      },
+    ];
+    let releaseWrite!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: storedModel } }));
+    updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+      if (updates.extra.studio_initial_model === 'fixture/b') await writing;
+      storedModel = updates.extra.studio_initial_model;
+      return true;
+    });
+    setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+      currentModel = value;
+      return { confirmation: 'observed', config_options: await load() };
+    });
+    const receivedBy = vi.fn();
+    sendMessageInvokeMock.mockImplementation(async () => {
+      receivedBy(currentModel);
+      return { turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' };
+    });
+    const port = { load, loadFresh: load, setConfigOption: setAelixInitialModelConfigOption };
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={port}
+        messageState={makeMessageState()}
+      />
+    );
+
+    const switchModel = port.setConfigOption('conv-1', 'model', 'fixture/b');
+    try {
+      await waitFor(() =>
+        expect(updateConversationInvokeMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            updates: { extra: { studio_initial_model: 'fixture/b' } },
+          })
+        )
+      );
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'send' })));
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        releaseWrite();
+        await switchModel;
+      });
+    }
+    await waitFor(() => expect(receivedBy).toHaveBeenCalledExactlyOnceWith('fixture/b'));
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a header model change that is still reading the runtime land before the first prompt', async () => {
+    const { useAcpConfigOptions: useRealConfigOptions } = await vi.importActual<
+      typeof import('@/renderer/hooks/agent/useAcpConfigOptions')
+    >('@/renderer/hooks/agent/useAcpConfigOptions');
+    let storedModel: string | null = 'fixture/a';
+    let currentModel = 'fixture/a';
+    const options = (): AcpConfigOptionDto[] => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: currentModel,
+        options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+      },
+    ];
+    let releaseRead!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: storedModel } }));
+    updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+      storedModel = updates.extra.studio_initial_model;
+      return true;
+    });
+    setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+      currentModel = value;
+      return { confirmation: 'observed', config_options: options() };
+    });
+    const loadFresh = async () => options();
+    const port = {
+      // The selector reads the runtime before it applies a change; hold that read.
+      load: async () => {
+        await reading;
+        return options();
+      },
+      loadFresh,
+      setConfigOption: setAelixInitialModelConfigOption,
+    };
+    const { result } = renderHook(() =>
+      useRealConfigOptions({ conversation_id: 'conv-header', configOptionsPort: port })
+    );
+    let headerChange!: Promise<unknown>;
+    act(() => {
+      headerChange = result.current.setConfigOptionWithConfirmation('model', 'fixture/b');
+    });
+    const dispatchedOn = vi.fn();
+    const send = submitAelixInitialPrompt('conv-header', async () => dispatchedOn(currentModel), vi.fn(), loadFresh);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(dispatchedOn).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseRead();
+      await headerChange;
+      await send;
+    });
+    expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith('fixture/b');
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledExactlyOnceWith({
+      conversation_id: 'conv-header',
+      option_id: 'model',
+      value: 'fixture/b',
+    });
+    expect(storedModel).toBeNull();
+  });
+
+  describe('a header model change the host reports as failed', () => {
+    const setup = (conversationId: string) => {
+      const state = { stored: 'fixture/a' as string | null, current: 'fixture/a' };
+      const options = (): AcpConfigOptionDto[] => [
+        {
+          id: 'model',
+          category: 'model',
+          type: 'select',
+          current_value: state.current,
+          options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+        },
+        {
+          id: 'thought',
+          category: 'thought_level',
+          type: 'select',
+          current_value: 'low',
+          options: [{ value: 'low' }, { value: 'high' }],
+        },
+      ];
+      getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: state.stored } }));
+      updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+        state.stored = updates.extra.studio_initial_model;
+        return true;
+      });
+      const loadFresh = async () => options();
+      const dispatchedOn = vi.fn();
+      const send = () =>
+        submitAelixInitialPrompt(conversationId, async () => dispatchedOn(state.current), vi.fn(), loadFresh);
+      return { state, options, loadFresh, dispatchedOn, send };
+    };
+
+    it('sends the first prompt on the model a failing native hook already applied', async () => {
+      const { useAcpConfigOptions: useRealConfigOptions, classifyConfigSetError: classify } = await vi.importActual<
+        typeof import('@/renderer/hooks/agent/useAcpConfigOptions')
+      >('@/renderer/hooks/agent/useAcpConfigOptions');
+      const { state, options, loadFresh, dispatchedOn, send } = setup('conv-hook-error');
+      const hookError = new BackendHttpError({
+        method: 'PUT',
+        path: '/api/conversations/conv-hook-error/config-options/model',
+        status: 502,
+        body: { success: false, error: 'Upstream service unavailable.', code: 'BAD_GATEWAY' },
+      });
+      setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+        state.current = value;
+        throw hookError;
+      });
+      const port = {
+        load: async () => options(),
+        loadFresh,
+        setConfigOption: (id: string, option: string, value: string) =>
+          setAelixInitialModelConfigOption(id, option, value, loadFresh),
+      };
+      const { result } = renderHook(() =>
+        useRealConfigOptions({ conversation_id: 'conv-hook-error', configOptionsPort: port })
+      );
+      let headerError: unknown;
+      await act(async () => {
+        headerError = await result.current.setConfigOptionWithConfirmation('model', 'fixture/b').catch((e) => e);
+      });
+      expect(classify(headerError)).toBe('model_change_observed_with_error');
+      expect(state.stored).toBe('fixture/b');
+
+      await send();
+      expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith('fixture/b');
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledOnce();
+      expect(state.stored).toBeNull();
+    });
+
+    it.each([
+      ['lands late', 'fixture/b'],
+      ['never lands', 'fixture/a'],
+    ])('sends the first prompt on what the runtime reports when a timed-out switch %s', async (_case, expected) => {
+      const conversationId = `conv-timeout-${expected}`;
+      const { state, loadFresh, dispatchedOn, send } = setup(conversationId);
+      const timeout = new BackendHttpError({
+        method: 'PUT',
+        path: `/api/conversations/${conversationId}/config-options/model`,
+        status: 504,
+        body: { success: false, error: 'The agent did not confirm the change.', code: 'confirmation_timeout' },
+      });
+      setConfigOptionInvokeMock.mockRejectedValue(timeout);
+      await expect(setAelixInitialModelConfigOption(conversationId, 'model', 'fixture/b', loadFresh)).rejects.toBe(
+        timeout
+      );
+      expect(state.stored).toBe('fixture/a');
+      state.current = expected;
+      setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+        state.current = value;
+        return { confirmation: 'observed', config_options: await loadFresh() };
+      });
+
+      await send();
+      expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith(expected);
+      // No switch back: the prompt goes out on the model the header shows.
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledOnce();
+    });
+
+    it('reads the first-prompt metadata only after an observed model change', async () => {
+      const { state, loadFresh } = setup('conv-metadata-reads');
+      setConfigOptionInvokeMock.mockImplementation(async ({ option_id, value }) => {
+        if (option_id === 'model') state.current = value;
+        return { confirmation: option_id === 'model' ? 'command_ack' : 'observed', config_options: await loadFresh() };
+      });
+      await setAelixInitialModelConfigOption('conv-metadata-reads', 'thought', 'high', loadFresh);
+      await setAelixInitialModelConfigOption('conv-metadata-reads', 'model', 'fixture/b', loadFresh);
+      expect(getConversationInvokeMock).not.toHaveBeenCalled();
+      expect(state.stored).toBe('fixture/a');
+    });
+  });
+
+  it.each([
+    ['reports no current model', '', false, 'conversation.welcome.selectModelToSend', true],
+    ['offers no model at all', '', false, 'conversation.welcome.addModelToSend', false],
+    ['reports a current model', 'fixture/one', false, null, true],
+    ['has a first-prompt choice pending', '', true, null, true],
+  ])('blocks Send for builtin Aelix only when the runtime %s', async (_case, current, pending, hint, hasModels) => {
+    const blocked = hint !== null;
+    useAcpConfigOptionsMock.mockReturnValue({
+      setStatus: { state: 'idle' },
+      mode: null,
+      thoughtLevel: null,
+      reload: vi.fn(),
+      setConfigOption: vi.fn(),
+      model: {
+        id: 'model',
+        category: 'model',
+        currentValue: current,
+        options: hasModels ? [{ value: 'fixture/one', label: 'Loopback one' }] : [],
+      },
+    });
+    sendMessageInvokeMock.mockResolvedValue({ turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' });
+    getConversationInvokeMock.mockResolvedValue({ extra: {} });
+    render(
+      <AcpSendBox
+        conversation_id={`conv-model-required-${String(blocked)}-${String(pending)}-${String(hasModels)}`}
+        backend='aelix'
+        hasInitialModel={pending}
+        messageState={makeMessageState()}
+      />
+    );
+    expect(sendBoxPropsSpy.mock.calls.at(-1)![0].sendDisabled).toBe(blocked);
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'send' })));
+    if (blocked) {
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+      expect(messageWarningMock).toHaveBeenCalledWith(hint);
+    } else {
+      await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
+      expect(messageWarningMock).not.toHaveBeenCalled();
+    }
+  });
+
+  it('puts an automatic first prompt rejected before dispatch back into the composer', async () => {
+    const actual = await vi.importActual<typeof import('@/renderer/utils/file/messageFiles')>(
+      '@/renderer/utils/file/messageFiles'
+    );
+    collectChatFileRefsMock.mockImplementation(actual.collectChatFileRefs);
+    splitChatFileRefsMock.mockImplementation(actual.splitChatFileRefs);
+    try {
+      render(
+        <AcpSendBox conversation_id='conv-restore' backend='aelix' hasInitialModel messageState={makeMessageState()} />
+      );
+      const { restoreDraft } = vi.mocked(useAcpInitialMessage).mock.calls.at(-1)![0];
+      const upload: ChatFileRef = { kind: 'upload', path: '/uploads/note.txt' };
+      const local: ChatFileRef = { kind: 'local', path: '/workspace/source.ts' };
+      restoreDraft!('first prompt', [upload, local]);
+      const update = draftMutateMock.mock.calls.at(-1)![0];
+      // A file the user already re-attached is not duplicated; later typing is kept after the prompt.
+      expect(update({ _type: 'acp', content: 'typed later', uploadFile: ['/uploads/note.txt'], atPath: [] })).toEqual({
+        _type: 'acp',
+        content: 'first prompt\ntyped later',
+        uploadFile: ['/uploads/note.txt'],
+        atPath: [{ path: '/workspace/source.ts', name: 'source.ts', isFile: true, chatRef: local }],
+      });
+      expect(update({ _type: 'acp', content: '', uploadFile: [], atPath: [] })).toMatchObject({
+        content: 'first prompt',
+        uploadFile: ['/uploads/note.txt'],
+      });
+    } finally {
+      collectChatFileRefsMock.mockImplementation(() => []);
+      splitChatFileRefsMock.mockImplementation(() => ({ uploadFiles: [], atPath: [] }));
+    }
   });
 
   it('shows a progress ring with a window size, a hollow ring without one, and nothing without usage', () => {

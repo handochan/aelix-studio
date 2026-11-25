@@ -38,6 +38,10 @@ type GuidModelSelectorProps = {
   setSelectedAcpModel: React.Dispatch<React.SetStateAction<string | null>>;
   thoughtLevelOption?: AgentRuntimeDerivedOption | null;
   onThoughtLevelSelect?: (value: string) => void;
+  /** No model is in use until the user picks one; label the picker as a prompt. */
+  modelSelectionRequired?: boolean;
+  /** A pick is required but there is nothing to pick; offer to add a model instead. */
+  modelSetupRequired?: boolean;
 };
 
 /** Composite id for a provider+model pair, so the shared flat model list can track selection. */
@@ -53,10 +57,12 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   setSelectedAcpModel,
   thoughtLevelOption,
   onThoughtLevelSelect,
+  modelSelectionRequired = false,
+  modelSetupRequired = false,
 }) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const defaultModelLabel = t('common.defaultModel');
+  const defaultModelLabel = modelSelectionRequired ? t('conversation.welcome.selectModel') : t('common.defaultModel');
 
   // 过滤掉被禁用的 provider
   const enabledModelList = React.useMemo(() => {
@@ -80,6 +86,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   const acpSelectedLabel = React.useMemo(() => {
     return (
       currentAcpCachedModelInfo?.available_models?.find((m) => m.id === selectedAcpModel)?.label ||
+      selectedAcpModel ||
       currentAcpCachedModelInfo?.current_model_label ||
       currentAcpCachedModelInfo?.current_model_id ||
       ''
@@ -92,13 +99,21 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   ]);
 
   const acpButtonLabel = React.useMemo(() => {
+    // The runtime's first advertised model is not in use; do not present it as chosen.
+    if (modelSelectionRequired) return defaultModelLabel;
     return getModelDisplayLabel({
       selected_value: selectedAcpModel || currentAcpCachedModelInfo?.current_model_id,
       selectedLabel: acpSelectedLabel,
       defaultModelLabel,
       fallbackLabel: defaultModelLabel,
     });
-  }, [acpSelectedLabel, currentAcpCachedModelInfo?.current_model_id, defaultModelLabel, selectedAcpModel]);
+  }, [
+    acpSelectedLabel,
+    currentAcpCachedModelInfo?.current_model_id,
+    defaultModelLabel,
+    modelSelectionRequired,
+    selectedAcpModel,
+  ]);
   const selectedThoughtLevelValue = thoughtLevelOption?.currentValue || thoughtLevelOption?.options[0]?.value || '';
   const normalizedThoughtLevelOption =
     thoughtLevelOption && thoughtLevelOption.options.length > 0
@@ -111,6 +126,22 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     modelLabel: acpButtonLabel,
     thoughtLevel: normalizedThoughtLevelOption,
   });
+
+  const addModelItem = (
+    <Menu.Item key='add-model' className='text-12px text-t-secondary' onClick={() => navigate('/settings/model')}>
+      <Plus theme='outline' size='12' />
+      {t('settings.addModel')}
+    </Menu.Item>
+  );
+  const noModelsItem = (
+    <Menu.Item
+      key='no-models'
+      className='px-12px py-12px text-t-secondary text-14px text-center flex justify-center items-center'
+      disabled
+    >
+      {t('settings.noAvailableModels')}
+    </Menu.Item>
+  );
 
   if (isGeminiMode) {
     // Provider-grouped models (e.g. aionrs). Build groups + a composite-id lookup
@@ -133,29 +164,13 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
     const currentProviderModelId = current_model
       ? providerCompositeId(current_model.id, current_model.use_model || '')
       : null;
-    const addModelItem = (
-      <Menu.Item key='add-model' className='text-12px text-t-secondary' onClick={() => navigate('/settings/model')}>
-        <Plus theme='outline' size='12' />
-        {t('settings.addModel')}
-      </Menu.Item>
-    );
-
     return (
       <Dropdown
         trigger='hover'
         droplist={
           <Menu selectedKeys={currentProviderModelId ? [currentProviderModelId] : []}>
             {providerModelGroups.length === 0
-              ? [
-                  <Menu.Item
-                    key='no-models'
-                    className='px-12px py-12px text-t-secondary text-14px text-center flex justify-center items-center'
-                    disabled
-                  >
-                    {t('settings.noAvailableModels')}
-                  </Menu.Item>,
-                  addModelItem,
-                ]
+              ? [noModelsItem, addModelItem]
               : [
                   <RuntimeSelectorModelList
                     key='model-list'
@@ -185,6 +200,26 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
           <span className='flex items-center gap-6px min-w-0'>
             <Brain theme='outline' size='14' fill={iconColors.secondary} className='shrink-0' />
             <span className='guid-model-label'>{geminiButtonLabel}</span>
+            <Down theme='outline' size='12' fill={iconColors.secondary} className='shrink-0' />
+          </span>
+        </Button>
+      </Dropdown>
+    );
+  }
+
+  // Builtin Aelix with nothing to pick: lead to Settings rather than suggest a send would load models.
+  if (modelSetupRequired) {
+    return (
+      <Dropdown trigger='click' droplist={<Menu>{[noModelsItem, addModelItem]}</Menu>}>
+        <Button
+          className={'sendbox-model-btn guid-config-btn'}
+          shape='round'
+          size='small'
+          data-testid='guid-model-setup'
+        >
+          <span className='flex items-center gap-6px min-w-0'>
+            <Brain theme='outline' size='14' fill={iconColors.secondary} className='shrink-0' />
+            <span className='guid-model-label'>{defaultModelLabel}</span>
             <Down theme='outline' size='12' fill={iconColors.secondary} className='shrink-0' />
           </span>
         </Button>

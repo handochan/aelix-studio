@@ -37,9 +37,10 @@ In the existing Model settings page or modal:
    its window cancels a pending login.
 3. For a custom compatible endpoint, save the Provider ID, model, endpoint and
    API protocol first, then register its key. Credential-bearing URLs are refused.
-4. Start a **new** Aelix conversation and send the first message. Its existing
-   custom-agent/assistant path launches the selected native Provider/model with
-   the same explicit CLI root. Existing sessions keep their cached credentials.
+4. Start a **new** Aelix conversation and send the first message. This opens the
+   built-in Aelix assistant with the chosen Provider and model. Studio supplies
+   the runtime and CLI root when starting a host that supports the built-in
+   entry. Existing sessions keep their cached credentials.
 
 `configured/source` comes from native `ModelRegistry`/`AuthStorage`; it means
 credentials are available, not that the remote Provider accepted them. Endpoint,

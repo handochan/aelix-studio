@@ -37,8 +37,10 @@ vi.mock('react-i18next', () => ({
   }),
 }));
 
+const navigateMock = vi.hoisted(() => vi.fn());
+
 vi.mock('react-router-dom', () => ({
-  useNavigate: () => vi.fn(),
+  useNavigate: () => navigateMock,
 }));
 
 vi.mock('@icon-park/react', () => ({
@@ -115,6 +117,55 @@ describe('GuidModelSelector', () => {
       { value: 'high', label: 'High' },
     ],
   };
+
+  it('offers to add a model instead of a dead-end pill when there is nothing to pick', () => {
+    render(
+      <GuidModelSelector
+        isGeminiMode={false}
+        modelList={[]}
+        current_model={undefined}
+        setCurrentModel={vi.fn()}
+        currentAcpCachedModelInfo={{ current_model_id: null, current_model_label: null, available_models: [] }}
+        selectedAcpModel={null}
+        setSelectedAcpModel={vi.fn()}
+        modelSelectionRequired
+        modelSetupRequired
+      />
+    );
+    expect(screen.getByTestId('guid-model-setup')).toHaveTextContent('conversation.welcome.selectModel');
+    expect(screen.queryByText('Model switch is not supported')).not.toBeInTheDocument();
+    expect(screen.getByText('settings.noAvailableModels')).toBeInTheDocument();
+    fireEvent.click(screen.getByText('settings.addModel'));
+    expect(navigateMock).toHaveBeenCalledWith('/settings/model');
+  });
+
+  it('asks for a model instead of naming the first advertised one while a pick is required', () => {
+    const props = {
+      isGeminiMode: false,
+      modelList: [],
+      current_model: undefined,
+      setCurrentModel: vi.fn(),
+      currentAcpCachedModelInfo: {
+        current_model_id: 'fixture/one',
+        current_model_label: 'Loopback one',
+        available_models: [
+          { id: 'fixture/one', label: 'Loopback one' },
+          { id: 'fixture/two', label: 'Loopback two' },
+        ],
+      },
+      selectedAcpModel: null,
+      setSelectedAcpModel: vi.fn(),
+    };
+    const { container, rerender } = render(<GuidModelSelector {...props} modelSelectionRequired />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('conversation.welcome.selectModel');
+
+    rerender(<GuidModelSelector {...props} modelSelectionRequired={false} />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('Loopback one');
+
+    // A saved last model applied as the pick shows its own label.
+    rerender(<GuidModelSelector {...props} selectedAcpModel='fixture/two' modelSelectionRequired={false} />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('Loopback two');
+  });
 
   it('shows ACP model descriptions in option tooltips', () => {
     render(

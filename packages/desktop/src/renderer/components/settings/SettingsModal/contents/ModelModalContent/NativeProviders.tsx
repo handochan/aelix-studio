@@ -2,10 +2,14 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Divider, Input, Link, Select, Space, Typography } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation, NativeAuthSelection } from '@aionui/web-host';
+import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation } from '@aionui/web-host';
 import { ipcBridge } from '@/common';
-import { AELIX_MARK_DATA_URL } from '@/renderer/utils/model/agentLogo';
-import { requestNativeAuth } from './nativeAuth';
+import { canStartAssistantConversation, isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
+import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
+import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
+import { recheckAelixAfterSessionFailure } from '@/renderer/services/runtime/aelixAvailability';
+import { emitter } from '@/renderer/utils/emitter';
+import { mutate } from 'swr';
 
 /** Reuses Provider settings while keeping native credentials outside Aion's Provider DB. */
 export default function NativeProviders({
@@ -41,6 +45,7 @@ export default function NativeProviders({
     if (reply.ok && 'providers' in reply.data) {
       const next = reply.data;
       setCatalog(next);
+      void mutate(NATIVE_AUTH_CATALOG_KEY, next, { revalidate: false });
       setProvider(
         (previous) =>
           previous || next.providers.find((item) => item.configured || item.source)?.id || next.providers[0]?.id || ''
@@ -64,6 +69,11 @@ export default function NativeProviders({
     setModel(selected?.models[0]?.id ?? '');
   }, [provider, selected?.models[0]?.id]);
 
+  // A corrected credential must not stay behind the host's earlier session failure.
+  const recheckAvailability = (): void => {
+    void recheckAelixAfterSessionFailure().catch(() => false);
+  };
+
   const perform = async (command: NativeAuthCommand): Promise<void> => {
     setBusy(true);
     setError('');
@@ -79,6 +89,8 @@ export default function NativeProviders({
       await refresh();
     } else if ('providers' in reply.data) {
       setCatalog(reply.data);
+      void mutate(NATIVE_AUTH_CATALOG_KEY, reply.data, { revalidate: false });
+      if (command.action === 'setKey' || command.action === 'endpoint') recheckAvailability();
       if (command.action === 'endpoint') {
         setProvider(command.provider);
         setModel(command.model);
@@ -86,6 +98,7 @@ export default function NativeProviders({
     } else if ('operationId' in reply.data) {
       currentOperation.current = reply.data;
       setOperation(reply.data);
+      if (reply.data.phase === 'complete') recheckAvailability();
       if (reply.data.phase !== 'pending') await refresh();
     }
     setBusy(false);
@@ -109,6 +122,7 @@ export default function NativeProviders({
         if (reply.data.phase !== 'pending') {
           setValue('');
           if (reply.data.phase === 'failed') setError(reply.data.code ?? 'NATIVE_FAILED');
+          if (reply.data.phase === 'complete') recheckAvailability();
           await refresh();
           return;
         }
@@ -138,46 +152,31 @@ export default function NativeProviders({
     setBusy(true);
     setError('');
     try {
-      const reply = await requestNativeAuth({ action: 'select', provider, model });
-      if (reply.ok === false) {
-        setError(reply.code);
+      let assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
+      // The rejection may be recorded after the key was corrected, or the key fixed outside Studio.
+      if (
+        assistant &&
+        !canStartAssistantConversation(assistant) &&
+        (await recheckAelixAfterSessionFailure().catch(() => false))
+      ) {
+        assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
+      }
+      if (!assistant || !canStartAssistantConversation(assistant)) {
+        setError('RUNTIME_UNAVAILABLE');
         return;
       }
-      if (!('command' in reply.data)) {
-        setError('NATIVE_FAILED');
-        return;
-      }
-      const launch: NativeAuthSelection = reply.data;
-      const agents = await ipcBridge.acpConversation.getManagedAgents.invoke();
-      let agent: { id: string } | undefined = agents.find(
-        (item) =>
-          item.command === launch.command &&
-          JSON.stringify(item.args) === JSON.stringify(launch.args) &&
-          JSON.stringify((item.env ?? []).map(({ name, value: entry }) => ({ name, value: entry }))) ===
-            JSON.stringify(launch.env)
-      );
-      agent ??= await ipcBridge.acpConversation.createCustomAgent.invoke({
-        name: `Aelix · ${provider}/${model}`,
-        command: launch.command,
-        icon: AELIX_MARK_DATA_URL,
-        args: launch.args,
-        env: launch.env,
-      });
-      const assistants = await ipcBridge.assistants.list.invoke();
-      const assistant = assistants.find((item) => item.agent_id === agent.id);
-      if (!assistant) {
-        setError('NATIVE_FAILED');
-        return;
-      }
+      const modelId = aelixModelId(provider, model);
       const conversation = await ipcBridge.conversation.create.invoke({
-        name: `Aelix · ${provider}/${model}`,
-        assistant: { id: assistant.id },
-        extra: {},
+        name: assistant.name,
+        assistant: { id: assistant.id, conversation_overrides: { model: modelId } },
+        extra: { studio_initial_model: modelId },
       });
+      emitter.emit('chat.history.refresh');
+      await confirmAelixInitialModel(conversation.id, modelId);
       onOpenConversation?.();
       void navigate(`/conversation/${conversation.id}`);
-    } catch {
-      setError('CONNECTION_LOST');
+    } catch (error) {
+      setError(error instanceof AelixInitialModelUnconfirmed ? 'MODEL_UNCONFIRMED' : 'CONNECTION_LOST');
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -190,7 +189,9 @@ export default function NativeProviders({
         ? t('settings.nativeAuth.unavailable')
         : error === 'UNAUTHENTICATED'
           ? t('settings.nativeAuth.unauthenticated')
-          : t('settings.nativeAuth.failed', { code: error });
+          : error === 'MODEL_UNCONFIRMED'
+            ? t('agent.model.switchFailed')
+            : t('settings.nativeAuth.failed', { code: error });
 
   return (
     <section className='flex flex-col gap-12px mb-24px' data-testid='native-provider-settings'>

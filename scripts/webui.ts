@@ -144,14 +144,17 @@ function runPackageIfNeeded(): void {
   console.log(`[webui] package finished in ${((Date.now() - start) / 1000).toFixed(1)}s`);
 }
 
-function resolveBackendBinary(): string {
+/** The host bundle for this platform: the alternate `AIONUI_BACKEND_BUNDLED_DIR` or the checkout's. */
+function resolveHostBundleDirectory(): string {
+  const bundledBase = process.env.AIONUI_BACKEND_BUNDLED_DIR ?? path.join(repoRoot, 'resources', 'bundled-aioncore');
+  return path.resolve(bundledBase, `${process.platform}-${process.arch}`);
+}
+
+function resolveBackendBinary(hostBundleDirectory: string): string {
   if (process.env.AIONUI_BACKEND_BIN) return process.env.AIONUI_BACKEND_BIN;
 
-  const bundledBase = process.env.AIONUI_BACKEND_BUNDLED_DIR ?? path.join(repoRoot, 'resources', 'bundled-aioncore');
-  const runtimeKey = `${process.platform}-${process.arch}`;
-  const bundled = path.join(bundledBase, runtimeKey, BACKEND_BINARY);
-  verifyDefaultHostBundle(path.join(bundledBase, runtimeKey), runtimeKey);
-  return bundled;
+  verifyDefaultHostBundle(hostBundleDirectory, `${process.platform}-${process.arch}`);
+  return path.join(hostBundleDirectory, BACKEND_BINARY);
 }
 
 /**
@@ -212,7 +215,8 @@ async function main(): Promise<void> {
   // This keeps `bun run webui` fully self-contained on hosts without Aelix Studio.app.
   const workDir = resolveBackendDataDir();
   const staticDir = resolveStaticDir();
-  const backendBin = resolveBackendBinary();
+  const hostBundleDirectory = resolveHostBundleDirectory();
+  const backendBin = resolveBackendBinary(hostBundleDirectory);
   const logDir = process.env.AIONUI_LOG_DIR ?? path.join(workDir, 'logs');
 
   console.log('[webui] work dir   :', workDir);
@@ -228,8 +232,10 @@ async function main(): Promise<void> {
     app: {
       version: '0.0.0',
       isPackaged: false,
-      resourcesPath: repoRoot,
+      resourcesPath: path.join(repoRoot, 'resources'),
       userDataPath,
+      // Bundled Node is verified from the same directory as the host binary.
+      bundledHostDirectory: hostBundleDirectory,
     },
     staticDir,
     port,

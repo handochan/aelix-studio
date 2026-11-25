@@ -19,6 +19,7 @@ const actionDir = resolve(projectRoot, '.github/actions/full-verify-gate');
 const RENDERER = 'packages/desktop/src/renderer/**';
 const EDITORS = 'packages/desktop/src/renderer/pages/conversation/Preview/components/editors';
 const PROVIDER_UI = 'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent';
+const NATIVE_AUTH = 'packages/desktop/src/renderer/services/runtime/nativeAuth.ts';
 const LOCALES = 'packages/desktop/src/renderer/services/i18n/locales';
 // The reviewer's case: main-process runtime that lives in the shared tree.
 const COMMON_RUNTIME = 'packages/desktop/src/common/platform/ElectronPlatformServices.ts';
@@ -61,7 +62,7 @@ describe('full verification skip set', () => {
     [`${EDITORS}/OfflineMonacoEditor.tsx`, `${EDITORS}/OfflineMonacoEditor.tsx`],
     [`${EDITORS}/localMonaco.ts`, `${EDITORS}/localMonaco.ts`],
     [`${PROVIDER_UI}/NativeProviders.tsx`, `${PROVIDER_UI}/**`],
-    [`${PROVIDER_UI}/nativeAuth.ts`, `${PROVIDER_UI}/**`],
+    [NATIVE_AUTH, NATIVE_AUTH],
     [`${LOCALES}/en-US/settings.json`, `${LOCALES}/*/settings.json`],
     [`${LOCALES}/ko-KR/settings.json`, `${LOCALES}/*/settings.json`],
     [`${LOCALES}/en-US/conversation.json`, `${LOCALES}/en-US/conversation.json`],

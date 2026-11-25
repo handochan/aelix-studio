@@ -1,9 +1,8 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { locateStudioExtensionLayout, STATE_ENVIRONMENT } from '../studio-extensions/store/layout.js';
 import { NATIVE_AUTH_HELPER } from './helperSource.js';
-import { resolveNativeRuntime, type NativeRuntime } from './runtime.js';
+import { normalizeStudioAgentDir, selectNativeRuntime, type NativeRuntime } from './runtime.js';
 import type { NativeAuthCommand, NativeAuthData, NativeAuthOperation, NativeAuthReply } from './types.js';
 
 type Operation = {
@@ -46,20 +45,6 @@ export class NativeAuthService {
     } = {}
   ) {}
 
-  private runtime(): NativeRuntime | undefined {
-    const explicit = this.options.runtime ?? process.env.AELIX_STUDIO_RUNTIME;
-    if (explicit) return resolveNativeRuntime(explicit);
-    const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-    const candidates = [resources && path.join(resources, 'studio-preview'), path.resolve('.local/studio-preview')];
-    for (const candidate of candidates) {
-      if (candidate) {
-        const runtime = resolveNativeRuntime(candidate);
-        if (runtime) return runtime;
-      }
-    }
-    return undefined;
-  }
-
   /** Returns only safe error codes; request bodies/native exception text must not be logged. */
   async request(owner: string, input: unknown, userDataPath?: string): Promise<NativeAuthReply> {
     try {
@@ -68,7 +53,7 @@ export class NativeAuthService {
       const command = input as NativeAuthCommand;
       if (!ACTIONS.has(command.action)) return fail('UNSUPPORTED');
       if ('operationId' in command) return this.control(owner, command);
-      const runtime = this.runtime();
+      const runtime = selectNativeRuntime(this.options.runtime);
       if (!runtime) return fail('RUNTIME_UNAVAILABLE');
       const mutation = !['catalog', 'select'].includes(command.action);
       if (mutation && (this.mutating || this.operation?.state.phase === 'pending')) return fail('BUSY');
@@ -164,7 +149,11 @@ export class NativeAuthService {
   private run(runtime: NativeRuntime, command: NativeAuthCommand, operation?: Operation): Promise<NativeAuthReply> {
     return new Promise((resolve) => {
       const child = spawn(runtime.python, [...runtime.helperArgs, '-c', NATIVE_AUTH_HELPER], {
-        env: { ...(this.options.env ?? process.env), PYTHONDONTWRITEBYTECODE: '1' },
+        env: {
+          ...(this.options.env ?? process.env),
+          AELIX_CODING_AGENT_DIR: normalizeStudioAgentDir(this.options.env),
+          PYTHONDONTWRITEBYTECODE: '1',
+        },
         stdio: ['pipe', 'pipe', 'pipe'],
         shell: false,
         windowsHide: true,

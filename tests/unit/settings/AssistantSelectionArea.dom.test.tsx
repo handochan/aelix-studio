@@ -10,8 +10,14 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import { ConfigProvider } from '@arco-design/web-react';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import AssistantSelectionArea from '@/renderer/pages/guid/components/AssistantSelectionArea';
+import aelixMark from '@/renderer/assets/logo.svg';
 import { AELIX_MARK_DATA_URL } from '@/renderer/utils/model/agentLogo';
 
+const { runtimeCatalog } = vi.hoisted(() => ({
+  runtimeCatalog: vi.fn((): unknown[] => [
+    { id: 'agent-antigravity', name: 'Antigravity', backend: 'antigravity', command: 'agy' },
+  ]),
+}));
 const logoMocks = vi.hoisted(() => ({ logos: {} as Record<string, string> }));
 
 vi.mock('react-i18next', () => ({
@@ -31,12 +37,50 @@ vi.mock('@/renderer/utils/model/agentLogo', async (importOriginal) => ({
 }));
 
 vi.mock('@/renderer/hooks/agent/useManagedAgents', () => ({
-  useManagedAgentRuntimeCatalog: () => [
-    { id: 'agent-antigravity', name: 'Antigravity', backend: 'antigravity', command: 'agy' },
-  ],
+  useManagedAgentRuntimeCatalog: runtimeCatalog,
 }));
 
 describe('AssistantSelectionArea', () => {
+  it('puts the builtin first and keeps the previously selected assistant selected', () => {
+    const aelix: Assistant = {
+      ...overflowAssistant('bare:builtin-aelix', 'Aelix', 99),
+      source: 'generated',
+      agent_id: 'builtin-aelix',
+      agent: { type: 'acp', source: 'builtin', acp_backend: 'aelix' },
+    };
+    vi.stubGlobal('innerWidth', 390);
+    try {
+      render(
+        <AssistantSelectionArea
+          selectedAssistantId='cowork'
+          assistants={[...assistants(), aelix]}
+          localeKey='en-US'
+          onSelectAssistant={vi.fn()}
+        />
+      );
+
+      const [first] = screen.getAllByTestId(/preset-pill-/);
+      expect(first).toHaveAttribute('data-assistant-id', aelix.id);
+      expect(first.querySelector('img')).toHaveAttribute('src', aelixMark);
+      expect(screen.getByTestId('preset-pill-cowork')).toHaveAttribute('data-assistant-selected', 'true');
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it('shows the missing builtin as a disabled first entry without a generated assistant', () => {
+    runtimeCatalog.withImplementation(
+      () => [{ id: 'builtin-aelix', name: 'Aelix', backend: 'aelix', status: 'missing', enabled: true }],
+      () => {
+        render(<AssistantSelectionArea assistants={assistants()} localeKey='en-US' onSelectAssistant={vi.fn()} />);
+
+        const [first] = screen.getAllByTestId(/preset-pill-/);
+        expect(first).toHaveTextContent('Aelix · settings.agentManagement.filterUnavailable');
+        expect(first).toBeDisabled();
+      }
+    );
+  });
+
   it('returns the real assistant id when a pill is selected', () => {
     const onSelectAssistant = vi.fn();
 

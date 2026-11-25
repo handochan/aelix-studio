@@ -331,7 +331,13 @@ export const conversation = {
   // 'auto' = frontend-derived default title (stays agent-overwritable).
   update: httpPatch<
     boolean,
-    { id: string; updates: Partial<TChatConversation> & { name_source?: 'user' | 'auto' }; merge_extra?: boolean }
+    {
+      id: string;
+      updates: (Partial<TChatConversation> | { extra: Partial<TChatConversation['extra']> }) & {
+        name_source?: 'user' | 'auto';
+      };
+      merge_extra?: boolean;
+    }
   >(
     (p) => `/api/conversations/${p.id}`,
     (p) => {
@@ -1856,6 +1862,7 @@ export interface ICreateConversationParams {
     };
   };
   extra: {
+    studio_initial_model?: string;
     workspace?: string;
     custom_workspace?: boolean;
     default_files?: string[];

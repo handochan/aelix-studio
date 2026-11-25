@@ -41,7 +41,7 @@ import { startStudioExtensions } from '@process/services/StudioExtensionsService
 import { pathToFileURL } from 'node:url';
 import { BackendLifecycleManager, fetchStudioBackend } from '@aionui/web-host';
 import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
-import { resolveBinaryPath } from '@process/backend';
+import { getBackendResourcesPath, resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
 import { wasLaunchedAtLogin } from '@process/bridge/applicationBridge';
 import { onLanguageChanged } from './process/bridge/systemSettingsBridge';
@@ -226,7 +226,7 @@ const backendManager = new BackendLifecycleManager(
   {
     version: app.getVersion(),
     isPackaged: app.isPackaged,
-    resourcesPath: process.resourcesPath,
+    resourcesPath: getBackendResourcesPath(),
     userDataPath: app.getPath('userData'),
   },
   resolveBinaryPath,

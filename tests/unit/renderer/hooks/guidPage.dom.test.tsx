@@ -594,6 +594,49 @@ describe('GuidPage', () => {
     });
   });
 
+  it.each([
+    ['in the catalog', ['fixture/one', 'fixture/two'], 'fixture/two'],
+    ['missing from the catalog', ['fixture/one'], null],
+    ['offered before the catalog loads', null, null],
+  ])('uses the saved builtin Aelix model as the pick only when it is %s', async (_case, catalog, expected) => {
+    const original = {
+      id: agentSelectionMock.selectedAssistantId,
+      assistant: agentSelectionMock.selectedAssistant,
+    };
+    agentSelectionMock.selectedAssistantId = 'bare:builtin-aelix';
+    agentSelectionMock.selectedAssistant = {
+      ...original.assistant,
+      id: 'bare:builtin-aelix',
+      agent_id: 'builtin-aelix',
+      source: 'generated',
+    };
+    agentSelectionMock.selectedAssistantBackend = 'aelix';
+    agentSelectionMock.currentAcpCachedModelInfo = catalog && {
+      current_model_id: catalog[0],
+      current_model_label: catalog[0],
+      available_models: catalog.map((id) => ({ id, label: id })),
+    };
+    swrMock.useSWRMock.mockReturnValue({ data: assistantDetailFixture });
+    resolveGuidAssistantDefaultsMock.mockReturnValue({
+      modelId: 'fixture/two',
+      disabledBuiltinSkillIds: [],
+      skillIds: [],
+      mcpIds: [],
+    });
+    try {
+      render(<GuidPage />);
+      await vi.waitFor(() =>
+        expect(agentSelectionMock.setSelectedAcpModel).toHaveBeenCalledWith(expected, { persistPreference: false })
+      );
+      if (!expected) {
+        expect(agentSelectionMock.setSelectedAcpModel).not.toHaveBeenCalledWith('fixture/two', expect.anything());
+      }
+    } finally {
+      agentSelectionMock.selectedAssistantId = original.id;
+      agentSelectionMock.selectedAssistant = original.assistant;
+    }
+  });
+
   it('does not reapply assistant default model over a guid-page model selection', async () => {
     swrMock.useSWRMock.mockReturnValue({ data: assistantDetailFixture });
     resolveGuidAssistantDefaultsMock.mockReturnValue({
@@ -628,6 +671,7 @@ describe('GuidPage', () => {
 
     expect(agentSelectionMock.setSelectedAcpModel).toHaveBeenCalledWith('global.anthropic.claude-opus-4-8', {
       persistPreference: false,
+      explicit: true,
     });
     agentSelectionMock.setSelectedAcpModel.mockClear();
 

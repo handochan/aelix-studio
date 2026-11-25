@@ -247,6 +247,8 @@ export type TChatConversation =
         {
           workspace?: string;
           backend: string;
+          /** Explicit builtin Aelix model until the host accepts the first prompt. */
+          studio_initial_model?: string | null;
           cli_path?: string;
           custom_workspace?: boolean;
           agent_name?: string;

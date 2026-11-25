@@ -8,6 +8,7 @@ import { ipcBridge } from '@/common';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import { parseError, uuid } from '@/common/utils';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { emitter } from '@/renderer/utils/emitter';
 import { type ChatFileRef, isChatFileRef, uploadFileRef } from '@/common/types/chatFile';
 import { useEffect } from 'react';
@@ -16,6 +17,10 @@ import { getConversationRuntimeWorkspaceErrorMessage } from '../../utils/convers
 import type { ConversationRuntimeSendFailure } from '../../runtime/conversationRuntimeViewStore';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
+import { AelixInitialModelUnconfirmed } from '@/renderer/services/runtime/aelixInitialModel';
+
+const isRefusedByHost = (error: unknown): boolean =>
+  isBackendHttpError(error) && error.status >= 400 && error.status < 500;
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
@@ -30,6 +35,8 @@ type UseAcpInitialMessageParams = {
   beginCompactionSubmission?: (input: string) => (() => void) | undefined;
   checkAndUpdateTitle: (conversation_id: string, input: string) => void;
   addOrUpdateMessage: (message: TMessage, prepend?: boolean) => void;
+  submitPrompt?: (dispatch: () => Promise<void>) => Promise<void>;
+  restoreDraft?: (input: string, files: ChatFileRef[]) => void;
 };
 
 /**
@@ -48,6 +55,8 @@ export const useAcpInitialMessage = ({
   beginCompactionSubmission,
   checkAndUpdateTitle,
   addOrUpdateMessage,
+  submitPrompt,
+  restoreDraft,
 }: UseAcpInitialMessageParams): void => {
   const { t } = useTranslation();
 
@@ -63,6 +72,8 @@ export const useAcpInitialMessage = ({
 
     const sendInitialMessage = async () => {
       let finishCompactionSubmission: (() => void) | undefined;
+      let draft: { input: string; files: ChatFileRef[] } | undefined;
+      let dispatched = false;
       try {
         const initialMessage = JSON.parse(storedMessage);
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
@@ -78,22 +89,28 @@ export const useAcpInitialMessage = ({
               .filter(isChatFileRef)
           : [];
 
-        markSendStarted?.();
-        setAiProcessing(true);
-
-        void checkAndUpdateTitle(conversation_id, input);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id: conversation_id,
-          files,
-        });
-        markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
+        draft = { input, files };
+        const dispatch = async () => {
+          dispatched = true;
+          markSendStarted?.();
+          setAiProcessing(true);
+          void checkAndUpdateTitle(conversation_id, input);
+          const result = await ipcBridge.acpConversation.sendMessage.invoke({ input, conversation_id, files });
+          markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
+        };
+        if (submitPrompt) await submitPrompt(dispatch);
+        else await dispatch();
 
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');
       } catch (error) {
+        // Give the prompt back unless it may have reached the agent: a 4xx means the host
+        // refused it, while a lost connection or a 5xx leaves that unknown.
+        if (draft && (!dispatched || isRefusedByHost(error))) restoreDraft?.(draft.input, draft.files);
         const errorMessageText =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+          error instanceof AelixInitialModelUnconfirmed
+            ? t('agent.model.switchFailed')
+            : getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed?.({
@@ -145,7 +162,9 @@ export const useAcpInitialMessage = ({
     markSendFailed,
     markSendStarted,
     resetState,
+    restoreDraft,
     setAiProcessing,
+    submitPrompt,
     t,
   ]);
 };
