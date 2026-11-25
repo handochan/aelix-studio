@@ -83,7 +83,7 @@ describe('useAcpInitialMessage', () => {
     expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBeNull();
   });
 
-  it('suppresses tips and reset when initial ACP send hits active-turn busy', async () => {
+  it('suppresses tips and reset and gives the draft back when initial ACP send hits active-turn busy', async () => {
     sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
     sendMessageInvokeMock.mockRejectedValue(
       new BackendHttpError({
@@ -123,8 +123,43 @@ describe('useAcpInitialMessage', () => {
     expect(addOrUpdateMessage).not.toHaveBeenCalled();
     expect(resetState).not.toHaveBeenCalled();
     expect(setAiProcessing).not.toHaveBeenCalledWith(false);
-    // The host saw this prompt, so the composer must not offer it again.
-    expect(restoreDraft).not.toHaveBeenCalled();
+    // The host refused the prompt (409), so the composer offers it again.
+    expect(restoreDraft).toHaveBeenCalledExactlyOnceWith('hello', []);
+  });
+
+  it.each([
+    ['a validation error', 400, true],
+    ['an archived conversation', 410, true],
+    ['an upstream failure', 502, false],
+    ['a lost connection', undefined, false],
+  ])('restores the dispatched first draft after %s only when the host refused it', async (_case, status, restores) => {
+    sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
+    sendMessageInvokeMock.mockRejectedValue(
+      status
+        ? new BackendHttpError({
+            method: 'POST',
+            path: '/api/conversations/conv-1/messages',
+            status,
+            body: { success: false, code: 'FIXTURE', error: 'fixture failure' },
+          })
+        : new TypeError('Failed to fetch')
+    );
+    const restoreDraft = vi.fn();
+    const addOrUpdateMessage = vi.fn();
+    renderHook(() =>
+      useAcpInitialMessage({
+        conversation_id: 'conv-1',
+        backend: 'aelix',
+        restoreDraft,
+        setAiProcessing: vi.fn(),
+        resetState: vi.fn(),
+        checkAndUpdateTitle: vi.fn(),
+        addOrUpdateMessage,
+      })
+    );
+    await waitFor(() => expect(addOrUpdateMessage).toHaveBeenCalledOnce());
+    expect(sendMessageInvokeMock).toHaveBeenCalledOnce();
+    expect(restoreDraft).toHaveBeenCalledTimes(restores ? 1 : 0);
   });
 
   it('holds the stored first message while sending is blocked and sends it once unblocked', async () => {

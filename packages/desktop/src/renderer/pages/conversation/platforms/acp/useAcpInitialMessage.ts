@@ -8,6 +8,7 @@ import { ipcBridge } from '@/common';
 import type { TMessage } from '@/common/chat/chatLib';
 import type { TConversationRuntimeSummary } from '@/common/config/storage';
 import { parseError, uuid } from '@/common/utils';
+import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { emitter } from '@/renderer/utils/emitter';
 import { type ChatFileRef, isChatFileRef, uploadFileRef } from '@/common/types/chatFile';
 import { useEffect } from 'react';
@@ -17,6 +18,9 @@ import type { ConversationRuntimeSendFailure } from '../../runtime/conversationR
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
 import { AelixInitialModelUnconfirmed } from '@/renderer/services/runtime/aelixInitialModel';
+
+const isRefusedByHost = (error: unknown): boolean =>
+  isBackendHttpError(error) && error.status >= 400 && error.status < 500;
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
@@ -68,7 +72,8 @@ export const useAcpInitialMessage = ({
 
     const sendInitialMessage = async () => {
       let finishCompactionSubmission: (() => void) | undefined;
-      let unsentDraft: { input: string; files: ChatFileRef[] } | undefined;
+      let draft: { input: string; files: ChatFileRef[] } | undefined;
+      let dispatched = false;
       try {
         const initialMessage = JSON.parse(storedMessage);
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
@@ -84,9 +89,9 @@ export const useAcpInitialMessage = ({
               .filter(isChatFileRef)
           : [];
 
-        unsentDraft = { input, files };
+        draft = { input, files };
         const dispatch = async () => {
-          unsentDraft = undefined;
+          dispatched = true;
           markSendStarted?.();
           setAiProcessing(true);
           void checkAndUpdateTitle(conversation_id, input);
@@ -99,7 +104,9 @@ export const useAcpInitialMessage = ({
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');
       } catch (error) {
-        if (unsentDraft) restoreDraft?.(unsentDraft.input, unsentDraft.files);
+        // Give the prompt back unless it may have reached the agent: a 4xx means the host
+        // refused it, while a lost connection or a 5xx leaves that unknown.
+        if (draft && (!dispatched || isRefusedByHost(error))) restoreDraft?.(draft.input, draft.files);
         const errorMessageText =
           error instanceof AelixInitialModelUnconfirmed
             ? t('agent.model.switchFailed')
