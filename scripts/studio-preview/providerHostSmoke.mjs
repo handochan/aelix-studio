@@ -205,7 +205,7 @@ try {
   // Builtin Aelix runs behind the host's protected relay, and the host drops free-form
   // peer detail at that boundary, so the provider's "Invalid API key" text never reaches
   // the UI. The classified failure card is what users see; providerSmoke.py separately
-  // requires the fixture to have rejected the wrong key. Follow-up issue: to be linked.
+  // requires the fixture to have rejected the wrong key. Follow-up: handochan/aelix-studio-host#71.
   await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
 
   await page.evaluate(() => {
