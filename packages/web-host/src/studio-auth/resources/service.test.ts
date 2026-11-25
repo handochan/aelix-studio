@@ -929,6 +929,85 @@ mcp_writer._platform_lock = traced_lock`;
     90000
   );
 
+  it.each([
+    ['private', 'studio', [], true],
+    ['shared', 'studio', ['other'], false],
+    ['differently named', 'staff', [], false],
+  ] as const)(
+    'applies the user-private-group rule to a group-writable lock directory (%s group)',
+    async (_label, groupName, members, allowed) => {
+      const sidecar = path.join(agent, 'locks');
+      await mkdir(sidecar);
+      await exec('chmod', ['0775', sidecar]);
+      // Present the lock directory's group as the user's primary group with the given name and members.
+      const seam = `import grp, pwd
+from types import SimpleNamespace
+lock_gid = os.stat(${JSON.stringify(sidecar)}).st_gid
+real_getpwuid, real_getgrgid = pwd.getpwuid, grp.getgrgid
+pwd.getpwuid = lambda uid: SimpleNamespace(pw_name="studio", pw_gid=lock_gid) if uid == os.geteuid() else real_getpwuid(uid)
+grp.getgrgid = lambda gid: SimpleNamespace(gr_name=${JSON.stringify(groupName)}, gr_mem=${JSON.stringify(members)}) if gid == lock_gid else real_getgrgid(gid)`;
+      const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
+      const old = await current(tool);
+      expect(old).toMatchObject(allowed ? { writable: true, reason: null } : { writable: false, reason: 'read-only' });
+      const result = await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision });
+      if (allowed) {
+        expect(result).toMatchObject({ ok: true, data: { saved: true } });
+        expect(JSON.parse(await readFile(settingsPath(), 'utf8'))).toMatchObject({ unrelated: { keep: true } });
+        expect(await readFile(settingsPath(), 'utf8')).not.toBe(initialSettings);
+      } else {
+        expect(result).toEqual(reply('helper-error-scope_readonly'));
+        expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
+      }
+    },
+    90000
+  );
+
+  it.each(['dotfile-style symlinked agent root', 'linked settings directory inside a symlinked agent root'])(
+    'resolves a %s before applying the directory policy',
+    async (scenario) => {
+      const dotfiles = path.join(root, 'dotfiles');
+      const realAgent = path.join(dotfiles, 'agent');
+      await mkdir(dotfiles, { mode: 0o700 });
+      await rename(agent, realAgent);
+      await symlink(realAgent, agent, 'dir');
+      let target = path.join(realAgent, 'settings.json');
+      let linked = service;
+      if (scenario !== 'dotfile-style symlinked agent root') {
+        await mkdir(path.join(realAgent, 'conf-real'), { mode: 0o700 });
+        target = path.join(realAgent, 'conf-real', 'settings.json');
+        await writeFile(target, initialSettings);
+        await symlink(path.join(realAgent, 'conf-real'), path.join(realAgent, 'conf'), 'dir');
+        linked = new NativeResourcesService({
+          runtime,
+          env: { ...env, AELIX_SETTINGS_PATH: path.join(agent, 'conf', 'settings.json') },
+        });
+      }
+      try {
+        const old = await linked.request(owner, tool);
+        if (old.ok === false) throw new Error(old.code);
+        const result = await linked.request(owner, {
+          ...command('helper-set-tool'),
+          expectedRevision: old.data.revision,
+        });
+        if (scenario === 'dotfile-style symlinked agent root') {
+          expect(old.data).toMatchObject({ writable: true, reason: null });
+          expect(result).toMatchObject({ ok: true, data: { saved: true } });
+          expect(await readFile(target, 'utf8')).not.toBe(initialSettings);
+          expect((await lstat(path.join(realAgent, 'locks'))).isDirectory()).toBe(true);
+          expect((await lstat(agent)).isSymbolicLink()).toBe(true);
+        } else {
+          expect(old.data).toMatchObject({ writable: false, reason: 'read-only' });
+          expect(result).toEqual(reply('helper-error-scope_readonly'));
+          expect(await readFile(target, 'utf8')).toBe(initialSettings);
+        }
+      } finally {
+        if (linked !== service) linked.dispose();
+      }
+    },
+    90000
+  );
+
   it('creates a missing agent root privately on the first write', async () => {
     await rm(agent, { recursive: true });
     const old = await current(tool);

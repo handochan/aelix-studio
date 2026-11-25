@@ -312,11 +312,24 @@ def windows_user():
     finally:
         token.Close()
 
+def private_group(gid):
+    """Debian/OpenSSH user-private-group rule: group write is only this user's own write."""
+    import grp
+    import pwd
+    try:
+        user = pwd.getpwuid(os.geteuid())
+        group = grp.getgrgid(gid)
+    except KeyError:
+        return False
+    return (user.pw_gid == gid and group.gr_name == user.pw_name
+        and all(member == user.pw_name for member in group.gr_mem))
+
 def private_directory(path, info):
     if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         return False
     if os.name != "nt":
-        return info.st_uid == os.geteuid() and not info.st_mode & (stat.S_IWGRP | stat.S_IWOTH)
+        return (info.st_uid == os.geteuid() and not info.st_mode & stat.S_IWOTH
+            and (not info.st_mode & stat.S_IWGRP or private_group(info.st_gid)))
     try:
         import win32security as security
         owner = windows_user()
@@ -365,27 +378,35 @@ def opened_id(fd):
 # Studio write, or make Studio report a save that did not land on the admitted
 # file. The native writer opens the sidecar lock and the temp file by path, and
 # Studio keeps that writer instead of reimplementing it. So, as defence in depth:
-#   1. Before writing, the lock directory and every settings directory from the
-#      agent root down are real directories (no link, junction or reparse
-#      point), owned by this user and not writable by group or others. Anything
-#      else is refused with SCOPE_READONLY.
+#   1. The agent root (or the directory of an AELIX_SETTINGS_PATH outside it)
+#      is resolved once to its real path, so a dotfile-style link to the root is
+#      allowed. Below that resolved root, the lock directory and every settings
+#      directory must be real directories (no link, junction or reparse point).
+#      The resolved root and those directories must be owned by this user and
+#      not writable by others. Group write is allowed only for this user's
+#      private group: the user's primary gid, named after the user, with no
+#      other members (Debian's umask 002 layout). Anything else is refused with
+#      SCOPE_READONLY.
 #   2. On POSIX those directories stay open (O_DIRECTORY|O_NOFOLLOW) for the
 #      whole transaction, and each child is opened relative to its pinned parent.
 #   3. After the native lock is taken, around the replacement and after it, the
 #      identities (st_dev/st_ino, or the Windows volume and file ID) of the lock
-#      file, the settings target and those directories are checked again. A
-#      mismatch fails closed: STORE_UNREADABLE before the commit, OUTCOME_UNKNOWN
-#      after it. An unavailable file ID counts as a mismatch, on Windows too.
+#      file, the settings target and those directories are checked again, and
+#      the configured root must still resolve to the pinned one. A mismatch
+#      fails closed: STORE_UNREADABLE before the commit, OUTCOME_UNKNOWN after
+#      it. An unavailable file ID counts as a mismatch, on Windows too.
 # A same-user process that swaps and restores a path between two checks can
 # still win. These checks catch every swap that is still visible.
 class SettingsPaths:
     """Hold identities (and POSIX directory handles) across the native transaction."""
     def __init__(self, stack):
         self.stack = stack
+        # Pinned real directories, and the configured spellings native code uses for them.
         self.directories = {}
+        self.aliases = {}
 
     def pin_store(self, store, real, create):
-        """Pin the configured chain, the real target's chain and the lock directory."""
+        """Pin the resolved root, the configured and real target chains, and the lock directory."""
         configured = store.global_path.parent
         anchor = ROOT if configured.is_relative_to(ROOT) else store.anchor
         if not os.path.lexists(anchor):
@@ -396,11 +417,22 @@ class SettingsPaths:
                 os.makedirs(anchor, 0o700, exist_ok=True)
             except OSError:
                 raise Refusal("SCOPE_READONLY") from None
-        self.pin_chain(configured, anchor)
-        self.pin_chain(real.parent, anchor.resolve())
-        locks = configured / "locks"
+        try:
+            real_anchor = anchor.resolve(strict=True)
+        except (OSError, RuntimeError):
+            raise Refusal("SCOPE_READONLY") from None
+        real_configured = real_anchor / configured.relative_to(anchor)
+        self.pin_chain(real_configured, real_anchor)
+        self.pin_chain(real.parent, real_anchor)
+        self.aliases[anchor] = real_anchor
+        self.aliases[configured] = real_configured
+        locks = real_configured / "locks"
         if create or os.path.lexists(locks):
             self.pin(locks, create=create)
+            self.aliases[configured / "locks"] = locks
+
+    def real(self, directory):
+        return self.aliases.get(directory, directory)
 
     def pin_chain(self, directory, anchor):
         cursor = anchor
@@ -440,6 +472,12 @@ class SettingsPaths:
             raise Refusal("SCOPE_READONLY") from None
 
     def verify(self):
+        for configured, real in self.aliases.items():
+            try:
+                if Path(os.path.realpath(configured)) != real:
+                    raise Refusal("STORE_UNREADABLE")
+            except OSError:
+                raise Refusal("STORE_UNREADABLE") from None
         for path, (expected, fd) in self.directories.items():
             try:
                 live = path.lstat()
@@ -451,9 +489,10 @@ class SettingsPaths:
                 raise Refusal("STORE_UNREADABLE") from None
 
     def regular(self, path, single_link=False):
-        fd = self.directories[path.parent][1]
+        parent = self.real(path.parent)
+        fd = self.directories[parent][1]
         try:
-            info = path.lstat() if fd is None else os.stat(path.name, dir_fd=fd, follow_symlinks=False)
+            info = (parent / path.name).lstat() if fd is None else os.stat(path.name, dir_fd=fd, follow_symlinks=False)
         except FileNotFoundError:
             return None
         if (not stat.S_ISREG(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
@@ -512,7 +551,8 @@ class GuardedSettings(FileSettingsStorage):
     @contextlib.contextmanager
     def _sidecar_lock(self, path):
         self.sidecar = self._sidecar_path(path)
-        self.paths.pin(self.sidecar.parent, create=True)
+        if self.paths.real(self.sidecar.parent) not in self.paths.directories:
+            raise Refusal("STORE_UNREADABLE")
         self.paths.verify()
         self.lock_key = self.paths.regular(self.sidecar, True)
         try:
