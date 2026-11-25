@@ -996,6 +996,21 @@ grp.getgrgid = shared_group`;
     90000
   );
 
+  it.runIf(onWindows)(
+    'refuses an agent root that grants CREATOR GROUP modify',
+    async () => {
+      // CREATOR GROUP inherits as the creator's primary group, so new settings files would be shared.
+      await exec('icacls', [agent, '/grant', '*S-1-3-1:(OI)(CI)M']);
+      const old = await current(tool);
+      expect(old).toMatchObject({ writable: false, reason: 'read-only' });
+      expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(
+        reply('helper-error-scope_readonly')
+      );
+      expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
+    },
+    90000
+  );
+
   // The user-private-group rule reads POSIX NSS; Windows uses owner and DACL checks instead.
   it.skipIf(onWindows).each([
     ['private group', {}, true],
