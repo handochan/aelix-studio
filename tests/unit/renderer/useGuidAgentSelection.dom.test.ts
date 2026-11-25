@@ -245,6 +245,17 @@ describe('useGuidAssistantSelection', () => {
       expect(result.current.modelSelectionRequired).toBe(false);
     });
 
+    it('counts the saved last model New Chat applies as the pick', async () => {
+      mockAssistants = [builtinAelix()];
+      loadCatalogMock.mockResolvedValue(helperCatalog);
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.currentAcpCachedModelInfo?.available_models).toHaveLength(2));
+      // GuidPage applies the saved preference without marking it explicit.
+      act(() => result.current.setSelectedAcpModel('fixture/two', { persistPreference: false }));
+      expect(result.current.selectedAcpModel).toBe('fixture/two');
+      expect(result.current.modelSelectionRequired).toBe(false);
+    });
+
     it('requires a pick when the runtime reports an empty current model, not its first model', async () => {
       mockAssistants = [builtinAelix()];
       mockManagedAgents = [runtimeReporting('')];

@@ -422,12 +422,12 @@ const GuidPage: React.FC = () => {
         }
       } else if (shouldApplyDefaultModel && resolvedDefaults.modelId) {
         const availableModelIds = new Set(agentSelection.currentAcpCachedModelInfo?.available_models.map((m) => m.id));
-        agentSelection.setSelectedAcpModel(
-          availableModelIds.size === 0 || availableModelIds.has(resolvedDefaults.modelId)
-            ? resolvedDefaults.modelId
-            : null,
-          { persistPreference: false }
-        );
+        // Builtin Aelix sends this as its model pick, so it must be one the catalog offers
+        // (the catalog may still be loading). Other agents keep the saved model until then.
+        const usable =
+          availableModelIds.has(resolvedDefaults.modelId) ||
+          (availableModelIds.size === 0 && !isBuiltinAelixAssistant(agentSelection.selectedAssistant));
+        agentSelection.setSelectedAcpModel(usable ? resolvedDefaults.modelId : null, { persistPreference: false });
       } else if (shouldApplyDefaultModel) {
         agentSelection.setSelectedAcpModel(null, { persistPreference: false });
       }
@@ -467,6 +467,7 @@ const GuidPage: React.FC = () => {
     agentSelection.currentAcpCachedModelInfo?.available_models,
     agentSelection.currentAgentModeOptions,
     agentSelection.currentThoughtLevelOption,
+    agentSelection.selectedAssistant,
     agentSelection.selectedAssistantBackend,
     agentSelection.setSelectedAcpModel,
     agentSelection.setSelectedMode,

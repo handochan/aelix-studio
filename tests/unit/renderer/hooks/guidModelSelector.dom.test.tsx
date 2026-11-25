@@ -138,6 +138,10 @@ describe('GuidModelSelector', () => {
 
     rerender(<GuidModelSelector {...props} modelSelectionRequired={false} />);
     expect(container.querySelector('.guid-model-label')).toHaveTextContent('Loopback one');
+
+    // A saved last model applied as the pick shows its own label.
+    rerender(<GuidModelSelector {...props} selectedAcpModel='fixture/two' modelSelectionRequired={false} />);
+    expect(container.querySelector('.guid-model-label')).toHaveTextContent('Loopback two');
   });
 
   it('shows ACP model descriptions in option tooltips', () => {
