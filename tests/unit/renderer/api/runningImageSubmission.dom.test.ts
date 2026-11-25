@@ -14,6 +14,21 @@ import {
 
 vi.mock('@renderer/services/runtime/RunningInput/Images', { spy: true });
 
+/** A socket that stays connecting and never emits events. */
+class InertWebSocket {
+  static readonly CONNECTING = 0;
+  static readonly OPEN = 1;
+  static readonly CLOSING = 2;
+  static readonly CLOSED = 3;
+  readyState = InertWebSocket.CONNECTING;
+  addEventListener(): void {}
+  removeEventListener(): void {}
+  send(): void {}
+  close(): void {
+    this.readyState = InertWebSocket.CLOSED;
+  }
+}
+
 const target = { bindingId: 'binding', turnId: 'turn' };
 const original = { kind: 'local', path: '/file.png' } as const;
 const derivative = { kind: 'upload', path: '/derived.png' } as const;
@@ -92,6 +107,10 @@ describe('running image submissions', () => {
     revokeURL.mockClear();
     mockPreparation.mockReset().mockReturnValue({ prepare, dispose: vi.fn() });
     vi.stubGlobal('fetch', fetcher);
+    // The realtime bridge opens a WebSocket on first use. jsdom's real socket fails
+    // asynchronously and logs after the file finishes, which Vitest reports as a
+    // teardown error. These tests only use fetch, so the socket never connects.
+    vi.stubGlobal('WebSocket', InertWebSocket);
     vi.stubGlobal(
       'URL',
       Object.assign(class extends URL {}, {
