@@ -224,6 +224,21 @@ describe('cancelled children report', () => {
     expect(entry(container, 1)).not.toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
   });
 
+  it('splits the persisted row captured from the pinned native and host', () => {
+    const captured = native.frames.find((frame) => frame.scenario === 'cancelledReport')!;
+    const saved = {
+      id: 'captured',
+      type: 'acp_tool_call',
+      conversation_id: 'conv',
+      msg_id: 'captured',
+      content: JSON.parse(JSON.stringify(captured.content)),
+    } as IMessageAcpToolCall;
+    const { container } = render(<MessageToolGroupSummary messages={[saved]} />);
+    expect(container.querySelectorAll('[data-subagent-state="stopped"]')).toHaveLength(2);
+    expect(entry(container, 1)).toHaveTextContent('PARTIAL_CHILD_CANCEL_A');
+    expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
+  });
+
   it('adds the report when the cancelled call result arrives after the stopped rows', () => {
     const live = message(stoppedPair, 'live');
     live.content.update.status = 'in_progress';

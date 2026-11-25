@@ -74,6 +74,11 @@ Studio runtime's `native-site`), without writing bytecode into it:
 python3 -I -B renderCancelReports.py <native-site> > cancelReports.json
 ```
 
+`nativeFrames.json` scenario `cancelledReport` is the real persisted row of a
+two-task cancel from `subagentSmoke.mjs` (host aelix.11, ACP `7a2ca0e8`, native
+`83714045`): status `failed`, the report as the call's text content, and the
+stopped children in `_meta`. The sandbox temp path is replaced with `<sandbox>`.
+
 Batch reports name members by submitted position only; progress rows carry no
 position, so the panel lists the report by task/step and never matches it to a
 row. A split is shown only when every position appears exactly once, in order,
