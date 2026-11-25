@@ -225,25 +225,32 @@ export const useGuidAssistantSelection = ({
     () => buildAgentRuntimeModelInfo(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
-  // A fresh profile has no ACP catalog snapshot until it opens a session.
+  // The ACP catalog is a snapshot from the last session: a fresh profile has none, and it
+  // misses providers configured since. The helper lists them; Send still confirms live.
   const { data: nativeCatalog } = useSWR(
-    isBuiltinAelixAssistant(selectedAssistant) && !cachedAgentRuntimeModelInfo ? NATIVE_AUTH_CATALOG_KEY : null,
+    isBuiltinAelixAssistant(selectedAssistant) ? NATIVE_AUTH_CATALOG_KEY : null,
     loadNativeAuthCatalog
   );
   const selectedAgentRuntimeModelInfo = useMemo<AcpModelInfo | null>(() => {
-    if (cachedAgentRuntimeModelInfo || !nativeCatalog) return cachedAgentRuntimeModelInfo;
+    if (!nativeCatalog) return cachedAgentRuntimeModelInfo;
+    const advertised = new Set(cachedAgentRuntimeModelInfo?.available_models.map((model) => model.id));
+    const configured = nativeCatalog.providers.flatMap((provider) =>
+      provider.models
+        .filter((model) => model.available)
+        .map((model) => ({
+          id: aelixModelId(provider.id, model.id),
+          label: model.name,
+          description: provider.name,
+        }))
+        .filter((model) => !advertised.has(model.id))
+    );
+    if (!cachedAgentRuntimeModelInfo) {
+      return { current_model_id: null, current_model_label: null, available_models: configured };
+    }
+    if (configured.length === 0) return cachedAgentRuntimeModelInfo;
     return {
-      current_model_id: null,
-      current_model_label: null,
-      available_models: nativeCatalog.providers.flatMap((provider) =>
-        provider.models
-          .filter((model) => model.available)
-          .map((model) => ({
-            id: aelixModelId(provider.id, model.id),
-            label: model.name,
-            description: provider.name,
-          }))
-      ),
+      ...cachedAgentRuntimeModelInfo,
+      available_models: [...cachedAgentRuntimeModelInfo.available_models, ...configured],
     };
   }, [cachedAgentRuntimeModelInfo, nativeCatalog]);
   const currentAgentAvailableCommands = useMemo(

@@ -6,7 +6,8 @@
 
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { createElement, type ReactNode } from 'react';
-import { SWRConfig } from 'swr';
+import { SWRConfig, useSWRConfig } from 'swr';
+import { NATIVE_AUTH_CATALOG_KEY } from '@/renderer/services/runtime/nativeAuth';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
@@ -137,16 +138,22 @@ describe('useGuidAssistantSelection', () => {
     }
   );
 
-  it('uses the helper only until an ACP catalog exists and preserves its extension model', async () => {
+  it('adds freshly configured helper models to the ACP catalog without replacing its extension model', async () => {
     const aelix = builtinAelix();
     mockAssistants = [aelix];
     loadCatalogMock.mockResolvedValue({
       providers: [{ id: 'fixture', name: 'Fixture', models: [{ id: 'helper', name: 'Helper', available: true }] }],
     });
-    const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: false }), {
-      wrapper: ({ children }: { children: ReactNode }) =>
-        createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
-    });
+    const { result, rerender } = renderHook(
+      () => ({
+        ...useGuidAssistantSelection({ resetAssistant: false }),
+        mutateCatalog: useSWRConfig().mutate,
+      }),
+      {
+        wrapper: ({ children }: { children: ReactNode }) =>
+          createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
+      }
+    );
     await waitFor(() =>
       expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id }) => id)).toEqual(['fixture/helper'])
     );
@@ -156,13 +163,38 @@ describe('useGuidAssistantSelection', () => {
         id: aelix.agent_id,
         available_models: {
           current_model_id: 'extension/live',
-          available_models: [{ id: 'extension/live', label: 'Extension model' }],
+          available_models: [
+            { id: 'extension/live', label: 'Extension model' },
+            { id: 'fixture/helper', label: 'Model A from ACP' },
+          ],
         },
       } as ManagedAgent,
     ];
     rerender();
-    expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id }) => id)).toEqual(['extension/live']);
+    await act(() =>
+      result.current.mutateCatalog(
+        NATIVE_AUTH_CATALOG_KEY,
+        {
+          providers: [
+            {
+              id: 'fixture',
+              name: 'Fixture',
+              models: [{ id: 'helper', name: 'Model A from helper', available: true }],
+            },
+            { id: 'provider-b', name: 'Provider B', models: [{ id: 'fresh', name: 'Model B', available: true }] },
+          ],
+        },
+        { revalidate: false }
+      )
+    );
+    expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id, label }) => ({ id, label }))).toEqual([
+      { id: 'extension/live', label: 'Extension model' },
+      { id: 'fixture/helper', label: 'Model A from ACP' },
+      { id: 'provider-b/fresh', label: 'Model B' },
+    ]);
     expect(result.current.selectedAcpModel).toBe('fixture/helper');
+    act(() => result.current.setSelectedAcpModel('provider-b/fresh', { explicit: true }));
+    expect(result.current.selectedAcpModel).toBe('provider-b/fresh');
   });
 
   it('restores the last selected guid assistant before falling back to the aionrs default', async () => {
