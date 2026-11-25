@@ -1,0 +1,464 @@
+[
+{
+ "id":"profile-ref",
+ "vectors":[
+  {
+   "sourceUri":"file:///fixture/agent/agents/quiet.md",
+   "rawUtf8":"---\nname: quiet\ndescription: Review only\ntools: []\n---\nReview only.\n",
+   "ref":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"}
+  },
+  {
+   "sourceUri":"file:///fixture/work/.aelix/agents/quiet.md",
+   "rawUtf8":"---\nname: quiet\ndescription: Review only\ntools: [read]\n---\nReview only.\n",
+   "ref":{"name":"quiet","scope":"project","revision":"sha256:53756f46a1de84b564fe8b4a0e9c7e00c78c5d73ffe60775264324363aeb73d7"}
+  },
+  {
+   "sourceUri":"file:///fixture/agent/agents/quiet.md",
+   "rawUtf8":"---\nname: quiet\ndescription: Review only\ntools: [read]\n---\nReview only.\n",
+   "ref":{"name":"quiet","scope":"user","revision":"sha256:ddb033f0cfc401c0b8f636362dca06c135657ecdb9f5afbbed93d7d351694da0"}
+  },
+  {
+   "sourceUri":"file:///fixture/work/.aelix/agents/quiet.md",
+   "rawUtf8":"---\nname: quiet\ndescription: Review only\ntools: []\n---\nReview only.\n",
+   "ref":{"name":"quiet","scope":"project","revision":"sha256:a035605d9ab4d710116ce8e7b428120057759fb7b0c3bf9c8b2bad6fe5f4dcaf"}
+  },
+  {
+   "sourceUri":"file:///fixture/agent/agents/writer.md",
+   "rawUtf8":"---\nname: writer\ndescription: Write notes\ntools: [write]\n---\nWrite notes.\n",
+   "ref":{"name":"writer","scope":"user","revision":"sha256:87ea6ee724da21b23c6523cee102159d26bcb75958919731d5596d32bfe669f7"}
+  }
+ ]
+},
+{"id":"relay-discovery","request":{"http":"GET","path":"/api/conversations/c-17/acp-extensions"},"response":{"status":200,"body":{"success":true,"data":{"version":1,"bindingId":"b-21","requests":["_aelix/session/input/state","_aelix/session/input/steer","_aelix/session/input/follow-up","_aelix/session/requests/lookup","_aelix/session/profiles/list","_aelix/session/profiles/show","_aelix/session/profiles/use","_aelix/session/tools/set-active","_aelix/session/selections/list","_aelix/session/selections/set"],"notifications":[]}}}},
+{
+ "id":"relay-envelope",
+ "httpRequest":{
+  "http":"POST",
+  "path":"/api/conversations/c-17/acp-extensions",
+  "body":{
+   "bindingId":"b-21",
+   "method":"_aelix/session/profiles/use",
+   "payload":{"profile":{"$fixture":"profile-ref#/vectors/0/ref"},"requestId":"019aa123-0001-7000-8000-000000000001"}
+  }
+ },
+ "acpRequest":{
+  "jsonrpc":"2.0",
+  "id":7,
+  "method":"_aelix/session/profiles/use",
+  "params":{
+   "sessionId":"s-42",
+   "bindingId":"b-21",
+   "payload":{"profile":{"$fixture":"profile-ref#/vectors/0/ref"},"requestId":"019aa123-0001-7000-8000-000000000001"}
+  }
+ },
+ "acpResponse":{
+  "jsonrpc":"2.0",
+  "id":7,
+  "result":{"accepted":true,"activeAgent":"quiet","activeRef":{"$fixture":"profile-ref#/vectors/0/ref"},"toolOverride":null}
+ },
+ "httpResponse":{
+  "status":200,
+  "body":{
+   "success":true,
+   "data":{"result":{"accepted":true,"activeAgent":"quiet","activeRef":{"$fixture":"profile-ref#/vectors/0/ref"},"toolOverride":null}}
+  }
+ }
+},
+{"id":"native-guard","capabilitiesFragment":{"profileRefGuard":1},"nativeRequest":{"type":"aelix_control","id":"n7","method":"agents/use","params":{"name":"quiet","expectedProfile":{"$fixture":"profile-ref#/vectors/0/ref"}}},"successData":{"message":"Agent profile: quiet (user)","activeRef":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"}},"changedBeforeApplyData":{"accepted":false,"reason":"profile-changed","currentRef":{"name":"quiet","scope":"project","revision":"sha256:53756f46a1de84b564fe8b4a0e9c7e00c78c5d73ffe60775264324363aeb73d7"}},"pinWithoutGuard":{"nativeUseCalls":0,"relayResult":{"accepted":false,"reason":"unsupported"}}},
+{"id":"profiles-list-page-1","post":{"bindingId":"b-21","method":"_aelix/session/profiles/list","payload":{"limit":1}},"result":{"profiles":[{"ref":{"$fixture":"profile-ref#/vectors/0/ref"},"description":"Review only"}],"activeAgent":"quiet","activeRef":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"},"diagnostics":[],"nextCursor":"p.abc"}},
+{"id":"profiles-list-page-2","post":{"bindingId":"b-21","method":"_aelix/session/profiles/list","payload":{"cursor":"p.abc"}},"result":{"profiles":[{"ref":{"$fixture":"profile-ref#/vectors/4/ref"},"description":"Write notes"}],"activeAgent":"quiet","activeRef":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"},"diagnostics":[],"nextCursor":null}},
+{
+ "id":"profiles-show",
+ "post":{"bindingId":"b-21","method":"_aelix/session/profiles/show","payload":{"name":"quiet"}},
+ "result":{
+  "profile":{
+   "ref":{"$fixture":"profile-ref#/vectors/0/ref"},
+   "source":"user:agents/quiet.md",
+   "description":"Review only",
+   "promptMode":"append",
+   "promptPreview":"Review only.",
+   "promptTruncated":false,
+   "provider":null,
+   "model":null,
+   "tools":[],
+   "skills":[],
+   "approvalMode":"inherit",
+   "policy":{
+    "builtinTools":true,
+    "excludeTools":[],
+    "inheritSkills":true,
+    "extensions":[],
+    "inheritExtensions":false,
+    "contextFiles":true,
+    "thinking":null,
+    "role":"leaf",
+    "outputCap":51200,
+    "timeoutMs":null,
+    "agents":null
+   }
+  }
+ }
+},
+{"id":"profiles-use","post":{"$fixture":"relay-envelope#/httpRequest/body"},"result":{"accepted":true,"activeAgent":"quiet","activeRef":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"},"toolOverride":null}},
+{"id":"profiles-clear","post":{"bindingId":"b-21","method":"_aelix/session/profiles/use","payload":{"profile":null,"requestId":"019aa123-0001-7000-8000-000000000004"}},"result":{"accepted":true,"activeAgent":null,"activeRef":null,"toolOverride":null}},
+{"id":"tools-set-active","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":["read"],"requestId":"019aa123-0001-7000-8000-000000000005"}},"result":{"accepted":true,"toolOverride":["read"],"activeTools":["read"]}},
+{"id":"tools-set-empty","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":[],"requestId":"019aa123-0001-7000-8000-000000000002"}},"result":{"accepted":true,"toolOverride":[],"activeTools":[]}},
+{
+ "id":"selections-list-tool-first",
+ "post":{"bindingId":"b-21","method":"_aelix/session/selections/list","payload":{"kind":"tool","limit":1}},
+ "result":{
+  "kind":"tool",
+  "effect":"next_request",
+  "scopes":{"global":{"writable":false,"reason":"management-helper","exists":true},"project":{"writable":true,"reason":null,"exists":true}},
+  "items":[
+   {
+    "key":"read",
+    "label":"read",
+    "role":"item",
+    "loaded":true,
+    "saved":true,
+    "decidedBy":"global",
+    "applied":true,
+    "inForce":true,
+    "live":true,
+    "pending":false,
+    "lock":null,
+    "problem":null
+   }
+  ],
+  "policyPending":false,
+  "diagnostics":[],
+  "toolOverride":null,
+  "activeTools":["read"],
+  "nextCursor":"t.abc"
+ }
+},
+{"id":"selections-list-tool-next","post":{"bindingId":"b-21","method":"_aelix/session/selections/list","payload":{"kind":"tool","cursor":"t.abc"}},"result":{"kind":"tool","effect":"next_request","scopes":{"global":{"writable":false,"reason":"management-helper","exists":true},"project":{"writable":true,"reason":null,"exists":true}},"items":[{"key":"write","label":"write","role":"item","loaded":true,"saved":false,"decidedBy":"project","applied":false,"inForce":false,"live":false,"pending":false,"lock":null,"problem":null}],"policyPending":false,"diagnostics":[],"toolOverride":null,"activeTools":["read"],"nextCursor":null}},
+{"id":"selections-list-skill","post":{"bindingId":"b-21","method":"_aelix/session/selections/list","payload":{"kind":"skill"}},"result":{"kind":"skill","effect":"next_request","scopes":{"global":{"writable":false,"reason":"management-helper","exists":true},"project":{"writable":true,"reason":null,"exists":true}},"items":[{"key":"review","label":"review","role":"item","loaded":false,"saved":false,"decidedBy":"project","applied":false,"inForce":false,"live":null,"pending":false,"lock":null,"problem":null}],"policyPending":false,"diagnostics":[],"toolOverride":null,"activeTools":null,"nextCursor":null}},
+{"id":"selections-list-mcp","post":{"bindingId":"b-21","method":"_aelix/session/selections/list","payload":{"kind":"mcp"}},"result":{"kind":"mcp","effect":"restart","scopes":{"global":{"writable":false,"reason":"management-helper","exists":true},"project":{"writable":true,"reason":null,"exists":true}},"items":[{"key":"local-docs","label":"local-docs","role":"item","loaded":true,"saved":false,"decidedBy":"project","applied":true,"inForce":true,"live":true,"pending":true,"lock":null,"problem":null}],"policyPending":false,"diagnostics":[],"toolOverride":null,"activeTools":null,"nextCursor":null}},
+{"id":"selections-set-tool","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"project","kind":"tool","changes":[{"key":"read","on":false}],"requestId":"019aa123-0001-7000-8000-000000000006"}},"result":{"accepted":true,"scope":"project","kind":"tool","effect":"next_request","written":[".aelix/settings.json"],"changed":[{"key":"read","saved":false}],"mismatches":[],"apply":{"applied":true,"deferred":false,"turnedOn":[],"turnedOff":["read"],"warning":null}}},
+{
+ "id":"selections-set-skill",
+ "post":{
+  "bindingId":"b-21",
+  "method":"_aelix/session/selections/set",
+  "payload":{"scope":"project","kind":"skill","changes":[{"key":"review","on":false}],"requestId":"019aa123-0001-7000-8000-000000000003"}
+ },
+ "result":{
+  "accepted":true,
+  "scope":"project",
+  "kind":"skill",
+  "effect":"next_request",
+  "written":[".aelix/settings.json"],
+  "changed":[{"key":"review","saved":false}],
+  "mismatches":[],
+  "apply":{"applied":true,"deferred":false,"turnedOn":[],"turnedOff":["review"],"warning":null}
+ }
+},
+{"id":"selections-set-mcp","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"project","kind":"mcp","changes":[{"key":"local-docs","on":false}],"requestId":"019aa123-0001-7000-8000-000000000007"}},"result":{"accepted":true,"scope":"project","kind":"mcp","effect":"restart","written":[".aelix/mcp.json"],"changed":[{"key":"local-docs","saved":false}],"mismatches":[],"apply":null}},
+{"id":"selections-deferred","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"project","kind":"skill","changes":[{"key":"review","on":false}],"requestId":"019aa123-0001-7000-8000-000000000008"}},"result":{"accepted":true,"scope":"project","kind":"skill","effect":"next_request","written":[".aelix/settings.json"],"changed":[{"key":"review","saved":false}],"mismatches":[],"apply":{"applied":false,"deferred":true,"turnedOn":[],"turnedOff":[],"warning":null}}},
+{"id":"selections-saved-not-applied","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"project","kind":"skill","changes":[{"key":"review","on":false}],"requestId":"019aa123-0001-7000-8000-000000000009"}},"result":{"accepted":true,"scope":"project","kind":"skill","effect":"next_request","written":[".aelix/settings.json"],"changed":[{"key":"review","saved":false}],"mismatches":[],"apply":{"applied":false,"deferred":false,"turnedOn":[],"turnedOff":[],"warning":"apply-failed"}}},
+{"id":"selections-mismatch","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"project","kind":"tool","changes":[{"key":"read","on":false}],"requestId":"019aa123-0001-7000-8000-000000000010"}},"result":{"accepted":true,"scope":"project","kind":"tool","effect":"next_request","written":[".aelix/settings.json"],"changed":[],"mismatches":[{"key":"read","reason":"saved-value-differs"}],"apply":{"applied":true,"deferred":false,"turnedOn":[],"turnedOff":[],"warning":null}}},
+{
+ "id":"load-drift-open",
+ "stored":{
+  "agent":"quiet",
+  "agentRef":{"name":"quiet","scope":"user","revision":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a"},
+  "agentPreview":{
+   "ref":{"$fixture":"profile-ref#/vectors/0/ref"},
+   "source":"user:agents/quiet.md",
+   "description":"Review only",
+   "promptMode":"append",
+   "promptPreview":"Review only.",
+   "promptTruncated":false,
+   "provider":null,
+   "model":null,
+   "tools":[],
+   "skills":[],
+   "approvalMode":"inherit",
+   "policy":{"$fixture":"profiles-show#/result/profile/policy"}
+  },
+  "activeTools":[]
+ },
+ "request":{
+  "jsonrpc":"2.0",
+  "id":31,
+  "method":"session/load",
+  "params":{"sessionId":"s-42","cwd":"/fixture/work","mcpServers":[],"_meta":{"aelix/sessionRelay":{"bindingId":"b-22"}}}
+ },
+ "acpToClient":{
+  "jsonrpc":"2.0",
+  "id":"perm-01",
+  "method":"session/request_permission",
+  "params":{
+   "sessionId":"s-42",
+   "toolCall":{
+    "toolCallId":"profile-change-01",
+    "title":"변경된 프로필로 재개",
+    "kind":"read",
+    "status":"pending",
+    "rawInput":{
+     "description":"quiet 출처: user → project. 도구: 없음 → read. 변경된 프로필을 이번에 적용할까요?",
+     "recorded":{"$fixture":"profile-ref#/vectors/0/ref"},
+     "candidate":{"$fixture":"profile-ref#/vectors/1/ref"},
+     "differences":[
+      {"field":"source","before":"user:agents/quiet.md","after":"project:agents/quiet.md"},
+      {"field":"revision","before":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a","after":"sha256:53756f46a1de84b564fe8b4a0e9c7e00c78c5d73ffe60775264324363aeb73d7"},
+      {"field":"tools","before":[],"after":["read"]}
+     ]
+    }
+   },
+   "options":[{"optionId":"allow-once","name":"변경된 프로필 재선택","kind":"allow_once"},{"optionId":"reject-once","name":"원래 환경 복구","kind":"reject_once"}]
+  }
+ },
+ "assert":{"nativeUseCallsBeforeAnswer":0,"prompts":0}
+},
+{
+ "id":"load-drift-allow",
+ "on":"load-drift-open",
+ "reply":{"jsonrpc":"2.0","id":"perm-01","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}},
+ "nativeRequest":{"type":"aelix_control","id":"n31","method":"agents/use","params":{"name":"quiet","expectedProfile":{"$fixture":"profile-ref#/vectors/1/ref"}}},
+ "nativeSuccessData":{"message":"Agent profile: quiet (project)","activeRef":{"$fixture":"profile-ref#/vectors/1/ref"}},
+ "loadSuccessFragment":{"jsonrpc":"2.0","id":31,"result":{"_meta":{"aelix/sessionRelay":{"bindingId":"b-22"}}}},
+ "storedAfter":{
+  "agent":"quiet",
+  "agentRef":{"$fixture":"profile-ref#/vectors/1/ref"},
+  "agentPreview":{
+   "ref":{"$fixture":"profile-ref#/vectors/1/ref"},
+   "source":"project:agents/quiet.md",
+   "description":"Review only",
+   "promptMode":"append",
+   "promptPreview":"Review only.",
+   "promptTruncated":false,
+   "provider":null,
+   "model":null,
+   "tools":["read"],
+   "skills":[],
+   "approvalMode":"inherit",
+   "policy":{"$fixture":"profiles-show#/result/profile/policy"}
+  },
+  "activeTools":[]
+ },
+ "assert":{"permissionCards":1,"nativeUseCalls":1,"prompts":0}
+},
+{"id":"load-drift-reject","on":"load-drift-open","reply":{"jsonrpc":"2.0","id":"perm-01","result":{"outcome":{"outcome":"selected","optionId":"reject-once"}}},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore the original profile, then reopen this session.","data":{"kind":"profile_reselection_required","reason":"declined","recovery":{"action":"restore-original-and-reopen","original":{"$fixture":"profile-ref#/vectors/0/ref"}}}}},"assert":{"nativeUseCalls":0,"changedPreferences":0}},
+{"id":"load-drift-cancel","on":"load-drift-open","reply":{"jsonrpc":"2.0","id":"perm-01","result":{"outcome":{"outcome":"cancelled"}}},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore the original profile, then reopen this session.","data":{"kind":"profile_reselection_required","reason":"cancelled","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}}}},"assert":{"nativeUseCalls":0,"changedPreferences":0}},
+{"id":"load-drift-silence","on":"load-drift-open","clockAdvanceMs":45000,"withdraw":{"jsonrpc":"2.0","method":"$/cancel_request","params":{"requestId":"perm-01"}},"reply":null,"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore the original profile, then reopen this session.","data":{"kind":"profile_reselection_required","reason":"unanswered","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}}}},"assert":{"nativeUseCalls":0,"changedPreferences":0}},
+{"id":"load-drift-raced","on":"load-drift-open","reply":{"$fixture":"load-drift-allow#/reply"},"candidateAtCommit":{"$fixture":"profile-ref#/vectors/2/ref"},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore the original profile, then reopen this session.","data":{"kind":"profile_reselection_required","reason":"changed-again","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}}}},"assert":{"permissionCards":1,"nativeProfileApplications":0,"changedPreferences":0}},
+{"id":"load-profile-missing","stored":{"$fixture":"load-drift-open#/stored"},"request":{"$fixture":"load-drift-open#/request"},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore or recreate that profile, then open the session again.","data":{"kind":"profile_unavailable","profile":"quiet"}}},"assert":{"permissionCards":0,"nativeProfileApplications":0}},
+{"id":"load-legacy","stored":{"agent":"quiet","activeTools":null},"request":{"$fixture":"load-drift-open#/request"},"loadSuccessFragment":{"$fixture":"load-drift-allow#/loadSuccessFragment"},"storedAfterFragment":{"agent":"quiet","activeTools":null},"nextExplicitPick":"profiles-use","thenStoredFragment":{"agent":"quiet","agentRef":{"$fixture":"profile-ref#/vectors/0/ref"},"agentPreview":{"$fixture":"profiles-show#/result/profile"},"activeTools":null}},
+{"id":"load-recorded-match","stored":{"$fixture":"load-drift-open#/stored"},"request":{"$fixture":"load-drift-open#/request"},"resolved":{"$fixture":"profile-ref#/vectors/0/ref"},"loadSuccessFragment":{"$fixture":"load-drift-allow#/loadSuccessFragment"},"assert":{"permissionCards":0,"nativeProfileApplications":1,"retainedExplicitEmptyTools":true}},
+{"id":"use-stale-preview","post":{"bindingId":"b-21","method":"_aelix/session/profiles/use","payload":{"profile":{"$fixture":"profile-ref#/vectors/0/ref"},"requestId":"019aa123-0001-7000-8000-000000000021"}},"result":{"accepted":false,"reason":"profile-changed","recorded":{"$fixture":"profile-ref#/vectors/0/ref"},"candidate":{"$fixture":"profile-ref#/vectors/1/ref"},"differences":{"$fixture":"load-drift-open#/acpToClient/params/toolCall/rawInput/differences"},"recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}},"assert":{"nativeUseCalls":0}},
+{"id":"use-recorded-drift","stored":{"$fixture":"load-drift-open#/stored"},"post":{"bindingId":"b-21","method":"_aelix/session/profiles/use","payload":{"profile":{"$fixture":"profile-ref#/vectors/1/ref"},"requestId":"019aa123-0001-7000-8000-000000000022"}},"permissionExample":"load-drift-open","reply":{"$fixture":"load-drift-allow#/reply"},"result":{"accepted":true,"activeAgent":"quiet","activeRef":{"$fixture":"profile-ref#/vectors/1/ref"},"toolOverride":null},"assert":{"permissionCards":1,"nativeProfileApplications":1}},
+{"id":"project-file-consent","post":{"$fixture":"selections-set-skill#/post"},"precondition":{"projectFileExists":false},"nativeConfirm":{"type":"extension_ui_request","id":"dlg-02","method":"confirm","title":"Create project settings?","message":"/fixture/work/.aelix/settings.json"},"acpToClient":{"jsonrpc":"2.0","id":"perm-02","method":"session/request_permission","params":{"sessionId":"s-42","toolCall":{"toolCallId":"selection-create-02","title":"프로젝트 설정 파일 만들기","kind":"edit","status":"pending","rawInput":{"description":"/fixture/work/.aelix/settings.json 파일이 생기며 이 폴더가 프로젝트 신뢰 판정 대상이 됩니다."}},"options":[{"optionId":"allow-once","name":"이번에 만들기","kind":"allow_once"},{"optionId":"reject-once","name":"만들지 않기","kind":"reject_once"}]}},"reply":{"jsonrpc":"2.0","id":"perm-02","result":{"outcome":{"outcome":"selected","optionId":"allow-once"}}},"nativeReply":{"type":"extension_ui_response","id":"dlg-02","confirmed":true},"result":{"$fixture":"selections-set-skill#/result"}},
+{"id":"load-bad-record","stored":{"agent":"quiet","agentRef":{"name":"quiet","scope":"user","revision":"broken"}},"request":{"$fixture":"load-drift-open#/request"},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"Restore the original profile, then reopen this session.","data":{"kind":"profile_reselection_required","reason":"invalid-record","recovery":{"action":"restore-original-and-reopen","original":null}}}},"assert":{"permissionCards":0,"nativeProfileApplications":0}},
+{"id":"load-guard-unavailable","stored":{"$fixture":"load-drift-open#/stored"},"request":{"$fixture":"load-drift-open#/request"},"response":{"jsonrpc":"2.0","id":31,"error":{"code":-32004,"message":"A revision-bound profile cannot be applied by this runtime.","data":{"kind":"profile_reselection_required","reason":"guard-unavailable","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}}}},"assert":{"nativeUseCalls":0}},
+{"id":"relay-error-busy","appliesTo":["profiles/use","tools/set-active","selections/set"],"given":"turn-or-worker-changing","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":[],"requestId":"019aa123-0001-7000-8000-000000000031"}},"result":{"accepted":false,"reason":"busy"}},
+{"id":"relay-error-unsupported","appliesTo":["all-six"],"given":"native-kind-absent","post":{"$fixture":"selections-list-skill#/post"},"result":{"accepted":false,"reason":"unsupported"}},
+{"id":"relay-error-stale-cursor","appliesTo":["profiles/list","selections/list"],"given":"expired-or-wrong-context","post":{"bindingId":"b-21","method":"_aelix/session/profiles/list","payload":{"cursor":"p.expired"}},"result":{"accepted":false,"reason":"cursor-stale"}},
+{"id":"relay-error-large-item","appliesTo":["profiles/list","profiles/show","selections/list","tools/set-active"],"given":"one-item-or-required-header-exceeds-frame","post":{"bindingId":"b-21","method":"_aelix/session/profiles/list","payload":{}},"result":{"accepted":false,"reason":"result-too-large"}},
+{"id":"relay-error-profile-unavailable","appliesTo":["profiles/show","profiles/use"],"given":"missing-or-invalid-profile","post":{"bindingId":"b-21","method":"_aelix/session/profiles/show","payload":{"name":"missing"}},"result":{"accepted":false,"reason":"profile-unavailable","name":"missing"}},
+{"id":"relay-error-profile-refused","appliesTo":["profiles/use"],"given":"native-policy-or-launch-refusal","post":{"$fixture":"relay-envelope#/httpRequest/body"},"result":{"accepted":false,"reason":"profile-refused"}},
+{"id":"relay-error-unavailable-tool","appliesTo":["tools/set-active"],"given":"tool-not-loaded","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":["removed"],"requestId":"019aa123-0001-7000-8000-000000000032"}},"result":{"accepted":false,"reason":"tool-unavailable","key":"removed"}},
+{"id":"relay-error-locked-tool","appliesTo":["tools/set-active"],"given":"operator-or-profile-lock","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":["write"],"requestId":"019aa123-0001-7000-8000-000000000033"}},"result":{"accepted":false,"reason":"tool-locked","key":"write"}},
+{"id":"relay-error-unknown-row","appliesTo":["selections/set"],"given":"key-disappeared","post":{"$fixture":"selections-set-skill#/post"},"result":{"accepted":false,"reason":"selection-missing","scope":"project","mismatches":[{"key":"review","reason":"missing"}],"written":[]}},
+{"id":"relay-error-locked-row","appliesTo":["selections/set"],"given":"row-locked","post":{"$fixture":"selections-set-skill#/post"},"result":{"accepted":false,"reason":"selection-locked","scope":"project","mismatches":[{"key":"review","reason":"locked"}],"written":[]}},
+{"id":"relay-error-scope-readonly","appliesTo":["selections/set"],"given":"native-scope-readonly","post":{"$fixture":"selections-set-skill#/post"},"result":{"accepted":false,"reason":"scope-readonly","scope":"project","written":[]}},
+{"id":"relay-error-unreadable","appliesTo":["profiles/list","selections/list","selections/set"],"given":"no-trustworthy-snapshot","post":{"bindingId":"b-21","method":"_aelix/session/selections/list","payload":{"kind":"tool"}},"result":{"accepted":false,"reason":"unreadable"}},
+{"id":"relay-error-write-failed","appliesTo":["profiles/use","tools/set-active","selections/set"],"given":"definitively-no-effect","post":{"$fixture":"selections-set-skill#/post"},"result":{"accepted":false,"reason":"write-failed"}},
+{"id":"relay-error-dedup","appliesTo":["profiles/use","tools/set-active","selections/set"],"given":"all-binding-receipt-slots-in-use","post":{"$fixture":"relay-envelope#/httpRequest/body"},"result":{"accepted":false,"reason":"dedup-capacity"}},
+{"id":"use-permission-deny","on":"use-recorded-drift","permissionOutcome":{"outcome":"selected","optionId":"reject-once"},"result":{"accepted":false,"reason":"consent-required","cause":"declined","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}},"assert":{"changedPreferences":0,"nativeProfileApplications":0}},
+{"id":"project-permission-deny","on":"project-file-consent","permissionOutcome":{"outcome":"selected","optionId":"reject-once"},"nativeReply":{"type":"extension_ui_response","id":"dlg-02","cancelled":true},"result":{"accepted":false,"reason":"consent-required","cause":"declined","scope":"project","written":[]}},
+{"id":"use-permission-cancel","on":"use-recorded-drift","permissionOutcome":{"outcome":"cancelled"},"result":{"accepted":false,"reason":"consent-required","cause":"cancelled","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}},"assert":{"changedPreferences":0,"nativeProfileApplications":0}},
+{"id":"project-permission-cancel","on":"project-file-consent","permissionOutcome":{"outcome":"cancelled"},"nativeReply":{"type":"extension_ui_response","id":"dlg-02","cancelled":true},"result":{"accepted":false,"reason":"consent-required","cause":"cancelled","scope":"project","written":[]}},
+{"id":"use-permission-timeout","on":"use-recorded-drift","permissionOutcome":null,"result":{"accepted":false,"reason":"consent-required","cause":"unanswered","recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}},"assert":{"changedPreferences":0,"nativeProfileApplications":0}},
+{"id":"project-permission-timeout","on":"project-file-consent","permissionOutcome":null,"nativeReply":{"type":"extension_ui_response","id":"dlg-02","cancelled":true},"result":{"accepted":false,"reason":"consent-required","cause":"unanswered","scope":"project","written":[]}},
+{"id":"relay-rpc-method","given":"not-negotiated","post":{"bindingId":"b-21","method":"_aelix/session/arbitrary","payload":{}},"acpError":{"jsonrpc":"2.0","id":7,"error":{"code":-32601,"message":"Request refused."}},"http":{"status":422,"body":{"success":false,"code":"EXT_AGENT_ERROR","error":"ACP agent rejected the extension request","details":{"rpcCode":-32601}}}},
+{"id":"relay-rpc-params","given":"unknown-field","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":[],"requestId":"019aa123-0001-7000-8000-000000000033","override":true}},"acpError":{"jsonrpc":"2.0","id":7,"error":{"code":-32602,"message":"Request refused."}},"http":{"status":422,"body":{"success":false,"code":"EXT_AGENT_ERROR","error":"ACP agent rejected the extension request","details":{"rpcCode":-32602}}}},
+{"id":"relay-rpc-id-conflict","given":"same-id-as-tools-set-empty-different-content","post":{"bindingId":"b-21","method":"_aelix/session/tools/set-active","payload":{"names":["read"],"requestId":"019aa123-0001-7000-8000-000000000002"}},"acpError":{"$fixture":"relay-rpc-params#/acpError"},"http":{"$fixture":"relay-rpc-params#/http"}},
+{"id":"relay-rpc-scope","given":"global-write-on-session","post":{"bindingId":"b-21","method":"_aelix/session/selections/set","payload":{"scope":"global","kind":"skill","changes":[{"key":"review","on":false}],"requestId":"019aa123-0001-7000-8000-000000000003"}},"acpError":{"jsonrpc":"2.0","id":7,"error":{"code":-33102,"message":"Request refused."}},"http":{"status":422,"body":{"success":false,"code":"EXT_AGENT_ERROR","error":"ACP agent rejected the extension request","details":{"rpcCode":-33102}}}},
+{"id":"relay-rpc-binding","given":"wrong-live-session-at-adapter","post":{"bindingId":"b-retired","method":"_aelix/session/selections/set","payload":{"$fixture":"selections-set-skill#/post/payload"}},"acpError":{"$fixture":"relay-rpc-scope#/acpError"},"http":{"$fixture":"relay-rpc-scope#/http"}},
+{"id":"relay-rpc-internal","given":"internal-read-error","post":{"$fixture":"relay-error-large-item#/post"},"acpError":{"jsonrpc":"2.0","id":7,"error":{"code":-32603,"message":"Request refused."}},"http":{"status":422,"body":{"success":false,"code":"EXT_AGENT_ERROR","error":"ACP agent rejected the extension request","details":{"rpcCode":-32603}}}},
+{"id":"relay-rpc-outcome","given":"native-mutation-dispatched-no-definitive-result","post":{"$fixture":"selections-set-skill#/post"},"acpError":{"jsonrpc":"2.0","id":7,"error":{"code":-33100,"message":"Outcome unknown."}},"http":{"status":502,"body":{"success":false,"code":"EXT_OUTCOME_UNKNOWN","error":"ACP extension outcome is unknown","details":{"retryable":false}}}},
+{"id":"lookup-done","post":{"bindingId":"b-21","method":"_aelix/session/requests/lookup","payload":{"requestId":"019aa123-0001-7000-8000-000000000002"}},"result":{"status":"completed","result":{"accepted":true,"toolOverride":[],"activeTools":[]}}},
+{"id":"lookup-error","post":{"$fixture":"lookup-done#/post"},"result":{"status":"completed","rpcCode":-32602}},
+{"id":"lookup-pending","post":{"$fixture":"lookup-done#/post"},"result":{"status":"pending"}},
+{"id":"lookup-unknown","post":{"$fixture":"lookup-done#/post"},"result":{"status":"unknown"}},
+{"id":"lookup-expired","post":{"$fixture":"lookup-done#/post"},"result":{"status":"unavailable"}},
+{"id":"lookup-large","post":{"$fixture":"lookup-done#/post"},"result":{"status":"unavailable","reason":"result-too-large"}},
+{"id":"use-changed-again","on":"use-recorded-drift","afterAllow":"resolved-identity-changed-before-use","result":{"accepted":false,"reason":"profile-changed","recorded":{"$fixture":"profile-ref#/vectors/1/ref"},"candidate":{"$fixture":"profile-ref#/vectors/2/ref"},"differences":[{"field":"source","before":"project:agents/quiet.md","after":"user:agents/quiet.md"},{"field":"revision","before":"sha256:53756f46a1de84b564fe8b4a0e9c7e00c78c5d73ffe60775264324363aeb73d7","after":"sha256:ddb033f0cfc401c0b8f636362dca06c135657ecdb9f5afbbed93d7d351694da0"}],"recovery":{"$fixture":"load-drift-reject#/response/error/data/recovery"}},"assert":{"permissionCards":1,"nativeProfileApplications":0}},
+{"id":"helper-profiles-first","command":{"action":"profiles/list","limit":1},"reply":{"ok":true,"data":{"profiles":{"$fixture":"profiles-list-page-1#/result/profiles"},"diagnostics":[],"nextCursor":"hp.abc"}}},
+{"id":"helper-profiles-next","command":{"action":"profiles/list","cursor":"hp.abc"},"reply":{"ok":true,"data":{"profiles":{"$fixture":"profiles-list-page-2#/result/profiles"},"diagnostics":[],"nextCursor":null}}},
+{
+ "id":"helper-profile-show",
+ "command":{"action":"profiles/show","name":"quiet"},
+ "reply":{"ok":true,"data":{"profile":{"$fixture":"profiles-show#/result/profile"}}}
+},
+{"id":"helper-tools-first","command":{"action":"selections/list","kind":"tool","scope":"global","limit":1},"reply":{"ok":true,"data":{"scope":"global","kind":"tool","revision":"g.tool.1","effect":"next_request","writable":true,"reason":null,"items":[{"key":"read","label":"read","role":"item","saved":true,"decidedBy":"global","lock":null,"problem":null}],"diagnostics":[],"nextCursor":"ht.abc","exists":true}}},
+{"id":"helper-tools-next","command":{"action":"selections/list","scope":"global","kind":"tool","cursor":"ht.abc"},"reply":{"ok":true,"data":{"scope":"global","kind":"tool","revision":"g.tool.1","effect":"next_request","writable":true,"reason":null,"items":[{"key":"write","label":"write","role":"item","saved":false,"decidedBy":"global","lock":null,"problem":null}],"diagnostics":[],"nextCursor":null,"exists":true}}},
+{"id":"helper-skills","command":{"action":"selections/list","scope":"global","kind":"skill"},"reply":{"ok":true,"data":{"scope":"global","kind":"skill","revision":"g.skill.1","effect":"next_request","writable":true,"reason":null,"items":[{"key":"review","label":"review","role":"item","saved":true,"decidedBy":"global","lock":null,"problem":null}],"diagnostics":[],"nextCursor":null,"exists":true}}},
+{"id":"helper-mcp","command":{"action":"selections/list","scope":"global","kind":"mcp"},"reply":{"ok":true,"data":{"scope":"global","kind":"mcp","revision":"g.mcp.1","effect":"restart","writable":true,"reason":null,"items":[{"key":"local-docs","label":"local-docs","role":"item","saved":true,"decidedBy":"global","lock":null,"problem":null}],"diagnostics":[],"nextCursor":null,"exists":true}}},
+{
+ "id":"helper-set-tool",
+ "command":{
+  "action":"selections/set",
+  "kind":"tool",
+  "scope":"global",
+  "expectedRevision":"g.tool.1",
+  "changes":[{"key":"read","on":false}],
+  "requestId":"019aa123-0001-7000-8000-000000000051"
+ },
+ "reply":{
+  "ok":true,
+  "data":{
+   "scope":"global",
+   "kind":"tool",
+   "revision":"g.tool.2",
+   "saved":true,
+   "changed":[{"key":"read","saved":false}],
+   "mismatches":[],
+   "appliesAt":"next_worker"
+  }
+ }
+},
+{"id":"helper-set-skill","command":{"action":"selections/set","kind":"skill","scope":"global","expectedRevision":"g.skill.1","changes":[{"key":"review","on":false}],"requestId":"019aa123-0001-7000-8000-000000000052"},"reply":{"ok":true,"data":{"scope":"global","kind":"skill","revision":"g.skill.2","saved":true,"changed":[{"key":"review","saved":false}],"mismatches":[],"appliesAt":"next_worker"}}},
+{"id":"helper-set-mcp","command":{"action":"selections/set","kind":"mcp","scope":"global","expectedRevision":"g.mcp.1","changes":[{"key":"local-docs","on":false}],"requestId":"019aa123-0001-7000-8000-000000000053"},"reply":{"ok":true,"data":{"scope":"global","kind":"mcp","revision":"g.mcp.2","saved":true,"changed":[{"key":"local-docs","saved":false}],"mismatches":[],"appliesAt":"next_worker"}}},
+{"id":"helper-set-noop","command":{"action":"selections/set","kind":"tool","scope":"global","expectedRevision":"g.tool.2","changes":[{"key":"read","on":false}],"requestId":"019aa123-0001-7000-8000-000000000055"},"reply":{"ok":true,"data":{"scope":"global","kind":"tool","revision":"g.tool.2","saved":true,"changed":[],"mismatches":[],"appliesAt":"next_worker"}}},
+{"id":"helper-global-readonly","command":{"action":"selections/list","scope":"global","kind":"mcp"},"reply":{"ok":true,"data":{"scope":"global","kind":"mcp","revision":"g.mcp.env","effect":"restart","writable":false,"reason":"env-config","exists":true,"items":[],"diagnostics":[{"code":"env-config","key":null,"source":null}],"nextCursor":null}}},
+{"id":"helper-error-forbidden","given":"origin-or-marker-or-untrusted-ipc-sender","command":{"action":"profiles/list"},"httpStatus":403,"reply":{"ok":false,"code":"FORBIDDEN"}},
+{"id":"helper-error-unauthenticated","given":"web-login-expired","command":{"action":"profiles/list"},"httpStatus":401,"reply":{"ok":false,"code":"UNAUTHENTICATED"}},
+{"id":"helper-error-frame_limit","given":"encoded-body-over-60000-bytes","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":413,"reply":{"ok":false,"code":"FRAME_LIMIT"}},
+{"id":"helper-error-invalid_input","given":"schema-or-unknown-action","command":{"action":"selections/set","scope":"global","kind":"tool","changes":[],"expectedRevision":"g.tool.1","requestId":"bad"},"httpStatus":400,"reply":{"ok":false,"code":"INVALID_INPUT"}},
+{"id":"helper-error-scope_denied","given":"global-helper-received-project","command":{"action":"selections/set","kind":"tool","scope":"project","expectedRevision":"g.tool.1","changes":[{"key":"read","on":false}],"requestId":"019aa123-0001-7000-8000-000000000051"},"httpStatus":403,"reply":{"ok":false,"code":"SCOPE_DENIED"}},
+{"id":"helper-error-cursor_stale","given":"expired-or-cross-owner","command":{"action":"selections/list","kind":"tool","scope":"global","cursor":"ht.expired"},"httpStatus":409,"reply":{"ok":false,"code":"CURSOR_STALE"}},
+{"id":"helper-error-profile_unavailable","given":"not-in-global-catalog-or-invalid","command":{"action":"profiles/show","name":"missing"},"httpStatus":404,"reply":{"ok":false,"code":"PROFILE_UNAVAILABLE"}},
+{"id":"helper-error-revision_conflict","given":"guard-inside-native-lock-differs","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":409,"reply":{"ok":false,"code":"REVISION_CONFLICT","currentRevision":"g.tool.2"}},
+{"id":"helper-error-selection_missing","given":"key-disappeared","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":422,"reply":{"ok":false,"code":"SELECTION_MISSING","key":"read"}},
+{"id":"helper-error-selection_locked","given":"immutable-row","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":422,"reply":{"ok":false,"code":"SELECTION_LOCKED","key":"read"}},
+{"id":"helper-error-scope_readonly","given":"effective-source-not-writable","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":422,"reply":{"ok":false,"code":"SCOPE_READONLY"}},
+{"id":"helper-error-store_unreadable","given":"failed-to-read-or-parse","command":{"action":"selections/list","kind":"tool","scope":"global"},"httpStatus":422,"reply":{"ok":false,"code":"STORE_UNREADABLE"}},
+{"id":"helper-error-busy","given":"store-lock-deadline-before-commit","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":409,"reply":{"ok":false,"code":"BUSY"}},
+{"id":"helper-error-request_id_conflict","given":"owner-id-used-by-different-command","command":{"action":"selections/set","kind":"tool","scope":"global","expectedRevision":"g.tool.1","changes":[{"key":"write","on":false}],"requestId":"019aa123-0001-7000-8000-000000000051"},"httpStatus":409,"reply":{"ok":false,"code":"REQUEST_ID_CONFLICT"}},
+{"id":"helper-error-dedup_capacity","given":"receipt-budget-full","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":429,"reply":{"ok":false,"code":"DEDUP_CAPACITY"}},
+{"id":"helper-error-runtime_unavailable","given":"verified-runtime-missing","command":{"action":"selections/list","kind":"tool","scope":"global"},"httpStatus":503,"reply":{"ok":false,"code":"RUNTIME_UNAVAILABLE"}},
+{"id":"helper-error-result_too_large","given":"single-entry-cannot-fit","command":{"action":"profiles/list"},"httpStatus":413,"reply":{"ok":false,"code":"RESULT_TOO_LARGE"}},
+{"id":"helper-error-save_failed","given":"confirmed-no-write","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":500,"reply":{"ok":false,"code":"SAVE_FAILED"}},
+{"id":"helper-error-helper_unavailable","given":"helper-or-admission-service-failed","command":{"action":"selections/list","kind":"tool","scope":"global"},"httpStatus":503,"reply":{"ok":false,"code":"HELPER_UNAVAILABLE"}},
+{"id":"helper-error-outcome_unknown","given":"write-dispatched-helper-exited","command":{"$fixture":"helper-set-tool#/command"},"httpStatus":503,"reply":{"ok":false,"code":"OUTCOME_UNKNOWN","retryable":false}},
+{"id":"transport-auth_required-401","operation":"discovery","http":{"status":401,"body":{"success":false,"code":"AUTH_REQUIRED","error":"Authentication required."}}},
+{"id":"transport-source_forbidden-403","operation":"write","http":{"status":403,"body":{"success":false,"code":"SOURCE_FORBIDDEN","error":"Request source forbidden."}}},
+{"id":"transport-csrf_invalid-403","operation":"write","http":{"status":403,"body":{"success":false,"code":"CSRF_INVALID","error":"CSRF token invalid"}}},
+{"id":"transport-conversation_not_found-404","operation":"discovery","http":{"status":404,"body":{"success":false,"code":"CONVERSATION_NOT_FOUND","error":"Conversation not found"}}},
+{"id":"transport-ext_no_live_task-409","operation":"discovery","http":{"status":409,"body":{"success":false,"code":"EXT_NO_LIVE_TASK","error":"No live ACP session"}}},
+{"id":"transport-ext_unavailable-409","operation":"discovery","http":{"status":409,"body":{"success":false,"code":"EXT_UNAVAILABLE","error":"ACP extensions are unavailable"}}},
+{"id":"transport-ext_stale_binding-409","operation":"write","http":{"status":409,"body":{"success":false,"code":"EXT_STALE_BINDING","error":"ACP extension binding changed"}}},
+{"id":"transport-ext_method_denied-403","operation":"write","http":{"status":403,"body":{"success":false,"code":"EXT_METHOD_DENIED","error":"ACP extension method denied"}}},
+{"id":"transport-ext_invalid-400","operation":"write","http":{"status":400,"body":{"success":false,"code":"EXT_INVALID","error":"Invalid ACP extension request"}}},
+{"id":"transport-ext_too_large-413","operation":"write","http":{"status":413,"body":{"success":false,"code":"EXT_TOO_LARGE","error":"ACP extension body exceeds 64 KiB"}}},
+{"id":"transport-ext_media_type-415","operation":"write","http":{"status":415,"body":{"success":false,"code":"EXT_MEDIA_TYPE","error":"Expected uncompressed application/json"}}},
+{"id":"transport-ext_rate_limited-429","operation":"write","http":{"status":429,"headers":{"Retry-After":"1"},"body":{"success":false,"code":"EXT_RATE_LIMITED","error":"ACP extension limit reached"}}},
+{"id":"transport-internal_error-500","operation":"discovery","http":{"status":500,"body":{"success":false,"code":"INTERNAL_ERROR","error":"Could not check conversation ownership"}}},
+{"id":"transport-ext_outcome_unknown-409","operation":"write","http":{"status":409,"body":{"$fixture":"relay-rpc-outcome#/http/body"}}},
+{"id":"transport-ext_outcome_unknown-502","operation":"write","http":{"$fixture":"relay-rpc-outcome#/http"}},
+{"id":"transport-ext_outcome_unknown-504","operation":"write","http":{"status":504,"body":{"$fixture":"relay-rpc-outcome#/http/body"}}},
+{"id":"transport-no-reply","operation":"write","http":null,"renderer":{"status":"unknown","action":"lookup-and-refresh","retryWrite":false}},
+{"id":"transport-old-host","operation":"discovery","http":{"status":404,"body":null},"renderer":{"status":"unsupported","action":"disable-control","retryWrite":false}},
+{
+ "id":"view-session-tool",
+ "inputCases":["selections-list-tool-first","selections-list-tool-next"],
+ "dto":{
+  "source":"session",
+  "conversationId":"c-17",
+  "bindingId":"b-21",
+  "kind":"tool",
+  "effect":"next_request",
+  "complete":true,
+  "toolOverride":null,
+  "activeTools":["read"],
+  "items":[
+   {
+    "key":"read",
+    "label":"read",
+    "role":"item",
+    "loaded":true,
+    "saved":true,
+    "decidedBy":"global",
+    "applied":true,
+    "inForce":true,
+    "live":true,
+    "pending":false,
+    "lock":null,
+    "problem":null,
+    "mismatches":[]
+   },
+   {
+    "key":"write",
+    "label":"write",
+    "role":"item",
+    "loaded":true,
+    "saved":false,
+    "decidedBy":"project",
+    "applied":false,
+    "inForce":false,
+    "live":false,
+    "pending":false,
+    "lock":null,
+    "problem":null,
+    "mismatches":[]
+   }
+  ],
+  "mismatches":[],
+  "scopes":{"global":{"writable":false,"reason":"management-helper","exists":true},"project":{"writable":true,"reason":null,"exists":true}},
+  "diagnostics":[],
+  "policyPending":false,
+  "nextCursor":null
+ }
+},
+{"id":"view-pending-mcp","inputCases":["selections-list-mcp"],"dto":{"source":"session","conversationId":"c-17","bindingId":"b-21","kind":"mcp","effect":"restart","complete":true,"toolOverride":null,"activeTools":null,"items":[{"key":"local-docs","label":"local-docs","role":"item","loaded":true,"saved":false,"decidedBy":"project","applied":true,"inForce":true,"live":true,"pending":true,"lock":null,"problem":null,"mismatches":[]}],"mismatches":[],"scopes":{"$fixture":"view-session-tool#/dto/scopes"},"diagnostics":[],"policyPending":false,"nextCursor":null}},
+{"id":"view-global","inputCases":["helper-tools-first"],"dto":{"source":"global","kind":"tool","revision":"g.tool.1","effect":"next_worker","complete":false,"toolOverride":null,"activeTools":null,"items":[{"key":"read","label":"read","role":"item","loaded":null,"saved":true,"decidedBy":"global","applied":null,"inForce":null,"live":null,"pending":null,"lock":null,"problem":null,"mismatches":[]}],"mismatches":[],"scopes":{"global":{"writable":true,"reason":null,"exists":true}},"diagnostics":[],"policyPending":null,"nextCursor":"ht.abc"}},
+{"id":"view-mismatches","inputCases":["selections-mismatch","selections-list-tool-first","selections-list-tool-next"],"dto":{"source":"session","conversationId":"c-17","bindingId":"b-21","kind":"tool","effect":"next_request","complete":true,"toolOverride":null,"activeTools":["read"],"items":[{"key":"read","label":"read","role":"item","loaded":true,"saved":true,"decidedBy":"global","applied":true,"inForce":true,"live":true,"pending":false,"lock":null,"problem":null,"mismatches":[{"key":"read","reason":"saved-value-differs"}]},{"$fixture":"view-session-tool#/dto/items/1"}],"mismatches":[{"key":"read","reason":"saved-value-differs"}],"scopes":{"$fixture":"view-session-tool#/dto/scopes"},"diagnostics":[],"policyPending":false,"nextCursor":null}},
+{"id":"view-profile","inputCases":["profiles-list-page-1","profiles-list-page-2","profiles-show"],"dto":{"source":"session","conversationId":"c-17","bindingId":"b-21","activeAgent":"quiet","activeRef":{"$fixture":"profile-ref#/vectors/0/ref"},"inspected":{"$fixture":"profiles-show#/result/profile"},"profiles":[{"ref":{"$fixture":"profile-ref#/vectors/0/ref"},"description":"Review only"},{"ref":{"$fixture":"profile-ref#/vectors/4/ref"},"description":"Write notes"}],"complete":true,"diagnostics":[],"nextCursor":null}},
+{"id":"view-refusal","inputCases":["use-permission-deny"],"dto":{"status":"recovery-required","reason":"declined","action":"restore-original-and-reopen","retryWrite":false,"original":{"$fixture":"profile-ref#/vectors/0/ref"}}},
+{"id":"view-effective-diff","given":"session-tool-is-loaded-and-selected-but-inactive-at-runtime","inputRow":{"key":"read","label":"read","role":"item","loaded":true,"saved":true,"decidedBy":"global","applied":true,"inForce":true,"live":false,"pending":false,"lock":null,"problem":null},"dtoRow":{"key":"read","label":"read","role":"item","loaded":true,"saved":true,"decidedBy":"global","applied":true,"inForce":true,"live":false,"pending":false,"lock":null,"problem":null,"mismatches":[]}},
+{"id":"view-unobservable","inputCases":["selections-list-skill"],"dtoRow":{"key":"review","label":"review","role":"item","loaded":false,"saved":false,"decidedBy":"project","applied":false,"inForce":false,"live":null,"pending":false,"lock":null,"problem":null,"mismatches":[]}},
+{"id":"view-locked","given":"launch-exclusion","inputRow":{"key":"write","label":"write","role":"item","loaded":false,"saved":true,"decidedBy":"project","applied":false,"inForce":false,"live":false,"pending":false,"lock":{"kind":"cli","value":false,"reason":"launch-locked"},"problem":null},"dtoRow":{"key":"write","label":"write","role":"item","loaded":false,"saved":true,"decidedBy":"project","applied":false,"inForce":false,"live":false,"pending":false,"lock":{"kind":"cli","value":false,"reason":"launch-locked"},"problem":null,"mismatches":[]}},
+{
+ "id":"helper-envelope",
+ "desktop":{
+  "bridge":"__studioNativeResources.request",
+  "ipc":"studio:native-resources",
+  "args":[{"action":"selections/list","scope":"global","kind":"skill"}]
+ },
+ "web":{
+  "http":"POST",
+  "path":"/api/studio/native-resources",
+  "headers":{"content-type":"application/json","x-studio-resources":"1"},
+  "credentials":"same-origin",
+  "body":{"action":"selections/list","scope":"global","kind":"skill"}
+ },
+ "stdio":{"stdin":{"action":"selections/list","scope":"global","kind":"skill"},"stdout":{"$fixture":"helper-skills#/reply"}},
+ "httpResponse":{"status":200,"body":{"$fixture":"helper-skills#/reply"}}
+},
+{"id":"paging-diagnostic","post":{"$fixture":"relay-error-large-item#/post"},"result":{"profiles":[],"activeAgent":null,"activeRef":null,"diagnostics":[{"code":"invalid-profile","key":null,"source":"user:agents/broken.md"}],"nextCursor":null}},
+{
+ "id":"reselection-same-source",
+ "on":"load-drift-open",
+ "recorded":{"$fixture":"profile-ref#/vectors/0/ref"},
+ "candidate":{"$fixture":"profile-ref#/vectors/2/ref"},
+ "differences":[
+  {
+   "field":"revision",
+   "before":"sha256:1db1f5963ef9139b31457b3d0d9ca7cf56ccda47688c029724745b86195f0c2a",
+   "after":"sha256:ddb033f0cfc401c0b8f636362dca06c135657ecdb9f5afbbed93d7d351694da0"
+  },
+  {"field":"tools","before":[],"after":["read"]}
+ ],
+ "permissionCards":1
+},
+{"id":"view-deferred","inputCase":"selections-deferred","rowAfterRead":{"key":"review","label":"review","role":"item","loaded":true,"saved":false,"decidedBy":"project","applied":true,"inForce":true,"live":null,"pending":true,"lock":null,"problem":null},"dtoRow":{"key":"review","label":"review","role":"item","loaded":true,"saved":false,"decidedBy":"project","applied":true,"inForce":true,"live":null,"pending":true,"lock":null,"problem":null,"mismatches":[]}},
+{"id":"view-global-profile","inputCases":["helper-profiles-first","helper-profiles-next","helper-profile-show"],"dto":{"source":"global","activeAgent":null,"activeRef":null,"profiles":{"$fixture":"view-profile#/dto/profiles"},"inspected":{"$fixture":"profiles-show#/result/profile"},"complete":true,"diagnostics":[],"nextCursor":null}},
+{"id":"same-key-twice","on":"tools-set-empty","arrivals":2,"lookupCase":"lookup-done","expected":{"nativeMutations":1,"identicalResults":2}},
+{"id":"helper-same-key-twice","on":"helper-set-tool","arrivals":2,"expected":{"storeCommits":1,"identicalReplies":2}},
+{"id":"renderer-errors","examples":[{"inputCase":"transport-ext_no_live_task-409","dto":{"status":"detached","reason":"EXT_NO_LIVE_TASK","action":"rediscover-on-attach","retryWrite":false}},{"inputCase":"transport-ext_stale_binding-409","dto":{"status":"stale","reason":"EXT_STALE_BINDING","action":"rediscover","retryWrite":false}},{"inputCase":"relay-error-busy","dto":{"status":"refused","reason":"busy","action":"wait-idle","retryWrite":false}},{"inputCase":"helper-error-revision_conflict","dto":{"status":"conflict","reason":"REVISION_CONFLICT","action":"refresh-and-choose","retryWrite":false}},{"inputCase":"transport-auth_required-401","dto":{"status":"unauthenticated","reason":"AUTH_REQUIRED","action":"sign-in-and-read","retryWrite":false}},{"inputCase":"transport-ext_outcome_unknown-502","dto":{"status":"unknown","reason":"EXT_OUTCOME_UNKNOWN","action":"lookup-and-refresh","retryWrite":false}},{"inputCase":"helper-error-outcome_unknown","dto":{"status":"unknown","reason":"OUTCOME_UNKNOWN","action":"refresh-and-choose","retryWrite":false}},{"inputCase":"relay-rpc-method","dto":{"status":"unsupported","reason":"rpc/-32601","action":"disable-control","retryWrite":false}},{"inputCase":"relay-rpc-scope","dto":{"status":"refused","reason":"rpc/-33102","action":"refresh","retryWrite":false}}],"invalidReadReply":{"wire":{"success":true,"data":{"result":{"items":"invalid"}}},"dto":{"status":"invalid-response","reason":"invalid-response","action":"refresh","retryWrite":false}},"invalidMutationReply":{"wire":{"success":true,"data":{"result":{"accepted":"yes"}}},"dto":{"status":"unknown","reason":"invalid-response","action":"lookup-and-refresh","retryWrite":false}}},
+{"id":"unkeyed-mismatch","nativeFragments":{"mismatches":["fixture: file changed after save"]},"dto":{"mismatches":[{"key":null,"reason":"native-mismatch"}]},"assert":{"attributedToRows":0}}
+]
