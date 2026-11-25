@@ -127,6 +127,13 @@ const INITIAL: State = {
 };
 
 type Session = { conversationId: string; resources: NativeSessionResources };
+type ApplyOptions = {
+  /** This write is the single decision-2 reselection. */
+  reselected?: boolean;
+  done?: ControlsNotice;
+  /** Show the ref first and write only if the runtime still resolves exactly this ref. */
+  verify?: { onMismatch: (shown: ProfileRef) => void; stillWanted?: () => boolean };
+};
 type VerifiedRef =
   | { status: 'match' }
   | { status: 'mismatch'; current: ProfileRef }
@@ -472,69 +479,6 @@ export function useAelixSessionControls({
     [patch, refresh]
   );
 
-  const applyProfileWith = useCallback(
-    async (ref: ProfileRef | null, before: Baseline, reselected = false, done?: ControlsNotice): Promise<boolean> => {
-      const target = sessionRef.current;
-      const capabilities = writable();
-      if (!target || !capabilities) return false;
-      const report = await runWrite(target, 'profile', () => target.resources.useProfile(capabilities.bindingId, ref));
-      if (!report || !current(target)) return false;
-      await settleLists(target, report.refresh);
-      if (report.outcome.status === 'success' || report.outcome.status === 'unknown') appliedRef.current?.();
-      await settle(
-        target,
-        'profile',
-        report.outcome,
-        before,
-        done ??
-          (ref
-            ? { tone: 'success', key: 'profileApplied', values: { name: ref.name } }
-            : { tone: 'success', key: 'profileCleared' }),
-        reselected
-      );
-      if (report.outcome.status !== 'success') return false;
-      patch(target, { preview: undefined, previewName: null });
-      return true;
-    },
-    [appliedRef, current, patch, runWrite, sessionRef, settle, settleLists, writable]
-  );
-
-  const applyProfile = useCallback(
-    (ref: ProfileRef | null, options?: { inheritTools?: boolean }) =>
-      applyProfileWith(
-        ref,
-        baseline(),
-        false,
-        options?.inheritTools ? { tone: 'success', key: 'toolsInherited' } : undefined
-      ),
-    [applyProfileWith, baseline]
-  );
-
-  const saveTools = useCallback(
-    async (names: readonly string[]) => {
-      const target = sessionRef.current;
-      const capabilities = writable();
-      if (!target || !capabilities) return false;
-      const before = baseline();
-      const report = await runWrite(target, 'tools', () =>
-        target.resources.setActiveTools(capabilities.bindingId, names)
-      );
-      if (!report || !current(target)) return false;
-      await settleLists(target);
-      await settle(
-        target,
-        'tools',
-        report.outcome,
-        before,
-        names.length === 0
-          ? { tone: 'success', key: 'toolsSavedEmpty' }
-          : { tone: 'success', key: 'toolsSaved', values: { count: names.length } }
-      );
-      return report.outcome.status === 'success';
-    },
-    [baseline, current, runWrite, sessionRef, settle, settleLists, writable]
-  );
-
   /**
    * Inspect a ref right before writing it. Until the native guard ships, ACP applies only a ref it
    * has just previewed, so reselect and restore must show it first. A different ref means the
@@ -567,26 +511,129 @@ export function useAelixSessionControls({
     [patch]
   );
 
+  const applyProfileWith = useCallback(
+    async (ref: ProfileRef | null, before: Baseline, options: ApplyOptions = {}): Promise<boolean> => {
+      const target = sessionRef.current;
+      const capabilities = writable();
+      if (!target || !capabilities) return false;
+      // Hold the write lock across the preview too, so a second click or a change of mind
+      // while the show is in flight cannot start another write.
+      writingRef.current = true;
+      patch(target, { writing: 'profile', notice: undefined });
+      let report: Awaited<ReturnType<NativeSessionResources['useProfile']>>;
+      try {
+        if (options.verify && ref) {
+          const checked = await verifyRef(target, ref);
+          if (!current(target) || (options.verify.stillWanted && !options.verify.stillWanted())) return false;
+          if (checked.status === 'failure') {
+            patch(target, { notice: refusalNotice(checked.failure, 'profile') });
+            return false;
+          }
+          if (checked.status === 'mismatch') {
+            options.verify.onMismatch(checked.current);
+            return false;
+          }
+        }
+        report = await target.resources.useProfile(capabilities.bindingId, ref);
+      } finally {
+        writingRef.current = false;
+        patch(target, { writing: null });
+      }
+      if (!current(target)) return false;
+      await settleLists(target, report.refresh);
+      if (report.outcome.status === 'success' || report.outcome.status === 'unknown') appliedRef.current?.();
+      await settle(
+        target,
+        'profile',
+        report.outcome,
+        before,
+        options.done ??
+          (ref
+            ? { tone: 'success', key: 'profileApplied', values: { name: ref.name } }
+            : { tone: 'success', key: 'profileCleared' }),
+        options.reselected
+      );
+      if (report.outcome.status !== 'success') return false;
+      patch(target, { preview: undefined, previewName: null });
+      return true;
+    },
+    [appliedRef, current, patch, sessionRef, settle, settleLists, verifyRef, writable]
+  );
+
+  const applyProfile = useCallback(
+    (ref: ProfileRef | null, options?: { inheritTools?: boolean }) => {
+      const before = baseline();
+      if (!options?.inheritTools) return applyProfileWith(ref, before);
+      // "Use inherited tools" reapplies the active profile, which the user has not just previewed.
+      // The interim runtime applies only a freshly shown ref, so inspect it first.
+      const target = sessionRef.current;
+      return applyProfileWith(ref, before, {
+        done: { tone: 'success', key: 'toolsInherited' },
+        verify: {
+          onMismatch: (shown) => {
+            if (!target || !ref) return;
+            const conflict: ResourceFailure = {
+              status: 'conflict',
+              reason: 'profile-changed',
+              action: 'refresh-and-choose',
+              retryWrite: false,
+              recorded: ref,
+              candidate: shown,
+              differences: [{ field: 'revision', before: ref.revision, after: shown.revision }],
+              recovery: { action: 'restore-original-and-reopen', original: ref },
+            };
+            patch(target, { conflict, conflictBaseline: before, recovery: undefined });
+          },
+        },
+      });
+    },
+    [applyProfileWith, baseline, patch, sessionRef]
+  );
+
+  const saveTools = useCallback(
+    async (names: readonly string[]) => {
+      const target = sessionRef.current;
+      const capabilities = writable();
+      if (!target || !capabilities) return false;
+      const before = baseline();
+      const report = await runWrite(target, 'tools', () =>
+        target.resources.setActiveTools(capabilities.bindingId, names)
+      );
+      if (!report || !current(target)) return false;
+      await settleLists(target);
+      await settle(
+        target,
+        'tools',
+        report.outcome,
+        before,
+        names.length === 0
+          ? { tone: 'success', key: 'toolsSavedEmpty' }
+          : { tone: 'success', key: 'toolsSaved', values: { count: names.length } }
+      );
+      return report.outcome.status === 'success';
+    },
+    [baseline, current, runWrite, sessionRef, settle, settleLists, writable]
+  );
+
   const reselect = useCallback(async () => {
     const { conflict, conflictBaseline } = stateRef.current;
     const candidate = conflict?.candidate;
     const target = sessionRef.current;
-    if (!conflict || !candidate || !target || !writable()) return;
+    if (!conflict || !candidate || !target) return;
     const before = conflictBaseline ?? baseline();
-    const checked = await verifyRef(target, candidate);
-    if (!current(target)) return;
-    if (checked.status === 'failure') {
-      patch(target, { notice: refusalNotice(checked.failure, 'profile') });
-      return;
-    }
-    if (checked.status === 'mismatch') {
-      const original = conflict.recovery ? conflict.recovery.original : before.profile;
-      changedAgain(target, { ...conflict, recorded: candidate, candidate: checked.current }, before, original);
-      return;
-    }
     // One explicit choice; the runtime asks for the single standard approval in the conversation.
-    await applyProfileWith(candidate, before, true);
-  }, [applyProfileWith, baseline, changedAgain, current, patch, sessionRef, stateRef, verifyRef, writable]);
+    await applyProfileWith(candidate, before, {
+      reselected: true,
+      verify: {
+        // "Keep current environment" during the preview withdraws the choice.
+        stillWanted: () => stateRef.current.conflict === conflict,
+        onMismatch: (shown) => {
+          const original = conflict.recovery ? conflict.recovery.original : before.profile;
+          changedAgain(target, { ...conflict, recorded: candidate, candidate: shown }, before, original);
+        },
+      },
+    });
+  }, [applyProfileWith, baseline, changedAgain, sessionRef, stateRef]);
 
   const keepCurrent = useCallback(() => {
     const target = sessionRef.current;

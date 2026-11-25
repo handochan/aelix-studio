@@ -465,6 +465,46 @@ describe('Aelix conversation controls: tools', () => {
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
   });
 
+  it('previews the active profile before returning to inherited tools', async () => {
+    state.toolOverride = ['read'];
+    // Like the interim runtime: refuse profiles/use for a ref that was not just shown.
+    const shown = new Set<string>();
+    const show = replies.get(SHOW)!;
+    const use = replies.get(USE)!;
+    replies.set(SHOW, (payload) => {
+      shown.add(String(payload.name));
+      return show(payload);
+    });
+    replies.set(USE, (payload) => {
+      const ref = payload.profile as Ref | null;
+      if (ref && !shown.has(ref.name)) return relay({ accepted: false, reason: 'profile-refused' });
+      shown.clear();
+      return use(payload);
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(profileCalls()).toEqual(['show:quiet', 'use:quiet@user']);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
+  });
+
+  it('shows the change card instead of writing when the active profile changed before inheriting', async () => {
+    state.toolOverride = ['read'];
+    state.quiet = fixture<Ref>('profile-ref', '/vectors/2/ref');
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(postsOf(USE)).toHaveLength(0);
+    expect(screen.getByTestId('aelix-profile-change-card')).toBeInTheDocument();
+    expect(screen.getByTestId('aelix-change-reselect')).not.toBeDisabled();
+  });
+
   it('drops an unsaved draft once inherited tools are applied', async () => {
     state.toolOverride = ['read'];
     render(<Routed />);
@@ -624,6 +664,53 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
     expect(profileCalls().at(-1)).toBe('show:quiet');
     expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
     expect(screen.queryByTestId('aelix-change-reselect')).toBeNull();
+  });
+
+  it('writes nothing when the user keeps the current environment while the reselect preview loads', async () => {
+    replies.set(USE, () => relay(fixture('use-stale-preview', '/result')));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    const late = hold();
+    const show = replies.get(SHOW)!;
+    replies.set(SHOW, async (payload) => {
+      await late.gate;
+      return show(payload);
+    });
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-keep'));
+    late.release();
+    await settle();
+
+    expect(postsOf(USE)).toHaveLength(1);
+    expect(screen.getByTestId('aelix-recovery-card')).toBeInTheDocument();
+  });
+
+  it('starts one preview and one write for a double reselect click', async () => {
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      if (ref.revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    const before = profileCalls().length;
+
+    const reselect = screen.getByTestId('aelix-change-reselect');
+    fireEvent.click(reselect);
+    fireEvent.click(reselect);
+    await settle();
+
+    expect(profileCalls().slice(before)).toEqual(['show:quiet', 'use:quiet@project']);
   });
 
   it('reports a failed reselect preview without writing', async () => {
