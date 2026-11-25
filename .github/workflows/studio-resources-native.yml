@@ -7,6 +7,10 @@ on:
   pull_request:
     paths:
       - 'packages/web-host/src/studio-auth/resources/**'
+      - 'packages/web-host/src/studio-auth/runtime.ts'
+      - 'scripts/studio-preview/baseline.json'
+      - 'scripts/studio-preview/packaging/launch.py'
+      - 'bun.lock'
       - '.github/workflows/studio-resources-native.yml'
   workflow_dispatch:
 
@@ -56,11 +60,13 @@ jobs:
           baseline=scripts/studio-preview/baseline.json
           repository=$(node -p "require('./$baseline').native.sourceTag.repository")
           commit=$(node -p "require('./$baseline').native.sourceTag.commit")
+          [[ "$repository" =~ ^https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || { echo "Unexpected native repository: $repository"; exit 1; }
+          [[ "$commit" =~ ^[0-9a-f]{40}$ ]] || { echo "Unexpected native commit: $commit"; exit 1; }
           source="$RUNNER_TEMP/aelix-ai"
           git init --quiet "$source"
           # Keep the source bytes the pinned archive has.
           git -C "$source" config core.autocrlf false
-          git -C "$source" fetch --quiet --depth 1 "$repository" "$commit"
+          git -C "$source" fetch --quiet --depth 1 -- "$repository" "$commit"
           git -C "$source" checkout --quiet --detach FETCH_HEAD
           test "$(git -C "$source" rev-parse HEAD)" = "$commit"
           echo "source=$source" >> "$GITHUB_OUTPUT"
