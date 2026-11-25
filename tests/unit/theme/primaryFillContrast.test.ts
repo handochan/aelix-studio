@@ -27,12 +27,13 @@ function parseColor(value: string): [number, number, number] {
   return triplet as [number, number, number];
 }
 
-function contrast(a: string, b: string): number {
-  const luminance = (value: string) => {
-    const [r, g, b] = parseColor(value).map(channelLuminance);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-  };
-  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+function relativeLuminance(value: string): number {
+  const [r, g, b] = parseColor(value).map(channelLuminance);
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+function contrast(foreground: string, background: string): number {
+  const [hi, lo] = [relativeLuminance(foreground), relativeLuminance(background)].toSorted((x, y) => y - x);
   return (hi + 0.05) / (lo + 0.05);
 }
 
