@@ -881,7 +881,8 @@
       "modeExplicit_one": "이 대화에서 고른 도구 {{count}}개",
       "modeExplicit_other": "이 대화에서 고른 도구 {{count}}개",
       "projectTools": "설정에서 프로젝트 도구 기본값",
-      "projectSkills": "설정에서 프로젝트 스킬"
+      "projectSkills": "설정에서 프로젝트 스킬",
+      "settingsDirty": "설정을 열기 전에 도구 변경 사항을 저장하거나 취소하세요."
     },
     "scope": {
       "bundled": "내장",

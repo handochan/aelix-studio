@@ -887,7 +887,8 @@
       "modeExplicit_one": "{{count}} ferramenta escolhida para esta conversa",
       "modeExplicit_other": "{{count}} ferramentas escolhidas para esta conversa",
       "projectTools": "Ferramentas padrão do projeto nas Configurações",
-      "projectSkills": "Habilidades do projeto nas Configurações"
+      "projectSkills": "Habilidades do projeto nas Configurações",
+      "settingsDirty": "Salve ou descarte as alterações de ferramentas antes de abrir as Configurações."
     },
     "scope": {
       "bundled": "Incluído",

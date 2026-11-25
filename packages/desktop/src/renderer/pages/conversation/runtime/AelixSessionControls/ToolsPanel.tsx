@@ -208,12 +208,14 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
           })}
         </div>
       )}
-      <div className='flex flex-wrap gap-4px'>
+      <div className='flex flex-wrap items-center gap-4px'>
         {(['tools', 'skills'] as const).map((page) => (
           <Button
             key={page}
             size='mini'
             type='text'
+            // Leaving would silently drop the unsaved draft.
+            disabled={changed}
             data-testid={`aelix-settings-${page}`}
             onClick={() => {
               // "This project" defaults for this conversation's workspace live in Settings.
@@ -224,6 +226,17 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             {t(`${KEY}.tools.${page === 'tools' ? 'projectTools' : 'projectSkills'}`)}
           </Button>
         ))}
+        {changed && (
+          <span
+            className='inline-flex items-center gap-4px text-12px text-t-secondary'
+            data-testid='aelix-settings-dirty'
+          >
+            {t(`${KEY}.tools.settingsDirty`)}
+            <Button size='mini' type='text' onClick={() => setDirty(false)} data-testid='aelix-settings-discard'>
+              {t(`${KEY}.tools.discard`)}
+            </Button>
+          </span>
+        )}
       </div>
       <div className='flex flex-wrap justify-end gap-8px'>
         {canInherit && (

@@ -881,7 +881,8 @@
       "modeExplicit_one": "{{count}} tool chosen for this conversation",
       "modeExplicit_other": "{{count}} tools chosen for this conversation",
       "projectTools": "Project tool defaults in Settings",
-      "projectSkills": "Project skills in Settings"
+      "projectSkills": "Project skills in Settings",
+      "settingsDirty": "Save or discard your tool changes before opening Settings."
     },
     "scope": {
       "bundled": "Bundled",

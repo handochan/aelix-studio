@@ -882,7 +882,8 @@
       "modeExplicit_one": "{{count}} herramienta elegida para esta conversación",
       "modeExplicit_other": "{{count}} herramientas elegidas para esta conversación",
       "projectTools": "Herramientas predeterminadas del proyecto en Ajustes",
-      "projectSkills": "Habilidades del proyecto en Ajustes"
+      "projectSkills": "Habilidades del proyecto en Ajustes",
+      "settingsDirty": "Guarda o descarta los cambios de herramientas antes de abrir Ajustes."
     },
     "scope": {
       "bundled": "Incluido",

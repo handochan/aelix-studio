@@ -655,6 +655,7 @@ export type I18nKey =
   | 'conversation.aelixControls.tools.projectTools'
   | 'conversation.aelixControls.tools.save'
   | 'conversation.aelixControls.tools.selectNone'
+  | 'conversation.aelixControls.tools.settingsDirty'
   | 'conversation.aelixControls.tools.skills'
   | 'conversation.aelixControls.tools.title'
   | 'conversation.aelixControls.value.empty'

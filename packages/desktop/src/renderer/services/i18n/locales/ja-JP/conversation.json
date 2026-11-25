@@ -881,7 +881,8 @@
       "modeExplicit_one": "この会話で選んだツール {{count}} 個",
       "modeExplicit_other": "この会話で選んだツール {{count}} 個",
       "projectTools": "設定でプロジェクトのツール既定値",
-      "projectSkills": "設定でプロジェクトのスキル"
+      "projectSkills": "設定でプロジェクトのスキル",
+      "settingsDirty": "設定を開く前に、ツールの変更を保存するか破棄してください。"
     },
     "scope": {
       "bundled": "同梱",

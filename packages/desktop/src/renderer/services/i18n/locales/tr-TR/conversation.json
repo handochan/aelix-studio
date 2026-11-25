@@ -883,7 +883,8 @@
       "modeExplicit_one": "Bu sohbet için {{count}} araç seçildi",
       "modeExplicit_other": "Bu sohbet için {{count}} araç seçildi",
       "projectTools": "Ayarlar'da proje araç varsayılanları",
-      "projectSkills": "Ayarlar'da proje becerileri"
+      "projectSkills": "Ayarlar'da proje becerileri",
+      "settingsDirty": "Ayarlar'ı açmadan önce araç değişikliklerinizi kaydedin veya atın."
     },
     "scope": {
       "bundled": "Paketle gelen",

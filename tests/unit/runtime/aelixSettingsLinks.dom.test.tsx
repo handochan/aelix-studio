@@ -25,7 +25,7 @@ const LocationProbe = () => {
 };
 
 function conversation(backend: string): TChatConversation {
-  return { id: 'c-18', type: 'acp', extra: { backend, skills: ['review'] } } as unknown as TChatConversation;
+  return { id: 'c 18&x=1', type: 'acp', extra: { backend, skills: ['review'] } } as unknown as TChatConversation;
 }
 
 async function openSkill(backend: string) {
@@ -42,7 +42,9 @@ async function openSkill(backend: string) {
 
 describe('ConversationSkillsIndicator settings link', () => {
   it('opens skills settings scoped to a builtin Aelix conversation', async () => {
-    expect(await openSkill('aelix')).toHaveTextContent('/settings/skills?highlight=review&conversation=c-18');
+    expect((await openSkill('aelix')).textContent).toBe(
+      '/settings/skills?highlight=review&conversation=c%2018%26x%3D1'
+    );
   });
 
   it('keeps the plain skills link for other agents', async () => {

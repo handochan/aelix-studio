@@ -225,7 +225,7 @@ beforeEach(() => {
   defaults();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
-    expect(url).toMatch(/^\/api\/conversations\/c-1[78]\/acp-extensions$/);
+    expect(url).toMatch(/^\/api\/conversations\/[^/]+\/acp-extensions$/);
     if (init.method === 'GET') return discovery();
     const post = JSON.parse(String(init.body)) as Post;
     posts.push(post);
@@ -883,17 +883,37 @@ describe('Aelix conversation controls: accessibility', () => {
 });
 
 describe('Aelix conversation controls: settings links', () => {
-  it('opens tools and skills settings scoped to this conversation', async () => {
-    render(<Routed conversationId='c-18' />);
+  // A token id the parser accepts but that must be encoded in a query string.
+  const ODD_ID = 'c 18&x=1#y';
+  const ODD_QUERY = 'conversation=c%2018%26x%3D1%23y';
+
+  it.each(['tools', 'skills'] as const)(
+    'opens %s settings with the conversation id encoded and closes the panel',
+    async (page) => {
+      render(<Routed conversationId={ODD_ID} />);
+      await settle();
+      await openPanel('tools');
+      fireEvent.click(screen.getByTestId(`aelix-settings-${page}`));
+      await settle();
+
+      expect(screen.getByTestId('location').textContent).toBe(`/settings/${page}?${ODD_QUERY}`);
+      expect(screen.getByTestId('aelix-tools-pill')).toHaveAttribute('aria-expanded', 'false');
+    }
+  );
+
+  it('keeps the settings links disabled while the tool draft has unsaved changes', async () => {
+    render(<Routed />);
     await settle();
     await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+
+    expect(screen.getByTestId('aelix-settings-tools')).toBeDisabled();
+    expect(screen.getByTestId('aelix-settings-dirty')).toHaveTextContent(`${K}.tools.settingsDirty`);
     fireEvent.click(screen.getByTestId('aelix-settings-tools'));
     await settle();
-    expect(screen.getByTestId('location')).toHaveTextContent('/settings/tools?conversation=c-18');
+    expect(screen.getByTestId('location').textContent).toBe('/conversation/c-17');
 
-    await openPanel('tools');
-    fireEvent.click(screen.getByTestId('aelix-settings-skills'));
-    await settle();
-    expect(screen.getByTestId('location')).toHaveTextContent('/settings/skills?conversation=c-18');
+    fireEvent.click(screen.getByTestId('aelix-settings-discard'));
+    expect(screen.getByTestId('aelix-settings-tools')).not.toBeDisabled();
   });
 });
