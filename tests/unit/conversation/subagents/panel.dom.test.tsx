@@ -9,6 +9,7 @@ import SubagentProgressPanel, {
 import MessageToolGroupSummary from '@/renderer/pages/conversation/Messages/components/MessageToolGroupSummary';
 import fixture from './frames.json';
 import native from './nativeFrames.json';
+import cancelReports from './cancelReports.json';
 import * as parser from '@/renderer/pages/conversation/Messages/acp/SubagentProgress/parser';
 
 vi.mock('react-i18next', () => ({
@@ -201,5 +202,68 @@ describe('subagent progress display', () => {
     fireEvent.click(screen.getByText('ordinary-tool'));
     expect(await screen.findByText('ORDINARY_FULL')).toBeInTheDocument();
     expect(ipcBridge.database.getConversationMessage.invoke).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('cancelled children report', () => {
+  const stoppedPair = native.frames[0].content._meta['aelix/subagents'];
+  const cancelled = (text: string, id = 'cancelled') => {
+    const saved = message(stoppedPair, id, text);
+    saved.content.update.status = 'failed';
+    return saved;
+  };
+  const report = (container: HTMLElement) => container.querySelector('[data-subagent-report]');
+  const entry = (container: HTMLElement, position: number) =>
+    container.querySelector(`[data-subagent-report-position="${position}"]`);
+
+  it('shows what each of two stopped children did right after the cancel', () => {
+    const { container } = render(<MessageToolGroupSummary messages={[cancelled(cancelReports.reports.twoStopped)]} />);
+    expect(screen.getAllByRole('listitem')).toHaveLength(2);
+    expect(entry(container, 1)).toHaveTextContent('PARTIAL_CHILD_CANCEL_A');
+    expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
+    expect(entry(container, 1)).not.toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
+  });
+
+  it('adds the report when the cancelled call result arrives after the stopped rows', () => {
+    const live = message(stoppedPair, 'live');
+    live.content.update.status = 'in_progress';
+    const { container, rerender } = render(<MessageToolGroupSummary messages={[live]} />);
+    expect(report(container)).toBeNull();
+    rerender(<MessageToolGroupSummary messages={[cancelled(cancelReports.reports.twoStopped, 'live')]} />);
+    expect(report(container)).toHaveAttribute('data-subagent-report', 'batch');
+  });
+
+  it('restores each child report from a reopened history message', () => {
+    const saved = JSON.stringify(cancelled(cancelReports.reports.twoStopped));
+    const first = render(<MessageToolGroupSummary messages={[JSON.parse(saved)]} />);
+    first.unmount();
+    const { container } = render(<MessageToolGroupSummary messages={[JSON.parse(saved)]} />);
+    expect(entry(container, 1)).toHaveTextContent('PARTIAL_CHILD_CANCEL_A');
+    expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
+  });
+
+  it('loads the full report of a compact reopened message before splitting it', async () => {
+    const full = cancelled(cancelReports.reports.twoStopped, 'compact-report');
+    vi.mocked(ipcBridge.database.getConversationMessage.invoke).mockResolvedValueOnce(full);
+    const preview = cancelled(cancelReports.reports.twoStopped.slice(0, 400) + '\n...[truncated]', 'compact-report');
+    const saved = { ...preview, content: { ...preview.content, _compact: { truncated: true } } };
+    const { container } = render(<MessageToolGroupSummary messages={[saved]} />);
+    expect(report(container)).toBeNull();
+    await vi.waitFor(() => expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B'));
+  });
+
+  it('names tasks that lost their agent or never had one', () => {
+    const { container } = render(<MessageToolGroupSummary messages={[cancelled(cancelReports.reports.lostAndIdle)]} />);
+    expect(entry(container, 2)).toHaveTextContent('acp.subagents.report.lost');
+    expect(entry(container, 3)).toHaveTextContent('acp.subagents.report.idle');
+  });
+
+  it.each([
+    ['missing', 'Tool call was cut.'],
+    ['unreadable', cancelReports.reports.forgedOverSibling],
+  ])('degrades to the %s notice without per-task text', (kind, text) => {
+    const { container } = render(<MessageToolGroupSummary messages={[cancelled(text)]} />);
+    expect(report(container)).toHaveAttribute('data-subagent-report', kind);
+    expect(container.querySelector('[data-subagent-report-position]')).toBeNull();
   });
 });

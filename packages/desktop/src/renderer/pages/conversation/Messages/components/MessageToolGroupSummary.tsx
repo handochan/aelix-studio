@@ -10,7 +10,11 @@ import type { NormalizedToolCall, NormalizedToolStatus, ToolMessage } from '@/co
 import { normalizeToolMessages } from '@/common/chat/normalizeToolCall';
 import LocalImageView from '@/renderer/components/media/LocalImageView';
 import { downloadFileFromPath } from '@/renderer/utils/file/download';
-import SubagentProgressPanel, { presentSubagentTool, type SubagentPresentation } from '../acp/SubagentProgress';
+import SubagentProgressPanel, {
+  presentCancelReport,
+  presentSubagentTool,
+  type SubagentPresentation,
+} from '../acp/SubagentProgress';
 import { readAcpCompaction, type AcpCompaction } from '../acp/compaction';
 import './MessageToolGroupSummary.css';
 
@@ -83,6 +87,15 @@ const ToolItemDetail: React.FC<{
     if (interrupted && expanded && item.truncated && !loadError) void loadFullItem();
   }, [interrupted, expanded, item.truncated, loadError, loadFullItem]);
 
+  const pendingFull = item.truncated === true && fullItem === null;
+  const report = useMemo(
+    () =>
+      subagents
+        ? presentCancelReport(subagents, displayItem.output, { pending: pendingFull, loadFailed: loadError })
+        : null,
+    [subagents, displayItem.output, pendingFull, loadError]
+  );
+
   const toggleExpanded = () => {
     const nextExpanded = !expanded;
     setExpanded(nextExpanded);
@@ -134,7 +147,7 @@ const ToolItemDetail: React.FC<{
           </span>
         )}
       </div>
-      {subagents && <SubagentProgressPanel progress={subagents.progress} />}
+      {subagents && <SubagentProgressPanel progress={subagents.progress} report={report} />}
       {expanded && hasDetail && (
         <div className='tool-detail-panel m-l-20px m-t-4px'>
           {loadingFull && <div className='tool-detail-label'>Loading...</div>}
