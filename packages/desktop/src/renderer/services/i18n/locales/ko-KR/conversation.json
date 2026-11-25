@@ -1052,7 +1052,10 @@
         "envConfig": "환경 설정으로 지정됨"
       },
       "approval": {
-        "inherit": "상속"
+        "inherit": "상속",
+        "ask": "묻기",
+        "auto": "자동 승인",
+        "deny": "거부"
       },
       "other": "기타 ({{code}})"
     }

@@ -16,6 +16,7 @@ import {
   aelixSheetEntries,
   useAelixSessionControls,
 } from '@/renderer/pages/conversation/runtime/AelixSessionControls';
+import ProfileChangeCard from '@/renderer/pages/conversation/runtime/AelixSessionControls/ProfileChangeCard';
 import RecoveryCard from '@/renderer/pages/conversation/runtime/AelixSessionControls/RecoveryCard';
 import { restorePlan } from '@/renderer/pages/conversation/runtime/AelixSessionControls/useAelixSessionControls';
 import type { ProfileCatalogView, ResourceFailure, SessionProfiles } from '@/renderer/services/runtime/NativeResources';
@@ -677,6 +678,34 @@ describe('Aelix conversation controls: labels', () => {
     expect(diagnostics).toHaveTextContent(`${K}.code.diagnostic.invalidProfile`);
     expect(diagnostics).not.toHaveTextContent('invalid-profile');
     expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent(`${K}.code.approval.inherit`);
+  });
+
+  it('labels every native approval mode in the preview', async () => {
+    replies.set(SHOW, ({ name }) => {
+      const reply = (name === 'writer' ? writerPreview() : fixture('profiles-show', '/result')) as Json;
+      return relay({ profile: { ...(reply.profile as Json), approvalMode: 'deny' } });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent(`${K}.code.approval.deny`);
+  });
+
+  it('labels approval modes in the change card the same way as the preview', () => {
+    const conflict: ResourceFailure = {
+      status: 'conflict',
+      reason: 'profile-changed',
+      action: 'refresh-and-choose',
+      retryWrite: false,
+      recorded: QUIET as ResourceFailure['recorded'],
+      candidate: QUIET_PROJECT as ResourceFailure['candidate'],
+      differences: [{ field: 'approvalMode', before: 'ask', after: 'auto' }],
+    };
+    render(<ProfileChangeCard conflict={conflict} blocked={null} onReselect={() => {}} onKeepCurrent={() => {}} />);
+    const differences = screen.getByTestId('aelix-change-differences');
+    expect(differences).toHaveTextContent(`${K}.code.approval.ask`);
+    expect(differences).toHaveTextContent(`${K}.code.approval.auto`);
   });
 
   it('passes a numeric count so tool totals use plural forms', async () => {

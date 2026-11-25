@@ -1052,7 +1052,10 @@
         "envConfig": "Défini par la configuration d'environnement"
       },
       "approval": {
-        "inherit": "Hériter"
+        "inherit": "Hériter",
+        "ask": "Demander",
+        "auto": "Approuver automatiquement",
+        "deny": "Refuser"
       },
       "other": "Autre ({{code}})"
     }

@@ -1054,7 +1054,10 @@
         "envConfig": "Ortam yapılandırmasıyla ayarlandı"
       },
       "approval": {
-        "inherit": "Devral"
+        "inherit": "Devral",
+        "ask": "Sor",
+        "auto": "Otomatik onayla",
+        "deny": "Reddet"
       },
       "other": "Diğer ({{code}})"
     }

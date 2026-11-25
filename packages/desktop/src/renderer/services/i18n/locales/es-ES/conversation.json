@@ -1053,7 +1053,10 @@
         "envConfig": "Definido por la configuración del entorno"
       },
       "approval": {
-        "inherit": "Heredar"
+        "inherit": "Heredar",
+        "ask": "Preguntar",
+        "auto": "Aprobar automáticamente",
+        "deny": "Denegar"
       },
       "other": "Otro ({{code}})"
     }

@@ -70,7 +70,12 @@ export function differenceValue(t: TFunction, field: string, value: ProfileDiffe
   if (value === null) return t(`${KEY}.value.unset`);
   if (typeof value === 'boolean') return t(value ? `${KEY}.value.yes` : `${KEY}.value.no`);
   if (typeof value === 'number') return String(value);
-  if (typeof value === 'string') return field === 'revision' ? shortRevision(value) : value;
+  if (typeof value === 'string') {
+    if (field === 'revision') return shortRevision(value);
+    // Same label as the preview, so the change card and the preview agree.
+    if (field === 'approvalMode') return approvalLabel(t, value);
+    return value;
+  }
   return value.length === 0 ? t(`${KEY}.value.empty`) : value.join(', ');
 }
 
@@ -120,5 +125,6 @@ export function diagnosticLabel(t: TFunction, code: string): string {
 }
 
 export function approvalLabel(t: TFunction, mode: string): string {
-  return codeLabel(t, 'approval', { inherit: 'inherit' }, mode);
+  // Native profile approval modes (aelix-coding-agent agents/profile.py).
+  return codeLabel(t, 'approval', { inherit: 'inherit', ask: 'ask', auto: 'auto', deny: 'deny' }, mode);
 }

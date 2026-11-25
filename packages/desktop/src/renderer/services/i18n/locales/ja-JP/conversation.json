@@ -1052,7 +1052,10 @@
         "envConfig": "環境設定で指定"
       },
       "approval": {
-        "inherit": "継承"
+        "inherit": "継承",
+        "ask": "確認する",
+        "auto": "自動承認",
+        "deny": "拒否"
       },
       "other": "その他（{{code}}）"
     }

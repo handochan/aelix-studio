@@ -1053,7 +1053,10 @@
         "envConfig": "Durch Umgebungskonfiguration festgelegt"
       },
       "approval": {
-        "inherit": "Erben"
+        "inherit": "Erben",
+        "ask": "Nachfragen",
+        "auto": "Automatisch freigeben",
+        "deny": "Ablehnen"
       },
       "other": "Sonstiges ({{code}})"
     }

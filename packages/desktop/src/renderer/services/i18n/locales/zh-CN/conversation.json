@@ -1052,7 +1052,10 @@
         "envConfig": "由环境配置设定"
       },
       "approval": {
-        "inherit": "继承"
+        "inherit": "继承",
+        "ask": "询问",
+        "auto": "自动批准",
+        "deny": "拒绝"
       },
       "other": "其他（{{code}}）"
     }
