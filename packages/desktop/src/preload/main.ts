@@ -13,6 +13,10 @@ contextBridge.exposeInMainWorld('__studioNativeAuth', {
   request: (command: unknown) => ipcRenderer.invoke('studio:native-auth', command),
 });
 
+contextBridge.exposeInMainWorld('__studioNativeResources', {
+  request: (command: unknown) => ipcRenderer.invoke('studio:native-resources', command),
+});
+
 // The extension helper's channel carries proxy credentials too: kept as dedicated as the one above.
 contextBridge.exposeInMainWorld('__studioExtensions', {
   request: (command: unknown) => ipcRenderer.invoke('studio:extensions', command),

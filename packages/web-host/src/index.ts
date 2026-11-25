@@ -6,6 +6,8 @@ export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle 
 export { startStaticServer, stopStaticServer } from './static-server.js';
 export type { StaticServerOptions, StaticServerHandle } from './static-server.js';
 export { NativeAuthService, getNativeAuthService } from './studio-auth/service.js';
+export { NativeResourcesService, getNativeResourcesService } from './studio-auth/resources/service.js';
+export type { NativeResourcesCommand, NativeResourcesReply } from './studio-auth/resources/types.js';
 export type {
   NativeAuthCommand,
   NativeAuthReply,

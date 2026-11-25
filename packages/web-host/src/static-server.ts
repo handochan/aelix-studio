@@ -26,6 +26,8 @@ import {
 } from './requestOrigin.js';
 import { toHostCookieHeader, toStudioSetCookie, usesSharedLoopbackHost } from './studio-auth/cookies.js';
 import { handleNativeAuth, NATIVE_AUTH_ROUTE } from './studio-auth/facade.js';
+import { respondStudio } from './studio-auth/request.js';
+import { handleNativeResources, NATIVE_RESOURCES_ROUTE } from './studio-auth/resources/facade.js';
 import { getNativeAuthService } from './studio-auth/service.js';
 import { handleStudioExtensions, STUDIO_EXTENSIONS_ROUTE } from './studio-extensions/host/facade.js';
 import { createRelayVerdicts, isLoopbackAddress } from './studio-extensions/host/transport.js';
@@ -263,12 +265,14 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
         return;
       }
 
+      const nativeResources = req.url.startsWith(NATIVE_RESOURCES_ROUTE);
       const safeMethod = req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS';
       if (!isAllowed(readSourceHeaders(req.rawHeaders), !safeMethod)) {
-        res.writeHead(403).end();
+        if (nativeResources) respondStudio(res, 403, { ok: false, code: 'FORBIDDEN' });
+        else res.writeHead(403).end();
         return;
       }
-      if (req.method === 'OPTIONS') {
+      if (req.method === 'OPTIONS' && !nativeResources) {
         res.writeHead(204).end();
         return;
       }
@@ -283,6 +287,15 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       }
       if (expectContinue) res.writeContinue();
       const cookieAuthority = browserCookieAuthority(req.headers.host);
+
+      if (nativeResources) {
+        if (!cookieAuthority) delete req.headers.cookie;
+        await handleNativeResources(req, res, {
+          backendPort: opts.backendPort,
+          origins: [req.headers.origin ?? ''],
+        });
+        return;
+      }
 
       if (req.url.startsWith(NATIVE_AUTH_ROUTE)) {
         if (!cookieAuthority) delete req.headers.cookie;
