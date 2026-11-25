@@ -505,6 +505,33 @@ describe('Aelix conversation controls: tools', () => {
     expect(screen.getByTestId('aelix-change-reselect')).not.toBeDisabled();
   });
 
+  it('drops an unsaved draft after a restore from the tools panel succeeds', async () => {
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      state.activeRef = ref;
+      state.toolOverride = null;
+      return failure(502, 'EXT_OUTCOME_UNKNOWN');
+    });
+    replies.set(LOOKUP, () => relay({ status: 'unknown' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+    expect(screen.getByTestId('aelix-recovery-card')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+    fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-tools')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    await settle();
+
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([['read']]);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
   it('drops an unsaved draft once inherited tools are applied', async () => {
     state.toolOverride = ['read'];
     render(<Routed />);
@@ -729,13 +756,15 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileUnavailable`);
   });
 
-  it('does not restore a profile whose preview no longer matches the saved ref', async () => {
+  it('does not restore a profile or picked tools when the preview no longer matches the saved ref', async () => {
     state.activeRef = QUIET;
     state.activeAgent = 'quiet';
+    state.toolOverride = ['read'];
     replies.set(USE, ({ profile }) => {
       const ref = profile as Ref;
       state.activeRef = ref;
       state.activeAgent = ref.name;
+      state.toolOverride = null;
       return failure(502, 'EXT_OUTCOME_UNKNOWN');
     });
     replies.set(LOOKUP, () => relay({ status: 'unknown' }));
@@ -750,10 +779,12 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
       relay(name === 'writer' ? writerPreview() : quietPreview(fixture<Ref>('profile-ref', '/vectors/2/ref')))
     );
     fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-profile')).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-tools')).getByRole('checkbox'));
     fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
     await settle();
 
     expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([WRITER]);
+    expect(postsOf(SET_TOOLS)).toHaveLength(0);
     expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
   });
 
