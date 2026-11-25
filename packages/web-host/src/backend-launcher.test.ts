@@ -14,7 +14,9 @@ vi.mock('node:child_process', () => ({
   spawn: vi.fn(),
 }));
 
-vi.mock('node:fs', () => ({
+vi.mock('node:fs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('node:fs')>()),
+  existsSync: vi.fn(),
   mkdirSync: vi.fn(),
   statSync: vi.fn(),
 }));
@@ -29,7 +31,7 @@ vi.mock('./agent-process-registry.js', () => ({
 }));
 
 import { spawn } from 'node:child_process';
-import { mkdirSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { connect, createServer } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
 import {
@@ -112,6 +114,7 @@ beforeEach(() => {
 afterEach(() => {
   // Do NOT call restoreAllMocks; it would remove vi.mock() module factories.
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe('buildSpawnArgs', () => {
@@ -349,6 +352,43 @@ describe('findAvailablePort', () => {
 });
 
 describe('BackendLifecycleManager.start (success path)', () => {
+  it('resolves the Aelix launch descriptor for each host start and omits it without a runtime', async () => {
+    const key = 'AIONUI_STUDIO_AELIX_LAUNCH';
+    vi.stubEnv(key, 'stale inherited descriptor');
+    const runtimePath = process.platform === 'win32' ? 'C:/prepared-runtime' : '/prepared-runtime';
+    vi.stubEnv('AELIX_STUDIO_RUNTIME', runtimePath);
+    vi.mocked(existsSync).mockImplementation((file) => !String(file).endsWith('manifest.json'));
+    const child = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(child as unknown as ChildProcess);
+    const mgr = new BackendLifecycleManager(APP_META_PACKAGED, () => '/abs/path/aioncore');
+
+    const firstStart = mgr.start('/db/path');
+    child.stdout?.emit('data', Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55555}\nAIONCORE_READY\n'));
+    await firstStart;
+    const launch = JSON.parse(vi.mocked(spawn).mock.calls[0][2]!.env![key]!);
+    expect(launch).toMatchObject({
+      command: process.execPath,
+      args: [expect.stringContaining('launch.cjs'), '--profile', 'coding'],
+    });
+    const firstStop = mgr.stop();
+    child.emit('exit', 0);
+    await firstStop;
+
+    vi.mocked(existsSync).mockReturnValue(false);
+    const secondChild = Object.assign(makeFakeChild(), { pid: undefined });
+    vi.mocked(spawn).mockReturnValue(secondChild as unknown as ChildProcess);
+    const secondStart = mgr.start('/db/path');
+    secondChild.stdout?.emit(
+      'data',
+      Buffer.from('AIONCORE_LISTENING {"host":"127.0.0.1","port":55556}\nAIONCORE_READY\n')
+    );
+    await secondStart;
+    expect(vi.mocked(spawn).mock.calls[1][2]!.env).not.toHaveProperty(key);
+    const secondStop = mgr.stop();
+    secondChild.emit('exit', 0);
+    await secondStop;
+  });
+
   it('lets aioncore choose the backend port and waits for the reported listening event', async () => {
     vi.mocked(createServer).mockImplementation(() => {
       throw new Error('launcher must not pre-bind backend ports');

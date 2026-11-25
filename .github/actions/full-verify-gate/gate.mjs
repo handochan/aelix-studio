@@ -72,6 +72,10 @@ export const FORCED_PATHS = [
     reason: 'Provider settings UI that scripts/studio-preview/providerSmoke.py hashes and providerHostSmoke.mjs drives',
   },
   {
+    pattern: 'packages/desktop/src/renderer/services/runtime/nativeAuth.ts',
+    reason: 'Provider settings transport included in the Provider smoke source receipt',
+  },
+  {
     pattern: 'packages/desktop/src/renderer/services/i18n/locales/*/settings.json',
     reason: 'strings scripts/studio-preview/providerHostSmoke.mjs reads to drive the Provider settings UI',
   },

@@ -1,4 +1,14 @@
-import type { NativeAuthCommand, NativeAuthReply } from '@aionui/web-host';
+import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthReply } from '@aionui/web-host';
+
+export const NATIVE_AUTH_CATALOG_KEY = 'studio.nativeAuth.catalog';
+
+/** ACP uses the provider-qualified identifier, including any slashes in the model ID. */
+export const aelixModelId = (provider: string, model: string): string => `${provider}/${model}`;
+
+export async function loadNativeAuthCatalog(): Promise<NativeAuthCatalog | null> {
+  const reply = await requestNativeAuth({ action: 'catalog' });
+  return reply.ok && 'providers' in reply.data ? reply.data : null;
+}
 
 declare global {
   interface Window {

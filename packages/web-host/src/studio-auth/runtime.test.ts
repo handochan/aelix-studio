@@ -1,6 +1,7 @@
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { resolveNativeRuntime } from './runtime';
+import { buildStudioAelixLaunch, resolveNativeRuntime } from './runtime';
 
 const mocks = vi.hoisted(() => ({ existsSync: vi.fn(), readFileSync: vi.fn() }));
 vi.mock('node:fs', () => mocks);
@@ -13,6 +14,7 @@ describe('portable native runtime resolution', () => {
     Object.defineProperty(process, 'platform', platform);
     Object.defineProperty(process, 'arch', arch);
     vi.resetAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it('uses the Windows venv Python without a shell or POSIX entrypoint', () => {
@@ -48,5 +50,28 @@ describe('portable native runtime resolution', () => {
     expect(resolveNativeRuntime(root)).toBeUndefined();
     mocks.existsSync.mockReturnValue(false);
     expect(resolveNativeRuntime(root)).toBeUndefined();
+  });
+
+  it('supplies only the D16 launcher arguments and environment for a bundled runtime', () => {
+    vi.stubEnv('AELIX_STUDIO_RUNTIME', root);
+    vi.stubEnv('AELIX_CODING_AGENT_DIR', '~/agent fixture');
+    vi.stubEnv('AELIX_AUTH_PATH', 'private auth path');
+    vi.stubEnv('OPENAI_API_KEY', 'test-secret');
+    mocks.existsSync.mockReturnValue(true);
+    mocks.readFileSync.mockReturnValue(
+      JSON.stringify({ schema: 'aelix.studio-preview.runtime/1', target: `${process.platform}-${process.arch}` })
+    );
+
+    const profile = path.join(root, 'profile');
+    const python = path.join(root, 'python', ...(process.platform === 'win32' ? ['python.exe'] : ['bin', 'python3']));
+    expect(JSON.parse(buildStudioAelixLaunch(profile)!)).toEqual({
+      command: python,
+      args: ['-I', '-S', '-B', '-X', 'utf8', path.join(root, 'launch.py'), 'acp', '--profile', 'coding'],
+      env: {
+        AELIX_CODING_AGENT_DIR: path.join(homedir(), 'agent fixture'),
+        AELIX_ACP_STUDIO_MANAGED: '1',
+        AELIX_STUDIO_EXTENSION_STATE: path.join(profile, 'aelix-runtime'),
+      },
+    });
   });
 });

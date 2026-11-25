@@ -2,10 +2,12 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, Button, Checkbox, Divider, Input, Link, Select, Space, Typography } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation, NativeAuthSelection } from '@aionui/web-host';
+import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation } from '@aionui/web-host';
 import { ipcBridge } from '@/common';
-import { AELIX_MARK_DATA_URL } from '@/renderer/utils/model/agentLogo';
-import { requestNativeAuth } from './nativeAuth';
+import { isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
+import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
+import { emitter } from '@/renderer/utils/emitter';
+import { mutate } from 'swr';
 
 /** Reuses Provider settings while keeping native credentials outside Aion's Provider DB. */
 export default function NativeProviders({
@@ -41,6 +43,7 @@ export default function NativeProviders({
     if (reply.ok && 'providers' in reply.data) {
       const next = reply.data;
       setCatalog(next);
+      void mutate(NATIVE_AUTH_CATALOG_KEY, next, { revalidate: false });
       setProvider(
         (previous) =>
           previous || next.providers.find((item) => item.configured || item.source)?.id || next.providers[0]?.id || ''
@@ -79,6 +82,7 @@ export default function NativeProviders({
       await refresh();
     } else if ('providers' in reply.data) {
       setCatalog(reply.data);
+      void mutate(NATIVE_AUTH_CATALOG_KEY, reply.data, { revalidate: false });
       if (command.action === 'endpoint') {
         setProvider(command.provider);
         setModel(command.model);
@@ -138,42 +142,22 @@ export default function NativeProviders({
     setBusy(true);
     setError('');
     try {
-      const reply = await requestNativeAuth({ action: 'select', provider, model });
-      if (reply.ok === false) {
-        setError(reply.code);
-        return;
-      }
-      if (!('command' in reply.data)) {
-        setError('NATIVE_FAILED');
-        return;
-      }
-      const launch: NativeAuthSelection = reply.data;
-      const agents = await ipcBridge.acpConversation.getManagedAgents.invoke();
-      let agent: { id: string } | undefined = agents.find(
-        (item) =>
-          item.command === launch.command &&
-          JSON.stringify(item.args) === JSON.stringify(launch.args) &&
-          JSON.stringify((item.env ?? []).map(({ name, value: entry }) => ({ name, value: entry }))) ===
-            JSON.stringify(launch.env)
-      );
-      agent ??= await ipcBridge.acpConversation.createCustomAgent.invoke({
-        name: `Aelix · ${provider}/${model}`,
-        command: launch.command,
-        icon: AELIX_MARK_DATA_URL,
-        args: launch.args,
-        env: launch.env,
-      });
       const assistants = await ipcBridge.assistants.list.invoke();
-      const assistant = assistants.find((item) => item.agent_id === agent.id);
-      if (!assistant) {
+      const assistant = assistants.find(isBuiltinAelixAssistant);
+      if (!assistant || assistant.agent_status === 'missing') {
+        setError('RUNTIME_UNAVAILABLE');
+        return;
+      }
+      if (!assistant.enabled) {
         setError('NATIVE_FAILED');
         return;
       }
       const conversation = await ipcBridge.conversation.create.invoke({
-        name: `Aelix · ${provider}/${model}`,
-        assistant: { id: assistant.id },
+        name: assistant.name,
+        assistant: { id: assistant.id, conversation_overrides: { model: aelixModelId(provider, model) } },
         extra: {},
       });
+      emitter.emit('chat.history.refresh');
       onOpenConversation?.();
       void navigate(`/conversation/${conversation.id}`);
     } catch {

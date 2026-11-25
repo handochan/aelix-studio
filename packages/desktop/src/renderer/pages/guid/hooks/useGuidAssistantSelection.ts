@@ -4,7 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { assistantRuntimeKey, isAionrsAssistant, type Assistant } from '@/common/types/agent/assistantTypes';
+import {
+  assistantRuntimeKey,
+  isAionrsAssistant,
+  isBuiltinAelixAssistant,
+  type Assistant,
+} from '@/common/types/agent/assistantTypes';
 import { configService } from '@/common/config/configService';
 import type { AcpModelInfo } from '../types';
 import type { AgentModeOption } from '@/renderer/utils/model/agentTypes';
@@ -19,6 +24,8 @@ import {
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManagedAgents';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import useSWR from 'swr';
+import { aelixModelId, loadNativeAuthCatalog, NATIVE_AUTH_CATALOG_KEY } from '@/renderer/services/runtime/nativeAuth';
 import { useCustomAgentsLoader } from './useCustomAgentsLoader';
 
 export {
@@ -102,8 +109,12 @@ function persistGuidAssistantSelectionKey(assistantId: string): void {
 }
 
 export function pickDefaultAssistantSelectionKey(assistants: Assistant[]): string | null {
-  const enabledAssistants = assistants.filter((assistant) => assistant.enabled !== false);
+  const enabledAssistants = assistants.filter(
+    (assistant) =>
+      assistant.enabled !== false && !(isBuiltinAelixAssistant(assistant) && assistant.agent_status === 'missing')
+  );
   const preferred =
+    enabledAssistants.find(isBuiltinAelixAssistant) ??
     enabledAssistants.find((assistant) => assistant.source === 'generated' && isAionrsAssistant(assistant)) ??
     enabledAssistants.find((assistant) => isAionrsAssistant(assistant)) ??
     enabledAssistants[0];
@@ -125,7 +136,14 @@ export const useGuidAssistantSelection = ({
   const [selectedMode, _setSelectedMode] = useState<string>('default');
   const [selectedAcpModel, _setSelectedAcpModel] = useState<string | null>(null);
   const [selectedThoughtLevelValue, _setSelectedThoughtLevelValue] = useState<string>('');
-  const { assistants } = useCustomAgentsLoader();
+  const { assistants: assistantCatalog } = useCustomAgentsLoader();
+  const assistants = useMemo(
+    () =>
+      assistantCatalog.filter(
+        (assistant) => !(isBuiltinAelixAssistant(assistant) && assistant.agent_status === 'missing')
+      ),
+    [assistantCatalog]
+  );
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
 
   const setSelectedMode = useCallback(
@@ -221,10 +239,31 @@ export const useGuidAssistantSelection = ({
         : undefined,
     [managedAgentRuntimeCatalog, selectedAssistant?.agent_id]
   );
-  const selectedAgentRuntimeModelInfo = useMemo(
+  const cachedAgentRuntimeModelInfo = useMemo(
     () => buildAgentRuntimeModelInfo(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
   );
+  // A fresh profile has no ACP catalog snapshot until it opens a session.
+  const { data: nativeCatalog } = useSWR(
+    isBuiltinAelixAssistant(selectedAssistant) ? NATIVE_AUTH_CATALOG_KEY : null,
+    loadNativeAuthCatalog
+  );
+  const selectedAgentRuntimeModelInfo = useMemo<AcpModelInfo | null>(() => {
+    if (!nativeCatalog) return cachedAgentRuntimeModelInfo;
+    return {
+      current_model_id: null,
+      current_model_label: null,
+      available_models: nativeCatalog.providers.flatMap((provider) =>
+        provider.models
+          .filter((model) => model.available)
+          .map((model) => ({
+            id: aelixModelId(provider.id, model.id),
+            label: model.name,
+            description: provider.name,
+          }))
+      ),
+    };
+  }, [cachedAgentRuntimeModelInfo, nativeCatalog]);
   const currentAgentAvailableCommands = useMemo(
     () => buildAgentRuntimeSlashCommands(selectedManagedAgentRuntimeCatalog),
     [selectedManagedAgentRuntimeCatalog]
@@ -340,7 +379,7 @@ export const useGuidAssistantSelection = ({
     selectedAssistant,
     selectedAssistantBackend,
     selectedAssistantAvailable,
-    assistants,
+    assistants: assistantCatalog,
     selectedMode,
     setSelectedMode,
     selectedAcpModel,

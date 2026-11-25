@@ -189,6 +189,7 @@ async def main():
     async def catalog():
         oauth = {p.id: p.name for p in get_oauth_providers()}
         models = registry.get_all()
+        available = {(m.provider, m.id) for m in registry.get_available()}
         ids = sorted({m.provider for m in models} | set(storage.list()) | set(oauth))
         result = []
         def model_info(model):
@@ -199,7 +200,8 @@ async def main():
             if parsed.port:
                 endpoint += ":" + str(parsed.port)
             endpoint += parsed.path
-            return dict(id=model.id, name=model.name, endpoint=endpoint, api=model.api)
+            return dict(id=model.id, name=model.name, endpoint=endpoint, api=model.api,
+                        available=(model.provider, model.id) in available)
         for pid in ids:
             status = await registry.get_provider_auth_status(pid)
             result.append(dict(id=pid, name=oauth.get(pid, registry.get_provider_display_name(pid)),

@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
@@ -22,38 +21,11 @@ type RelayWindow = Window & {
 };
 
 const hostBinary = process.env.STUDIO_RUNNING_INPUT_HOST;
-const adapterBinary = process.env.STUDIO_RUNNING_INPUT_ACP;
-const nativeBinary = process.env.STUDIO_RUNNING_INPUT_NATIVE;
-const agentId = 'fixture-running-input';
+const runtime = process.env.STUDIO_RUNNING_INPUT_RUNTIME;
+const agentId = 'builtin-aelix';
 const steerText = 'RUNNING_INPUT_STEER_MARKER';
 const followUpText = 'RUNNING_INPUT_FOLLOW_UP_MARKER';
 const staleText = 'RUNNING_INPUT_STALE_MARKER';
-
-const sqlString = (value: string) => "'" + value.replaceAll("'", "''") + "'";
-
-function seedBuiltin(root: string, adapter: string, native: string): void {
-  // The released H1 host enables the relay only for an unmodified builtin catalog entry.
-  // Seed the isolated catalog before startup hydration, using the installed ACP and native.
-  const args = JSON.stringify([
-    '--aelix',
-    native,
-    '--profile',
-    'coding',
-    '--provider',
-    'fixture',
-    '--model',
-    'one',
-    '--state-dir',
-    join(root, 'acp'),
-  ]);
-  execFileSync('sqlite3', [
-    join(root, 'aionui-backend.db'),
-    `
-    INSERT INTO agent_metadata (id, agent_id, name, backend, agent_type, agent_source, command, args, created_at, updated_at)
-    VALUES ('${agentId}','${agentId}','Running Input','aelix','acp','builtin',${sqlString(adapter)},${sqlString(args)},1,1);
-  `,
-  ]);
-}
 
 async function prepareFixture(root: string) {
   const agent = join(root, 'agent');
@@ -131,6 +103,7 @@ async function prepareFixture(root: string) {
       ...process.env,
       HOME: root,
       USERPROFILE: root,
+      AELIX_STUDIO_RUNTIME: runtime,
       AELIX_CODING_AGENT_DIR: agent,
       AELIX_SETTINGS_PATH: join(agent, 'settings.json'),
       AELIX_AUTH_PATH: join(agent, 'auth.json'),
@@ -294,11 +267,10 @@ async function checkRunningInput(page: Page, fixture: Awaited<ReturnType<typeof 
 for (const surface of ['desktop', 'webui'] as const) {
   test(`running input receives native queue receipts on ${surface}`, async () => {
     test.skip(
-      !hostBinary || !adapterBinary || !nativeBinary,
-      'Supply the verified bundled host, ACP and native paths.'
+      !hostBinary || !runtime,
+      'Set STUDIO_RUNNING_INPUT_HOST to a D16 host and STUDIO_RUNNING_INPUT_RUNTIME to a prepared or bundled runtime.'
     );
-    test.skip(process.platform === 'win32', 'This fixture seeds the isolated host catalog with the sqlite3 CLI.');
-    assert(hostBinary && adapterBinary && nativeBinary);
+    assert(hostBinary && runtime);
     const root = await mkdtemp(join(tmpdir(), 'studio-running-input-'));
     try {
       const fixture = await prepareFixture(root);
@@ -316,18 +288,17 @@ for (const surface of ['desktop', 'webui'] as const) {
           try {
             const page = await electron.firstWindow();
             await expect(page.locator('body')).toHaveText('Fixture');
-            seedBuiltin(root, adapterBinary, nativeBinary);
-            const restarted = await electron.evaluate(async () => {
+            const origin = await electron.evaluate(() => {
               const win = globalThis as typeof globalThis & {
-                studioFixture: { restart(): Promise<{ origin: string }> };
+                studioFixture: { origin(): string };
               };
-              return win.studioFixture.restart();
+              return win.studioFixture.origin();
             });
             await page.evaluate(
               (port) => {
                 (window as RelayWindow).__backendPort = port;
               },
-              Number(new URL(restarted.origin).port)
+              Number(new URL(origin).port)
             );
             await checkRunningInput(page, fixture);
           } finally {
@@ -342,9 +313,6 @@ for (const surface of ['desktop', 'webui'] as const) {
             true
           );
           try {
-            await manager.start(root);
-            await manager.stop();
-            seedBuiltin(root, adapterBinary, nativeBinary);
             const backendPort = await manager.start(root);
             const reset = await fetchStudioBackend(`http://127.0.0.1:${backendPort}/api/webui/reset-password`, {
               method: 'POST',

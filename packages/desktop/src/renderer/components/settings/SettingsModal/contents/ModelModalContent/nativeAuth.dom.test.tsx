@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { requestNativeAuth } from './nativeAuth';
+import { requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
 
 describe('secret-bearing native auth transport', () => {
   afterEach(() => {

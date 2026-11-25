@@ -13,6 +13,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdirSync, statSync } from 'node:fs';
 import { connect, createServer, type Socket } from 'node:net';
 import { cleanupRegisteredAgentProcesses } from './agent-process-registry.js';
+import { buildStudioAelixLaunch, STUDIO_AELIX_LAUNCH_ENV } from './studio-auth/runtime.js';
 import type { AppMetadata, BackendBinaryResolver } from './types.js';
 
 export const STUDIO_CREDENTIAL_HEADER = 'x-aionui-studio-auth';
@@ -250,7 +251,7 @@ export function buildSpawnEnv(dirs?: BackendDirConfig): NodeJS.ProcessEnv {
   // CLIs spawned under aioncore (e.g. cursor-agent) ship natives under
   // build/Release only, and node-gyp-build skips that directory for any
   // non-empty value, aborting the agent before the ACP handshake (#4070).
-  const { PREBUILDS_ONLY: _prebuildsOnly, ...parentEnv } = process.env;
+  const { PREBUILDS_ONLY: _prebuildsOnly, [STUDIO_AELIX_LAUNCH_ENV]: _aelixLaunch, ...parentEnv } = process.env;
   // Preserve explicit operator host settings (NPM_REGISTRY / REMOTE_IMAGES).
   // No Studio defaults: unset values retain the host's blocked behavior.
   if (!dirs) return parentEnv;
@@ -716,9 +717,12 @@ export class BackendLifecycleManager {
     }
 
     try {
+      const env = buildSpawnEnv(dirs);
+      const launch = buildStudioAelixLaunch(this.appMeta.userDataPath);
+      if (launch) env[STUDIO_AELIX_LAUNCH_ENV] = launch;
       this.childProcess = spawn(binaryPath, args, {
         stdio: ['pipe', 'pipe', 'pipe'],
-        env: buildSpawnEnv(dirs),
+        env,
         cwd: dirs?.workDir ?? dbPath,
         detached: process.platform !== 'win32',
       });

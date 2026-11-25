@@ -29,7 +29,7 @@ export type NativeAuthCatalog = {
     configured: boolean;
     source: string | null;
     oauth: boolean;
-    models: { id: string; name: string; endpoint: string; api: string }[];
+    models: { id: string; name: string; endpoint: string; api: string; available: boolean }[];
   }[];
 };
 

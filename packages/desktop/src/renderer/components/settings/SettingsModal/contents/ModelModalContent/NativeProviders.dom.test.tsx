@@ -14,7 +14,10 @@ const mocks = vi.hoisted(() => ({
   assistants: vi.fn(),
   createConversation: vi.fn(),
 }));
-vi.mock('./nativeAuth', () => ({ requestNativeAuth: mocks.request }));
+vi.mock('@/renderer/services/runtime/nativeAuth', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/renderer/services/runtime/nativeAuth')>()),
+  requestNativeAuth: mocks.request,
+}));
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -46,17 +49,30 @@ const catalog: NativeAuthCatalog = {
       configured: false,
       source: null,
       oauth: true,
-      models: [{ id: 'test-model', name: 'Test model', endpoint: 'https://api.example', api: 'anthropic-messages' }],
+      models: [
+        {
+          id: 'test-model',
+          name: 'Test model',
+          endpoint: 'https://api.example',
+          api: 'anthropic-messages',
+          available: false,
+        },
+      ],
     },
   ],
 };
+
+const configured = { ...catalog, providers: [{ ...catalog.providers[0], configured: true, source: 'stored' }] };
 
 describe('native provider settings', () => {
   beforeEach(() => {
     mocks.request.mockResolvedValue({ ok: true, data: catalog });
     mocks.agents.mockResolvedValue([]);
     mocks.createAgent.mockResolvedValue({ id: 'native-agent' });
-    mocks.assistants.mockResolvedValue([{ id: 'native-assistant', agent_id: 'native-agent' }]);
+    mocks.assistants.mockResolvedValue([
+      { id: 'legacy-aelix', agent_id: 'native-agent', source: 'generated' },
+      { id: 'bare:builtin-aelix', agent_id: 'builtin-aelix', source: 'generated', name: 'Aelix', enabled: true },
+    ]);
     mocks.createConversation.mockResolvedValue({ id: 'native-conversation' });
   });
   afterEach(() => {
@@ -119,38 +135,30 @@ describe('native provider settings', () => {
     expect(screen.getByLabelText('API key')).toHaveValue('');
   });
 
-  it('starts a fresh conversation with the selected native model and managed command environment', async () => {
-    const configured = { ...catalog, providers: [{ ...catalog.providers[0], configured: true, source: 'stored' }] };
-    const launch = {
-      root: catalog.root,
-      command: '/runtime/adapter/bin/aelix-acp',
-      args: ['--provider', 'anthropic', '--model', 'test-model'],
-      env: [
-        { name: 'AELIX_CODING_AGENT_DIR', value: catalog.root },
-        { name: 'AELIX_ACP_STUDIO_MANAGED', value: '1' },
-      ],
-    };
-    mocks.request.mockImplementation(async (command) => ({
-      ok: true,
-      data: command.action === 'select' ? launch : configured,
-    }));
+  it('starts a builtin Aelix conversation with the provider-qualified model override', async () => {
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
     const opened = vi.fn();
     render(<NativeProviders onOpenConversation={opened} />);
     const start = await screen.findByRole('button', { name: english.nativeAuth.startConversation });
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/conversation/native-conversation'));
-    expect(mocks.createAgent).toHaveBeenCalledWith({
-      name: 'Aelix · anthropic/test-model',
-      command: launch.command,
-      icon: expect.stringMatching(/^data:image\/svg\+xml;charset=utf-8,/),
-      args: launch.args,
-      env: launch.env,
+    expect(mocks.createConversation).toHaveBeenCalledWith({
+      name: 'Aelix',
+      assistant: { id: 'bare:builtin-aelix', conversation_overrides: { model: 'anthropic/test-model' } },
+      extra: {},
     });
-    // The stored icon is the official mark itself, not a build-specific asset path.
-    const { icon } = mocks.createAgent.mock.calls[0][0] as { icon: string };
-    expect(decodeURIComponent(icon.slice(icon.indexOf(',') + 1))).toContain('aria-label="Aelix mark"');
+    expect(mocks.createAgent).not.toHaveBeenCalled();
     expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it('reports unavailable when only legacy custom Aelix agents exist', async () => {
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.assistants.mockResolvedValue([{ id: 'legacy-aelix', agent_id: 'native-agent', source: 'generated' }]);
+    render(<NativeProviders />);
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+    expect(await screen.findByText(english.nativeAuth.unavailable)).toBeVisible();
+    expect(mocks.createConversation).not.toHaveBeenCalled();
   });
 
   it('lets the user answer a localized manual callback and clears the transient input', async () => {

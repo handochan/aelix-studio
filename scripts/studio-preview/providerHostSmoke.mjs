@@ -190,15 +190,13 @@ try {
   });
   const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
   const expectedExtensionState = path.join(fs.realpathSync(userDataPath), 'aelix-runtime');
-  const registration = page.waitForRequest(
-    (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/agents/custom'
+  const conversationCreation = page.waitForRequest(
+    (request) => request.method() === 'POST' && new URL(request.url()).pathname === '/api/conversations'
   );
   await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
-  assert.equal(
-    (await registration).postDataJSON().env?.find(({ name }) => name === 'AELIX_STUDIO_EXTENSION_STATE')?.value,
-    expectedExtensionState,
-    'The managed command must send the original Studio data path to the host as an environment value'
-  );
+  const request = (await conversationCreation).postDataJSON();
+  assert.equal(request.assistant?.id, 'bare:builtin-aelix');
+  assert.equal(request.assistant?.conversation_overrides?.model, 'fixture/fixture-model');
   let input = page.getByTestId('sendbox-input');
   await expect(input).toBeVisible({ timeout: 30000 });
   await input.fill('Check rejected credentials');

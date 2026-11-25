@@ -7,6 +7,12 @@ import {
 } from '@/renderer/pages/guid/hooks/useGuidAssistantSelection';
 
 describe('guid assistant selection helpers', () => {
+  const aelix = assistant({
+    id: 'bare:builtin-aelix',
+    agent_id: 'builtin-aelix',
+    source: 'generated',
+    runtimeKey: 'aelix',
+  });
   const assistants: Assistant[] = [
     assistant({ id: 'builtin-writer', source: 'builtin', runtimeKey: 'claude', sort_order: 20 }),
     assistant({ id: 'bare-aionrs', source: 'generated', runtimeKey: 'aionrs', sort_order: 10 }),
@@ -14,7 +20,7 @@ describe('guid assistant selection helpers', () => {
   ];
 
   it('prefers explicit custom assistant keys when the assistant exists', () => {
-    expect(resolveAssistantSelectionKey('custom:user-research', assistants)).toBe('user-research');
+    expect(resolveAssistantSelectionKey('custom:user-research', [aelix, ...assistants])).toBe('user-research');
   });
 
   it('does not accept legacy backend keys as assistant selection ids', () => {
@@ -22,8 +28,14 @@ describe('guid assistant selection helpers', () => {
     expect(resolveAssistantSelectionKey('aionrs', assistants)).toBeUndefined();
   });
 
-  it('defaults to the generated aionrs assistant when available', () => {
-    expect(pickDefaultAssistantSelectionKey(assistants)).toBe('bare-aionrs');
+  it('defaults to the builtin Aelix assistant ahead of the generated Aion CLI', () => {
+    expect(pickDefaultAssistantSelectionKey([...assistants, aelix])).toBe(aelix.id);
+  });
+
+  it('defaults to Aion CLI when the builtin runtime is missing', () => {
+    expect(pickDefaultAssistantSelectionKey([{ ...aelix, agent_status: 'missing' }, ...assistants])).toBe(
+      'bare-aionrs'
+    );
   });
 
   it('returns null when no assistants are available', () => {

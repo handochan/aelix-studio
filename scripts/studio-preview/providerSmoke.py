@@ -288,7 +288,8 @@ async def main(args):
                        Path(__file__).with_name('host-release') / 'verification.mjs']
             sources += sorted((ROOT / 'packages/web-host/src/studio-auth').glob('*.ts'))
             sources += sorted((ROOT / 'packages/desktop/src/renderer/components/settings/SettingsModal/contents/ModelModalContent').glob('*.ts*'))
-            sources += [ROOT / 'packages/desktop/src/index.ts', ROOT / 'packages/desktop/src/preload/main.ts',
+            sources += [ROOT / 'packages/desktop/src/renderer/services/runtime/nativeAuth.ts',
+                        ROOT / 'packages/desktop/src/index.ts', ROOT / 'packages/desktop/src/preload/main.ts',
                         ROOT / 'packages/desktop/src/process/bridge/index.ts']
             report['sourceSha256'] = {file.relative_to(ROOT).as_posix(): digest(file) for file in sources}
             report['builtAppSha256'] = {name: digest(ROOT / name) for name in ('out/main/index.js', 'out/preload/index.js')}

@@ -11,6 +11,13 @@ export type AssistantSource = 'builtin' | 'generated' | 'user';
 export type AssistantAgentStatus = 'missing' | 'online' | 'offline' | 'unchecked';
 export type AssistantAgentSource = 'internal' | 'builtin' | 'extension' | 'custom';
 
+export const BUILTIN_AELIX_AGENT_ID = 'builtin-aelix';
+
+/** Identify the generated picker entry for Studio's built-in Aelix agent. */
+export function isBuiltinAelixAssistant(assistant?: Pick<Assistant, 'source' | 'agent_id'>): boolean {
+  return assistant?.source === 'generated' && assistant.agent_id === BUILTIN_AELIX_AGENT_ID;
+}
+
 export type AssistantAgent = {
   type: string;
   source: AssistantAgentSource;
