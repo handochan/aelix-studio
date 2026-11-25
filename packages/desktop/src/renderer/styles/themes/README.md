@@ -62,7 +62,7 @@ Each token declares a `scope`:
 Grouped as in `tokenContract.ts` (`i` = appearance-invariant, otherwise appearance-scoped):
 
 - **Background**: `--bg-base` `--bg-1` `--bg-2` `--bg-3` `--bg-6` `--bg-hover` `--bg-active`
-- **Text**: `--text-primary` `--text-secondary` `--text-disabled` `--text-white` (i)
+- **Text**: `--text-primary` `--text-secondary` `--text-disabled` `--text-white` (i) `--text-on-primary`
 - **Border**: `--border-base` `--border-light` `--border-special`
 - **Semantic**: `--primary` `--success` `--warning` `--danger` `--info`
 - **Brand**: `--brand` `--brand-light` `--brand-hover`

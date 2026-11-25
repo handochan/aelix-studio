@@ -5,6 +5,9 @@
  * earlier), so these win by order. Light primary-6 is the brand deep #0E7490 so
  * white button text keeps AA contrast (5.4:1); dark primary-6 #0891B2 keeps link
  * text readable on the dark ground (5.2:1). Links follow the primary ramp.
+ * --primary-fill-text is the text on primary-6/7 fills: white in light mode
+ * (5.4:1, 7.3:1), ink in dark mode (5.2:1, 7.4:1). It lives beside the ramp
+ * because Arco's scales are not part of the theme token contract.
  */
 body {
   --primary-1: 236, 254, 255;
@@ -27,6 +30,7 @@ body {
   --link-8: var(--primary-8);
   --link-9: var(--primary-9);
   --link-10: var(--primary-10);
+  --primary-fill-text: #ffffff;
 }
 
 body[arco-theme='dark'] {
@@ -50,6 +54,23 @@ body[arco-theme='dark'] {
   --link-8: var(--primary-8);
   --link-9: var(--primary-9);
   --link-10: var(--primary-10);
+  --primary-fill-text: #0e0e0e;
+}
+
+/*
+ * Primary buttons and the active step carry text on the primary fill. Hover uses
+ * primary-7 like active: primary-5 is too light for white text in light mode and
+ * too dark for ink in dark mode. Status buttons keep Arco's colors.
+ */
+.arco-btn-primary:not(.arco-btn-disabled):not([class*='arco-btn-status-']),
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):hover,
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):active,
+.arco-steps-item-process .arco-steps-icon {
+  color: var(--primary-fill-text);
+}
+
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):hover {
+  background-color: rgb(var(--primary-7));
 }
 
 /*
