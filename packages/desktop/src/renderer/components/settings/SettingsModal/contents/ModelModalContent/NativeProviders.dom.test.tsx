@@ -221,7 +221,8 @@ describe('native provider settings', () => {
         installed: true,
         enabled: true,
         status: 'offline',
-        last_check_error_code: 'auth_required',
+        last_check_kind: 'session',
+        last_check_error_code: 'session_send_failed',
       },
     ]);
     mocks.checkAgentHealth.mockImplementation(async () => {
@@ -246,7 +247,7 @@ describe('native provider settings', () => {
     expect(mocks.checkAgentHealth).toHaveBeenCalledOnce();
   });
 
-  it('re-probes an Aelix the host marked offline for a sign-in failure before starting', async () => {
+  it('re-probes an Aelix the host marked offline after a failed session before starting', async () => {
     let agentStatus = 'offline';
     mocks.assistants.mockImplementation(async () => [
       {
@@ -260,7 +261,13 @@ describe('native provider settings', () => {
     ]);
     mocks.request.mockResolvedValue({ ok: true, data: configured });
     mocks.agents.mockResolvedValue([
-      { id: 'builtin-aelix', enabled: true, status: 'offline', last_check_error_code: 'auth_required' },
+      {
+        id: 'builtin-aelix',
+        enabled: true,
+        status: 'offline',
+        last_check_kind: 'session',
+        last_check_error_code: 'auth_required',
+      },
     ]);
     mocks.checkAgentHealth.mockImplementation(async () => {
       agentStatus = 'online';
@@ -272,7 +279,7 @@ describe('native provider settings', () => {
     expect(mocks.checkAgentHealth).toHaveBeenCalledExactlyOnceWith({ id: 'builtin-aelix' });
   });
 
-  it('keeps an Aelix that is offline for another reason unavailable without probing it', async () => {
+  it('keeps an Aelix that a probe marked offline unavailable without probing it again', async () => {
     mocks.assistants.mockResolvedValue([
       {
         id: 'bare:builtin-aelix',
@@ -285,7 +292,13 @@ describe('native provider settings', () => {
     ]);
     mocks.request.mockResolvedValue({ ok: true, data: configured });
     mocks.agents.mockResolvedValue([
-      { id: 'builtin-aelix', enabled: true, status: 'offline', last_check_error_code: 'acp_init_failed' },
+      {
+        id: 'builtin-aelix',
+        enabled: true,
+        status: 'offline',
+        last_check_kind: 'manual',
+        last_check_error_code: 'acp_init_failed',
+      },
     ]);
     render(<NativeProviders />);
     fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));

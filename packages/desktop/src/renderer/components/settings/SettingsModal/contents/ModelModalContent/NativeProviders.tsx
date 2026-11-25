@@ -7,7 +7,7 @@ import { ipcBridge } from '@/common';
 import { canStartAssistantConversation, isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
 import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
 import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
-import { recheckAelixAfterAuthFailure } from '@/renderer/services/runtime/aelixAvailability';
+import { recheckAelixAfterSessionFailure } from '@/renderer/services/runtime/aelixAvailability';
 import { emitter } from '@/renderer/utils/emitter';
 import { mutate } from 'swr';
 
@@ -69,9 +69,9 @@ export default function NativeProviders({
     setModel(selected?.models[0]?.id ?? '');
   }, [provider, selected?.models[0]?.id]);
 
-  // A corrected credential must not stay behind the host's earlier sign-in failure.
+  // A corrected credential must not stay behind the host's earlier session failure.
   const recheckAvailability = (): void => {
-    void recheckAelixAfterAuthFailure().catch(() => false);
+    void recheckAelixAfterSessionFailure().catch(() => false);
   };
 
   const perform = async (command: NativeAuthCommand): Promise<void> => {
@@ -157,7 +157,7 @@ export default function NativeProviders({
       if (
         assistant &&
         !canStartAssistantConversation(assistant) &&
-        (await recheckAelixAfterAuthFailure().catch(() => false))
+        (await recheckAelixAfterSessionFailure().catch(() => false))
       ) {
         assistant = (await ipcBridge.assistants.list.invoke()).find(isBuiltinAelixAssistant);
       }
