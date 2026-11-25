@@ -231,7 +231,12 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             <Button
               size='small'
               disabled={Boolean(blocked)}
-              onClick={() => void controls.applyProfile(active, { inheritTools: true })}
+              onClick={() =>
+                // Like Save: once inherit lands, an unsaved draft must not stay to overwrite it.
+                void controls.applyProfile(active, { inheritTools: true }).then((applied) => {
+                  if (applied) setDirty(false);
+                })
+              }
               data-testid='aelix-tools-inherit'
             >
               {t(`${KEY}.tools.inherit`)}

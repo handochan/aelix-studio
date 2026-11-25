@@ -440,6 +440,22 @@ describe('Aelix conversation controls: tools', () => {
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
   });
 
+  it('drops an unsaved draft once inherited tools are applied', async () => {
+    state.toolOverride = ['read'];
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeInherited`);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
   it('shows saved, applied and live state with lock reasons and pending rows', async () => {
     replies.set(SELECTIONS, ({ kind }) => {
       if (kind !== 'tool') return relay(fixture('selections-list-skill', '/result'));
