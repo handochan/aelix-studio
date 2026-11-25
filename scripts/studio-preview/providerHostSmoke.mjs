@@ -348,11 +348,8 @@ try {
   await expect(input).toBeVisible({ timeout: 30000 });
   await input.fill('Verify unreachable endpoint');
   await page.getByTestId('sendbox-send-btn').click();
-  await expect(
-    page
-      .getByText(/All connection attempts failed|Connection error|Connection refused|ECONNREFUSED|connection_error/)
-      .last()
-  ).toBeVisible({ timeout: 30000 });
+  // The connection error text is peer detail too (see the rejected-key check above).
+  await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
 
   // Operator setup uses the authenticated Electron renderer. The WebUI
   // below must obtain its own browser session before accessing native auth.
