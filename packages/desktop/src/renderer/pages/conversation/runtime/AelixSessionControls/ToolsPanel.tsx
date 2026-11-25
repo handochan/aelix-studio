@@ -106,6 +106,13 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
     setEditBase(null);
   }, [tools, dirty]);
 
+  // Any accepted write (Save, inherit, a decision-2 reselect, a restore) supersedes the draft,
+  // so a stale draft cannot be saved over it.
+  const acceptedWrites = controls.acceptedWrites;
+  useEffect(() => {
+    if (acceptedWrites > 0) setDirty(false);
+  }, [acceptedWrites]);
+
   const rows = tools?.items ?? [];
   const saveNames = useMemo(() => namesFor(rows, draft), [rows, draft]);
 
@@ -232,9 +239,12 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             data-testid='aelix-settings-dirty'
           >
             {t(`${KEY}.tools.settingsDirty`)}
-            <Button size='mini' type='text' onClick={() => setDirty(false)} data-testid='aelix-settings-discard'>
-              {t(`${KEY}.tools.discard`)}
-            </Button>
+            {/* The list-changed warning already offers Discard; show only one. */}
+            {!listChanged && (
+              <Button size='mini' type='text' onClick={() => setDirty(false)} data-testid='aelix-settings-discard'>
+                {t(`${KEY}.tools.discard`)}
+              </Button>
+            )}
           </span>
         )}
       </div>
@@ -244,12 +254,7 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             <Button
               size='small'
               disabled={Boolean(blocked)}
-              onClick={() =>
-                // Like Save: once inherit lands, an unsaved draft must not stay to overwrite it.
-                void controls.applyProfile(active, { inheritTools: true }).then((applied) => {
-                  if (applied) setDirty(false);
-                })
-              }
+              onClick={() => void controls.applyProfile(active, { inheritTools: true })}
               data-testid='aelix-tools-inherit'
             >
               {t(`${KEY}.tools.inherit`)}

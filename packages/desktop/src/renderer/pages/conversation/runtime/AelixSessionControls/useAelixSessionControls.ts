@@ -76,6 +76,8 @@ export type AelixSessionControls = {
   previewName: string | null;
   previewFailure?: ResourceFailure;
   writing: WriteTarget | null;
+  /** Counts accepted writes (profile, tools, restore) so editors can drop drafts made before them. */
+  acceptedWrites: number;
   /** Writes only run while the conversation is idle and attached. */
   writeBlocked: 'busy' | 'not-idle' | null;
   notice?: ControlsNotice;
@@ -121,6 +123,7 @@ const INITIAL: State = {
   availability: { kind: 'checking' },
   previewName: null,
   writing: null,
+  acceptedWrites: 0,
 };
 
 type Session = { conversationId: string; resources: NativeSessionResources };
@@ -417,7 +420,12 @@ export function useAelixSessionControls({
       reselected = false
     ) => {
       if (outcome.status === 'success') {
-        patch(target, { notice: done, conflict: undefined, conflictBaseline: undefined });
+        patch(target, (previous) => ({
+          notice: done,
+          conflict: undefined,
+          conflictBaseline: undefined,
+          acceptedWrites: previous.acceptedWrites + 1,
+        }));
         return;
       }
       if (outcome.status === 'conflict' && outcome.reason === 'profile-changed') {
@@ -574,7 +582,12 @@ export function useAelixSessionControls({
       patch(target, (previous) =>
         failure
           ? { notice: refusalNotice(failure, 'restore') }
-          : { notice: { tone: 'success', key: 'restored' }, recovery: undefined, conflict: previous.conflict }
+          : {
+              notice: { tone: 'success', key: 'restored' },
+              recovery: undefined,
+              conflict: previous.conflict,
+              acceptedWrites: previous.acceptedWrites + 1,
+            }
       );
     },
     [appliedRef, current, patch, refresh, sessionRef, stateRef, writable]

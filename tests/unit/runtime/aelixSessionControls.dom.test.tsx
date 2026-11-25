@@ -423,6 +423,7 @@ describe('Aelix conversation controls: tools', () => {
     await settle();
 
     expect(screen.getByTestId('aelix-tools-list-changed')).toHaveTextContent(`${K}.tools.listChanged`);
+    expect(screen.getAllByText(`${K}.tools.discard`)).toHaveLength(1);
     fireEvent.click(screen.getByTestId('aelix-tools-save'));
     await settle();
     expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
@@ -452,6 +453,31 @@ describe('Aelix conversation controls: tools', () => {
     await settle();
 
     expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeInherited`);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
+  it('drops an unsaved draft after a reselect from the tools panel succeeds', async () => {
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      if (ref.revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      state.activeRef = ref;
+      state.toolOverride = null;
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET, QUIET_PROJECT]);
     expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
     expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
   });
