@@ -2286,6 +2286,35 @@ describe('AcpSendBox', () => {
       expect(lastOptions()).toMatchObject({ enabled: false });
     });
 
+    it('keeps Profile and tools off for an Aelix member of a team', () => {
+      useTeamPermissionMock.mockReturnValue({
+        isTeamMode: true,
+        isLeaderAgent: true,
+        leaderConversationId: 'conv-team',
+        allConversationIds: ['conv-team'],
+        propagateMode: vi.fn(),
+        warmupSession: vi.fn().mockResolvedValue(undefined),
+      });
+      render(<AcpSendBox conversation_id='conv-team' backend='aelix' messageState={makeMessageState()} />);
+
+      expect(lastOptions()).toMatchObject({ enabled: false });
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
+    });
+
+    it('keeps Profile and tools off in a team send box', () => {
+      render(
+        <AcpSendBox
+          conversation_id='conv-team'
+          backend='aelix'
+          messageState={makeMessageState()}
+          teamRuntime={{ loading: false, startedAtMs: null } as unknown as TeamSendBoxRuntime}
+        />
+      );
+
+      expect(lastOptions()).toMatchObject({ enabled: false });
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
+    });
+
     it('re-reads the model controls after a profile change', () => {
       const reload = vi.fn().mockResolvedValue(null);
       useAcpConfigOptionsMock.mockReturnValue({ ...useAcpConfigOptionsMock(), reload });
