@@ -191,6 +191,11 @@ function runtimeEntries(directory: string): string[] {
   }
 }
 
+/**
+ * Digest the native distributions' RECORD and METADATA so a package-only update stales cursors and revisions.
+ * An editable developer install (PEP 660, with an editable `direct_url.json`) keeps its RECORD when only
+ * the source tree changes, so source edits there are not sealed. Shipped runtimes never use editable installs.
+ */
 function nativeDistributions(root: string, bundled: boolean): string[][] {
   const native = path.join(root, 'native');
   const lib = path.join(native, 'lib');

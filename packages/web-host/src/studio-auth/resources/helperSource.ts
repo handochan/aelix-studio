@@ -56,8 +56,18 @@ def credential(info):
     return info is not None and (identity(info) in STARTUP_CREDENTIALS or
         (info.st_nlink > 1 and identity(info) in credential_identities()))
 
+PROCESS_EVENTS = {"subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork"}
+# The helper is sessionless: no model, catalog, MCP or other network traffic.
+NETWORK_EVENTS = {
+    "socket.connect", "socket.bind", "socket.sendto", "socket.sendmsg", "socket.getaddrinfo",
+    "socket.gethostbyname", "socket.gethostbyaddr", "socket.getnameinfo",
+}
+DENIED = []
+
 def protect_native_io(event, args):
-    if event in ("subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork"):
+    if event in PROCESS_EVENTS or event in NETWORK_EVENTS:
+        # Native code may catch the refusal and carry on. main() still fails closed.
+        DENIED.append(event)
         raise Refusal("HELPER_UNAVAILABLE")
     if event == "open" and isinstance(args[0], (str, bytes)):
         real = Path(os.fsdecode(args[0])).resolve()
@@ -65,6 +75,9 @@ def protect_native_io(event, args):
         if real in AUTH_NAMES or (info is not None and identity(info) in STARTUP_CREDENTIALS):
             raise PermissionError("credential store is outside native resource discovery")
 
+# The event loop's self-pipe is a socketpair (emulated with bind and connect on
+# Windows), so the one loop the settings writer needs is created before the guard.
+LOOP = asyncio.new_event_loop()
 # Native discovery follows links. Recheck credential identities at each open.
 sys.addaudithook(protect_native_io)
 with contextlib.redirect_stdout(sys.stderr):
@@ -731,7 +744,7 @@ def settings(command):
             if not writable_store(store.selection()) or not private_settings(store):
                 check_revision(command, revision)
                 raise Refusal("SCOPE_READONLY")
-            asyncio.run(manager.edit_list("global", key, edit, nullable=grammar.nullable))
+            LOOP.run_until_complete(manager.edit_list("global", key, edit, nullable=grammar.nullable))
             return saved(command, store.revision, before, after)
         raw = get_entries(text_of(data))
         if raw is not None and (not isinstance(raw, list) or any(not isinstance(e, str) for e in raw)):
@@ -881,6 +894,10 @@ def main(command):
 with contextlib.redirect_stdout(sys.stderr):
     request = json.loads(sys.stdin.buffer.readline(60002))
     reply = main(request)
+    if DENIED and reply["ok"]:
+        # A swallowed process or network attempt still fails the request closed.
+        write = request["action"] == "selections/set"
+        reply = dict(ok=False, code="OUTCOME_UNKNOWN", retryable=False) if write else dict(ok=False, code="HELPER_UNAVAILABLE")
 # Bound encoding as well: Markdown can reuse the same long YAML scalar many times.
 encoder = json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":"))
 with io.StringIO() as frame:

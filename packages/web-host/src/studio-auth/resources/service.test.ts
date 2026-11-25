@@ -474,6 +474,15 @@ describe('D16 global resources service', () => {
     }
   );
 
+  it('keeps the spawned helper command line within the Windows limit', async () => {
+    serve(() => reply('helper-skills'));
+    await service.request('owner', command('helper-skills'));
+    const [file, args] = mockSpawn.mock.lastCall! as [string, string[]];
+    // CreateProcess counts the program, separators and quoting toward 32767 characters.
+    const line = [file, ...args].map((arg) => '"' + arg.replace(/"/g, '\\"') + '"').join(' ');
+    expect(line.length).toBeLessThan(32767);
+  });
+
   it('refuses an installed launcher that differs from its receipt before spawning', async () => {
     await writeFile(
       path.join(runtime, 'receipt.json'),
@@ -1185,6 +1194,51 @@ McpSelection._load = retarget_then_load
         }
       }
       expect(await service.request(owner, request)).toEqual(reply('helper-error-result_too_large'));
+    },
+    90000
+  );
+
+  it.each([
+    ['connect', 'list'],
+    ['connect', 'write'],
+    ['swallowed lookup', 'list'],
+    ['swallowed lookup', 'write'],
+  ] as const)(
+    'fails closed on a helper network %s during a %s',
+    async (attempt, action) => {
+      let connections = 0;
+      const listener = createServer((_req, res) => res.writeHead(500).end());
+      listener.on('connection', () => connections++);
+      await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
+      const port = (listener.address() as AddressInfo).port;
+      try {
+        const old = await current(tool);
+        const probe =
+          attempt === 'connect'
+            ? `socket.create_connection(("127.0.0.1", ${port}), timeout=5).close()`
+            : `try:\n            socket.getaddrinfo("localhost", ${port})\n        except Exception:\n            pass`;
+        // Fault-inject native network use; the audit hook must refuse it even when native code swallows the error.
+        const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+        injectNative(real, (source) =>
+          source.replace(
+            'if command["action"].startswith("profiles/"):',
+            `import socket\n        ${probe}\n        if command["action"].startswith("profiles/"):`
+          )
+        );
+        const request = action === 'list' ? tool : { ...command('helper-set-tool'), expectedRevision: old.revision };
+        const expected =
+          action === 'write' && attempt !== 'connect'
+            ? 'helper-error-outcome_unknown'
+            : 'helper-error-helper_unavailable';
+        expect(await service.request(owner, request)).toEqual(reply(expected));
+        if (action === 'write' && attempt === 'connect') {
+          expect(await readFile(settingsPath(), 'utf8')).toBe(initialSettings);
+        }
+        expect(connections).toBe(0);
+      } finally {
+        listener.closeAllConnections();
+        await new Promise<void>((resolve) => listener.close(() => resolve()));
+      }
     },
     90000
   );
