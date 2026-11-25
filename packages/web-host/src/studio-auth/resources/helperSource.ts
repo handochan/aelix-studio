@@ -2,6 +2,7 @@
 export const NATIVE_RESOURCES_HELPER = String.raw`
 import asyncio
 import contextlib
+import errno
 import hashlib
 import hmac
 import io
@@ -312,24 +313,56 @@ def windows_user():
     finally:
         token.Close()
 
+PRIVATE_GROUPS = {}
+
 def private_group(gid):
-    """Debian/OpenSSH user-private-group rule: group write is only this user's own write."""
+    """Debian/OpenSSH user-private-group rule: group write is only this user's own write.
+
+    The helper serves one command per process, so the answer is cached for the
+    whole write: a transient NSS miss after admission cannot turn a landed
+    write into OUTCOME_UNKNOWN.
+    """
+    if gid not in PRIVATE_GROUPS:
+        PRIVATE_GROUPS[gid] = lookup_private_group(gid)
+    return PRIVATE_GROUPS[gid]
+
+def lookup_private_group(gid):
     import grp
     import pwd
     try:
         user = pwd.getpwuid(os.geteuid())
         group = grp.getgrgid(gid)
-    except KeyError:
+        if (user.pw_gid != gid or group.gr_name != user.pw_name
+                or any(member != user.pw_name for member in group.gr_mem)):
+            return False
+        # gr_mem lists supplementary members only. An account whose primary
+        # group this is shares it too (Debian user-group-modes).
+        return all(entry.pw_gid != gid or entry.pw_uid == user.pw_uid for entry in pwd.getpwall())
+    except Exception:
         return False
-    return (user.pw_gid == gid and group.gr_name == user.pw_name
-        and all(member == user.pw_name for member in group.gr_mem))
+
+def posix_acl(path):
+    """Whether a Linux POSIX ACL may grant write to someone the group bits do not name.
+
+    With an access ACL the group bits are the ACL mask, so S_IWGRP means a named
+    user or group may write. macOS ACLs are not visible in the mode bits and
+    Python cannot list them; like OpenSSH, they are not inspected.
+    """
+    listxattr = getattr(os, "listxattr", None)
+    if listxattr is None:
+        return False
+    try:
+        return "system.posix_acl_access" in listxattr(path, follow_symlinks=False)
+    except OSError as error:
+        # A file system without extended attributes has no ACL. Anything else is unverified.
+        return error.errno not in (errno.ENOTSUP, errno.EOPNOTSUPP)
 
 def private_directory(path, info):
     if not stat.S_ISDIR(info.st_mode) or getattr(info, "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT:
         return False
     if os.name != "nt":
         return (info.st_uid == os.geteuid() and not info.st_mode & stat.S_IWOTH
-            and (not info.st_mode & stat.S_IWGRP or private_group(info.st_gid)))
+            and (not info.st_mode & stat.S_IWGRP or (not posix_acl(path) and private_group(info.st_gid))))
     try:
         import win32security as security
         owner = windows_user()
@@ -358,18 +391,9 @@ def file_id(info, code):
     return identity(info)
 
 def opened_id(fd):
-    info = os.fstat(fd)
-    if os.name != "nt" or (info.st_dev and info.st_ino):
-        return file_id(info, "STORE_UNREADABLE")
-    try:
-        import msvcrt
-        import win32file
-        _, _, _, _, volume, _, _, _, high, low = win32file.GetFileInformationByHandle(msvcrt.get_osfhandle(fd))
-        if volume and (high or low):
-            return volume, (high << 32) | low
-    except Exception:
-        pass
-    raise Refusal("STORE_UNREADABLE")
+    # CPython 3.12 fills the Windows volume and file ID from the handle, in the
+    # same format as lstat. Without them the handle is unverified and refused.
+    return file_id(os.fstat(fd), "STORE_UNREADABLE")
 
 # Same-user threat model for global settings writes.
 #
@@ -385,8 +409,9 @@ def opened_id(fd):
 #      The resolved root and those directories must be owned by this user and
 #      not writable by others. Group write is allowed only for this user's
 #      private group: the user's primary gid, named after the user, with no
-#      other members (Debian's umask 002 layout). Anything else is refused with
-#      SCOPE_READONLY.
+#      other supplementary member and no other account's primary group, and no
+#      Linux POSIX access ACL (Debian's umask 002 layout). NSS answers are cached
+#      for the command. Anything else is refused with SCOPE_READONLY.
 #   2. On POSIX those directories stay open (O_DIRECTORY|O_NOFOLLOW) for the
 #      whole transaction, and each child is opened relative to its pinned parent.
 #   3. After the native lock is taken, around the replacement and after it, the

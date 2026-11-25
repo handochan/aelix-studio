@@ -930,22 +930,55 @@ mcp_writer._platform_lock = traced_lock`;
   );
 
   it.each([
-    ['private', 'studio', [], true],
-    ['shared', 'studio', ['other'], false],
-    ['differently named', 'staff', [], false],
+    ['private group', {}, true],
+    ['private group across an NSS miss after the replacement', { nssDownAfterReplace: true }, true],
+    ['shared group', { members: ['other'] }, false],
+    ['differently named group', { name: 'staff' }, false],
+    ["group that is another account's primary group", { others: ['other'] }, false],
+    ['group missing from NSS', { missing: true }, false],
+    ['private group with a POSIX ACL', { acl: true }, false],
   ] as const)(
-    'applies the user-private-group rule to a group-writable lock directory (%s group)',
-    async (_label, groupName, members, allowed) => {
+    'applies the user-private-group rule to a group-writable lock directory (%s)',
+    async (_label, overrides, allowed) => {
       const sidecar = path.join(agent, 'locks');
       await mkdir(sidecar);
       await exec('chmod', ['0775', sidecar]);
-      // Present the lock directory's group as the user's primary group with the given name and members.
+      const config = {
+        lock: sidecar,
+        name: 'studio',
+        members: [] as readonly string[],
+        others: [] as readonly string[],
+        missing: false,
+        acl: false,
+        nssDownAfterReplace: false,
+        ...overrides,
+      };
+      // Present the lock directory's group as the user's primary group, then vary NSS and ACL answers.
       const seam = `import grp, pwd
 from types import SimpleNamespace
-lock_gid = os.stat(${JSON.stringify(sidecar)}).st_gid
-real_getpwuid, real_getgrgid = pwd.getpwuid, grp.getgrgid
-pwd.getpwuid = lambda uid: SimpleNamespace(pw_name="studio", pw_gid=lock_gid) if uid == os.geteuid() else real_getpwuid(uid)
-grp.getgrgid = lambda gid: SimpleNamespace(gr_name=${JSON.stringify(groupName)}, gr_mem=${JSON.stringify(members)}) if gid == lock_gid else real_getgrgid(gid)`;
+from aelix_ai.settings import storage as seam_storage
+config = json.loads(${JSON.stringify(JSON.stringify(config))})
+lock_gid = os.stat(config["lock"]).st_gid
+uid = os.geteuid()
+nss = dict(down=False)
+user = SimpleNamespace(pw_name="studio", pw_uid=uid, pw_gid=lock_gid)
+real_getpwuid, real_getgrgid, real_replace = pwd.getpwuid, grp.getgrgid, seam_storage._replace
+def fake_group(gid):
+    if gid != lock_gid:
+        return real_getgrgid(gid)
+    if config["missing"] or nss["down"]:
+        raise KeyError(gid)
+    return SimpleNamespace(gr_name=config["name"], gr_mem=config["members"])
+def replace_then_lose_nss(src, dst):
+    real_replace(src, dst)
+    nss["down"] = config["nssDownAfterReplace"]
+pwd.getpwuid = lambda value: user if value == uid else real_getpwuid(value)
+pwd.getpwall = lambda: [user] + [SimpleNamespace(pw_name=name, pw_uid=uid + 1 + index, pw_gid=lock_gid)
+    for index, name in enumerate(config["others"])]
+grp.getgrgid = fake_group
+seam_storage._replace = replace_then_lose_nss
+if config["acl"]:
+    os.listxattr = lambda path, *args, **kwargs: ["user.note", "system.posix_acl_access"]`;
       const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
       injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
       const old = await current(tool);
