@@ -47,15 +47,25 @@ describe('useAcpInitialMessage', () => {
     vi.clearAllMocks();
   });
 
-  it('sends nothing when the first-prompt model check rejects', async () => {
-    sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
+  it('restores the automatic first draft and sends nothing when the model check rejects', async () => {
+    const files = [
+      { kind: 'upload', path: '/uploads/note.txt' },
+      { kind: 'local', path: '/workspace/source.ts' },
+      { kind: 'project', pe_id: 'p1', relative_path: 'src/main.ts' },
+    ];
+    sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files }));
     const addOrUpdateMessage = vi.fn();
-    const prepareInitialModel = vi.fn().mockRejectedValue(new AelixInitialModelUnconfirmed());
+    const restoreDraft = vi.fn();
+    // The live model check fails before the prompt is handed to the host.
+    const submitPrompt = vi.fn(async (_dispatch: () => Promise<void>) => {
+      throw new AelixInitialModelUnconfirmed();
+    });
     renderHook(() =>
       useAcpInitialMessage({
         conversation_id: 'conv-1',
         backend: 'aelix',
-        prepareInitialModel,
+        submitPrompt,
+        restoreDraft,
         setAiProcessing: vi.fn(),
         resetState: vi.fn(),
         checkAndUpdateTitle: vi.fn(),
@@ -69,6 +79,8 @@ describe('useAcpInitialMessage', () => {
       )
     );
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(restoreDraft).toHaveBeenCalledExactlyOnceWith('hello', files);
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBeNull();
   });
 
   it('suppresses tips and reset when initial ACP send hits active-turn busy', async () => {
@@ -86,12 +98,14 @@ describe('useAcpInitialMessage', () => {
     const addOrUpdateMessage = vi.fn();
     const resetState = vi.fn();
     const setAiProcessing = vi.fn();
+    const restoreDraft = vi.fn();
 
     renderHook(() =>
       useAcpInitialMessage({
         conversation_id: 'conv-1',
         backend: 'codex',
         workspacePath: '/tmp/workspace',
+        restoreDraft,
         setAiProcessing,
         resetState,
         markSendStarted: vi.fn(),
@@ -109,6 +123,8 @@ describe('useAcpInitialMessage', () => {
     expect(addOrUpdateMessage).not.toHaveBeenCalled();
     expect(resetState).not.toHaveBeenCalled();
     expect(setAiProcessing).not.toHaveBeenCalledWith(false);
+    // The host saw this prompt, so the composer must not offer it again.
+    expect(restoreDraft).not.toHaveBeenCalled();
   });
 
   it('holds the stored first message while sending is blocked and sends it once unblocked', async () => {
@@ -143,12 +159,14 @@ describe('useAcpInitialMessage', () => {
     const addOrUpdateMessage = vi.fn();
     const resetState = vi.fn();
     const setAiProcessing = vi.fn();
+    const restoreDraft = vi.fn();
 
     renderHook(() =>
       useAcpInitialMessage({
         conversation_id: 'conv-1',
         backend: 'codex',
         workspacePath: '/tmp/workspace',
+        restoreDraft,
         setAiProcessing,
         resetState,
         markSendStarted: vi.fn(),

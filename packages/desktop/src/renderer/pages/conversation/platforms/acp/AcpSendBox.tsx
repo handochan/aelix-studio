@@ -1,9 +1,5 @@
 import { ipcBridge } from '@/common';
-import {
-  AelixInitialModelUnconfirmed,
-  confirmPendingAelixInitialModel,
-  saveAelixInitialModel,
-} from '@/renderer/services/runtime/aelixInitialModel';
+import { AelixInitialModelUnconfirmed, submitAelixInitialPrompt } from '@/renderer/services/runtime/aelixInitialModel';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { chatFileRefKey, uploadFileRef, type ChatFileRef } from '@/common/types/chatFile';
@@ -123,6 +119,22 @@ const useSendBoxDraft = (conversation_id: string) => {
     [data, mutate]
   );
 
+  const restoreDraft = useCallback(
+    (input: string, files: ChatFileRef[]) => {
+      mutate((draft) => {
+        const existing = new Set(collectChatFileRefs(draft.uploadFile, draft.atPath).map(chatFileRefKey));
+        const restored = splitChatFileRefs(files.filter((file) => !existing.has(chatFileRefKey(file))));
+        return {
+          ...draft,
+          content: draft.content === input ? input : [input, draft.content].filter(Boolean).join('\n'),
+          uploadFile: [...restored.uploadFiles, ...draft.uploadFile],
+          atPath: [...restored.atPath, ...draft.atPath],
+        };
+      });
+    },
+    [mutate]
+  );
+
   const removeSubmittedFiles = (files: ChatFileRef[]) => {
     if (!files.length) return;
     const sent = new Set(files.map(chatFileRefKey));
@@ -138,6 +150,7 @@ const useSendBoxDraft = (conversation_id: string) => {
 
   return {
     removeSubmittedFiles,
+    restoreDraft,
     atPath,
     uploadFile,
     setAtPath,
@@ -188,7 +201,7 @@ const AcpSendBox: React.FC<{
   const showModeSelector = true;
   const isLeaderInTeam = teamPermission && conversation_id === teamPermission.leaderConversationId;
   const { checkAndUpdateTitle } = useAutoTitle();
-  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, removeSubmittedFiles } =
+  const { atPath, uploadFile, setAtPath, setUploadFile, content, setContent, removeSubmittedFiles, restoreDraft } =
     useSendBoxDraft(conversation_id);
   const layout = useLayoutContext();
   const isMobile = Boolean(layout?.isMobile);
@@ -383,19 +396,20 @@ const AcpSendBox: React.FC<{
   const firstModelAcceptedRef = useRef<string | null>(null);
   const keepsInitialModelDraft = hasInitialModel && firstModelAcceptedRef.current !== conversation_id;
   const loadFreshConfig = viewConfigPort?.loadFresh;
-  const prepareInitialModel = useCallback(async () => {
-    if (!hasInitialModel || firstModelAcceptedRef.current === conversation_id) return false;
-    return confirmPendingAelixInitialModel(
-      conversation_id,
-      loadFreshConfig && (() => loadFreshConfig(conversation_id))
-    );
-  }, [conversation_id, hasInitialModel, loadFreshConfig]);
-  const onInitialModelAccepted = useCallback(() => {
-    firstModelAcceptedRef.current = conversation_id;
-    void saveAelixInitialModel(conversation_id, null).catch(() => {
-      console.error('[AcpSendBox] Failed to retire the first-prompt model');
-    });
-  }, [conversation_id]);
+  const submitPrompt = useCallback(
+    (dispatch: () => Promise<void>) => {
+      if (!hasInitialModel || firstModelAcceptedRef.current === conversation_id) return dispatch();
+      return submitAelixInitialPrompt(
+        conversation_id,
+        dispatch,
+        () => {
+          firstModelAcceptedRef.current = conversation_id;
+        },
+        loadFreshConfig && (() => loadFreshConfig(conversation_id))
+      );
+    },
+    [conversation_id, hasInitialModel, loadFreshConfig]
+  );
 
   // Check for and send initial message from guid page
   useAcpInitialMessage({
@@ -410,8 +424,8 @@ const AcpSendBox: React.FC<{
     beginCompactionSubmission,
     checkAndUpdateTitle,
     addOrUpdateMessage: addOrUpdateMessageRef.current,
-    prepareInitialModel: hasInitialModel ? prepareInitialModel : undefined,
-    onInitialModelAccepted,
+    submitPrompt,
+    restoreDraft,
   });
 
   const executeCommand = useCallback(
@@ -431,19 +445,19 @@ const AcpSendBox: React.FC<{
           return;
         }
 
-        const confirmedInitialModel = hasInitialModel && (await prepareInitialModel());
-        markSendStarted();
-        setAiProcessing(true);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id,
-          files,
-          // `@@` references. Dropping this here is a silent failure: the agent
-          // simply never receives the session block.
-          sessions,
+        await submitPrompt(async () => {
+          markSendStarted();
+          setAiProcessing(true);
+          const result = await ipcBridge.acpConversation.sendMessage.invoke({
+            input,
+            conversation_id,
+            files,
+            // `@@` references. Dropping this here is a silent failure: the agent
+            // simply never receives the session block.
+            sessions,
+          });
+          markSendAccepted(result.turn_id, result.runtime, result.msg_id);
         });
-        markSendAccepted(result.turn_id, result.runtime, result.msg_id);
-        if (confirmedInitialModel) onInitialModelAccepted();
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
         if (error instanceof AelixInitialModelUnconfirmed) {
@@ -536,12 +550,10 @@ Please check your local CLI tool authentication status`,
       beginCompactionSubmission,
       checkAndUpdateTitle,
       conversation_id,
-      hasInitialModel,
       markSendAccepted,
       markSendFailed,
       markSendStarted,
-      onInitialModelAccepted,
-      prepareInitialModel,
+      submitPrompt,
       resetState,
       setAiProcessing,
       t,

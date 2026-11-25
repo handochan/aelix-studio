@@ -4,7 +4,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import React from 'react';
 import { Message } from '@arco-design/web-react';
@@ -16,6 +16,12 @@ import AcpSendBox from '@/renderer/pages/conversation/platforms/acp/AcpSendBox';
 import type { UseAcpMessageReturn } from '@/renderer/pages/conversation/platforms/acp/useAcpMessage';
 import type { MobileActionSheetEntry } from '@/renderer/components/chat/MobileActionSheet/types';
 import type { TeamSendBoxRuntime } from '@/renderer/pages/team/components/teamSendRuntime';
+import {
+  setAelixInitialModelConfigOption,
+  submitAelixInitialPrompt,
+} from '@/renderer/services/runtime/aelixInitialModel';
+import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
+import type { ChatFileRef } from '@/common/types/chatFile';
 
 const {
   sendMessageInvokeMock,
@@ -99,32 +105,38 @@ const {
   setConfigOptionInvokeMock: vi.fn(),
 }));
 
-const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock, imagePathsMock, noticesPropsSpy } = vi.hoisted(
-  () => ({
-    runningInputMock: {
-      available: false,
-      handlesSubmit: false,
-      modes: ['steer', 'follow-up'],
-      mode: 'follow-up',
-      setMode: vi.fn(),
-      notices: [],
-      submit: vi.fn(),
-      beginStop: vi.fn(),
-      finishStop: vi.fn(),
-      dismiss: vi.fn(),
-      check: vi.fn(),
-      images: { modes: ['steer'], receipts: [] },
-    },
-    useRunningInputSpy: vi.fn(),
-    collectChatFileRefsMock: vi.fn((): object[] => []),
-    imagePathsMock: {
-      remember: vi.fn(),
-      available: false,
-      send: vi.fn(async () => ({ sent: false, decorationsCurrent: false })),
-    },
-    noticesPropsSpy: vi.fn(),
-  })
-);
+const {
+  runningInputMock,
+  useRunningInputSpy,
+  collectChatFileRefsMock,
+  splitChatFileRefsMock,
+  imagePathsMock,
+  noticesPropsSpy,
+} = vi.hoisted(() => ({
+  runningInputMock: {
+    available: false,
+    handlesSubmit: false,
+    modes: ['steer', 'follow-up'],
+    mode: 'follow-up',
+    setMode: vi.fn(),
+    notices: [],
+    submit: vi.fn(),
+    beginStop: vi.fn(),
+    finishStop: vi.fn(),
+    dismiss: vi.fn(),
+    check: vi.fn(),
+    images: { modes: ['steer'], receipts: [] },
+  },
+  useRunningInputSpy: vi.fn(),
+  collectChatFileRefsMock: vi.fn((): object[] => []),
+  splitChatFileRefsMock: vi.fn((): { uploadFiles: string[]; atPath: object[] } => ({ uploadFiles: [], atPath: [] })),
+  imagePathsMock: {
+    remember: vi.fn(),
+    available: false,
+    send: vi.fn(async () => ({ sent: false, decorationsCurrent: false })),
+  },
+  noticesPropsSpy: vi.fn(),
+}));
 
 vi.mock('@/renderer/pages/conversation/runtime/RunningInput', async () => ({
   // The real layout, so the order test below checks what the composer renders.
@@ -403,7 +415,7 @@ vi.mock('@/renderer/utils/file/fileSelection', () => ({
 }));
 vi.mock('@/renderer/utils/file/messageFiles', () => ({
   collectChatFileRefs: collectChatFileRefsMock,
-  splitChatFileRefs: () => ({ uploadFiles: [], atPath: [] }),
+  splitChatFileRefs: splitChatFileRefsMock,
 }));
 vi.mock('@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage', () => ({
   useAcpInitialMessage: vi.fn(),
@@ -594,6 +606,167 @@ describe('AcpSendBox', () => {
     expect(Message.error).toHaveBeenCalledWith('agent.model.switchFailed');
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
     expect(clearFilesMock).not.toHaveBeenCalled();
+  });
+
+  it('holds Send behind a header change until the observed choice is saved', async () => {
+    let storedModel: string | null = 'fixture/a';
+    let currentModel = 'fixture/a';
+    const load = async (): Promise<AcpConfigOptionDto[]> => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: currentModel,
+        options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+      },
+    ];
+    let releaseWrite!: () => void;
+    const writing = new Promise<void>((resolve) => {
+      releaseWrite = resolve;
+    });
+    getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: storedModel } }));
+    updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+      if (updates.extra.studio_initial_model === 'fixture/b') await writing;
+      storedModel = updates.extra.studio_initial_model;
+      return true;
+    });
+    setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+      currentModel = value;
+      return { confirmation: 'observed', config_options: await load() };
+    });
+    const receivedBy = vi.fn();
+    sendMessageInvokeMock.mockImplementation(async () => {
+      receivedBy(currentModel);
+      return { turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' };
+    });
+    const port = { load, loadFresh: load, setConfigOption: setAelixInitialModelConfigOption };
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={port}
+        messageState={makeMessageState()}
+      />
+    );
+
+    const switchModel = port.setConfigOption('conv-1', 'model', 'fixture/b');
+    try {
+      await waitFor(() =>
+        expect(updateConversationInvokeMock).toHaveBeenCalledWith(
+          expect.objectContaining({
+            updates: { extra: { studio_initial_model: 'fixture/b' } },
+          })
+        )
+      );
+      await act(async () => fireEvent.click(screen.getByRole('button', { name: 'send' })));
+      expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    } finally {
+      await act(async () => {
+        releaseWrite();
+        await switchModel;
+      });
+    }
+    await waitFor(() => expect(receivedBy).toHaveBeenCalledExactlyOnceWith('fixture/b'));
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('lets a header model change that is still reading the runtime land before the first prompt', async () => {
+    const { useAcpConfigOptions: useRealConfigOptions } = await vi.importActual<
+      typeof import('@/renderer/hooks/agent/useAcpConfigOptions')
+    >('@/renderer/hooks/agent/useAcpConfigOptions');
+    let storedModel: string | null = 'fixture/a';
+    let currentModel = 'fixture/a';
+    const options = (): AcpConfigOptionDto[] => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: currentModel,
+        options: [{ value: 'fixture/a' }, { value: 'fixture/b' }],
+      },
+    ];
+    let releaseRead!: () => void;
+    const reading = new Promise<void>((resolve) => {
+      releaseRead = resolve;
+    });
+    getConversationInvokeMock.mockImplementation(async () => ({ extra: { studio_initial_model: storedModel } }));
+    updateConversationInvokeMock.mockImplementation(async ({ updates }) => {
+      storedModel = updates.extra.studio_initial_model;
+      return true;
+    });
+    setConfigOptionInvokeMock.mockImplementation(async ({ value }) => {
+      currentModel = value;
+      return { confirmation: 'observed', config_options: options() };
+    });
+    const loadFresh = async () => options();
+    const port = {
+      // The selector reads the runtime before it applies a change; hold that read.
+      load: async () => {
+        await reading;
+        return options();
+      },
+      loadFresh,
+      setConfigOption: setAelixInitialModelConfigOption,
+    };
+    const { result } = renderHook(() =>
+      useRealConfigOptions({ conversation_id: 'conv-header', configOptionsPort: port })
+    );
+    let headerChange!: Promise<unknown>;
+    act(() => {
+      headerChange = result.current.setConfigOptionWithConfirmation('model', 'fixture/b');
+    });
+    const dispatchedOn = vi.fn();
+    const send = submitAelixInitialPrompt('conv-header', async () => dispatchedOn(currentModel), vi.fn(), loadFresh);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    expect(dispatchedOn).not.toHaveBeenCalled();
+
+    await act(async () => {
+      releaseRead();
+      await headerChange;
+      await send;
+    });
+    expect(dispatchedOn).toHaveBeenCalledExactlyOnceWith('fixture/b');
+    expect(setConfigOptionInvokeMock).toHaveBeenCalledExactlyOnceWith({
+      conversation_id: 'conv-header',
+      option_id: 'model',
+      value: 'fixture/b',
+    });
+    expect(storedModel).toBeNull();
+  });
+
+  it('puts an automatic first prompt rejected before dispatch back into the composer', async () => {
+    const actual = await vi.importActual<typeof import('@/renderer/utils/file/messageFiles')>(
+      '@/renderer/utils/file/messageFiles'
+    );
+    collectChatFileRefsMock.mockImplementation(actual.collectChatFileRefs);
+    splitChatFileRefsMock.mockImplementation(actual.splitChatFileRefs);
+    try {
+      render(
+        <AcpSendBox conversation_id='conv-restore' backend='aelix' hasInitialModel messageState={makeMessageState()} />
+      );
+      const { restoreDraft } = vi.mocked(useAcpInitialMessage).mock.calls.at(-1)![0];
+      const upload: ChatFileRef = { kind: 'upload', path: '/uploads/note.txt' };
+      const local: ChatFileRef = { kind: 'local', path: '/workspace/source.ts' };
+      restoreDraft!('first prompt', [upload, local]);
+      const update = draftMutateMock.mock.calls.at(-1)![0];
+      // A file the user already re-attached is not duplicated; later typing is kept after the prompt.
+      expect(update({ _type: 'acp', content: 'typed later', uploadFile: ['/uploads/note.txt'], atPath: [] })).toEqual({
+        _type: 'acp',
+        content: 'first prompt\ntyped later',
+        uploadFile: ['/uploads/note.txt'],
+        atPath: [{ path: '/workspace/source.ts', name: 'source.ts', isFile: true, chatRef: local }],
+      });
+      expect(update({ _type: 'acp', content: '', uploadFile: [], atPath: [] })).toMatchObject({
+        content: 'first prompt',
+        uploadFile: ['/uploads/note.txt'],
+      });
+    } finally {
+      collectChatFileRefsMock.mockImplementation(() => []);
+      splitChatFileRefsMock.mockImplementation(() => ({ uploadFiles: [], atPath: [] }));
+    }
   });
 
   it('shows a progress ring with a window size, a hollow ring without one, and nothing without usage', () => {

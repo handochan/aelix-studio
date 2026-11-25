@@ -31,8 +31,8 @@ type UseAcpInitialMessageParams = {
   beginCompactionSubmission?: (input: string) => (() => void) | undefined;
   checkAndUpdateTitle: (conversation_id: string, input: string) => void;
   addOrUpdateMessage: (message: TMessage, prepend?: boolean) => void;
-  prepareInitialModel?: () => Promise<boolean>;
-  onInitialModelAccepted?: () => void;
+  submitPrompt?: (dispatch: () => Promise<void>) => Promise<void>;
+  restoreDraft?: (input: string, files: ChatFileRef[]) => void;
 };
 
 /**
@@ -51,8 +51,8 @@ export const useAcpInitialMessage = ({
   beginCompactionSubmission,
   checkAndUpdateTitle,
   addOrUpdateMessage,
-  prepareInitialModel,
-  onInitialModelAccepted,
+  submitPrompt,
+  restoreDraft,
 }: UseAcpInitialMessageParams): void => {
   const { t } = useTranslation();
 
@@ -68,6 +68,7 @@ export const useAcpInitialMessage = ({
 
     const sendInitialMessage = async () => {
       let finishCompactionSubmission: (() => void) | undefined;
+      let unsentDraft: { input: string; files: ChatFileRef[] } | undefined;
       try {
         const initialMessage = JSON.parse(storedMessage);
         const input = typeof initialMessage.input === 'string' ? initialMessage.input : '';
@@ -83,22 +84,22 @@ export const useAcpInitialMessage = ({
               .filter(isChatFileRef)
           : [];
 
-        const confirmedInitialModel = prepareInitialModel && (await prepareInitialModel());
-        markSendStarted?.();
-        setAiProcessing(true);
-
-        void checkAndUpdateTitle(conversation_id, input);
-        const result = await ipcBridge.acpConversation.sendMessage.invoke({
-          input,
-          conversation_id: conversation_id,
-          files,
-        });
-        markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
-        if (confirmedInitialModel) onInitialModelAccepted?.();
+        unsentDraft = { input, files };
+        const dispatch = async () => {
+          unsentDraft = undefined;
+          markSendStarted?.();
+          setAiProcessing(true);
+          void checkAndUpdateTitle(conversation_id, input);
+          const result = await ipcBridge.acpConversation.sendMessage.invoke({ input, conversation_id, files });
+          markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
+        };
+        if (submitPrompt) await submitPrompt(dispatch);
+        else await dispatch();
 
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');
       } catch (error) {
+        if (unsentDraft) restoreDraft?.(unsentDraft.input, unsentDraft.files);
         const errorMessageText =
           error instanceof AelixInitialModelUnconfirmed
             ? t('agent.model.switchFailed')
@@ -153,10 +154,10 @@ export const useAcpInitialMessage = ({
     markSendAccepted,
     markSendFailed,
     markSendStarted,
-    onInitialModelAccepted,
-    prepareInitialModel,
     resetState,
+    restoreDraft,
     setAiProcessing,
+    submitPrompt,
     t,
   ]);
 };

@@ -11,17 +11,11 @@ import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
 import { CronJobManager } from '@/renderer/pages/cron';
 import { resolveCronJobId } from '@/renderer/pages/cron/cronUtils';
 import {
-  findConfigOption,
-  hasObservedValue,
   classifyConfigSetError,
   type AcpConfigOptionsPort,
   useAcpConfigOptions,
 } from '@/renderer/hooks/agent/useAcpConfigOptions';
-import {
-  loadAelixInitialModel,
-  readAelixInitialModel,
-  saveAelixInitialModel,
-} from '@/renderer/services/runtime/aelixInitialModel';
+import { readAelixInitialModel, setAelixInitialModelConfigOption } from '@/renderer/services/runtime/aelixInitialModel';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
@@ -306,23 +300,7 @@ const ChatConversation: React.FC<{
       sessionView && {
         load: async () => (await sessionView.ensure()).config_options,
         loadFresh: async () => (await sessionView.ensure({ fresh: true })).config_options,
-        ...(hasInitialModel && {
-          setConfigOption: async (conversation_id: string, option_id: string, value: string) => {
-            const response = await ipcBridge.acpConversation.setConfigOption.invoke({
-              conversation_id,
-              option_id,
-              value,
-            });
-            if (
-              hasObservedValue(response, option_id, value) &&
-              findConfigOption(response.config_options, 'model', ['model'])?.id === option_id &&
-              (await loadAelixInitialModel(conversation_id))
-            ) {
-              await saveAelixInitialModel(conversation_id, value);
-            }
-            return response;
-          },
-        }),
+        ...(hasInitialModel && { setConfigOption: setAelixInitialModelConfigOption }),
       },
     [hasInitialModel, sessionView]
   );

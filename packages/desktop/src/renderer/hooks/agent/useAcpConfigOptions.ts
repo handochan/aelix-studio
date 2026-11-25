@@ -179,6 +179,18 @@ function subscribeConversationSetStatus(
   };
 }
 
+/** Resolve once no selector change is in flight for the conversation. */
+export function waitForConfigOptionIdle(conversation_id: string): Promise<void> {
+  if (getConversationSetStatus(conversation_id).state === 'idle') return Promise.resolve();
+  return new Promise((resolve) => {
+    const unsubscribe = subscribeConversationSetStatus(conversation_id, (status) => {
+      if (status.state !== 'idle') return;
+      unsubscribe();
+      resolve();
+    });
+  });
+}
+
 /**
  * Values the backend ACCEPTED but has not applied yet, keyed by option id.
  *
