@@ -64,7 +64,9 @@ const ProfilePanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }
 
   const active = profiles?.activeRef ?? null;
   const legacyName = !active && profiles?.activeAgent ? profiles.activeAgent : null;
-  const canApply = capabilities.profilesUse && !controls.profileUseUnsupported;
+  // Only a runtime without `profiles/use` lacks selection. Until the native guard ships, ACP applies
+  // by name with a revision check and reports drift through the same decision-2 flow.
+  const canApply = capabilities.profilesUse;
   const selected = preview && previewName === preview.ref.name ? preview : undefined;
 
   return (

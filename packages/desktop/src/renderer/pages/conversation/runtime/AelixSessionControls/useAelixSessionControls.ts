@@ -77,8 +77,6 @@ export type AelixSessionControls = {
   writing: WriteTarget | null;
   /** Writes only run while the conversation is idle and attached. */
   writeBlocked: 'busy' | 'not-idle' | null;
-  /** The runtime refused `profiles/use` as unsupported, e.g. the native profile guard is missing. */
-  profileUseUnsupported: boolean;
   notice?: ControlsNotice;
   conflict?: ResourceFailure;
   recovery?: RecoveryState;
@@ -116,7 +114,6 @@ const INITIAL: State = {
   availability: { kind: 'checking' },
   previewName: null,
   writing: null,
-  profileUseUnsupported: false,
 };
 
 type Session = { conversationId: string; resources: NativeSessionResources };
@@ -426,7 +423,7 @@ export function useAelixSessionControls({
         });
         return;
       }
-      if (outcome.status === 'unsupported' && kind !== 'tools') patch(target, { profileUseUnsupported: true });
+      // A one-off `unsupported` refusal is reported, but only a missing capability disables the control.
       patch(target, { notice: refusalNotice(outcome, kind) });
       const availability = availabilityFor(outcome);
       if (outcome.status === 'detached' || outcome.status === 'unauthenticated') {

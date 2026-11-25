@@ -106,11 +106,7 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
   const changed = dirty && !sameNames(saveNames, baselineNames);
   // Inherit returns only through a profile write, which resets the conversation override.
   const active = profiles?.activeRef ?? null;
-  const canInherit =
-    override !== null &&
-    capabilities.profilesUse &&
-    !controls.profileUseUnsupported &&
-    (active !== null || !profiles?.activeAgent);
+  const canInherit = override !== null && capabilities.profilesUse && (active !== null || !profiles?.activeAgent);
 
   const toggle = (key: string, checked: boolean) => {
     setDraft((previous) => {

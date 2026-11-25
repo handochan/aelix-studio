@@ -242,7 +242,24 @@ describe('Aelix conversation controls: attach and availability', () => {
     expect(panel.getByTestId('aelix-controls-update-required')).toBeInTheDocument();
   });
 
-  it('reports the missing native profile guard as an update, never as success', async () => {
+  it('shows selection as unavailable only when the runtime lacks profiles/use', async () => {
+    const requests = fixture<string[]>('relay-discovery', '/response/body/data/requests').filter(
+      (method) => method !== USE
+    );
+    discovery = () => {
+      const body = fixture<Json>('relay-discovery', '/response/body');
+      return Response.json({ ...body, data: { ...(body.data as Json), requests } });
+    };
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+
+    expect(screen.getByTestId('aelix-profile-apply-update-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-apply')).toBeNull();
+    expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
+  });
+
+  it('keeps selection available when a runtime refuses one apply as unsupported, without faking success', async () => {
     state.activeRef = WRITER;
     state.activeAgent = 'writer';
     replies.set(USE, () => relay({ accepted: false, reason: 'unsupported' }));
@@ -253,9 +270,9 @@ describe('Aelix conversation controls: attach and availability', () => {
     fireEvent.click(screen.getByTestId('aelix-profile-apply'));
     await settle();
 
-    expect(screen.getByTestId('aelix-profile-apply-update-required')).toBeInTheDocument();
-    expect(screen.queryByTestId('aelix-profile-apply')).toBeNull();
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.updateRequired`);
+    expect(screen.queryByTestId('aelix-profile-apply-update-required')).toBeNull();
+    expect(screen.getByTestId('aelix-profile-current')).toHaveTextContent('writer');
   });
 });
 
