@@ -149,6 +149,11 @@ const ProfilePanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }
           </Tooltip>
         </div>
       )}
+      {canApply && controls.tools && controls.tools.toolOverride !== null && (
+        <div className='text-12px text-warning' data-testid='aelix-profile-resets-tools'>
+          {t(`${KEY}.profile.resetsTools`)}
+        </div>
+      )}
       {canApply && blocked && !controls.writing && (
         <div className='text-12px text-t-secondary' data-testid='aelix-controls-blocked'>
           {blocked}

@@ -852,7 +852,8 @@
       "empty": "找不到設定檔。請使用 Aelix CLI 建立。",
       "partial": "只讀取到部分設定檔清單。",
       "diagnostics": "部分設定檔無法讀取：{{codes}}",
-      "legacy": "{{name}}（僅記錄名稱）"
+      "legacy": "{{name}}（僅記錄名稱）",
+      "resetsTools": "變更設定檔會將此對話的工具選擇重設為繼承。"
     },
     "tools": {
       "label": "工具",

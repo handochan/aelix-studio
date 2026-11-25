@@ -853,7 +853,8 @@
       "empty": "Keine Profile gefunden. Erstelle eines mit der Aelix CLI.",
       "partial": "Die Profilliste konnte nur teilweise gelesen werden.",
       "diagnostics": "Einige Profile konnten nicht gelesen werden: {{codes}}",
-      "legacy": "{{name}} (nur mit Namen gespeichert)"
+      "legacy": "{{name}} (nur mit Namen gespeichert)",
+      "resetsTools": "Ein Profilwechsel setzt die Werkzeugauswahl dieser Unterhaltung auf geerbt zurück."
     },
     "tools": {
       "label": "Werkzeuge",

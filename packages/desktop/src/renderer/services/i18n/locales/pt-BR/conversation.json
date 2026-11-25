@@ -858,7 +858,8 @@
       "empty": "Nenhum perfil encontrado. Crie um com a CLI do Aelix.",
       "partial": "Só foi possível ler parte da lista de perfis.",
       "diagnostics": "Alguns perfis não puderam ser lidos: {{codes}}",
-      "legacy": "{{name}} (registrado apenas pelo nome)"
+      "legacy": "{{name}} (registrado apenas pelo nome)",
+      "resetsTools": "Trocar o perfil volta a escolha de ferramentas desta conversa para herdadas."
     },
     "tools": {
       "label": "Ferramentas",

@@ -852,7 +852,8 @@
       "empty": "未找到配置。请使用 Aelix CLI 创建。",
       "partial": "只读取到部分配置列表。",
       "diagnostics": "部分配置无法读取：{{codes}}",
-      "legacy": "{{name}}（仅记录名称）"
+      "legacy": "{{name}}（仅记录名称）",
+      "resetsTools": "更改配置会将本对话的工具选择重置为继承。"
     },
     "tools": {
       "label": "工具",

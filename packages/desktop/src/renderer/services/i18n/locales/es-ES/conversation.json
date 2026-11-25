@@ -853,7 +853,8 @@
       "empty": "No se encontraron perfiles. Crea uno con la CLI de Aelix.",
       "partial": "Solo se pudo leer parte de la lista de perfiles.",
       "diagnostics": "No se pudieron leer algunos perfiles: {{codes}}",
-      "legacy": "{{name}} (registrado solo por nombre)"
+      "legacy": "{{name}} (registrado solo por nombre)",
+      "resetsTools": "Cambiar el perfil devuelve la selección de herramientas de esta conversación a heredadas."
     },
     "tools": {
       "label": "Herramientas",

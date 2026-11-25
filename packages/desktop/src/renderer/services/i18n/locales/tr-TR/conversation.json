@@ -854,7 +854,8 @@
       "empty": "Profil bulunamadı. Aelix CLI ile bir profil oluşturun.",
       "partial": "Profil listesinin yalnızca bir kısmı okunabildi.",
       "diagnostics": "Bazı profiller okunamadı: {{codes}}",
-      "legacy": "{{name}} (yalnızca adıyla kayıtlı)"
+      "legacy": "{{name}} (yalnızca adıyla kayıtlı)",
+      "resetsTools": "Profili değiştirmek bu sohbetin araç seçimini devralınana döndürür."
     },
     "tools": {
       "label": "Araçlar",

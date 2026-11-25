@@ -302,6 +302,22 @@ describe('Aelix conversation controls: profile', () => {
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileApplied`);
   });
 
+  it('warns that changing the profile resets an explicit tool choice, including none', async () => {
+    state.toolOverride = [];
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    expect(screen.getByTestId('aelix-profile-resets-tools')).toHaveTextContent(`${K}.profile.resetsTools`);
+  });
+
+  it('does not warn about tools when they are inherited', async () => {
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-resets-tools')).toBeNull();
+  });
+
   it('keeps apply disabled while Aelix is busy and sends no write', async () => {
     render(<Harness hostState='busy' />);
     await settle();

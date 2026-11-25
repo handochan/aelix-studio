@@ -565,6 +565,7 @@ export type I18nKey =
   | 'conversation.aelixControls.profile.legacy'
   | 'conversation.aelixControls.profile.none'
   | 'conversation.aelixControls.profile.partial'
+  | 'conversation.aelixControls.profile.resetsTools'
   | 'conversation.aelixControls.profile.title'
   | 'conversation.aelixControls.recovery.cause.cancelled'
   | 'conversation.aelixControls.recovery.cause.changedAgain'
