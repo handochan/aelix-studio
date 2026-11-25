@@ -848,10 +848,12 @@ describe('AcpSendBox', () => {
   });
 
   it.each([
-    ['reports no current model', '', false, true],
-    ['reports a current model', 'fixture/one', false, false],
-    ['has a first-prompt choice pending', '', true, false],
-  ])('blocks Send for builtin Aelix only when the runtime %s', async (_case, current, pending, blocked) => {
+    ['reports no current model', '', false, 'conversation.welcome.selectModelToSend', true],
+    ['offers no model at all', '', false, 'conversation.welcome.addModelToSend', false],
+    ['reports a current model', 'fixture/one', false, null, true],
+    ['has a first-prompt choice pending', '', true, null, true],
+  ])('blocks Send for builtin Aelix only when the runtime %s', async (_case, current, pending, hint, hasModels) => {
+    const blocked = hint !== null;
     useAcpConfigOptionsMock.mockReturnValue({
       setStatus: { state: 'idle' },
       mode: null,
@@ -862,14 +864,14 @@ describe('AcpSendBox', () => {
         id: 'model',
         category: 'model',
         currentValue: current,
-        options: [{ value: 'fixture/one', label: 'Loopback one' }],
+        options: hasModels ? [{ value: 'fixture/one', label: 'Loopback one' }] : [],
       },
     });
     sendMessageInvokeMock.mockResolvedValue({ turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' });
     getConversationInvokeMock.mockResolvedValue({ extra: {} });
     render(
       <AcpSendBox
-        conversation_id={`conv-model-required-${String(blocked)}-${String(pending)}`}
+        conversation_id={`conv-model-required-${String(blocked)}-${String(pending)}-${String(hasModels)}`}
         backend='aelix'
         hasInitialModel={pending}
         messageState={makeMessageState()}
@@ -879,7 +881,7 @@ describe('AcpSendBox', () => {
     await act(async () => fireEvent.click(screen.getByRole('button', { name: 'send' })));
     if (blocked) {
       expect(sendMessageInvokeMock).not.toHaveBeenCalled();
-      expect(messageWarningMock).toHaveBeenCalledWith('conversation.welcome.selectModelToSend');
+      expect(messageWarningMock).toHaveBeenCalledWith(hint);
     } else {
       await waitFor(() => expect(sendMessageInvokeMock).toHaveBeenCalledOnce());
       expect(messageWarningMock).not.toHaveBeenCalled();

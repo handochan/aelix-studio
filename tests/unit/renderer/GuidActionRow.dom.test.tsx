@@ -194,8 +194,12 @@ describe('GuidActionRow send gating', () => {
 
   it('explains a disabled Send on hover and shows no hint otherwise', () => {
     const { rerender } = renderActionRow({ isButtonDisabled: true, sendDisabledHint: 'Pick a model first' });
-    expect(screen.getByTestId('guid-send-btn')).toBeDisabled();
+    const send = screen.getByTestId('guid-send-btn');
+    expect(send).toBeDisabled();
     expect(screen.getByTestId('guid-send-hint').parentElement).toHaveAttribute('data-tooltip', 'Pick a model first');
+    // Assistive technology reads the reason from the button itself.
+    const describedBy = send.getAttribute('aria-describedby');
+    expect(describedBy && document.getElementById(describedBy)).toHaveTextContent('Pick a model first');
     rerender(
       <GuidActionRow
         files={[]}
@@ -223,6 +227,22 @@ describe('GuidActionRow send gating', () => {
       />
     );
     expect(screen.getByTestId('guid-send-hint').parentElement).not.toHaveAttribute('data-tooltip');
+    expect(screen.getByTestId('guid-send-btn')).not.toHaveAttribute('aria-describedby');
+  });
+
+  it('turns the mobile model entry into an add-model action when there is nothing to pick', () => {
+    environment.isMobile = true;
+    const onAddModel = vi.fn();
+    renderActionRow({
+      currentAcpCachedModelInfo: { current_model_id: null, current_model_label: null, available_models: [] },
+      modelSelectionRequired: true,
+      modelSetupRequired: true,
+      onAddModel,
+    });
+    const entry = screen.getByTestId('model');
+    expect(entry).toHaveAttribute('data-meta', 'settings.addModel');
+    fireEvent.click(entry);
+    expect(onAddModel).toHaveBeenCalledOnce();
   });
 
   it('asks for a model in the mobile sheet instead of naming the first advertised one', () => {

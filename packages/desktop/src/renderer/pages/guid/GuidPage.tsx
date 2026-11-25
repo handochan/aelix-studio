@@ -245,6 +245,16 @@ const GuidPage: React.FC = () => {
     [slashController.filteredCommands, slashController.query]
   );
 
+  // Why Send waits: nothing to pick yet (add a model in Settings), or a pick is due.
+  const modelSelectionHint = agentSelection.modelSetupRequired
+    ? t('conversation.welcome.addModelToSend')
+    : agentSelection.modelSelectionRequired
+      ? t('conversation.welcome.selectModelToSend')
+      : undefined;
+  const openModelSettings = useCallback(() => {
+    void navigate('/settings/model');
+  }, [navigate]);
+
   const send = useGuidSend({
     // Input state
     input: guidInput.input,
@@ -261,6 +271,7 @@ const GuidPage: React.FC = () => {
     selectedAssistantAvailable: agentSelection.selectedAssistantAvailable,
     selectedBuiltinAelix: isBuiltinAelixAssistant(agentSelection.selectedAssistant),
     modelSelectionRequired: agentSelection.modelSelectionRequired,
+    modelSelectionHint,
     selectedAssistantBackend: agentSelection.selectedAssistantBackend,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
@@ -605,6 +616,7 @@ const GuidPage: React.FC = () => {
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
       modelSelectionRequired={agentSelection.modelSelectionRequired}
+      modelSetupRequired={agentSelection.modelSetupRequired}
     />
   );
 
@@ -630,6 +642,8 @@ const GuidPage: React.FC = () => {
       currentAcpCachedModelInfo={agentSelection.currentAcpCachedModelInfo}
       selectedAcpModel={agentSelection.selectedAcpModel}
       modelSelectionRequired={agentSelection.modelSelectionRequired}
+      modelSetupRequired={agentSelection.modelSetupRequired}
+      onAddModel={openModelSettings}
       setSelectedAcpModel={setGuidSelectedAcpModel}
       thoughtLevelOption={isGeminiMode ? null : agentSelection.currentThoughtLevelOption}
       onThoughtLevelSelect={setGuidSelectedThoughtLevel}
@@ -649,7 +663,7 @@ const GuidPage: React.FC = () => {
       }
       loading={guidInput.loading}
       isButtonDisabled={send.isButtonDisabled}
-      sendDisabledHint={agentSelection.modelSelectionRequired ? t('conversation.welcome.selectModelToSend') : undefined}
+      sendDisabledHint={modelSelectionHint}
       onSend={send.sendMessageHandler}
     />
   );

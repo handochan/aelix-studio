@@ -34,7 +34,7 @@ import {
   Shield,
   UploadOne,
 } from '@icon-park/react';
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useId, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import styles from '../index.module.css';
 
@@ -91,6 +91,10 @@ type GuidActionRowProps = {
   selectedAcpModel: string | null;
   /** No model is in use until the user picks one. */
   modelSelectionRequired?: boolean;
+  /** A pick is required but there is nothing to pick; offer to add a model instead. */
+  modelSetupRequired?: boolean;
+  /** Opens Settings → Model. */
+  onAddModel?: () => void;
   setSelectedAcpModel: (model: string | null) => void;
 
   // Thought level (mobile action sheet; only present for ACP agents)
@@ -133,6 +137,8 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   currentAcpCachedModelInfo,
   selectedAcpModel,
   modelSelectionRequired = false,
+  modelSetupRequired = false,
+  onAddModel,
   setSelectedAcpModel,
   thoughtLevelOption,
   onThoughtLevelSelect,
@@ -154,6 +160,7 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
   onSend,
 }) => {
   const { t } = useTranslation();
+  const sendHintId = useId();
   const layout = useLayoutContext();
   const isMobile = layout?.isMobile ?? false;
   const [isPlusDropdownOpen, setIsPlusDropdownOpen] = useState(false);
@@ -270,7 +277,15 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
           '';
       onModelSelect = (key) => setSelectedAcpModel(key);
     }
-    if (modelOptions.length > 0) {
+    if (modelOptions.length === 0 && modelSetupRequired && onAddModel) {
+      entries.push({
+        key: 'model',
+        icon: <Brain theme='outline' size='16' />,
+        label: t('common.model', { defaultValue: 'Model' }),
+        meta: t('settings.addModel'),
+        onClick: onAddModel,
+      });
+    } else if (modelOptions.length > 0) {
       entries.push({
         key: 'model',
         icon: <Brain theme='outline' size='16' />,
@@ -420,6 +435,8 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
     currentAcpCachedModelInfo,
     selectedAcpModel,
     modelSelectionRequired,
+    modelSetupRequired,
+    onAddModel,
     setSelectedAcpModel,
     thoughtLevelOption,
     onThoughtLevelSelect,
@@ -661,10 +678,16 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         )}
 
         {speechInputNode}
+        {sendDisabledHint && (
+          <span id={sendHintId} className='sr-only'>
+            {sendDisabledHint}
+          </span>
+        )}
         <Tooltip content={sendDisabledHint} disabled={!sendDisabledHint} position='top'>
-          {/* A disabled button receives no hover events; the wrapper carries the hint. */}
-          <span className='inline-flex' data-testid='guid-send-hint' aria-label={sendDisabledHint}>
+          {/* A disabled button receives no hover events; the wrapper carries the tooltip. */}
+          <span className='inline-flex' data-testid='guid-send-hint'>
             <Button
+              aria-describedby={sendDisabledHint ? sendHintId : undefined}
               shape='circle'
               type='primary'
               loading={loading}

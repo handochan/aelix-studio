@@ -994,6 +994,7 @@ export type I18nKey =
   | 'conversation.terminal.truncated'
   | 'conversation.thinking.complete'
   | 'conversation.thinking.label'
+  | 'conversation.welcome.addModelToSend'
   | 'conversation.welcome.clearWorkspace'
   | 'conversation.welcome.currentWorkspace'
   | 'conversation.welcome.linkFolder'

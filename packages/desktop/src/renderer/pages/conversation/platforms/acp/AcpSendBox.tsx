@@ -399,6 +399,12 @@ const AcpSendBox: React.FC<{
   // A pending first-prompt choice is applied before dispatch, so it does not count.
   const modelSelectionRequired =
     backend === 'aelix' && !keepsInitialModelDraft && runtimeConfig.model !== null && !runtimeConfig.model.currentValue;
+  // With no models to choose from, the header cannot help: a model must be added in Settings.
+  const modelSelectionHint = !modelSelectionRequired
+    ? undefined
+    : runtimeConfig.model?.options.length
+      ? t('conversation.welcome.selectModelToSend')
+      : t('conversation.welcome.addModelToSend');
   const loadFreshConfig = viewConfigPort?.loadFresh;
   const submitPrompt = useCallback(
     (dispatch: () => Promise<void>) => {
@@ -652,7 +658,7 @@ Please check your local CLI tool authentication status`,
     }
     if (deferDraftClear && !message.trim()) return false;
     if (modelSelectionRequired) {
-      Message.warning(t('conversation.welcome.selectModelToSend'));
+      Message.warning(modelSelectionHint);
       return false;
     }
 
@@ -1073,9 +1079,7 @@ Please check your local CLI tool authentication status`,
                 defaultValue:
                   'The current agent is still working and cannot receive another message yet. Add it to Draft box instead.',
               })
-            : modelSelectionRequired
-              ? t('conversation.welcome.selectModelToSend')
-              : undefined
+            : modelSelectionHint
         }
         placeholder={
           sendBlocked

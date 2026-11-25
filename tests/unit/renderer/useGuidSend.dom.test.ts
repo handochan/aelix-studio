@@ -5,6 +5,7 @@
  */
 
 import { act, renderHook } from '@testing-library/react';
+import { Message } from '@arco-design/web-react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { IMcpServer } from '@/common/config/storage';
 import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useGuidSend';
@@ -107,11 +108,14 @@ describe('useGuidSend', () => {
       selectedBuiltinAelix: true,
       selectedAcpModel: null,
       modelSelectionRequired: true,
+      modelSelectionHint: 'Pick a model first',
     };
+    vi.mocked(Message.warning).mockClear();
     const { result } = renderHook(() => useGuidSend(deps));
     expect(result.current.isButtonDisabled).toBe(true);
     // Enter reaches the handler even while the button is disabled.
     act(() => result.current.sendMessageHandler());
+    expect(Message.warning).toHaveBeenCalledExactlyOnceWith('Pick a model first');
     await act(() => result.current.handleSend());
     expect(createConversationInvokeMock).not.toHaveBeenCalled();
     expect(deps.setInput).not.toHaveBeenCalled();

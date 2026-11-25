@@ -235,12 +235,37 @@ describe('useGuidAssistantSelection', () => {
           createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
       });
 
+    it.each([
+      ['no provider is configured', { providers: [] }],
+      [
+        'no provider has a usable model',
+        {
+          providers: [
+            { ...helperCatalog.providers[0], models: [{ id: 'one', name: 'Loopback one', available: false }] },
+          ],
+        },
+      ],
+      ['the helper catalog failed', null],
+    ])('asks to add a model once loaded when %s', async (_case, catalog) => {
+      mockAssistants = [builtinAelix()];
+      let finish!: (value: unknown) => void;
+      loadCatalogMock.mockReturnValue(new Promise((resolve) => (finish = resolve)));
+      const { result } = renderSelection();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      // Still loading: not yet a dead end.
+      expect(result.current.modelSelectionRequired).toBe(true);
+      expect(result.current.modelSetupRequired).toBe(false);
+      await act(async () => finish(catalog));
+      await waitFor(() => expect(result.current.modelSetupRequired).toBe(true));
+    });
+
     it('requires a pick on a fresh profile and clears once the user picks', async () => {
       mockAssistants = [builtinAelix()];
       loadCatalogMock.mockResolvedValue(helperCatalog);
       const { result } = renderSelection();
       await waitFor(() => expect(result.current.currentAcpCachedModelInfo?.available_models).toHaveLength(2));
       expect(result.current.modelSelectionRequired).toBe(true);
+      expect(result.current.modelSetupRequired).toBe(false);
       act(() => result.current.setSelectedAcpModel('fixture/two', { explicit: true }));
       expect(result.current.modelSelectionRequired).toBe(false);
     });

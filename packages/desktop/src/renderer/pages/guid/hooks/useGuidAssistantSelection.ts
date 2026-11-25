@@ -56,6 +56,8 @@ export type GuidAssistantSelectionResult = {
   currentAcpCachedModelInfo: AcpModelInfo | null;
   /** Builtin Aelix has no model to use until the user picks one. */
   modelSelectionRequired: boolean;
+  /** A pick is required but there is nothing to pick: a model must be added in Settings. */
+  modelSetupRequired: boolean;
   currentAgentAvailableCommands: SlashCommandItem[];
   currentAgentModeOptions: AgentModeOption[];
   currentThoughtLevelOption: AgentRuntimeDerivedOption | null;
@@ -272,7 +274,7 @@ export const useGuidAssistantSelection = ({
   );
   // The ACP catalog is a snapshot from the last session: a fresh profile has none, and it
   // misses providers configured since. The helper lists them; Send still confirms live.
-  const { data: nativeCatalog } = useSWR(
+  const { data: nativeCatalog, isLoading: nativeCatalogLoading } = useSWR(
     isBuiltinAelixAssistant(selectedAssistant) ? NATIVE_AUTH_CATALOG_KEY : null,
     loadNativeAuthCatalog
   );
@@ -326,6 +328,10 @@ export const useGuidAssistantSelection = ({
     isBuiltinAelixAssistant(selectedAssistant) &&
     !selectedAcpModel &&
     !getReportedCurrentModelId(selectedManagedAgentRuntimeCatalog);
+  // Once the catalogs have loaded and offer nothing (no provider yet, or the helper failed),
+  // picking cannot help: the user needs to add a model first.
+  const modelSetupRequired =
+    modelSelectionRequired && !nativeCatalogLoading && !selectedAgentRuntimeModelInfo?.available_models.length;
 
   const modelSelectionScopeRef = useRef<string | null>(null);
   useEffect(() => {
@@ -426,6 +432,7 @@ export const useGuidAssistantSelection = ({
     setSelectedAcpModel,
     currentAcpCachedModelInfo,
     modelSelectionRequired,
+    modelSetupRequired,
     currentAgentAvailableCommands,
     currentAgentModeOptions,
     currentThoughtLevelOption,

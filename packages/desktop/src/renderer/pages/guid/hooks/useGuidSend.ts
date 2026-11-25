@@ -35,6 +35,8 @@ export type GuidSendDeps = {
   selectedBuiltinAelix?: boolean;
   /** Send waits for a model pick (builtin Aelix with no reported model). */
   modelSelectionRequired?: boolean;
+  /** Shown when Send is attempted while a model pick is required. */
+  modelSelectionHint?: string;
   selectedAssistantBackend: string;
   selectedMode: string;
   selectedAcpModel: string | null;
@@ -85,6 +87,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAssistantAvailable,
     selectedBuiltinAelix,
     modelSelectionRequired = false,
+    modelSelectionHint,
     selectedAssistantBackend,
     selectedMode,
     selectedAcpModel,
@@ -321,9 +324,12 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   ]);
 
   const sendMessageHandler = useCallback(() => {
+    if (loading || !selectedAssistantId || !selectedAssistantAvailable || sendingRef.current) return;
     // Keep the draft: a send that waits for a model pick must not clear the input.
-    if (loading || !selectedAssistantId || !selectedAssistantAvailable || modelSelectionRequired || sendingRef.current)
+    if (modelSelectionRequired) {
+      if (modelSelectionHint) Message.warning(modelSelectionHint);
       return;
+    }
     sendingRef.current = true;
     setLoading(true);
     handleSend()
@@ -353,6 +359,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     selectedAssistantId,
     selectedAssistantAvailable,
     modelSelectionRequired,
+    modelSelectionHint,
     handleSend,
     setLoading,
     setInput,

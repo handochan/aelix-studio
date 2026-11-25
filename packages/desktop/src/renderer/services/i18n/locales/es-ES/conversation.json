@@ -7,6 +7,7 @@
     "selectModel": "Seleccionar modelo",
     "useCliModel": "Seleccionar modelo",
     "selectModelToSend": "Selecciona un modelo antes de enviar.",
+    "addModelToSend": "Añade un modelo en Ajustes → Modelo antes de enviar.",
     "modelSwitchNotSupported": "La lista de modelos estará disponible después de la primera conexión. Envía un mensaje para conectar y cargar los modelos disponibles.",
     "specifyWorkspace": "Chatear en proyecto",
     "currentWorkspace": "Proyecto actual",
