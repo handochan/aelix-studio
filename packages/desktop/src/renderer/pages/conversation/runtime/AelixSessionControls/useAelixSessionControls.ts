@@ -127,6 +127,10 @@ const INITIAL: State = {
 };
 
 type Session = { conversationId: string; resources: NativeSessionResources };
+type VerifiedRef =
+  | { status: 'match' }
+  | { status: 'mismatch'; current: ProfileRef }
+  | { status: 'failure'; failure: ResourceFailure };
 
 function availabilityFor(failure: ResourceFailure): Availability | undefined {
   switch (failure.status) {
@@ -531,13 +535,58 @@ export function useAelixSessionControls({
     [baseline, current, runWrite, sessionRef, settle, settleLists, writable]
   );
 
+  /**
+   * Inspect a ref right before writing it. Until the native guard ships, ACP applies only a ref it
+   * has just previewed, so reselect and restore must show it first. A different ref means the
+   * profile changed again; a failed show is reported without writing.
+   */
+  const verifyRef = useCallback(async (target: Session, ref: ProfileRef): Promise<VerifiedRef> => {
+    const shown = await target.resources.showProfile(ref.name);
+    if (shown.status !== 'success') return { status: 'failure', failure: shown };
+    return sameRef(shown.data.ref, ref) ? { status: 'match' } : { status: 'mismatch', current: shown.data.ref };
+  }, []);
+
+  /** Decision 2 allows one reselection; a profile that changed again ends in recovery without a write. */
+  const changedAgain = useCallback(
+    (target: Session, failure: ResourceFailure, before: Baseline, original: ProfileRef | null) => {
+      patch(target, {
+        conflict: undefined,
+        conflictBaseline: undefined,
+        recovery: {
+          failure: {
+            ...failure,
+            status: 'recovery-required',
+            reason: 'changed-again',
+            action: 'restore-original-and-reopen',
+            original,
+          },
+          baseline: before,
+        },
+      });
+    },
+    [patch]
+  );
+
   const reselect = useCallback(async () => {
     const { conflict, conflictBaseline } = stateRef.current;
     const candidate = conflict?.candidate;
-    if (!candidate) return;
+    const target = sessionRef.current;
+    if (!conflict || !candidate || !target || !writable()) return;
+    const before = conflictBaseline ?? baseline();
+    const checked = await verifyRef(target, candidate);
+    if (!current(target)) return;
+    if (checked.status === 'failure') {
+      patch(target, { notice: refusalNotice(checked.failure, 'profile') });
+      return;
+    }
+    if (checked.status === 'mismatch') {
+      const original = conflict.recovery ? conflict.recovery.original : before.profile;
+      changedAgain(target, { ...conflict, recorded: candidate, candidate: checked.current }, before, original);
+      return;
+    }
     // One explicit choice; the runtime asks for the single standard approval in the conversation.
-    await applyProfileWith(candidate, conflictBaseline ?? baseline(), true);
-  }, [applyProfileWith, baseline, stateRef]);
+    await applyProfileWith(candidate, before, true);
+  }, [applyProfileWith, baseline, changedAgain, current, patch, sessionRef, stateRef, verifyRef, writable]);
 
   const keepCurrent = useCallback(() => {
     const target = sessionRef.current;
@@ -563,13 +612,19 @@ export function useAelixSessionControls({
       writingRef.current = true;
       patch(target, { writing: 'restore', notice: undefined });
       let failure: ResourceFailure | undefined;
+      let mismatch: ProfileRef | undefined;
       try {
         if (profileStep) {
-          const report = await target.resources.useProfile(capabilities.bindingId, profileStep.ref);
-          if (report.outcome.status !== 'success') failure = report.outcome;
-          else appliedRef.current?.();
+          const checked = profileStep.ref ? await verifyRef(target, profileStep.ref) : { status: 'match' as const };
+          if (checked.status === 'failure') failure = checked.failure;
+          else if (checked.status === 'mismatch') mismatch = checked.current;
+          else {
+            const report = await target.resources.useProfile(capabilities.bindingId, profileStep.ref);
+            if (report.outcome.status !== 'success') failure = report.outcome;
+            else appliedRef.current?.();
+          }
         }
-        if (!failure && toolStep?.names) {
+        if (!failure && !mismatch && toolStep?.names) {
           const report = await target.resources.setActiveTools(capabilities.bindingId, toolStep.names);
           if (report.outcome.status !== 'success') failure = report.outcome;
         }
@@ -579,6 +634,11 @@ export function useAelixSessionControls({
       }
       if (!current(target)) return;
       await refresh();
+      if (mismatch) {
+        // The saved profile no longer resolves to the same source and revision: nothing was written.
+        changedAgain(target, { ...recovery.failure, candidate: mismatch }, recovery.baseline, plan.profile.ref);
+        return;
+      }
       patch(target, (previous) =>
         failure
           ? { notice: refusalNotice(failure, 'restore') }
@@ -590,7 +650,7 @@ export function useAelixSessionControls({
             }
       );
     },
-    [appliedRef, current, patch, refresh, sessionRef, stateRef, writable]
+    [appliedRef, changedAgain, current, patch, refresh, sessionRef, stateRef, verifyRef, writable]
   );
 
   const dismissNotice = useCallback(() => {
