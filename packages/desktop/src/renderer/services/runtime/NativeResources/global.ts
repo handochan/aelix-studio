@@ -263,6 +263,11 @@ export function createGlobalResources(owner: AbortSignal) {
         if (owner.aborted) return { outcome: stalePage() };
         if (outcome.status === 'invalid-input') return { outcome };
         if (outcome.status === 'unauthenticated') return { outcome, requestId };
+        const retired = () => ({
+          outcome: failure('unknown', 'context-changed', 'refresh-and-choose'),
+          requestId,
+        });
+        if (context !== started) return retired();
         const report = await reconcileWrite(outcome, requestId, undefined, (settled) =>
           listSelections(kind, undefined, (page) =>
             settled.status === 'success' && context === started && page.revision === settled.data.revision
@@ -271,10 +276,7 @@ export function createGlobalResources(owner: AbortSignal) {
           )
         );
         if (owner.aborted) return { outcome: stalePage() };
-        if (context !== started && outcome.status !== 'unknown') {
-          return { ...report, outcome: failure('unknown', 'context-changed', 'refresh-and-choose') };
-        }
-        return report;
+        return context === started ? report : retired();
       } finally {
         mutationInFlight = false;
       }

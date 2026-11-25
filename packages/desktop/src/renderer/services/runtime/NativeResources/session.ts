@@ -59,6 +59,7 @@ const methods = {
 
 const kinds = ['tool', 'skill', 'mcp'] as const;
 type Method = keyof typeof methods;
+type WriteMethod = 'profilesUse' | 'setActiveTools' | 'selectionsSet';
 type Binding = {
   source: SessionSource;
   capabilities: SessionCapabilities;
@@ -89,12 +90,17 @@ function capabilities(value: unknown): SessionCapabilities | undefined {
   });
 }
 
-function result<T>(value: unknown, parse: (value: unknown) => T, writing: boolean): ResourceResult<T> {
+function result<T>(
+  value: unknown,
+  parse: (value: unknown) => T,
+  method: Method,
+  writing: boolean
+): ResourceResult<T> | undefined {
   if (isRecord(value) && value.accepted === false) {
-    return decode((reply) => relayRefusal(reply, writing), value) ?? invalidReply(writing);
+    return decode((reply) => relayRefusal(reply, method, writing), value);
   }
   const data = decode(parse, value);
-  return data === undefined ? invalidReply(writing) : success(data);
+  return data === undefined ? undefined : success(data);
 }
 
 function writeMismatches(outcome: ResourceResult<{ mismatches: readonly ResourceMismatch[] }>) {
@@ -189,14 +195,12 @@ export function createSessionResources(conversationId: string, owner: AbortSigna
       return mutation ? failure('unknown', 'EXT_STALE_BINDING', 'lookup-and-refresh') : staleBinding();
     }
     if (reply.kind === 'success') {
-      return result(isRecord(reply.data) ? reply.data.result : undefined, parse, mutation);
+      return (
+        result(isRecord(reply.data) ? reply.data.result : undefined, parse, method, mutation) ?? invalidReply(mutation)
+      );
     }
     const outcome = transportFailure(reply.failure, mutation);
-    if (
-      outcome.status === 'detached' ||
-      outcome.status === 'unauthenticated' ||
-      outcome.reason === 'EXT_STALE_BINDING'
-    ) {
+    if (outcome.status === 'detached' || outcome.status === 'unauthenticated' || outcome.status === 'stale') {
       invalidate();
     }
     return outcome;
@@ -256,7 +260,12 @@ export function createSessionResources(conversationId: string, owner: AbortSigna
     );
   }
 
-  async function lookup<T>(context: Binding, requestId: string, parse: (value: unknown) => T): Promise<Receipt<T>> {
+  async function lookup<T>(
+    context: Binding,
+    requestId: string,
+    method: WriteMethod,
+    parse: (value: unknown) => T
+  ): Promise<Receipt<T>> {
     const reply = await call(context, 'lookup', { requestId }, (value): Receipt<T> => {
       if (!isRecord(value)) return { status: 'unavailable' };
       if (value.status === 'pending' || value.status === 'unknown' || value.status === 'unavailable') {
@@ -264,7 +273,8 @@ export function createSessionResources(conversationId: string, owner: AbortSigna
       }
       if (value.status === 'completed') {
         if ('result' in value && !('rpcCode' in value)) {
-          return { status: 'completed', outcome: result(value.result, parse, true) };
+          const outcome = result(value.result, parse, method, true);
+          if (outcome) return { status: 'completed', outcome };
         }
         if (!('result' in value) && typeof value.rpcCode === 'number' && Number.isSafeInteger(value.rpcCode)) {
           return { status: 'completed', outcome: rpcFailure(value.rpcCode, true) };
@@ -277,7 +287,7 @@ export function createSessionResources(conversationId: string, owner: AbortSigna
 
   async function mutate<T, State>(
     context: Binding | undefined,
-    method: 'profilesUse' | 'setActiveTools' | 'selectionsSet',
+    method: WriteMethod,
     expectedBinding: string,
     payload: Record<string, unknown>,
     parse: (value: unknown) => T,
@@ -298,7 +308,9 @@ export function createSessionResources(conversationId: string, owner: AbortSigna
       const report = await reconcileWrite(
         outcome,
         requestId,
-        binding === context && context.capabilities.lookup ? () => lookup(context, requestId, parse) : undefined,
+        binding === context && context.capabilities.lookup
+          ? () => lookup(context, requestId, method, parse)
+          : undefined,
         async (settled) => {
           if (owner.aborted) return staleBinding();
           if (!binding) {

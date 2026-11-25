@@ -1,7 +1,10 @@
 import type { RelayFailure } from '../RunningInput/transport';
+import { sameProfile } from './parse';
 import type {
   GlobalSelections,
   ProfileCatalog,
+  ProfileCatalogView,
+  ProfilePreview,
   ResourceFailure,
   ResourceMismatch,
   ResourceResult,
@@ -60,9 +63,10 @@ export function rpcFailure(code: number, writing: boolean): ResourceFailure {
 }
 
 export function transportFailure(
-  { status, code, rpcCode, reportedCode, emptyBody }: RelayFailure,
+  { status, code, rpcCode, reportedCode, emptyBody, malformedEnvelope }: RelayFailure,
   writing: boolean
 ): ResourceFailure {
+  if (writing && malformedEnvelope) return invalidReply(true);
   if (status === 401 && code === 'AUTH_REQUIRED') return failure('unauthenticated', code, 'sign-in-and-read');
   if (status === 409 && code === 'EXT_NO_LIVE_TASK') return failure('detached', code, 'rediscover-on-attach');
   if (status === 409 && code === 'EXT_STALE_BINDING') return staleBinding();
@@ -166,7 +170,7 @@ function freeze<T>(value: T): T {
 }
 
 /** Maintain one validated snapshot and its opaque cursor chain inside a single owner/selector context. */
-export function createPages<T extends Page>() {
+export function createPages<T extends Page>(onClear?: () => void) {
   let current: T | undefined;
   let lastKey: string | undefined;
   let generation = 0;
@@ -180,6 +184,7 @@ export function createPages<T extends Page>() {
     lastKey = undefined;
     issues = undefined;
     cursors.clear();
+    onClear?.();
   }
 
   async function load(
@@ -245,22 +250,23 @@ export function createPages<T extends Page>() {
 }
 
 export function createProfilePages<T extends ProfileCatalog>() {
-  const pages = createPages<T>();
-  let inspected: T['inspected'] = null;
+  let inspected: ProfilePreview | null = null;
   let ticket = 0;
+  const pages = createPages<T>(() => {
+    inspected = null;
+    ticket++;
+  });
 
   return {
     ...pages,
-    clear() {
-      pages.clear();
-      inspected = null;
-      ticket++;
-    },
-    view() {
+    view(): ProfileCatalogView<T> | undefined {
       const snapshot = pages.peek();
-      return snapshot && freeze({ ...snapshot, inspected });
+      if (!snapshot) return undefined;
+      const preview = inspected;
+      const matches = preview && snapshot.profiles.some(({ ref }) => sameProfile(ref, preview.ref));
+      return freeze({ ...snapshot, inspected: matches ? preview : null });
     },
-    async inspect(read: () => Promise<ResourceResult<NonNullable<T['inspected']>>>) {
+    async inspect(read: () => Promise<ResourceResult<ProfilePreview>>) {
       const run = ++ticket;
       inspected = null;
       const reply = await read();

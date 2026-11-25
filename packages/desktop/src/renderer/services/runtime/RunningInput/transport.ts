@@ -35,6 +35,7 @@ export type RelayFailure = Readonly<{
   rpcCode?: number;
   reportedCode?: string;
   emptyBody?: boolean;
+  malformedEnvelope?: boolean;
 }>;
 
 type RelayReply = { kind: 'success'; data: unknown } | { kind: 'failure'; failure: RelayFailure };
@@ -140,11 +141,14 @@ export async function requestRelay(
   if (ok && isRecord(responseBody) && responseBody.success === true) {
     return { kind: 'success', data: responseBody.data };
   }
-  const code = isRecord(responseBody) ? RELAY_CODES.find((known) => known === responseBody.code) : undefined;
-  const rawCode = isRecord(responseBody) ? responseBody.code : undefined;
+  const envelope = isRecord(responseBody) ? responseBody : undefined;
+  const rawCode = envelope?.code;
   const reportedCode =
     typeof rawCode === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(rawCode) ? rawCode : undefined;
-  const details = isRecord(responseBody) ? responseBody.details : undefined;
+  const validFailure = envelope?.success === false && typeof envelope.error === 'string' && reportedCode !== undefined;
+  const code =
+    maxResponseBytes === undefined || validFailure ? RELAY_CODES.find((known) => known === rawCode) : undefined;
+  const details = envelope?.details;
   const rpcCode = code === 'EXT_AGENT_ERROR' && isRecord(details) ? details.rpcCode : undefined;
   return {
     kind: 'failure',
@@ -152,7 +156,13 @@ export async function requestRelay(
       status,
       code,
       rpcCode: typeof rpcCode === 'number' && Number.isSafeInteger(rpcCode) ? rpcCode : undefined,
-      ...(maxResponseBytes === undefined ? {} : { reportedCode, emptyBody: empty }),
+      ...(maxResponseBytes === undefined
+        ? {}
+        : {
+            reportedCode: validFailure ? reportedCode : undefined,
+            emptyBody: empty,
+            malformedEnvelope: status !== 0 && !validFailure,
+          }),
     },
   };
 }

@@ -1,9 +1,10 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'vitest';
 import {
   createNativeResources,
   parseProfileLoadRecovery,
   type ProfileRef,
   type ResourceChange,
+  type ResourceKind,
   type ResourceResult,
 } from './index';
 import fixtures from './studio-7-d16-v1.json';
@@ -418,7 +419,8 @@ describe('explicit writes and reconciliation', () => {
     );
     expect(valueOf(report.outcome)).toEqual(fixture(id, '/result'));
     sentMutation(2, id);
-    if (id === 'selections-deferred' && report.refresh) {
+    if (id === 'selections-deferred') {
+      if (!report.refresh) throw new Error('Missing deferred-write refresh');
       expect(valueOf(report.refresh).items[0]).toEqual(fixture('view-deferred', '/dtoRow'));
     }
   });
@@ -801,5 +803,349 @@ describe('wire compatibility and limits', () => {
       outcome: { status: 'refused', reason: 'SAVE_FAILED', retryWrite: false },
     });
     expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('review regressions', () => {
+  it.each([
+    ['wrong-method refusal', { accepted: false, reason: 'cursor-stale' }, 200],
+    ['tool refusal without key', { accepted: false, reason: 'tool-locked' }, 200],
+    ['contradictory HTTP envelope', { success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403],
+    ['incomplete HTTP envelope', { success: false, code: 'EXT_METHOD_DENIED' }, 403],
+  ] as const)('looks up a write receipt after a %s', async (_example, body, status) => {
+    const { bindingId } = await attach();
+    enqueue(status === 200 ? relay(body) : response(body, status));
+    sessionCase('lookup-unknown');
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, []);
+    expect(report).toMatchObject({
+      outcome: { status: 'unknown', reason: 'invalid-response', retryWrite: false },
+      receipt: 'unknown',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('preserves the original binding for lookup when a stale-binding code has the wrong HTTP status', async () => {
+    const { bindingId } = await attach();
+    enqueue(response(fixture('transport-ext_stale_binding-409', '/http/body'), 502));
+    sessionCase('lookup-unknown');
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, []);
+    expect(report).toMatchObject({
+      outcome: { status: 'unknown' },
+      receipt: 'unknown',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({ bindingId, method: '_aelix/session/requests/lookup' });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps a malformed completed receipt unavailable and still refreshes', async () => {
+    const { bindingId } = await attach();
+    fetcher.mockRejectedValueOnce(new Error('Lost write response'));
+    enqueue(relay({ status: 'completed', result: { accepted: 'yes' } }));
+    sessionCase('selections-list-tool-first');
+    expect(await session().setActiveTools(bindingId, [])).toMatchObject({
+      outcome: { status: 'unknown', reason: 'no-reply', retryWrite: false },
+      receipt: 'unavailable',
+      refresh: { status: 'success' },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('leaves the replacement global page and cursor intact when a retired write resolves', async () => {
+    helperCase('helper-tools-first');
+    const old = valueOf(await globalResources().listSelections('tool'));
+    let finish: ((reply: Response) => void) | undefined;
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const write = globalResources().setSelections(old, [{ key: 'read', on: false }]);
+
+    globalResources().invalidate();
+    helperCase('helper-tools-first');
+    const current = valueOf(await globalResources().listSelections('tool', 1));
+    helperCase('helper-tools-next');
+    finish?.(response(fixture('helper-set-tool', '/reply')));
+
+    const report = await write;
+    expect(report).toMatchObject({ outcome: { status: 'unknown', reason: 'context-changed' } });
+    expect(globalResources().peekSelections('tool')).toBe(current);
+    expect(valueOf(await globalResources().nextSelections(current)).complete).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it.each(['explicit refresh', 'expired cursor'])('retires a pending profile preview on %s', async (reason) => {
+    await attach();
+    sessionCase('profiles-list-page-1');
+    const first = valueOf(await session().listProfiles(1));
+    let finish: ((reply: Response) => void) | undefined;
+    fetcher.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+    );
+    const show = session().showProfile('quiet');
+
+    if (reason === 'expired cursor') {
+      sessionCase('relay-error-stale-cursor');
+      sessionCase('profiles-list-page-1');
+      valueOf(await session().nextProfiles(first));
+    } else {
+      sessionCase('profiles-list-page-1');
+      valueOf(await session().listProfiles(1));
+    }
+    finish?.(relay(fixture('profiles-show', '/result')));
+    expect(await show).toMatchObject({ status: 'stale' });
+    expect(session().profileView()?.inspected).toBeNull();
+  });
+
+  it('clears a cached preview when restarting the catalog', async () => {
+    helperCase('helper-profiles-first');
+    valueOf(await globalResources().listProfiles(1));
+    helperCase('helper-profile-show');
+    valueOf(await globalResources().showProfile('quiet'));
+    expect(globalResources().profileView()?.inspected).toBeTruthy();
+    helperCase('helper-profiles-first');
+    valueOf(await globalResources().listProfiles(1));
+    expect(globalResources().profileView()?.inspected).toBeNull();
+  });
+
+  it.each(['scope', 'revision'])('pairs a profile preview only when the catalog ref has the same %s', async (field) => {
+    const entry = object(fixture('helper-profiles-first', '/reply/data/profiles/0'));
+    const ref = { ...object(entry.ref), [field]: field === 'scope' ? 'bundled' : 'sha256:' + '1'.repeat(64) };
+    enqueue(
+      response({
+        ok: true,
+        data: { ...object(fixture('helper-profiles-first', '/reply/data')), profiles: [{ ...entry, ref }] },
+      })
+    );
+    valueOf(await globalResources().listProfiles(1));
+    helperCase('helper-profile-show');
+    valueOf(await globalResources().showProfile('quiet'));
+    expect(globalResources().profileView()).toMatchObject({ inspected: null, profiles: [{ ref }] });
+  });
+
+  it('types the display view separately from the pageable profile DTO', async () => {
+    helperCase('helper-profiles-first');
+    const page = valueOf(await globalResources().listProfiles(1));
+    const view = globalResources().profileView();
+    expectTypeOf<NonNullable<typeof view>>().not.toMatchTypeOf<typeof page>();
+    helperCase('helper-profiles-next');
+    expect(valueOf(await globalResources().nextProfiles(page)).complete).toBe(true);
+  });
+});
+
+describe('D16 behavioral fixture matrix', () => {
+  // These examples specify native hashing/approval, persistence, or gateway deduplication.
+  // Renderer-facing replies embedded in them are exercised through the cases that reference them.
+  const otherUnits = {
+    A: [
+      'native-guard',
+      'load-drift-open',
+      'load-drift-allow',
+      'load-legacy',
+      'load-recorded-match',
+      'reselection-same-source',
+      'same-key-twice',
+    ],
+    B: ['project-file-consent'],
+    C: ['helper-same-key-twice'],
+  } as const;
+
+  it('records ownership of the nine producer-only cases in the fixture', () => {
+    const producerCases = Object.values(otherUnits).flat();
+    expect(new Set(producerCases).size).toBe(9);
+    expect([...cases.keys()].filter((id) => producerCases.some((producerCase) => producerCase === id))).toHaveLength(9);
+  });
+
+  it.each([
+    ['relay-error-unsupported', 'selections', 'unsupported', 'disable-control'],
+    ['relay-error-large-item', 'profiles', 'refused', 'refresh'],
+    ['relay-error-profile-unavailable', 'preview', 'refused', 'refresh'],
+    ['relay-error-unreadable', 'selections', 'refused', 'refresh'],
+  ] as const)('preserves the typed read outcome for %s', async (id, operation, status, action) => {
+    await attach();
+    sessionCase(id);
+    const { reason, ...details } = object(fixture(id, '/result'));
+    const result =
+      operation === 'profiles'
+        ? await session().listProfiles()
+        : operation === 'preview'
+          ? await session().showProfile(String(details.name))
+          : await session().listSelections(fixture(id, '/post/payload/kind') as ResourceKind);
+    const { accepted: _accepted, ...dto } = details;
+    expect(result).toEqual({ status, reason, action, retryWrite: false, ...dto });
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['relay-error-unavailable-tool', 'relay-error-locked-tool'])('keeps the offending tool in %s', async (id) => {
+    const { bindingId } = await attach();
+    sessionCase(id);
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, fixture(id, '/post/payload/names') as string[]);
+    const { accepted: _accepted, ...details } = object(fixture(id, '/result'));
+    expect(report.outcome).toEqual({ status: 'refused', action: 'refresh', retryWrite: false, ...details });
+    expect(report.receipt).toBeUndefined();
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(['relay-error-profile-refused', 'relay-error-dedup', 'use-permission-cancel', 'use-permission-timeout'])(
+    'preserves the profile write refusal for %s',
+    async (id) => {
+      const { bindingId } = await attach();
+      sessionCase(id);
+      sessionCase('profiles-list-page-1');
+      sessionCase('selections-list-tool-first');
+      sessionCase('selections-list-skill');
+      const ref = fixture('profile-ref', '/vectors/0/ref') as ProfileRef;
+      const { cause, reason, recovery } = object(fixture(id, '/result'));
+      const { outcome, receipt } = await session().useProfile(bindingId, ref);
+      expect(outcome).toEqual(
+        cause
+          ? { status: 'recovery-required', reason: cause, ...object(recovery), retryWrite: false }
+          : { status: 'refused', reason, action: 'refresh', retryWrite: false }
+      );
+      expect(receipt).toBeUndefined();
+    }
+  );
+
+  it.each([
+    'relay-error-unknown-row',
+    'relay-error-locked-row',
+    'relay-error-scope-readonly',
+    'relay-error-write-failed',
+    'project-permission-deny',
+    'project-permission-cancel',
+    'project-permission-timeout',
+  ])('preserves project write scope and decision details for %s', async (id) => {
+    await attach();
+    sessionCase('selections-list-skill');
+    const before = valueOf(await session().listSelections('skill'));
+    sessionCase(id);
+    sessionCase('selections-list-skill');
+    const { accepted: _accepted, ...details } = object(fixture(id, '/result'));
+    const changes = fixture('selections-set-skill', '/post/payload/changes') as ResourceChange[];
+    const report = await session().setProjectSelections(before, changes);
+    expect(report.outcome).toEqual({ status: 'refused', action: 'refresh', retryWrite: false, ...details });
+    expect(report.refresh).toMatchObject({
+      status: 'success',
+      data: {
+        items: [{ key: 'review', mismatches: details.mismatches ?? [] }],
+      },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it.each([
+    ['helper-error-forbidden', 'refused', 'refresh'],
+    ['helper-error-unauthenticated', 'unauthenticated', 'sign-in-and-read'],
+    ['helper-error-frame_limit', 'refused', 'refresh'],
+    ['helper-error-invalid_input', 'refused', 'refresh'],
+    ['helper-error-scope_denied', 'refused', 'refresh'],
+    ['helper-error-profile_unavailable', 'refused', 'refresh'],
+    ['helper-error-selection_missing', 'refused', 'refresh'],
+    ['helper-error-selection_locked', 'refused', 'refresh'],
+    ['helper-error-scope_readonly', 'refused', 'refresh'],
+    ['helper-error-store_unreadable', 'refused', 'refresh'],
+    ['helper-error-busy', 'refused', 'wait-idle'],
+    ['helper-error-request_id_conflict', 'refused', 'refresh'],
+    ['helper-error-dedup_capacity', 'refused', 'refresh'],
+    ['helper-error-runtime_unavailable', 'unsupported', 'disable-control'],
+    ['helper-error-result_too_large', 'refused', 'refresh'],
+    ['helper-error-helper_unavailable', 'error', 'refresh'],
+  ] as const)('projects the helper error for %s', async (id, status, action) => {
+    const { action: operation, kind, name } = object(fixture(id, '/command'));
+    const { code, key } = object(fixture(id, '/reply'));
+    const refusal = response(fixture(id, '/reply'), Number(fixture(id, '/httpStatus')));
+    const global = globalResources();
+    let outcome: ResourceResult<unknown>;
+    if (operation === 'selections/set') {
+      helperCase('helper-tools-first');
+      const before = valueOf(await global.listSelections('tool'));
+      enqueue(refusal);
+      helperCase('helper-tools-first');
+      outcome = (await global.setSelections(before, [{ key: 'read', on: false }])).outcome;
+      expect(fetcher).toHaveBeenCalledTimes(3);
+    } else {
+      enqueue(refusal);
+      if (operation === 'selections/list') outcome = await global.listSelections(kind as ResourceKind);
+      else if (operation === 'profiles/show') outcome = await global.showProfile(String(name));
+      else outcome = await global.listProfiles();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    }
+    expect(outcome).toEqual({ status, reason: code, action, retryWrite: false, ...(key === undefined ? {} : { key }) });
+  });
+
+  it.each([
+    ['transport-source_forbidden-403', 'refused', 'refresh', 'SOURCE_FORBIDDEN'],
+    ['transport-csrf_invalid-403', 'refused', 'refresh', 'CSRF_INVALID'],
+    ['transport-ext_method_denied-403', 'unsupported', 'disable-control', 'EXT_METHOD_DENIED'],
+    ['transport-ext_invalid-400', 'refused', 'refresh', 'EXT_INVALID'],
+    ['transport-ext_too_large-413', 'refused', 'refresh', 'EXT_TOO_LARGE'],
+    ['transport-ext_media_type-415', 'refused', 'refresh', 'EXT_MEDIA_TYPE'],
+    ['transport-ext_rate_limited-429', 'refused', 'refresh', 'EXT_RATE_LIMITED'],
+    ['relay-rpc-method', 'unsupported', 'disable-control', 'rpc/-32601'],
+    ['relay-rpc-params', 'refused', 'refresh', 'rpc/-32602'],
+    ['relay-rpc-id-conflict', 'refused', 'refresh', 'rpc/-32602'],
+    ['relay-rpc-scope', 'refused', 'refresh', 'rpc/-33102'],
+    ['relay-rpc-binding', 'refused', 'refresh', 'rpc/-33102'],
+  ] as const)('treats the validated H1 envelope in %s as a definitive refusal', async (id, status, action, reason) => {
+    const { bindingId } = await attach();
+    enqueue(http(fixture(id, '/http')));
+    sessionCase('selections-list-tool-first');
+    const { outcome, receipt } = await session().setActiveTools(bindingId, []);
+    expect({ outcome, receipt }).toEqual({
+      outcome: { status, reason, action, retryWrite: false },
+      receipt: undefined,
+    });
+    expect(fetcher).toHaveBeenCalledTimes(3);
+  });
+
+  it.each([
+    ['transport-ext_unavailable-409', 'unsupported', 'EXT_UNAVAILABLE', 'disable-control'],
+    ['transport-internal_error-500', 'error', 'INTERNAL_ERROR', 'refresh'],
+    ['relay-rpc-internal', 'error', 'rpc/-32603', 'refresh'],
+  ] as const)('classifies the H1 read failure in %s', async (id, status, reason, action) => {
+    if (id === 'relay-rpc-internal') await attach();
+    enqueue(http(fixture(id, '/http')));
+    const outcome = id === 'relay-rpc-internal' ? await session().listProfiles() : await session().discover();
+    expect(outcome).toEqual({ status, reason, action, retryWrite: false });
+  });
+
+  it.each([
+    'relay-rpc-outcome',
+    'transport-ext_outcome_unknown-409',
+    'transport-ext_outcome_unknown-504',
+    'transport-no-reply',
+  ])('reconciles %s once, with the original binding and request ID', async (id) => {
+    const { bindingId } = await attach();
+    const frame = fixture(id, '/http');
+    if (frame === null) fetcher.mockRejectedValueOnce(new Error('Lost write response'));
+    else enqueue(http(frame));
+    sessionCase('lookup-pending');
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, []);
+    const dto =
+      frame === null
+        ? fixture(id, '/renderer')
+        : { status: 'unknown', reason: 'EXT_OUTCOME_UNKNOWN', action: 'lookup-and-refresh', retryWrite: false };
+    expect(report).toMatchObject({ outcome: dto, receipt: 'pending', refresh: { status: 'success' } });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
   });
 });

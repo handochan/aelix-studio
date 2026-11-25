@@ -18,6 +18,7 @@ import type {
   ResourceMismatch,
   ResourceRow,
   ScopeStatus,
+  SessionCapabilities,
   SessionProfiles,
   SessionSelections,
   SessionSource,
@@ -451,29 +452,38 @@ function profileDifference(entry: unknown): ProfileDifference {
   return { field, before: difference(row.before), after: difference(row.after) };
 }
 
-const REFUSALS = [
-  'busy',
-  'unsupported',
-  'cursor-stale',
-  'result-too-large',
-  'profile-unavailable',
-  'profile-refused',
-  'tool-unavailable',
-  'tool-locked',
-  'selection-missing',
-  'selection-locked',
-  'scope-readonly',
-  'unreadable',
-  'write-failed',
-  'dedup-capacity',
-  'profile-changed',
-  'consent-required',
-] as const;
+type SessionMethod = Exclude<keyof SessionCapabilities, 'bindingId'>;
+const mutations = ['profilesUse', 'setActiveTools', 'selectionsSet'] as const;
+const lists = ['profilesList', 'selectionsList'] as const;
+const refusalMethods = {
+  busy: mutations,
+  unsupported: [...lists, 'profilesShow', ...mutations],
+  'cursor-stale': lists,
+  'result-too-large': [...lists, 'profilesShow', 'setActiveTools'],
+  'profile-unavailable': ['profilesShow', 'profilesUse'],
+  'profile-refused': ['profilesUse'],
+  'tool-unavailable': ['setActiveTools'],
+  'tool-locked': ['setActiveTools'],
+  'selection-missing': ['selectionsSet'],
+  'selection-locked': ['selectionsSet'],
+  'scope-readonly': ['selectionsSet'],
+  unreadable: [...lists, 'selectionsSet'],
+  'write-failed': mutations,
+  'dedup-capacity': mutations,
+  'profile-changed': ['profilesUse'],
+  'consent-required': ['profilesUse', 'selectionsSet'],
+} satisfies Record<string, readonly SessionMethod[]>;
 
-export function relayRefusal(value: unknown, writing: boolean): ResourceFailure {
+export function relayRefusal(value: unknown, method: SessionMethod, writing: boolean): ResourceFailure {
   const row = record(value);
   requireValid(row.accepted === false);
-  const reason = writing ? oneOf(row.reason, ...REFUSALS) : code(row.reason);
+  const reason = code(row.reason);
+  if (!Object.hasOwn(refusalMethods, reason)) {
+    requireValid(!writing);
+    return { status: 'error', reason, action: 'refresh', retryWrite: false };
+  }
+  const allowed: readonly SessionMethod[] = refusalMethods[reason as keyof typeof refusalMethods];
+  requireValid(allowed.includes(method));
   if (reason === 'profile-changed') {
     return {
       status: 'conflict',
@@ -486,31 +496,41 @@ export function relayRefusal(value: unknown, writing: boolean): ResourceFailure 
       recovery: profileRecovery(row.recovery),
     };
   }
-  const details = {
-    ...(row.key === undefined ? {} : { key: token(row.key) }),
-    ...(row.name === undefined ? {} : { name: profileName(row.name) }),
-    ...(row.scope === undefined ? {} : { scope: oneOf(row.scope, 'project') }),
-    ...(row.written === undefined ? {} : { written: list(row.written, relativeDisplay) }),
-    ...(row.mismatches === undefined ? {} : { mismatches: mismatches(row.mismatches) }),
-  };
-  if (reason === 'consent-required') {
-    const cause = oneOf(row.cause, 'declined', 'cancelled', 'unanswered');
-    if (row.recovery !== undefined) {
-      const recovery = profileRecovery(row.recovery);
-      return { status: 'recovery-required', reason: cause, ...recovery, retryWrite: false };
-    }
-    return { status: 'refused', reason, cause, action: 'refresh', retryWrite: false, ...details };
-  }
   if (reason === 'unsupported') return { status: 'unsupported', reason, action: 'disable-control', retryWrite: false };
   if (reason === 'cursor-stale') return { status: 'stale', reason, action: 'refresh', retryWrite: false };
-  const known = REFUSALS.some((refusal) => refusal === reason);
-  return {
-    status: known ? 'refused' : 'error',
+  const refusal: ResourceFailure = {
+    status: 'refused',
     reason,
     action: reason === 'busy' ? 'wait-idle' : 'refresh',
     retryWrite: false,
-    ...details,
   };
+  switch (reason) {
+    case 'tool-locked':
+    case 'tool-unavailable':
+      return { ...refusal, key: token(row.key) };
+    case 'profile-unavailable':
+      return { ...refusal, name: profileName(row.name) };
+    case 'selection-locked':
+    case 'selection-missing':
+      return {
+        ...refusal,
+        scope: oneOf(row.scope, 'project'),
+        written: list(row.written, relativeDisplay),
+        mismatches: mismatches(row.mismatches),
+      };
+    case 'scope-readonly':
+      return { ...refusal, scope: oneOf(row.scope, 'project'), written: list(row.written, relativeDisplay) };
+    case 'consent-required': {
+      const cause = oneOf(row.cause, 'declined', 'cancelled', 'unanswered');
+      if (method === 'profilesUse') {
+        const recovery = profileRecovery(row.recovery);
+        return { status: 'recovery-required', reason: cause, ...recovery, retryWrite: false };
+      }
+      return { ...refusal, cause, scope: oneOf(row.scope, 'project'), written: list(row.written, relativeDisplay) };
+    }
+    default:
+      return refusal;
+  }
 }
 
 /** Validate the safe error fragment when it is available from the existing session/load path. */

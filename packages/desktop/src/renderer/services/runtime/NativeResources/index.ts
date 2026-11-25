@@ -16,10 +16,11 @@ export type * from './types';
  * `invalidate()` before reconnect or detach, then discover again on attach. A binding ID
  * from discovery is required for explicit profile and tool writes.
  *
- * `listProfiles` and `listSelections` start a snapshot. Pass the latest successful list
- * DTO back to `nextProfiles` or `nextSelections` to extend that snapshot. Read `complete`
- * before treating it as a whole list. An expired cursor causes the read to restart at
- * page one. `profileView()` combines the catalog with the latest inspected preview.
+ * `listProfiles` and `listSelections` start a snapshot. Retain the exact DTO object
+ * returned by the latest successful list or continuation call for `nextProfiles` or
+ * `nextSelections`. Read `complete` before treating it as a whole list. An expired
+ * cursor restarts the catalog at page one. `profileView()` is a display copy and
+ * includes an inspected preview only when its full ref matches a catalog entry.
  * `showProfile` inspects the current winner by name. `peekSelections` returns the latest
  * immutable snapshot if present. Re-list on screen return to observe external changes.
  *

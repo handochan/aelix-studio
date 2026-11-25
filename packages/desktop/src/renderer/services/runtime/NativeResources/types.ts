@@ -81,12 +81,14 @@ export type GlobalSelections = GlobalSource &
 export type ProfileCatalog = PageStatus & {
   activeAgent: string | null;
   activeRef: ProfileRef | null;
-  inspected: ProfilePreview | null;
+  inspected: null;
   profiles: readonly { ref: ProfileRef; description: string }[];
   diagnostics: readonly Diagnostic[];
 };
 export type SessionProfiles = SessionSource & ProfileCatalog;
 export type GlobalProfiles = GlobalSource & ProfileCatalog;
+/** A display copy of a catalog. Continue pagination with the original list result. */
+export type ProfileCatalogView<T extends ProfileCatalog> = Omit<T, 'inspected'> & { inspected: ProfilePreview | null };
 export type SessionCapabilities = {
   bindingId: string;
   profilesList: boolean;
