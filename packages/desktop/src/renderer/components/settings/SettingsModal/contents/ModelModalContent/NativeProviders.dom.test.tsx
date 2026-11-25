@@ -6,6 +6,8 @@ import NativeProviders from './NativeProviders';
 import type { NativeAuthCatalog } from '@aionui/web-host';
 import english from '@/renderer/services/i18n/locales/en-US/settings.json';
 import agentEnglish from '@/renderer/services/i18n/locales/en-US/agent.json';
+import conversationEnglish from '@/renderer/services/i18n/locales/en-US/conversation.json';
+import { conversation as backendConversation } from '@/common/adapter/ipcBridge';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -37,10 +39,12 @@ vi.mock('@/common', () => ({
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
-    t: (key: string) => {
+    t: (key: string, params?: Record<string, string>) => {
       if (key === 'agent.model.switchFailed') return agentEnglish.model.switchFailed;
+      if (key === 'conversation.createFailed') return conversationEnglish.createFailed;
       const name = key.replace('settings.nativeAuth.', '') as keyof typeof english.nativeAuth;
-      return english.nativeAuth[name] ?? key;
+      const template = english.nativeAuth[name] ?? key;
+      return template.replace(/{{(\w+)}}/g, (placeholder, name: string) => params?.[name] ?? placeholder);
     },
   }),
 }));
@@ -100,6 +104,7 @@ describe('native provider settings', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('shows the CLI store and requires exclusive use before registering a key', async () => {
@@ -177,6 +182,51 @@ describe('native provider settings', () => {
     });
     expect(mocks.createAgent).not.toHaveBeenCalled();
     expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    {
+      scenario: 'the pinned Host returns its generic ACP startup response',
+      body: { success: false, code: 'BAD_GATEWAY', error: 'Upstream service unavailable.' },
+      status: 502,
+      text: english.nativeAuth.agentStartFailed,
+    },
+    {
+      scenario: 'the WebUI proxy cannot reach the Host',
+      body: { error: 'BACKEND_UNREACHABLE' },
+      status: 502,
+      text: english.nativeAuth.failed.replace('{{code}}', 'CONNECTION_LOST'),
+    },
+    {
+      scenario: 'the Host supplies an unrelated HTTP error',
+      body: { code: 'INTERNAL_ERROR', error: 'Internal server error' },
+      status: 500,
+      text: conversationEnglish.createFailed,
+    },
+  ])('renders the startup alert when $scenario', async ({ body, status, text }) => {
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.ensureRuntime.mockImplementationOnce(backendConversation.ensureRuntime.invoke);
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify(body), { status }));
+    vi.stubGlobal('fetch', fetchMock);
+    render(<NativeProviders />);
+
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+
+    expect(await screen.findByText(text)).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledWith('/api/conversations/native-conversation/runtime/ensure', expect.anything());
+    expect(mocks.navigate).not.toHaveBeenCalled();
+  });
+
+  it('retains CONNECTION_LOST when the Host connection fails without a response', async () => {
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.createConversation.mockImplementationOnce(backendConversation.create.invoke);
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValueOnce(new TypeError('Failed to fetch')));
+    render(<NativeProviders />);
+
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+
+    expect(await screen.findByText(english.nativeAuth.failed.replace('{{code}}', 'CONNECTION_LOST'))).toBeVisible();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it('shows a localized error and keeps Settings open after an unobserved model change', async () => {
@@ -412,7 +462,7 @@ describe('native provider settings', () => {
     await screen.findByText(catalog.authPath);
     fireEvent.click(screen.getByText(english.nativeAuth.exclusive));
     fireEvent.click(screen.getByRole('button', { name: english.nativeAuth.oauth }));
-    await screen.findByText(english.nativeAuth.failed);
+    await screen.findByText(english.nativeAuth.failed.replace('{{code}}', 'NATIVE_FAILED'));
     expect(mocks.request.mock.calls.filter(([command]) => command.action === 'login')).toHaveLength(1);
     expect(mocks.request.mock.calls.filter(([command]) => command.action === 'catalog')).toHaveLength(2);
   });
