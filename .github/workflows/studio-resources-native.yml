@@ -82,6 +82,33 @@ jobs:
           "import aelix_ai.settings.settings_manager, aelix_coding_agent.agents.discovery,
           aelix_coding_agent.core.mcp_config_edit, aelix_coding_agent.core.mcp_selection,
           aelix_coding_agent.core.skill_selection, aelix_coding_agent.tools"
+      - name: TEMPORARY diagnose Windows directory ACLs
+        if: runner.os == 'Windows'
+        continue-on-error: true
+        working-directory: ${{ steps.native.outputs.source }}
+        run: |
+          uv run --frozen --no-sync python -I -B - "$RUNNER_TEMP" <<'PY'
+          import os, pathlib, subprocess, sys, tempfile
+          import win32api, win32con, win32security as sec
+          base = pathlib.Path(tempfile.mkdtemp(dir=sys.argv[1]))
+          made = base / "mode700"
+          os.mkdir(made, 0o700)
+          plain = base / "plain"
+          os.mkdir(plain)
+          token = sec.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
+          print("token user", sec.ConvertSidToStringSid(sec.GetTokenInformation(token, sec.TokenUser)[0]))
+          print("token owner", sec.ConvertSidToStringSid(sec.GetTokenInformation(token, sec.TokenOwner)))
+          for directory in (pathlib.Path(os.environ["USERPROFILE"]), pathlib.Path(sys.argv[1]), base, made, plain):
+              print("==", directory)
+              print(subprocess.run(["icacls", str(directory)], capture_output=True, text=True).stdout)
+              sd = sec.GetNamedSecurityInfo(str(directory), sec.SE_FILE_OBJECT,
+                  sec.OWNER_SECURITY_INFORMATION | sec.DACL_SECURITY_INFORMATION)
+              print("owner", sec.ConvertSidToStringSid(sd.GetSecurityDescriptorOwner()))
+              acl = sd.GetSecurityDescriptorDacl()
+              for index in range(acl.GetAceCount()):
+                  ace = acl.GetAce(index)
+                  print("ace", ace[0], hex(ace[1]), sec.ConvertSidToStringSid(ace[-1]))
+          PY
       - name: Run the pinned native resources suite
         env:
           STUDIO_RESOURCES_NATIVE_SOURCE: ${{ steps.native.outputs.source }}
