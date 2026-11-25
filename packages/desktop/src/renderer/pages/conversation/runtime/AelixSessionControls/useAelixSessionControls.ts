@@ -261,7 +261,8 @@ export function useAelixSessionControls({
       const name = stateRef.current.previewName;
       if (name && capabilities.profilesShow && profileList?.status === 'success') {
         const shown = await resources.showProfile(name);
-        if (readRun.current !== run) return;
+        // The user may have picked another profile while this re-read was in flight.
+        if (readRun.current !== run || stateRef.current.previewName !== name) return;
         patch(target, {
           preview: shown.status === 'success' ? shown.data : undefined,
           previewFailure: shown.status === 'success' ? undefined : shown,

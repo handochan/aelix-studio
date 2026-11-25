@@ -156,12 +156,13 @@ const discovered = () => Response.json(fixture('relay-discovery', '/response/bod
 
 // ---- Harness --------------------------------------------------------------------------------
 
-const Harness: React.FC<{ hostState?: HostTurnState; mobile?: boolean; onProfileApplied?: () => void }> = ({
-  hostState = 'idle',
-  mobile = false,
-  onProfileApplied,
-}) => {
-  const controls = useAelixSessionControls({ conversationId: 'c-17', enabled: true, hostState, onProfileApplied });
+const Harness: React.FC<{
+  hostState?: HostTurnState;
+  mobile?: boolean;
+  onProfileApplied?: () => void;
+  conversationId?: string;
+}> = ({ hostState = 'idle', mobile = false, onProfileApplied, conversationId = 'c-17' }) => {
+  const controls = useAelixSessionControls({ conversationId, enabled: true, hostState, onProfileApplied });
   const { t } = useTranslation();
   if (!mobile) return <AelixSessionPills controls={controls} />;
   return (
@@ -205,7 +206,7 @@ beforeEach(() => {
   defaults();
   fetchMock.mockReset();
   fetchMock.mockImplementation(async (url, init) => {
-    expect(url).toBe('/api/conversations/c-17/acp-extensions');
+    expect(url).toMatch(/^\/api\/conversations\/c-1[78]\/acp-extensions$/);
     if (init.method === 'GET') return discovery();
     const post = JSON.parse(String(init.body)) as Post;
     posts.push(post);
@@ -661,5 +662,64 @@ describe('Aelix conversation controls: labels', () => {
     expect(i18n.t(`${K}.tools.count`, { count: 1 })).toBe('1 tool');
     expect(i18n.t(`${K}.tools.count`, { count: 2 })).toBe('2 tools');
     expect(i18n.t(`${K}.tools.count`, { count: 5, lng: 'ru-RU' })).toBe('5 инструментов');
+  });
+});
+
+describe('Aelix conversation controls: stale responses', () => {
+  function hold() {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return { gate, release };
+  }
+
+  it('ignores a late re-read preview after the user picked another profile', async () => {
+    const view = render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+
+    const late = hold();
+    replies.set(SHOW, async ({ name }) => {
+      if (name === 'writer') await late.gate;
+      return relay(name === 'writer' ? writerPreview() : fixture('profiles-show', '/result'));
+    });
+    view.rerender(<Harness hostState='unknown' />);
+    await settle();
+    fireEvent.click(within(screen.getByTestId('aelix-profile-list')).getByText('quiet'));
+    await settle();
+    late.release();
+    await settle();
+
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent('user:agents/quiet.md');
+    expect(screen.queryByText(`${K}.preview.failed`)).toBeNull();
+  });
+
+  it('drops a late list reply from the previous conversation after switching', async () => {
+    const late = hold();
+    const current = replies.get(LIST)!;
+    let lists = 0;
+    replies.set(LIST, async (payload) => {
+      if (lists++ > 0) return current(payload);
+      await late.gate;
+      return relay({
+        profiles: [{ ref: WRITER, description: 'Write notes' }],
+        activeAgent: 'writer',
+        activeRef: WRITER,
+        diagnostics: [],
+        nextCursor: null,
+      });
+    });
+    const view = render(<Harness conversationId='c-17' />);
+    await settle();
+    view.rerender(<Harness conversationId='c-18' />);
+    await settle();
+    late.release();
+    await settle();
+
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent('quiet');
+    expect(screen.getByTestId('aelix-profile-pill')).not.toHaveTextContent('writer');
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/c-18/'))).toBe(true);
   });
 });
