@@ -87,6 +87,7 @@ const ProfilePanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }
       </div>
       <WriteOutcome controls={controls} />
       {!canApply && <UpdateRequired testId='aelix-profile-apply-update-required' />}
+      {canApply && !capabilities.profilesShow && <UpdateRequired testId='aelix-profile-preview-update-required' />}
       {controls.profilesFailure && <Alert type='error' content={t(`${KEY}.status.readFailed`)} />}
       {profiles && profiles.profiles.length === 0 && (
         <div className='text-12px text-t-secondary'>{t(`${KEY}.profile.empty`)}</div>
@@ -146,18 +147,20 @@ const ProfilePanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }
               </Button>
             </Tooltip>
           )}
-          <Tooltip content={blocked} disabled={!blocked || !selected}>
-            <Button
-              size='small'
-              type='primary'
-              loading={controls.writing === 'profile'}
-              disabled={!selected || Boolean(blocked) || sameRef(selected.ref, active)}
-              onClick={() => selected && void controls.applyProfile(selected.ref)}
-              data-testid='aelix-profile-apply'
-            >
-              {t(`${KEY}.profile.apply`)}
-            </Button>
-          </Tooltip>
+          {capabilities.profilesShow && (
+            <Tooltip content={blocked} disabled={!blocked || !selected}>
+              <Button
+                size='small'
+                type='primary'
+                loading={controls.writing === 'profile'}
+                disabled={!selected || Boolean(blocked) || sameRef(selected.ref, active)}
+                onClick={() => selected && void controls.applyProfile(selected.ref)}
+                data-testid='aelix-profile-apply'
+              >
+                {t(`${KEY}.profile.apply`)}
+              </Button>
+            </Tooltip>
+          )}
         </div>
       )}
       {canApply && controls.tools && controls.tools.toolOverride !== null && (

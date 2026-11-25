@@ -275,6 +275,22 @@ describe('Aelix conversation controls: attach and availability', () => {
     expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
   });
 
+  it('explains that previews need an update when profiles/show is missing but profiles/use exists', async () => {
+    const requests = fixture<string[]>('relay-discovery', '/response/body/data/requests').filter(
+      (method) => method !== SHOW
+    );
+    discovery = () => {
+      const body = fixture<Json>('relay-discovery', '/response/body');
+      return Response.json({ ...body, data: { ...(body.data as Json), requests } });
+    };
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+
+    expect(screen.getByTestId('aelix-profile-preview-update-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-apply')).toBeNull();
+  });
+
   it('keeps selection available when a runtime refuses one apply as unsupported, without faking success', async () => {
     state.activeRef = WRITER;
     state.activeAgent = 'writer';
