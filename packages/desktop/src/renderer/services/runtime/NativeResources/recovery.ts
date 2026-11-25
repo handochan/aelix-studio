@@ -66,12 +66,12 @@ export function transportFailure(
   { status, code, rpcCode, reportedCode, emptyBody, malformedEnvelope }: RelayFailure,
   writing: boolean
 ): ResourceFailure {
-  if (writing && malformedEnvelope) return invalidReply(true);
+  if (status === 404 && emptyBody && !writing) return unsupported();
+  if (malformedEnvelope) return invalidReply(writing);
   if (status === 401 && code === 'AUTH_REQUIRED') return failure('unauthenticated', code, 'sign-in-and-read');
   if (status === 409 && code === 'EXT_NO_LIVE_TASK') return failure('detached', code, 'rediscover-on-attach');
   if (status === 409 && code === 'EXT_STALE_BINDING') return staleBinding();
   if (status === 409 && code === 'EXT_UNAVAILABLE') return unsupported(code);
-  if (status === 404 && emptyBody && !writing) return unsupported();
   if (status === 422 && code === 'EXT_AGENT_ERROR' && rpcCode !== undefined) return rpcFailure(rpcCode, writing);
   if (status === 409 || status === 502 || status === 504) {
     if (code === 'EXT_OUTCOME_UNKNOWN') return failure('unknown', code, 'lookup-and-refresh');

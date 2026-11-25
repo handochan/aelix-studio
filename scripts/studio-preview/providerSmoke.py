@@ -170,12 +170,13 @@ class ProviderFixture:
 
 
 async def main(args):
-    from prepare import verify_prepared
-
     output = ROOT / '.local/studio-provider'
     output.mkdir(parents=True, exist_ok=True)
+    (output / 'first-window.json').unlink(missing_ok=True)
     for name in ('host.json', 'helper.json'):
         (output / name).write_text(json.dumps({'status': 'running'}) + '\n')
+    from prepare import verify_prepared
+
     if not __debug__:
         raise RuntimeError('Run without Python -O')
     runtime = Path(args.runtime).resolve()

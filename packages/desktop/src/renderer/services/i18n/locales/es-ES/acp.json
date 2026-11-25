@@ -64,7 +64,17 @@
       "unknown": "Desconocido",
       "ended": "Turno finalizado; estado final sin informar"
     },
-    "elapsedReported": "Último tiempo informado: {{value}} s"
+    "elapsedReported": "Último tiempo informado: {{value}} s",
+    "report": {
+      "title": "Lo que hicieron los agentes detenidos",
+      "task": "Tarea {{index}} de {{total}}",
+      "step": "Paso {{index}} de {{total}}",
+      "lost": "Su agente terminó por un error interno; lo que había hecho no está en el informe.",
+      "idle": "No había ningún agente en ejecución para ella al cancelar el turno: no se inició o no se alcanzó.",
+      "missing": "No se devolvió ningún informe de lo que hicieron los agentes detenidos.",
+      "unreadable": "No se pudo asociar el informe a cada tarea. El texto completo está en la salida de la herramienta.",
+      "loadFailed": "No se pudo cargar el informe completo."
+    }
   },
   "runningInput": {
     "mode": {

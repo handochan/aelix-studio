@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 import {
   createNativeResources,
   parseProfileLoadRecovery,
+  type ProfileDifference,
   type ProfileRef,
   type ResourceChange,
   type ResourceKind,
@@ -727,7 +728,7 @@ describe('binding and revision changes during reconciliation', () => {
 });
 
 describe('wire compatibility and limits', () => {
-  it('keeps a safe unlisted 404 code and treats malformed 404 as an error', async () => {
+  it('keeps a safe unlisted 404 code and reports malformed 404 as invalid-response', async () => {
     enqueue(response({ success: false, code: 'CONVERSATION_ARCHIVED', error: 'private details' }, 404));
     enqueue(new Response('unexpected payload', { status: 404 }));
     expect(await session().discover()).toEqual({
@@ -736,7 +737,7 @@ describe('wire compatibility and limits', () => {
       action: 'refresh',
       retryWrite: false,
     });
-    expect(await session().discover()).toMatchObject({ status: 'error', reason: 'http/404' });
+    expect(await session().discover()).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
   });
 
   it('limits the H1 response envelope by UTF-8 bytes before accepting it', async () => {
@@ -768,6 +769,23 @@ describe('wire compatibility and limits', () => {
     expect(await session().showProfile('quiet')).toMatchObject({ status: 'invalid-response' });
   });
 
+  const preview = object(fixture('profiles-show', '/result/profile'));
+  it.each([
+    ['signed legacy timeout', { policy: { ...object(preview.policy), timeoutMs: -5 } }],
+    ['repeated tool names', { tools: ['read', 'read'] }],
+  ] as const)('accepts %s in a native profile preview', async (_case, fields) => {
+    await attach();
+    enqueue(relay({ profile: { ...preview, ...fields } }));
+    expect(await session().showProfile('quiet')).toMatchObject({ status: 'success', data: fields });
+  });
+
+  it('rejects repeated names in a tools/set-active request before dispatch', async () => {
+    const { bindingId } = await attach();
+    const report = await session().setActiveTools(bindingId, ['read', 'read']);
+    expect(report.outcome).toMatchObject({ status: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves an omitted prompt change and a disappeared candidate as structured recovery', async () => {
     const { bindingId } = await attach();
     const refusal = object(fixture('use-changed-again', '/result'));
@@ -792,6 +810,24 @@ describe('wire compatibility and limits', () => {
     });
   });
 
+  it('preserves valid scope-only differences and legacy profile values', async () => {
+    const { bindingId } = await attach();
+    const differences: ProfileDifference[] = [
+      { field: 'source', before: 'user', after: 'project' },
+      { field: 'tools', before: null, after: ['read', 'read'] },
+      { field: 'skills', before: [], after: ['user:skills/review'] },
+      { field: 'timeoutMs', before: null, after: -5 },
+      { field: 'omittedPrompt', before: null, after: 'b'.repeat(64) },
+    ];
+    enqueue(relay({ ...object(fixture('use-stale-preview', '/result')), differences }));
+    sessionCase('profiles-list-page-1');
+    sessionCase('selections-list-tool-first');
+    sessionCase('selections-list-skill');
+    const report = await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef);
+    expect(report.outcome).toMatchObject({ status: 'conflict', differences });
+    expect(report.receipt).toBeUndefined();
+  });
+
   it('keeps the request ID and classifies a definitive helper save failure', async () => {
     helperCase('helper-tools-first');
     const initial = valueOf(await globalResources().listSelections('tool'));
@@ -807,17 +843,50 @@ describe('wire compatibility and limits', () => {
 });
 
 describe('review regressions', () => {
+  const badDiffs: readonly [string, string, unknown, unknown][] = [
+    ['non-string revision', 'revision', false, 42],
+    ['invalid revision hash', 'revision', fixture('profile-ref', '/vectors/0/ref/revision'), 'sha256:bad'],
+    ['invalid profile source', 'source', 'user:agents/quiet.md', 'global:agents/quiet.md'],
+    ['invalid prompt mode', 'promptMode', 'append', 'merge'],
+    ['oversized prompt diff', 'promptPreview', 'before', '😀'.repeat(513)],
+    ['non-boolean policy flag', 'builtinTools', true, 'false'],
+    ['invalid tool list', 'tools', null, ['read', 42]],
+    ['invalid skill list', 'skills', [], 'review'],
+    ['invalid extension label', 'extensions', [], ['../extension.js']],
+    ['non-numeric output cap', 'outputCap', 51200, '4096'],
+    ['zero output cap', 'outputCap', 51200, 0],
+    ['invalid omitted prompt hash', 'omittedPrompt', null, 'b'.repeat(63)],
+    ['non-nullable description', 'description', null, 'Review only'],
+    ['invalid delegation approval mode', 'approvalMode', 'inherit', 'allow-all'],
+    ['invalid delegation role', 'role', 'leaf', 'root'],
+    ['invalid agent name', 'agents', [], ['agents/writer.md']],
+  ];
+
   it.each([
-    ['wrong-method refusal', { accepted: false, reason: 'cursor-stale' }, 200],
-    ['tool refusal without key', { accepted: false, reason: 'tool-locked' }, 200],
-    ['contradictory HTTP envelope', { success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403],
-    ['incomplete HTTP envelope', { success: false, code: 'EXT_METHOD_DENIED' }, 403],
-  ] as const)('looks up a write receipt after a %s', async (_example, body, status) => {
+    ['wrong-method refusal', { accepted: false, reason: 'cursor-stale' }, 200, 'tools'],
+    ['tool refusal without key', { accepted: false, reason: 'tool-locked' }, 200, 'tools'],
+    ['contradictory HTTP envelope', { success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403, 'tools'],
+    ['incomplete HTTP envelope', { success: false, code: 'EXT_METHOD_DENIED' }, 403, 'tools'],
+    ...badDiffs.map(
+      ([label, field, before, after]) =>
+        [
+          label,
+          { ...object(fixture('use-stale-preview', '/result')), differences: [{ field, before, after }] },
+          200,
+          'profile',
+        ] as const
+    ),
+  ] as const)('looks up a write receipt for %s', async (_example, body, status, target) => {
     const { bindingId } = await attach();
     enqueue(status === 200 ? relay(body) : response(body, status));
     sessionCase('lookup-unknown');
+    if (target === 'profile') sessionCase('profiles-list-page-1');
     sessionCase('selections-list-tool-first');
-    const report = await session().setActiveTools(bindingId, []);
+    if (target === 'profile') sessionCase('selections-list-skill');
+    const report =
+      target === 'profile'
+        ? await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef)
+        : await session().setActiveTools(bindingId, []);
     expect(report).toMatchObject({
       outcome: { status: 'unknown', reason: 'invalid-response', retryWrite: false },
       receipt: 'unknown',
@@ -828,7 +897,69 @@ describe('review regressions', () => {
       method: '_aelix/session/requests/lookup',
       payload: { requestId: report.requestId },
     });
+    expect(fetcher).toHaveBeenCalledTimes(target === 'profile' ? 6 : 4);
+  });
+
+  it.each(['discovery', 'list'])('reports a malformed H1 %s reply as invalid-response', async (operation) => {
+    if (operation === 'list') await attach();
+    enqueue(response({ success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403));
+    const result = operation === 'discovery' ? await session().discover() : await session().listProfiles();
+    expect(result).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
+  });
+
+  const agentError = object(fixture('relay-rpc-method', '/http/body'));
+  const malformedRpcDetails = [
+    ['missing rpcCode', {}],
+    ['string rpcCode', { rpcCode: '-32601' }],
+    ['fractional rpcCode', { rpcCode: -32601.5 }],
+  ] as const;
+
+  it.each(malformedRpcDetails)('reports invalid-response on reads with %s', async (_case, details) => {
+    await attach();
+    enqueue(response({ ...agentError, details }, 422));
+    expect(await session().listProfiles()).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(malformedRpcDetails)('looks up a write receipt on 422 with %s', async (_case, details) => {
+    const { bindingId } = await attach();
+    enqueue(response({ ...agentError, details }, 422));
+    sessionCase('lookup-unknown');
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, []);
+    expect(report).toMatchObject({
+      outcome: fixture('renderer-errors', '/invalidMutationReply/dto'),
+      receipt: 'unknown',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
     expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it('keeps the D16 result-too-large refusal out of profiles/use and its completed receipts', async () => {
+    const { bindingId } = await attach();
+    const oversized = fixture('relay-error-large-item', '/result');
+    enqueue(relay(oversized));
+    enqueue(relay({ status: 'completed', result: oversized }));
+    sessionCase('profiles-list-page-1');
+    sessionCase('selections-list-tool-first');
+    sessionCase('selections-list-skill');
+    const report = await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef);
+    expect(report).toMatchObject({
+      outcome: { status: 'unknown', reason: 'invalid-response', retryWrite: false },
+      receipt: 'unavailable',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(6);
   });
 
   it('preserves the original binding for lookup when a stale-binding code has the wrong HTTP status', async () => {

@@ -64,7 +64,17 @@
       "unknown": "Unknown",
       "ended": "Turn ended; final status not reported"
     },
-    "elapsedReported": "Last reported elapsed: {{value}} s"
+    "elapsedReported": "Last reported elapsed: {{value}} s",
+    "report": {
+      "title": "What the stopped agents did",
+      "task": "Task {{index}} of {{total}}",
+      "step": "Step {{index}} of {{total}}",
+      "lost": "Its agent ended on an internal error; what it had done is not in the report.",
+      "idle": "No agent was running for it when the turn was cancelled: not started, or not reached.",
+      "missing": "No report of what the stopped agents did was returned.",
+      "unreadable": "The report could not be matched to each task. Its full text is in the tool output.",
+      "loadFailed": "The full report could not be loaded."
+    }
   },
   "runningInput": {
     "mode": {

@@ -64,7 +64,17 @@
       "unknown": "Bilinmiyor",
       "ended": "Tur sona erdi; son durum bildirilmedi"
     },
-    "elapsedReported": "Son bildirilen süre: {{value}} sn"
+    "elapsedReported": "Son bildirilen süre: {{value}} sn",
+    "report": {
+      "title": "Durdurulan aracıların yaptıkları",
+      "task": "Görev {{index}}/{{total}}",
+      "step": "Adım {{index}}/{{total}}",
+      "lost": "Aracısı dahili bir hatayla sona erdi; yaptıkları raporda yok.",
+      "idle": "Tur iptal edildiğinde bunun için çalışan bir aracı yoktu: başlamadı veya sırası gelmedi.",
+      "missing": "Durdurulan aracıların yaptıklarına dair bir rapor dönmedi.",
+      "unreadable": "Rapor görevlerle tek tek eşleştirilemedi. Tam metin araç çıktısında.",
+      "loadFailed": "Raporun tamamı yüklenemedi."
+    }
   },
   "runningInput": {
     "mode": {

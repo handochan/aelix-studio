@@ -5,7 +5,7 @@ import fsSync from 'node:fs';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProcessTimeline } from '../../../scripts/studio-preview/host-release/probes/processTimeline.mjs';
 import {
   boundedWait,
@@ -18,6 +18,7 @@ import {
   electronAppEnvironment,
   verifyConfigPreserved,
   verifyInstalledBackend,
+  waitForProviderWindow,
 } from '../../../scripts/studio-preview/host-release/verification.mjs';
 
 afterEach(() => {
@@ -106,6 +107,124 @@ function application(error?: Error, failureExitCode: number | null = 0, failureS
   };
   return { main, app };
 }
+
+describe('Provider first window', () => {
+  let output: string;
+  let report: { file: string; waits: unknown[] };
+
+  beforeEach(async () => {
+    output = await fs.mkdtemp(path.join(os.tmpdir(), 'studio-provider-window-'));
+    report = { file: path.join(output, 'first-window.json'), waits: [] };
+  });
+
+  afterEach(async () => {
+    await fs.rm(output, { recursive: true, force: true });
+  });
+
+  it('accepts a delayed window on Intel macOS', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    const page = {};
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(page), 35000)));
+
+    const result = waitForProviderWindow(app, 1, report, { platform: 'darwin', arch: 'x64' });
+    await vi.advanceTimersByTimeAsync(35000);
+
+    await expect(result).resolves.toBe(page);
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 60000 });
+    expect(JSON.parse(await fs.readFile(report.file, 'utf8'))).toEqual([
+      {
+        wait: 'provider-first-window',
+        phase: 'startup',
+        launch: 1,
+        pid: 123,
+        startedAt: expect.any(String),
+        endedAt: expect.any(String),
+        elapsedMs: 35000,
+        timeoutMs: 60000,
+        status: 'passed',
+      },
+    ]);
+  });
+
+  it.each([
+    ['darwin', 'x64', 60000],
+    ['darwin', 'arm64', 30000],
+    ['linux', 'arm64', 30000],
+    ['linux', 'x64', 30000],
+    ['win32', 'x64', 30000],
+  ])('fails when the window never opens on %s/%s', async (platform, arch, timeoutMs) => {
+    vi.useFakeTimers();
+    const { app } = application();
+    app.firstWindow.mockImplementation(() => new Promise(() => {}));
+
+    const result = waitForProviderWindow(app, 1, report, { platform, arch });
+    const failure = expect(result).rejects.toThrow(`provider-first-window: bounded wait elapsed (${timeoutMs}ms)`);
+    await vi.advanceTimersByTimeAsync(timeoutMs);
+
+    await failure;
+    expect(app.firstWindow.mock.calls).toEqual([[{ timeout: timeoutMs }]]);
+    expect(JSON.parse(await fs.readFile(report.file, 'utf8'))).toMatchObject([
+      { elapsedMs: timeoutMs, timeoutMs, status: 'failed' },
+    ]);
+  });
+
+  it('retains both observations when the driver is killed during the restart wait', async () => {
+    const verification = new URL('../../../scripts/studio-preview/host-release/verification.mjs', import.meta.url);
+    const child = spawn(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `
+        import { waitForProviderWindow } from ${JSON.stringify(verification.href)};
+        const report = { file: process.argv[1], waits: [] };
+        await waitForProviderWindow({ process: () => ({ pid: 123 }), firstWindow: async () => ({}) }, 1, report);
+        await waitForProviderWindow({
+          process: () => ({ pid: 456 }),
+          firstWindow() {
+            process.send('waiting');
+            return new Promise(() => {});
+          },
+        }, 2, report);
+        `,
+        report.file,
+      ],
+      { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] }
+    );
+    const exited = once(child, 'exit');
+    try {
+      const state = await Promise.race([once(child, 'message').then(([message]) => message), exited.then(() => null)]);
+      expect(state).toBe('waiting');
+    } finally {
+      child.kill('SIGKILL');
+      await exited;
+    }
+
+    expect(JSON.parse(await fs.readFile(report.file, 'utf8'))).toMatchObject([
+      { launch: 1, pid: 123, endedAt: expect.any(String), status: 'passed' },
+      { launch: 2, pid: 456, startedAt: expect.any(String), endedAt: null, elapsedMs: null, status: 'pending' },
+    ]);
+  });
+
+  it('preserves the window result and both observations if the artifact cannot be replaced', async () => {
+    vi.spyOn(fsSync, 'renameSync').mockImplementation(() => {
+      throw new Error('replacement failed');
+    });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const { app } = application();
+    const error = new Error('app closed before opening a window');
+
+    await expect(waitForProviderWindow(app, 1, report)).resolves.toEqual({});
+    app.firstWindow.mockRejectedValueOnce(error);
+    await expect(waitForProviderWindow(app, 2, report)).rejects.toBe(error);
+    expect(report.waits).toMatchObject([
+      { launch: 1, status: 'passed' },
+      { launch: 2, status: 'failed' },
+    ]);
+    expect(warn).toHaveBeenCalledWith('Could not save Provider first-window evidence');
+  });
+});
 
 const collected = { code: -32000, message: 'Promise was collected' };
 

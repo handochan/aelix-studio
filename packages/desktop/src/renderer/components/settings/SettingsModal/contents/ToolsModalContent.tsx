@@ -20,6 +20,7 @@ import AionSelect from '@/renderer/components/base/AionSelect';
 import TalkToButlerButton from '@/renderer/components/base/TalkToButlerButton';
 import AddMcpServerModal from '@/renderer/pages/settings/components/AddMcpServerModal';
 import McpServerItem from '@/renderer/pages/settings/ToolsSettings/McpServerItem';
+import { AelixDefaultsPanel } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
 import {
   useMcpServers,
   useMcpConnection,
@@ -267,7 +268,12 @@ const ModalMcpManagementSection: React.FC<{
   );
 };
 
-const ToolsModalContent: React.FC = () => {
+type ToolsModalContentProps = {
+  /** Conversation that opened Tools settings; enables the Aelix "This project" scope. */
+  aelixConversationId?: string | null;
+};
+
+const ToolsModalContent: React.FC<ToolsModalContentProps> = ({ aelixConversationId }) => {
   const { t } = useTranslation();
   const [rawMcpMessage, mcpMessageContext] = Message.useMessage({ maxCount: 10 });
   // ELECTRON-1A1: guard message calls so async MCP callbacks that resolve after this
@@ -508,6 +514,10 @@ const ToolsModalContent: React.FC = () => {
                 />
               </AionScrollArea>
             </div>
+          </div>
+          {/* Native Aelix defaults: a separate data source from the Aion MCP list above. */}
+          <div className='px-[12px] md:px-[32px] py-[24px] bg-2 rd-12px md:rd-16px border border-border-2'>
+            <AelixDefaultsPanel kinds={['tool', 'mcp']} conversationId={aelixConversationId} deferUntilVisible />
           </div>
           {/* 图像生成 */}
           <div className='px-[12px] md:px-[32px] py-[24px] bg-2 rd-12px md:rd-16px border border-border-2'>

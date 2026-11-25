@@ -1689,6 +1689,9 @@
     "callback": "인증 입력",
     "continue": "인증 계속",
     "startConversation": "새 Aelix 대화 시작",
+    "agentStartFailed": "Aelix 에이전트를 시작할 수 없습니다.",
+    "agentStartFailedWithReason": "Aelix 에이전트를 시작할 수 없습니다. {{reason}}",
+    "socketPathTooLong": "임시 폴더 경로가 Unix 소켓에 사용하기에는 너무 깁니다. TMPDIR에 더 짧고 쓰기 가능한 폴더 경로를 설정하세요.",
     "firstResponse": "새 대화에서 첫 메시지를 보내 선택한 Provider·모델·endpoint를 확인하세요. 요청이 실패해도 Provider를 바꾸거나 인증 등록을 자동 재시도하지 않습니다.",
     "customEndpoint": "사용자 endpoint 설정",
     "endpoint": "Endpoint URL (인증 정보와 쿼리 제외)",
@@ -1703,5 +1706,189 @@
   },
   "autoUpdateCheck": "시작할 때 업데이트 확인",
   "autoUpdateCheckDescription": "Aelix Studio Releases를 확인하고 알립니다. 오프라인에서는 꺼 두세요.",
-  "autoUpdateSaveFailed": "업데이트 설정을 저장하지 못했습니다."
+  "autoUpdateSaveFailed": "업데이트 설정을 저장하지 못했습니다.",
+  "aelixNative": {
+    "title": "Aelix 전역 기본값",
+    "description": "Aelix CLI도 읽는 Aelix 기본 설정입니다. 이 페이지의 Aion 목록과는 별개입니다.",
+    "skillsDescription": "Aelix CLI도 읽는 Aelix 기본 스킬 설정입니다. 다른 탭의 Aion 스킬 라이브러리와는 별개입니다.",
+    "tab": "Aelix 기본값",
+    "kind": {
+      "tool": "도구",
+      "skill": "스킬",
+      "mcp": "MCP 서버",
+      "label": "리소스 유형"
+    },
+    "scope": {
+      "global": "전역",
+      "project": "이 프로젝트",
+      "label": "범위"
+    },
+    "workspace": "작업 공간: {{path}}",
+    "workspaceUnknown": "작업 공간을 사용할 수 없음",
+    "projectImpact": "이 프로젝트에 저장하면 이 폴더의 Aelix 설정이 변경됩니다. 같은 폴더의 다른 대화와 Aelix CLI에도 적용됩니다.",
+    "noConversationOverride": "스킬과 MCP 서버에는 대화별 설정이 없습니다.",
+    "toolOverrideHint": "이 대화에서만 도구를 변경하려면 대화의 도구 선택기를 사용하세요.",
+    "effectiveUnknown": "적용 상태: 대화를 연 후 확인하세요.",
+    "loading": "불러오는 중…",
+    "empty": "설정할 항목이 없습니다.",
+    "partial": "목록의 일부만 불러왔습니다.",
+    "reload": "다시 불러오기",
+    "save": "저장",
+    "discard": "취소",
+    "unsaved": "저장 안 됨",
+    "on": "켜짐",
+    "off": "꺼짐",
+    "missingStore": "아직 설정 파일이 없습니다. 저장하면 새로 만들어지며, 프로젝트 파일은 먼저 대화에서 승인을 요청합니다.",
+    "mismatch": "차이: {{reason}}",
+    "mismatchList": "저장된 값이 현재 적용 중인 값과 다릅니다: {{reasons}}",
+    "problem": "문제: {{code}}",
+    "decidedBy": {
+      "global": "전역에서 설정됨",
+      "project": "프로젝트에서 설정됨"
+    },
+    "state": {
+      "applied": "적용됨",
+      "notApplied": "적용 안 됨",
+      "inForce": "적용 중",
+      "notInForce": "적용 중 아님",
+      "live": "사용 중",
+      "notLive": "사용 안 함",
+      "liveUnknown": "사용 여부 확인 안 됨",
+      "notLoaded": "로드되지 않음",
+      "pendingNextRequest": "다음 요청부터",
+      "pendingRestart": "재시작 대기 중",
+      "policyPending": "정책 변경 대기 중"
+    },
+    "lock": {
+      "title": "{{value}}(으)로 잠김: {{reason}}",
+      "reason": {
+        "launchLocked": "실행 옵션으로 설정됨",
+        "invalidMcpEntry": "잘못된 MCP 항목",
+        "envConfig": "환경 변수로 설정됨",
+        "extension": "확장 프로그램에서 제공",
+        "untrusted": "신뢰하지 않는 프로젝트",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "전역 기본값은 전역 보기에서 변경합니다.",
+      "readOnly": "이 설정 파일은 읽기 전용입니다.",
+      "missingFile": "이 위치에는 아직 설정 파일이 없습니다. 먼저 Aelix CLI로 만드세요.",
+      "envConfig": "환경 변수로 설정되어 여기서 변경할 수 없습니다.",
+      "unsupported": "이 대화의 Aelix는 프로젝트 설정을 저장할 수 없습니다.",
+      "other": "이 범위는 변경할 수 없습니다({{reason}}).",
+      "unknown": "이 범위는 변경할 수 없습니다."
+    },
+    "diagnostics": {
+      "title": "진단",
+      "invalidProfile": "잘못된 프로필",
+      "invalidSettingsEntry": "잘못된 설정 항목",
+      "skillSettingsProblem": "스킬 설정 문제",
+      "invalidSkill": "잘못된 스킬",
+      "shadowedSkill": "같은 이름의 다른 스킬에 가려진 스킬",
+      "envConfig": "환경 변수로 구성됨",
+      "mcpConfigWarning": "MCP 구성 경고",
+      "invalidMcpKey": "잘못된 MCP 서버 이름",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "저장 및 적용되었습니다. 다음 요청부터 반영됩니다.",
+      "deferred": "저장되었습니다. 다음 요청까지 대기 중입니다.",
+      "notApplied": "저장되었지만 실행 중인 대화에는 아직 적용되지 않았습니다.",
+      "restart": "저장되었습니다. 재시작 대기 중: 대화가 워커를 재시작하면 반영됩니다.",
+      "nextWorker": "저장되었습니다. 다음 Aelix 워커가 시작될 때(예: 새 대화나 다시 연 대화) 적용됩니다.",
+      "noChange": "저장소에서 변경된 내용이 없습니다. 값이 이미 다른 곳에서 설정되었을 수 있습니다.",
+      "mismatch": "일부 저장된 값이 선택한 값과 다릅니다."
+    },
+    "retry": {
+      "conflict": "이 설정이 Studio 외부(예: CLI)에서 변경되었습니다. 현재 값이 표시되어 있습니다. 다시 적용하면 내 선택으로 덮어써 저장합니다.",
+      "unknown": "Studio에서 저장 여부를 확인하지 못했습니다. 현재 값이 표시되어 있습니다. 다시 적용하면 내 선택을 다시 저장합니다.",
+      "stale": "저장하기 전에 목록이 변경되었습니다. 현재 값을 확인한 후 다시 적용하세요.",
+      "current": "현재: {{value}}",
+      "choice": "내 선택: {{value}}",
+      "missing": "더 이상 사용할 수 없음",
+      "reapply": "내 선택 다시 적용",
+      "dismiss": "닫기"
+    },
+    "failure": {
+      "unsupported": "현재 Aelix 런타임에서는 사용할 수 없습니다.",
+      "unauthenticated": "이 설정을 읽으려면 다시 로그인하세요.",
+      "detached": "먼저 이 대화를 연 다음 돌아와서 프로젝트 설정을 관리하세요.",
+      "stale": "대화가 다시 연결되었습니다. 계속하려면 다시 불러오세요.",
+      "busy": "Aelix가 작업 중입니다. 유휴 상태가 되면 다시 시도하세요.",
+      "locked": "{{key}}은(는) 잠겨 있어 변경되지 않았습니다.",
+      "missing": "{{key}}이(가) 더 이상 존재하지 않습니다. 다시 불러온 후 다시 선택하세요.",
+      "readOnly": "이 범위는 읽기 전용입니다.",
+      "invalid": "예상치 못한 응답을 받았습니다. 다시 불러온 후 다시 시도하세요.",
+      "generic": "요청을 완료하지 못했습니다({{reason}}).",
+      "listChanged": "목록이 변경되었습니다. 다시 불러오세요."
+    },
+    "recovery": {
+      "open": "이전 상태 복원",
+      "title": "이전 환경 복원",
+      "description": "복원할 항목을 선택하세요. 선택한 항목만 원래 저장되었던 위치에 다시 기록됩니다.",
+      "previous": "이전: {{value}}",
+      "current": "현재: {{value}}",
+      "alreadyRestored": "이미 이전 값임",
+      "unavailable": "더 이상 사용할 수 없음",
+      "locked": "잠김",
+      "changedElsewhere": "Studio가 저장한 이후 이 설정이 변경되었습니다. 복원하기 전에 현재 값을 확인하세요.",
+      "uncertain": "저장 중 하나의 결과가 확인되지 않았습니다.",
+      "restore": "선택 항목 복원",
+      "restored": "선택한 항목을 복원했습니다.",
+      "none": "복원할 항목이 없습니다.",
+      "explicitProject": "명시적인 프로젝트 값으로 복원됩니다(이전에는 상속된 값이었음).",
+      "explicitGlobal": "명시적인 전역 값으로 복원됩니다(이전에는 기본값이었음)."
+    },
+    "profiles": {
+      "title": "Aelix 프로필",
+      "show": "프로필 보기",
+      "hide": "숨기기",
+      "description": "Aelix CLI가 찾은 프로필(번들 및 사용자)입니다. 프로젝트 프로필은 대화 안에 표시됩니다.",
+      "hint": "프로필은 Aelix CLI로 만들거나 편집하고, 대화에 사용할 프로필은 입력창에서 선택하세요.",
+      "empty": "프로필이 없습니다.",
+      "preview": "미리 보기",
+      "scope": {
+        "bundled": "번들",
+        "user": "사용자",
+        "project": "프로젝트"
+      },
+      "source": "출처",
+      "model": "모델",
+      "tools": "도구",
+      "skills": "스킬",
+      "approvalMode": "위임 승인",
+      "promptMode": "프롬프트 모드",
+      "prompt": "프롬프트",
+      "truncated": "(잘림)",
+      "inherit": "상속됨",
+      "none": "없음",
+      "changed": "목록을 불러온 후 이 프로필이 변경되었습니다. 미리 보려면 다시 불러오세요.",
+      "unavailable": "이 프로필은 더 이상 사용할 수 없습니다.",
+      "assistantLink": "Aelix 프로필 보기",
+      "count_one": "프로필 {{count}}개",
+      "count_other": "프로필 {{count}}개",
+      "diagnosticCount_one": "문제 {{count}}개",
+      "diagnosticCount_other": "문제 {{count}}개",
+      "previewNamed": "{{name}} 미리 보기",
+      "promptModes": {
+        "append": "기본 프롬프트에 추가",
+        "replace": "기본 프롬프트를 대체",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "상속됨",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "현재 필터로 Aelix 에이전트 카드가 숨겨졌거나 Aelix가 감지되지 않았습니다. 해당 프로필은 여기에 표시됩니다."
+    },
+    "titleProject": "Aelix 프로젝트 기본값",
+    "unknownValue": "알 수 없음",
+    "nothingToApply": "아무것도 기록되지 않았습니다. 현재 값이 이미 선택한 값과 같거나 더 이상 변경할 수 없습니다.",
+    "mismatchReason": {
+      "savedValueDiffers": "저장된 값이 선택한 값과 다름",
+      "nativeMismatch": "Aelix에서 차이를 보고했습니다",
+      "other": "{{reason}}"
+    }
+  }
 }

@@ -145,17 +145,22 @@ export async function requestRelay(
   const rawCode = envelope?.code;
   const reportedCode =
     typeof rawCode === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,79}$/.test(rawCode) ? rawCode : undefined;
-  const validFailure = envelope?.success === false && typeof envelope.error === 'string' && reportedCode !== undefined;
+  const details = envelope?.details;
+  const rawRpcCode = isRecord(details) ? details.rpcCode : undefined;
+  const rpcCode = typeof rawRpcCode === 'number' && Number.isSafeInteger(rawRpcCode) ? rawRpcCode : undefined;
+  const validFailure =
+    envelope?.success === false &&
+    typeof envelope.error === 'string' &&
+    reportedCode !== undefined &&
+    (status !== 422 || rawCode !== 'EXT_AGENT_ERROR' || rpcCode !== undefined);
   const code =
     maxResponseBytes === undefined || validFailure ? RELAY_CODES.find((known) => known === rawCode) : undefined;
-  const details = envelope?.details;
-  const rpcCode = code === 'EXT_AGENT_ERROR' && isRecord(details) ? details.rpcCode : undefined;
   return {
     kind: 'failure',
     failure: {
       status,
       code,
-      rpcCode: typeof rpcCode === 'number' && Number.isSafeInteger(rpcCode) ? rpcCode : undefined,
+      rpcCode: code === 'EXT_AGENT_ERROR' ? rpcCode : undefined,
       ...(maxResponseBytes === undefined
         ? {}
         : {

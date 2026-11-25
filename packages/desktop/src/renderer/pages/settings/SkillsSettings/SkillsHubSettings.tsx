@@ -14,6 +14,7 @@ import TalkToButlerButton from '@/renderer/components/base/TalkToButlerButton';
 import { AionSearchInput } from '@/renderer/components/base';
 import { formatDateTime } from '@/renderer/services/i18n/format';
 import { buildSkillImportNotice, getSkillImportErrorMessage } from './skillImportMessages';
+import { AelixDefaultsPanel } from '../ToolsSettings/AelixNative';
 
 // Skill 信息类型 / Skill info type
 interface SkillInfo {
@@ -129,7 +130,7 @@ interface SkillsHubSettingsProps {
   withWrapper?: boolean;
 }
 
-type SkillsTab = 'custom' | 'official';
+type SkillsTab = 'custom' | 'official' | 'aelix';
 
 const getSkillsTabFromState = (state: unknown): SkillsTab => {
   if (typeof state === 'object' && state !== null && 'skillsTab' in state && state.skillsTab === 'official') {
@@ -155,7 +156,11 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
   const [search_query, setSearchQuery] = useState('');
   const [importHistory, setImportHistory] = useState<SkillImportRecord[]>([]);
   const [importLimits, setImportLimits] = useState<SkillImportLimits | null>(null);
-  const [activeTab, setActiveTab] = useState<SkillsTab>(() => getSkillsTabFromState(location.state));
+  // The native Aelix tab is a separate data source; a conversation deep link opens it on "This project".
+  const aelixConversationId = searchParams.get('conversation');
+  const [activeTab, setActiveTab] = useState<SkillsTab>(() =>
+    aelixConversationId || searchParams.get('aelix') ? 'aelix' : getSkillsTabFromState(location.state)
+  );
   // Batch management (Custom tab only): multi-select skills for bulk deletion.
   const [batchMode, setBatchMode] = useState(false);
   const [selectedSkillNames, setSelectedSkillNames] = useState<Set<string>>(new Set());
@@ -990,29 +995,32 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
           defaultValue: 'Centrally manage AI skill packs — install once, use across all assistants.',
         })}
         actions={
-          <>
-            {/* Mobile: the actions row is too crowded — drop the search box entirely. */}
-            {!isMobile && searchBox('input-search-my-skills')}
-            <Button
-              type='text'
-              size='small'
-              data-testid='btn-open-import-history'
-              className='!text-t-secondary hover:!text-t-primary !px-8px'
-              onClick={showImportHistory}
-            >
-              {t('settings.skillsHub.importHistoryTitle', { defaultValue: 'Import history' })}
-            </Button>
-            <TalkToButlerButton
-              label={t('settings.skillsHub.addSkill', { defaultValue: 'Add Skill' })}
-              chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
-              onManual={handleManualImport}
-              manualLabel={t('settings.skillsHub.manualImport', { defaultValue: 'Import Skills' })}
-              prompt={t('settings.talkToButler.prompt.addSkill', {
-                defaultValue: 'Help me import a skill and attach it to an assistant.',
-              })}
-              data-testid='btn-add-skill'
-            />
-          </>
+          // The Aion search and import actions do not apply to the native Aelix defaults tab.
+          activeTab === 'aelix' ? undefined : (
+            <>
+              {/* Mobile: the actions row is too crowded — drop the search box entirely. */}
+              {!isMobile && searchBox('input-search-my-skills')}
+              <Button
+                type='text'
+                size='small'
+                data-testid='btn-open-import-history'
+                className='!text-t-secondary hover:!text-t-primary !px-8px'
+                onClick={showImportHistory}
+              >
+                {t('settings.skillsHub.importHistoryTitle', { defaultValue: 'Import history' })}
+              </Button>
+              <TalkToButlerButton
+                label={t('settings.skillsHub.addSkill', { defaultValue: 'Add Skill' })}
+                chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
+                onManual={handleManualImport}
+                manualLabel={t('settings.skillsHub.manualImport', { defaultValue: 'Import Skills' })}
+                prompt={t('settings.talkToButler.prompt.addSkill', {
+                  defaultValue: 'Help me import a skill and attach it to an assistant.',
+                })}
+                data-testid='btn-add-skill'
+              />
+            </>
+          )
         }
         tabs={[
           {
@@ -1025,14 +1033,27 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
             label: t('settings.skillsHub.tabOfficial', { defaultValue: 'Official' }),
             count: officialSkills.length + extensionSkills.length + builtinAutoSkills.length,
           },
+          { key: 'aelix', label: t('settings.aelixNative.tab') },
         ]}
         activeTab={activeTab}
         onTabChange={(key) => {
-          setActiveTab(key as 'custom' | 'official');
+          setActiveTab(key as SkillsTab);
           exitBatchMode();
         }}
       />
-      {activeTab === 'custom' ? customPane : officialPane}
+      {activeTab === 'custom' ? (
+        customPane
+      ) : activeTab === 'official' ? (
+        officialPane
+      ) : (
+        <div className='rd-12px md:rd-16px border border-border-2 bg-2 px-12px py-16px md:px-24px'>
+          <AelixDefaultsPanel
+            kinds={['skill']}
+            conversationId={aelixConversationId}
+            description={t('settings.aelixNative.skillsDescription')}
+          />
+        </div>
+      )}
     </div>
   );
 

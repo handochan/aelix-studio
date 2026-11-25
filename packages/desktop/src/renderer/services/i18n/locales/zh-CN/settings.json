@@ -1688,6 +1688,9 @@
     "callback": "授权输入",
     "continue": "继续授权",
     "startConversation": "开始新的 Aelix 对话",
+    "agentStartFailed": "无法启动 Aelix 智能体。",
+    "agentStartFailedWithReason": "无法启动 Aelix 智能体。{{reason}}",
+    "socketPathTooLong": "临时文件夹路径对于 Unix 套接字来说过长。请将 TMPDIR 设为较短且可写的文件夹路径。",
     "firstResponse": "在新对话中发送第一条消息，以验证所选服务商、模型和端点。请求失败不会切换服务商或自动重试注册。",
     "customEndpoint": "配置自定义端点",
     "endpoint": "端点 URL（不含凭据和查询参数）",
@@ -1702,5 +1705,189 @@
   },
   "autoUpdateCheck": "启动时检查更新",
   "autoUpdateCheckDescription": "检查 Aelix Studio Releases 并通知您。离线使用时可关闭。",
-  "autoUpdateSaveFailed": "无法保存更新设置。"
+  "autoUpdateSaveFailed": "无法保存更新设置。",
+  "aelixNative": {
+    "title": "Aelix 全局默认设置",
+    "description": "Aelix CLI 也会读取的 Aelix 原生设置。它们与本页上的 Aion 列表相互独立。",
+    "skillsDescription": "Aelix CLI 也会读取的 Aelix 原生技能默认设置。它们与其他标签页中的 Aion 技能库相互独立。",
+    "tab": "Aelix 默认设置",
+    "kind": {
+      "tool": "工具",
+      "skill": "技能",
+      "mcp": "MCP 服务器",
+      "label": "资源类型"
+    },
+    "scope": {
+      "global": "全局",
+      "project": "此项目",
+      "label": "范围"
+    },
+    "workspace": "工作区：{{path}}",
+    "workspaceUnknown": "工作区不可用",
+    "projectImpact": "保存到此项目会更改此文件夹中的 Aelix 设置。同一文件夹中的其他会话和 Aelix CLI 也会使用这些设置。",
+    "noConversationOverride": "技能和 MCP 服务器没有单独的会话级设置。",
+    "toolOverrideHint": "如需仅为此会话更改工具，请使用会话中的工具选择器。",
+    "effectiveUnknown": "生效状态：打开会话后查看。",
+    "loading": "加载中…",
+    "empty": "没有可配置的项。",
+    "partial": "仅加载了部分列表。",
+    "reload": "重新加载",
+    "save": "保存",
+    "discard": "放弃",
+    "unsaved": "未保存",
+    "on": "开启",
+    "off": "关闭",
+    "missingStore": "尚无设置文件。保存时会创建一个；项目文件会先在会话中请求批准。",
+    "mismatch": "不一致：{{reason}}",
+    "mismatchList": "已保存的值与当前生效的值不同：{{reasons}}",
+    "problem": "问题：{{code}}",
+    "decidedBy": {
+      "global": "全局设置",
+      "project": "由项目设置"
+    },
+    "state": {
+      "applied": "已应用",
+      "notApplied": "未应用",
+      "inForce": "生效中",
+      "notInForce": "未生效",
+      "live": "使用中",
+      "notLive": "未使用",
+      "liveUnknown": "未观察到使用",
+      "notLoaded": "未加载",
+      "pendingNextRequest": "下次请求生效",
+      "pendingRestart": "等待重启",
+      "policyPending": "策略变更待生效"
+    },
+    "lock": {
+      "title": "已锁定为 {{value}}：{{reason}}",
+      "reason": {
+        "launchLocked": "由启动选项设置",
+        "invalidMcpEntry": "MCP 条目无效",
+        "envConfig": "由环境变量设置",
+        "extension": "由扩展提供",
+        "untrusted": "项目未受信任",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "全局默认设置需在“全局”视图中更改。",
+      "readOnly": "此设置文件为只读。",
+      "missingFile": "此处尚无设置文件。请先使用 Aelix CLI 创建。",
+      "envConfig": "由环境变量设置，无法在此更改。",
+      "unsupported": "此会话的 Aelix 无法保存项目设置。",
+      "other": "无法更改此范围（{{reason}}）。",
+      "unknown": "无法更改此范围。"
+    },
+    "diagnostics": {
+      "title": "诊断",
+      "invalidProfile": "无效的配置档案",
+      "invalidSettingsEntry": "无效的设置项",
+      "skillSettingsProblem": "技能设置存在问题",
+      "invalidSkill": "无效的技能",
+      "shadowedSkill": "技能被另一个同名技能遮蔽",
+      "envConfig": "由环境变量配置",
+      "mcpConfigWarning": "MCP 配置警告",
+      "invalidMcpKey": "无效的 MCP 服务器名称",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "已保存并应用，从下次请求开始生效。",
+      "deferred": "已保存。将在下次请求时生效。",
+      "notApplied": "已保存，但正在运行的会话尚未应用。",
+      "restart": "已保存。等待重启：会话重启其工作进程后生效。",
+      "nextWorker": "已保存。将在下一个 Aelix 工作进程启动时应用，例如在新建或重新打开的会话中。",
+      "noChange": "存储中没有任何变化；该值可能已在其他位置设置。",
+      "mismatch": "部分已保存的值与您的选择不同。"
+    },
+    "retry": {
+      "conflict": "这些设置已在 Studio 之外被更改（例如在 CLI 中）。此处显示的是当前值。重新应用即可用你的选择覆盖它们。",
+      "unknown": "Studio 无法确认是否已保存。此处显示的是当前值。重新应用即可再次保存你的选择。",
+      "stale": "保存前列表已发生变化。请检查当前值后重新应用。",
+      "current": "当前：{{value}}",
+      "choice": "你的选择：{{value}}",
+      "missing": "已不可用",
+      "reapply": "重新应用我的选择",
+      "dismiss": "忽略"
+    },
+    "failure": {
+      "unsupported": "当前 Aelix 运行时不支持此功能。",
+      "unauthenticated": "请重新登录以读取这些设置。",
+      "detached": "请先打开此会话，再返回管理项目设置。",
+      "stale": "会话已重新连接。请重新加载以继续。",
+      "busy": "Aelix 正忙。请在其空闲时重试。",
+      "locked": "{{key}} 已锁定，未作更改。",
+      "missing": "{{key}} 已不存在。请重新加载后再次选择。",
+      "readOnly": "此范围为只读。",
+      "invalid": "收到意外的回复。请重新加载后重试。",
+      "generic": "无法完成请求（{{reason}}）。",
+      "listChanged": "列表已发生变化。请重新加载。"
+    },
+    "recovery": {
+      "open": "恢复之前的设置",
+      "title": "恢复之前的环境",
+      "description": "选择要恢复的项目。只有选中的项目会被写回，且写回到其原先保存的位置。",
+      "previous": "之前：{{value}}",
+      "current": "现在：{{value}}",
+      "alreadyRestored": "已是之前的值",
+      "unavailable": "已不可用",
+      "locked": "已锁定",
+      "changedElsewhere": "这些设置在 Studio 保存后又被更改过。恢复前请检查当前值。",
+      "uncertain": "其中一次保存的结果未经确认。",
+      "restore": "恢复所选项",
+      "restored": "已恢复所选项。",
+      "none": "没有可恢复的内容。",
+      "explicitProject": "恢复为显式的项目值（之前为继承值）。",
+      "explicitGlobal": "恢复为显式的全局值（之前为默认值）。"
+    },
+    "profiles": {
+      "title": "Aelix 配置档案",
+      "show": "显示配置档案",
+      "hide": "隐藏",
+      "description": "Aelix CLI 发现的配置档案（内置和用户）。项目配置档案会在会话中显示。",
+      "hint": "使用 Aelix CLI 创建或编辑配置档案，并在输入框中为会话选择一个。",
+      "empty": "未找到配置档案。",
+      "preview": "预览",
+      "scope": {
+        "bundled": "内置",
+        "user": "用户",
+        "project": "项目"
+      },
+      "source": "来源",
+      "model": "模型",
+      "tools": "工具",
+      "skills": "技能",
+      "approvalMode": "委派审批",
+      "promptMode": "提示词模式",
+      "prompt": "提示词",
+      "truncated": "（已截断）",
+      "inherit": "继承",
+      "none": "无",
+      "changed": "列表加载后此配置档案已更改。请重新加载以预览。",
+      "unavailable": "此配置档案已不可用。",
+      "assistantLink": "查看 Aelix 配置档案",
+      "count_one": "{{count}} 个配置档案",
+      "count_other": "{{count}} 个配置档案",
+      "diagnosticCount_one": "{{count}} 个问题",
+      "diagnosticCount_other": "{{count}} 个问题",
+      "previewNamed": "预览 {{name}}",
+      "promptModes": {
+        "append": "追加到默认提示词",
+        "replace": "替换默认提示词",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "继承",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Aelix 智能体卡片已被当前筛选条件隐藏，或未检测到 Aelix。其配置档案列在此处。"
+    },
+    "titleProject": "Aelix 项目默认设置",
+    "unknownValue": "未知",
+    "nothingToApply": "未写入任何内容：当前值已与您的选择一致，或已无法更改。",
+    "mismatchReason": {
+      "savedValueDiffers": "已保存的值与您的选择不同",
+      "nativeMismatch": "Aelix 报告了差异",
+      "other": "{{reason}}"
+    }
+  }
 }

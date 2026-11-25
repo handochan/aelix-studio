@@ -64,7 +64,17 @@
       "unknown": "未知",
       "ended": "回合已结束，未报告最终状态"
     },
-    "elapsedReported": "上次报告耗时：{{value}} 秒"
+    "elapsedReported": "上次报告耗时：{{value}} 秒",
+    "report": {
+      "title": "已停止的代理完成的工作",
+      "task": "任务 {{index}}/{{total}}",
+      "step": "步骤 {{index}}/{{total}}",
+      "lost": "该代理因内部错误结束，报告中没有它已完成的工作。",
+      "idle": "取消回合时没有代理在运行：尚未开始或尚未轮到。",
+      "missing": "未返回已停止代理的工作报告。",
+      "unreadable": "无法将报告逐一对应到各任务。完整内容见工具输出。",
+      "loadFailed": "无法加载完整报告。"
+    }
   },
   "runningInput": {
     "mode": {

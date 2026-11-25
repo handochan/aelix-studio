@@ -1687,6 +1687,9 @@
     "callback": "Yetkilendirme girdisi",
     "continue": "Yetkilendirmeye devam et",
     "startConversation": "Yeni Aelix konuşması başlat",
+    "agentStartFailed": "Aelix ajanı başlatılamadı.",
+    "agentStartFailedWithReason": "Aelix ajanı başlatılamadı. {{reason}}",
+    "socketPathTooLong": "Geçici klasör yolu Unix soketi için çok uzun. TMPDIR değişkenini daha kısa ve yazılabilir bir klasör yoluna ayarlayın.",
     "firstResponse": "Sağlayıcıyı, modeli ve uç noktayı doğrulamak için yeni konuşmada ilk mesajı gönderin. Hata durumunda sağlayıcı değiştirilmez veya kayıt otomatik tekrarlanmaz.",
     "customEndpoint": "Özel uç nokta yapılandır",
     "endpoint": "Uç nokta URL’si (kimlik bilgileri ve sorgu parametreleri olmadan)",
@@ -1701,5 +1704,189 @@
   },
   "autoUpdateCheck": "Başlangıçta güncellemeleri denetle",
   "autoUpdateCheckDescription": "Aelix Studio Releases denetlenir ve bildirilir. Çevrimdışı kullanımda kapatın.",
-  "autoUpdateSaveFailed": "Güncelleme tercihi kaydedilemedi."
+  "autoUpdateSaveFailed": "Güncelleme tercihi kaydedilemedi.",
+  "aelixNative": {
+    "title": "Aelix genel varsayılanları",
+    "description": "Aelix CLI'ın da okuduğu yerel Aelix ayarları. Bu sayfadaki Aion listelerinden ayrıdır.",
+    "skillsDescription": "Aelix CLI'ın da okuduğu yerel Aelix beceri varsayılanları. Diğer sekmelerdeki Aion beceri kitaplığından ayrıdır.",
+    "tab": "Aelix varsayılanları",
+    "kind": {
+      "tool": "Araçlar",
+      "skill": "Beceriler",
+      "mcp": "MCP sunucuları",
+      "label": "Kaynak türü"
+    },
+    "scope": {
+      "global": "Genel",
+      "project": "Bu proje",
+      "label": "Kapsam"
+    },
+    "workspace": "Çalışma alanı: {{path}}",
+    "workspaceUnknown": "Çalışma alanı kullanılamıyor",
+    "projectImpact": "Bu projeye kaydetmek, bu klasördeki Aelix ayarlarını değiştirir. Aynı klasördeki diğer konuşmalar ve Aelix CLI da bu ayarları kullanır.",
+    "noConversationOverride": "Beceriler ve MCP sunucuları için konuşmaya özel ayar yoktur.",
+    "toolOverrideHint": "Araçları yalnızca bu konuşma için değiştirmek üzere konuşmadaki araç seçiciyi kullanın.",
+    "effectiveUnknown": "Etkin durum: bir konuşma açtıktan sonra kontrol edin.",
+    "loading": "Yükleniyor…",
+    "empty": "Yapılandırılacak bir şey yok.",
+    "partial": "Listenin yalnızca bir kısmı yüklendi.",
+    "reload": "Yeniden yükle",
+    "save": "Kaydet",
+    "discard": "Vazgeç",
+    "unsaved": "Kaydedilmedi",
+    "on": "Açık",
+    "off": "Kapalı",
+    "missingStore": "Henüz bir ayar dosyası yok. Kaydetmek bir dosya oluşturur; proje dosyası için önce konuşmada onay istenir.",
+    "mismatch": "Farklı: {{reason}}",
+    "mismatchList": "Kaydedilen değerler yürürlükteki değerlerden farklı: {{reasons}}",
+    "problem": "Sorun: {{code}}",
+    "decidedBy": {
+      "global": "Genel olarak ayarlandı",
+      "project": "Proje tarafından ayarlandı"
+    },
+    "state": {
+      "applied": "Uygulandı",
+      "notApplied": "Uygulanmadı",
+      "inForce": "Geçerli",
+      "notInForce": "Geçerli değil",
+      "live": "Kullanımda",
+      "notLive": "Kullanımda değil",
+      "liveUnknown": "Kullanım gözlemlenmedi",
+      "notLoaded": "Yüklenmedi",
+      "pendingNextRequest": "Sonraki istekte",
+      "pendingRestart": "Yeniden başlatma bekleniyor",
+      "policyPending": "İlke değişikliği bekleniyor"
+    },
+    "lock": {
+      "title": "{{value}} olarak kilitli: {{reason}}",
+      "reason": {
+        "launchLocked": "başlatma seçenekleriyle ayarlandı",
+        "invalidMcpEntry": "geçersiz MCP girdisi",
+        "envConfig": "bir ortam değişkeniyle ayarlandı",
+        "extension": "bir uzantı tarafından sağlandı",
+        "untrusted": "proje güvenilir değil",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "Genel varsayılanlar Genel görünümden değiştirilir.",
+      "readOnly": "Bu ayar dosyası salt okunur.",
+      "missingFile": "Burada henüz bir ayar dosyası yok. Önce Aelix CLI ile oluşturun.",
+      "envConfig": "Bir ortam değişkeniyle ayarlandığı için burada değiştirilemez.",
+      "unsupported": "Bu konuşmanın Aelix'i proje ayarlarını kaydedemiyor.",
+      "other": "Bu kapsam değiştirilemez ({{reason}}).",
+      "unknown": "Bu kapsam değiştirilemez."
+    },
+    "diagnostics": {
+      "title": "Tanılama",
+      "invalidProfile": "Geçersiz profil",
+      "invalidSettingsEntry": "Geçersiz ayar girdisi",
+      "skillSettingsProblem": "Beceri ayarlarında sorun",
+      "invalidSkill": "Geçersiz beceri",
+      "shadowedSkill": "Aynı adlı başka bir beceri tarafından gizlenen beceri",
+      "envConfig": "Bir ortam değişkeniyle yapılandırıldı",
+      "mcpConfigWarning": "MCP yapılandırma uyarısı",
+      "invalidMcpKey": "Geçersiz MCP sunucu adı",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "Kaydedildi ve uygulandı. Sonraki istekten itibaren geçerli olur.",
+      "deferred": "Kaydedildi. Sonraki isteğe kadar bekliyor.",
+      "notApplied": "Kaydedildi, ancak çalışan konuşma henüz uygulamadı.",
+      "restart": "Kaydedildi. Yeniden başlatma bekleniyor: konuşma çalışan sürecini yeniden başlattığında geçerli olur.",
+      "nextWorker": "Kaydedildi. Bir sonraki Aelix çalışan süreci başladığında, örneğin yeni veya yeniden açılan bir konuşmada uygulanır.",
+      "noChange": "Depoda hiçbir şey değişmedi; değer başka bir yerde zaten ayarlanmış olabilir.",
+      "mismatch": "Kaydedilen bazı değerler seçiminizden farklı."
+    },
+    "retry": {
+      "conflict": "Bu ayarlar Studio dışında, örneğin CLI'da değiştirildi. Geçerli değerler gösteriliyor. Seçiminizi bunların üzerine kaydetmek için yeniden uygulayın.",
+      "unknown": "Studio kaydın yapılıp yapılmadığını doğrulayamadı. Geçerli değerler gösteriliyor. Seçiminizi tekrar kaydetmek için yeniden uygulayın.",
+      "stale": "Liste kaydetmeden önce değişti. Geçerli değerleri gözden geçirip yeniden uygulayın.",
+      "current": "Geçerli: {{value}}",
+      "choice": "Seçiminiz: {{value}}",
+      "missing": "artık kullanılamıyor",
+      "reapply": "Seçimimi yeniden uygula",
+      "dismiss": "Kapat"
+    },
+    "failure": {
+      "unsupported": "Geçerli Aelix çalışma zamanında kullanılamıyor.",
+      "unauthenticated": "Bu ayarları okumak için yeniden oturum açın.",
+      "detached": "Önce bu konuşmayı açın, ardından proje ayarlarını yönetmek için geri dönün.",
+      "stale": "Konuşma yeniden bağlandı. Devam etmek için yeniden yükleyin.",
+      "busy": "Aelix meşgul. Boşta olduğunda tekrar deneyin.",
+      "locked": "{{key}} kilitli olduğu için değiştirilmedi.",
+      "missing": "{{key}} artık mevcut değil. Yeniden yükleyip tekrar seçin.",
+      "readOnly": "Bu kapsam salt okunur.",
+      "invalid": "Beklenmeyen bir yanıt alındı. Yeniden yükleyip tekrar deneyin.",
+      "generic": "İstek tamamlanamadı ({{reason}}).",
+      "listChanged": "Liste değişti. Yeniden yükleyin."
+    },
+    "recovery": {
+      "open": "Öncekini geri yükle",
+      "title": "Önceki ortamı geri yükle",
+      "description": "Geri yüklenecek öğeleri seçin. Yalnızca seçilen öğeler, kaydedildikleri yere geri yazılır.",
+      "previous": "Önce: {{value}}",
+      "current": "Şimdi: {{value}}",
+      "alreadyRestored": "Zaten önceki değerde",
+      "unavailable": "Artık kullanılamıyor",
+      "locked": "Kilitli",
+      "changedElsewhere": "Bu ayarlar Studio kaydettikten sonra değişti. Geri yüklemeden önce geçerli değerleri kontrol edin.",
+      "uncertain": "Kayıtlardan birinin sonucu doğrulanamadı.",
+      "restore": "Seçilenleri geri yükle",
+      "restored": "Seçilen öğeler geri yüklendi.",
+      "none": "Geri yüklenecek bir şey yok.",
+      "explicitProject": "Açık bir proje değeri olarak geri yüklenir (daha önce devralınmıştı).",
+      "explicitGlobal": "Açık bir genel değer olarak geri yüklenir (daha önce varsayılandı)."
+    },
+    "profiles": {
+      "title": "Aelix profilleri",
+      "show": "Profilleri göster",
+      "hide": "Gizle",
+      "description": "Aelix CLI tarafından bulunan profiller (paketle gelen ve kullanıcı). Proje profilleri bir konuşmanın içinde görünür.",
+      "hint": "Profilleri Aelix CLI ile oluşturun veya düzenleyin; bir konuşma için profili giriş alanından seçin.",
+      "empty": "Profil bulunamadı.",
+      "preview": "Önizleme",
+      "scope": {
+        "bundled": "Paketle gelen",
+        "user": "Kullanıcı",
+        "project": "Proje"
+      },
+      "source": "Kaynak",
+      "model": "Model",
+      "tools": "Araçlar",
+      "skills": "Beceriler",
+      "approvalMode": "Devredilen onay",
+      "promptMode": "İstem modu",
+      "prompt": "İstem",
+      "truncated": "(kısaltıldı)",
+      "inherit": "Devralındı",
+      "none": "Yok",
+      "changed": "Bu profil liste yüklendikten sonra değişti. Önizlemek için yeniden yükleyin.",
+      "unavailable": "Bu profil artık kullanılamıyor.",
+      "assistantLink": "Aelix profillerini görüntüle",
+      "count_one": "{{count}} profil",
+      "count_other": "{{count}} profil",
+      "diagnosticCount_one": "{{count}} sorun",
+      "diagnosticCount_other": "{{count}} sorun",
+      "previewNamed": "{{name}} önizlemesi",
+      "promptModes": {
+        "append": "Varsayılan isteme eklenir",
+        "replace": "Varsayılan istemin yerini alır",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Devralındı",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Aelix ajan kartı geçerli filtre tarafından gizlendi veya Aelix algılanmadı. Profilleri burada listelenir."
+    },
+    "titleProject": "Aelix proje varsayılanları",
+    "unknownValue": "Bilinmiyor",
+    "nothingToApply": "Hiçbir şey yazılmadı: geçerli değerler seçiminizle zaten eşleşiyor veya artık değiştirilemiyor.",
+    "mismatchReason": {
+      "savedValueDiffers": "kaydedilen değer seçiminizden farklı",
+      "nativeMismatch": "Aelix bir fark bildirdi",
+      "other": "{{reason}}"
+    }
+  }
 }

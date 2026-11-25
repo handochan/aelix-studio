@@ -64,7 +64,17 @@
       "unknown": "Unbekannt",
       "ended": "Runde beendet; Endstatus nicht gemeldet"
     },
-    "elapsedReported": "Zuletzt gemeldete Dauer: {{value}} s"
+    "elapsedReported": "Zuletzt gemeldete Dauer: {{value}} s",
+    "report": {
+      "title": "Was die gestoppten Agenten getan haben",
+      "task": "Aufgabe {{index}} von {{total}}",
+      "step": "Schritt {{index}} von {{total}}",
+      "lost": "Der Agent endete mit einem internen Fehler; was er getan hatte, steht nicht im Bericht.",
+      "idle": "Beim Abbrechen der Runde lief hierfür kein Agent: nicht gestartet oder nicht erreicht.",
+      "missing": "Es wurde kein Bericht darüber zurückgegeben, was die gestoppten Agenten getan haben.",
+      "unreadable": "Der Bericht konnte nicht den einzelnen Aufgaben zugeordnet werden. Der vollständige Text steht in der Tool-Ausgabe.",
+      "loadFailed": "Der vollständige Bericht konnte nicht geladen werden."
+    }
   },
   "runningInput": {
     "mode": {

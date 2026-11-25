@@ -10,6 +10,8 @@
  */
 
 import { Console } from 'node:console';
+import { once } from 'node:events';
+import { createServer, type ServerResponse } from 'node:http';
 import { Writable } from 'node:stream';
 import { inspect } from 'node:util';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -23,6 +25,7 @@ import {
   stubProvider,
   withResponseMap,
   BackendHttpError,
+  BackendConnectionError,
   isBackendHttpError,
   wsEmitter,
   wsMappedEmitter,
@@ -408,6 +411,44 @@ describe('httpBridge', () => {
           expect(diagnostic).not.toContain(marker);
           expect(diagnostic).not.toContain(JSON.stringify(marker).slice(1, -1));
         }
+      }
+    });
+
+    it.each([
+      { status: 200, action: 'disconnect' },
+      { status: 502, action: 'disconnect' },
+      { status: 200, action: 'abort with a TypeError', cancelled: new TypeError('caller cancelled the request') },
+      { status: 200, action: 'abort with a SyntaxError', cancelled: new SyntaxError('caller cancelled the request') },
+    ])('distinguishes a body $action after HTTP $status headers', async ({ status, cancelled }) => {
+      const partial = Promise.withResolvers<ServerResponse>();
+      const server = createServer((_request, response) => {
+        response.writeHead(status, { 'Content-Type': 'application/json', 'Content-Length': '25' });
+        response.write('{"data":');
+        partial.resolve(response);
+      });
+      await once(server.listen(0, '127.0.0.1'), 'listening');
+      try {
+        const address = server.address();
+        if (!address || typeof address === 'string') throw new Error('Loopback server did not start');
+        const lifetime = new AbortController();
+        const response = await fetch(`http://127.0.0.1:${address.port}`, { signal: lifetime.signal });
+        vi.stubGlobal('fetch', vi.fn().mockResolvedValueOnce(response));
+
+        const pending = httpRequest('GET', '/api/test', undefined, { signal: lifetime.signal });
+        const rejection = cancelled
+          ? expect(pending).rejects.toBe(cancelled)
+          : expect(pending).rejects.toBeInstanceOf(BackendConnectionError);
+
+        await vi.waitFor(() => expect(response.bodyUsed).toBe(true));
+        if (cancelled) {
+          lifetime.abort(cancelled);
+        } else {
+          (await partial.promise).destroy();
+        }
+        await rejection;
+      } finally {
+        server.closeAllConnections();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     });
 

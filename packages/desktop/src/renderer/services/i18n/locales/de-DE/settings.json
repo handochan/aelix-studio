@@ -1687,6 +1687,9 @@
     "callback": "Autorisierungseingabe",
     "continue": "Autorisierung fortsetzen",
     "startConversation": "Neue Aelix-Unterhaltung starten",
+    "agentStartFailed": "Der Aelix-Agent konnte nicht gestartet werden.",
+    "agentStartFailedWithReason": "Der Aelix-Agent konnte nicht gestartet werden. {{reason}}",
+    "socketPathTooLong": "Der Pfad zum temporären Ordner ist für den Unix-Socket zu lang. Setzen Sie TMPDIR auf einen kürzeren, beschreibbaren Ordnerpfad.",
     "firstResponse": "Senden Sie die erste Nachricht in der neuen Unterhaltung, um Anbieter, Modell und Endpunkt zu prüfen. Fehler führen weder zum Anbieterwechsel noch zur automatischen Wiederholung der Registrierung.",
     "customEndpoint": "Benutzerdefinierten Endpunkt konfigurieren",
     "endpoint": "Endpunkt-URL (ohne Zugangsdaten oder Abfrageparameter)",
@@ -1701,5 +1704,189 @@
   },
   "autoUpdateCheck": "Beim Start nach Updates suchen",
   "autoUpdateCheckDescription": "Prüft Aelix Studio Releases und benachrichtigt Sie. Für Offline-Nutzung ausschalten.",
-  "autoUpdateSaveFailed": "Die Update-Einstellung konnte nicht gespeichert werden."
+  "autoUpdateSaveFailed": "Die Update-Einstellung konnte nicht gespeichert werden.",
+  "aelixNative": {
+    "title": "Globale Aelix-Standardwerte",
+    "description": "Native Aelix-Einstellungen, die auch die Aelix CLI liest. Sie sind von den Aion-Listen auf dieser Seite getrennt.",
+    "skillsDescription": "Native Aelix-Standardwerte für Skills, die auch die Aelix CLI liest. Sie sind von der Aion-Skill-Bibliothek in den anderen Tabs getrennt.",
+    "tab": "Aelix-Standards",
+    "kind": {
+      "tool": "Tools",
+      "skill": "Skills",
+      "mcp": "MCP-Server",
+      "label": "Ressourcentyp"
+    },
+    "scope": {
+      "global": "Global",
+      "project": "Dieses Projekt",
+      "label": "Bereich"
+    },
+    "workspace": "Arbeitsbereich: {{path}}",
+    "workspaceUnknown": "Arbeitsbereich nicht verfügbar",
+    "projectImpact": "Beim Speichern in dieses Projekt werden die Aelix-Einstellungen in diesem Ordner geändert. Andere Unterhaltungen und die Aelix CLI im selben Ordner verwenden sie ebenfalls.",
+    "noConversationOverride": "Für Skills und MCP-Server gibt es keine Einstellung pro Unterhaltung.",
+    "toolOverrideHint": "Um Tools nur für diese Unterhaltung zu ändern, verwende die Tool-Auswahl in der Unterhaltung.",
+    "effectiveUnknown": "Wirksamer Status: nach dem Öffnen einer Unterhaltung prüfen.",
+    "loading": "Wird geladen…",
+    "empty": "Nichts zu konfigurieren.",
+    "partial": "Nur ein Teil der Liste wurde geladen.",
+    "reload": "Neu laden",
+    "save": "Speichern",
+    "discard": "Verwerfen",
+    "unsaved": "Nicht gespeichert",
+    "on": "An",
+    "off": "Aus",
+    "missingStore": "Es gibt noch keine Einstellungsdatei. Beim Speichern wird eine erstellt; für eine Projektdatei wird zuerst in der Unterhaltung um Genehmigung gebeten.",
+    "mismatch": "Abweichung: {{reason}}",
+    "mismatchList": "Gespeicherte Werte weichen von den wirksamen Werten ab: {{reasons}}",
+    "problem": "Problem: {{code}}",
+    "decidedBy": {
+      "global": "Global festgelegt",
+      "project": "Vom Projekt festgelegt"
+    },
+    "state": {
+      "applied": "Angewendet",
+      "notApplied": "Nicht angewendet",
+      "inForce": "Wirksam",
+      "notInForce": "Nicht wirksam",
+      "live": "In Verwendung",
+      "notLive": "Nicht in Verwendung",
+      "liveUnknown": "Verwendung nicht beobachtet",
+      "notLoaded": "Nicht geladen",
+      "pendingNextRequest": "Ab nächster Anfrage",
+      "pendingRestart": "Neustart ausstehend",
+      "policyPending": "Richtlinienänderung ausstehend"
+    },
+    "lock": {
+      "title": "Gesperrt auf {{value}}: {{reason}}",
+      "reason": {
+        "launchLocked": "durch Startoptionen festgelegt",
+        "invalidMcpEntry": "ungültiger MCP-Eintrag",
+        "envConfig": "durch eine Umgebungsvariable festgelegt",
+        "extension": "von einer Erweiterung bereitgestellt",
+        "untrusted": "Projekt nicht vertrauenswürdig",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "Globale Standardwerte werden in der globalen Ansicht geändert.",
+      "readOnly": "Diese Einstellungsdatei ist schreibgeschützt.",
+      "missingFile": "Hier gibt es noch keine Einstellungsdatei. Erstelle sie zuerst mit der Aelix CLI.",
+      "envConfig": "Durch eine Umgebungsvariable festgelegt und kann daher hier nicht geändert werden.",
+      "unsupported": "Das Aelix dieser Unterhaltung kann keine Projekteinstellungen speichern.",
+      "other": "Dieser Bereich kann nicht geändert werden ({{reason}}).",
+      "unknown": "Dieser Bereich kann nicht geändert werden."
+    },
+    "diagnostics": {
+      "title": "Diagnose",
+      "invalidProfile": "Ungültiges Profil",
+      "invalidSettingsEntry": "Ungültiger Einstellungseintrag",
+      "skillSettingsProblem": "Problem in den Skill-Einstellungen",
+      "invalidSkill": "Ungültiger Skill",
+      "shadowedSkill": "Skill wird durch einen anderen Skill mit demselben Namen verdeckt",
+      "envConfig": "Durch eine Umgebungsvariable konfiguriert",
+      "mcpConfigWarning": "MCP-Konfigurationswarnung",
+      "invalidMcpKey": "Ungültiger MCP-Servername",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "Gespeichert und angewendet. Wirksam ab der nächsten Anfrage.",
+      "deferred": "Gespeichert. Ausstehend bis zur nächsten Anfrage.",
+      "notApplied": "Gespeichert, aber die laufende Unterhaltung hat es noch nicht angewendet.",
+      "restart": "Gespeichert. Neustart ausstehend: wird wirksam, wenn die Unterhaltung ihren Worker neu startet.",
+      "nextWorker": "Gespeichert. Gilt, sobald der nächste Aelix-Worker startet, zum Beispiel in einer neuen oder erneut geöffneten Unterhaltung.",
+      "noChange": "Im Speicher hat sich nichts geändert; der Wert wurde möglicherweise bereits an anderer Stelle gesetzt.",
+      "mismatch": "Einige gespeicherte Werte weichen von deiner Auswahl ab."
+    },
+    "retry": {
+      "conflict": "Diese Einstellungen wurden außerhalb von Studio geändert, zum Beispiel in der CLI. Die aktuellen Werte werden angezeigt. Erneut anwenden, um deine Auswahl darüber zu speichern.",
+      "unknown": "Studio konnte nicht bestätigen, ob das Speichern erfolgt ist. Die aktuellen Werte werden angezeigt. Erneut anwenden, um deine Auswahl noch einmal zu speichern.",
+      "stale": "Die Liste hat sich vor dem Speichern geändert. Prüfe die aktuellen Werte und wende sie erneut an.",
+      "current": "Aktuell: {{value}}",
+      "choice": "Deine Auswahl: {{value}}",
+      "missing": "nicht mehr verfügbar",
+      "reapply": "Meine Auswahl erneut anwenden",
+      "dismiss": "Schließen"
+    },
+    "failure": {
+      "unsupported": "Mit der aktuellen Aelix-Laufzeit nicht verfügbar.",
+      "unauthenticated": "Melde dich erneut an, um diese Einstellungen zu lesen.",
+      "detached": "Öffne zuerst diese Unterhaltung und kehre dann zurück, um die Projekteinstellungen zu verwalten.",
+      "stale": "Die Unterhaltung wurde neu verbunden. Lade neu, um fortzufahren.",
+      "busy": "Aelix ist beschäftigt. Versuche es erneut, wenn es inaktiv ist.",
+      "locked": "{{key}} ist gesperrt und wurde nicht geändert.",
+      "missing": "{{key}} existiert nicht mehr. Lade neu und wähle erneut.",
+      "readOnly": "Dieser Bereich ist schreibgeschützt.",
+      "invalid": "Unerwartete Antwort erhalten. Lade neu und versuche es erneut.",
+      "generic": "Die Anfrage konnte nicht abgeschlossen werden ({{reason}}).",
+      "listChanged": "Die Liste hat sich geändert. Lade neu."
+    },
+    "recovery": {
+      "open": "Vorherige wiederherstellen",
+      "title": "Vorherige Umgebung wiederherstellen",
+      "description": "Wähle die wiederherzustellenden Elemente. Nur die gewählten Elemente werden zurückgeschrieben, und zwar an den Ort, an dem sie gespeichert waren.",
+      "previous": "Vorher: {{value}}",
+      "current": "Jetzt: {{value}}",
+      "alreadyRestored": "Bereits auf dem vorherigen Wert",
+      "unavailable": "Nicht mehr verfügbar",
+      "locked": "Gesperrt",
+      "changedElsewhere": "Diese Einstellungen wurden geändert, nachdem Studio sie gespeichert hat. Prüfe die aktuellen Werte vor dem Wiederherstellen.",
+      "uncertain": "Bei einem der Speichervorgänge ist das Ergebnis unbestätigt.",
+      "restore": "Auswahl wiederherstellen",
+      "restored": "Die ausgewählten Elemente wurden wiederhergestellt.",
+      "none": "Nichts wiederherzustellen.",
+      "explicitProject": "Wird als expliziter Projektwert wiederhergestellt (vorher war er geerbt).",
+      "explicitGlobal": "Wird als expliziter globaler Wert wiederhergestellt (vorher war es ein Standardwert)."
+    },
+    "profiles": {
+      "title": "Aelix-Profile",
+      "show": "Profile anzeigen",
+      "hide": "Ausblenden",
+      "description": "Von der Aelix CLI gefundene Profile (mitgeliefert und Benutzer). Projektprofile werden innerhalb einer Unterhaltung angezeigt.",
+      "hint": "Erstelle oder bearbeite Profile mit der Aelix CLI und wähle eines für eine Unterhaltung im Eingabefeld aus.",
+      "empty": "Keine Profile gefunden.",
+      "preview": "Vorschau",
+      "scope": {
+        "bundled": "Mitgeliefert",
+        "user": "Benutzer",
+        "project": "Projekt"
+      },
+      "source": "Quelle",
+      "model": "Modell",
+      "tools": "Tools",
+      "skills": "Skills",
+      "approvalMode": "Delegierte Genehmigung",
+      "promptMode": "Prompt-Modus",
+      "prompt": "Prompt",
+      "truncated": "(gekürzt)",
+      "inherit": "Geerbt",
+      "none": "Keine",
+      "changed": "Dieses Profil hat sich nach dem Laden der Liste geändert. Lade neu, um die Vorschau anzuzeigen.",
+      "unavailable": "Dieses Profil ist nicht mehr verfügbar.",
+      "assistantLink": "Aelix-Profile anzeigen",
+      "count_one": "{{count}} Profil",
+      "count_other": "{{count}} Profile",
+      "diagnosticCount_one": "{{count}} Problem",
+      "diagnosticCount_other": "{{count}} Probleme",
+      "previewNamed": "Vorschau von {{name}}",
+      "promptModes": {
+        "append": "Wird an den Standard-Prompt angehängt",
+        "replace": "Ersetzt den Standard-Prompt",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Geerbt",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Die Aelix-Agentenkarte ist durch den aktuellen Filter ausgeblendet, oder Aelix wurde nicht erkannt. Ihre Profile werden hier aufgeführt."
+    },
+    "titleProject": "Aelix-Projektstandardwerte",
+    "unknownValue": "Unbekannt",
+    "nothingToApply": "Nichts wurde geschrieben: Die aktuellen Werte entsprechen bereits deiner Auswahl oder können nicht mehr geändert werden.",
+    "mismatchReason": {
+      "savedValueDiffers": "der gespeicherte Wert weicht von deiner Auswahl ab",
+      "nativeMismatch": "Aelix hat eine Abweichung gemeldet",
+      "other": "{{reason}}"
+    }
+  }
 }
