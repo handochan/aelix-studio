@@ -34,7 +34,7 @@
 .send-button-custom--enabled.arco-btn {
   background-color: rgb(var(--primary-6)) !important;
   border-color: rgb(var(--primary-6)) !important;
-  color: var(--text-white) !important;
+  color: var(--primary-fill-text) !important;
 }
 
 .send-button-custom--enabled:not(:disabled):hover,
@@ -47,7 +47,7 @@
 .send-button-custom--enabled.arco-btn:not(:disabled):focus-visible {
   background-color: rgb(var(--primary-7)) !important;
   border-color: rgb(var(--primary-7)) !important;
-  color: var(--text-white) !important;
+  color: var(--primary-fill-text) !important;
 }
 
 /* Send button disabled state - keep it synchronized with the draft action. */
@@ -133,7 +133,7 @@
 .sendbox-draft-tool-action--enabled.arco-btn-secondary {
   background-color: rgb(var(--primary-6)) !important;
   border-color: rgb(var(--primary-6)) !important;
-  color: var(--text-white) !important;
+  color: var(--primary-fill-text) !important;
 }
 
 .sendbox-draft-tool-action--enabled:not(:disabled):hover,
@@ -146,7 +146,7 @@
 .sendbox-draft-tool-action--enabled.arco-btn:not(:disabled):focus-visible {
   background-color: rgb(var(--primary-7)) !important;
   border-color: rgb(var(--primary-7)) !important;
-  color: var(--text-white) !important;
+  color: var(--primary-fill-text) !important;
 }
 
 .sendbox-draft-tool-action--disabled,

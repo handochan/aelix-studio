@@ -5,6 +5,8 @@
  */
 
 import studioMark from '@renderer/assets/logo.svg';
+import lockupDark from '@renderer/assets/logos/brand/lockup-dark.svg';
+import lockupLight from '@renderer/assets/logos/brand/lockup-light.svg';
 import { ipcBridge } from '@/common';
 import { TEAM_MODE_ENABLED } from '@/common/config/constants';
 import PwaPullToRefresh from '@/renderer/components/layout/PwaPullToRefresh';
@@ -58,6 +60,14 @@ const SidebarIcon: React.FC<{ size?: number; strokeWidth?: number }> = ({ size =
     <rect x='6' y='10' width='36' height='28' rx='5' />
     <line x1='18' y1='10' x2='18' y2='38' />
   </svg>
+);
+
+/** Official Aelix lockup; the copy for the other appearance is hidden by `.aelix-lockup--*` rules. */
+const AelixSiderLockup: React.FC<{ alt: string }> = ({ alt }) => (
+  <>
+    <img src={lockupLight} alt={alt} className='aelix-lockup--light h-32px w-auto' />
+    <img src={lockupDark} alt={alt} className='aelix-lockup--dark h-32px w-auto' />
+  </>
 );
 
 const useDebug = () => {
@@ -399,22 +409,14 @@ const Layout: React.FC<{
                   }
                 )}
               >
-                <div
-                  className={classNames('bg-black shrink-0 size-32px relative rd-0.5rem', {
-                    '!size-24px': collapsed,
-                  })}
-                  onClick={onClick}
-                >
-                  <img
-                    src={studioMark}
-                    alt=''
-                    className={classNames('absolute inset-0 m-auto size-20px', { '!size-28px': !collapsed })}
-                  />
-                </div>
-                {isSettingsRoute ? (
+                {/* Official Aelix artwork: the mark alone when collapsed, the lockup matching the
+                    appearance otherwise (BRAND.md: below ~32px lockup height use the mark). */}
+                {collapsed ? (
+                  <img src={studioMark} alt={t('login.brand')} className='shrink-0 size-24px' onClick={onClick} />
+                ) : isSettingsRoute ? (
                   <Tooltip content={t('common.back', { defaultValue: 'Back to Chat' })} position='bottom'>
                     <div
-                      className='text-16px text-t-primary collapsed-hidden font-semibold cursor-pointer'
+                      className='collapsed-hidden flex items-center cursor-pointer'
                       role='button'
                       tabIndex={0}
                       aria-label={t('common.back', { defaultValue: 'Back to Chat' })}
@@ -426,11 +428,13 @@ const Layout: React.FC<{
                         }
                       }}
                     >
-                      {t('login.brand')}
+                      <AelixSiderLockup alt={t('login.brand')} />
                     </div>
                   </Tooltip>
                 ) : (
-                  <div className='text-16px text-t-primary collapsed-hidden font-semibold'>{t('login.brand')}</div>
+                  <div className='collapsed-hidden flex items-center cursor-default' onClick={onClick}>
+                    <AelixSiderLockup alt={t('login.brand')} />
+                  </div>
                 )}
                 {isMobile && !collapsed && (
                   <button

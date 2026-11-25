@@ -120,7 +120,7 @@ const MyAssistantCard: React.FC<MyAssistantCardProps> = ({
               type='text'
               size='small'
               data-testid={`btn-chat-${assistant.id}`}
-              className='!inline-flex !h-28px !items-center !justify-center !rounded-9px !bg-fill-2 !px-12px !leading-none !text-t-secondary !opacity-0 transition-all hover:!bg-primary-6 hover:!text-white group-hover:!opacity-100'
+              className='!inline-flex !h-28px !items-center !justify-center !rounded-9px !bg-fill-2 !px-12px !leading-none !text-t-secondary !opacity-0 transition-all hover:!bg-primary hover:!text-on-primary group-hover:!opacity-100'
               onClick={() => onStartChat(assistant)}
             >
               {t('settings.assistantGoChat', { defaultValue: 'Chat' })}

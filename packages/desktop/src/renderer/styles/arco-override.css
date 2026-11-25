@@ -1,6 +1,79 @@
 /* Arco Design custom overrides - non-theme related */
 
 /*
+ * Aelix cyan primary for Arco components. Same selectors as arco.css (loaded
+ * earlier), so these win by order. Light primary-6 is the brand deep #0E7490 so
+ * white button text keeps AA contrast (5.4:1); dark primary-6 #0891B2 keeps link
+ * text readable on the dark ground (5.2:1). Links follow the primary ramp.
+ * --primary-fill-text is the text on primary-6/7 fills: white in light mode
+ * (5.4:1, 7.3:1), ink in dark mode (5.2:1, 7.4:1). It lives beside the ramp
+ * because Arco's scales are not part of the theme token contract.
+ */
+body {
+  --primary-1: 236, 254, 255;
+  --primary-2: 207, 250, 254;
+  --primary-3: 165, 243, 252;
+  --primary-4: 103, 232, 249;
+  --primary-5: 8, 145, 178;
+  --primary-6: 14, 116, 144;
+  --primary-7: 21, 94, 117;
+  --primary-8: 22, 78, 99;
+  --primary-9: 8, 51, 68;
+  --primary-10: 4, 39, 50;
+  --link-1: var(--primary-1);
+  --link-2: var(--primary-2);
+  --link-3: var(--primary-3);
+  --link-4: var(--primary-4);
+  --link-5: var(--primary-5);
+  --link-6: var(--primary-6);
+  --link-7: var(--primary-7);
+  --link-8: var(--primary-8);
+  --link-9: var(--primary-9);
+  --link-10: var(--primary-10);
+  --primary-fill-text: #ffffff;
+}
+
+body[arco-theme='dark'] {
+  --primary-1: 4, 40, 49;
+  --primary-2: 8, 58, 71;
+  --primary-3: 11, 80, 98;
+  --primary-4: 13, 105, 128;
+  --primary-5: 8, 131, 161;
+  --primary-6: 8, 145, 178;
+  --primary-7: 34, 175, 206;
+  --primary-8: 103, 213, 234;
+  --primary-9: 165, 234, 246;
+  --primary-10: 220, 248, 252;
+  --link-1: var(--primary-1);
+  --link-2: var(--primary-2);
+  --link-3: var(--primary-3);
+  --link-4: var(--primary-4);
+  --link-5: var(--primary-5);
+  --link-6: var(--primary-6);
+  --link-7: var(--primary-7);
+  --link-8: var(--primary-8);
+  --link-9: var(--primary-9);
+  --link-10: var(--primary-10);
+  --primary-fill-text: #0e0e0e;
+}
+
+/*
+ * Primary buttons and the active step carry text on the primary fill. Hover uses
+ * primary-7 like active: primary-5 is too light for white text in light mode and
+ * too dark for ink in dark mode. Status buttons keep Arco's colors.
+ */
+.arco-btn-primary:not(.arco-btn-disabled):not([class*='arco-btn-status-']),
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):hover,
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):active,
+.arco-steps-item-process .arco-steps-icon {
+  color: var(--primary-fill-text);
+}
+
+.arco-btn-primary:not(.arco-btn-disabled):not(.arco-btn-loading):not([class*='arco-btn-status-']):hover {
+  background-color: rgb(var(--primary-7));
+}
+
+/*
  * Arco Spin 垂直居中修正。
  *
  * 现象：「思考过程」「执行步骤」这类标题栏，加载中显示 <Spin size={12} />，完成后换成

@@ -176,6 +176,47 @@ describe('usePresetAssistantInfo', () => {
     });
   });
 
+  it("shows a generated assistant's agent icon when the host omits its avatar", () => {
+    useSWRMock.mockImplementation((key: unknown) => {
+      if (key === 'assistants.list') return { data: [], isLoading: false };
+      if (key === 'extensions.acpAdapters') return { data: [], isLoading: false };
+      return { data: undefined, isLoading: false };
+    });
+    // Native Aelix agents are custom agents whose stored icon (the Aelix mark) the host keeps
+    // on the agent row but drops from the generated assistant's avatar.
+    TEST_LOGOS['77905fd1'] = 'data:image/svg+xml;charset=utf-8,aelix-mark';
+    const assistant = {
+      id: 'bare:77905fd1',
+      source: 'generated',
+      name: 'Aelix · ollama/qwen',
+      avatar: '',
+      backend: 'acp',
+    };
+    const fromExtra = { ...makeConversation({ agent_id: '77905fd1' }), assistant } as TChatConversation;
+    const fromAssistantId = { ...makeConversation({}), assistant } as TChatConversation;
+    const userAssistant = {
+      ...makeConversation({ agent_id: '77905fd1' }),
+      assistant: { ...assistant, id: 'assistant-user', source: 'user' },
+    } as TChatConversation;
+
+    try {
+      for (const conversation of [fromExtra, fromAssistantId]) {
+        const { result } = renderHook(() => usePresetAssistantInfo(conversation));
+        expect(result.current.info).toMatchObject({
+          name: 'Aelix · ollama/qwen',
+          logo: 'data:image/svg+xml;charset=utf-8,aelix-mark',
+          isEmoji: false,
+          isFallback: false,
+        });
+      }
+      // A user's own assistant without an avatar keeps the regular fallback.
+      const { result } = renderHook(() => usePresetAssistantInfo(userAssistant));
+      expect(result.current.info).toMatchObject({ logo: '', isFallback: true });
+    } finally {
+      delete TEST_LOGOS['77905fd1'];
+    }
+  });
+
   it('restores local absolute assistant snapshot avatars from the backend assistant catalog', () => {
     useSWRMock.mockImplementation((key: unknown) => {
       if (key === 'assistants.list') {

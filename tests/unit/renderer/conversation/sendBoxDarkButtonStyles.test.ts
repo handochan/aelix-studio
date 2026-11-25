@@ -33,9 +33,9 @@ describe('SendBox action button styles', () => {
     const draftBody = getRuleBodyContainingSelector('.sendbox-draft-tool-action--enabled.arco-btn-secondary');
 
     expect(sendBody).toContain('background-color: rgb(var(--primary-6))');
-    expect(sendBody).toContain('color: var(--text-white)');
+    expect(sendBody).toContain('color: var(--primary-fill-text)');
     expect(draftBody).toContain('background-color: rgb(var(--primary-6))');
-    expect(draftBody).toContain('color: var(--text-white)');
+    expect(draftBody).toContain('color: var(--primary-fill-text)');
   });
 
   it('prevents the send button from drawing a square primary background', () => {

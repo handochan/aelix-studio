@@ -11,6 +11,7 @@ const textColors = {
   't-secondary': 'var(--text-secondary)', // text-t-secondary - 次要文字
   't-tertiary': 'var(--bg-6)', // text-t-tertiary - 三级说明/提示文字
   't-disabled': 'var(--text-disabled)', // text-t-disabled - 禁用文字
+  'on-primary': 'var(--text-on-primary)', // text-on-primary - text on a bg-primary fill
 };
 
 // ==================== 语义状态色 / Semantic State Colors ====================

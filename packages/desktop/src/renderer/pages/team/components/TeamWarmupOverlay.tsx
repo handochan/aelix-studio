@@ -199,8 +199,8 @@ const TeamWarmupOverlay: React.FC<Props> = ({ phase, assistants, runtimeStatus, 
                 type='button'
                 onClick={onRetry}
                 data-testid='team-warmup-retry'
-                className='mt-4px flex items-center gap-6px h-32px px-18px rounded-8px border-none text-13px font-500 text-white cursor-pointer'
-                style={{ background: 'var(--brand)' }}
+                className='mt-4px flex items-center gap-6px h-32px px-18px rounded-8px border-none text-13px font-500 text-on-primary cursor-pointer'
+                style={{ background: 'var(--primary)' }}
               >
                 <Refresh theme='outline' size='14' fill='currentColor' />
                 {t('team.warmup.retry', { defaultValue: 'Retry' })}

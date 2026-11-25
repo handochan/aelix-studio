@@ -1,12 +1,11 @@
-import { useThemeContext } from '@/renderer/hooks/context/ThemeContext';
+/**
+ * Composer focus ring and ambient glow. The colors are theme tokens from the
+ * default color scheme, so light/dark switching happens in CSS.
+ */
+export const INPUT_FOCUS_RING = {
+  activeBorderColor: 'var(--composer-ring-active)',
+  inactiveBorderColor: 'var(--composer-ring-inactive)',
+  activeShadow: 'var(--composer-ambient)',
+} as const;
 
-export const useInputFocusRing = () => {
-  const { theme } = useThemeContext();
-  const isDarkTheme = theme === 'dark';
-
-  return {
-    activeBorderColor: isDarkTheme ? '#4D4B87' : '#E1E0FF',
-    inactiveBorderColor: isDarkTheme ? '#3a3a4a' : '#c9cacf',
-    activeShadow: isDarkTheme ? '0px 2px 20px rgba(77, 75, 135, 0.45)' : '0px 2px 20px rgba(225, 224, 255, 0.6)',
-  };
-};
+export const useInputFocusRing = () => INPUT_FOCUS_RING;

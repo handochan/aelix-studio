@@ -31,6 +31,12 @@ import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGa
 import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from './process/utils/initStorage';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
+import {
+  getWindowBackgroundColor,
+  loadThemeSelection,
+  onThemeChanged,
+  WINDOW_BACKGROUND_COLORS,
+} from '@process/bridge/themeBridge';
 import { startStudioExtensions } from '@process/services/StudioExtensionsService';
 import { pathToFileURL } from 'node:url';
 import { BackendLifecycleManager, fetchStudioBackend } from '@aionui/web-host';
@@ -489,7 +495,8 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
     minWidth: MIN_WINDOW_WIDTH,
     minHeight: MIN_WINDOW_HEIGHT,
     show: false, // Hide until CSS is loaded to prevent FOUC
-    backgroundColor: '#ffffff',
+    // Stored light/dark choice, else the OS appearance (the default theme follows it).
+    backgroundColor: getWindowBackgroundColor(),
     autoHideMenuBar: true,
     // Set icon for Windows/Linux in development mode
     ...(devIcon && process.platform !== 'darwin' ? { icon: devIcon } : {}),
@@ -665,7 +672,14 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
     console.warn('[AionUi] Renderer became unresponsive');
   });
 
+  // Keep the native background (visible while resizing) on the applied theme.
+  const themedWindow = mainWindow;
+  const offThemeBackground = onThemeChanged((theme) => {
+    if (!themedWindow.isDestroyed()) themedWindow.setBackgroundColor(WINDOW_BACKGROUND_COLORS[theme.appearance]);
+  });
+
   mainWindow.on('closed', () => {
+    offThemeBackground();
     console.log('[AionUi] Main window closed');
   });
 
@@ -1027,6 +1041,8 @@ const handleAppReady = async (): Promise<void> => {
 
     const showMainWindowOnReady = !(wasLaunchedAtLogin() && getCloseToTrayEnabled());
 
+    // Bounded by a request timeout; on failure the window follows the OS appearance.
+    await loadThemeSelection();
     createWindow({ showOnReady: showMainWindowOnReady });
     appReadyDone = true;
     mark('createWindow');

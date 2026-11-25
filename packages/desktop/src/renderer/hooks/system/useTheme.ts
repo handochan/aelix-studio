@@ -11,22 +11,39 @@ import { applyTheme, seedElectronTheme, setActiveTheme } from '@/renderer/utils/
 import { getSystemPrefersDark } from '@/renderer/utils/theme/systemAppearance';
 import { startSystemThemeWatcher } from '@/renderer/utils/theme/systemThemeWatcher';
 import { BUILTIN_THEMES } from '@renderer/theme/builtinThemes';
-import { LIGHT_THEME_ID } from '@/common/theme/constants';
+import { DEFAULT_THEME_ID, SYSTEM_THEME_ID } from '@/common/theme/constants';
 import type { Theme } from '@/common/theme/types';
 import { useCallback, useEffect, useState } from 'react';
 
-const APPEARANCE_CACHE_KEY = '__aionui_theme';
+/** Read by the first-paint script in `renderer/index.html`. */
+const THEME_SELECTION_CACHE_KEY = '__aionui_theme';
 
-function cacheAppearance(theme: Theme): void {
+/**
+ * Cache the selection for the first paint: `system` while following the OS (the
+ * first-paint script resolves it with matchMedia, so OS changes need no update),
+ * otherwise the fixed appearance of the chosen theme.
+ */
+function cacheThemeSelection(activeId: string, theme: Theme): void {
   try {
-    localStorage.setItem(APPEARANCE_CACHE_KEY, theme.appearance);
+    localStorage.setItem(THEME_SELECTION_CACHE_KEY, activeId === SYSTEM_THEME_ID ? SYSTEM_THEME_ID : theme.appearance);
   } catch {
     /* noop */
   }
 }
 
 function getPersistedActiveId(): string {
-  return (configService.get('theme.activeId') as string) || LIGHT_THEME_ID;
+  return (configService.get('theme.activeId') as string) || DEFAULT_THEME_ID;
+}
+
+/**
+ * Selection behind a relayed theme (the Electron echo or another window). Config is
+ * persisted before the broadcast, and once loaded nothing stored means the default;
+ * before that, fall back to the relayed theme itself.
+ */
+function getRelayedSelectionId(theme: Theme): string {
+  const stored = configService.get('theme.activeId') as string | undefined;
+  if (stored) return stored;
+  return configService.isInitialized() ? DEFAULT_THEME_ID : theme.id;
 }
 
 async function initActiveTheme(): Promise<Theme> {
@@ -36,13 +53,13 @@ async function initActiveTheme(): Promise<Theme> {
     const userThemes = (configService.get('theme.userThemes') as Theme[]) ?? [];
     const resolved = resolveActiveTheme(activeId, [...BUILTIN_THEMES, ...userThemes], getSystemPrefersDark());
     applyTheme(resolved);
-    cacheAppearance(resolved);
+    cacheThemeSelection(activeId, resolved);
     // Seed the main-process relay so other surfaces (markdown shadow DOM, pet windows) can pull it.
     void seedElectronTheme(resolved).catch(() => {});
     return resolved;
   } catch (e) {
     console.error('init theme failed', e);
-    const fallback = resolveActiveTheme(LIGHT_THEME_ID, BUILTIN_THEMES);
+    const fallback = resolveActiveTheme(DEFAULT_THEME_ID, BUILTIN_THEMES, getSystemPrefersDark());
     applyTheme(fallback);
     return fallback;
   }
@@ -72,12 +89,12 @@ const useTheme = (): [Theme | null, (activeId: string) => Promise<void>, string 
       .catch((e) => console.error('init theme failed', e));
     const off = ipcBridge.theme.changed.on((t: Theme) => {
       applyTheme(t);
+      const selectedId = getRelayedSelectionId(t);
       if (mounted) {
         setActive((prev) => (prev?.id === t.id ? prev : t));
-        // Best-effort: config was persisted before the broadcast, fall back to the resolved id.
-        setActiveId((configService.get('theme.activeId') as string) || t.id);
+        setActiveId(selectedId);
       }
-      cacheAppearance(t);
+      cacheThemeSelection(selectedId, t);
     });
     const offSystemWatch = startSystemThemeWatcher();
     return () => {
@@ -91,7 +108,7 @@ const useTheme = (): [Theme | null, (activeId: string) => Promise<void>, string 
     const resolved = await setActiveTheme(selectedId);
     setActive(resolved);
     setActiveId(selectedId);
-    cacheAppearance(resolved);
+    cacheThemeSelection(selectedId, resolved);
   }, []);
 
   return [active, select, activeId];
