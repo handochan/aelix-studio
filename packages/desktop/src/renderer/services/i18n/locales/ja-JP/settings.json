@@ -1736,7 +1736,7 @@
     "on": "オン",
     "off": "オフ",
     "missingStore": "設定ファイルがまだありません。保存すると作成されます。プロジェクトファイルの場合は、先に会話内で承認を求めます。",
-    "mismatch": "保存済みの値と異なります: {{reason}}",
+    "mismatch": "相違: {{reason}}",
     "mismatchList": "保存された値が現在有効な値と異なります: {{reasons}}",
     "problem": "問題: {{code}}",
     "decidedBy": {

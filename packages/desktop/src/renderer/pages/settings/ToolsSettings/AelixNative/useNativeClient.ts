@@ -38,11 +38,18 @@ export type ConversationWorkspace =
   | { status: 'ready'; name: string | null; workspace: string | null }
   | { status: 'failed' };
 
-/** Read the display name and workspace folder of the conversation that opened settings. */
-export function useConversationWorkspace(conversationId: string | null | undefined): ConversationWorkspace | undefined {
+/**
+ * Read the display name and workspace folder of the conversation that opened settings. `client`
+ * is the current user's NativeResources client: a user change replaces it, which drops the
+ * previous user's path and reads again as the new user.
+ */
+export function useConversationWorkspace(
+  conversationId: string | null | undefined,
+  client: NativeResources | undefined
+): ConversationWorkspace | undefined {
   const [state, setState] = useState<ConversationWorkspace>();
   useEffect(() => {
-    if (!conversationId) {
+    if (!conversationId || !client) {
       setState(undefined);
       return;
     }
@@ -63,6 +70,6 @@ export function useConversationWorkspace(conversationId: string | null | undefin
         if (!request.signal.aborted) setState({ status: 'failed' });
       });
     return () => request.abort();
-  }, [conversationId]);
+  }, [client, conversationId]);
   return state;
 }

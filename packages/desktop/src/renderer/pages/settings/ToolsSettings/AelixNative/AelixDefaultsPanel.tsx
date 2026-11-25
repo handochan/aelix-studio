@@ -71,7 +71,7 @@ const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
   const [scope, setScope] = useState<'global' | 'project'>(conversationId ? 'project' : 'global');
   const [kind, setKind] = useState<ResourceKind>(kinds[0]);
   const [project, setProject] = useState<ProjectState>();
-  const workspace = useConversationWorkspace(conversationId);
+  const workspace = useConversationWorkspace(conversationId, client);
   const discovery = useRef(0);
   // Pending re-apply notices belong to one user (client) and one conversation.
   const notices = useMemo<NoticeCache>(() => new Map(), [client, conversationId]);

@@ -1734,7 +1734,7 @@
     "on": "Açık",
     "off": "Kapalı",
     "missingStore": "Henüz bir ayar dosyası yok. Kaydetmek bir dosya oluşturur; proje dosyası için önce konuşmada onay istenir.",
-    "mismatch": "Kaydedilen değerden farklı: {{reason}}",
+    "mismatch": "Farklı: {{reason}}",
     "mismatchList": "Kaydedilen değerler yürürlükteki değerlerden farklı: {{reasons}}",
     "problem": "Sorun: {{code}}",
     "decidedBy": {

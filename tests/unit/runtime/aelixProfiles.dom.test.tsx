@@ -21,6 +21,14 @@ vi.mock('react-i18next', () => ({
 
 vi.mock('@/common', () => ({ ipcBridge: { conversation: { get: { invoke: vi.fn() } } } }));
 
+const userChange = vi.hoisted(() => new Set<() => void>());
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  onUserChange: (handler: () => void) => {
+    userChange.add(handler);
+    return () => userChange.delete(handler);
+  },
+}));
+
 import { AelixProfiles } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
 
 const QUIET = {
@@ -182,5 +190,17 @@ describe('Aelix profiles on the builtin Aelix card', () => {
     expect(screen.queryByTestId('aelix-profile-preview-quiet')).not.toBeInTheDocument();
     expect(screen.getByTestId('aelix-profile-preview-writer')).toBeInTheDocument();
     expect(screen.getByTestId('aelix-profiles-toggle')).toHaveAttribute('aria-expanded', 'true');
+  });
+  it("clears the previous user's profiles and preview as soon as the user changes", async () => {
+    render(<AelixProfiles defaultExpanded focusProfile='quiet' />);
+    await screen.findByTestId('aelix-profile-preview-quiet');
+
+    // The new user's list is still loading, so nothing from the previous user may remain.
+    helper.mockImplementation(() => new Promise(() => {}));
+    act(() => userChange.forEach((handler) => handler()));
+
+    expect(screen.queryByTestId('aelix-profile-quiet')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-preview-quiet')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profiles-diagnostics')).not.toBeInTheDocument();
   });
 });

@@ -1734,7 +1734,7 @@
     "on": "An",
     "off": "Aus",
     "missingStore": "Es gibt noch keine Einstellungsdatei. Beim Speichern wird eine erstellt; für eine Projektdatei wird zuerst in der Unterhaltung um Genehmigung gebeten.",
-    "mismatch": "Weicht vom gespeicherten Wert ab: {{reason}}",
+    "mismatch": "Abweichung: {{reason}}",
     "mismatchList": "Gespeicherte Werte weichen von den wirksamen Werten ab: {{reasons}}",
     "problem": "Problem: {{code}}",
     "decidedBy": {

@@ -1736,7 +1736,7 @@
     "on": "開啟",
     "off": "關閉",
     "missingStore": "尚無設定檔案。儲存時會建立一個；專案檔案會先在對話中請求核准。",
-    "mismatch": "與已儲存的值不同：{{reason}}",
+    "mismatch": "不一致：{{reason}}",
     "mismatchList": "已儲存的值與目前生效的值不同：{{reasons}}",
     "problem": "問題：{{code}}",
     "decidedBy": {

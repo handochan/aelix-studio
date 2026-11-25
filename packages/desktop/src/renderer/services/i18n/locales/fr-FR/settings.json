@@ -1734,7 +1734,7 @@
     "on": "Activé",
     "off": "Désactivé",
     "missingStore": "Aucun fichier de paramètres n'existe encore. L'enregistrement en crée un ; pour un fichier de projet, une approbation est d'abord demandée dans la conversation.",
-    "mismatch": "Diffère de la valeur enregistrée : {{reason}}",
+    "mismatch": "Diffère : {{reason}}",
     "mismatchList": "Les valeurs enregistrées diffèrent de celles en vigueur : {{reasons}}",
     "problem": "Problème : {{code}}",
     "decidedBy": {

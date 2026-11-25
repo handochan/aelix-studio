@@ -1737,7 +1737,7 @@
     "on": "Ativado",
     "off": "Desativado",
     "missingStore": "Ainda não existe um arquivo de configurações. Salvar cria um; para um arquivo de projeto, a aprovação é solicitada antes na conversa.",
-    "mismatch": "Diferente do valor salvo: {{reason}}",
+    "mismatch": "Diferente: {{reason}}",
     "mismatchList": "Os valores salvos diferem dos que estão em vigor: {{reasons}}",
     "problem": "Problema: {{code}}",
     "decidedBy": {

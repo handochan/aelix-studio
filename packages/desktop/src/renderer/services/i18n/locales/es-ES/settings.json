@@ -1734,7 +1734,7 @@
     "on": "Activado",
     "off": "Desactivado",
     "missingStore": "Todavía no existe un archivo de ajustes. Al guardar se crea uno; para un archivo de proyecto, primero se pide aprobación en la conversación.",
-    "mismatch": "Difiere del valor guardado: {{reason}}",
+    "mismatch": "Difiere: {{reason}}",
     "mismatchList": "Los valores guardados difieren de los que están en vigor: {{reasons}}",
     "problem": "Problema: {{code}}",
     "decidedBy": {

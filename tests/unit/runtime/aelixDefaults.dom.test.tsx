@@ -705,4 +705,14 @@ describe('Aelix global defaults panel', () => {
     modal = await screen.findByTestId('aelix-recovery-modal');
     expect(within(modal).getByTestId('aelix-recovery-row-read')).toBeInTheDocument();
   });
+  it("never shows the previous user's workspace path after a user change", async () => {
+    render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
+    expect(await screen.findByTestId('aelix-workspace')).toHaveTextContent('/work/demo');
+
+    fake.conversationGet.mockImplementation(() => new Promise(() => {}));
+    act(() => changeUser());
+
+    await waitFor(() => expect(fake.conversationGet).toHaveBeenCalledTimes(2));
+    expect(screen.getByTestId('aelix-workspace')).not.toHaveTextContent('/work/demo');
+  });
 });
