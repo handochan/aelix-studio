@@ -280,6 +280,18 @@ export function verifyInstalledBackend(identity) {
   assert.equal(identity.backendOverride, undefined);
 }
 
+/** Wait for the Provider window inside the existing Provider host stage budget. */
+export function waitForProviderWindow(app, launch, { platform = process.platform, arch = process.arch } = {}) {
+  // Intel macOS runners can hit Playwright's default first-window limit during startup.
+  const timeoutMs = platform === 'darwin' && arch === 'x64' ? 60000 : 30000;
+  return boundedWait(app.firstWindow({ timeout: timeoutMs }), 'provider-first-window', {
+    timeoutMs,
+    launch,
+    pid: app.process().pid,
+    phase: 'startup',
+  });
+}
+
 /** Share the launch timeout with first-window readiness before evaluating identity. */
 export async function launchWithIdentity(
   launch,

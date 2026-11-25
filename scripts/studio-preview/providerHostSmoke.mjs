@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../packages/web-host/src/index.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
-import { boundedWait, closeElectron } from './host-release/verification.mjs';
+import { boundedWait, closeElectron, waitForProviderWindow } from './host-release/verification.mjs';
 
 const { httpGet, httpPost } = httpBridge;
 
@@ -110,7 +110,7 @@ try {
     assert.equal(fs.realpathSync.native(selected), fs.realpathSync.native(installed));
     process.env.AELIX_STUDIO_RUNTIME = installed;
   }
-  page = await app.firstWindow();
+  page = await waitForProviderWindow(app, 1);
   if (executablePath) {
     const require = createRequire(import.meta.url);
     const builder = createRequire(require.resolve('electron-builder'));
@@ -303,7 +303,7 @@ try {
     .toBe(true);
   app = await launch();
   assert.notEqual(app.process().pid, previousPid);
-  page = await app.firstWindow();
+  page = await waitForProviderWindow(app, 2);
   await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
     timeout: 60000,
   });

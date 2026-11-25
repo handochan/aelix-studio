@@ -18,6 +18,7 @@ import {
   electronAppEnvironment,
   verifyConfigPreserved,
   verifyInstalledBackend,
+  waitForProviderWindow,
 } from '../../../scripts/studio-preview/host-release/verification.mjs';
 
 afterEach(() => {
@@ -106,6 +107,40 @@ function application(error?: Error, failureExitCode: number | null = 0, failureS
   };
   return { main, app };
 }
+
+describe('Provider first window', () => {
+  it('accepts a delayed window on Intel macOS', async () => {
+    vi.useFakeTimers();
+    const { app } = application();
+    const page = {};
+    app.firstWindow.mockImplementation(() => new Promise((resolve) => setTimeout(() => resolve(page), 35000)));
+
+    const result = waitForProviderWindow(app, 1, { platform: 'darwin', arch: 'x64' });
+    await vi.advanceTimersByTimeAsync(35000);
+
+    await expect(result).resolves.toBe(page);
+    expect(app.firstWindow).toHaveBeenCalledWith({ timeout: 60000 });
+  });
+
+  it.each([
+    ['darwin', 'x64', 60000],
+    ['darwin', 'arm64', 30000],
+    ['linux', 'arm64', 30000],
+    ['linux', 'x64', 30000],
+    ['win32', 'x64', 30000],
+  ])('fails when the window never opens on %s/%s', async (platform, arch, timeoutMs) => {
+    vi.useFakeTimers();
+    const { app } = application();
+    app.firstWindow.mockImplementation(() => new Promise(() => {}));
+
+    const result = waitForProviderWindow(app, 2, { platform, arch });
+    const failure = expect(result).rejects.toThrow(`provider-first-window: bounded wait elapsed (${timeoutMs}ms)`);
+    await vi.advanceTimersByTimeAsync(timeoutMs);
+
+    await failure;
+    expect(app.firstWindow.mock.calls).toEqual([[{ timeout: timeoutMs }]]);
+  });
+});
 
 const collected = { code: -32000, message: 'Promise was collected' };
 
