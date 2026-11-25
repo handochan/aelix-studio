@@ -402,9 +402,11 @@ def private_directory(path, info):
             return False
         # OWNER RIGHTS (S-1-3-4) applies to the owner checked above; Python's
         # os.mkdir(path, 0o700) grants it, SYSTEM and Administrators. CREATOR
-        # OWNER and CREATOR GROUP (S-1-3-0/1) only matter for inheritance and
-        # never match a token.
-        trusted = {user, "S-1-5-18", ADMINISTRATORS, "S-1-3-4", "S-1-3-0", "S-1-3-1"}
+        # OWNER (S-1-3-0) never matches a token and inherits as the creator.
+        # CREATOR GROUP is not trusted: it inherits as the creator's primary
+        # group (Domain Users, or the local "None" group), so new settings,
+        # temp and lock files would be writable by every member.
+        trusted = {user, "S-1-5-18", ADMINISTRATORS, "S-1-3-4", "S-1-3-0"}
         for index in range(acl.GetAceCount()):
             ace = acl.GetAce(index)
             kind, flags = ace[0]
@@ -457,7 +459,10 @@ def opened_id(fd):
 #      fails closed: STORE_UNREADABLE before the commit, OUTCOME_UNKNOWN after
 #      it. An unavailable file ID counts as a mismatch, on Windows too.
 # A same-user process that swaps and restores a path between two checks can
-# still win. These checks catch every swap that is still visible.
+# still win. These checks catch every swap that is still visible. Inherit-only
+# ACEs are skipped, so file-content integrity against other local principals
+# through inherit-only object ACEs is out of scope: this is defence in depth
+# under the same-user threat model, not a guard against other accounts.
 class SettingsPaths:
     """Hold identities (and POSIX directory handles) across the native transaction."""
     def __init__(self, stack):
