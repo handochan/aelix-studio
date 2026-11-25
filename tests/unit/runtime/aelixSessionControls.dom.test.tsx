@@ -762,6 +762,38 @@ describe('Aelix conversation controls: labels', () => {
     expect(i18n.t(`${K}.tools.count`, { count: 2 })).toBe('2 tools');
     expect(i18n.t(`${K}.tools.count`, { count: 5, lng: 'ru-RU' })).toBe('5 инструментов');
   });
+
+  it('passes a numeric count to the tools mode line and the saved notice', async () => {
+    state.toolOverride = ['read', 'write'];
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeExplicit {"count":2}`);
+
+    fireEvent.click(within(screen.getByTestId('aelix-tool-write')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-tools-save'));
+    await settle();
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([['read']]);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsSaved {"count":1}`);
+  });
+
+  it('resolves plural forms for the tools mode line and the saved notice', async () => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: 'en-US',
+      resources: {
+        'en-US': { translation: { conversation: enConversation } },
+        'ru-RU': { translation: { conversation: ruConversation } },
+      },
+    });
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 1 })).toBe('1 tool chosen for this conversation');
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 3 })).toBe('3 tools chosen for this conversation');
+    expect(i18n.t(`${K}.notice.toolsSaved`, { count: 1 })).toBe('Saved 1 tool for this conversation.');
+    expect(i18n.t(`${K}.notice.toolsSaved`, { count: 2, lng: 'ru-RU' })).toBe(
+      'Для этого диалога сохранено 2 инструмента.'
+    );
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 1, lng: 'ru-RU' })).toBe('Для этого диалога выбран 1 инструмент');
+  });
 });
 
 function hold() {
