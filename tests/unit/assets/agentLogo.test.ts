@@ -140,11 +140,46 @@ describe('agentLogo', () => {
       ]);
 
       await expect(fetchAgentLogos()).resolves.toEqual({
-        acp: '/api/assets/logos/ai-major/claude.svg',
         'agent-claude': '/api/assets/logos/ai-major/claude.svg',
         claude: '/api/assets/logos/ai-major/claude.svg',
       });
       expect(bridgeMocks.getManagedAgents).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not lend one custom ACP agent's icon to icon-less custom agents", async () => {
+      const custom = { agent_type: 'acp', agent_source: 'custom', enabled: true, installed: true, status: 'online' };
+      bridgeMocks.getManagedAgents.mockResolvedValue([
+        { ...custom, id: 'native-aelix', name: 'Aelix', icon: AELIX_MARK_DATA_URL },
+        { ...custom, id: 'my-agent', name: 'My agent' },
+      ]);
+
+      const logos = await fetchAgentLogos();
+
+      expect(logos).toEqual({ 'native-aelix': AELIX_MARK_DATA_URL });
+      // Agent settings and cron jobs look an agent up by backend, else by its agent type.
+      expect(resolveAgentAvatar(logos, { backend: 'acp' })).toEqual({ kind: 'fallback' });
+      expect(resolveAgentLogo(logos, { backend: 'acp' })).toBeNull();
+      expect(resolveAgentLogo(logos, { backend: 'native-aelix' })).toBe(AELIX_MARK_DATA_URL);
+    });
+
+    it('keeps single-runtime agent types as logo keys', async () => {
+      bridgeMocks.getManagedAgents.mockResolvedValue([
+        {
+          id: 'gateway',
+          name: 'OpenClaw',
+          agent_type: 'openclaw-gateway',
+          agent_source: 'builtin',
+          enabled: true,
+          installed: true,
+          status: 'online',
+          icon: '/api/assets/logos/tools/openclaw.svg',
+        },
+      ]);
+
+      // OpenClaw conversations without a backend fall back to the agent type.
+      await expect(fetchAgentLogos()).resolves.toMatchObject({
+        'openclaw-gateway': '/api/assets/logos/tools/openclaw.svg',
+      });
     });
   });
 

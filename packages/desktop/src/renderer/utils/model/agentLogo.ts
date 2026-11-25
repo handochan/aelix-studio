@@ -45,8 +45,16 @@ export type AgentLogoMap = Record<string, string>;
 
 export const AGENT_LOGOS_SWR_KEY = 'agents.logos';
 
+/**
+ * Every vendor and custom ACP agent shares `agent_type: 'acp'`, so keying a logo by it
+ * would give one agent's icon to every icon-less custom agent. Other agent types name a
+ * single runtime whose conversations fall back to that type as their logo key.
+ */
+const SHARED_AGENT_TYPES = new Set(['acp']);
+
 function collectManagedAgentLogoKeys(agent: ManagedAgent): string[] {
-  const keys = [agent.backend, agent.agent_type, agent.id, agent.custom_agent_id];
+  const runtimeKey = SHARED_AGENT_TYPES.has(agent.agent_type) ? undefined : agent.agent_type;
+  const keys = [agent.backend, runtimeKey, agent.id, agent.custom_agent_id];
   return keys
     .filter((key): key is string => typeof key === 'string' && key.trim().length > 0)
     .map((key) => key.trim().toLowerCase())
