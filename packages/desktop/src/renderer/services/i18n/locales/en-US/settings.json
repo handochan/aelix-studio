@@ -1704,5 +1704,189 @@
   },
   "autoUpdateCheck": "Check for updates at startup",
   "autoUpdateCheckDescription": "Check Aelix Studio Releases and notify you. Turn off for offline use.",
-  "autoUpdateSaveFailed": "Could not save the update preference."
+  "autoUpdateSaveFailed": "Could not save the update preference.",
+  "aelixNative": {
+    "title": "Aelix global defaults",
+    "description": "Native Aelix settings that the Aelix CLI also reads. They are separate from the Aion lists on this page.",
+    "skillsDescription": "Native Aelix skill defaults that the Aelix CLI also reads. They are separate from the Aion skill library in the other tabs.",
+    "tab": "Aelix defaults",
+    "kind": {
+      "tool": "Tools",
+      "skill": "Skills",
+      "mcp": "MCP servers",
+      "label": "Resource type"
+    },
+    "scope": {
+      "global": "Global",
+      "project": "This project",
+      "label": "Scope"
+    },
+    "workspace": "Workspace: {{path}}",
+    "workspaceUnknown": "Workspace unavailable",
+    "projectImpact": "Saving to this project changes the Aelix settings in this folder. Other conversations and the Aelix CLI in the same folder use them too.",
+    "noConversationOverride": "Skills and MCP servers have no per-conversation setting.",
+    "toolOverrideHint": "To change tools for this conversation only, use the tool picker in the conversation.",
+    "effectiveUnknown": "Effective state: check after opening a conversation.",
+    "loading": "Loading…",
+    "empty": "Nothing to configure.",
+    "partial": "Only part of the list was loaded.",
+    "reload": "Reload",
+    "save": "Save",
+    "discard": "Discard",
+    "unsaved": "Unsaved",
+    "on": "On",
+    "off": "Off",
+    "missingStore": "No settings file exists yet. Saving creates one; a project file asks for approval in the conversation first.",
+    "mismatch": "Differs: {{reason}}",
+    "mismatchList": "Saved values differ from what is in force: {{reasons}}",
+    "problem": "Problem: {{code}}",
+    "decidedBy": {
+      "global": "Set globally",
+      "project": "Set by project"
+    },
+    "state": {
+      "applied": "Applied",
+      "notApplied": "Not applied",
+      "inForce": "In force",
+      "notInForce": "Not in force",
+      "live": "In use",
+      "notLive": "Not in use",
+      "liveUnknown": "Use not observed",
+      "notLoaded": "Not loaded",
+      "pendingNextRequest": "Next request",
+      "pendingRestart": "Restart pending",
+      "policyPending": "Policy change pending"
+    },
+    "lock": {
+      "title": "Locked {{value}}: {{reason}}",
+      "reason": {
+        "launchLocked": "set by launch options",
+        "invalidMcpEntry": "invalid MCP entry",
+        "envConfig": "set by an environment variable",
+        "extension": "provided by an extension",
+        "untrusted": "project not trusted",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "Global defaults are changed from the Global view.",
+      "readOnly": "This settings file is read-only.",
+      "missingFile": "No settings file exists here yet. Create it with the Aelix CLI first.",
+      "envConfig": "Set by an environment variable, so it cannot be changed here.",
+      "unsupported": "This conversation's Aelix cannot save project settings.",
+      "other": "This scope cannot be changed ({{reason}}).",
+      "unknown": "This scope cannot be changed."
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "invalidProfile": "Invalid profile",
+      "invalidSettingsEntry": "Invalid settings entry",
+      "skillSettingsProblem": "Problem in skill settings",
+      "invalidSkill": "Invalid skill",
+      "shadowedSkill": "Skill hidden by another skill with the same name",
+      "envConfig": "Configured by an environment variable",
+      "mcpConfigWarning": "MCP configuration warning",
+      "invalidMcpKey": "Invalid MCP server name",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "Saved and applied. It takes effect from the next request.",
+      "deferred": "Saved. Pending until the next request.",
+      "notApplied": "Saved, but the running conversation has not applied it.",
+      "restart": "Saved. Restart pending: it takes effect when the conversation restarts its worker.",
+      "nextWorker": "Saved. It applies when the next Aelix worker starts, for example in a new or reopened conversation.",
+      "noChange": "Nothing changed in the store; the value may already have been set elsewhere.",
+      "mismatch": "Some saved values differ from your choice."
+    },
+    "retry": {
+      "conflict": "These settings changed outside Studio, for example in the CLI. The current values are shown. Re-apply to save your choice over them.",
+      "unknown": "Studio could not confirm whether the save happened. The current values are shown. Re-apply to save your choice again.",
+      "stale": "The list changed before saving. Review the current values and re-apply.",
+      "current": "Current: {{value}}",
+      "choice": "Your choice: {{value}}",
+      "missing": "no longer available",
+      "reapply": "Re-apply my choice",
+      "dismiss": "Dismiss"
+    },
+    "failure": {
+      "unsupported": "Not available with the current Aelix runtime.",
+      "unauthenticated": "Sign in again to read these settings.",
+      "detached": "Open this conversation first, then come back to manage project settings.",
+      "stale": "The conversation reconnected. Reload to continue.",
+      "busy": "Aelix is busy. Try again when it is idle.",
+      "locked": "{{key}} is locked and was not changed.",
+      "missing": "{{key}} no longer exists. Reload and choose again.",
+      "readOnly": "This scope is read-only.",
+      "invalid": "Received an unexpected reply. Reload and try again.",
+      "generic": "Could not complete the request ({{reason}}).",
+      "listChanged": "The list changed. Reload."
+    },
+    "recovery": {
+      "open": "Restore previous",
+      "title": "Restore previous environment",
+      "description": "Pick the items to restore. Only the picked items are written back, to the same place they were saved.",
+      "previous": "Before: {{value}}",
+      "current": "Now: {{value}}",
+      "alreadyRestored": "Already at the previous value",
+      "unavailable": "No longer available",
+      "locked": "Locked",
+      "changedElsewhere": "These settings changed after Studio saved them. Check the current values before restoring.",
+      "uncertain": "One of the saves had an unconfirmed result.",
+      "restore": "Restore selected",
+      "restored": "Restored the selected items.",
+      "none": "Nothing to restore.",
+      "explicitProject": "Restores as an explicit project value (it was inherited before).",
+      "explicitGlobal": "Restores as an explicit global value (it was a default before)."
+    },
+    "profiles": {
+      "title": "Aelix profiles",
+      "show": "Show profiles",
+      "hide": "Hide",
+      "description": "Profiles discovered by the Aelix CLI (bundled and user). Project profiles appear inside a conversation.",
+      "hint": "Create or edit profiles with the Aelix CLI, and choose one for a conversation in the composer.",
+      "empty": "No profiles found.",
+      "preview": "Preview",
+      "scope": {
+        "bundled": "Bundled",
+        "user": "User",
+        "project": "Project"
+      },
+      "source": "Source",
+      "model": "Model",
+      "tools": "Tools",
+      "skills": "Skills",
+      "approvalMode": "Delegated approval",
+      "promptMode": "Prompt mode",
+      "prompt": "Prompt",
+      "truncated": "(truncated)",
+      "inherit": "Inherited",
+      "none": "None",
+      "changed": "This profile changed after the list was loaded. Reload to preview it.",
+      "unavailable": "This profile is no longer available.",
+      "assistantLink": "View Aelix profiles",
+      "count_one": "{{count}} profile",
+      "count_other": "{{count}} profiles",
+      "diagnosticCount_one": "{{count}} issue",
+      "diagnosticCount_other": "{{count}} issues",
+      "previewNamed": "Preview {{name}}",
+      "promptModes": {
+        "append": "Added to the default prompt",
+        "replace": "Replaces the default prompt",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Inherited",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "The Aelix agent card is hidden by the current filter, or Aelix was not detected. Its profiles are listed here."
+    },
+    "titleProject": "Aelix project defaults",
+    "unknownValue": "Unknown",
+    "nothingToApply": "Nothing was written: the current values already match your choice or can no longer be changed.",
+    "mismatchReason": {
+      "savedValueDiffers": "the saved value differs from your choice",
+      "nativeMismatch": "Aelix reported a difference",
+      "other": "{{reason}}"
+    }
+  }
 }

@@ -12,12 +12,14 @@
 
 import React from 'react';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import ToolsModalContent from '@/renderer/components/settings/SettingsModal/contents/ToolsModalContent';
 import SettingsPageWrapper from '../components/SettingsPageWrapper';
 import SettingsPageHeader from '../components/SettingsPageHeader';
 
 const ToolsSettings: React.FC = () => {
   const { t } = useTranslation();
+  const [searchParams] = useSearchParams();
 
   return (
     <SettingsPageWrapper contentClassName='max-w-1200px'>
@@ -29,7 +31,7 @@ const ToolsSettings: React.FC = () => {
             defaultValue: 'Configure MCP servers and built-in tools such as image generation.',
           })}
         />
-        <ToolsModalContent />
+        <ToolsModalContent aelixConversationId={searchParams.get('conversation')} />
       </div>
     </SettingsPageWrapper>
   );

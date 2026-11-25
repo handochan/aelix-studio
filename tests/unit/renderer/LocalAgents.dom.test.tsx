@@ -450,4 +450,43 @@ describe('LocalAgents', () => {
     expect(screen.queryByText('Aion CLI')).toBeNull();
     expect(screen.getByText('Claude Code')).toBeInTheDocument();
   });
+  it('lists Aelix profiles only under the builtin Aelix card and opens them from a deep link', () => {
+    useManagedAgents.mockReturnValue({
+      agents: [
+        ...makeAgents(),
+        {
+          id: 'builtin-aelix',
+          name: 'Aelix',
+          agent_type: 'acp',
+          agent_source: 'builtin',
+          backend: 'aelix',
+          enabled: true,
+          available: true,
+          installed: true,
+          status: 'online',
+        },
+      ],
+      revalidate: vi.fn(),
+      refreshCatalog: vi.fn(),
+    });
+
+    render(<LocalAgents aelixProfiles={{ expanded: true, profile: null }} />);
+
+    const profiles = screen.getAllByTestId('aelix-profiles');
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0].parentElement).toContainElement(screen.getByTestId('agent-row-builtin-aelix'));
+    // Opened from the assistant editor's link: the list is already expanded.
+    expect(screen.getByTestId('aelix-profiles-toggle')).toHaveTextContent('settings.aelixNative.profiles.hide');
+    // Other official agents keep their plain card.
+    expect(profiles[0].parentElement).not.toContainElement(screen.getByTestId('agent-row-aionrs'));
+  });
+  it('still opens the profile list from a deep link when the Aelix card is not shown', () => {
+    useManagedAgents.mockReturnValue({ agents: makeAgents(), revalidate: vi.fn(), refreshCatalog: vi.fn() });
+
+    render(<LocalAgents aelixProfiles={{ expanded: true, profile: null }} />);
+
+    const standalone = screen.getByTestId('aelix-profiles-standalone');
+    expect(standalone).toHaveTextContent('settings.aelixNative.profiles.cardHidden');
+    expect(screen.getAllByTestId('aelix-profiles')).toHaveLength(1);
+  });
 });

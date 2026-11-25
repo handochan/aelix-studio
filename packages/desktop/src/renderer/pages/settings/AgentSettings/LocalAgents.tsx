@@ -21,6 +21,8 @@ import TalkToButlerButton from '@/renderer/components/base/TalkToButlerButton';
 import React, { useCallback, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import AgentCard from './AgentCard';
+import { AelixProfiles } from '../ToolsSettings/AelixNative';
+import { BUILTIN_AELIX_AGENT_ID } from '@/common/types/agent/assistantTypes';
 import { isDeprecatedRuntimeAgentType } from '@/renderer/utils/model/agentTypeSupportPolicy';
 import InlineAgentEditor, { type CustomAgentDraft } from './InlineAgentEditor';
 import { getBoundAssistants, useAssistantsForAgents } from './BoundAssistants';
@@ -34,7 +36,14 @@ import {
 
 const LOCAL_AGENT_SETUP_GUIDE_URL = 'https://github.com/iOfficeAI/AionUi/wiki/ACP-Setup';
 
-const LocalAgents: React.FC = () => {
+/** Open the builtin Aelix profile list and optionally preview one profile. */
+export type AelixProfilesFocus = { expanded: boolean; profile: string | null };
+
+type LocalAgentsProps = {
+  aelixProfiles?: AelixProfilesFocus;
+};
+
+const LocalAgents: React.FC<LocalAgentsProps> = ({ aelixProfiles }) => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const layout = useLayoutContext();
@@ -271,17 +280,40 @@ const LocalAgents: React.FC = () => {
       {/* Detected Agents section */}
       <div data-testid='agent-management-official-section'>
         <div className='flex flex-col gap-8px rounded-12px border border-border-2 bg-2 p-8px md:rounded-16px md:p-10px'>
-          {visibleOfficialAgents.map((agent) => (
-            <AgentCard
-              key={agent.id}
-              type='official'
-              agent={agent}
-              boundAssistants={getBoundAssistants(agent, assistants)}
-              onTestConnection={() => void handleTestConnection(agent.id)}
-              onConfigure={() => openAgentConfig(agent.id)}
-              isTesting={testingAgentId === agent.id}
-            />
-          ))}
+          {/* A profile deep link still works when the Aelix card is filtered out or not detected. */}
+          {aelixProfiles?.expanded && !visibleOfficialAgents.some((agent) => agent.id === BUILTIN_AELIX_AGENT_ID) ? (
+            <div className='flex flex-col gap-6px' data-testid='aelix-profiles-standalone'>
+              <Typography.Text className='text-12px text-t-secondary'>
+                {t('settings.aelixNative.profiles.cardHidden')}
+              </Typography.Text>
+              <AelixProfiles defaultExpanded focusProfile={aelixProfiles.profile} />
+            </div>
+          ) : null}
+          {visibleOfficialAgents.map((agent) => {
+            const card = (
+              <AgentCard
+                key={agent.id}
+                type='official'
+                agent={agent}
+                boundAssistants={getBoundAssistants(agent, assistants)}
+                onTestConnection={() => void handleTestConnection(agent.id)}
+                onConfigure={() => openAgentConfig(agent.id)}
+                isTesting={testingAgentId === agent.id}
+              />
+            );
+            // The builtin Aelix card also lists globally discovered native profiles (read-only).
+            return agent.id === BUILTIN_AELIX_AGENT_ID ? (
+              <div key={agent.id} className='flex flex-col gap-6px'>
+                {card}
+                <AelixProfiles
+                  defaultExpanded={aelixProfiles?.expanded}
+                  focusProfile={aelixProfiles?.profile ?? null}
+                />
+              </div>
+            ) : (
+              card
+            );
+          })}
           {visibleOfficialAgents.length === 0 && (
             <Typography.Text type='secondary' className='block py-16px text-center text-12px'>
               {normalizedSearchQuery
