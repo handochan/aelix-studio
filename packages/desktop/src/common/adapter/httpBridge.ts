@@ -159,6 +159,14 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
   return false;
 }
 
+/** A rejected Host fetch before any HTTP response was available. */
+export class BackendConnectionError extends TypeError {
+  constructor(cause: TypeError) {
+    super(cause.message, { cause });
+    this.name = 'BackendConnectionError';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // HTTP request helper
 // ---------------------------------------------------------------------------
@@ -205,7 +213,7 @@ export function resolveCoreCsrfToken(): string {
   return candidates.length === 1 ? candidates[0].slice(prefix.length) : '';
 }
 
-function sendHttpRequest(
+async function sendHttpRequest(
   method: string,
   path: string,
   headers: Record<string, string>,
@@ -214,13 +222,18 @@ function sendHttpRequest(
   signal?: AbortSignal
 ): Promise<Response> {
   const url = `${getBaseUrl()}${path}`;
-  return fetchFromDesktopOrBrowser(url, {
-    method,
-    headers,
-    body,
-    ...(options?.keepalive ? { keepalive: true } : {}),
-    ...(signal ? { signal } : {}),
-  });
+  try {
+    return await fetchFromDesktopOrBrowser(url, {
+      method,
+      headers,
+      body,
+      ...(options?.keepalive ? { keepalive: true } : {}),
+      ...(signal ? { signal } : {}),
+    });
+  } catch (error) {
+    if (!signal?.aborted && error instanceof TypeError) throw new BackendConnectionError(error);
+    throw error;
+  }
 }
 
 function refreshWithinDeadline(signal?: AbortSignal): Promise<boolean> {
