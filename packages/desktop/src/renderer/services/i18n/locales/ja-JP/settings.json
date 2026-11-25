@@ -1712,11 +1712,13 @@
     "kind": {
       "tool": "ツール",
       "skill": "スキル",
-      "mcp": "MCP サーバー"
+      "mcp": "MCP サーバー",
+      "label": "リソースの種類"
     },
     "scope": {
       "global": "グローバル",
-      "project": "このプロジェクト"
+      "project": "このプロジェクト",
+      "label": "スコープ"
     },
     "workspace": "ワークスペース: {{path}}",
     "workspaceUnknown": "ワークスペースを利用できません",
@@ -1734,7 +1736,7 @@
     "on": "オン",
     "off": "オフ",
     "missingStore": "設定ファイルがまだありません。保存すると作成されます。プロジェクトファイルの場合は、先に会話内で承認を求めます。",
-    "mismatch": "保存済みの値と異なります",
+    "mismatch": "保存済みの値と異なります: {{reason}}",
     "mismatchList": "保存済みの値の一部が、現在有効な値と異なります。",
     "problem": "問題: {{code}}",
     "decidedBy": {
@@ -1771,7 +1773,8 @@
       "missingFile": "ここにはまだ設定ファイルがありません。先に Aelix CLI で作成してください。",
       "envConfig": "環境変数で設定されているため、ここでは変更できません。",
       "unsupported": "この会話の Aelix はプロジェクト設定を保存できません。",
-      "other": "このスコープは変更できません ({{reason}})。"
+      "other": "このスコープは変更できません ({{reason}})。",
+      "unknown": "このスコープは変更できません。"
     },
     "diagnostics": {
       "title": "診断",
@@ -1790,8 +1793,9 @@
       "deferred": "保存しました。次のリクエストまで保留中です。",
       "notApplied": "保存しましたが、実行中の会話にはまだ適用されていません。",
       "restart": "保存しました。再起動待ち: 会話がワーカーを再起動すると有効になります。",
-      "globalNext": "保存しました。保留中: 次のリクエストから適用されます。",
-      "globalRestart": "保存しました。再起動待ち: 次に Aelix ワーカーが起動したときに適用されます。"
+      "nextWorker": "保存しました。次に Aelix ワーカーが起動したとき (新規または再度開いた会話など) に適用されます。",
+      "noChange": "ストアは変更されませんでした。値がすでに別の場所で設定されている可能性があります。",
+      "mismatch": "一部の保存済みの値が選択内容と異なります。"
     },
     "retry": {
       "conflict": "これらの設定は Studio の外部 (CLI など) で変更されました。現在の値を表示しています。再適用すると、あなたの選択で上書き保存します。",
@@ -1813,7 +1817,8 @@
       "missing": "{{key}} は存在しなくなりました。再読み込みして選び直してください。",
       "readOnly": "このスコープは読み取り専用です。",
       "invalid": "予期しない応答を受信しました。再読み込みして再試行してください。",
-      "generic": "リクエストを完了できませんでした ({{reason}})。"
+      "generic": "リクエストを完了できませんでした ({{reason}})。",
+      "listChanged": "リストが変更されました。再読み込みしてください。"
     },
     "recovery": {
       "open": "以前の状態に戻す",
@@ -1828,14 +1833,14 @@
       "uncertain": "いずれかの保存結果が確認できていません。",
       "restore": "選択項目を復元",
       "restored": "選択した項目を復元しました。",
-      "none": "復元する項目はありません。"
+      "none": "復元する項目はありません。",
+      "explicitProject": "明示的なプロジェクト値として復元します (以前は継承値でした)。",
+      "explicitGlobal": "明示的なグローバル値として復元します (以前は既定値でした)。"
     },
     "profiles": {
       "title": "Aelix プロファイル",
       "show": "プロファイルを表示",
       "hide": "非表示",
-      "count": "{{count}} 件のプロファイル",
-      "diagnosticCount": "{{count}} 件の問題",
       "description": "Aelix CLI が検出したプロファイル (バンドルおよびユーザー) です。プロジェクトのプロファイルは会話内に表示されます。",
       "hint": "プロファイルの作成や編集は Aelix CLI で行い、会話で使うものは入力欄で選択します。",
       "empty": "プロファイルが見つかりません。",
@@ -1857,7 +1862,30 @@
       "none": "なし",
       "changed": "リストの読み込み後にこのプロファイルが変更されました。プレビューするには再読み込みしてください。",
       "unavailable": "このプロファイルは利用できなくなりました。",
-      "assistantLink": "Aelix プロファイルを表示"
+      "assistantLink": "Aelix プロファイルを表示",
+      "count_one": "{{count}} 件のプロファイル",
+      "count_other": "{{count}} 件のプロファイル",
+      "diagnosticCount_one": "{{count}} 件の問題",
+      "diagnosticCount_other": "{{count}} 件の問題",
+      "previewNamed": "{{name}} をプレビュー",
+      "promptModes": {
+        "append": "既定のプロンプトに追加",
+        "replace": "既定のプロンプトを置き換え",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "継承",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Aelix エージェントカードが現在のフィルターで非表示になっているか、Aelix が検出されませんでした。そのプロファイルをここに表示しています。"
+    },
+    "titleProject": "Aelix のプロジェクト既定値",
+    "unknownValue": "不明",
+    "nothingToApply": "何も書き込まれませんでした: 現在の値がすでに選択内容と一致しているか、変更できなくなっています。",
+    "mismatchReason": {
+      "savedValueDiffers": "保存済みの値が選択内容と異なります",
+      "nativeMismatch": "保存後にファイルが変更されました",
+      "other": "{{reason}}"
     }
   }
 }

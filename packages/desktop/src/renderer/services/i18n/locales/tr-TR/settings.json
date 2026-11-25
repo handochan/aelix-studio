@@ -1710,11 +1710,13 @@
     "kind": {
       "tool": "Araçlar",
       "skill": "Beceriler",
-      "mcp": "MCP sunucuları"
+      "mcp": "MCP sunucuları",
+      "label": "Kaynak türü"
     },
     "scope": {
       "global": "Genel",
-      "project": "Bu proje"
+      "project": "Bu proje",
+      "label": "Kapsam"
     },
     "workspace": "Çalışma alanı: {{path}}",
     "workspaceUnknown": "Çalışma alanı kullanılamıyor",
@@ -1732,7 +1734,7 @@
     "on": "Açık",
     "off": "Kapalı",
     "missingStore": "Henüz bir ayar dosyası yok. Kaydetmek bir dosya oluşturur; proje dosyası için önce konuşmada onay istenir.",
-    "mismatch": "Kaydedilen değerden farklı",
+    "mismatch": "Kaydedilen değerden farklı: {{reason}}",
     "mismatchList": "Kaydedilen bazı değerler, geçerli olanlardan farklı.",
     "problem": "Sorun: {{code}}",
     "decidedBy": {
@@ -1769,7 +1771,8 @@
       "missingFile": "Burada henüz bir ayar dosyası yok. Önce Aelix CLI ile oluşturun.",
       "envConfig": "Bir ortam değişkeniyle ayarlandığı için burada değiştirilemez.",
       "unsupported": "Bu konuşmanın Aelix'i proje ayarlarını kaydedemiyor.",
-      "other": "Bu kapsam değiştirilemez ({{reason}})."
+      "other": "Bu kapsam değiştirilemez ({{reason}}).",
+      "unknown": "Bu kapsam değiştirilemez."
     },
     "diagnostics": {
       "title": "Tanılama",
@@ -1788,8 +1791,9 @@
       "deferred": "Kaydedildi. Sonraki isteğe kadar bekliyor.",
       "notApplied": "Kaydedildi, ancak çalışan konuşma henüz uygulamadı.",
       "restart": "Kaydedildi. Yeniden başlatma bekleniyor: konuşma çalışan sürecini yeniden başlattığında geçerli olur.",
-      "globalNext": "Kaydedildi. Bekliyor: sonraki istekten itibaren uygulanır.",
-      "globalRestart": "Kaydedildi. Yeniden başlatma bekleniyor: bir Aelix çalışan süreci bir sonraki başlatıldığında uygulanır."
+      "nextWorker": "Kaydedildi. Bir sonraki Aelix çalışan süreci başladığında, örneğin yeni veya yeniden açılan bir konuşmada uygulanır.",
+      "noChange": "Depoda hiçbir şey değişmedi; değer başka bir yerde zaten ayarlanmış olabilir.",
+      "mismatch": "Kaydedilen bazı değerler seçiminizden farklı."
     },
     "retry": {
       "conflict": "Bu ayarlar Studio dışında, örneğin CLI'da değiştirildi. Geçerli değerler gösteriliyor. Seçiminizi bunların üzerine kaydetmek için yeniden uygulayın.",
@@ -1811,7 +1815,8 @@
       "missing": "{{key}} artık mevcut değil. Yeniden yükleyip tekrar seçin.",
       "readOnly": "Bu kapsam salt okunur.",
       "invalid": "Beklenmeyen bir yanıt alındı. Yeniden yükleyip tekrar deneyin.",
-      "generic": "İstek tamamlanamadı ({{reason}})."
+      "generic": "İstek tamamlanamadı ({{reason}}).",
+      "listChanged": "Liste değişti. Yeniden yükleyin."
     },
     "recovery": {
       "open": "Öncekini geri yükle",
@@ -1826,14 +1831,14 @@
       "uncertain": "Kayıtlardan birinin sonucu doğrulanamadı.",
       "restore": "Seçilenleri geri yükle",
       "restored": "Seçilen öğeler geri yüklendi.",
-      "none": "Geri yüklenecek bir şey yok."
+      "none": "Geri yüklenecek bir şey yok.",
+      "explicitProject": "Açık bir proje değeri olarak geri yüklenir (daha önce devralınmıştı).",
+      "explicitGlobal": "Açık bir genel değer olarak geri yüklenir (daha önce varsayılandı)."
     },
     "profiles": {
       "title": "Aelix profilleri",
       "show": "Profilleri göster",
       "hide": "Gizle",
-      "count": "{{count}} profil",
-      "diagnosticCount": "{{count}} sorun",
       "description": "Aelix CLI tarafından bulunan profiller (paketle gelen ve kullanıcı). Proje profilleri bir konuşmanın içinde görünür.",
       "hint": "Profilleri Aelix CLI ile oluşturun veya düzenleyin; bir konuşma için profili giriş alanından seçin.",
       "empty": "Profil bulunamadı.",
@@ -1855,7 +1860,30 @@
       "none": "Yok",
       "changed": "Bu profil liste yüklendikten sonra değişti. Önizlemek için yeniden yükleyin.",
       "unavailable": "Bu profil artık kullanılamıyor.",
-      "assistantLink": "Aelix profillerini görüntüle"
+      "assistantLink": "Aelix profillerini görüntüle",
+      "count_one": "{{count}} profil",
+      "count_other": "{{count}} profil",
+      "diagnosticCount_one": "{{count}} sorun",
+      "diagnosticCount_other": "{{count}} sorun",
+      "previewNamed": "{{name}} önizlemesi",
+      "promptModes": {
+        "append": "Varsayılan isteme eklenir",
+        "replace": "Varsayılan istemin yerini alır",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Devralındı",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Aelix ajan kartı geçerli filtre tarafından gizlendi veya Aelix algılanmadı. Profilleri burada listelenir."
+    },
+    "titleProject": "Aelix proje varsayılanları",
+    "unknownValue": "Bilinmiyor",
+    "nothingToApply": "Hiçbir şey yazılmadı: geçerli değerler seçiminizle zaten eşleşiyor veya artık değiştirilemiyor.",
+    "mismatchReason": {
+      "savedValueDiffers": "kaydedilen değer seçiminizden farklı",
+      "nativeMismatch": "dosya kaydedildikten sonra değişti",
+      "other": "{{reason}}"
     }
   }
 }

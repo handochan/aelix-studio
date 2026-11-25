@@ -8,7 +8,13 @@ import { Alert, Button, Checkbox, Modal, Typography } from '@arco-design/web-rea
 import React, { useEffect, useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ResourceChange } from '@/renderer/services/runtime/NativeResources';
-import { changedSinceSave, compareRecovery, type RecoveryRecord, type RecoveryRowState } from './recoveryStore';
+import {
+  changedSinceSave,
+  compareRecovery,
+  restorePlan,
+  type RecoveryRecord,
+  type RecoveryRowState,
+} from './recoveryStore';
 import type { Listing } from './useSelections';
 
 type RecoveryModalProps = {
@@ -36,7 +42,15 @@ const RecoveryModal: React.FC<RecoveryModalProps> = ({ visible, record, listing,
   const rows = useMemo(() => compareRecovery(record, listing), [listing, record]);
   const changed = changedSinceSave(record, listing);
   const value = (on: boolean | null) =>
-    on === null ? '-' : on ? t('settings.aelixNative.on') : t('settings.aelixNative.off');
+    on === null
+      ? t('settings.aelixNative.unknownValue')
+      : on
+        ? t('settings.aelixNative.on')
+        : t('settings.aelixNative.off');
+  const explicitKey =
+    record.target.scope === 'project'
+      ? 'settings.aelixNative.recovery.explicitProject'
+      : 'settings.aelixNative.recovery.explicitGlobal';
 
   useEffect(() => {
     if (visible) setPicked(new Set());
@@ -65,7 +79,7 @@ const RecoveryModal: React.FC<RecoveryModalProps> = ({ visible, record, listing,
             disabled={picked.size === 0}
             loading={saving}
             onClick={() =>
-              onRestore(rows.filter((row) => picked.has(row.key)).map((row) => ({ key: row.key, on: row.before })))
+              onRestore(rows.filter((row) => picked.has(row.key)).map((row) => restorePlan(record.target, row).change))
             }
           >
             {t('settings.aelixNative.recovery.restore')}
@@ -99,9 +113,12 @@ const RecoveryModal: React.FC<RecoveryModalProps> = ({ visible, record, listing,
                 <span className='text-13px text-t-primary'>{row.key}</span>
               </Checkbox>
               <div className='flex flex-col items-end text-12px text-t-secondary'>
-                <span>{t('settings.aelixNative.recovery.previous', { value: value(row.before) })}</span>
+                <span>{t('settings.aelixNative.recovery.previous', { value: value(row.before.on) })}</span>
                 <span>{t('settings.aelixNative.recovery.current', { value: value(row.current) })}</span>
                 {row.state === 'restorable' ? null : <span>{t(STATE_KEYS[row.state])}</span>}
+                {row.state === 'restorable' && restorePlan(record.target, row).explicitWhereInherited ? (
+                  <span data-testid={`aelix-recovery-explicit-${row.key}`}>{t(explicitKey)}</span>
+                ) : null}
               </div>
             </div>
           ))

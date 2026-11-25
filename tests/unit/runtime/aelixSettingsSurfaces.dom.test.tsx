@@ -127,7 +127,7 @@ vi.mock('@/renderer/services/clientBusinessSettings', () => ({
 
 import ToolsSettings from '@/renderer/pages/settings/ToolsSettings';
 import SkillsHubSettings from '@/renderer/pages/settings/SkillsSettings/SkillsHubSettings';
-import { clearRecovery } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
+import { resetRecoveryForRuntimeChange } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
 
 const SCOPES = {
   global: { writable: false, reason: 'management-helper', exists: true },
@@ -164,7 +164,7 @@ function sessionList(kind: string, key: string) {
 }
 
 beforeEach(() => {
-  clearRecovery();
+  resetRecoveryForRuntimeChange();
   fake.relay.mockReset().mockImplementation(async (_path, body) => {
     if (body === undefined) {
       return {
@@ -286,8 +286,13 @@ describe('Tools and Skills settings with native Aelix defaults', () => {
     fireEvent.click(screen.getByTestId('settings-tab-official'));
     expect(await screen.findByText('ext-skill')).toBeInTheDocument();
 
+    expect(screen.getByTestId('btn-open-import-history')).toBeInTheDocument();
+    expect(screen.getByText('TalkToButlerButton')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('settings-tab-aelix'));
     const panel = await screen.findByTestId('aelix-defaults-panel');
+    // The Aion search and import actions do not act on native defaults, so they are hidden here.
+    expect(screen.queryByText('TalkToButlerButton')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('btn-open-import-history')).not.toBeInTheDocument();
     // Without a conversation only the global scope exists.
     expect(within(panel).queryByTestId('aelix-scope')).not.toBeInTheDocument();
     expect(await within(panel).findByTestId('aelix-list-failure')).toBeInTheDocument();

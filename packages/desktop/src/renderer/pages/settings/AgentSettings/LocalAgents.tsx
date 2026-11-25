@@ -280,6 +280,15 @@ const LocalAgents: React.FC<LocalAgentsProps> = ({ aelixProfiles }) => {
       {/* Detected Agents section */}
       <div data-testid='agent-management-official-section'>
         <div className='flex flex-col gap-8px rounded-12px border border-border-2 bg-2 p-8px md:rounded-16px md:p-10px'>
+          {/* A profile deep link still works when the Aelix card is filtered out or not detected. */}
+          {aelixProfiles?.expanded && !visibleOfficialAgents.some((agent) => agent.id === BUILTIN_AELIX_AGENT_ID) ? (
+            <div className='flex flex-col gap-6px' data-testid='aelix-profiles-standalone'>
+              <Typography.Text className='text-12px text-t-secondary'>
+                {t('settings.aelixNative.profiles.cardHidden')}
+              </Typography.Text>
+              <AelixProfiles defaultExpanded focusProfile={aelixProfiles.profile} />
+            </div>
+          ) : null}
           {visibleOfficialAgents.map((agent) => {
             const card = (
               <AgentCard

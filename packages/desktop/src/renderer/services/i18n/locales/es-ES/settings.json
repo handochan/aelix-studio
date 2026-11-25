@@ -1710,11 +1710,13 @@
     "kind": {
       "tool": "Herramientas",
       "skill": "Habilidades",
-      "mcp": "Servidores MCP"
+      "mcp": "Servidores MCP",
+      "label": "Tipo de recurso"
     },
     "scope": {
       "global": "Global",
-      "project": "Este proyecto"
+      "project": "Este proyecto",
+      "label": "Ámbito"
     },
     "workspace": "Espacio de trabajo: {{path}}",
     "workspaceUnknown": "Espacio de trabajo no disponible",
@@ -1732,7 +1734,7 @@
     "on": "Activado",
     "off": "Desactivado",
     "missingStore": "Todavía no existe un archivo de ajustes. Al guardar se crea uno; para un archivo de proyecto, primero se pide aprobación en la conversación.",
-    "mismatch": "Difiere del valor guardado",
+    "mismatch": "Difiere del valor guardado: {{reason}}",
     "mismatchList": "Algunos valores guardados difieren de los que están en vigor.",
     "problem": "Problema: {{code}}",
     "decidedBy": {
@@ -1769,7 +1771,8 @@
       "missingFile": "Todavía no existe un archivo de ajustes aquí. Créalo primero con Aelix CLI.",
       "envConfig": "Definido por una variable de entorno, por lo que no se puede cambiar aquí.",
       "unsupported": "El Aelix de esta conversación no puede guardar ajustes de proyecto.",
-      "other": "Este ámbito no se puede cambiar ({{reason}})."
+      "other": "Este ámbito no se puede cambiar ({{reason}}).",
+      "unknown": "Este ámbito no se puede cambiar."
     },
     "diagnostics": {
       "title": "Diagnóstico",
@@ -1788,8 +1791,9 @@
       "deferred": "Guardado. Pendiente hasta la próxima solicitud.",
       "notApplied": "Guardado, pero la conversación en curso aún no lo ha aplicado.",
       "restart": "Guardado. Reinicio pendiente: surte efecto cuando la conversación reinicie su proceso de trabajo.",
-      "globalNext": "Guardado. Pendiente: se aplica a partir de la próxima solicitud.",
-      "globalRestart": "Guardado. Reinicio pendiente: se aplica la próxima vez que se inicie un proceso de trabajo de Aelix."
+      "nextWorker": "Guardado. Se aplica cuando se inicie el siguiente proceso de trabajo de Aelix, por ejemplo en una conversación nueva o reabierta.",
+      "noChange": "No cambió nada en el almacén; es posible que el valor ya se hubiera establecido en otro lugar.",
+      "mismatch": "Algunos valores guardados difieren de tu elección."
     },
     "retry": {
       "conflict": "Estos ajustes cambiaron fuera de Studio, por ejemplo en la CLI. Se muestran los valores actuales. Vuelve a aplicar para guardar tu elección sobre ellos.",
@@ -1811,7 +1815,8 @@
       "missing": "{{key}} ya no existe. Recarga y vuelve a elegir.",
       "readOnly": "Este ámbito es de solo lectura.",
       "invalid": "Se recibió una respuesta inesperada. Recarga e inténtalo de nuevo.",
-      "generic": "No se pudo completar la solicitud ({{reason}})."
+      "generic": "No se pudo completar la solicitud ({{reason}}).",
+      "listChanged": "La lista cambió. Recarga."
     },
     "recovery": {
       "open": "Restaurar anterior",
@@ -1826,14 +1831,14 @@
       "uncertain": "Uno de los guardados tuvo un resultado sin confirmar.",
       "restore": "Restaurar selección",
       "restored": "Se restauraron los elementos seleccionados.",
-      "none": "No hay nada que restaurar."
+      "none": "No hay nada que restaurar.",
+      "explicitProject": "Se restaura como valor explícito del proyecto (antes era heredado).",
+      "explicitGlobal": "Se restaura como valor global explícito (antes era un valor predeterminado)."
     },
     "profiles": {
       "title": "Perfiles de Aelix",
       "show": "Mostrar perfiles",
       "hide": "Ocultar",
-      "count": "{{count}} perfiles",
-      "diagnosticCount": "{{count}} problemas",
       "description": "Perfiles detectados por Aelix CLI (incluidos y de usuario). Los perfiles de proyecto aparecen dentro de una conversación.",
       "hint": "Crea o edita perfiles con Aelix CLI y elige uno para una conversación en el campo de mensaje.",
       "empty": "No se encontraron perfiles.",
@@ -1855,7 +1860,30 @@
       "none": "Ninguno",
       "changed": "Este perfil cambió después de cargar la lista. Recarga para ver la vista previa.",
       "unavailable": "Este perfil ya no está disponible.",
-      "assistantLink": "Ver perfiles de Aelix"
+      "assistantLink": "Ver perfiles de Aelix",
+      "count_one": "{{count}} perfil",
+      "count_other": "{{count}} perfiles",
+      "diagnosticCount_one": "{{count}} problema",
+      "diagnosticCount_other": "{{count}} problemas",
+      "previewNamed": "Vista previa de {{name}}",
+      "promptModes": {
+        "append": "Se añade al prompt predeterminado",
+        "replace": "Reemplaza el prompt predeterminado",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Heredado",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "La tarjeta del agente Aelix está oculta por el filtro actual o no se detectó Aelix. Sus perfiles se muestran aquí."
+    },
+    "titleProject": "Valores predeterminados del proyecto de Aelix",
+    "unknownValue": "Desconocido",
+    "nothingToApply": "No se escribió nada: los valores actuales ya coinciden con tu elección o ya no se pueden cambiar.",
+    "mismatchReason": {
+      "savedValueDiffers": "el valor guardado difiere de tu elección",
+      "nativeMismatch": "el archivo cambió después de guardarlo",
+      "other": "{{reason}}"
     }
   }
 }

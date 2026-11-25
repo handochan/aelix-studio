@@ -9,7 +9,7 @@
 
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 
 type Row = { saved: boolean; lock: { kind: string; value: boolean; reason: string } | null };
 type Kind = 'tool' | 'skill' | 'mcp';
@@ -25,6 +25,17 @@ const fake = vi.hoisted(() => ({
   helper: vi.fn<(command: Command) => Promise<unknown>>(),
   relay: vi.fn<(path: string, body?: string) => Promise<unknown>>(),
   conversationGet: vi.fn(),
+  userChange: new Set<() => void>(),
+}));
+
+/** Simulate sign-out or another user's sign-in. */
+const changeUser = () => fake.userChange.forEach((handler) => handler());
+
+vi.mock('@/renderer/hooks/context/AuthContext', () => ({
+  onUserChange: (handler: () => void) => {
+    fake.userChange.add(handler);
+    return () => fake.userChange.delete(handler);
+  },
 }));
 
 vi.mock('react-i18next', () => ({
@@ -43,13 +54,15 @@ vi.mock('@/renderer/services/runtime/RunningInput/transport', async (importOrigi
   return { ...actual, requestRelay: fake.relay };
 });
 
-import { AelixDefaultsPanel, clearRecovery } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
+import { AelixDefaultsPanel, resetRecoveryForRuntimeChange } from '@/renderer/pages/settings/ToolsSettings/AelixNative';
 
 // ---------------------------------------------------------------------------
 // Global helper fake: one store per kind with a revision guarded like the native writer.
 
 type Store = { revision: number; writable: boolean; reason: string | null; rows: Record<string, Row> };
 let stores: Record<Kind, Store>;
+/** When set, the next global write commits nothing and reports no changed rows. */
+let helperNoop: boolean;
 
 const globalRow = (key: string, row: Row) => ({
   key,
@@ -84,6 +97,20 @@ function helperReply(command: Command): unknown {
   if (command.action === 'selections/set') {
     if (command.expectedRevision !== revision)
       return { ok: false, code: 'REVISION_CONFLICT', currentRevision: revision };
+    if (helperNoop) {
+      return {
+        ok: true,
+        data: {
+          scope: 'global',
+          kind: command.kind,
+          revision,
+          saved: true,
+          changed: [],
+          mismatches: [],
+          appliesAt: 'next_worker',
+        },
+      };
+    }
     for (const change of command.changes ?? []) store.rows[change.key].saved = change.on;
     store.revision++;
     return {
@@ -114,8 +141,18 @@ const helperWrites = () =>
 // ---------------------------------------------------------------------------
 // Conversation relay fake: discovery plus session selections for c-17.
 
-type SessionRow = Row & { applied: boolean; inForce: boolean; live: boolean | null; pending: boolean };
+type SessionRow = Row & {
+  applied: boolean;
+  inForce: boolean;
+  live: boolean | null;
+  pending: boolean;
+  decidedBy?: 'global' | 'project';
+};
 let session: Record<Kind, Record<string, SessionRow>>;
+/** When set, the next project write's outcome is lost and its binding is replaced. */
+let loseNextWrite: boolean;
+/** Set after a lost write: the next list finds the conversation detached. */
+let detachNextList = false;
 let applyMode: 'applied' | 'deferred';
 let writeMismatches: { key: string; reason: string }[];
 
@@ -145,7 +182,7 @@ function sessionList(kind: Kind) {
       role: 'item',
       loaded: true,
       saved: row.saved,
-      decidedBy: 'project',
+      decidedBy: row.decidedBy ?? 'project',
       applied: row.applied,
       inForce: row.inForce,
       live: row.live,
@@ -162,9 +199,21 @@ function sessionList(kind: Kind) {
 }
 
 function relayReply(path: string, body?: string): unknown {
-  if (path !== '/api/conversations/c-17/acp-extensions') throw new Error('unexpected relay path ' + path);
+  if (!/^\/api\/conversations\/c-1[78]\/acp-extensions$/.test(path)) throw new Error('unexpected relay path ' + path);
   if (body === undefined) return { kind: 'success', data: DISCOVERY };
   const { method, payload } = JSON.parse(body) as { method: string; payload: Command & { requestId?: string } };
+  if (method === '_aelix/session/requests/lookup') {
+    return { kind: 'failure', failure: { status: 409, code: 'EXT_STALE_BINDING' } };
+  }
+  if (method === '_aelix/session/selections/list' && detachNextList) {
+    detachNextList = false;
+    return { kind: 'failure', failure: { status: 409, code: 'EXT_NO_LIVE_TASK' } };
+  }
+  if (method === '_aelix/session/selections/set' && loseNextWrite) {
+    loseNextWrite = false;
+    detachNextList = true;
+    return { kind: 'failure', failure: { status: 502, code: 'EXT_OUTCOME_UNKNOWN' } };
+  }
   if (method === '_aelix/session/selections/list')
     return { kind: 'success', data: { result: sessionList(payload.kind) } };
   if (method === '_aelix/session/selections/set') {
@@ -208,7 +257,9 @@ const relayWrites = () =>
     .filter(({ method }) => method === '_aelix/session/selections/set');
 
 beforeEach(() => {
-  clearRecovery();
+  changeUser();
+  helperNoop = false;
+  loseNextWrite = false;
   stores = {
     tool: {
       revision: 1,
@@ -269,13 +320,13 @@ describe('Aelix global defaults panel', () => {
     expect(switchOf('local-docs')).toBeDisabled();
   });
 
-  it('saves a global change with the listed revision and reports it as pending for the next request', async () => {
+  it('saves a global change with the listed revision and reports when it applies', async () => {
     render(<AelixDefaultsPanel kinds={['tool', 'mcp']} />);
 
     fireEvent.click(await waitFor(() => switchOf('write')));
     fireEvent.click(screen.getByTestId('aelix-save'));
 
-    expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.globalNext');
+    expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.nextWorker');
     expect(helperWrites()).toEqual([
       expect.objectContaining({ kind: 'tool', expectedRevision: 'g.tool.1', changes: [{ key: 'write', on: true }] }),
     ]);
@@ -283,7 +334,7 @@ describe('Aelix global defaults panel', () => {
     expect(switchOf('write')).toBeChecked();
   });
 
-  it('reports a saved global MCP change as restart pending', async () => {
+  it('reports a saved global MCP change as applying at the next worker start', async () => {
     render(<AelixDefaultsPanel kinds={['tool', 'mcp']} />);
     await screen.findByTestId('aelix-row-read');
 
@@ -291,9 +342,7 @@ describe('Aelix global defaults panel', () => {
     fireEvent.click(await waitFor(() => switchOf('local-docs')));
     fireEvent.click(screen.getByTestId('aelix-save'));
 
-    expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent(
-      'settings.aelixNative.saved.globalRestart'
-    );
+    expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.nextWorker');
   });
 
   it('shows the current value after a CLI conflict and writes again only when the user re-applies', async () => {
@@ -414,7 +463,10 @@ describe('Aelix global defaults panel', () => {
     fireEvent.click(screen.getByTestId('aelix-save'));
 
     expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.applied');
-    expect(screen.getByTestId('aelix-mismatch-review')).toHaveTextContent('settings.aelixNative.mismatch');
+    expect(screen.getByTestId('aelix-mismatch-review')).toHaveTextContent(
+      'settings.aelixNative.mismatch(settings.aelixNative.mismatchReason.savedValueDiffers)'
+    );
+    expect(screen.getByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.mismatch');
   });
 
   it('marks a project MCP save as restart pending', async () => {
@@ -443,5 +495,163 @@ describe('Aelix global defaults panel', () => {
       'settings.aelixNative.failure.detached'
     );
     expect(fake.helper).not.toHaveBeenCalled();
+  });
+  it('drops restore records when the signed-in user changes or the runtime changes', async () => {
+    const saveRead = async () => {
+      fireEvent.click(await waitFor(() => switchOf('read')));
+      fireEvent.click(screen.getByTestId('aelix-save'));
+      await screen.findByTestId('aelix-save-notice');
+      expect(screen.getByTestId('aelix-recovery-open')).toBeInTheDocument();
+    };
+    const first = render(<AelixDefaultsPanel kinds={['tool']} />);
+    await saveRead();
+    first.unmount();
+
+    changeUser();
+    const second = render(<AelixDefaultsPanel kinds={['tool']} />);
+    await screen.findByTestId('aelix-row-read');
+    expect(screen.queryByTestId('aelix-recovery-open')).not.toBeInTheDocument();
+    await saveRead();
+    second.unmount();
+
+    resetRecoveryForRuntimeChange();
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    await screen.findByTestId('aelix-row-read');
+    expect(screen.queryByTestId('aelix-recovery-open')).not.toBeInTheDocument();
+  });
+
+  it('labels a restore of an inherited project value as an explicit project value', async () => {
+    session.skill.review.decidedBy = 'global';
+    applyMode = 'applied';
+    render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
+    fireEvent.click(await waitFor(() => switchOf('review')));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+    await screen.findByTestId('aelix-save-notice');
+
+    fireEvent.click(screen.getByTestId('aelix-recovery-open'));
+    const modal = await screen.findByTestId('aelix-recovery-modal');
+    expect(within(modal).getByTestId('aelix-recovery-explicit-review')).toHaveTextContent(
+      'settings.aelixNative.recovery.explicitProject'
+    );
+    fireEvent.click(within(within(modal).getByTestId('aelix-recovery-row-review')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    await screen.findByText(/settings\.aelixNative\.recovery\.restored/);
+    expect(relayWrites()[1].payload).toMatchObject({ scope: 'project', changes: [{ key: 'review', on: true }] });
+  });
+
+  it('warns and keeps nothing to restore when the store reports no saved change', async () => {
+    helperNoop = true;
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    fireEvent.click(await waitFor(() => switchOf('write')));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+
+    expect(await screen.findByTestId('aelix-save-notice')).toHaveTextContent('settings.aelixNative.saved.noChange');
+    expect(screen.queryByTestId('aelix-recovery-open')).not.toBeInTheDocument();
+  });
+
+  it('does not report its own restore as a change made elsewhere', async () => {
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    fireEvent.click(await waitFor(() => switchOf('read')));
+    fireEvent.click(switchOf('write'));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+    await screen.findByTestId('aelix-save-notice');
+
+    fireEvent.click(screen.getByTestId('aelix-recovery-open'));
+    let modal = await screen.findByTestId('aelix-recovery-modal');
+    expect(modal).not.toHaveTextContent('settings.aelixNative.recovery.changedElsewhere');
+    fireEvent.click(within(within(modal).getByTestId('aelix-recovery-row-read')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    await screen.findByText(/settings\.aelixNative\.recovery\.restored/);
+
+    fireEvent.click(screen.getByTestId('aelix-recovery-open'));
+    modal = await screen.findByTestId('aelix-recovery-modal');
+    expect(within(modal).getByTestId('aelix-recovery-row-write')).toBeInTheDocument();
+    expect(modal).not.toHaveTextContent('settings.aelixNative.recovery.changedElsewhere');
+  });
+
+  it('says so when re-applying finds every value already matching', async () => {
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    fireEvent.click(await waitFor(() => switchOf('read')));
+    cliWrite('tool', 'read', false);
+    fireEvent.click(screen.getByTestId('aelix-save'));
+
+    fireEvent.click(within(await screen.findByTestId('aelix-retry-conflict')).getByTestId('aelix-reapply'));
+    expect(await screen.findByTestId('aelix-nothing-to-apply')).toHaveTextContent(
+      'settings.aelixNative.nothingToApply'
+    );
+    expect(helperWrites()).toHaveLength(1);
+  });
+
+  it('keeps a pending re-apply visible across a rediscovered conversation binding', async () => {
+    render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
+    fireEvent.click(await waitFor(() => switchOf('review')));
+    loseNextWrite = true;
+    fireEvent.click(screen.getByTestId('aelix-save'));
+
+    // The write's outcome is unknown and the conversation detached, so the list cannot be read yet.
+    const failure = await screen.findByTestId('aelix-list-failure');
+    expect(screen.getByTestId('aelix-retry-unknown')).toBeInTheDocument();
+    fireEvent.click(within(failure).getByText('settings.aelixNative.reload'));
+
+    await screen.findByTestId('aelix-row-review');
+    const retry = screen.getByTestId('aelix-retry-unknown');
+    expect(within(retry).getByTestId('aelix-reapply')).not.toBeDisabled();
+    expect(relayWrites()).toHaveLength(1);
+  });
+
+  it('titles the panel by scope, retries a failed discovery and passes an abort signal to the workspace read', async () => {
+    let live = false;
+    fake.relay.mockImplementation(async (path, body) =>
+      live ? relayReply(path, body) : { kind: 'failure', failure: { status: 409, code: 'EXT_NO_LIVE_TASK' } }
+    );
+    render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
+
+    expect(screen.getByTestId('aelix-defaults-title')).toHaveTextContent('settings.aelixNative.titleProject');
+    expect(screen.getByRole('radiogroup', { name: 'settings.aelixNative.scope.label' })).toBeInTheDocument();
+    expect(fake.conversationGet).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'c-17', signal: expect.any(AbortSignal) })
+    );
+    live = true;
+    fireEvent.click(await screen.findByTestId('aelix-project-retry'));
+    await screen.findByTestId('aelix-row-review');
+
+    fireEvent.click(screen.getByText('settings.aelixNative.scope.global'));
+    expect(screen.getByTestId('aelix-defaults-title')).toHaveTextContent('settings.aelixNative.title');
+  });
+
+  it('switches to the new project when the conversation changes', async () => {
+    const view = render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
+    await screen.findByTestId('aelix-row-review');
+    fake.conversationGet.mockResolvedValue({ id: 'c-18', extra: { workspace: '/work/other' } });
+
+    view.rerender(<AelixDefaultsPanel kinds={['skill']} conversationId='c-18' />);
+    expect(await screen.findByText('settings.aelixNative.workspace(/work/other)')).toBeInTheDocument();
+    await waitFor(() =>
+      expect(fake.relay.mock.calls.some(([path]) => path === '/api/conversations/c-18/acp-extensions')).toBe(true)
+    );
+    await screen.findByTestId('aelix-row-review');
+  });
+
+  it('waits to read global defaults until a deferred panel is on screen', async () => {
+    const observers: ((entries: { isIntersecting: boolean }[]) => void)[] = [];
+    const original = window.IntersectionObserver;
+    window.IntersectionObserver = class {
+      constructor(callback: (entries: { isIntersecting: boolean }[]) => void) {
+        observers.push(callback);
+      }
+      observe() {}
+      disconnect() {}
+    } as unknown as typeof IntersectionObserver;
+    try {
+      render(<AelixDefaultsPanel kinds={['tool', 'mcp']} deferUntilVisible />);
+      await waitFor(() => expect(observers).toHaveLength(1));
+      expect(fake.helper).not.toHaveBeenCalled();
+
+      act(() => observers[0]([{ isIntersecting: true }]));
+      await screen.findByTestId('aelix-row-read');
+      expect(fake.helper).toHaveBeenCalledTimes(1);
+    } finally {
+      window.IntersectionObserver = original;
+    }
   });
 });

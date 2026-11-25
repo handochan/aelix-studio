@@ -1712,11 +1712,13 @@
     "kind": {
       "tool": "工具",
       "skill": "技能",
-      "mcp": "MCP 伺服器"
+      "mcp": "MCP 伺服器",
+      "label": "資源類型"
     },
     "scope": {
       "global": "全域",
-      "project": "此專案"
+      "project": "此專案",
+      "label": "範圍"
     },
     "workspace": "工作區：{{path}}",
     "workspaceUnknown": "無法使用工作區",
@@ -1734,7 +1736,7 @@
     "on": "開啟",
     "off": "關閉",
     "missingStore": "尚無設定檔案。儲存時會建立一個；專案檔案會先在對話中請求核准。",
-    "mismatch": "與已儲存的值不同",
+    "mismatch": "與已儲存的值不同：{{reason}}",
     "mismatchList": "部分已儲存的值與目前生效的值不同。",
     "problem": "問題：{{code}}",
     "decidedBy": {
@@ -1771,7 +1773,8 @@
       "missingFile": "此處尚無設定檔案。請先使用 Aelix CLI 建立。",
       "envConfig": "由環境變數設定，無法在此變更。",
       "unsupported": "此對話的 Aelix 無法儲存專案設定。",
-      "other": "無法變更此範圍（{{reason}}）。"
+      "other": "無法變更此範圍（{{reason}}）。",
+      "unknown": "無法變更此範圍。"
     },
     "diagnostics": {
       "title": "診斷",
@@ -1790,8 +1793,9 @@
       "deferred": "已儲存。將在下次請求時生效。",
       "notApplied": "已儲存，但執行中的對話尚未套用。",
       "restart": "已儲存。等待重新啟動：對話重新啟動其工作程序後生效。",
-      "globalNext": "已儲存。待生效：從下次請求開始套用。",
-      "globalRestart": "已儲存。等待重新啟動：將在下次啟動 Aelix 工作程序時套用。"
+      "nextWorker": "已儲存。將在下一個 Aelix 工作程序啟動時套用，例如在新的或重新開啟的對話中。",
+      "noChange": "儲存區中沒有任何變更；此值可能已在其他地方設定。",
+      "mismatch": "部分已儲存的值與您的選擇不同。"
     },
     "retry": {
       "conflict": "這些設定已在 Studio 以外被變更（例如在 CLI 中）。此處顯示的是目前的值。重新套用即可用你的選擇覆寫它們。",
@@ -1813,7 +1817,8 @@
       "missing": "{{key}} 已不存在。請重新載入後再次選擇。",
       "readOnly": "此範圍為唯讀。",
       "invalid": "收到非預期的回應。請重新載入後再試一次。",
-      "generic": "無法完成請求（{{reason}}）。"
+      "generic": "無法完成請求（{{reason}}）。",
+      "listChanged": "清單已有變動。請重新載入。"
     },
     "recovery": {
       "open": "還原先前設定",
@@ -1828,14 +1833,14 @@
       "uncertain": "其中一次儲存的結果未經確認。",
       "restore": "還原所選項目",
       "restored": "已還原所選項目。",
-      "none": "沒有可還原的內容。"
+      "none": "沒有可還原的內容。",
+      "explicitProject": "還原為明確的專案值（先前為繼承值）。",
+      "explicitGlobal": "還原為明確的全域值（先前為預設值）。"
     },
     "profiles": {
       "title": "Aelix 設定檔",
       "show": "顯示設定檔",
       "hide": "隱藏",
-      "count": "{{count}} 個設定檔",
-      "diagnosticCount": "{{count}} 個問題",
       "description": "Aelix CLI 探索到的設定檔（內建與使用者）。專案設定檔會在對話中顯示。",
       "hint": "使用 Aelix CLI 建立或編輯設定檔，並在輸入框中為對話選擇一個。",
       "empty": "找不到設定檔。",
@@ -1857,7 +1862,30 @@
       "none": "無",
       "changed": "清單載入後此設定檔已變更。請重新載入以預覽。",
       "unavailable": "此設定檔已無法使用。",
-      "assistantLink": "檢視 Aelix 設定檔"
+      "assistantLink": "檢視 Aelix 設定檔",
+      "count_one": "{{count}} 個設定檔",
+      "count_other": "{{count}} 個設定檔",
+      "diagnosticCount_one": "{{count}} 個問題",
+      "diagnosticCount_other": "{{count}} 個問題",
+      "previewNamed": "預覽 {{name}}",
+      "promptModes": {
+        "append": "附加到預設提示詞",
+        "replace": "取代預設提示詞",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "繼承",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Aelix 代理卡片已被目前的篩選條件隱藏，或未偵測到 Aelix。其設定檔列於此處。"
+    },
+    "titleProject": "Aelix 專案預設值",
+    "unknownValue": "未知",
+    "nothingToApply": "未寫入任何內容：目前的值已與您的選擇相符，或已無法變更。",
+    "mismatchReason": {
+      "savedValueDiffers": "已儲存的值與您的選擇不同",
+      "nativeMismatch": "儲存後檔案已有變動",
+      "other": "{{reason}}"
     }
   }
 }

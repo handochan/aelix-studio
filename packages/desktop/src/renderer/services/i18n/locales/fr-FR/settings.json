@@ -1710,11 +1710,13 @@
     "kind": {
       "tool": "Outils",
       "skill": "Compétences",
-      "mcp": "Serveurs MCP"
+      "mcp": "Serveurs MCP",
+      "label": "Type de ressource"
     },
     "scope": {
       "global": "Global",
-      "project": "Ce projet"
+      "project": "Ce projet",
+      "label": "Portée"
     },
     "workspace": "Espace de travail : {{path}}",
     "workspaceUnknown": "Espace de travail indisponible",
@@ -1732,7 +1734,7 @@
     "on": "Activé",
     "off": "Désactivé",
     "missingStore": "Aucun fichier de paramètres n'existe encore. L'enregistrement en crée un ; pour un fichier de projet, une approbation est d'abord demandée dans la conversation.",
-    "mismatch": "Diffère de la valeur enregistrée",
+    "mismatch": "Diffère de la valeur enregistrée : {{reason}}",
     "mismatchList": "Certaines valeurs enregistrées diffèrent de celles en vigueur.",
     "problem": "Problème : {{code}}",
     "decidedBy": {
@@ -1769,7 +1771,8 @@
       "missingFile": "Aucun fichier de paramètres n'existe encore ici. Créez-le d'abord avec Aelix CLI.",
       "envConfig": "Défini par une variable d'environnement, il ne peut donc pas être modifié ici.",
       "unsupported": "L'Aelix de cette conversation ne peut pas enregistrer les paramètres du projet.",
-      "other": "Cette portée ne peut pas être modifiée ({{reason}})."
+      "other": "Cette portée ne peut pas être modifiée ({{reason}}).",
+      "unknown": "Cette portée ne peut pas être modifiée."
     },
     "diagnostics": {
       "title": "Diagnostics",
@@ -1788,8 +1791,9 @@
       "deferred": "Enregistré. En attente jusqu'à la prochaine requête.",
       "notApplied": "Enregistré, mais la conversation en cours ne l'a pas encore appliqué.",
       "restart": "Enregistré. Redémarrage en attente : prend effet lorsque la conversation redémarre son processus de travail.",
-      "globalNext": "Enregistré. En attente : s'applique à partir de la prochaine requête.",
-      "globalRestart": "Enregistré. Redémarrage en attente : s'applique au prochain démarrage d'un processus de travail Aelix."
+      "nextWorker": "Enregistré. S'applique au démarrage du prochain processus de travail Aelix, par exemple dans une conversation nouvelle ou rouverte.",
+      "noChange": "Rien n'a changé dans le stockage ; la valeur a peut-être déjà été définie ailleurs.",
+      "mismatch": "Certaines valeurs enregistrées diffèrent de votre choix."
     },
     "retry": {
       "conflict": "Ces paramètres ont été modifiés en dehors de Studio, par exemple dans la CLI. Les valeurs actuelles sont affichées. Réappliquez pour enregistrer votre choix par-dessus.",
@@ -1811,7 +1815,8 @@
       "missing": "{{key}} n'existe plus. Rechargez et choisissez à nouveau.",
       "readOnly": "Cette portée est en lecture seule.",
       "invalid": "Réponse inattendue reçue. Rechargez et réessayez.",
-      "generic": "Impossible de terminer la requête ({{reason}})."
+      "generic": "Impossible de terminer la requête ({{reason}}).",
+      "listChanged": "La liste a changé. Rechargez."
     },
     "recovery": {
       "open": "Restaurer l'état précédent",
@@ -1826,14 +1831,14 @@
       "uncertain": "Le résultat de l'un des enregistrements n'a pas été confirmé.",
       "restore": "Restaurer la sélection",
       "restored": "Les éléments sélectionnés ont été restaurés.",
-      "none": "Rien à restaurer."
+      "none": "Rien à restaurer.",
+      "explicitProject": "Restaurée comme valeur explicite du projet (elle était héritée auparavant).",
+      "explicitGlobal": "Restaurée comme valeur globale explicite (c'était une valeur par défaut auparavant)."
     },
     "profiles": {
       "title": "Profils Aelix",
       "show": "Afficher les profils",
       "hide": "Masquer",
-      "count": "{{count}} profils",
-      "diagnosticCount": "{{count}} problèmes",
       "description": "Profils détectés par Aelix CLI (intégrés et utilisateur). Les profils de projet apparaissent dans une conversation.",
       "hint": "Créez ou modifiez des profils avec Aelix CLI, et choisissez-en un pour une conversation dans la zone de saisie.",
       "empty": "Aucun profil trouvé.",
@@ -1855,7 +1860,30 @@
       "none": "Aucun",
       "changed": "Ce profil a changé après le chargement de la liste. Rechargez pour l'afficher en aperçu.",
       "unavailable": "Ce profil n'est plus disponible.",
-      "assistantLink": "Voir les profils Aelix"
+      "assistantLink": "Voir les profils Aelix",
+      "count_one": "{{count}} profil",
+      "count_other": "{{count}} profils",
+      "diagnosticCount_one": "{{count}} problème",
+      "diagnosticCount_other": "{{count}} problèmes",
+      "previewNamed": "Aperçu de {{name}}",
+      "promptModes": {
+        "append": "Ajouté au prompt par défaut",
+        "replace": "Remplace le prompt par défaut",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Hérité",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "La carte de l'agent Aelix est masquée par le filtre actuel, ou Aelix n'a pas été détecté. Ses profils sont listés ici."
+    },
+    "titleProject": "Valeurs par défaut du projet Aelix",
+    "unknownValue": "Inconnu",
+    "nothingToApply": "Rien n'a été écrit : les valeurs actuelles correspondent déjà à votre choix ou ne peuvent plus être modifiées.",
+    "mismatchReason": {
+      "savedValueDiffers": "la valeur enregistrée diffère de votre choix",
+      "nativeMismatch": "le fichier a changé après l'enregistrement",
+      "other": "{{reason}}"
     }
   }
 }

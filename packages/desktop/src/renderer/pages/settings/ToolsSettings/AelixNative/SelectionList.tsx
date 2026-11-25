@@ -4,19 +4,28 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { Alert, Button, Spin, Switch, Tag, Tooltip, Typography } from '@arco-design/web-react';
+import { Alert, Button, Spin, Switch, Tag, Typography } from '@arco-design/web-react';
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import type { ResourceKind, ResourceRow } from '@/renderer/services/runtime/NativeResources';
-import { diagnosticLabel, failureLabel, lockReasonLabel, scopeReasonLabel, type Label } from './labels';
+import { diagnosticLabel, failureLabel, lockReasonLabel, mismatchLabel, scopeReasonLabel, type Label } from './labels';
 import RecoveryModal from './RecoveryModal';
-import { scopeStatus, useSelections, type Listing, type SelectionTarget, type SaveNotice } from './useSelections';
+import {
+  scopeStatus,
+  useSelections,
+  type Listing,
+  type NoticeCache,
+  type SelectionTarget,
+  type SaveNotice,
+} from './useSelections';
 
 type SelectionListProps = {
   target: SelectionTarget;
   kind: ResourceKind;
   /** Re-run conversation discovery after a detached or replaced binding. */
   onRediscover?: () => void;
+  /** Keeps a pending notice across a rediscovery of the same conversation and kind. */
+  notices?: NoticeCache;
 };
 
 const P = 'settings.aelixNative';
@@ -31,9 +40,9 @@ function effectiveText(row: ResourceRow, t: (key: string) => string): string[] {
   return parts;
 }
 
-const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscover }) => {
+const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscover, notices }) => {
   const { t } = useTranslation();
-  const state = useSelections(target, kind);
+  const state = useSelections(target, kind, notices);
   const [recoveryOpen, setRecoveryOpen] = useState(false);
   const { listing, failure, loading, saving, draft, notice, recovery, writable } = state;
   const label = ({ key, values }: Label) => t(key, values);
@@ -46,11 +55,26 @@ const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscove
     if (current.type === 'saved') {
       return (
         <Alert
-          type={current.message === 'notApplied' ? 'warning' : 'success'}
+          type={current.message === 'notApplied' || current.warning ? 'warning' : 'success'}
           data-testid='aelix-save-notice'
-          content={[current.restored ? t(`${P}.recovery.restored`) : null, t(`${P}.saved.${current.message}`)]
+          content={[
+            current.restored ? t(`${P}.recovery.restored`) : null,
+            t(`${P}.saved.${current.message}`),
+            current.warning ? t(`${P}.saved.${current.warning}`) : null,
+          ]
             .filter(Boolean)
             .join(' ')}
+          closable
+          onClose={state.dismissNotice}
+        />
+      );
+    }
+    if (current.type === 'nothingToApply') {
+      return (
+        <Alert
+          type='info'
+          data-testid='aelix-nothing-to-apply'
+          content={t(`${P}.nothingToApply`)}
           closable
           onClose={state.dismissNotice}
         />
@@ -109,20 +133,26 @@ const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscove
     if (failure) {
       const rediscover = target.scope === 'project' && (failure.status === 'detached' || failure.status === 'stale');
       return (
-        <Alert
-          type={failure.status === 'unsupported' ? 'info' : 'warning'}
-          data-testid='aelix-list-failure'
-          content={
-            <div className='flex flex-wrap items-center gap-8px'>
-              <span>{label(failureLabel(failure))}</span>
-              {failure.status === 'unsupported' ? null : (
-                <Button size='mini' onClick={() => (rediscover && onRediscover ? onRediscover() : void state.reload())}>
-                  {t(`${P}.reload`)}
-                </Button>
-              )}
-            </div>
-          }
-        />
+        <div className='flex flex-col gap-12px'>
+          {notice ? renderNotice(notice) : null}
+          <Alert
+            type={failure.status === 'unsupported' ? 'info' : 'warning'}
+            data-testid='aelix-list-failure'
+            content={
+              <div className='flex flex-wrap items-center gap-8px'>
+                <span>{label(failureLabel(failure))}</span>
+                {failure.status === 'unsupported' ? null : (
+                  <Button
+                    size='mini'
+                    onClick={() => (rediscover && onRediscover ? onRediscover() : void state.reload())}
+                  >
+                    {t(`${P}.reload`)}
+                  </Button>
+                )}
+              </div>
+            }
+          />
+        </div>
       );
     }
     return (
@@ -169,7 +199,12 @@ const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscove
           }
         />
       ) : null}
-      {unkeyed.length > 0 ? <Alert type='warning' content={t(`${P}.mismatchList`)} /> : null}
+      {unkeyed.length > 0 ? (
+        <Alert
+          type='warning'
+          content={`${t(`${P}.mismatchList`)} ${unkeyed.map((issue) => label(mismatchLabel(issue.reason))).join(', ')}`}
+        />
+      ) : null}
       {notice ? renderNotice(notice) : null}
 
       {listing.items.length === 0 ? (
@@ -204,11 +239,11 @@ const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscove
                       </Tag>
                     ) : null}
                     {row.mismatches.length > 0 ? (
-                      <Tooltip content={row.mismatches.map((issue) => issue.reason).join(', ')}>
-                        <Tag size='small' color='gold' data-testid={`aelix-mismatch-${row.key}`}>
-                          {t(`${P}.mismatch`)}
-                        </Tag>
-                      </Tooltip>
+                      <Tag size='small' color='gold' data-testid={`aelix-mismatch-${row.key}`}>
+                        {t(`${P}.mismatch`, {
+                          reason: row.mismatches.map((issue) => label(mismatchLabel(issue.reason))).join(', '),
+                        })}
+                      </Tag>
                     ) : null}
                     {row.pending ? (
                       <Tag size='small' color='arcoblue' data-testid={`aelix-pending-${row.key}`}>

@@ -10,4 +10,4 @@
  */
 export { default as AelixDefaultsPanel } from './AelixDefaultsPanel';
 export { default as AelixProfiles } from './AelixProfiles';
-export { clearRecovery } from './recoveryStore';
+export { resetRecoveryForRuntimeChange } from './recoveryStore';

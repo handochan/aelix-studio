@@ -36,12 +36,12 @@ export function useConversationWorkspace(conversationId: string | null | undefin
       setState(undefined);
       return;
     }
-    let active = true;
+    const request = new AbortController();
     setState({ status: 'loading' });
     ipcBridge.conversation.get
-      .invoke({ id: conversationId, privateRead: true })
+      .invoke({ id: conversationId, privateRead: true, signal: request.signal })
       .then((detail: unknown) => {
-        if (!active) return;
+        if (request.signal.aborted) return;
         const extra = isRecord(detail) && isRecord(detail.extra) ? detail.extra : undefined;
         setState({
           status: 'ready',
@@ -50,11 +50,9 @@ export function useConversationWorkspace(conversationId: string | null | undefin
         });
       })
       .catch(() => {
-        if (active) setState({ status: 'failed' });
+        if (!request.signal.aborted) setState({ status: 'failed' });
       });
-    return () => {
-      active = false;
-    };
+    return () => request.abort();
   }, [conversationId]);
   return state;
 }

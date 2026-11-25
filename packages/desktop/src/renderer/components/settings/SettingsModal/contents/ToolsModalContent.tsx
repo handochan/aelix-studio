@@ -517,7 +517,7 @@ const ToolsModalContent: React.FC<ToolsModalContentProps> = ({ aelixConversation
           </div>
           {/* Native Aelix defaults: a separate data source from the Aion MCP list above. */}
           <div className='px-[12px] md:px-[32px] py-[24px] bg-2 rd-12px md:rd-16px border border-border-2'>
-            <AelixDefaultsPanel kinds={['tool', 'mcp']} conversationId={aelixConversationId} />
+            <AelixDefaultsPanel kinds={['tool', 'mcp']} conversationId={aelixConversationId} deferUntilVisible />
           </div>
           {/* 图像生成 */}
           <div className='px-[12px] md:px-[32px] py-[24px] bg-2 rd-12px md:rd-16px border border-border-2'>

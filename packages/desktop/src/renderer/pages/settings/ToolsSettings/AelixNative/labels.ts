@@ -44,12 +44,44 @@ export function lockReasonLabel(reason: string): Label {
   return known ? { key: `${PREFIX}.lock.reason.${known}` } : { key: `${PREFIX}.lock.reason.other`, values: { reason } };
 }
 
+const MISMATCHES: Record<string, string> = {
+  'saved-value-differs': 'savedValueDiffers',
+  'native-mismatch': 'nativeMismatch',
+};
+
+const PROMPT_MODES: Record<string, string> = { append: 'append', replace: 'replace' };
+
+const APPROVAL_MODES: Record<string, string> = { inherit: 'inherit' };
+
 /** Describe why a whole scope cannot be written. */
 export function scopeReasonLabel(reason: string | null): Label {
-  const known = reason ? SCOPE_REASONS[reason] : undefined;
+  if (reason === null) return { key: `${PREFIX}.scopeReason.unknown` };
+  const known = SCOPE_REASONS[reason];
+  return known ? { key: `${PREFIX}.scopeReason.${known}` } : { key: `${PREFIX}.scopeReason.other`, values: { reason } };
+}
+
+/** Describe why a saved value differs from what is in force. */
+export function mismatchLabel(reason: string): Label {
+  const known = MISMATCHES[reason];
   return known
-    ? { key: `${PREFIX}.scopeReason.${known}` }
-    : { key: `${PREFIX}.scopeReason.other`, values: { reason: reason ?? '-' } };
+    ? { key: `${PREFIX}.mismatchReason.${known}` }
+    : { key: `${PREFIX}.mismatchReason.other`, values: { reason } };
+}
+
+/** Describe a profile's prompt mode. */
+export function promptModeLabel(mode: string): Label {
+  const known = PROMPT_MODES[mode];
+  return known
+    ? { key: `${PREFIX}.profiles.promptModes.${known}` }
+    : { key: `${PREFIX}.profiles.promptModes.other`, values: { mode } };
+}
+
+/** Describe a profile's delegated approval mode. Unknown modes keep their safe code. */
+export function approvalModeLabel(mode: string): Label {
+  const known = APPROVAL_MODES[mode];
+  return known
+    ? { key: `${PREFIX}.profiles.approvalModes.${known}` }
+    : { key: `${PREFIX}.profiles.approvalModes.other`, values: { mode } };
 }
 
 /** Describe a native diagnostic code. */
@@ -69,7 +101,10 @@ export function failureLabel(failure: ResourceFailure): Label {
     case 'detached':
       return { key: `${PREFIX}.failure.detached` };
     case 'stale':
-      return { key: `${PREFIX}.failure.stale` };
+      // Only a replaced conversation binding is about the conversation; other stale reads are list changes.
+      return failure.reason === 'EXT_STALE_BINDING'
+        ? { key: `${PREFIX}.failure.stale` }
+        : { key: `${PREFIX}.failure.listChanged` };
     case 'invalid-response':
       return { key: `${PREFIX}.failure.invalid` };
     case 'refused':

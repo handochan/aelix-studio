@@ -27,10 +27,17 @@ export type SelectionTarget =
   | { scope: 'global'; client: NativeResources }
   | { scope: 'project'; conversationId: string; session: NativeSessionResources; canWrite: boolean };
 
-export type SavedMessage = 'applied' | 'deferred' | 'notApplied' | 'restart' | 'globalNext' | 'globalRestart';
+export type SavedMessage = 'applied' | 'deferred' | 'notApplied' | 'restart' | 'nextWorker';
 
 export type SaveNotice =
-  | { type: 'saved'; message: SavedMessage; restored: boolean }
+  | {
+      type: 'saved';
+      message: SavedMessage;
+      restored: boolean;
+      /** The store saved nothing, or saved values that differ from the request. */
+      warning: 'noChange' | 'mismatch' | null;
+    }
+  | { type: 'nothingToApply' }
   | { type: 'retry'; reason: 'conflict' | 'unknown' | 'stale'; changes: readonly ResourceChange[] }
   | { type: 'failure'; failure: ResourceFailure };
 
@@ -87,8 +94,12 @@ async function readRest(source: Source, first: ResourceResult<Listing>): Promise
   return reply;
 }
 
-function savedMessage(data: GlobalWrite | ProjectWrite, kind: ResourceKind): SavedMessage {
-  if (data.scope === 'global') return kind === 'mcp' ? 'globalRestart' : 'globalNext';
+/** Notices survive a rediscovery of the same scope and kind, so a pending re-apply is not lost. */
+export type NoticeCache = Map<string, SaveNotice>;
+
+function savedMessage(data: GlobalWrite | ProjectWrite): SavedMessage {
+  // The global helper reports when a save takes effect; D16 v1 only defines the next worker start.
+  if (data.scope === 'global') return 'nextWorker';
   if (data.effect === 'restart' || data.apply === null) return 'restart';
   if (data.apply.deferred) return 'deferred';
   return data.apply.applied ? 'applied' : 'notApplied';
@@ -111,13 +122,13 @@ export function scopeStatus(listing: Listing) {
  * saves, conflict re-apply and previous-environment restore. Writes are only sent on an
  * explicit user action and are never retried automatically.
  */
-export function useSelections(target: SelectionTarget | undefined, kind: ResourceKind) {
+export function useSelections(target: SelectionTarget | undefined, kind: ResourceKind, notices?: NoticeCache) {
   const [listing, setListing] = useState<Listing>();
   const [failure, setFailure] = useState<ResourceFailure>();
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [draft, setDraft] = useState<ReadonlyMap<string, boolean>>(() => new Map());
-  const [notice, setNotice] = useState<SaveNotice>();
+  const [notice, setNoticeState] = useState<SaveNotice>();
   const [recovery, setRecovery] = useState<RecoveryRecord>();
   const ticket = useRef(0);
 
@@ -128,6 +139,19 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
       ? { scope: 'global' }
       : { scope: 'project', conversationId: target.conversationId };
   }, [target]);
+  const identity = target
+    ? `${target.scope === 'global' ? 'global' : `project:${target.conversationId}`}:${kind}`
+    : undefined;
+
+  const setNotice = useCallback(
+    (next: SaveNotice | undefined) => {
+      setNoticeState(next);
+      if (!identity || !notices) return;
+      if (next) notices.set(identity, next);
+      else notices.delete(identity);
+    },
+    [identity, notices]
+  );
 
   const apply = useCallback((reply: ResourceResult<Listing>) => {
     if (reply.status === 'success') {
@@ -156,19 +180,21 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
     setSaving(false);
     setLoading(false);
     setDraft(new Map());
-    setNotice(undefined);
+    // A rediscovered binding for the same conversation and kind keeps its pending notice.
+    setNoticeState(identity ? notices?.get(identity) : undefined);
     setRecovery(recoveryTarget ? getRecovery(recoveryTarget, kind) : undefined);
     if (source) void reload();
     else ticket.current++;
-  }, [kind, recoveryTarget, reload, source]);
+  }, [identity, kind, notices, recoveryTarget, reload, source]);
 
   const submit = useCallback(
     async (requested: readonly ResourceChange[], restoring = false) => {
       if (!source || !listing || !recoveryTarget || saving) return;
       const changes = effectiveChanges(listing, requested);
       if (changes.length === 0) {
+        // Re-apply or restore found every value already matching (or no longer changeable).
         setDraft(new Map());
-        setNotice(undefined);
+        setNotice(requested.length > 0 ? { type: 'nothingToApply' } : undefined);
         return;
       }
       const snapshot = listing;
@@ -185,18 +211,27 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
 
       const { outcome } = report;
       if (outcome.status === 'success') {
-        const revision = outcome.data.scope === 'global' ? outcome.data.revision : null;
+        const { data } = outcome;
+        const revision = data.scope === 'global' ? data.revision : null;
+        // Only what the store reports as saved can be restored later.
+        const saved = data.changed.map(({ key, saved: on }) => ({ key, on }));
         if (restoring) {
           forgetRestored(
             recoveryTarget,
             kind,
-            changes.map((change) => change.key)
+            changes.map((change) => change.key),
+            revision
           );
         } else {
-          rememberChange(recoveryTarget, kind, snapshot, changes, revision, false);
+          rememberChange(recoveryTarget, kind, snapshot, saved, revision, false);
         }
         setDraft(new Map());
-        setNotice({ type: 'saved', message: savedMessage(outcome.data, kind), restored: restoring });
+        setNotice({
+          type: 'saved',
+          message: savedMessage(data),
+          restored: restoring,
+          warning: data.mismatches.length > 0 ? 'mismatch' : saved.length === 0 ? 'noChange' : null,
+        });
       } else if (outcome.status === 'conflict' || outcome.status === 'unknown') {
         // An unknown write may have committed; keep what it would replace so it can be restored.
         if (outcome.status === 'unknown' && !restoring) {
@@ -212,7 +247,7 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
       }
       setRecovery(getRecovery(recoveryTarget, kind));
     },
-    [apply, kind, listing, recoveryTarget, saving, source]
+    [apply, kind, listing, recoveryTarget, saving, setNotice, source]
   );
 
   const toggle = useCallback(

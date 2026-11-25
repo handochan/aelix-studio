@@ -995,29 +995,32 @@ const SkillsHubSettings: React.FC<SkillsHubSettingsProps> = ({ withWrapper = tru
           defaultValue: 'Centrally manage AI skill packs — install once, use across all assistants.',
         })}
         actions={
-          <>
-            {/* Mobile: the actions row is too crowded — drop the search box entirely. */}
-            {!isMobile && searchBox('input-search-my-skills')}
-            <Button
-              type='text'
-              size='small'
-              data-testid='btn-open-import-history'
-              className='!text-t-secondary hover:!text-t-primary !px-8px'
-              onClick={showImportHistory}
-            >
-              {t('settings.skillsHub.importHistoryTitle', { defaultValue: 'Import history' })}
-            </Button>
-            <TalkToButlerButton
-              label={t('settings.skillsHub.addSkill', { defaultValue: 'Add Skill' })}
-              chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
-              onManual={handleManualImport}
-              manualLabel={t('settings.skillsHub.manualImport', { defaultValue: 'Import Skills' })}
-              prompt={t('settings.talkToButler.prompt.addSkill', {
-                defaultValue: 'Help me import a skill and attach it to an assistant.',
-              })}
-              data-testid='btn-add-skill'
-            />
-          </>
+          // The Aion search and import actions do not apply to the native Aelix defaults tab.
+          activeTab === 'aelix' ? undefined : (
+            <>
+              {/* Mobile: the actions row is too crowded — drop the search box entirely. */}
+              {!isMobile && searchBox('input-search-my-skills')}
+              <Button
+                type='text'
+                size='small'
+                data-testid='btn-open-import-history'
+                className='!text-t-secondary hover:!text-t-primary !px-8px'
+                onClick={showImportHistory}
+              >
+                {t('settings.skillsHub.importHistoryTitle', { defaultValue: 'Import history' })}
+              </Button>
+              <TalkToButlerButton
+                label={t('settings.skillsHub.addSkill', { defaultValue: 'Add Skill' })}
+                chatLabel={t('settings.talkToButler.addViaChat', { defaultValue: 'Add via chat' })}
+                onManual={handleManualImport}
+                manualLabel={t('settings.skillsHub.manualImport', { defaultValue: 'Import Skills' })}
+                prompt={t('settings.talkToButler.prompt.addSkill', {
+                  defaultValue: 'Help me import a skill and attach it to an assistant.',
+                })}
+                data-testid='btn-add-skill'
+              />
+            </>
+          )
         }
         tabs={[
           {

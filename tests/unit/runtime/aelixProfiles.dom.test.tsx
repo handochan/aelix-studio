@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 
 const helper = vi.hoisted(() => vi.fn<(command: { action: string; name?: string }) => Promise<unknown>>());
 
@@ -150,5 +150,37 @@ describe('Aelix profiles on the builtin Aelix card', () => {
     } finally {
       delete window.__backendPort;
     }
+  });
+  it('keeps only the latest preview when replies arrive out of order', async () => {
+    let releaseQuiet: (value: unknown) => void = () => {};
+    helper.mockImplementation(async (command) => {
+      if (command.action === 'profiles/list') {
+        return {
+          ok: true,
+          data: {
+            profiles: [
+              { ref: QUIET, description: 'Review only' },
+              { ref: WRITER, description: 'Write notes' },
+            ],
+            diagnostics: [],
+            nextCursor: null,
+          },
+        };
+      }
+      if (command.name === 'quiet') return new Promise((resolve) => (releaseQuiet = resolve));
+      return preview(WRITER);
+    });
+    render(<AelixProfiles defaultExpanded />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'settings.aelixNative.profiles.previewNamed(quiet)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'settings.aelixNative.profiles.previewNamed(writer)' }));
+    expect(await screen.findByTestId('aelix-profile-preview-writer')).toHaveTextContent(
+      'settings.aelixNative.profiles.promptModes.append'
+    );
+    await act(async () => releaseQuiet(preview(QUIET)));
+
+    expect(screen.queryByTestId('aelix-profile-preview-quiet')).not.toBeInTheDocument();
+    expect(screen.getByTestId('aelix-profile-preview-writer')).toBeInTheDocument();
+    expect(screen.getByTestId('aelix-profiles-toggle')).toHaveAttribute('aria-expanded', 'true');
   });
 });

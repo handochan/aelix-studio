@@ -1710,11 +1710,13 @@
     "kind": {
       "tool": "Tools",
       "skill": "Skills",
-      "mcp": "MCP-Server"
+      "mcp": "MCP-Server",
+      "label": "Ressourcentyp"
     },
     "scope": {
       "global": "Global",
-      "project": "Dieses Projekt"
+      "project": "Dieses Projekt",
+      "label": "Bereich"
     },
     "workspace": "Arbeitsbereich: {{path}}",
     "workspaceUnknown": "Arbeitsbereich nicht verfügbar",
@@ -1732,7 +1734,7 @@
     "on": "An",
     "off": "Aus",
     "missingStore": "Es gibt noch keine Einstellungsdatei. Beim Speichern wird eine erstellt; für eine Projektdatei wird zuerst in der Unterhaltung um Genehmigung gebeten.",
-    "mismatch": "Weicht vom gespeicherten Wert ab",
+    "mismatch": "Weicht vom gespeicherten Wert ab: {{reason}}",
     "mismatchList": "Einige gespeicherte Werte weichen von den wirksamen Werten ab.",
     "problem": "Problem: {{code}}",
     "decidedBy": {
@@ -1769,7 +1771,8 @@
       "missingFile": "Hier gibt es noch keine Einstellungsdatei. Erstelle sie zuerst mit der Aelix CLI.",
       "envConfig": "Durch eine Umgebungsvariable festgelegt und kann daher hier nicht geändert werden.",
       "unsupported": "Das Aelix dieser Unterhaltung kann keine Projekteinstellungen speichern.",
-      "other": "Dieser Bereich kann nicht geändert werden ({{reason}})."
+      "other": "Dieser Bereich kann nicht geändert werden ({{reason}}).",
+      "unknown": "Dieser Bereich kann nicht geändert werden."
     },
     "diagnostics": {
       "title": "Diagnose",
@@ -1788,8 +1791,9 @@
       "deferred": "Gespeichert. Ausstehend bis zur nächsten Anfrage.",
       "notApplied": "Gespeichert, aber die laufende Unterhaltung hat es noch nicht angewendet.",
       "restart": "Gespeichert. Neustart ausstehend: wird wirksam, wenn die Unterhaltung ihren Worker neu startet.",
-      "globalNext": "Gespeichert. Ausstehend: gilt ab der nächsten Anfrage.",
-      "globalRestart": "Gespeichert. Neustart ausstehend: gilt, sobald ein Aelix-Worker das nächste Mal startet."
+      "nextWorker": "Gespeichert. Gilt, sobald der nächste Aelix-Worker startet, zum Beispiel in einer neuen oder erneut geöffneten Unterhaltung.",
+      "noChange": "Im Speicher hat sich nichts geändert; der Wert wurde möglicherweise bereits an anderer Stelle gesetzt.",
+      "mismatch": "Einige gespeicherte Werte weichen von deiner Auswahl ab."
     },
     "retry": {
       "conflict": "Diese Einstellungen wurden außerhalb von Studio geändert, zum Beispiel in der CLI. Die aktuellen Werte werden angezeigt. Erneut anwenden, um deine Auswahl darüber zu speichern.",
@@ -1811,7 +1815,8 @@
       "missing": "{{key}} existiert nicht mehr. Lade neu und wähle erneut.",
       "readOnly": "Dieser Bereich ist schreibgeschützt.",
       "invalid": "Unerwartete Antwort erhalten. Lade neu und versuche es erneut.",
-      "generic": "Die Anfrage konnte nicht abgeschlossen werden ({{reason}})."
+      "generic": "Die Anfrage konnte nicht abgeschlossen werden ({{reason}}).",
+      "listChanged": "Die Liste hat sich geändert. Lade neu."
     },
     "recovery": {
       "open": "Vorherige wiederherstellen",
@@ -1826,14 +1831,14 @@
       "uncertain": "Bei einem der Speichervorgänge ist das Ergebnis unbestätigt.",
       "restore": "Auswahl wiederherstellen",
       "restored": "Die ausgewählten Elemente wurden wiederhergestellt.",
-      "none": "Nichts wiederherzustellen."
+      "none": "Nichts wiederherzustellen.",
+      "explicitProject": "Wird als expliziter Projektwert wiederhergestellt (vorher war er geerbt).",
+      "explicitGlobal": "Wird als expliziter globaler Wert wiederhergestellt (vorher war es ein Standardwert)."
     },
     "profiles": {
       "title": "Aelix-Profile",
       "show": "Profile anzeigen",
       "hide": "Ausblenden",
-      "count": "{{count}} Profile",
-      "diagnosticCount": "{{count}} Probleme",
       "description": "Von der Aelix CLI gefundene Profile (mitgeliefert und Benutzer). Projektprofile werden innerhalb einer Unterhaltung angezeigt.",
       "hint": "Erstelle oder bearbeite Profile mit der Aelix CLI und wähle eines für eine Unterhaltung im Eingabefeld aus.",
       "empty": "Keine Profile gefunden.",
@@ -1855,7 +1860,30 @@
       "none": "Keine",
       "changed": "Dieses Profil hat sich nach dem Laden der Liste geändert. Lade neu, um die Vorschau anzuzeigen.",
       "unavailable": "Dieses Profil ist nicht mehr verfügbar.",
-      "assistantLink": "Aelix-Profile anzeigen"
+      "assistantLink": "Aelix-Profile anzeigen",
+      "count_one": "{{count}} Profil",
+      "count_other": "{{count}} Profile",
+      "diagnosticCount_one": "{{count}} Problem",
+      "diagnosticCount_other": "{{count}} Probleme",
+      "previewNamed": "Vorschau von {{name}}",
+      "promptModes": {
+        "append": "Wird an den Standard-Prompt angehängt",
+        "replace": "Ersetzt den Standard-Prompt",
+        "other": "{{mode}}"
+      },
+      "approvalModes": {
+        "inherit": "Geerbt",
+        "other": "{{mode}}"
+      },
+      "cardHidden": "Die Aelix-Agentenkarte ist durch den aktuellen Filter ausgeblendet, oder Aelix wurde nicht erkannt. Ihre Profile werden hier aufgeführt."
+    },
+    "titleProject": "Aelix-Projektstandardwerte",
+    "unknownValue": "Unbekannt",
+    "nothingToApply": "Nichts wurde geschrieben: Die aktuellen Werte entsprechen bereits deiner Auswahl oder können nicht mehr geändert werden.",
+    "mismatchReason": {
+      "savedValueDiffers": "der gespeicherte Wert weicht von deiner Auswahl ab",
+      "nativeMismatch": "die Datei wurde nach dem Speichern geändert",
+      "other": "{{reason}}"
     }
   }
 }

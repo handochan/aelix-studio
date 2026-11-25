@@ -480,4 +480,13 @@ describe('LocalAgents', () => {
     // Other official agents keep their plain card.
     expect(profiles[0].parentElement).not.toContainElement(screen.getByTestId('agent-row-aionrs'));
   });
+  it('still opens the profile list from a deep link when the Aelix card is not shown', () => {
+    useManagedAgents.mockReturnValue({ agents: makeAgents(), revalidate: vi.fn(), refreshCatalog: vi.fn() });
+
+    render(<LocalAgents aelixProfiles={{ expanded: true, profile: null }} />);
+
+    const standalone = screen.getByTestId('aelix-profiles-standalone');
+    expect(standalone).toHaveTextContent('settings.aelixNative.profiles.cardHidden');
+    expect(screen.getAllByTestId('aelix-profiles')).toHaveLength(1);
+  });
 });

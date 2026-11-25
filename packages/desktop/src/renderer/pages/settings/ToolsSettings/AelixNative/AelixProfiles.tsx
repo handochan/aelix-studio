@@ -13,7 +13,7 @@ import type {
   ResourceFailure,
   ResourceResult,
 } from '@/renderer/services/runtime/NativeResources';
-import { diagnosticLabel, failureLabel, type Label } from './labels';
+import { approvalModeLabel, diagnosticLabel, failureLabel, promptModeLabel, type Label } from './labels';
 import { useNativeClient } from './useNativeClient';
 
 type AelixProfilesProps = {
@@ -48,6 +48,7 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
   const [loading, setLoading] = useState(false);
   const [preview, setPreview] = useState<PreviewState>();
   const ticket = useRef(0);
+  const previewTicket = useRef(0);
   const focused = useRef(false);
 
   const load = useCallback(async () => {
@@ -62,6 +63,8 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
     }
     if (run !== ticket.current) return;
     setLoading(false);
+    // A new list retires any preview, including one still in flight.
+    previewTicket.current++;
     setPreview(undefined);
     if (reply.status === 'success') {
       setCatalog(reply.data);
@@ -79,8 +82,11 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
   const inspect = useCallback(
     async (name: string) => {
       if (!client) return;
+      const run = ++previewTicket.current;
       setPreview({ name, status: 'loading' });
       const reply = await client.global.showProfile(name);
+      // Only the latest request may fill the preview; earlier replies are dropped.
+      if (run !== previewTicket.current) return;
       if (reply.status !== 'success') {
         setPreview({ name, status: 'failed', failure: reply });
         return;
@@ -118,8 +124,11 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
       [t(`${P}.model`), [profile.provider, profile.model].filter(Boolean).join(' / ') || inherit],
       [t(`${P}.tools`), listValue(profile.tools, inherit, none)],
       [t(`${P}.skills`), listValue(profile.skills, inherit, none)],
-      [t(`${P}.approvalMode`), profile.approvalMode],
-      [t(`${P}.promptMode`), profile.promptMode],
+      [
+        t(`${P}.approvalMode`),
+        t(approvalModeLabel(profile.approvalMode).key, approvalModeLabel(profile.approvalMode).values),
+      ],
+      [t(`${P}.promptMode`), t(promptModeLabel(profile.promptMode).key, promptModeLabel(profile.promptMode).values)],
     ];
     return (
       <div className='flex flex-col gap-6px text-12px' data-testid={`aelix-profile-preview-${profile.ref.name}`}>
@@ -157,7 +166,12 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
             </Tag>
           ) : null}
         </div>
-        <Button size='mini' data-testid='aelix-profiles-toggle' onClick={() => setExpanded((value) => !value)}>
+        <Button
+          size='mini'
+          data-testid='aelix-profiles-toggle'
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
           {expanded ? t(`${P}.hide`) : t(`${P}.show`)}
         </Button>
       </div>
@@ -209,7 +223,12 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
                   <Tag size='small'>{t(`${P}.scope.${entry.ref.scope}`)}</Tag>
                   <Typography.Text className='truncate text-12px text-t-secondary'>{entry.description}</Typography.Text>
                 </div>
-                <Button size='mini' type='text' onClick={() => void inspect(entry.ref.name)}>
+                <Button
+                  size='mini'
+                  type='text'
+                  aria-label={t(`${P}.previewNamed`, { name: entry.ref.name })}
+                  onClick={() => void inspect(entry.ref.name)}
+                >
                   {t(`${P}.preview`)}
                 </Button>
               </div>
