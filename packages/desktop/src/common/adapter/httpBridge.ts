@@ -159,7 +159,7 @@ export function isBackendHttpError(error: unknown): error is BackendHttpError {
   return false;
 }
 
-/** A rejected Host fetch before any HTTP response was available. */
+/** A transport failure while fetching the Host or reading its response body. */
 export class BackendConnectionError extends TypeError {
   constructor(cause: TypeError) {
     super(cause.message, { cause });
@@ -213,6 +213,12 @@ export function resolveCoreCsrfToken(): string {
   return candidates.length === 1 ? candidates[0].slice(prefix.length) : '';
 }
 
+function rethrowBackendTransportError(error: unknown, signal?: AbortSignal): never {
+  signal?.throwIfAborted();
+  if (error instanceof TypeError) throw new BackendConnectionError(error);
+  throw error;
+}
+
 async function sendHttpRequest(
   method: string,
   path: string,
@@ -231,8 +237,7 @@ async function sendHttpRequest(
       ...(signal ? { signal } : {}),
     });
   } catch (error) {
-    if (!signal?.aborted && error instanceof TypeError) throw new BackendConnectionError(error);
-    throw error;
+    rethrowBackendTransportError(error, signal);
   }
 }
 
@@ -295,7 +300,7 @@ export async function httpRequest<T>(
       throw new BackendHttpError({ method, path: '[private request]', status: response.status, body: undefined });
     }
     // Response body can only be consumed once — read as text, then try JSON
-    const rawText = await response.text().catch(() => '');
+    const rawText = await response.text().catch((error: unknown) => rethrowBackendTransportError(error, signal));
     let errorBody: unknown;
     try {
       errorBody = JSON.parse(rawText);
@@ -315,8 +320,9 @@ export async function httpRequest<T>(
   }
 
   const json: unknown = await response.json().catch((error: unknown) => {
+    signal?.throwIfAborted();
     if (error instanceof SyntaxError) throw new SyntaxError('Backend returned invalid JSON');
-    throw error;
+    rethrowBackendTransportError(error, signal);
   });
   // Backend wraps in { success, data, ... } — unwrap when present
   if (json && typeof json === 'object' && 'data' in json) {

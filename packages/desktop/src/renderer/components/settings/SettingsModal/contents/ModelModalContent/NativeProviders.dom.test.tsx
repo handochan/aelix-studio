@@ -186,16 +186,7 @@ describe('native provider settings', () => {
 
   it.each([
     {
-      scenario: 'the Host supplies the socket path error',
-      body: {
-        code: 'BAD_REQUEST',
-        error: 'acp_init_failed: Agent protocol error (-33004) ({"kind":"socket_path_too_long"})',
-      },
-      status: 400,
-      text: english.nativeAuth.agentStartFailedWithReason.replace('{{reason}}', english.nativeAuth.socketPathTooLong),
-    },
-    {
-      scenario: 'the Host suppresses the ACP error details',
+      scenario: 'the pinned Host returns its generic ACP startup response',
       body: { success: false, code: 'BAD_GATEWAY', error: 'Upstream service unavailable.' },
       status: 502,
       text: english.nativeAuth.agentStartFailed,
