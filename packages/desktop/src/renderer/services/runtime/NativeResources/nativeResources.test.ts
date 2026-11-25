@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, expectTypeOf, it, vi } from 'v
 import {
   createNativeResources,
   parseProfileLoadRecovery,
+  type ProfileDifference,
   type ProfileRef,
   type ResourceChange,
   type ResourceKind,
@@ -792,6 +793,24 @@ describe('wire compatibility and limits', () => {
     });
   });
 
+  it('preserves valid scope-only differences and legacy profile values', async () => {
+    const { bindingId } = await attach();
+    const differences: ProfileDifference[] = [
+      { field: 'source', before: 'user', after: 'project' },
+      { field: 'tools', before: null, after: ['read', 'read'] },
+      { field: 'skills', before: [], after: ['user:skills/review'] },
+      { field: 'timeoutMs', before: null, after: -5 },
+      { field: 'omittedPrompt', before: null, after: 'b'.repeat(64) },
+    ];
+    enqueue(relay({ ...object(fixture('use-stale-preview', '/result')), differences }));
+    sessionCase('profiles-list-page-1');
+    sessionCase('selections-list-tool-first');
+    sessionCase('selections-list-skill');
+    const report = await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef);
+    expect(report.outcome).toMatchObject({ status: 'conflict', differences });
+    expect(report.receipt).toBeUndefined();
+  });
+
   it('keeps the request ID and classifies a definitive helper save failure', async () => {
     helperCase('helper-tools-first');
     const initial = valueOf(await globalResources().listSelections('tool'));
@@ -807,17 +826,50 @@ describe('wire compatibility and limits', () => {
 });
 
 describe('review regressions', () => {
+  const badDiffs: readonly [string, string, unknown, unknown][] = [
+    ['non-string revision', 'revision', false, 42],
+    ['invalid revision hash', 'revision', fixture('profile-ref', '/vectors/0/ref/revision'), 'sha256:bad'],
+    ['invalid profile source', 'source', 'user:agents/quiet.md', 'global:agents/quiet.md'],
+    ['invalid prompt mode', 'promptMode', 'append', 'merge'],
+    ['oversized prompt diff', 'promptPreview', 'before', '😀'.repeat(513)],
+    ['non-boolean policy flag', 'builtinTools', true, 'false'],
+    ['invalid tool list', 'tools', null, ['read', 42]],
+    ['invalid skill list', 'skills', [], 'review'],
+    ['invalid extension label', 'extensions', [], ['../extension.js']],
+    ['non-numeric output cap', 'outputCap', 51200, '4096'],
+    ['zero output cap', 'outputCap', 51200, 0],
+    ['invalid omitted prompt hash', 'omittedPrompt', null, 'b'.repeat(63)],
+    ['non-nullable description', 'description', null, 'Review only'],
+    ['invalid delegation approval mode', 'approvalMode', 'inherit', 'allow-all'],
+    ['invalid delegation role', 'role', 'leaf', 'root'],
+    ['invalid agent name', 'agents', [], ['agents/writer.md']],
+  ];
+
   it.each([
-    ['wrong-method refusal', { accepted: false, reason: 'cursor-stale' }, 200],
-    ['tool refusal without key', { accepted: false, reason: 'tool-locked' }, 200],
-    ['contradictory HTTP envelope', { success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403],
-    ['incomplete HTTP envelope', { success: false, code: 'EXT_METHOD_DENIED' }, 403],
-  ] as const)('looks up a write receipt after a %s', async (_example, body, status) => {
+    ['wrong-method refusal', { accepted: false, reason: 'cursor-stale' }, 200, 'tools'],
+    ['tool refusal without key', { accepted: false, reason: 'tool-locked' }, 200, 'tools'],
+    ['contradictory HTTP envelope', { success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403, 'tools'],
+    ['incomplete HTTP envelope', { success: false, code: 'EXT_METHOD_DENIED' }, 403, 'tools'],
+    ...badDiffs.map(
+      ([label, field, before, after]) =>
+        [
+          label,
+          { ...object(fixture('use-stale-preview', '/result')), differences: [{ field, before, after }] },
+          200,
+          'profile',
+        ] as const
+    ),
+  ] as const)('looks up a write receipt for %s', async (_example, body, status, target) => {
     const { bindingId } = await attach();
     enqueue(status === 200 ? relay(body) : response(body, status));
     sessionCase('lookup-unknown');
+    if (target === 'profile') sessionCase('profiles-list-page-1');
     sessionCase('selections-list-tool-first');
-    const report = await session().setActiveTools(bindingId, []);
+    if (target === 'profile') sessionCase('selections-list-skill');
+    const report =
+      target === 'profile'
+        ? await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef)
+        : await session().setActiveTools(bindingId, []);
     expect(report).toMatchObject({
       outcome: { status: 'unknown', reason: 'invalid-response', retryWrite: false },
       receipt: 'unknown',
@@ -828,7 +880,7 @@ describe('review regressions', () => {
       method: '_aelix/session/requests/lookup',
       payload: { requestId: report.requestId },
     });
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(target === 'profile' ? 6 : 4);
   });
 
   it.each(['discovery', 'list'])('reports a malformed H1 %s reply as invalid-response', async (operation) => {
@@ -836,6 +888,28 @@ describe('review regressions', () => {
     enqueue(response({ success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403));
     const result = operation === 'discovery' ? await session().discover() : await session().listProfiles();
     expect(result).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
+  });
+
+  it('keeps the D16 result-too-large refusal out of profiles/use and its completed receipts', async () => {
+    const { bindingId } = await attach();
+    const oversized = fixture('relay-error-large-item', '/result');
+    enqueue(relay(oversized));
+    enqueue(relay({ status: 'completed', result: oversized }));
+    sessionCase('profiles-list-page-1');
+    sessionCase('selections-list-tool-first');
+    sessionCase('selections-list-skill');
+    const report = await session().useProfile(bindingId, fixture('profile-ref', '/vectors/0/ref') as ProfileRef);
+    expect(report).toMatchObject({
+      outcome: { status: 'unknown', reason: 'invalid-response', retryWrite: false },
+      receipt: 'unavailable',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(6);
   });
 
   it('preserves the original binding for lookup when a stale-binding code has the wrong HTTP status', async () => {

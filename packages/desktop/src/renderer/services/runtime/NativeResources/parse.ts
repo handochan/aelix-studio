@@ -70,9 +70,15 @@ function boolean(value: unknown): boolean {
   return value;
 }
 
-function natural(value: unknown): number {
-  requireValid(typeof value === 'number' && Number.isSafeInteger(value) && value >= 0);
+function integer(value: unknown): number {
+  requireValid(typeof value === 'number' && Number.isSafeInteger(value));
   return value;
+}
+
+function natural(value: unknown): number {
+  const result = integer(value);
+  requireValid(result >= 0);
+  return result;
 }
 
 function oneOf<const T extends string>(value: unknown, ...values: T[]): T {
@@ -138,10 +144,19 @@ export function profileName(value: unknown): string {
   return name;
 }
 
+function profileScope(value: unknown): ProfileRef['scope'] {
+  return oneOf(value, 'bundled', 'user', 'project');
+}
+
+function profileRevision(value: unknown): string {
+  const revision = text(value);
+  requireValid(/^sha256:[0-9a-f]{64}$/.test(revision));
+  return revision;
+}
+
 export function profileRef(value: unknown): ProfileRef {
   const { name, scope, revision } = record(value);
-  requireValid(typeof revision === 'string' && /^sha256:[0-9a-f]{64}$/.test(revision));
-  return { name: profileName(name), scope: oneOf(scope, 'bundled', 'user', 'project'), revision };
+  return { name: profileName(name), scope: profileScope(scope), revision: profileRevision(revision) };
 }
 
 export function sameProfile(a: ProfileRef | null, b: ProfileRef | null): boolean {
@@ -412,43 +427,60 @@ function profileRecovery(value: unknown): ProfileRecovery {
   return { action: oneOf(row.action, 'restore-original-and-reopen'), original: nullable(row.original, profileRef) };
 }
 
+const profileDifferenceFields = {
+  source(value) {
+    const source = token(value);
+    const separator = source.indexOf(':');
+    // ACP can report just the scope when the earlier preview is missing.
+    if (separator === -1) return profileScope(source);
+    profileScope(source.slice(0, separator));
+    relativeDisplay(source.slice(separator + 1));
+    return source;
+  },
+  revision: profileRevision,
+  description: text,
+  promptMode: (value) => oneOf(value, 'append', 'replace'),
+  promptPreview(value) {
+    const prompt = text(value);
+    const safe = boundedPrompt(prompt);
+    requireValid(safe.length <= 512 && safe.join('') === prompt);
+    return prompt;
+  },
+  promptTruncated: boolean,
+  omittedPrompt: (value) =>
+    nullable(value, (entry) => {
+      const digest = text(entry);
+      requireValid(/^[0-9a-f]{64}$/.test(digest));
+      return digest;
+    }),
+  provider: (value) => nullable(value, token),
+  model: (value) => nullable(value, token),
+  tools: (value) => nullable(value, (entry) => list(entry, token)),
+  skills: (value) => list(value, profilePathLabel),
+  approvalMode: (value) => oneOf(value, 'inherit', 'ask', 'auto', 'deny'),
+  builtinTools: boolean,
+  excludeTools: (value) => list(value, token),
+  inheritSkills: boolean,
+  extensions: (value) => list(value, profilePathLabel),
+  inheritExtensions: boolean,
+  contextFiles: boolean,
+  thinking: (value) => nullable(value, code),
+  role: (value) => oneOf(value, 'leaf', 'orchestrator'),
+  outputCap(value) {
+    const bytes = integer(value);
+    requireValid(bytes > 0);
+    return bytes;
+  },
+  // Native retains signed legacy timeout metadata for display.
+  timeoutMs: (value) => nullable(value, integer),
+  agents: (value) => nullable(value, (entry) => names(entry).map(profileName)),
+} satisfies Record<string, Decoder<ProfileDifference['before']>>;
+
 function profileDifference(entry: unknown): ProfileDifference {
   const row = record(entry);
-  const field = oneOf(
-    row.field,
-    'source',
-    'revision',
-    'description',
-    'promptMode',
-    'promptPreview',
-    'promptTruncated',
-    'omittedPrompt',
-    'provider',
-    'model',
-    'tools',
-    'skills',
-    'approvalMode',
-    'builtinTools',
-    'excludeTools',
-    'inheritSkills',
-    'extensions',
-    'inheritExtensions',
-    'contextFiles',
-    'thinking',
-    'role',
-    'outputCap',
-    'timeoutMs',
-    'agents'
-  );
-  function difference(value: unknown): ProfileDifference['before'] {
-    if (value === null) return null;
-    if (typeof value === 'boolean') return value;
-    if (typeof value === 'number') return natural(value);
-    if (field === 'source') return sourceDisplay(value);
-    if (field === 'skills' || field === 'extensions') return list(value, profilePathLabel);
-    if (field === 'promptPreview') return boundedPrompt(value).slice(0, 512).join('');
-    return Array.isArray(value) ? list(value, token) : text(value);
-  }
+  requireValid(typeof row.field === 'string' && Object.hasOwn(profileDifferenceFields, row.field));
+  const field = row.field as keyof typeof profileDifferenceFields;
+  const difference = profileDifferenceFields[field];
   return { field, before: difference(row.before), after: difference(row.after) };
 }
 
@@ -459,6 +491,7 @@ const refusalMethods = {
   busy: mutations,
   unsupported: [...lists, 'profilesShow', ...mutations],
   'cursor-stale': lists,
+  // D16's relay-error-large-item case excludes profiles/use.
   'result-too-large': [...lists, 'profilesShow', 'setActiveTools'],
   'profile-unavailable': ['profilesShow', 'profilesUse'],
   'profile-refused': ['profilesUse'],
