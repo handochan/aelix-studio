@@ -400,6 +400,29 @@ describe('Aelix conversation controls: decision 2 and recovery', () => {
     expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileApplied`);
   });
 
+  it('ends in recovery without a second reselect when the profile changes again', async () => {
+    replies.set(USE, ({ profile }) =>
+      relay(
+        (profile as Ref).revision === QUIET.revision
+          ? fixture('use-stale-preview', '/result')
+          : fixture('use-changed-again', '/result')
+      )
+    );
+    render(<Harness />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET, QUIET_PROJECT]);
+    expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
+    expect(screen.queryByTestId('aelix-profile-change-card')).toBeNull();
+    expect(screen.queryByTestId('aelix-change-reselect')).toBeNull();
+  });
+
   it('offers recovery after the approval is declined and sends nothing more', async () => {
     replies.set(USE, ({ profile }) =>
       relay(

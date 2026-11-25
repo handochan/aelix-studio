@@ -405,13 +405,30 @@ export function useAelixSessionControls({
       kind: WriteTarget,
       outcome: ResourceFailure | { status: 'success' },
       before: Baseline,
-      done: ControlsNotice
+      done: ControlsNotice,
+      reselected = false
     ) => {
       if (outcome.status === 'success') {
         patch(target, { notice: done, conflict: undefined, conflictBaseline: undefined });
         return;
       }
       if (outcome.status === 'conflict' && outcome.reason === 'profile-changed') {
+        if (reselected) {
+          // Decision 2 allows one reselection. A second change ends in recovery, not another offer.
+          const failure: ResourceFailure = {
+            ...outcome,
+            status: 'recovery-required',
+            reason: 'changed-again',
+            action: 'restore-original-and-reopen',
+            original: outcome.recovery?.original ?? before.profile,
+          };
+          patch(target, {
+            conflict: undefined,
+            conflictBaseline: undefined,
+            recovery: { failure, baseline: before },
+          });
+          return;
+        }
         patch(target, { conflict: outcome, conflictBaseline: before, recovery: undefined });
         return;
       }
@@ -435,7 +452,7 @@ export function useAelixSessionControls({
   );
 
   const applyProfileWith = useCallback(
-    async (ref: ProfileRef | null, before: Baseline) => {
+    async (ref: ProfileRef | null, before: Baseline, reselected = false) => {
       const target = sessionRef.current;
       const capabilities = writable();
       if (!target || !capabilities) return;
@@ -450,7 +467,8 @@ export function useAelixSessionControls({
         before,
         ref
           ? { tone: 'success', key: 'profileApplied', values: { name: ref.name } }
-          : { tone: 'success', key: 'profileCleared' }
+          : { tone: 'success', key: 'profileCleared' },
+        reselected
       );
       if (report.outcome.status === 'success') patch(target, { preview: undefined, previewName: null });
     },
@@ -491,7 +509,7 @@ export function useAelixSessionControls({
     const candidate = conflict?.candidate;
     if (!candidate) return;
     // One explicit choice; the runtime asks for the single standard approval in the conversation.
-    await applyProfileWith(candidate, conflictBaseline ?? baseline());
+    await applyProfileWith(candidate, conflictBaseline ?? baseline(), true);
   }, [applyProfileWith, baseline, stateRef]);
 
   const keepCurrent = useCallback(() => {
