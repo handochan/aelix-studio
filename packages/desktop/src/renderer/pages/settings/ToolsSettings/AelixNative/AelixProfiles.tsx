@@ -76,6 +76,15 @@ const AelixProfiles: React.FC<AelixProfilesProps> = ({ defaultExpanded = false, 
   }, [client]);
 
   useEffect(() => {
+    // A new client (for example after a user change) starts from an empty catalog.
+    ticket.current++;
+    previewTicket.current++;
+    setCatalog(undefined);
+    setFailure(undefined);
+    setPreview(undefined);
+  }, [client]);
+
+  useEffect(() => {
     if (expanded) void load();
   }, [expanded, load]);
 

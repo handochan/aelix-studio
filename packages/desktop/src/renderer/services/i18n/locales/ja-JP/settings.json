@@ -1737,7 +1737,7 @@
     "off": "オフ",
     "missingStore": "設定ファイルがまだありません。保存すると作成されます。プロジェクトファイルの場合は、先に会話内で承認を求めます。",
     "mismatch": "保存済みの値と異なります: {{reason}}",
-    "mismatchList": "保存済みの値の一部が、現在有効な値と異なります。",
+    "mismatchList": "保存された値が現在有効な値と異なります: {{reasons}}",
     "problem": "問題: {{code}}",
     "decidedBy": {
       "global": "グローバルで設定",
@@ -1884,7 +1884,7 @@
     "nothingToApply": "何も書き込まれませんでした: 現在の値がすでに選択内容と一致しているか、変更できなくなっています。",
     "mismatchReason": {
       "savedValueDiffers": "保存済みの値が選択内容と異なります",
-      "nativeMismatch": "保存後にファイルが変更されました",
+      "nativeMismatch": "Aelix が差異を報告しました",
       "other": "{{reason}}"
     }
   }

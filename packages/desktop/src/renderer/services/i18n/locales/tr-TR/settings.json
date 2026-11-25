@@ -1735,7 +1735,7 @@
     "off": "Kapalı",
     "missingStore": "Henüz bir ayar dosyası yok. Kaydetmek bir dosya oluşturur; proje dosyası için önce konuşmada onay istenir.",
     "mismatch": "Kaydedilen değerden farklı: {{reason}}",
-    "mismatchList": "Kaydedilen bazı değerler, geçerli olanlardan farklı.",
+    "mismatchList": "Kaydedilen değerler yürürlükteki değerlerden farklı: {{reasons}}",
     "problem": "Sorun: {{code}}",
     "decidedBy": {
       "global": "Genel olarak ayarlandı",
@@ -1882,7 +1882,7 @@
     "nothingToApply": "Hiçbir şey yazılmadı: geçerli değerler seçiminizle zaten eşleşiyor veya artık değiştirilemiyor.",
     "mismatchReason": {
       "savedValueDiffers": "kaydedilen değer seçiminizden farklı",
-      "nativeMismatch": "dosya kaydedildikten sonra değişti",
+      "nativeMismatch": "Aelix bir fark bildirdi",
       "other": "{{reason}}"
     }
   }

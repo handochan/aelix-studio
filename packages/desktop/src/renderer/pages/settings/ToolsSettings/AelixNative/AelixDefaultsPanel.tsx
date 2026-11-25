@@ -7,7 +7,7 @@
 import { Alert, Button, Radio, Spin, Typography } from '@arco-design/web-react';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { ResourceFailure, ResourceKind } from '@/renderer/services/runtime/NativeResources';
+import type { NativeResources, ResourceFailure, ResourceKind } from '@/renderer/services/runtime/NativeResources';
 import { failureLabel } from './labels';
 import SelectionList from './SelectionList';
 import { useConversationWorkspace, useNativeClient } from './useNativeClient';
@@ -23,10 +23,12 @@ export type AelixDefaultsPanelProps = {
   deferUntilVisible?: boolean;
 };
 
-type ProjectState =
+/** Discovery state, tagged with the conversation and client it belongs to. */
+type ProjectState = { conversationId: string; client: NativeResources } & (
   | { status: 'loading' }
   | { status: 'ready'; target: SelectionTarget }
-  | { status: 'failed'; failure: ResourceFailure };
+  | { status: 'failed'; failure: ResourceFailure }
+);
 
 const P = 'settings.aelixNative';
 
@@ -37,10 +39,6 @@ const invalidConversation: ResourceFailure = {
   retryWrite: false,
 };
 
-/**
- * Native Aelix defaults for tools, skills and MCP. Data comes only from NativeResources, never
- * from the Aion catalog, so the Aion lists on the same page keep their own CRUD and import.
- */
 /** Become true once the element is on screen; true at once where visibility cannot be observed. */
 function useSeen(element: React.RefObject<HTMLElement | null>, enabled: boolean): boolean {
   const [seen, setSeen] = useState(!enabled || typeof IntersectionObserver === 'undefined');
@@ -56,6 +54,10 @@ function useSeen(element: React.RefObject<HTMLElement | null>, enabled: boolean)
   return seen;
 }
 
+/**
+ * Native Aelix defaults for tools, skills and MCP. Data comes only from NativeResources, never
+ * from the Aion catalog, so the Aion lists on the same page keep their own CRUD and import.
+ */
 const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
   kinds,
   conversationId,
@@ -71,12 +73,12 @@ const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
   const [project, setProject] = useState<ProjectState>();
   const workspace = useConversationWorkspace(conversationId);
   const discovery = useRef(0);
-  const notices = useRef<NoticeCache>(new Map());
+  // Pending re-apply notices belong to one user (client) and one conversation.
+  const notices = useMemo<NoticeCache>(() => new Map(), [client, conversationId]);
 
   useEffect(() => {
-    // Another conversation is another project: drop its binding, discovery and notices.
+    // Another conversation is another project: drop its binding and discovery.
     discovery.current++;
-    notices.current = new Map();
     setProject(undefined);
     setScope(conversationId ? 'project' : 'global');
   }, [conversationId]);
@@ -93,22 +95,26 @@ const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
     try {
       session = client.session(conversationId);
     } catch {
-      setProject({ status: 'failed', failure: invalidConversation });
+      setProject({ conversationId, client, status: 'failed', failure: invalidConversation });
       return;
     }
-    setProject({ status: 'loading' });
+    setProject({ conversationId, client, status: 'loading' });
     session.invalidate();
     const reply = await session.discover();
     if (run !== discovery.current) return;
     if (reply.status !== 'success') {
-      setProject({ status: 'failed', failure: reply });
+      setProject({ conversationId, client, status: 'failed', failure: reply });
     } else if (!reply.data.selectionsList) {
       setProject({
+        conversationId,
+        client,
         status: 'failed',
         failure: { status: 'unsupported', reason: 'unsupported', action: 'disable-control', retryWrite: false },
       });
     } else {
       setProject({
+        conversationId,
+        client,
         status: 'ready',
         target: { scope: 'project', conversationId, session, canWrite: reply.data.selectionsSet },
       });
@@ -123,12 +129,18 @@ const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
     if (scope === 'global') {
       if (!seen) return null;
       return globalTarget ? (
-        <SelectionList key={`global:${kind}`} target={globalTarget} kind={kind} notices={notices.current} />
+        <SelectionList key={`global:${kind}`} target={globalTarget} kind={kind} notices={notices} />
       ) : (
         <Spin />
       );
     }
-    if (!project || project.status === 'loading') {
+    // Never render a binding from an earlier conversation or a retired client: it would send requests there.
+    if (
+      !project ||
+      project.status === 'loading' ||
+      project.conversationId !== conversationId ||
+      project.client !== client
+    ) {
       return (
         <div className='flex justify-center py-16px'>
           <Spin tip={t(`${P}.loading`)} />
@@ -160,7 +172,7 @@ const AelixDefaultsPanel: React.FC<AelixDefaultsPanelProps> = ({
         target={project.target}
         kind={kind}
         onRediscover={() => void discover()}
-        notices={notices.current}
+        notices={notices}
       />
     );
   };

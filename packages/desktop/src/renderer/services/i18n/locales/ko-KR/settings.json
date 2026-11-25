@@ -1737,7 +1737,7 @@
     "off": "꺼짐",
     "missingStore": "아직 설정 파일이 없습니다. 저장하면 새로 만들어지며, 프로젝트 파일은 먼저 대화에서 승인을 요청합니다.",
     "mismatch": "저장된 값과 다름: {{reason}}",
-    "mismatchList": "일부 저장된 값이 현재 적용 중인 값과 다릅니다.",
+    "mismatchList": "저장된 값이 현재 적용 중인 값과 다릅니다: {{reasons}}",
     "problem": "문제: {{code}}",
     "decidedBy": {
       "global": "전역에서 설정됨",
@@ -1884,7 +1884,7 @@
     "nothingToApply": "아무것도 기록되지 않았습니다. 현재 값이 이미 선택한 값과 같거나 더 이상 변경할 수 없습니다.",
     "mismatchReason": {
       "savedValueDiffers": "저장된 값이 선택한 값과 다름",
-      "nativeMismatch": "저장 후 파일이 변경됨",
+      "nativeMismatch": "Aelix에서 차이를 보고했습니다",
       "other": "{{reason}}"
     }
   }

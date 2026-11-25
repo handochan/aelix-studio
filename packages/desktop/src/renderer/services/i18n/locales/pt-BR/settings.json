@@ -1738,7 +1738,7 @@
     "off": "Desativado",
     "missingStore": "Ainda não existe um arquivo de configurações. Salvar cria um; para um arquivo de projeto, a aprovação é solicitada antes na conversa.",
     "mismatch": "Diferente do valor salvo: {{reason}}",
-    "mismatchList": "Alguns valores salvos diferem dos que estão em vigor.",
+    "mismatchList": "Os valores salvos diferem dos que estão em vigor: {{reasons}}",
     "problem": "Problema: {{code}}",
     "decidedBy": {
       "global": "Definido globalmente",
@@ -1885,7 +1885,7 @@
     "nothingToApply": "Nada foi gravado: os valores atuais já correspondem à sua escolha ou não podem mais ser alterados.",
     "mismatchReason": {
       "savedValueDiffers": "o valor salvo é diferente da sua escolha",
-      "nativeMismatch": "o arquivo mudou depois de salvo",
+      "nativeMismatch": "O Aelix relatou uma diferença",
       "other": "{{reason}}"
     }
   }

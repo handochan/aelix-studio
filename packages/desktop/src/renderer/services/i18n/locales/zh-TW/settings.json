@@ -1737,7 +1737,7 @@
     "off": "關閉",
     "missingStore": "尚無設定檔案。儲存時會建立一個；專案檔案會先在對話中請求核准。",
     "mismatch": "與已儲存的值不同：{{reason}}",
-    "mismatchList": "部分已儲存的值與目前生效的值不同。",
+    "mismatchList": "已儲存的值與目前生效的值不同：{{reasons}}",
     "problem": "問題：{{code}}",
     "decidedBy": {
       "global": "全域設定",
@@ -1884,7 +1884,7 @@
     "nothingToApply": "未寫入任何內容：目前的值已與您的選擇相符，或已無法變更。",
     "mismatchReason": {
       "savedValueDiffers": "已儲存的值與您的選擇不同",
-      "nativeMismatch": "儲存後檔案已有變動",
+      "nativeMismatch": "Aelix 回報了差異",
       "other": "{{reason}}"
     }
   }

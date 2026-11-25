@@ -1736,7 +1736,7 @@
     "off": "关闭",
     "missingStore": "尚无设置文件。保存时会创建一个；项目文件会先在会话中请求批准。",
     "mismatch": "与已保存的值不同：{{reason}}",
-    "mismatchList": "部分已保存的值与当前生效的值不同。",
+    "mismatchList": "已保存的值与当前生效的值不同：{{reasons}}",
     "problem": "问题：{{code}}",
     "decidedBy": {
       "global": "全局设置",
@@ -1883,7 +1883,7 @@
     "nothingToApply": "未写入任何内容：当前值已与您的选择一致，或已无法更改。",
     "mismatchReason": {
       "savedValueDiffers": "已保存的值与您的选择不同",
-      "nativeMismatch": "保存后文件已发生变化",
+      "nativeMismatch": "Aelix 报告了差异",
       "other": "{{reason}}"
     }
   }

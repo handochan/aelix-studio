@@ -623,6 +623,8 @@ describe('Aelix global defaults panel', () => {
     const view = render(<AelixDefaultsPanel kinds={['skill']} conversationId='c-17' />);
     await screen.findByTestId('aelix-row-review');
     fake.conversationGet.mockResolvedValue({ id: 'c-18', extra: { workspace: '/work/other' } });
+    const toC17 = () => fake.relay.mock.calls.filter(([path]) => path.includes('/c-17/')).length;
+    const before = toC17();
 
     view.rerender(<AelixDefaultsPanel kinds={['skill']} conversationId='c-18' />);
     expect(await screen.findByText('settings.aelixNative.workspace(/work/other)')).toBeInTheDocument();
@@ -630,6 +632,8 @@ describe('Aelix global defaults panel', () => {
       expect(fake.relay.mock.calls.some(([path]) => path === '/api/conversations/c-18/acp-extensions')).toBe(true)
     );
     await screen.findByTestId('aelix-row-review');
+    // The previous conversation's binding is never used after the switch.
+    expect(toC17()).toBe(before);
   });
 
   it('waits to read global defaults until a deferred panel is on screen', async () => {
@@ -653,5 +657,52 @@ describe('Aelix global defaults panel', () => {
     } finally {
       window.IntersectionObserver = original;
     }
+  });
+  it('does not bring back a success notice after switching kind and back', async () => {
+    render(<AelixDefaultsPanel kinds={['tool', 'mcp']} />);
+    fireEvent.click(await waitFor(() => switchOf('write')));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+    await screen.findByTestId('aelix-save-notice');
+
+    fireEvent.click(screen.getByText('settings.aelixNative.kind.mcp'));
+    await screen.findByTestId('aelix-row-local-docs');
+    fireEvent.click(screen.getByText('settings.aelixNative.kind.tool'));
+    await screen.findByTestId('aelix-row-read');
+    expect(screen.queryByTestId('aelix-save-notice')).not.toBeInTheDocument();
+  });
+
+  it("drops the previous user's lists and restore records while the page stays open", async () => {
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    fireEvent.click(await waitFor(() => switchOf('read')));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+    await screen.findByTestId('aelix-save-notice');
+    expect(screen.getByTestId('aelix-recovery-open')).toBeInTheDocument();
+    const lists = () => fake.helper.mock.calls.filter(([command]) => command.action === 'selections/list').length;
+    const before = lists();
+
+    act(() => changeUser());
+
+    await waitFor(() => expect(lists()).toBe(before + 1));
+    await screen.findByTestId('aelix-row-read');
+    expect(screen.queryByTestId('aelix-recovery-open')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-save-notice')).not.toBeInTheDocument();
+  });
+
+  it('keeps an item available when the store reports it was not restored', async () => {
+    render(<AelixDefaultsPanel kinds={['tool']} />);
+    fireEvent.click(await waitFor(() => switchOf('read')));
+    fireEvent.click(screen.getByTestId('aelix-save'));
+    await screen.findByTestId('aelix-save-notice');
+
+    helperNoop = true;
+    fireEvent.click(screen.getByTestId('aelix-recovery-open'));
+    let modal = await screen.findByTestId('aelix-recovery-modal');
+    fireEvent.click(within(within(modal).getByTestId('aelix-recovery-row-read')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    expect(await screen.findByText(/settings\.aelixNative\.saved\.noChange/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('aelix-recovery-open'));
+    modal = await screen.findByTestId('aelix-recovery-modal');
+    expect(within(modal).getByTestId('aelix-recovery-row-read')).toBeInTheDocument();
   });
 });

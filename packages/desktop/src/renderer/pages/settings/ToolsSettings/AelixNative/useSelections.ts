@@ -147,7 +147,8 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
     (next: SaveNotice | undefined) => {
       setNoticeState(next);
       if (!identity || !notices) return;
-      if (next) notices.set(identity, next);
+      // Only a pending re-apply is worth keeping across a rediscovery; other notices are momentary.
+      if (next?.type === 'retry') notices.set(identity, next);
       else notices.delete(identity);
     },
     [identity, notices]
@@ -216,10 +217,12 @@ export function useSelections(target: SelectionTarget | undefined, kind: Resourc
         // Only what the store reports as saved can be restored later.
         const saved = data.changed.map(({ key, saved: on }) => ({ key, on }));
         if (restoring) {
+          // Forget only items the store reports as restored; keep the rest for another try.
+          const mismatched = new Set(data.mismatches.map((issue) => issue.key));
           forgetRestored(
             recoveryTarget,
             kind,
-            changes.map((change) => change.key),
+            saved.filter((change) => !mismatched.has(change.key)).map((change) => change.key),
             revision
           );
         } else {

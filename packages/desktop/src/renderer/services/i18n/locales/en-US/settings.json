@@ -1735,7 +1735,7 @@
     "off": "Off",
     "missingStore": "No settings file exists yet. Saving creates one; a project file asks for approval in the conversation first.",
     "mismatch": "Differs from saved value: {{reason}}",
-    "mismatchList": "Some saved values differ from what is in force.",
+    "mismatchList": "Saved values differ from what is in force: {{reasons}}",
     "problem": "Problem: {{code}}",
     "decidedBy": {
       "global": "Set globally",
@@ -1882,7 +1882,7 @@
     "nothingToApply": "Nothing was written: the current values already match your choice or can no longer be changed.",
     "mismatchReason": {
       "savedValueDiffers": "the saved value differs from your choice",
-      "nativeMismatch": "the file changed after saving",
+      "nativeMismatch": "Aelix reported a difference",
       "other": "{{reason}}"
     }
   }

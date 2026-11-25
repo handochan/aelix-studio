@@ -1735,7 +1735,7 @@
     "off": "Aus",
     "missingStore": "Es gibt noch keine Einstellungsdatei. Beim Speichern wird eine erstellt; für eine Projektdatei wird zuerst in der Unterhaltung um Genehmigung gebeten.",
     "mismatch": "Weicht vom gespeicherten Wert ab: {{reason}}",
-    "mismatchList": "Einige gespeicherte Werte weichen von den wirksamen Werten ab.",
+    "mismatchList": "Gespeicherte Werte weichen von den wirksamen Werten ab: {{reasons}}",
     "problem": "Problem: {{code}}",
     "decidedBy": {
       "global": "Global festgelegt",
@@ -1882,7 +1882,7 @@
     "nothingToApply": "Nichts wurde geschrieben: Die aktuellen Werte entsprechen bereits deiner Auswahl oder können nicht mehr geändert werden.",
     "mismatchReason": {
       "savedValueDiffers": "der gespeicherte Wert weicht von deiner Auswahl ab",
-      "nativeMismatch": "die Datei wurde nach dem Speichern geändert",
+      "nativeMismatch": "Aelix hat eine Abweichung gemeldet",
       "other": "{{reason}}"
     }
   }

@@ -202,7 +202,9 @@ const SelectionList: React.FC<SelectionListProps> = ({ target, kind, onRediscove
       {unkeyed.length > 0 ? (
         <Alert
           type='warning'
-          content={`${t(`${P}.mismatchList`)} ${unkeyed.map((issue) => label(mismatchLabel(issue.reason))).join(', ')}`}
+          content={t(`${P}.mismatchList`, {
+            reasons: unkeyed.map((issue) => label(mismatchLabel(issue.reason))).join(', '),
+          })}
         />
       ) : null}
       {notice ? renderNotice(notice) : null}

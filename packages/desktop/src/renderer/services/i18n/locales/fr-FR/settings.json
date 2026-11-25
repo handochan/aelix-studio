@@ -1735,7 +1735,7 @@
     "off": "Désactivé",
     "missingStore": "Aucun fichier de paramètres n'existe encore. L'enregistrement en crée un ; pour un fichier de projet, une approbation est d'abord demandée dans la conversation.",
     "mismatch": "Diffère de la valeur enregistrée : {{reason}}",
-    "mismatchList": "Certaines valeurs enregistrées diffèrent de celles en vigueur.",
+    "mismatchList": "Les valeurs enregistrées diffèrent de celles en vigueur : {{reasons}}",
     "problem": "Problème : {{code}}",
     "decidedBy": {
       "global": "Défini globalement",
@@ -1882,7 +1882,7 @@
     "nothingToApply": "Rien n'a été écrit : les valeurs actuelles correspondent déjà à votre choix ou ne peuvent plus être modifiées.",
     "mismatchReason": {
       "savedValueDiffers": "la valeur enregistrée diffère de votre choix",
-      "nativeMismatch": "le fichier a changé après l'enregistrement",
+      "nativeMismatch": "Aelix a signalé une différence",
       "other": "{{reason}}"
     }
   }

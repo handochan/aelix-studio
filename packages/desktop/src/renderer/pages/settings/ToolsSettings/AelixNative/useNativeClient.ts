@@ -8,17 +8,27 @@ import { useEffect, useState } from 'react';
 import { createNativeResources, type NativeResources } from '@/renderer/services/runtime/NativeResources';
 import { isRecord } from '@/renderer/services/runtime/RunningInput/transport';
 import { ipcBridge } from '@/common';
+import { onUserChange } from '@/renderer/hooks/context/AuthContext';
 
 /**
  * Own one NativeResources client for a mounted settings screen. The client is disposed on
- * unmount, so returning to the screen lists again and observes CLI changes.
+ * unmount, so returning to the screen lists again and observes CLI changes. A sign-out or another
+ * user's sign-in replaces the client, so nothing read or staged for the previous user survives.
  */
 export function useNativeClient(): NativeResources | undefined {
   const [client, setClient] = useState<NativeResources>();
   useEffect(() => {
-    const next = createNativeResources();
-    setClient(next);
-    return () => next.dispose();
+    let current = createNativeResources();
+    setClient(current);
+    const unsubscribe = onUserChange(() => {
+      current.dispose();
+      current = createNativeResources();
+      setClient(current);
+    });
+    return () => {
+      unsubscribe();
+      current.dispose();
+    };
   }, []);
   return client;
 }
