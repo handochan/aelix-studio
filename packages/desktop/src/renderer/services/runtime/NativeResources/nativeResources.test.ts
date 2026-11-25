@@ -890,6 +890,39 @@ describe('review regressions', () => {
     expect(result).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
   });
 
+  const agentError = object(fixture('relay-rpc-method', '/http/body'));
+  const malformedRpcDetails = [
+    ['missing rpcCode', {}],
+    ['string rpcCode', { rpcCode: '-32601' }],
+    ['fractional rpcCode', { rpcCode: -32601.5 }],
+  ] as const;
+
+  it.each(malformedRpcDetails)('reports invalid-response on reads with %s', async (_case, details) => {
+    await attach();
+    enqueue(response({ ...agentError, details }, 422));
+    expect(await session().listProfiles()).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
+    expect(fetcher).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(malformedRpcDetails)('looks up a write receipt on 422 with %s', async (_case, details) => {
+    const { bindingId } = await attach();
+    enqueue(response({ ...agentError, details }, 422));
+    sessionCase('lookup-unknown');
+    sessionCase('selections-list-tool-first');
+    const report = await session().setActiveTools(bindingId, []);
+    expect(report).toMatchObject({
+      outcome: fixture('renderer-errors', '/invalidMutationReply/dto'),
+      receipt: 'unknown',
+      refresh: { status: 'success' },
+    });
+    expect(sent(2)).toMatchObject({
+      bindingId,
+      method: '_aelix/session/requests/lookup',
+      payload: { requestId: report.requestId },
+    });
+    expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
   it('keeps the D16 result-too-large refusal out of profiles/use and its completed receipts', async () => {
     const { bindingId } = await attach();
     const oversized = fixture('relay-error-large-item', '/result');
