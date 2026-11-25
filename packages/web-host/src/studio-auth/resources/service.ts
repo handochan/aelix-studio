@@ -1,10 +1,21 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  existsSync,
+  fstatSync,
+  opendirSync,
+  openSync,
+  readSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
-import { normalizeStudioAgentDir, selectNativeRuntime, type NativeRuntime } from '../runtime.js';
+import { gzipSync } from 'node:zlib';
+import { normalizeStudioAgentDir, type NativeRuntime } from '../runtime.js';
 import { NATIVE_RESOURCES_HELPER } from './helperSource.js';
 import {
   type NativeResourcesCommand,
@@ -13,6 +24,8 @@ import {
   type ResourceKind,
 } from './types.js';
 
+// Keep the embedded code within Windows' process argument limit.
+const HELPER_BOOTSTRAP = `import base64,gzip;exec(gzip.decompress(base64.b64decode('${gzipSync(NATIVE_RESOURCES_HELPER).toString('base64')}')))`;
 const REQUEST_BYTES = 60000;
 const RESPONSE_BYTES = 256 * 1024;
 const CATALOG_BYTES = 16 * 1024 * 1024;
@@ -148,60 +161,122 @@ function runtimeFile(file: string): Buffer {
   }
 }
 
-function selectResourceRuntime(explicit = process.env.AELIX_STUDIO_RUNTIME): NativeRuntime | undefined {
-  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
-  const roots = explicit
-    ? [explicit]
-    : [...(resources ? [path.join(resources, 'studio-preview')] : []), '.local/studio-preview'];
-  for (const root of roots) {
-    // The shared native selector reads a bundled manifest. Refuse special or
-    // oversized files before delegating to that selector.
-    try {
-      const info = statSync(path.resolve(root, 'manifest.json'));
-      if (!info.isFile() || info.size > RUNTIME_METADATA_BYTES) continue;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') continue;
-    }
-    const selected = selectNativeRuntime(root);
-    if (selected) return selected;
+const fileDigest = (data: Buffer) => createHash('sha256').update(data).digest('hex');
+
+function optionalRuntimeFile(file: string): Buffer | undefined {
+  try {
+    return runtimeFile(file);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
   }
 }
 
-/** The install recipe and launchers advance the binding even if Python is reused. */
-function runtimeGeneration(runtime: NativeRuntime): string | undefined {
-  const digest = (file: string) => createHash('sha256').update(runtimeFile(file)).digest('hex');
-  const metadata = path.join(runtime.root, runtime.acpArgs ? 'manifest.json' : 'receipt.json');
+function runtimeEntries(directory: string): string[] {
+  let dir: ReturnType<typeof opendirSync>;
   try {
-    const install = runtimeIdentity(path.dirname(runtime.python));
-    const launcher = digest(runtime.launcher);
-    const entry = runtime.acpArgs?.at(-2);
-    const entryDigest = entry ? digest(entry) : undefined;
-    let seal: Buffer;
-    try {
-      seal = runtimeFile(metadata);
-    } catch (error) {
-      if (entry || (error as NodeJS.ErrnoException).code !== 'ENOENT') return;
-      // Developer venvs have no build receipt. Bind their selected launcher and install directory.
-      return JSON.stringify([install, launcher]);
+    dir = opendirSync(directory);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
+  }
+  try {
+    const names: string[] = [];
+    for (let entry = dir.readSync(); entry; entry = dir.readSync()) {
+      if (names.length >= 4096) throw new Error('Runtime inventory exceeded its limit');
+      names.push(entry.name);
     }
-    const manifest: unknown = JSON.parse(seal.toString('utf8'));
-    if (!record(manifest) || manifest.target !== `${process.platform}-${process.arch}`) return;
-    if (entry) {
-      const recipe = manifest.recipeSha256;
+    return names.sort();
+  } finally {
+    dir.closeSync();
+  }
+}
+
+function nativeDistributions(root: string, bundled: boolean): string[][] {
+  const native = path.join(root, 'native');
+  const lib = path.join(native, 'lib');
+  const sites = bundled
+    ? [path.join(root, 'native-site')]
+    : process.platform === 'win32'
+      ? [path.join(native, 'Lib', 'site-packages')]
+      : runtimeEntries(lib)
+          .filter((name) => /^python[0-9.]+$/.test(name))
+          .map((name) => path.join(lib, name, 'site-packages'));
+  const generation: string[][] = [];
+  for (const site of sites) {
+    for (const name of runtimeEntries(site)) {
+      if (!/^aelix(?:_ai|_agent_core|_coding_agent)?-[^/]+\.dist-info$/i.test(name)) continue;
+      const directory = path.join(site, name);
+      const files = ['RECORD', 'METADATA'].map((file) => optionalRuntimeFile(path.join(directory, file)));
+      if (files.every((value) => !value)) throw new Error('Missing native distribution metadata');
+      generation.push([site, name, ...files.map((value) => (value ? fileDigest(value) : ''))]);
+    }
+  }
+  return generation;
+}
+
+type ResourceRuntime = NativeRuntime & { seal: string };
+
+/** Select the executable and derive its seal from one bounded read of the selected recipe. */
+function readResourceRuntime(directory: string): ResourceRuntime | undefined {
+  try {
+    const root = path.resolve(directory);
+    const launcher = path.join(root, 'launch.cjs');
+    const launcherDigest = fileDigest(runtimeFile(launcher));
+    const manifest = optionalRuntimeFile(path.join(root, 'manifest.json'));
+    const recipe = manifest ?? optionalRuntimeFile(path.join(root, 'receipt.json'));
+    const info: unknown = recipe && JSON.parse(recipe.toString('utf8'));
+    const windows = process.platform === 'win32';
+    const isolated = ['-I', '-B', '-X', 'utf8'];
+    let python: string;
+    let helperArgs: string[];
+    let entryDigest: string | undefined;
+    if (manifest) {
+      const entry = path.join(root, 'launch.py');
+      entryDigest = fileDigest(runtimeFile(entry));
       if (
-        manifest.schema !== 'aelix.studio-preview.runtime/1' ||
-        !record(recipe) ||
-        recipe['launch.cjs'] !== launcher ||
-        recipe['launch.py'] !== entryDigest
+        !record(info) ||
+        info.schema !== 'aelix.studio-preview.runtime/1' ||
+        !record(info.recipeSha256) ||
+        info.recipeSha256['launch.cjs'] !== launcherDigest ||
+        info.recipeSha256['launch.py'] !== entryDigest
       )
         return;
-    } else if (manifest.launcherSha256 !== launcher) {
-      return;
+      python = path.join(root, 'python', ...(windows ? ['python.exe'] : ['bin', 'python3']));
+      helperArgs = ['-I', '-S', '-B', '-X', 'utf8', entry, 'helper'];
+    } else {
+      const bin = windows ? 'Scripts' : 'bin';
+      const exe = windows ? 'python.exe' : 'python';
+      python = path.join(root, 'native', bin, exe);
+      if (
+        !existsSync(path.join(root, 'adapter', bin, exe)) ||
+        (recipe && (!record(info) || info.launcherSha256 !== launcherDigest))
+      )
+        return;
+      helperArgs = isolated;
     }
-    return JSON.stringify([install, createHash('sha256').update(seal).digest('hex'), launcher, entryDigest]);
+    if (!existsSync(python) || (recipe && (!record(info) || info.target !== `${process.platform}-${process.arch}`)))
+      return;
+    const seal = JSON.stringify([
+      runtimeIdentity(path.dirname(python)),
+      runtimeIdentity(python),
+      recipe && fileDigest(recipe),
+      launcherDigest,
+      entryDigest,
+      nativeDistributions(root, Boolean(manifest)),
+    ]);
+    return { root, launcher, python, helperArgs, seal };
   } catch {
     return;
   }
+}
+
+function selectResourceRuntime(explicit = process.env.AELIX_STUDIO_RUNTIME): ResourceRuntime | undefined {
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  if (explicit) return readResourceRuntime(explicit);
+  return (
+    (resources && readResourceRuntime(path.join(resources, 'studio-preview'))) ||
+    readResourceRuntime('.local/studio-preview')
+  );
 }
 
 function launchEnvironment(source: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
@@ -209,10 +284,18 @@ function launchEnvironment(source: NodeJS.ProcessEnv, root: string): NodeJS.Proc
   for (const key of ['AELIX_SETTINGS_PATH', 'AELIX_MCP_CONFIG', 'AELIX_AUTH_PATH', 'XDG_CONFIG_HOME'] as const) {
     const configured = env[key];
     if (!configured) continue;
-    env[key] =
-      key === 'AELIX_MCP_CONFIG' && (configured === '~' || configured.startsWith('~/'))
-        ? path.resolve(env.HOME || env.USERPROFILE || homedir(), configured.slice(2))
-        : path.resolve(configured);
+    const windows = process.platform === 'win32';
+    // Native Python expands this with os.path.expanduser, which on Windows also accepts a backslash after "~".
+    if (key === 'AELIX_MCP_CONFIG' && (windows ? /^~(?:[\\/]|$)/ : /^~(?:\/|$)/).test(configured)) {
+      if (windows) {
+        const home = env.USERPROFILE ?? (env.HOMEPATH === undefined ? undefined : (env.HOMEDRIVE ?? '') + env.HOMEPATH);
+        if (home !== undefined) env[key] = path.win32.join(home, configured.slice(2));
+      } else {
+        env[key] = path.resolve(env.HOME || homedir(), configured.slice(2));
+      }
+    } else {
+      env[key] = path.resolve(configured);
+    }
   }
   return env;
 }
@@ -299,7 +382,7 @@ export class NativeResourcesService {
     const list = command.action === 'profiles/list' || command.action === 'selections/list';
     if (!(list && command.cursor) && this.active >= MAX_HELPERS) return { ok: false, code: 'BUSY' };
     const runtime = selectResourceRuntime(this.options.runtime);
-    const runtimeSeal = runtime && runtimeGeneration(runtime);
+    const runtimeSeal = runtime?.seal;
     if (!runtime || !runtimeSeal) {
       return { ok: false, code: list && command.cursor ? 'CURSOR_STALE' : 'RUNTIME_UNAVAILABLE' };
     }
@@ -338,7 +421,7 @@ export class NativeResourcesService {
     const pending = this.run(runtime, runtimeSeal, { ...env, STUDIO_RESOURCES_REVISION_KEY: seed }, command)
       .then((reply): NativeResourcesReply => {
         if (list && reply.ok) {
-          if (runtimeGeneration(runtime) !== runtimeSeal) return { ok: false, code: 'CURSOR_STALE' };
+          if (readResourceRuntime(runtime.root)?.seal !== runtimeSeal) return { ok: false, code: 'CURSOR_STALE' };
           return this.firstPage(command, context, store, reply.data, generation);
         }
         if (
@@ -459,7 +542,7 @@ export class NativeResourcesService {
     try {
       cwd = await mkdtemp(path.join(tmpdir(), 'studio-native-resources-'));
       if (this.disposed) return { ok: false, code: 'HELPER_UNAVAILABLE' };
-      if (runtimeGeneration(runtime) !== seal) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
+      if (readResourceRuntime(runtime.root)?.seal !== seal) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
       return await this.invoke(runtime, cwd, env, command);
     } catch {
       return { ok: false, code: 'HELPER_UNAVAILABLE' };
@@ -475,7 +558,7 @@ export class NativeResourcesService {
     command: NativeResourcesCommand
   ): Promise<NativeResourcesReply> {
     return new Promise((resolve) => {
-      const child = spawn(runtime.python, [...runtime.helperArgs, '-c', NATIVE_RESOURCES_HELPER], {
+      const child = spawn(runtime.python, [...runtime.helperArgs, '-c', HELPER_BOOTSTRAP], {
         cwd,
         env,
         stdio: ['pipe', 'pipe', 'ignore'],

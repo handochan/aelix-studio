@@ -9,6 +9,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
+import { gunzipSync, gzipSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeResourcesService } from './service.js';
 import fixture from './studio-7-d16-v1.json';
@@ -38,6 +39,36 @@ vi.mock('node:child_process', async (importOriginal) => {
     spawn: (...args: Parameters<typeof actual.spawn>) => {
       const implementation = mockSpawn.getMockImplementation();
       return implementation ? mockSpawn(...args) : actual.spawn(...args);
+    },
+  };
+});
+
+const manifestProbe = vi.hoisted(() => ({
+  path: undefined as string | undefined,
+  open: undefined as ((stage: 'before' | 'after') => void) | undefined,
+  bounded: 0,
+  unbounded: 0,
+}));
+vi.mock('node:fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return {
+    ...actual,
+    openSync: (...args: Parameters<typeof actual.openSync>) => {
+      if (args[0] !== manifestProbe.path) return actual.openSync(...args);
+      manifestProbe.bounded++;
+      manifestProbe.open?.('before');
+      const fd = actual.openSync(...args);
+      manifestProbe.open?.('after');
+      return fd;
+    },
+    readFileSync: (...args: Parameters<typeof actual.readFileSync>) => {
+      if (args[0] === manifestProbe.path) {
+        manifestProbe.unbounded++;
+        manifestProbe.open?.('before');
+        // A regression must fail the assertion without blocking on a FIFO.
+        throw new Error('Unbounded manifest read');
+      }
+      return actual.readFileSync(...args);
     },
   };
 });
@@ -81,6 +112,18 @@ function serve(result: (input: Record<string, unknown>) => unknown | Promise<unk
   });
 }
 
+// Decode the launch payload so the same seam can reproduce a bug in the raw-argv helper.
+function injectNative(real: typeof import('node:child_process'), edit: (source: string) => string): void {
+  mockSpawn.mockImplementation((file: string, args: string[], options: { cwd: string }) => {
+    const bootstrap = args.at(-1)!;
+    const encoded = /b64decode\('([a-z0-9+/=]+)'\)/i.exec(bootstrap)?.[1];
+    const source = encoded ? gunzipSync(Buffer.from(encoded, 'base64')).toString('utf8') : bootstrap;
+    const updated = edit(source);
+    const payload = encoded ? bootstrap.replace(encoded, gzipSync(updated).toString('base64')) : updated;
+    return real.spawn(file, [...args.slice(0, -1), payload], options);
+  });
+}
+
 describe('D16 global resources service', () => {
   let root: string;
   let runtime: string;
@@ -93,6 +136,7 @@ describe('D16 global resources service', () => {
   afterEach(async () => {
     service.dispose();
     mockSpawn.mockReset();
+    Object.assign(manifestProbe, { path: undefined, open: undefined, bounded: 0, unbounded: 0 });
     vi.useRealTimers();
     await rm(root, { recursive: true, force: true });
   });
@@ -304,6 +348,129 @@ describe('D16 global resources service', () => {
       expect(await service.request('owner', { ...command('helper-tools-next'), cursor: page.data.nextCursor })).toEqual(
         reply('helper-error-cursor_stale')
       );
+    }
+  );
+
+  it('invalidates a prepared cursor and revision seed after a package-only update', async () => {
+    const site = path.join(runtime, 'native', process.platform === 'win32' ? 'Lib' : 'lib/python3.12', 'site-packages');
+    const dist = path.join(site, 'aelix_coding_agent-0.1.dist-info');
+    await mkdir(dist, { recursive: true });
+    const record = path.join(dist, 'RECORD');
+    await writeFile(record, 'aelix_coding_agent/__init__.py,sha256=old,12\n');
+    await writeFile(
+      path.join(runtime, 'receipt.json'),
+      JSON.stringify({
+        target: `${process.platform}-${process.arch}`,
+        launcherSha256: createHash('sha256').update('').digest('hex'),
+      })
+    );
+    const first = reply('helper-tools-first').data!;
+    const next = reply('helper-tools-next').data!;
+    const seeds: string[] = [];
+    serve(() => {
+      seeds.push(mockSpawn.mock.lastCall![2].env.STUDIO_RESOURCES_REVISION_KEY);
+      return { ok: true, data: { ...first, items: [...(first.items as unknown[]), ...(next.items as unknown[])] } };
+    });
+    const page = await service.request('owner', command('helper-tools-first'));
+    if (page.ok === false) throw new Error(page.code);
+    await writeFile(record, 'aelix_coding_agent/__init__.py,sha256=new,12\n');
+    expect(await service.request('owner', { ...command('helper-tools-next'), cursor: page.data.nextCursor })).toEqual(
+      reply('helper-error-cursor_stale')
+    );
+    expect(await service.request('owner', command('helper-tools-first'))).toMatchObject({ ok: true });
+    expect(seeds[1]).not.toBe(seeds[0]);
+  });
+
+  it.each(['oversized', 'FIFO'])('rejects a manifest swapped for a %s file at open time', async (kind) => {
+    if (kind === 'FIFO' && process.platform === 'win32') return;
+    const manifest = path.join(runtime, 'manifest.json');
+    const replacement = path.join(runtime, 'replacement');
+    await writeFile(manifest, '{}');
+    if (kind === 'FIFO') {
+      await exec('mkfifo', [replacement]);
+    } else {
+      await writeFile(replacement, '{}');
+      await truncate(replacement, 1024 * 1024 + 1);
+    }
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    manifestProbe.path = manifest;
+    manifestProbe.open = (stage) => {
+      if (stage === 'before') fs.renameSync(replacement, manifest);
+    };
+    serve(() => reply('helper-skills'));
+    expect(await service.request('owner', command('helper-skills'))).toEqual(reply('helper-error-runtime_unavailable'));
+    expect({ bounded: manifestProbe.bounded, unbounded: manifestProbe.unbounded }).toEqual({
+      bounded: 1,
+      unbounded: 0,
+    });
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it.skipIf(process.platform === 'win32')('selects and seals a cached page from the same open manifest', async () => {
+    const manifest = path.join(runtime, 'manifest.json');
+    const replacement = path.join(runtime, 'replacement');
+    const bin = path.join(runtime, 'python', 'bin');
+    await mkdir(bin, { recursive: true });
+    await writeFile(path.join(bin, 'python3'), '');
+    await writeFile(path.join(runtime, 'launch.py'), '# launcher');
+    const digest = (value: string) => createHash('sha256').update(value).digest('hex');
+    await writeFile(
+      manifest,
+      JSON.stringify({
+        schema: 'aelix.studio-preview.runtime/1',
+        target: `${process.platform}-${process.arch}`,
+        recipeSha256: { 'launch.cjs': digest(''), 'launch.py': digest('# launcher') },
+      })
+    );
+    await writeFile(replacement, '{}');
+    const first = reply('helper-tools-first').data!;
+    const next = reply('helper-tools-next').data!;
+    serve(() => ({
+      ok: true,
+      data: { ...first, items: [...(first.items as unknown[]), ...(next.items as unknown[])] },
+    }));
+    const page = await service.request('owner', command('helper-tools-first'));
+    if (page.ok === false) throw new Error(page.code);
+    const follow = { ...command('helper-tools-next'), cursor: page.data.nextCursor };
+    const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+    manifestProbe.path = manifest;
+    manifestProbe.open = (stage) => {
+      if (stage === 'after') fs.renameSync(replacement, manifest);
+    };
+    expect(await service.request('owner', follow)).toEqual({ ok: true, data: next });
+    expect({ bounded: manifestProbe.bounded, unbounded: manifestProbe.unbounded }).toEqual({
+      bounded: 1,
+      unbounded: 0,
+    });
+    manifestProbe.open = undefined;
+    expect(await service.request('owner', follow)).toEqual(reply('helper-error-cursor_stale'));
+  });
+
+  it.each([
+    [{ USERPROFILE: 'C:\\Native', HOMEDRIVE: 'Z:', HOMEPATH: '\\Fallback' }, '~/mcp.json', 'C:\\Native\\mcp.json'],
+    [{ HOMEDRIVE: 'Z:', HOMEPATH: '\\Fallback' }, '~/mcp.json', 'Z:\\Fallback\\mcp.json'],
+    [{ USERPROFILE: 'C:\\Native' }, '~\\mcp.json', 'C:\\Native\\mcp.json'],
+  ] as const)(
+    'expands Windows MCP home from %j and %s while ignoring HOME',
+    async (windowsEnv, configured, expected) => {
+      await mkdir(path.join(runtime, 'native', 'Scripts'), { recursive: true });
+      await mkdir(path.join(runtime, 'adapter', 'Scripts'), { recursive: true });
+      await writeFile(path.join(runtime, 'native', 'Scripts', 'python.exe'), '');
+      await writeFile(path.join(runtime, 'adapter', 'Scripts', 'python.exe'), '');
+      const target = Object.getOwnPropertyDescriptor(process, 'platform')!;
+      Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+      const windows = new NativeResourcesService({
+        runtime,
+        env: { HOME: 'C:\\Wrong', AELIX_CODING_AGENT_DIR: 'C:\\Agent', AELIX_MCP_CONFIG: configured, ...windowsEnv },
+      });
+      try {
+        serve(() => reply('helper-global-readonly'));
+        expect(await windows.request('owner', command('helper-mcp'))).toEqual(reply('helper-global-readonly'));
+        expect(mockSpawn.mock.lastCall![2].env.AELIX_MCP_CONFIG).toBe(expected);
+      } finally {
+        windows.dispose();
+        Object.defineProperty(process, 'platform', target);
+      }
     }
   );
 
@@ -643,11 +810,7 @@ def traced_lock(*args):
     Path(${JSON.stringify(waiting)}).write_text("ready")
     return original_lock(*args)
 mcp_writer._platform_lock = traced_lock`;
-      mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
-        const source = args.at(-1)!;
-        const body = source.replace('def diagnostic(', seam + '\n\ndef diagnostic(');
-        return real.spawn(file, [...args.slice(0, -1), body], options);
-      });
+      injectNative(real, (source) => source.replace('def diagnostic(', seam + '\n\ndef diagnostic('));
       let pending: ReturnType<NativeResourcesService['request']> | undefined;
       try {
         await waitForFile(locked);
@@ -747,10 +910,7 @@ def retarget_then_load(self):
     return original_load(self)
 McpSelection._load = retarget_then_load
 `;
-    mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
-      const code = args.at(-1)!.replace('def diagnostic(', seam + '\ndef diagnostic(');
-      return real.spawn(file, [...args.slice(0, -1), code], options);
-    });
+    injectNative(real, (source) => source.replace('def diagnostic(', seam + '\ndef diagnostic('));
     expect(await service.request(owner, mcp)).toEqual(reply('helper-error-store_unreadable'));
   }, 90000);
 
@@ -867,21 +1027,12 @@ McpSelection._load = retarget_then_load
       // Fault-inject a native spawn in both paths. A working sentinel would create the marker.
       const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
       const injection = `import subprocess\n        subprocess.run(${JSON.stringify([python, ...sentinel])}, check=True)\n        `;
-      mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
-        return real.spawn(
-          file,
-          [
-            ...args.slice(0, -1),
-            args
-              .at(-1)!
-              .replace(
-                'if command["action"].startswith("profiles/"):',
-                injection + 'if command["action"].startswith("profiles/"):'
-              ),
-          ],
-          options
-        );
-      });
+      injectNative(real, (source) =>
+        source.replace(
+          'if command["action"].startswith("profiles/"):',
+          injection + 'if command["action"].startswith("profiles/"):'
+        )
+      );
       expect(await service.request(owner, tool)).toEqual(reply('helper-error-helper_unavailable'));
       expect(
         await service.request(owner, {
