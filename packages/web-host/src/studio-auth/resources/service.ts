@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { createHash, createHmac, randomBytes } from 'node:crypto';
-import { realpathSync, statSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import path from 'node:path';
 import { normalizeStudioAgentDir, selectNativeRuntime, type NativeRuntime } from '../runtime.js';
 import { NATIVE_RESOURCES_HELPER } from './helperSource.js';
@@ -19,6 +19,8 @@ const CATALOG_BYTES = 16 * 1024 * 1024;
 const CURSOR_TTL = 60000;
 const RECEIPT_TTL = 600000;
 const RECEIPT_CAPACITY = 256;
+const MAX_HELPERS = 4;
+const RUNTIME_METADATA_BYTES = 1024 * 1024;
 const SNAPSHOT_BUDGET = 32 * 1024 * 1024;
 const KINDS = new Set(['tool', 'skill', 'mcp']);
 const UUID_V7 = /^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -27,7 +29,7 @@ type List = Extract<NativeResourcesCommand, { action: 'profiles/list' | 'selecti
 type Receipt = { digest: string; expires: number; reply: Promise<NativeResourcesReply> };
 type Snapshot = {
   context: string;
-  catalog: string;
+  store: string;
   column: 'profiles' | 'items';
   header: Record<string, unknown>;
   rows: { value: Record<string, unknown>; bytes: number }[];
@@ -126,6 +128,95 @@ function runtimeIdentity(file: string): string {
   }
 }
 
+function runtimeFile(file: string): Buffer {
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+  try {
+    const info = fstatSync(fd);
+    const { size } = info;
+    if (!info.isFile() || size > RUNTIME_METADATA_BYTES) throw new Error('Invalid runtime metadata');
+    const buffer = Buffer.allocUnsafe(size + 1);
+    let length = 0;
+    while (length < buffer.length) {
+      const bytes = readSync(fd, buffer, length, buffer.length - length, null);
+      if (bytes === 0) break;
+      length += bytes;
+    }
+    if (length !== size) throw new Error('Runtime metadata changed while being read');
+    return buffer.subarray(0, length);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function selectResourceRuntime(explicit = process.env.AELIX_STUDIO_RUNTIME): NativeRuntime | undefined {
+  const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
+  const roots = explicit
+    ? [explicit]
+    : [...(resources ? [path.join(resources, 'studio-preview')] : []), '.local/studio-preview'];
+  for (const root of roots) {
+    // The shared native selector reads a bundled manifest. Refuse special or
+    // oversized files before delegating to that selector.
+    try {
+      const info = statSync(path.resolve(root, 'manifest.json'));
+      if (!info.isFile() || info.size > RUNTIME_METADATA_BYTES) continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') continue;
+    }
+    const selected = selectNativeRuntime(root);
+    if (selected) return selected;
+  }
+}
+
+/** The install recipe and launchers advance the binding even if Python is reused. */
+function runtimeGeneration(runtime: NativeRuntime): string | undefined {
+  const digest = (file: string) => createHash('sha256').update(runtimeFile(file)).digest('hex');
+  const metadata = path.join(runtime.root, runtime.acpArgs ? 'manifest.json' : 'receipt.json');
+  try {
+    const install = runtimeIdentity(path.dirname(runtime.python));
+    const launcher = digest(runtime.launcher);
+    const entry = runtime.acpArgs?.at(-2);
+    const entryDigest = entry ? digest(entry) : undefined;
+    let seal: Buffer;
+    try {
+      seal = runtimeFile(metadata);
+    } catch (error) {
+      if (entry || (error as NodeJS.ErrnoException).code !== 'ENOENT') return;
+      // Developer venvs have no build receipt. Bind their selected launcher and install directory.
+      return JSON.stringify([install, launcher]);
+    }
+    const manifest: unknown = JSON.parse(seal.toString('utf8'));
+    if (!record(manifest) || manifest.target !== `${process.platform}-${process.arch}`) return;
+    if (entry) {
+      const recipe = manifest.recipeSha256;
+      if (
+        manifest.schema !== 'aelix.studio-preview.runtime/1' ||
+        !record(recipe) ||
+        recipe['launch.cjs'] !== launcher ||
+        recipe['launch.py'] !== entryDigest
+      )
+        return;
+    } else if (manifest.launcherSha256 !== launcher) {
+      return;
+    }
+    return JSON.stringify([install, createHash('sha256').update(seal).digest('hex'), launcher, entryDigest]);
+  } catch {
+    return;
+  }
+}
+
+function launchEnvironment(source: NodeJS.ProcessEnv, root: string): NodeJS.ProcessEnv {
+  const env = { ...source, AELIX_CODING_AGENT_DIR: root } as NodeJS.ProcessEnv;
+  for (const key of ['AELIX_SETTINGS_PATH', 'AELIX_MCP_CONFIG', 'AELIX_AUTH_PATH', 'XDG_CONFIG_HOME'] as const) {
+    const configured = env[key];
+    if (!configured) continue;
+    env[key] =
+      key === 'AELIX_MCP_CONFIG' && (configured === '~' || configured.startsWith('~/'))
+        ? path.resolve(env.HOME || env.USERPROFILE || homedir(), configured.slice(2))
+        : path.resolve(configured);
+  }
+  return env;
+}
+
 const bytesOf = (value: unknown) => Buffer.byteLength(JSON.stringify(value));
 const unknownOutcome = (): NativeResourcesReply => ({ ok: false, code: 'OUTCOME_UNKNOWN', retryable: false });
 
@@ -174,7 +265,8 @@ export class NativeResourcesService {
   private readonly snapshots = new Set<Snapshot>();
   private readonly cursors = new Map<string, { snapshot: Snapshot; offset: number }>();
   private readonly children = new Set<ReturnType<typeof spawn>>();
-  private generation = 0;
+  private readonly generations = new Map<string, number>();
+  private active = 0;
   private disposed = false;
 
   constructor(private readonly options: { runtime?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number } = {}) {}
@@ -204,22 +296,36 @@ export class NativeResourcesService {
       if (this.receipts.size >= RECEIPT_CAPACITY) return { ok: false, code: 'DEDUP_CAPACITY' };
     }
 
-    const runtime = selectNativeRuntime(this.options.runtime);
     const list = command.action === 'profiles/list' || command.action === 'selections/list';
-    if (!runtime) return { ok: false, code: list && command.cursor ? 'CURSOR_STALE' : 'RUNTIME_UNAVAILABLE' };
+    if (!(list && command.cursor) && this.active >= MAX_HELPERS) return { ok: false, code: 'BUSY' };
+    const runtime = selectResourceRuntime(this.options.runtime);
+    const runtimeSeal = runtime && runtimeGeneration(runtime);
+    if (!runtime || !runtimeSeal) {
+      return { ok: false, code: list && command.cursor ? 'CURSOR_STALE' : 'RUNTIME_UNAVAILABLE' };
+    }
     const root = normalizeStudioAgentDir(this.options.env);
-    const env = this.options.env ?? process.env;
-    const store = JSON.stringify([
-      canonical(runtime.root),
-      canonical(path.dirname(runtime.python)),
-      runtimeIdentity(runtime.python),
-      canonical(root),
-      env.AELIX_SETTINGS_PATH,
-      env.AELIX_MCP_CONFIG,
-    ]);
+    const env = launchEnvironment(this.options.env ?? process.env, root);
     const filter = 'kind' in command ? command.kind : 'profiles';
-    const catalog = JSON.stringify([store, filter]);
-    const context = JSON.stringify([owner, catalog]);
+    const configured =
+      filter === 'profiles'
+        ? root
+        : filter === 'mcp'
+          ? env.AELIX_MCP_CONFIG || path.join(root, 'mcp.json')
+          : env.AELIX_SETTINGS_PATH || path.join(root, 'settings.json');
+    const store = JSON.stringify([
+      filter === 'tool' || filter === 'skill' ? 'settings' : filter,
+      canonical(configured),
+    ]);
+    const context = JSON.stringify([
+      owner,
+      filter,
+      store,
+      canonical(root),
+      configured,
+      canonical(runtime.root),
+      runtimeIdentity(runtime.python),
+      runtimeSeal,
+    ]);
     if (list && command.cursor) {
       const cursor = this.cursors.get(command.cursor);
       if (cursor?.snapshot.context !== context) return { ok: false, code: 'CURSOR_STALE' };
@@ -227,28 +333,30 @@ export class NativeResourcesService {
     }
 
     const seed = createHmac('sha256', this.secret).update(context).digest('hex');
-    const generation = this.generation;
-    const pending = this.run(runtime, root, seed, command).then((reply): NativeResourcesReply => {
-      if (list && reply.ok) return this.firstPage(command, context, catalog, reply.data, generation);
-      if (
-        mutation &&
-        ((reply.ok && reply.data.revision !== command.expectedRevision) ||
-          (reply.ok === false && ['REVISION_CONFLICT', 'OUTCOME_UNKNOWN'].includes(reply.code)))
-      ) {
-        this.generation++;
-        for (const snapshot of this.snapshots) {
-          if (
-            snapshot.catalog === catalog ||
-            (command.kind !== 'mcp' &&
-              snapshot.catalog === JSON.stringify([store, command.kind === 'tool' ? 'skill' : 'tool']))
-          ) {
-            this.clearSnapshot(snapshot);
+    const generation = this.generations.get(store) ?? 0;
+    this.active++;
+    const pending = this.run(runtime, runtimeSeal, { ...env, STUDIO_RESOURCES_REVISION_KEY: seed }, command)
+      .then((reply): NativeResourcesReply => {
+        if (list && reply.ok) {
+          if (runtimeGeneration(runtime) !== runtimeSeal) return { ok: false, code: 'CURSOR_STALE' };
+          return this.firstPage(command, context, store, reply.data, generation);
+        }
+        if (
+          mutation &&
+          ((reply.ok && reply.data.revision !== command.expectedRevision) ||
+            (reply.ok === false && ['REVISION_CONFLICT', 'OUTCOME_UNKNOWN'].includes(reply.code)))
+        ) {
+          this.generations.set(store, (this.generations.get(store) ?? 0) + 1);
+          for (const snapshot of this.snapshots) {
+            if (snapshot.store === store) this.clearSnapshot(snapshot);
           }
         }
-      }
-      if (bytesOf(reply) <= RESPONSE_BYTES) return reply;
-      return mutation ? unknownOutcome() : { ok: false, code: 'RESULT_TOO_LARGE' };
-    });
+        if (bytesOf(reply) <= RESPONSE_BYTES) return reply;
+        return mutation ? unknownOutcome() : { ok: false, code: 'RESULT_TOO_LARGE' };
+      })
+      .finally(() => {
+        this.active--;
+      });
     if (mutation) {
       const receipt = { digest, expires: Infinity, reply: pending };
       this.receipts.set(id, receipt);
@@ -267,7 +375,7 @@ export class NativeResourcesService {
   private firstPage(
     command: List,
     context: string,
-    catalog: string,
+    store: string,
     data: Record<string, unknown>,
     generation: number
   ): NativeResourcesReply {
@@ -286,7 +394,7 @@ export class NativeResourcesService {
     rows.sort((a, b) => Buffer.compare(a.key, b.key));
     const snapshot: Snapshot = {
       context,
-      catalog,
+      store,
       column,
       header,
       rows,
@@ -297,7 +405,7 @@ export class NativeResourcesService {
     };
     const reply = this.page(snapshot, 0);
     if (reply.ok && reply.data.nextCursor !== null) {
-      if (this.disposed || generation !== this.generation) {
+      if (this.disposed || generation !== (this.generations.get(store) ?? 0)) {
         this.clearSnapshot(snapshot);
         return { ok: false, code: 'CURSOR_STALE' };
       }
@@ -343,25 +451,15 @@ export class NativeResourcesService {
 
   private async run(
     runtime: NativeRuntime,
-    root: string,
-    seed: string,
+    seal: string,
+    env: NodeJS.ProcessEnv,
     command: NativeResourcesCommand
   ): Promise<NativeResourcesReply> {
     let cwd: string | undefined;
     try {
       cwd = await mkdtemp(path.join(tmpdir(), 'studio-native-resources-'));
       if (this.disposed) return { ok: false, code: 'HELPER_UNAVAILABLE' };
-      const env: NodeJS.ProcessEnv = {
-        ...(this.options.env ?? process.env),
-        AELIX_CODING_AGENT_DIR: root,
-        STUDIO_RESOURCES_REVISION_KEY: seed,
-      };
-      // Anchor explicit relative CLI overrides before entering the project-free directory.
-      for (const key of ['AELIX_SETTINGS_PATH', 'AELIX_MCP_CONFIG', 'AELIX_AUTH_PATH', 'XDG_CONFIG_HOME'] as const) {
-        const configured = env[key];
-        if (configured && !(key === 'AELIX_MCP_CONFIG' && (configured === '~' || configured.startsWith('~/'))))
-          env[key] = path.resolve(configured);
-      }
+      if (runtimeGeneration(runtime) !== seal) return { ok: false, code: 'RUNTIME_UNAVAILABLE' };
       return await this.invoke(runtime, cwd, env, command);
     } catch {
       return { ok: false, code: 'HELPER_UNAVAILABLE' };
@@ -440,6 +538,7 @@ export class NativeResourcesService {
     for (const child of this.children) child.kill('SIGKILL');
     for (const snapshot of this.snapshots) this.clearSnapshot(snapshot);
     this.receipts.clear();
+    this.generations.clear();
   }
 }
 

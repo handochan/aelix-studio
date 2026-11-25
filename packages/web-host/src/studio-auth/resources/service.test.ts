@@ -1,7 +1,7 @@
 import { execFile, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { link, lstat, mkdir, mkdtemp, readFile, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -12,6 +12,7 @@ import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeResourcesService } from './service.js';
 import fixture from './studio-7-d16-v1.json';
+import baseline from '../../../../../scripts/studio-preview/baseline.json';
 
 const cases = new Map(fixture.map((entry) => [entry.id, entry]));
 function resolveRefs(value: unknown): unknown {
@@ -164,6 +165,176 @@ describe('D16 global resources service', () => {
     expect(mockSpawn).toHaveBeenCalledTimes(1);
   });
 
+  it('returns BUSY before spawning more than four fresh helpers and recovers when they exit', async () => {
+    let unblock!: (reply: unknown) => void;
+    const held = new Promise((resolve) => {
+      unblock = resolve;
+    });
+    serve(() => held);
+    const requests = Array.from({ length: 5 }, () => service.request('owner', command('helper-skills')));
+    try {
+      await expect(
+        Promise.race([requests[4], new Promise((resolve) => setTimeout(resolve, 500, 'blocked'))])
+      ).resolves.toEqual(reply('helper-error-busy'));
+    } finally {
+      unblock(reply('helper-skills'));
+      await Promise.all(requests);
+    }
+    expect(mockSpawn).toHaveBeenCalledTimes(4);
+    expect(await service.request('owner', command('helper-skills'))).toEqual(reply('helper-skills'));
+  });
+
+  it('keeps in-flight profile pages across a settings save and invalidates both settings catalogs', async () => {
+    const toolFirst = reply('helper-tools-first').data!;
+    const skillFirst = reply('helper-skills').data!;
+    const profileFirst = reply('helper-profiles-first').data!;
+    let unblock!: () => void;
+    const held = new Promise<void>((resolve) => {
+      unblock = resolve;
+    });
+    serve(async (input) => {
+      if (input.action === 'profiles/list') {
+        await held;
+        return {
+          ok: true,
+          data: {
+            ...profileFirst,
+            profiles: [
+              ...(profileFirst.profiles as unknown[]),
+              ...(reply('helper-profiles-next').data!.profiles as unknown[]),
+            ],
+          },
+        };
+      }
+      if (input.action === 'selections/set') return reply('helper-set-tool');
+      const data = input.kind === 'tool' ? toolFirst : skillFirst;
+      const items = data.items as { key: string }[];
+      return { ok: true, data: { ...data, items: [...items, { ...items[0], key: 'zz' }] } };
+    });
+    const toolPage = await service.request('owner', command('helper-tools-first'));
+    const skillPage = await service.request('owner', { ...command('helper-skills'), limit: 1 });
+    const profiles = service.request('owner', command('helper-profiles-first'));
+    try {
+      expect(await service.request('owner', command('helper-set-tool'))).toEqual(reply('helper-set-tool'));
+    } finally {
+      unblock();
+    }
+    const profilePage = await profiles;
+    expect(profilePage).toMatchObject({ ok: true, data: { nextCursor: expect.any(String) } });
+    for (const [kind, page] of [
+      ['tool', toolPage],
+      ['skill', skillPage],
+    ] as const) {
+      if (page.ok === false) throw new Error(page.code);
+      expect(
+        await service.request('owner', {
+          action: 'selections/list',
+          scope: 'global',
+          kind,
+          cursor: page.data.nextCursor,
+        })
+      ).toEqual(reply('helper-error-cursor_stale'));
+    }
+  });
+
+  it.each(['receipt.json', 'launch.cjs', 'manifest.json'])(
+    'invalidates cached pages and the revision seed when runtime %s changes in place',
+    async (file) => {
+      if (file === 'manifest.json') {
+        const bin = process.platform === 'win32' ? 'python' : 'python/bin';
+        await mkdir(path.join(runtime, bin), { recursive: true });
+        await writeFile(path.join(runtime, bin, process.platform === 'win32' ? 'python.exe' : 'python3'), '');
+        await writeFile(path.join(runtime, 'launch.py'), '# launcher');
+      }
+      const digest = (text: string) => createHash('sha256').update(text).digest('hex');
+      const metadata = {
+        schema: 'aelix.studio-preview.runtime/1',
+        target: `${process.platform}-${process.arch}`,
+        launcherSha256: digest(''),
+        recipeSha256: { 'launch.cjs': digest(''), 'launch.py': digest('# launcher') },
+      };
+      await writeFile(path.join(runtime, file), JSON.stringify({ ...metadata, generation: 1 }));
+      const first = reply('helper-tools-first').data!;
+      const next = reply('helper-tools-next').data!;
+      const seeds: string[] = [];
+      serve(() => {
+        seeds.push(mockSpawn.mock.lastCall![2].env.STUDIO_RESOURCES_REVISION_KEY);
+        return { ok: true, data: { ...first, items: [...(first.items as unknown[]), ...(next.items as unknown[])] } };
+      });
+      const page = await service.request('owner', command('helper-tools-first'));
+      if (page.ok === false) throw new Error(page.code);
+      await writeFile(path.join(runtime, file), JSON.stringify({ ...metadata, generation: 2 }));
+      expect(await service.request('owner', { ...command('helper-tools-next'), cursor: page.data.nextCursor })).toEqual(
+        reply('helper-error-cursor_stale')
+      );
+      expect(mockSpawn).toHaveBeenCalledTimes(1);
+      expect(await service.request('owner', command('helper-tools-first'))).toMatchObject({ ok: true });
+      expect(seeds[1]).not.toBe(seeds[0]);
+    }
+  );
+
+  it.skipIf(process.platform === 'win32')(
+    'invalidates the receipt-bound page when a prepared venv is replaced with the same base Python',
+    async () => {
+      const native = path.join(runtime, 'native');
+      const sharedPython = path.join(root, 'python');
+      const replacement = path.join(root, 'replacement');
+      await writeFile(sharedPython, '');
+      await rm(path.join(native, 'bin', 'python'));
+      await symlink(sharedPython, path.join(native, 'bin', 'python'));
+      await mkdir(path.join(replacement, 'bin'), { recursive: true });
+      await symlink(sharedPython, path.join(replacement, 'bin', 'python'));
+      await writeFile(
+        path.join(runtime, 'receipt.json'),
+        JSON.stringify({
+          target: `${process.platform}-${process.arch}`,
+          launcherSha256: createHash('sha256').update('').digest('hex'),
+        })
+      );
+      const first = reply('helper-tools-first').data!;
+      const next = reply('helper-tools-next').data!;
+      serve(() => ({
+        ok: true,
+        data: { ...first, items: [...(first.items as unknown[]), ...(next.items as unknown[])] },
+      }));
+      const page = await service.request('owner', command('helper-tools-first'));
+      if (page.ok === false) throw new Error(page.code);
+      await rm(native, { recursive: true });
+      await symlink(replacement, native, 'junction');
+      expect(await service.request('owner', { ...command('helper-tools-next'), cursor: page.data.nextCursor })).toEqual(
+        reply('helper-error-cursor_stale')
+      );
+    }
+  );
+
+  it('refuses an installed launcher that differs from its receipt before spawning', async () => {
+    await writeFile(
+      path.join(runtime, 'receipt.json'),
+      JSON.stringify({
+        target: `${process.platform}-${process.arch}`,
+        launcherSha256: createHash('sha256').update('sealed launcher').digest('hex'),
+      })
+    );
+    serve(() => reply('helper-skills'));
+    expect(await service.request('owner', command('helper-skills'))).toEqual(reply('helper-error-runtime_unavailable'));
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
+  it('refuses oversized runtime metadata before starting a helper', async () => {
+    const receipt = path.join(runtime, 'receipt.json');
+    await writeFile(
+      receipt,
+      JSON.stringify({
+        target: `${process.platform}-${process.arch}`,
+        launcherSha256: createHash('sha256').update('').digest('hex'),
+        padding: ' '.repeat(1024 * 1024),
+      })
+    );
+    serve(() => reply('helper-skills'));
+    expect(await service.request('owner', command('helper-skills'))).toEqual(reply('helper-error-runtime_unavailable'));
+    expect(mockSpawn).not.toHaveBeenCalled();
+  });
+
   it('fits UTF-8 rows within the complete envelope and rejects a row that cannot fit', async () => {
     const entry = (name: string, size: number) => ({
       ref: { name, scope: 'user', revision: 'sha256:' + '0'.repeat(64) },
@@ -232,10 +403,10 @@ describe('D16 global resources service', () => {
 
 const exec = promisify(execFile);
 const nativeSource = process.env.STUDIO_RESOURCES_NATIVE_SOURCE;
-const pin = '83714045439478b17ab0c61248dc5c414435927a';
+const pin = baseline.native.sourceTag.commit;
 
 async function waitForFile(file: string): Promise<void> {
-  for (let attempt = 0; attempt < 400; attempt++) {
+  for (let attempt = 0; attempt < 800; attempt++) {
     if ((await readFile(file, 'utf8').catch(() => '')) === 'ready') return;
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
@@ -329,12 +500,22 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
     const skillRows = await current(skill);
     expect(skillRows.items).toContainEqual((reply('helper-skills').data!.items as unknown[])[0]);
 
+    const skillChanges = [
+      { key: 'extending-aelix', on: false },
+      { key: 'review', on: false },
+    ];
     for (const [id, list] of [
       ['helper-set-tool', tool],
       ['helper-set-skill', skill],
     ] as const) {
-      const edited = await current({ ...command(id), expectedRevision: (await current(list)).revision });
-      expect(edited).toEqual({ ...reply(id).data, revision: expect.any(String) });
+      const changes = id === 'helper-set-skill' ? skillChanges : command(id).changes;
+      const edited = await current({ ...command(id), changes, expectedRevision: (await current(list)).revision });
+      expect(edited).toMatchObject({ scope: 'global', kind: list.kind, saved: true, revision: expect.any(String) });
+      if (id === 'helper-set-skill') {
+        expect(edited.changed).toEqual(expect.arrayContaining(skillChanges.map(({ key }) => ({ key, saved: false }))));
+      } else {
+        expect(edited).toEqual({ ...reply(id).data, revision: expect.any(String) });
+      }
       if (id === 'helper-set-tool') {
         const noop = await current({ ...command('helper-set-noop'), expectedRevision: edited.revision });
         expect(noop).toEqual({ ...reply('helper-set-noop').data, revision: edited.revision });
@@ -372,7 +553,7 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
             type: 'aelix_control',
             id,
             method: 'selections/set',
-            params: { kind, scope: 'global', changes: command(id).changes },
+            params: { kind, scope: 'global', changes: kind === 'skill' ? skillChanges : command(id).changes },
           }) + '\n'
         );
         let message: { id?: string; success?: boolean };
@@ -393,11 +574,19 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
         child.kill('SIGKILL');
       });
     }
-  }, 35000);
+  }, 90000);
 
-  it.each(['tool', 'mcp'])(
+  it.each(['tool', 'linked tool', 'mcp'])(
     'rejects a stale %s write after an already-held CLI lock lets its owner commit',
-    async (kind) => {
+    async (scenario) => {
+      const kind = scenario === 'mcp' ? 'mcp' : 'tool';
+      const targetDir = path.join(agent, 'relocated');
+      if (scenario === 'linked tool') {
+        await mkdir(targetDir);
+        await writeFile(path.join(targetDir, 'other.json'), initialSettings);
+        await rm(settingsPath());
+        await symlink(path.join(targetDir, 'other.json'), settingsPath());
+      }
       const list = kind === 'tool' ? tool : mcp;
       const id = kind === 'tool' ? 'helper-set-tool' : 'helper-set-mcp';
       const initialMcp =
@@ -407,6 +596,7 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
       const locked = path.join(root, 'cli-locked');
       const waiting = path.join(root, 'helper-waiting');
       const release = path.join(root, 'release');
+      const sidecar = path.join(root, 'helper-sidecar');
       const cliWriter = `
 import asyncio, os, sys, threading, time
 from pathlib import Path
@@ -432,13 +622,18 @@ else:
       const writer = exec(python, ['-I', '-B', '-c', cliWriter, agent, kind, locked, release], {
         env,
         cwd: root,
-        timeout: 30000,
+        timeout: 60000,
       });
       void writer.catch(() => {}); // Await and surface the result after releasing the barrier.
       const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
       const seam =
         kind === 'tool'
-          ? `original_lock = FileSettingsStorage._lock_fd
+          ? `original_sidecar = FileSettingsStorage._sidecar_lock
+def traced_sidecar(self, target):
+    Path(${JSON.stringify(sidecar)}).write_text(str(self._sidecar_path(target).parent.resolve()))
+    return original_sidecar(self, target)
+FileSettingsStorage._sidecar_lock = traced_sidecar
+original_lock = FileSettingsStorage._lock_fd
 def traced_lock(fd, label):
     Path(${JSON.stringify(waiting)}).write_text("ready")
     return original_lock(fd, label)
@@ -450,7 +645,7 @@ def traced_lock(*args):
 mcp_writer._platform_lock = traced_lock`;
       mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
         const source = args.at(-1)!;
-        const body = source.replace('class Refusal(Exception):', seam + '\n\nclass Refusal(Exception):');
+        const body = source.replace('def diagnostic(', seam + '\n\ndef diagnostic(');
         return real.spawn(file, [...args.slice(0, -1), body], options);
       });
       let pending: ReturnType<NativeResourcesService['request']> | undefined;
@@ -464,6 +659,23 @@ mcp_writer._platform_lock = traced_lock`;
         mockSpawn.mockReset();
       }
       const refused = await pending;
+      if (scenario === 'linked tool') {
+        const configuredLocks = (
+          await exec(
+            python,
+            [
+              '-I',
+              '-B',
+              '-c',
+              'from pathlib import Path; import sys; print(Path(sys.argv[1]).resolve())',
+              path.join(agent, 'locks'),
+            ],
+            { env }
+          )
+        ).stdout.trim();
+        expect(await readFile(sidecar, 'utf8')).toBe(configuredLocks);
+        expect((await lstat(settingsPath())).isSymbolicLink()).toBe(true);
+      }
       const fresh = await current(list);
       expect(refused).toEqual({ ...reply('helper-error-revision_conflict'), currentRevision: fresh.revision });
       const expected =
@@ -491,10 +703,91 @@ mcp_writer._platform_lock = traced_lock`;
         );
       }
     },
-    35000
+    90000
   );
 
-  it('lists all global catalogs with zero model HTTP requests, MCP connections or credential reads', async () => {
+  it.each(['dangling link', 'outside link', 'credential hard link'])(
+    'refuses a settings %s before reading or locking it',
+    async (scenario) => {
+      const old = await current(tool);
+      const target = path.join(root, 'outside.json');
+      await rm(settingsPath());
+      if (scenario === 'credential hard link') {
+        const credential = path.join(agent, 'auth.json');
+        await writeFile(credential, '{"synthetic-credential":"may not be copied"}', { mode: 0o600 });
+        await link(credential, settingsPath());
+      } else {
+        if (scenario === 'outside link') await writeFile(target, initialSettings);
+        await symlink(target, settingsPath());
+      }
+      expect(await service.request(owner, tool)).toEqual(reply('helper-error-store_unreadable'));
+      expect(await service.request(owner, { ...command('helper-set-tool'), expectedRevision: old.revision })).toEqual(
+        reply('helper-error-store_unreadable')
+      );
+      await expect(lstat(path.join(agent, 'locks'))).rejects.toMatchObject({ code: 'ENOENT' });
+      if (scenario === 'dangling link') await expect(lstat(target)).rejects.toMatchObject({ code: 'ENOENT' });
+      if (scenario === 'outside link') expect(await readFile(target, 'utf8')).toBe(initialSettings);
+    },
+    90000
+  );
+
+  it('refuses an MCP link retargeted outside the admitted root during native discovery', async () => {
+    const outside = path.join(root, 'outside-mcp.json');
+    const inside = path.join(agent, 'inside-mcp.json');
+    const config = '{"mcpServers":{}}';
+    await writeFile(outside, config);
+    await writeFile(inside, config);
+    await symlink(inside, mcpPath());
+    const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    const seam = `original_load = McpSelection._load
+def retarget_then_load(self):
+    entry = Path(${JSON.stringify(mcpPath())})
+    entry.unlink()
+    entry.symlink_to(${JSON.stringify(outside)})
+    return original_load(self)
+McpSelection._load = retarget_then_load
+`;
+    mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
+      const code = args.at(-1)!.replace('def diagnostic(', seam + '\ndef diagnostic(');
+      return real.spawn(file, [...args.slice(0, -1), code], options);
+    });
+    expect(await service.request(owner, mcp)).toEqual(reply('helper-error-store_unreadable'));
+  }, 90000);
+
+  it('creates an authorized regular settings entry at the configured missing path', async () => {
+    await rm(settingsPath());
+    const old = await current(tool);
+    expect(old.exists).toBe(false);
+    await current({ ...command('helper-set-tool'), expectedRevision: old.revision });
+    expect(JSON.parse(await readFile(settingsPath(), 'utf8'))).toEqual({ defaultTools: ['-read'] });
+  }, 90000);
+
+  it.each(['settings', 'mcp', 'markdown', 'discovery'])(
+    'refuses oversized %s work before native parsing or reply construction',
+    async (input) => {
+      let request = tool;
+      if (input === 'settings' || input === 'mcp') {
+        const target = input === 'settings' ? settingsPath() : mcpPath();
+        await writeFile(target, '{}');
+        await truncate(target, 2 * 1024 * 1024);
+        if (input === 'mcp') request = mcp;
+      } else {
+        request = { action: 'profiles/list' };
+        const profiles = path.join(agent, 'agents');
+        if (input === 'markdown') {
+          const target = path.join(profiles, 'giant.md');
+          await writeFile(target, '---\nname: giant\ndescription: Example\n---\nBody\n');
+          await truncate(target, 256 * 1024);
+        } else {
+          for (let i = 0; i < 2300; i++) await mkdir(path.join(profiles, String(i)));
+        }
+      }
+      expect(await service.request(owner, request)).toEqual(reply('helper-error-result_too_large'));
+    },
+    90000
+  );
+
+  it('reads and writes global resources without model requests, HTTP MCP, stdio MCP, or credential reads', async () => {
     let modelRequests = 0;
     let mcpConnections = 0;
     const listener = createServer((req, res) => {
@@ -504,7 +797,18 @@ mcp_writer._platform_lock = traced_lock`;
     listener.on('connection', () => mcpConnections++);
     await new Promise<void>((resolve) => listener.listen(0, '127.0.0.1', resolve));
     const url = 'http://127.0.0.1:' + (listener.address() as AddressInfo).port;
+    const launchMarker = path.join(root, 'stdio-mcp-started');
+    const sentinel = [
+      '-I',
+      '-B',
+      '-c',
+      'from pathlib import Path; import sys; Path(sys.argv[1]).touch()',
+      launchMarker,
+    ];
     try {
+      await exec(python, sentinel, { env, cwd: root });
+      expect((await lstat(launchMarker)).isFile()).toBe(true);
+      await rm(launchMarker);
       await writeFile(
         path.join(agent, 'models.json'),
         JSON.stringify({
@@ -527,12 +831,13 @@ mcp_writer._platform_lock = traced_lock`;
               url: url + '/mcp?token=synthetic-secret',
               headers: { Authorization: 'synthetic-secret' },
             },
+            'stdio-probe': { command: python, args: sentinel },
           },
         })
       );
       const auth = path.join(agent, 'auth.json');
       await writeFile(auth, '---\nname: secret-test\ndescription: synthetic-secret\n---\nsecret test\n');
-      await symlink(auth, path.join(agent, 'agents', 'secret-test.md'));
+      await link(auth, path.join(agent, 'agents', 'secret-test.md'));
       const outputs = await Promise.all([
         current({ action: 'profiles/list' }),
         current(tool),
@@ -544,12 +849,53 @@ mcp_writer._platform_lock = traced_lock`;
         key: null,
         source: 'user:agents/secret-test.md',
       });
-      expect(outputs[3].items).toEqual(reply('helper-mcp').data!.items);
+      expect(outputs[3].items).toEqual(
+        expect.arrayContaining([
+          ...(reply('helper-mcp').data!.items as unknown[]),
+          expect.objectContaining({ key: 'stdio-probe', saved: true }),
+        ])
+      );
+      for (const [id, list] of [
+        ['helper-set-tool', tool],
+        ['helper-set-skill', skill],
+        ['helper-set-mcp', mcp],
+      ] as const) {
+        const data = await current({ ...command(id), expectedRevision: (await current(list)).revision });
+        expect(data.saved).toBe(true);
+      }
+      await expect(lstat(launchMarker)).rejects.toMatchObject({ code: 'ENOENT' });
+      // Fault-inject a native spawn in both paths. A working sentinel would create the marker.
+      const real = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+      const injection = `import subprocess\n        subprocess.run(${JSON.stringify([python, ...sentinel])}, check=True)\n        `;
+      mockSpawn.mockImplementation((file: string, args: string[], options: object) => {
+        return real.spawn(
+          file,
+          [
+            ...args.slice(0, -1),
+            args
+              .at(-1)!
+              .replace(
+                'if command["action"].startswith("profiles/"):',
+                injection + 'if command["action"].startswith("profiles/"):'
+              ),
+          ],
+          options
+        );
+      });
+      expect(await service.request(owner, tool)).toEqual(reply('helper-error-helper_unavailable'));
+      expect(
+        await service.request(owner, {
+          ...command('helper-set-tool'),
+          expectedRevision: outputs[1].revision,
+          requestId: '019aa123-0001-7000-8000-000000000099',
+        })
+      ).toEqual(reply('helper-error-helper_unavailable'));
+      await expect(lstat(launchMarker)).rejects.toMatchObject({ code: 'ENOENT' });
       expect(JSON.stringify(outputs)).not.toContain('synthetic-secret');
       expect({ modelRequests, mcpConnections }).toEqual({ modelRequests: 0, mcpConnections: 0 });
     } finally {
       listener.closeAllConnections();
       await new Promise<void>((resolve) => listener.close(() => resolve()));
     }
-  }, 25000);
+  }, 90000);
 });

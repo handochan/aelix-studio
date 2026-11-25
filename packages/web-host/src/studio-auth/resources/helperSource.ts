@@ -4,6 +4,7 @@ import asyncio
 import contextlib
 import hashlib
 import hmac
+import io
 import json
 import os
 import stat
@@ -16,20 +17,54 @@ ROOT = Path(os.environ["AELIX_CODING_AGENT_DIR"])
 CWD = os.getcwd()
 SEED = bytes.fromhex(os.environ["STUDIO_RESOURCES_REVISION_KEY"])
 HOME = Path.home()
-AUTH_PATHS = {path.resolve() for path in (
+STORE_BYTES = 1024 * 1024
+MARKDOWN_BYTES = 128 * 1024
+DISCOVERY_BYTES = 8 * 1024 * 1024
+CATALOG_BYTES = 16 * 1024 * 1024
+DISCOVERY_ENTRIES = 2048
+SELECTION_ENTRIES = 1024
+
+class Refusal(Exception):
+    def __init__(self, code, **detail):
+        self.reply = dict(ok=False, code=code, **detail)
+
+AUTH_PATHS = [
     ROOT / "auth.json", HOME / ".aelix/agent/auth.json", HOME / ".config/aelix/agent/auth.json",
     Path(os.environ.get("XDG_CONFIG_HOME") or HOME / ".config") / "aelix/agent/auth.json",
-)}
+]
 if os.environ.get("AELIX_AUTH_PATH"):
-    AUTH_PATHS.add(Path(os.environ["AELIX_AUTH_PATH"]).resolve())
+    AUTH_PATHS.append(Path(os.environ["AELIX_AUTH_PATH"]))
+AUTH_NAMES = {path.resolve() for path in AUTH_PATHS}
 
-def protect_credentials(event, args):
+def identity(info):
+    return info.st_dev, info.st_ino
+
+def file_info(path):
+    try:
+        return path.stat()
+    except FileNotFoundError:
+        return None
+
+def credential_identities():
+    return {identity(info) for name in AUTH_PATHS if (info := file_info(name)) is not None}
+
+STARTUP_CREDENTIALS = credential_identities()
+
+def credential(info):
+    return info is not None and (identity(info) in STARTUP_CREDENTIALS or
+        (info.st_nlink > 1 and identity(info) in credential_identities()))
+
+def protect_native_io(event, args):
+    if event in ("subprocess.Popen", "os.posix_spawn", "os.system", "os.exec", "os.spawn", "os.fork"):
+        raise Refusal("HELPER_UNAVAILABLE")
     if event == "open" and isinstance(args[0], (str, bytes)):
-        if Path(os.fsdecode(args[0])).resolve() in AUTH_PATHS:
+        real = Path(os.fsdecode(args[0])).resolve()
+        info = file_info(real) if STARTUP_CREDENTIALS else None
+        if real in AUTH_NAMES or (info is not None and identity(info) in STARTUP_CREDENTIALS):
             raise PermissionError("credential store is outside native resource discovery")
 
-# Discovery follows file symlinks, so enforce the boundary before native opens.
-sys.addaudithook(protect_credentials)
+# Native discovery follows links. Recheck credential identities at each open.
+sys.addaudithook(protect_native_io)
 with contextlib.redirect_stdout(sys.stderr):
     from aelix_ai.settings.settings_manager import Settings, SettingsManager, SettingsFileError
     from aelix_ai.settings.storage import FileSettingsStorage
@@ -45,31 +80,108 @@ with contextlib.redirect_stdout(sys.stderr):
     from aelix_coding_agent.core.tool_selection import DefaultToolsGrammar, EditRefused
     from aelix_coding_agent.tools import ALL_TOOL_NAMES
 
-class Refusal(Exception):
-    def __init__(self, code, **detail):
-        self.reply = dict(ok=False, code=code, **detail)
-
+# Native APIs above are bound before dispatch.
 def diagnostic(code, key=None, source=None):
     return dict(code=code, key=key, source=source)
 
-def raw_file(path):
-    # A store can be absent. A special file, bad link, or read error cannot stand in for absence.
+def resolve_entry(path):
+    """Resolve an existing entry or an ordinary missing suffix; reject dangling links."""
     try:
-        resolved = path.resolve(strict=True)
+        return path.resolve(strict=True)
+    except FileNotFoundError:
+        if path != path.parent:
+            try:
+                path.lstat()
+            except FileNotFoundError:
+                return resolve_entry(path.parent) / path.name
+        raise Refusal("STORE_UNREADABLE") from None
+    except (OSError, RuntimeError):
+        raise Refusal("STORE_UNREADABLE") from None
+
+def admit_store(path, anchor):
+    real = resolve_entry(path)
+    root = resolve_entry(anchor)
+    try:
+        info = file_info(real)
+    except OSError:
+        raise Refusal("STORE_UNREADABLE") from None
+    if (real == root or not real.is_relative_to(root) or real in AUTH_NAMES or
+            (info is not None and (not stat.S_ISREG(info.st_mode) or credential(info)))):
+        raise Refusal("STORE_UNREADABLE")
+    return real
+
+def bounded_read(stream, info, limit):
+    if not stat.S_ISREG(info.st_mode) or credential(info):
+        raise PermissionError("file outside native resource discovery")
+    if info.st_size > limit:
+        raise Refusal("RESULT_TOO_LARGE")
+    data = stream.read(limit + 1)
+    if len(data) > limit:
+        raise Refusal("RESULT_TOO_LARGE")
+    return data
+
+def raw_file(path, limit=STORE_BYTES, follow=True):
+    try:
+        real = path.resolve(strict=True) if follow else path
+        before = real.lstat()
     except FileNotFoundError:
         return None, None
-    if resolved in AUTH_PATHS or not resolved.is_file():
-        raise Refusal("STORE_UNREADABLE")
+    if not stat.S_ISREG(before.st_mode) or credential(before):
+        raise PermissionError("file outside native resource discovery")
     flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_BINARY", 0)
-    with os.fdopen(os.open(resolved, flags), "rb") as stream:
+    with os.fdopen(os.open(real, flags), "rb") as stream:
         info = os.fstat(stream.fileno())
-        if not stat.S_ISREG(info.st_mode):
+        if identity(info) != identity(before):
             raise Refusal("STORE_UNREADABLE")
-        return stream.read(), info
+        return bounded_read(stream, info, limit), info
 
-def store_version(path, source):
-    real = path.resolve()
-    data, info = raw_file(real)
+@contextlib.contextmanager
+def bounded_discovery(limit=MARKDOWN_BYTES, store=None):
+    """Meter the native scanners' actual directory iteration and file reads."""
+    iterdir, read_bytes, read_text = Path.iterdir, Path.read_bytes, Path.read_text
+    scanned, total = 0, 0
+
+    def entries(directory):
+        nonlocal scanned
+        with os.scandir(directory) as children:
+            for child in children:
+                scanned += 1
+                if scanned > DISCOVERY_ENTRIES:
+                    raise Refusal("RESULT_TOO_LARGE")
+                yield directory / child.name
+
+    def content(path):
+        nonlocal total
+        if store is not None and resolve_entry(path) != store:
+            raise Refusal("STORE_UNREADABLE")
+        data, _ = raw_file(store or path, min(limit, DISCOVERY_BYTES - total), follow=store is None)
+        if data is None:
+            raise FileNotFoundError
+        total += len(data)
+        return data
+
+    def text(path, encoding=None, errors=None, newline=None):
+        value = content(path).decode(encoding or "utf-8", errors or "strict")
+        return value.replace("\r\n", "\n").replace("\r", "\n") if newline is None else value
+
+    try:
+        Path.iterdir, Path.read_bytes, Path.read_text = entries, content, text
+        yield content
+    finally:
+        Path.iterdir, Path.read_bytes, Path.read_text = iterdir, read_bytes, read_text
+
+def read_mcp_fd(fd):
+    with os.fdopen(fd, "rb", closefd=False) as stream:
+        return bounded_read(stream, os.fstat(fd), STORE_BYTES)
+
+# The pinned writer also rechecks the saved bytes immediately before replacement.
+mcp_writer._read_all = read_mcp_fd
+
+def store_version(real, source):
+    try:
+        data, info = raw_file(real, follow=False)
+    except OSError:
+        raise Refusal("STORE_UNREADABLE") from None
     return data, revision_for(real, source, data, info)
 
 def revision_for(real, source, data, info):
@@ -91,7 +203,7 @@ def display_name(name):
 def safe_int(value):
     return value if value is not None and 0 <= value < 2**53 else None
 
-def profiles(command):
+def profiles(command, content):
     discovered = discover_profiles(CWD, project_trusted=False, agent_dir=str(ROOT))
     dirs = {"user": ROOT / "agents", "bundled": builtin_agents_dir()}
 
@@ -112,15 +224,15 @@ def profiles(command):
         path = Path(original.file_path)
         try:
             actual = path.resolve(strict=True)
-            raw, _ = raw_file(actual)
-            text = raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else ""
-        except (OSError, UnicodeError, Refusal):
+            raw = content(actual)
+            text = text_of(raw)
+        except (OSError, UnicodeError):
             diagnostics.append(diagnostic("invalid-profile", source=source(path, original.scope)))
             continue
         # Bind the public ref and the preview to the same bytes even if the discovery read raced an edit.
         result = parse_profile(text, file_path=str(path), scope=original.scope)
         parsed = result.profile
-        if parsed is None or parsed.name != original.name or raw is None:
+        if parsed is None or parsed.name != original.name:
             diagnostics.append(diagnostic("invalid-profile", source=source(path, original.scope)))
             continue
         prefix = "\0".join(("studio-profile/1", parsed.scope, actual.as_uri(), "")).encode()
@@ -189,37 +301,67 @@ def text_of(raw):
 
 class GuardedSettings(FileSettingsStorage):
     """Use edit_list's native transaction and capture the exact, locked revisions."""
-    def __init__(self, path, guard):
-        super().__init__(CWD, ROOT, global_path=path.resolve())
-        self.selection_path = path
+    def __init__(self, path, anchor, guard):
+        super().__init__(CWD, ROOT, global_path=path)
+        self.anchor = anchor
         self.guard = guard
         self.committed = False
         self.revision = None
+        self.locked = None
+
+    def selection(self):
+        return admit_store(self.global_path, self.anchor)
+
+    def target(self, scope):
+        return self.locked if self.locked is not None else super().target(scope)
+
+    @contextlib.contextmanager
+    def _sidecar_lock(self, path):
+        # Native keys the sidecar to the target but puts it beside the configured entry.
+        sidecar = self._sidecar_path(path)
+        parent = resolve_entry(self.global_path.parent)
+        real = admit_store(sidecar, self.global_path.parent)
+        info = file_info(real)
+        if real != parent / "locks" / sidecar.name or (info is not None and info.st_nlink != 1):
+            raise Refusal("STORE_UNREADABLE")
+        with super()._sidecar_lock(path):
+            self.check_target(path)
+            yield
+
+    def check_target(self, path):
+        current = self.selection()
+        if current != path:
+            raise Refusal("REVISION_CONFLICT", currentRevision=store_version(current, "settings")[1])
 
     def _read_text_strict(self, path):
-        return text_of(raw_file(path)[0])
+        return text_of(raw_file(path, follow=False)[0])
 
     def transact(self, scope, build):
-        locked = self.target(scope)
+        self.locked = self.selection()
         def checked(current):
-            raw, current_revision = store_version(locked, "settings")
-            if self.selection_path.resolve() != locked or text_of(raw) != current:
-                raise Refusal("REVISION_CONFLICT", currentRevision=store_version(self.selection_path, "settings")[1])
+            self.check_target(self.locked)
+            raw, current_revision = store_version(self.locked, "settings")
+            if text_of(raw) != current:
+                raise Refusal("REVISION_CONFLICT", currentRevision=current_revision)
             self.revision = current_revision
             self.guard(current, current_revision)
             return build(current)
-        super().transact(scope, checked)
+        try:
+            super().transact(scope, checked)
+        finally:
+            self.locked = None
 
     def _write_text_atomic(self, path, payload):
-        if self.selection_path.resolve() != path:
-            raise Refusal("REVISION_CONFLICT", currentRevision=store_version(self.selection_path, "settings")[1])
+        self.check_target(path)
+        if len(payload.encode("utf-8")) > STORE_BYTES:
+            raise Refusal("RESULT_TOO_LARGE")
         try:
             super()._write_text_atomic(path, payload)
         except OSError:
             raise Refusal("SAVE_FAILED") from None
         self.committed = True
         data, self.revision = store_version(path, "settings")
-        if self.selection_path.resolve() != path or data != payload.encode("utf-8"):
+        if self.selection() != path or data != payload.encode("utf-8"):
             raise Refusal("OUTCOME_UNKNOWN", retryable=False)
 
 def writable_store(target):
@@ -231,25 +373,33 @@ def writable_store(target):
 def settings(command):
     kind = command["kind"]
     key = "defaultTools" if kind == "tool" else "skills"
-    path = Path(os.environ["AELIX_SETTINGS_PATH"]) if os.environ.get("AELIX_SETTINGS_PATH") else ROOT / "settings.json"
+    override = os.environ.get("AELIX_SETTINGS_PATH")
+    path = Path(override) if override else ROOT / "settings.json"
+    anchor = path.parent if override else ROOT
     base = str(path.parent)
     grammar = DefaultToolsGrammar(ALL_TOOL_NAMES) if kind == "tool" else grammar_of(None)
     mutation = command["action"] == "selections/set"
     wanted, before, after = [], [], []
     items = {}
+    candidates, diagnostics = [], []
 
     def view(entries):
+        nonlocal candidates, diagnostics
+        if isinstance(entries, list) and len(entries) > SELECTION_ENTRIES:
+            raise Refusal("RESULT_TOO_LARGE")
         valid, problems = grammar.validate(entries)
         selections = ScopeList("global", tuple(valid or ()), base, present=valid is not None)
-        diagnostics = [diagnostic("invalid-settings-entry")] if problems else []
-        if kind == "tool":
+        if not candidates:
+            diagnostics = [diagnostic("invalid-settings-entry")] if problems else []
+        if not candidates and kind == "tool":
             candidates = [ResourceItem(kind=kind, key=name, label=name, identities=(name,)) for name in sorted(ALL_TOOL_NAMES)]
-        else:
-            catalog = load_skill_catalog([
-                SkillSource("global", str(ROOT / "skills")),
-                SkillSource("global", str(user_agents_skills_dir()), agents=True),
-                SkillSource("bundled", str(packaged_skills_dir())),
-            ], SettingsLists(selections))
+        elif not candidates:
+            with bounded_discovery():
+                catalog = load_skill_catalog([
+                    SkillSource("global", str(ROOT / "skills")),
+                    SkillSource("global", str(user_agents_skills_dir()), agents=True),
+                    SkillSource("bundled", str(packaged_skills_dir())),
+                ], SettingsLists(selections))
             candidates = [ResourceItem(kind=kind, key=s.name, label=s.name, identities=(s.name,),
                 path=s.file_path, scope=catalog.origins[s.file_path].tier,
                 source_base=catalog.origins[s.file_path].directory) for s in catalog.discovered]
@@ -269,10 +419,11 @@ def settings(command):
     def guard(current, revision):
         nonlocal items, before, wanted
         check_revision(command, revision)
-        if not writable_store(path.resolve()):
+        if not writable_store(store.selection()):
             raise Refusal("SCOPE_READONLY")
         items, before, _ = view(get_entries(current))
-        wanted = edits_for(command, before)
+        # ResourceSelection.save puts the edited scope's own rows first, stably.
+        wanted = sorted(edits_for(command, before), key=lambda edit: items[edit[0]].scope != "global")
 
     def edit(entries):
         nonlocal after
@@ -281,14 +432,14 @@ def settings(command):
         _, after, _ = view(entries)
         return entries
 
-    store = GuardedSettings(path, guard)
-    data, revision = store_version(path, "settings")
+    store = GuardedSettings(path, anchor, guard)
+    data, revision = store_version(store.selection(), "settings")
     # This manager only supplies the CLI's parser and list editor. Its regular
     # constructor can be used without loading either settings file (the transaction reads the disk).
     manager = SettingsManager(store, Settings(), Settings(), project_trusted=False)
     try:
         if mutation:
-            if not writable_store(path.resolve()):
+            if not writable_store(store.selection()):
                 check_revision(command, revision)
                 raise Refusal("SCOPE_READONLY")
             asyncio.run(manager.edit_list("global", key, edit, nullable=grammar.nullable))
@@ -297,25 +448,33 @@ def settings(command):
         if raw is not None and (not isinstance(raw, list) or any(not isinstance(e, str) for e in raw)):
             raise Refusal("STORE_UNREADABLE")
         _, rows, diagnostics = view(raw)
-        return listing(kind, revision, data is not None, rows, diagnostics, None if writable_store(path.resolve()) else "read-only")
+        return listing(kind, revision, data is not None, rows, diagnostics, None if writable_store(store.selection()) else "read-only")
     except (SettingsFileError, UnicodeError):
         raise Refusal("STORE_UNREADABLE") from None
     except EditRefused:
         raise Refusal("SAVE_FAILED") from None
     except TimeoutError:
         raise Refusal("BUSY") from None
-    except OSError:
+    except (OSError, Refusal) as error:
         if store.committed:
             raise Refusal("OUTCOME_UNKNOWN", retryable=False) from None
+        if isinstance(error, Refusal):
+            raise
         raise Refusal("STORE_UNREADABLE") from None
 
 def mcp(command):
     selection = McpSelection(CWD, str(ROOT), False)
     kind = McpKind()
 
+    def admit(here):
+        if here.source not in ("global", "env"):
+            raise Refusal("SCOPE_READONLY")
+        return admit_store(here.path, ROOT if here.source == "global" else here.path.parent)
+
     def snapshot():
         here = selection._in_force()
-        data, revision = store_version(here.path, here.source)
+        real = admit(here)
+        data, revision = store_version(real, here.source)
         if data is not None:
             try:
                 raw = mcp_writer._parse(mcp_writer._decode(data))
@@ -323,8 +482,11 @@ def mcp(command):
                 raise Refusal("STORE_UNREADABLE") from None
             if not isinstance(raw, dict) or not isinstance(raw.get("mcpServers"), dict):
                 raise Refusal("STORE_UNREADABLE")
-        loaded = selection._load()
-        if loaded.here != here or store_version(here.path, here.source)[1] != revision:
+            if len(raw["mcpServers"]) > SELECTION_ENTRIES:
+                raise Refusal("RESULT_TOO_LARGE")
+        with bounded_discovery(STORE_BYTES, real):
+            loaded = selection._load()
+        if loaded.here != here or admit(here) != real or store_version(real, here.source)[1] != revision:
             raise Refusal("BUSY")
         if here.source == "env":
             return here, listing("mcp", revision, data is not None, [], [diagnostic("env-config")], "env-config"), {}
@@ -359,12 +521,13 @@ def mcp(command):
     if not mutation:
         return snapshot()[1]
     here = selection._in_force()
+    real = admit(here)
     committed = False
     abandoned = threading.Event()
     # This is the same native lock and the same byte-preserving writer as write_enabled.
     # Take the snapshot, compare the revision, write and observe the commit before releasing it.
     try:
-        if here.source != "global" or not Path(here.real).parent.is_dir():
+        if here.source != "global" or real != Path(here.real) or not real.is_file():
             _, before, _ = snapshot()
             check_revision(command, before["revision"])
             raise Refusal("SCOPE_READONLY")
@@ -381,8 +544,10 @@ def mcp(command):
                 info, data = mcp_writer._read_checked(here.real, label)
                 check_revision(command, revision_for(Path(here.real), here.source, data, info))
                 new = mcp_writer.edit_enabled(data, wanted)
-                if selection._in_force() != here:
+                if selection._in_force() != here or admit(here) != real:
                     raise Refusal("REVISION_CONFLICT", currentRevision=snapshot()[1]["revision"])
+                if len(new) > STORE_BYTES:
+                    raise Refusal("RESULT_TOO_LARGE")
                 if new != data:
                     mcp_writer._replace_file(here.real, label, info, data, new, abandoned)
                     committed = True
@@ -406,7 +571,8 @@ def mcp(command):
 def main(command):
     try:
         if command["action"].startswith("profiles/"):
-            data = profiles(command)
+            with bounded_discovery() as content:
+                data = profiles(command, content)
         elif command["kind"] == "mcp":
             data = mcp(command)
         else:
@@ -414,6 +580,8 @@ def main(command):
         return dict(ok=True, data=data)
     except Refusal as error:
         return error.reply
+    except RecursionError:
+        return dict(ok=False, code="RESULT_TOO_LARGE")
     except (OSError, UnicodeError):
         if command["action"] == "selections/list":
             return dict(ok=False, code="STORE_UNREADABLE")
@@ -423,5 +591,17 @@ def main(command):
 with contextlib.redirect_stdout(sys.stderr):
     request = json.loads(sys.stdin.buffer.readline(60002))
     reply = main(request)
-print(json.dumps(reply, ensure_ascii=True, allow_nan=False, separators=(",", ":")), flush=True)
+# Bound encoding as well: Markdown can reuse the same long YAML scalar many times.
+encoder = json.JSONEncoder(ensure_ascii=True, allow_nan=False, separators=(",", ":"))
+with io.StringIO() as frame:
+    for part in encoder.iterencode(reply):
+        if frame.tell() + len(part) >= CATALOG_BYTES:
+            if request["action"] == "selections/set" and reply["ok"]:
+                print('{"ok":false,"code":"OUTCOME_UNKNOWN","retryable":false}', flush=True)
+            else:
+                print('{"ok":false,"code":"RESULT_TOO_LARGE"}', flush=True)
+            break
+        frame.write(part)
+    else:
+        print(frame.getvalue(), flush=True)
 `;
