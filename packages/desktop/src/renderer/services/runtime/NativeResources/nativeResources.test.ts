@@ -727,7 +727,7 @@ describe('binding and revision changes during reconciliation', () => {
 });
 
 describe('wire compatibility and limits', () => {
-  it('keeps a safe unlisted 404 code and treats malformed 404 as an error', async () => {
+  it('keeps a safe unlisted 404 code and reports malformed 404 as invalid-response', async () => {
     enqueue(response({ success: false, code: 'CONVERSATION_ARCHIVED', error: 'private details' }, 404));
     enqueue(new Response('unexpected payload', { status: 404 }));
     expect(await session().discover()).toEqual({
@@ -736,7 +736,7 @@ describe('wire compatibility and limits', () => {
       action: 'refresh',
       retryWrite: false,
     });
-    expect(await session().discover()).toMatchObject({ status: 'error', reason: 'http/404' });
+    expect(await session().discover()).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
   });
 
   it('limits the H1 response envelope by UTF-8 bytes before accepting it', async () => {
@@ -829,6 +829,13 @@ describe('review regressions', () => {
       payload: { requestId: report.requestId },
     });
     expect(fetcher).toHaveBeenCalledTimes(4);
+  });
+
+  it.each(['discovery', 'list'])('reports a malformed H1 %s reply as invalid-response', async (operation) => {
+    if (operation === 'list') await attach();
+    enqueue(response({ success: true, code: 'EXT_METHOD_DENIED', error: 'fixture' }, 403));
+    const result = operation === 'discovery' ? await session().discover() : await session().listProfiles();
+    expect(result).toEqual(fixture('renderer-errors', '/invalidReadReply/dto'));
   });
 
   it('preserves the original binding for lookup when a stale-binding code has the wrong HTTP status', async () => {
