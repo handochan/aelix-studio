@@ -589,7 +589,20 @@ async function waitForFile(file: string): Promise<void> {
   throw new Error('Native lock probe did not reach its barrier');
 }
 
-describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned native end-to-end', () => {
+const onWindows = process.platform === 'win32';
+
+/** Give another principal write access: POSIX mode bits, or a Windows ACE for Users or Everyone. */
+async function openToOthers(directory: string, mode: '0775' | '0770' | '0757'): Promise<void> {
+  if (!onWindows) {
+    await exec('chmod', [mode, directory]);
+    return;
+  }
+  // BUILTIN\Users for group write, Everyone for world write.
+  const principal = mode === '0757' ? '*S-1-1-0' : '*S-1-5-32-545';
+  await exec('icacls', [directory, '/grant', `${principal}:(OI)(CI)M`]);
+}
+
+describe.skipIf(!nativeSource)('isolated pinned native end-to-end', () => {
   let root: string;
   let agent: string;
   let env: NodeJS.ProcessEnv;
@@ -620,7 +633,7 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
     const source = path.resolve(nativeSource!);
     expect((await exec('git', ['-C', source, 'rev-parse', 'HEAD'])).stdout.trim()).toBe(pin);
     const venv = path.join(source, '.venv');
-    python = path.join(venv, 'bin', 'python');
+    python = onWindows ? path.join(venv, 'Scripts', 'python.exe') : path.join(venv, 'bin', 'python');
     runtime = await preparedRuntime(root, venv);
     env = {
       HOME: home,
@@ -629,6 +642,15 @@ describe.skipIf(!nativeSource || process.platform === 'win32')('isolated pinned 
       AELIX_CODING_AGENT_DIR: agent,
       PATH: process.env.PATH,
       PI_OFFLINE: '1',
+      // Windows Python needs these for Winsock, randomness and temporary files.
+      ...(onWindows
+        ? {
+            SYSTEMROOT: process.env.SYSTEMROOT,
+            WINDIR: process.env.WINDIR,
+            TEMP: process.env.TEMP,
+            TMP: process.env.TMP,
+          }
+        : {}),
     };
     service = new NativeResourcesService({ runtime, env });
     await writeFile(settingsPath(), initialSettings);
@@ -912,7 +934,7 @@ mcp_writer._platform_lock = traced_lock`;
         kind === 'group-writable settings ancestor' ? path.join(relocated, 'settings.json') : settingsPath();
       if (kind === 'group-writable lock') {
         await mkdir(sidecar);
-        await exec('chmod', ['0775', sidecar]);
+        await openToOthers(sidecar, '0775');
       } else if (kind === 'linked lock') {
         const outside = path.join(root, 'redirect');
         await mkdir(outside);
@@ -921,9 +943,9 @@ mcp_writer._platform_lock = traced_lock`;
         await mkdir(relocated, { mode: 0o700 });
         await rename(settingsPath(), target);
         await symlink(target, settingsPath());
-        await exec('chmod', ['0770', relocated]);
+        await openToOthers(relocated, '0770');
       } else {
-        await exec('chmod', ['0757', agent]);
+        await openToOthers(agent, '0757');
       }
       const old = await current(tool);
       expect(old).toMatchObject({ writable: false, reason: 'read-only' });
@@ -938,7 +960,8 @@ mcp_writer._platform_lock = traced_lock`;
     90000
   );
 
-  it.each([
+  // The user-private-group rule reads POSIX NSS; Windows uses owner and DACL checks instead.
+  it.skipIf(onWindows).each([
     ['private group', {}, true],
     ['private group across an NSS miss after the replacement', { nssDownAfterReplace: true }, true],
     ['shared group', { members: ['other'] }, false],
@@ -1056,8 +1079,10 @@ if config["acl"]:
     expect(old).toMatchObject({ exists: false, writable: true });
     await current({ ...command('helper-set-tool'), expectedRevision: old.revision });
     expect(JSON.parse(await readFile(settingsPath(), 'utf8'))).toEqual({ defaultTools: ['-read'] });
-    expect((await lstat(agent)).mode & 0o777).toBe(0o700);
-    expect((await lstat(path.join(agent, 'locks'))).mode & 0o777).toBe(0o700);
+    if (!onWindows) {
+      expect((await lstat(agent)).mode & 0o777).toBe(0o700);
+      expect((await lstat(path.join(agent, 'locks'))).mode & 0o777).toBe(0o700);
+    }
   }, 90000);
 
   it.each(['lock-open', 'lock-leaf', 'settings-ancestor', 'after-replace', 'same-bytes substitution'])(

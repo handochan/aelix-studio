@@ -321,13 +321,20 @@ def text_of(raw):
     return raw.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n") if raw is not None else None
 
 @cache
-def windows_user():
+def windows_owners():
+    """The token user, and the default owner it gives new objects.
+
+    An elevated administrator's token owns what it creates as BUILTIN\Administrators,
+    which the DACL check already trusts.
+    """
     import win32api
     import win32con
     import win32security
     token = win32security.OpenProcessToken(win32api.GetCurrentProcess(), win32con.TOKEN_QUERY)
     try:
-        return win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+        user = win32security.GetTokenInformation(token, win32security.TokenUser)[0]
+        default = win32security.GetTokenInformation(token, win32security.TokenOwner)
+        return {win32security.ConvertSidToStringSid(user), win32security.ConvertSidToStringSid(default)}
     finally:
         token.Close()
 
@@ -387,13 +394,13 @@ def private_directory(path, info):
             and (not info.st_mode & stat.S_IWGRP or (not posix_acl(path) and private_group(info.st_gid))))
     try:
         import win32security as security
-        owner = windows_user()
+        owners = windows_owners()
         descriptor = security.GetNamedSecurityInfo(str(path), security.SE_FILE_OBJECT,
             security.OWNER_SECURITY_INFORMATION | security.DACL_SECURITY_INFORMATION)
         acl = descriptor.GetSecurityDescriptorDacl()
-        if descriptor.GetSecurityDescriptorOwner() != owner or acl is None:
+        if security.ConvertSidToStringSid(descriptor.GetSecurityDescriptorOwner()) not in owners or acl is None:
             return False
-        trusted = {security.ConvertSidToStringSid(owner), "S-1-5-18", "S-1-5-32-544"}
+        trusted = owners | {"S-1-5-18", "S-1-5-32-544"}
         for index in range(acl.GetAceCount()):
             ace = acl.GetAce(index)
             kind, flags = ace[0]
@@ -428,8 +435,10 @@ def opened_id(fd):
 #      is resolved once to its real path, so a dotfile-style link to the root is
 #      allowed. Below that resolved root, the lock directory and every settings
 #      directory must be real directories (no link, junction or reparse point).
-#      The resolved root and those directories must be owned by this user and
-#      not writable by others. Group write is allowed only for this user's
+#      The resolved root and those directories must be owned by this user (on
+#      Windows, the token user or its default owner) and not writable by others
+#      (on Windows, no write ACE for anyone but those, SYSTEM and Administrators).
+#      Group write is allowed only for this user's
 #      private group: the user's primary gid, named after the user, with no
 #      other supplementary member and no other account's primary group, and no
 #      Linux POSIX access ACL (Debian's umask 002 layout). NSS answers are cached
