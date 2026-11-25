@@ -873,7 +873,9 @@
       "skills": "사용 중인 스킬: {{skills}}",
       "inherit": "상속된 도구 사용",
       "selectNone": "모두 해제",
-      "save": "이 대화에 저장"
+      "save": "이 대화에 저장",
+      "listChanged": "편집하는 동안 도구 목록이 바뀌었습니다. 저장하기 전에 선택을 확인하세요.",
+      "discard": "변경 취소"
     },
     "scope": {
       "bundled": "내장",
@@ -961,7 +963,8 @@
       "profileRefused": "Aelix가 이 프로필을 거부했습니다.",
       "writeFailed": "변경 사항을 저장하지 못했습니다.",
       "profileFailed": "프로필을 적용하지 못했습니다.",
-      "toolsFailed": "도구를 저장하지 못했습니다."
+      "toolsFailed": "도구를 저장하지 못했습니다.",
+      "toolsInherited": "이 대화는 이제 상속된 도구를 사용합니다."
     },
     "change": {
       "title": "프로필이 바뀌었습니다",

@@ -371,6 +371,36 @@ describe('Aelix conversation controls: tools', () => {
     expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.none`);
   });
 
+  it('keeps an unsaved draft when the list is read again and says the list changed', async () => {
+    const view = render(<Harness />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+
+    state.activeTools = ['read', 'write'];
+    view.rerender(<Harness hostState='unknown' />);
+    await settle();
+    view.rerender(<Harness hostState='idle' />);
+    await settle();
+
+    expect(screen.getByTestId('aelix-tools-list-changed')).toHaveTextContent(`${K}.tools.listChanged`);
+    fireEvent.click(screen.getByTestId('aelix-tools-save'));
+    await settle();
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
+  });
+
+  it('confirms inherited tools with a tools notice, not a profile notice', async () => {
+    state.toolOverride = ['read'];
+    render(<Harness />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET]);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
+  });
+
   it('shows saved, applied and live state with lock reasons and pending rows', async () => {
     replies.set(SELECTIONS, ({ kind }) => {
       if (kind !== 'tool') return relay(fixture('selections-list-skill', '/result'));

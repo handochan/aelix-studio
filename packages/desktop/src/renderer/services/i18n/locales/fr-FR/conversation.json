@@ -873,7 +873,9 @@
       "skills": "Compétences utilisées : {{skills}}",
       "inherit": "Utiliser les outils hérités",
       "selectNone": "Ne rien sélectionner",
-      "save": "Enregistrer pour cette conversation"
+      "save": "Enregistrer pour cette conversation",
+      "listChanged": "La liste des outils a changé pendant la modification. Vérifiez votre sélection avant d'enregistrer.",
+      "discard": "Annuler mes modifications"
     },
     "scope": {
       "bundled": "Intégré",
@@ -961,7 +963,8 @@
       "profileRefused": "Aelix a refusé ce profil.",
       "writeFailed": "La modification n'a pas pu être enregistrée.",
       "profileFailed": "Le profil n'a pas pu être appliqué.",
-      "toolsFailed": "Les outils n'ont pas pu être enregistrés."
+      "toolsFailed": "Les outils n'ont pas pu être enregistrés.",
+      "toolsInherited": "Cette conversation utilise maintenant les outils hérités."
     },
     "change": {
       "title": "Ce profil a changé",

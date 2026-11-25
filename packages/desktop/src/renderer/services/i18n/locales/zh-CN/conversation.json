@@ -873,7 +873,9 @@
       "skills": "正在使用的技能：{{skills}}",
       "inherit": "使用继承的工具",
       "selectNone": "全部取消",
-      "save": "保存到本对话"
+      "save": "保存到本对话",
+      "listChanged": "编辑期间工具列表已更改。保存前请检查你的选择。",
+      "discard": "放弃我的更改"
     },
     "scope": {
       "bundled": "内置",
@@ -961,7 +963,8 @@
       "profileRefused": "Aelix 拒绝了此配置。",
       "writeFailed": "无法保存更改。",
       "profileFailed": "无法应用配置。",
-      "toolsFailed": "无法保存工具。"
+      "toolsFailed": "无法保存工具。",
+      "toolsInherited": "本对话现在使用继承的工具。"
     },
     "change": {
       "title": "此配置已更改",

@@ -873,7 +873,9 @@
       "skills": "使用中のスキル: {{skills}}",
       "inherit": "継承したツールを使う",
       "selectNone": "すべて解除",
-      "save": "この会話に保存"
+      "save": "この会話に保存",
+      "listChanged": "編集中にツール一覧が変わりました。保存前に選択を確認してください。",
+      "discard": "変更を破棄"
     },
     "scope": {
       "bundled": "同梱",
@@ -961,7 +963,8 @@
       "profileRefused": "Aelix がこのプロファイルを拒否しました。",
       "writeFailed": "変更を保存できませんでした。",
       "profileFailed": "プロファイルを適用できませんでした。",
-      "toolsFailed": "ツールを保存できませんでした。"
+      "toolsFailed": "ツールを保存できませんでした。",
+      "toolsInherited": "この会話は継承したツールを使うようになりました。"
     },
     "change": {
       "title": "このプロファイルは変更されています",

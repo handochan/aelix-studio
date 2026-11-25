@@ -875,7 +875,9 @@
       "skills": "Kullanılan beceriler: {{skills}}",
       "inherit": "Devralınan araçları kullan",
       "selectNone": "Hiçbirini seçme",
-      "save": "Bu sohbet için kaydet"
+      "save": "Bu sohbet için kaydet",
+      "listChanged": "Siz düzenlerken araç listesi değişti. Kaydetmeden önce seçiminizi gözden geçirin.",
+      "discard": "Değişikliklerimi at"
     },
     "scope": {
       "bundled": "Paketle gelen",
@@ -963,7 +965,8 @@
       "profileRefused": "Aelix bu profili reddetti.",
       "writeFailed": "Değişiklik kaydedilemedi.",
       "profileFailed": "Profil uygulanamadı.",
-      "toolsFailed": "Araçlar kaydedilemedi."
+      "toolsFailed": "Araçlar kaydedilemedi.",
+      "toolsInherited": "Bu sohbet artık devralınan araçları kullanıyor."
     },
     "change": {
       "title": "Bu profil değişti",

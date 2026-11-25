@@ -84,8 +84,10 @@ export type AelixSessionControls = {
   openPanel: (panel: ControlsPanel | null) => void;
   refresh: () => Promise<void>;
   inspect: (name: string) => Promise<void>;
-  applyProfile: (ref: ProfileRef | null) => Promise<void>;
-  saveTools: (names: readonly string[]) => Promise<void>;
+  /** `inheritTools` marks a profile write made to return this conversation's tools to inherited. */
+  applyProfile: (ref: ProfileRef | null, options?: { inheritTools?: boolean }) => Promise<void>;
+  /** Resolves true only when the runtime accepted the selection. */
+  saveTools: (names: readonly string[]) => Promise<boolean>;
   reselect: () => Promise<void>;
   keepCurrent: () => void;
   restore: (choice: RestoreChoice) => Promise<void>;
@@ -452,7 +454,7 @@ export function useAelixSessionControls({
   );
 
   const applyProfileWith = useCallback(
-    async (ref: ProfileRef | null, before: Baseline, reselected = false) => {
+    async (ref: ProfileRef | null, before: Baseline, reselected = false, done?: ControlsNotice) => {
       const target = sessionRef.current;
       const capabilities = writable();
       if (!target || !capabilities) return;
@@ -465,9 +467,10 @@ export function useAelixSessionControls({
         'profile',
         report.outcome,
         before,
-        ref
-          ? { tone: 'success', key: 'profileApplied', values: { name: ref.name } }
-          : { tone: 'success', key: 'profileCleared' },
+        done ??
+          (ref
+            ? { tone: 'success', key: 'profileApplied', values: { name: ref.name } }
+            : { tone: 'success', key: 'profileCleared' }),
         reselected
       );
       if (report.outcome.status === 'success') patch(target, { preview: undefined, previewName: null });
@@ -476,7 +479,13 @@ export function useAelixSessionControls({
   );
 
   const applyProfile = useCallback(
-    (ref: ProfileRef | null) => applyProfileWith(ref, baseline()),
+    (ref: ProfileRef | null, options?: { inheritTools?: boolean }) =>
+      applyProfileWith(
+        ref,
+        baseline(),
+        false,
+        options?.inheritTools ? { tone: 'success', key: 'toolsInherited' } : undefined
+      ),
     [applyProfileWith, baseline]
   );
 
@@ -484,12 +493,12 @@ export function useAelixSessionControls({
     async (names: readonly string[]) => {
       const target = sessionRef.current;
       const capabilities = writable();
-      if (!target || !capabilities) return;
+      if (!target || !capabilities) return false;
       const before = baseline();
       const report = await runWrite(target, 'tools', () =>
         target.resources.setActiveTools(capabilities.bindingId, names)
       );
-      if (!report || !current(target)) return;
+      if (!report || !current(target)) return false;
       await settleLists(target);
       await settle(
         target,
@@ -500,6 +509,7 @@ export function useAelixSessionControls({
           ? { tone: 'success', key: 'toolsSavedEmpty' }
           : { tone: 'success', key: 'toolsSaved', values: { total: String(names.length) } }
       );
+      return report.outcome.status === 'success';
     },
     [baseline, current, runWrite, sessionRef, settle, settleLists, writable]
   );

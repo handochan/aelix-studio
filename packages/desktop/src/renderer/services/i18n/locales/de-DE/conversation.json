@@ -874,7 +874,9 @@
       "skills": "Verwendete Skills: {{skills}}",
       "inherit": "Geerbte Werkzeuge verwenden",
       "selectNone": "Keine auswählen",
-      "save": "Für diese Unterhaltung speichern"
+      "save": "Für diese Unterhaltung speichern",
+      "listChanged": "Die Werkzeugliste hat sich während der Bearbeitung geändert. Prüfe deine Auswahl vor dem Speichern.",
+      "discard": "Meine Änderungen verwerfen"
     },
     "scope": {
       "bundled": "Mitgeliefert",
@@ -962,7 +964,8 @@
       "profileRefused": "Aelix hat dieses Profil abgelehnt.",
       "writeFailed": "Die Änderung konnte nicht gespeichert werden.",
       "profileFailed": "Das Profil konnte nicht angewendet werden.",
-      "toolsFailed": "Die Werkzeuge konnten nicht gespeichert werden."
+      "toolsFailed": "Die Werkzeuge konnten nicht gespeichert werden.",
+      "toolsInherited": "Diese Unterhaltung verwendet jetzt geerbte Werkzeuge."
     },
     "change": {
       "title": "Dieses Profil wurde geändert",

@@ -75,6 +75,15 @@ function initialDraft(tools: SessionSelections): Set<string> {
   return new Set(tools.items.filter((row) => row.inForce === true).map((row) => row.key));
 }
 
+/** What the user saw when they started editing, to tell when the list changed underneath. */
+function signature(tools: SessionSelections): string {
+  return JSON.stringify([
+    tools.items.map((row) => [row.key, row.loaded, row.lock, row.inForce]),
+    tools.toolOverride,
+    tools.activeTools,
+  ]);
+}
+
 function sameNames(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((name, index) => name === b[index]);
 }
@@ -85,13 +94,15 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
   const { availability, tools, skills, profiles } = controls;
   const [draft, setDraft] = useState<Set<string>>(new Set());
   const [dirty, setDirty] = useState(false);
+  const [editBase, setEditBase] = useState<string | null>(null);
   const blocked = writeBlockedText(t, controls);
 
+  // Follow fresh reads only while the user has not started editing; keep their draft otherwise.
   useEffect(() => {
-    if (!tools) return;
+    if (!tools || dirty) return;
     setDraft(initialDraft(tools));
-    setDirty(false);
-  }, [tools]);
+    setEditBase(null);
+  }, [tools, dirty]);
 
   const rows = tools?.items ?? [];
   const saveNames = useMemo(() => namesFor(rows, draft), [rows, draft]);
@@ -107,16 +118,20 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
   // Inherit returns only through a profile write, which resets the conversation override.
   const active = profiles?.activeRef ?? null;
   const canInherit = override !== null && capabilities.profilesUse && (active !== null || !profiles?.activeAgent);
+  const listChanged = dirty && tools !== undefined && editBase !== null && signature(tools) !== editBase;
 
-  const toggle = (key: string, checked: boolean) => {
-    setDraft((previous) => {
+  const edit = (update: (previous: Set<string>) => Set<string>) => {
+    if (!dirty && tools) setEditBase(signature(tools));
+    setDraft(update);
+    setDirty(true);
+  };
+  const toggle = (key: string, checked: boolean) =>
+    edit((previous) => {
       const next = new Set(previous);
       if (checked) next.add(key);
       else next.delete(key);
       return next;
     });
-    setDirty(true);
-  };
 
   return (
     <div className='flex flex-col gap-10px' data-testid='aelix-tools-panel'>
@@ -133,6 +148,18 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
         </div>
       </div>
       <WriteOutcome controls={controls} />
+      {listChanged && (
+        <Alert
+          type='warning'
+          data-testid='aelix-tools-list-changed'
+          content={t(`${KEY}.tools.listChanged`)}
+          action={
+            <Button size='mini' onClick={() => setDirty(false)} data-testid='aelix-tools-discard'>
+              {t(`${KEY}.tools.discard`)}
+            </Button>
+          }
+        />
+      )}
       {controls.toolsFailure && <Alert type='error' content={t(`${KEY}.status.readFailed`)} />}
       {tools?.policyPending && <Alert type='info' content={t(`${KEY}.tools.policyPending`)} />}
       {tools && !complete && (
@@ -185,7 +212,7 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             <Button
               size='small'
               disabled={Boolean(blocked)}
-              onClick={() => void controls.applyProfile(active)}
+              onClick={() => void controls.applyProfile(active, { inheritTools: true })}
               data-testid='aelix-tools-inherit'
             >
               {t(`${KEY}.tools.inherit`)}
@@ -195,10 +222,7 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
         <Button
           size='small'
           disabled={Boolean(blocked) || rows.every((row) => row.lock !== null || !draft.has(row.key))}
-          onClick={() => {
-            setDraft(new Set());
-            setDirty(true);
-          }}
+          onClick={() => edit(() => new Set())}
           data-testid='aelix-tools-none'
         >
           {t(`${KEY}.tools.selectNone`)}
@@ -209,7 +233,11 @@ const ToolsPanel: React.FC<{ controls: AelixSessionControls }> = ({ controls }) 
             type='primary'
             loading={controls.writing === 'tools'}
             disabled={!changed || !complete || Boolean(blocked)}
-            onClick={() => void controls.saveTools(saveNames)}
+            onClick={() =>
+              void controls.saveTools(saveNames).then((saved) => {
+                if (saved) setDirty(false);
+              })
+            }
             data-testid='aelix-tools-save'
           >
             {t(`${KEY}.tools.save`)}

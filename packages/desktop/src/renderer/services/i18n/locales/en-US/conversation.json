@@ -873,7 +873,9 @@
       "skills": "Skills in use: {{skills}}",
       "inherit": "Use inherited tools",
       "selectNone": "Select none",
-      "save": "Save for this conversation"
+      "save": "Save for this conversation",
+      "listChanged": "The tool list changed while you were editing. Review your selection before saving.",
+      "discard": "Discard my changes"
     },
     "scope": {
       "bundled": "Bundled",
@@ -961,7 +963,8 @@
       "profileRefused": "Aelix refused this profile.",
       "writeFailed": "The change could not be saved.",
       "profileFailed": "The profile could not be applied.",
-      "toolsFailed": "The tools could not be saved."
+      "toolsFailed": "The tools could not be saved.",
+      "toolsInherited": "This conversation now uses inherited tools."
     },
     "change": {
       "title": "This profile changed",

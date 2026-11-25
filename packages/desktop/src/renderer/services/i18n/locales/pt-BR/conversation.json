@@ -879,7 +879,9 @@
       "skills": "Habilidades em uso: {{skills}}",
       "inherit": "Usar ferramentas herdadas",
       "selectNone": "Desmarcar todas",
-      "save": "Salvar para esta conversa"
+      "save": "Salvar para esta conversa",
+      "listChanged": "A lista de ferramentas mudou durante a edição. Revise sua seleção antes de salvar.",
+      "discard": "Descartar minhas alterações"
     },
     "scope": {
       "bundled": "Incluído",
@@ -967,7 +969,8 @@
       "profileRefused": "O Aelix recusou este perfil.",
       "writeFailed": "Não foi possível salvar a alteração.",
       "profileFailed": "Não foi possível aplicar o perfil.",
-      "toolsFailed": "Não foi possível salvar as ferramentas."
+      "toolsFailed": "Não foi possível salvar as ferramentas.",
+      "toolsInherited": "Esta conversa agora usa ferramentas herdadas."
     },
     "change": {
       "title": "Este perfil mudou",
