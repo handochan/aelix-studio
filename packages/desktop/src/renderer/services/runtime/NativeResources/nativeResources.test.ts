@@ -769,6 +769,23 @@ describe('wire compatibility and limits', () => {
     expect(await session().showProfile('quiet')).toMatchObject({ status: 'invalid-response' });
   });
 
+  const preview = object(fixture('profiles-show', '/result/profile'));
+  it.each([
+    ['signed legacy timeout', { policy: { ...object(preview.policy), timeoutMs: -5 } }],
+    ['repeated tool names', { tools: ['read', 'read'] }],
+  ] as const)('accepts %s in a native profile preview', async (_case, fields) => {
+    await attach();
+    enqueue(relay({ profile: { ...preview, ...fields } }));
+    expect(await session().showProfile('quiet')).toMatchObject({ status: 'success', data: fields });
+  });
+
+  it('rejects repeated names in a tools/set-active request before dispatch', async () => {
+    const { bindingId } = await attach();
+    const report = await session().setActiveTools(bindingId, ['read', 'read']);
+    expect(report.outcome).toMatchObject({ status: 'invalid-input' });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
   it('preserves an omitted prompt change and a disappeared candidate as structured recovery', async () => {
     const { bindingId } = await attach();
     const refusal = object(fixture('use-changed-again', '/result'));

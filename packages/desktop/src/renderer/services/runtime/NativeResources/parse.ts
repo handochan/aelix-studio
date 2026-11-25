@@ -164,6 +164,15 @@ export function sameProfile(a: ProfileRef | null, b: ProfileRef | null): boolean
   return a.name === b.name && a.scope === b.scope && a.revision === b.revision;
 }
 
+function profileTools(value: unknown): string[] | null {
+  return nullable(value, (entry) => list(entry, token));
+}
+
+function profileTimeout(value: unknown): number | null {
+  // Native retains signed legacy timeout metadata for display.
+  return nullable(value, integer);
+}
+
 export function profilePreview(value: unknown, name: string, global: boolean): ProfilePreview {
   const profile = record(record(value).profile);
   const ref = profileRef(profile.ref);
@@ -181,7 +190,7 @@ export function profilePreview(value: unknown, name: string, global: boolean): P
     promptTruncated: boolean(profile.promptTruncated) || prompt.length > 512,
     provider: nullable(profile.provider, token),
     model: nullable(profile.model, token),
-    tools: nullable(profile.tools, names),
+    tools: profileTools(profile.tools),
     skills: nullable(profile.skills, (skills) => list(skills, profilePathLabel)),
     approvalMode: code(profile.approvalMode),
     policy: {
@@ -194,7 +203,7 @@ export function profilePreview(value: unknown, name: string, global: boolean): P
       thinking: nullable(policy.thinking, code),
       role: oneOf(policy.role, 'leaf', 'orchestrator'),
       outputCap: nullable(policy.outputCap, natural),
-      timeoutMs: nullable(policy.timeoutMs, natural),
+      timeoutMs: profileTimeout(policy.timeoutMs),
       agents: nullable(policy.agents, names),
     },
   };
@@ -455,7 +464,7 @@ const profileDifferenceFields = {
     }),
   provider: (value) => nullable(value, token),
   model: (value) => nullable(value, token),
-  tools: (value) => nullable(value, (entry) => list(entry, token)),
+  tools: profileTools,
   skills: (value) => list(value, profilePathLabel),
   approvalMode: (value) => oneOf(value, 'inherit', 'ask', 'auto', 'deny'),
   builtinTools: boolean,
@@ -471,8 +480,7 @@ const profileDifferenceFields = {
     requireValid(bytes > 0);
     return bytes;
   },
-  // Native retains signed legacy timeout metadata for display.
-  timeoutMs: (value) => nullable(value, integer),
+  timeoutMs: profileTimeout,
   agents: (value) => nullable(value, (entry) => names(entry).map(profileName)),
 } satisfies Record<string, Decoder<ProfileDifference['before']>>;
 
