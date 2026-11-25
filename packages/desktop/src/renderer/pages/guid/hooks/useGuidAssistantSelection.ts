@@ -27,6 +27,7 @@ import { useManagedAgentRuntimeCatalog } from '@/renderer/hooks/agent/useManaged
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import useSWR from 'swr';
 import { aelixModelId, loadNativeAuthCatalog, NATIVE_AUTH_CATALOG_KEY } from '@/renderer/services/runtime/nativeAuth';
+import { recheckAelixAfterSessionFailure } from '@/renderer/services/runtime/aelixAvailability';
 import { useCustomAgentsLoader } from './useCustomAgentsLoader';
 
 export {
@@ -112,6 +113,18 @@ export function pickDefaultAssistantSelectionKey(assistants: Assistant[]): strin
   return preferred?.id ?? null;
 }
 
+/** Whether this page would choose `candidate` (preselected, saved, or default) if it were available. */
+function wouldSelect(candidate: Assistant, assistants: Assistant[], preselectAssistantId?: string): boolean {
+  const available = assistants.map((assistant) =>
+    assistant.id === candidate.id ? { ...assistant, agent_status: 'online' as const } : assistant
+  );
+  const preferred =
+    resolveAssistantSelectionKey(preselectAssistantId, available) ??
+    readPersistedGuidAssistantSelectionKey(available) ??
+    pickDefaultAssistantSelectionKey(available);
+  return preferred === candidate.id;
+}
+
 type UseGuidAssistantSelectionOptions = {
   resetAssistant?: boolean;
   preselectAssistantId?: string;
@@ -130,6 +143,7 @@ export const useGuidAssistantSelection = ({
   const { assistants } = useCustomAgentsLoader();
   const managedAgentRuntimeCatalog = useManagedAgentRuntimeCatalog();
   const explicitModelAssistantRef = useRef<string | null>(null);
+  const userPickedAssistantRef = useRef(false);
 
   const setSelectedMode = useCallback(
     (mode: React.SetStateAction<string>, _options?: { persistPreference?: boolean }) => {
@@ -166,6 +180,7 @@ export const useGuidAssistantSelection = ({
     (assistantId: string) => {
       const normalizedId = resolveAssistantSelectionKey(assistantId, assistants);
       if (!normalizedId) return;
+      userPickedAssistantRef.current = true;
       _setSelectedAssistantId(normalizedId);
       persistGuidAssistantSelectionKey(normalizedId);
     },
@@ -203,6 +218,33 @@ export const useGuidAssistantSelection = ({
       );
     }
   }, [assistants, locationKey, preselectAssistantId, resetAssistant, selectedAssistantIdState]);
+
+  // One failed session (even a transient network error) leaves Aelix offline until a probe.
+  // Probe once per visit when Aelix would be the choice; the probe records a non-session
+  // verdict, so a still-broken Aelix is not probed again.
+  const aelixRecheckStartedRef = useRef(false);
+  const [aelixProbed, setAelixProbed] = useState(false);
+  useEffect(() => {
+    if (aelixRecheckStartedRef.current) return;
+    const aelix = assistants.find(isBuiltinAelixAssistant);
+    if (!aelix || aelix.enabled === false || aelix.agent_status !== 'offline') return;
+    if (!wouldSelect(aelix, assistants, preselectAssistantId)) return;
+    aelixRecheckStartedRef.current = true;
+    void recheckAelixAfterSessionFailure()
+      .catch(() => false)
+      .then((probed) => {
+        if (probed) setAelixProbed(true);
+      });
+  }, [assistants, preselectAssistantId]);
+
+  // Restore Aelix as the choice once the refreshed list shows it, unless the user picked another.
+  useLayoutEffect(() => {
+    if (!aelixProbed) return;
+    const aelix = assistants.find(isBuiltinAelixAssistant);
+    if (!aelix || !canStartAssistantConversation(aelix)) return;
+    setAelixProbed(false);
+    if (!userPickedAssistantRef.current) _setSelectedAssistantId(aelix.id);
+  }, [aelixProbed, assistants]);
 
   const selectedAssistant = useMemo(
     () =>

@@ -23,10 +23,15 @@ import {
 let mockAssistants: Assistant[] = [];
 let mockManagedAgents: ManagedAgent[] = [];
 
-const { configGetMock, configSetMock, loadCatalogMock } = vi.hoisted(() => ({
+const { configGetMock, configSetMock, loadCatalogMock, recheckAelixMock } = vi.hoisted(() => ({
   configGetMock: vi.fn(),
   configSetMock: vi.fn(),
   loadCatalogMock: vi.fn(),
+  recheckAelixMock: vi.fn(),
+}));
+
+vi.mock('@/renderer/services/runtime/aelixAvailability', () => ({
+  recheckAelixAfterSessionFailure: recheckAelixMock,
 }));
 
 vi.mock('@/common/config/configService', () => ({
@@ -61,6 +66,7 @@ describe('useGuidAssistantSelection', () => {
     configGetMock.mockReturnValue(undefined);
     configSetMock.mockResolvedValue(undefined);
     loadCatalogMock.mockReset().mockResolvedValue(null);
+    recheckAelixMock.mockReset().mockResolvedValue(false);
     mockManagedAgents = [];
     mockAssistants = [
       {
@@ -195,6 +201,49 @@ describe('useGuidAssistantSelection', () => {
     expect(result.current.selectedAcpModel).toBe('fixture/helper');
     act(() => result.current.setSelectedAcpModel('provider-b/fresh', { explicit: true }));
     expect(result.current.selectedAcpModel).toBe('provider-b/fresh');
+  });
+
+  describe('after a failed session left builtin Aelix offline', () => {
+    const offlineAelix = () => ({ ...builtinAelix(), agent_status: 'offline' as const });
+
+    it('re-probes once and makes Aelix the default again when it comes back', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      recheckAelixMock.mockResolvedValue(true);
+      const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+      await waitFor(() => expect(recheckAelixMock).toHaveBeenCalledOnce());
+
+      // The refreshed list still shows Aelix offline: no second probe from this page.
+      mockAssistants = [offlineAelix(), fallback];
+      rerender();
+      mockAssistants = [builtinAelix(), fallback];
+      rerender();
+      await waitFor(() => expect(result.current.selectedAssistantId).toBe('bare:builtin-aelix'));
+      expect(recheckAelixMock).toHaveBeenCalledOnce();
+    });
+
+    it('keeps the assistant the user picked while the probe ran', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      let finishProbe!: (probed: boolean) => void;
+      recheckAelixMock.mockReturnValue(new Promise<boolean>((resolve) => (finishProbe = resolve)));
+      const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      act(() => result.current.setSelectedAssistantId(fallback.id));
+      await act(async () => finishProbe(true));
+      mockAssistants = [builtinAelix(), fallback];
+      rerender();
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+    });
+
+    it('does not probe when the saved choice is another assistant', async () => {
+      const fallback = mockAssistants[0];
+      mockAssistants = [offlineAelix(), fallback];
+      configGetMock.mockReturnValue(fallback.id);
+      renderHook(() => useGuidAssistantSelection({ resetAssistant: true }));
+      await act(async () => {});
+      expect(recheckAelixMock).not.toHaveBeenCalled();
+    });
   });
 
   it('restores the last selected guid assistant before falling back to the aionrs default', async () => {
