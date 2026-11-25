@@ -1701,5 +1701,161 @@
   },
   "autoUpdateCheck": "Buscar actualizaciones al iniciar",
   "autoUpdateCheckDescription": "Consulta Aelix Studio Releases y le avisa. Desactive para uso sin conexión.",
-  "autoUpdateSaveFailed": "No se pudo guardar la preferencia de actualización."
+  "autoUpdateSaveFailed": "No se pudo guardar la preferencia de actualización.",
+  "aelixNative": {
+    "title": "Valores predeterminados globales de Aelix",
+    "description": "Ajustes nativos de Aelix que también lee Aelix CLI. Son independientes de las listas de Aion de esta página.",
+    "skillsDescription": "Valores predeterminados nativos de habilidades de Aelix que también lee Aelix CLI. Son independientes de la biblioteca de habilidades de Aion de las otras pestañas.",
+    "tab": "Predeterminados de Aelix",
+    "kind": {
+      "tool": "Herramientas",
+      "skill": "Habilidades",
+      "mcp": "Servidores MCP"
+    },
+    "scope": {
+      "global": "Global",
+      "project": "Este proyecto"
+    },
+    "workspace": "Espacio de trabajo: {{path}}",
+    "workspaceUnknown": "Espacio de trabajo no disponible",
+    "projectImpact": "Guardar en este proyecto cambia los ajustes de Aelix de esta carpeta. Otras conversaciones y Aelix CLI en la misma carpeta también los usan.",
+    "noConversationOverride": "Las habilidades y los servidores MCP no tienen ajuste por conversación.",
+    "toolOverrideHint": "Para cambiar las herramientas solo en esta conversación, usa el selector de herramientas de la conversación.",
+    "effectiveUnknown": "Estado efectivo: compruébalo después de abrir una conversación.",
+    "loading": "Cargando…",
+    "empty": "No hay nada que configurar.",
+    "partial": "Solo se cargó parte de la lista.",
+    "reload": "Recargar",
+    "save": "Guardar",
+    "discard": "Descartar",
+    "unsaved": "Sin guardar",
+    "on": "Activado",
+    "off": "Desactivado",
+    "missingStore": "Todavía no existe un archivo de ajustes. Al guardar se crea uno; para un archivo de proyecto, primero se pide aprobación en la conversación.",
+    "mismatch": "Difiere del valor guardado",
+    "mismatchList": "Algunos valores guardados difieren de los que están en vigor.",
+    "problem": "Problema: {{code}}",
+    "decidedBy": {
+      "global": "Definido globalmente",
+      "project": "Definido por el proyecto"
+    },
+    "state": {
+      "applied": "Aplicado",
+      "notApplied": "No aplicado",
+      "inForce": "En vigor",
+      "notInForce": "Sin efecto",
+      "live": "En uso",
+      "notLive": "Sin usar",
+      "liveUnknown": "Uso no observado",
+      "notLoaded": "No cargado",
+      "pendingNextRequest": "En la próxima solicitud",
+      "pendingRestart": "Reinicio pendiente",
+      "policyPending": "Cambio de política pendiente"
+    },
+    "lock": {
+      "title": "Bloqueado en {{value}}: {{reason}}",
+      "reason": {
+        "launchLocked": "definido por las opciones de inicio",
+        "invalidMcpEntry": "entrada MCP no válida",
+        "envConfig": "definido por una variable de entorno",
+        "extension": "proporcionado por una extensión",
+        "untrusted": "proyecto no confiable",
+        "other": "{{reason}}"
+      }
+    },
+    "scopeReason": {
+      "managementHelper": "Los valores predeterminados globales se cambian desde la vista Global.",
+      "readOnly": "Este archivo de ajustes es de solo lectura.",
+      "missingFile": "Todavía no existe un archivo de ajustes aquí. Créalo primero con Aelix CLI.",
+      "envConfig": "Definido por una variable de entorno, por lo que no se puede cambiar aquí.",
+      "unsupported": "El Aelix de esta conversación no puede guardar ajustes de proyecto.",
+      "other": "Este ámbito no se puede cambiar ({{reason}})."
+    },
+    "diagnostics": {
+      "title": "Diagnóstico",
+      "invalidProfile": "Perfil no válido",
+      "invalidSettingsEntry": "Entrada de ajustes no válida",
+      "skillSettingsProblem": "Problema en los ajustes de habilidades",
+      "invalidSkill": "Habilidad no válida",
+      "shadowedSkill": "Habilidad ocultada por otra habilidad con el mismo nombre",
+      "envConfig": "Configurado por una variable de entorno",
+      "mcpConfigWarning": "Advertencia de configuración de MCP",
+      "invalidMcpKey": "Nombre de servidor MCP no válido",
+      "other": "{{code}}"
+    },
+    "saved": {
+      "applied": "Guardado y aplicado. Surte efecto a partir de la próxima solicitud.",
+      "deferred": "Guardado. Pendiente hasta la próxima solicitud.",
+      "notApplied": "Guardado, pero la conversación en curso aún no lo ha aplicado.",
+      "restart": "Guardado. Reinicio pendiente: surte efecto cuando la conversación reinicie su proceso de trabajo.",
+      "globalNext": "Guardado. Pendiente: se aplica a partir de la próxima solicitud.",
+      "globalRestart": "Guardado. Reinicio pendiente: se aplica la próxima vez que se inicie un proceso de trabajo de Aelix."
+    },
+    "retry": {
+      "conflict": "Estos ajustes cambiaron fuera de Studio, por ejemplo en la CLI. Se muestran los valores actuales. Vuelve a aplicar para guardar tu elección sobre ellos.",
+      "unknown": "Studio no pudo confirmar si se guardó. Se muestran los valores actuales. Vuelve a aplicar para guardar tu elección de nuevo.",
+      "stale": "La lista cambió antes de guardar. Revisa los valores actuales y vuelve a aplicar.",
+      "current": "Actual: {{value}}",
+      "choice": "Tu elección: {{value}}",
+      "missing": "ya no está disponible",
+      "reapply": "Volver a aplicar mi elección",
+      "dismiss": "Descartar"
+    },
+    "failure": {
+      "unsupported": "No disponible con el runtime actual de Aelix.",
+      "unauthenticated": "Vuelve a iniciar sesión para leer estos ajustes.",
+      "detached": "Abre primero esta conversación y luego vuelve para gestionar los ajustes del proyecto.",
+      "stale": "La conversación se volvió a conectar. Recarga para continuar.",
+      "busy": "Aelix está ocupado. Inténtalo de nuevo cuando esté inactivo.",
+      "locked": "{{key}} está bloqueado y no se modificó.",
+      "missing": "{{key}} ya no existe. Recarga y vuelve a elegir.",
+      "readOnly": "Este ámbito es de solo lectura.",
+      "invalid": "Se recibió una respuesta inesperada. Recarga e inténtalo de nuevo.",
+      "generic": "No se pudo completar la solicitud ({{reason}})."
+    },
+    "recovery": {
+      "open": "Restaurar anterior",
+      "title": "Restaurar entorno anterior",
+      "description": "Elige los elementos que quieres restaurar. Solo se vuelven a escribir los elementos elegidos, en el mismo lugar donde se guardaron.",
+      "previous": "Antes: {{value}}",
+      "current": "Ahora: {{value}}",
+      "alreadyRestored": "Ya tiene el valor anterior",
+      "unavailable": "Ya no está disponible",
+      "locked": "Bloqueado",
+      "changedElsewhere": "Estos ajustes cambiaron después de que Studio los guardara. Comprueba los valores actuales antes de restaurar.",
+      "uncertain": "Uno de los guardados tuvo un resultado sin confirmar.",
+      "restore": "Restaurar selección",
+      "restored": "Se restauraron los elementos seleccionados.",
+      "none": "No hay nada que restaurar."
+    },
+    "profiles": {
+      "title": "Perfiles de Aelix",
+      "show": "Mostrar perfiles",
+      "hide": "Ocultar",
+      "count": "{{count}} perfiles",
+      "diagnosticCount": "{{count}} problemas",
+      "description": "Perfiles detectados por Aelix CLI (incluidos y de usuario). Los perfiles de proyecto aparecen dentro de una conversación.",
+      "hint": "Crea o edita perfiles con Aelix CLI y elige uno para una conversación en el campo de mensaje.",
+      "empty": "No se encontraron perfiles.",
+      "preview": "Vista previa",
+      "scope": {
+        "bundled": "Incluido",
+        "user": "Usuario",
+        "project": "Proyecto"
+      },
+      "source": "Origen",
+      "model": "Modelo",
+      "tools": "Herramientas",
+      "skills": "Habilidades",
+      "approvalMode": "Aprobación delegada",
+      "promptMode": "Modo de prompt",
+      "prompt": "Prompt",
+      "truncated": "(truncado)",
+      "inherit": "Heredado",
+      "none": "Ninguno",
+      "changed": "Este perfil cambió después de cargar la lista. Recarga para ver la vista previa.",
+      "unavailable": "Este perfil ya no está disponible.",
+      "assistantLink": "Ver perfiles de Aelix"
+    }
+  }
 }

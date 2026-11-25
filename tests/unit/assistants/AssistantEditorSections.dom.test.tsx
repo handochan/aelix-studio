@@ -2,7 +2,7 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ConfigProvider } from '@arco-design/web-react';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import AssistantEditorSections from '@/renderer/pages/settings/AssistantSettings/AssistantEditorSections';
 import type { AssistantEditorViewModel } from '@/renderer/pages/settings/AssistantSettings/types';
 
@@ -1040,5 +1040,44 @@ describe('AssistantEditorSections', () => {
 
     const textarea = screen.getByPlaceholderText('Enter rules in Markdown format...');
     expect(document.activeElement).not.toBe(textarea);
+  });
+  it('links the builtin Aelix assistant to the Aelix profile list', async () => {
+    const LocationProbe = () => {
+      const location = useLocation();
+      return <div data-testid='location'>{location.pathname + location.search}</div>;
+    };
+    const sections = (agentId: string) => (
+      <AssistantEditorSections
+        editor={createEditor({ isCreating: false })}
+        activeAssistant={{
+          id: 'generated-' + agentId,
+          name: 'Aelix',
+          sort_order: 1,
+          source: 'generated',
+          enabled: true,
+          agent_id: agentId,
+          agent: { type: 'acp', source: 'builtin', acp_backend: 'aelix' },
+        }}
+      />
+    );
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/assistants']}>
+        <ConfigProvider>
+          <Routes>
+            <Route path='/assistants' element={sections('builtin-aelix')} />
+            <Route path='/settings/agent' element={<LocationProbe />} />
+          </Routes>
+        </ConfigProvider>
+      </MemoryRouter>
+    );
+
+    fireEvent.click(screen.getByTestId('link-aelix-profiles'));
+    expect(await screen.findByTestId('location')).toHaveTextContent('/settings/agent?aelix=profiles');
+    unmount();
+
+    // Other generated CLI assistants keep the plain banner.
+    renderWithProviders(sections('agent-droid'));
+    expect(screen.getByTestId('assistant-cli-readonly-banner')).toBeInTheDocument();
+    expect(screen.queryByTestId('link-aelix-profiles')).not.toBeInTheDocument();
   });
 });
