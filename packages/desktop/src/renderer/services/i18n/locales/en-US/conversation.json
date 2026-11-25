@@ -884,7 +884,8 @@
       "checking": "Checking",
       "openFirst": "After opening",
       "updateRequired": "Update needed",
-      "unavailable": "Unavailable"
+      "unavailable": "Unavailable",
+      "readFailed": "Couldn't read"
     },
     "status": {
       "checking": "Checking what Aelix supports...",

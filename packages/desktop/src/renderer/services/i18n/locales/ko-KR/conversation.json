@@ -884,7 +884,8 @@
       "checking": "확인 중",
       "openFirst": "대화를 연 뒤",
       "updateRequired": "업데이트 필요",
-      "unavailable": "사용 불가"
+      "unavailable": "사용 불가",
+      "readFailed": "읽지 못함"
     },
     "status": {
       "checking": "Aelix가 지원하는 기능을 확인하는 중...",

@@ -885,7 +885,8 @@
       "checking": "Comprobando",
       "openFirst": "Tras abrirla",
       "updateRequired": "Requiere actualizar",
-      "unavailable": "No disponible"
+      "unavailable": "No disponible",
+      "readFailed": "No se pudo leer"
     },
     "status": {
       "checking": "Comprobando qué admite Aelix...",

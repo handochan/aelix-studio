@@ -890,7 +890,8 @@
       "checking": "Verificando",
       "openFirst": "Após abrir",
       "updateRequired": "Requer atualização",
-      "unavailable": "Indisponível"
+      "unavailable": "Indisponível",
+      "readFailed": "Não foi possível ler"
     },
     "status": {
       "checking": "Verificando o que o Aelix suporta...",

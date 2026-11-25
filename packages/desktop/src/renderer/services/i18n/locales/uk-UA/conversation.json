@@ -900,7 +900,8 @@
       "checking": "Перевірка",
       "openFirst": "Після відкриття",
       "updateRequired": "Потрібне оновлення",
-      "unavailable": "Недоступно"
+      "unavailable": "Недоступно",
+      "readFailed": "Не вдалося прочитати"
     },
     "status": {
       "checking": "Перевіряємо, що підтримує Aelix...",

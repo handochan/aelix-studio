@@ -885,7 +885,8 @@
       "checking": "Wird geprüft",
       "openFirst": "Nach dem Öffnen",
       "updateRequired": "Update nötig",
-      "unavailable": "Nicht verfügbar"
+      "unavailable": "Nicht verfügbar",
+      "readFailed": "Nicht lesbar"
     },
     "status": {
       "checking": "Prüfe, was Aelix unterstützt...",

@@ -884,7 +884,8 @@
       "checking": "Vérification",
       "openFirst": "Après ouverture",
       "updateRequired": "Mise à jour requise",
-      "unavailable": "Indisponible"
+      "unavailable": "Indisponible",
+      "readFailed": "Lecture impossible"
     },
     "status": {
       "checking": "Vérification des fonctions prises en charge par Aelix...",

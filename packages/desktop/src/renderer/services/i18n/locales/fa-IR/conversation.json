@@ -884,7 +884,8 @@
       "checking": "در حال بررسی",
       "openFirst": "پس از باز شدن",
       "updateRequired": "نیاز به به‌روزرسانی",
-      "unavailable": "در دسترس نیست"
+      "unavailable": "در دسترس نیست",
+      "readFailed": "خوانده نشد"
     },
     "status": {
       "checking": "در حال بررسی قابلیت‌های Aelix...",

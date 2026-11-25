@@ -900,7 +900,8 @@
       "checking": "Проверка",
       "openFirst": "После открытия",
       "updateRequired": "Нужно обновление",
-      "unavailable": "Недоступно"
+      "unavailable": "Недоступно",
+      "readFailed": "Не удалось прочитать"
     },
     "status": {
       "checking": "Проверяем, что поддерживает Aelix...",

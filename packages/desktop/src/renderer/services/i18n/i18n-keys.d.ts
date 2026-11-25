@@ -616,6 +616,7 @@ export type I18nKey =
   | 'conversation.aelixControls.status.writing'
   | 'conversation.aelixControls.summary.checking'
   | 'conversation.aelixControls.summary.openFirst'
+  | 'conversation.aelixControls.summary.readFailed'
   | 'conversation.aelixControls.summary.unavailable'
   | 'conversation.aelixControls.summary.updateRequired'
   | 'conversation.aelixControls.tools.count'

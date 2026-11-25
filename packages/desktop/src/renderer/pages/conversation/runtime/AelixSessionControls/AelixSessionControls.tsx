@@ -27,10 +27,12 @@ export function controlSummary(t: TFunction, controls: Controls, panel: Controls
   const { capabilities } = availability;
   if (panel === 'profile') {
     if (!capabilities.profilesList) return t(`${KEY}.summary.updateRequired`);
+    if (controls.profilesFailure) return t(`${KEY}.summary.readFailed`);
     const profiles = controls.profiles;
     return profiles?.activeRef?.name ?? profiles?.activeAgent ?? t(`${KEY}.profile.none`);
   }
   if (!capabilities.selectionsList || !capabilities.setActiveTools) return t(`${KEY}.summary.updateRequired`);
+  if (controls.toolsFailure) return t(`${KEY}.summary.readFailed`);
   const override = controls.tools?.toolOverride;
   if (override === undefined) return t(`${KEY}.summary.checking`);
   if (override === null) return t(`${KEY}.tools.inherited`);

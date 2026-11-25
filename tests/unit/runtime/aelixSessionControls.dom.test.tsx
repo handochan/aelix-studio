@@ -245,6 +245,15 @@ describe('Aelix conversation controls: attach and availability', () => {
     expect(panel.getByTestId('aelix-controls-update-required')).toBeInTheDocument();
   });
 
+  it('says the lists could not be read instead of "No profile" or "Checking"', async () => {
+    replies.set(LIST, () => failure(500, 'INTERNAL_ERROR'));
+    replies.set(SELECTIONS, () => failure(500, 'INTERNAL_ERROR'));
+    render(<Harness />);
+    await settle();
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent(`${K}.summary.readFailed`);
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.summary.readFailed`);
+  });
+
   it('shows selection as unavailable only when the runtime lacks profiles/use', async () => {
     const requests = fixture<string[]>('relay-discovery', '/response/body/data/requests').filter(
       (method) => method !== USE

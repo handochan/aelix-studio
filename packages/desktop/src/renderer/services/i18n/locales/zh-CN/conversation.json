@@ -884,7 +884,8 @@
       "checking": "检查中",
       "openFirst": "打开对话后",
       "updateRequired": "需要更新",
-      "unavailable": "不可用"
+      "unavailable": "不可用",
+      "readFailed": "无法读取"
     },
     "status": {
       "checking": "正在检查 Aelix 支持的功能...",

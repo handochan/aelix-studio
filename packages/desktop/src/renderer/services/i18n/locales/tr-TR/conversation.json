@@ -886,7 +886,8 @@
       "checking": "Kontrol ediliyor",
       "openFirst": "Açıldıktan sonra",
       "updateRequired": "Güncelleme gerekli",
-      "unavailable": "Kullanılamıyor"
+      "unavailable": "Kullanılamıyor",
+      "readFailed": "Okunamadı"
     },
     "status": {
       "checking": "Aelix'in neleri desteklediği kontrol ediliyor...",

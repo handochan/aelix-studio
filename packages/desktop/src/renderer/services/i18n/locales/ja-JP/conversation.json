@@ -884,7 +884,8 @@
       "checking": "確認中",
       "openFirst": "会話を開いた後",
       "updateRequired": "更新が必要",
-      "unavailable": "利用不可"
+      "unavailable": "利用不可",
+      "readFailed": "読み取り失敗"
     },
     "status": {
       "checking": "Aelix の対応機能を確認しています...",
