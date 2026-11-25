@@ -838,5 +838,227 @@
       "body": "Studio 无法确认没有其他进程正在使用此会话，因此已暂停发送和草稿箱。请重新检查以继续。"
     },
     "paused": "在检查成功之前，发送和草稿箱将保持暂停。"
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "配置",
+      "title": "配置",
+      "none": "无配置",
+      "current": "当前：{{profile}}",
+      "currentLegacy": "当前：{{name}}（仅记录名称）",
+      "active": "使用中",
+      "apply": "应用配置",
+      "clear": "不使用配置",
+      "empty": "未找到配置。请使用 Aelix CLI 创建。",
+      "partial": "只读取到部分配置列表。",
+      "diagnostics": "部分配置无法读取：{{codes}}",
+      "legacy": "{{name}}（仅记录名称）",
+      "resetsTools": "更改配置会将本对话的工具选择重置为继承。"
+    },
+    "tools": {
+      "label": "工具",
+      "title": "本对话的工具",
+      "inherited": "继承",
+      "none": "无工具",
+      "count": "{{count}} 个工具",
+      "modeInherited": "继承自配置和默认值",
+      "modeNone": "本对话不使用工具",
+      "modeExplicit": "本对话选择了 {{count}} 个工具",
+      "effectNext": "更改将从下一次请求开始生效。",
+      "effectRestart": "更改将在 Aelix 重启后生效。",
+      "policyPending": "有策略更改正在等待应用。",
+      "partial": "工具列表不完整，暂时无法保存。",
+      "mismatch": "已保存的选择与 Aelix 报告的状态不一致。",
+      "empty": "Aelix 未报告任何工具。",
+      "skills": "正在使用的技能：{{skills}}",
+      "inherit": "使用继承的工具",
+      "selectNone": "全部取消",
+      "save": "保存到本对话",
+      "listChanged": "编辑期间工具列表已更改。保存前请检查你的选择。",
+      "discard": "放弃我的更改",
+      "count_one": "{{count}} 个工具",
+      "count_other": "{{count}} 个工具",
+      "modeExplicit_one": "本对话选择了 {{count}} 个工具",
+      "modeExplicit_other": "本对话选择了 {{count}} 个工具",
+      "projectTools": "在设置中查看项目工具默认值",
+      "projectSkills": "在设置中查看项目技能",
+      "settingsDirty": "打开设置前，请先保存或放弃工具更改。"
+    },
+    "scope": {
+      "bundled": "内置",
+      "user": "用户",
+      "project": "项目"
+    },
+    "summary": {
+      "checking": "检查中",
+      "openFirst": "打开对话后",
+      "updateRequired": "需要更新",
+      "unavailable": "不可用",
+      "readFailed": "无法读取"
+    },
+    "status": {
+      "checking": "正在检查 Aelix 支持的功能...",
+      "openFirst": "请在对话打开后使用。Aelix 连接后会再次检查。",
+      "updateRequiredTitle": "需要更新 Aelix",
+      "updateRequired": "当前 Aelix 运行时尚不支持此功能。请更新 Aelix 后使用。",
+      "signIn": "请重新登录以读取这些设置。",
+      "readFailed": "无法读取这些设置。",
+      "busy": "Aelix 空闲时可用。",
+      "notIdle": "对话打开并空闲时可用。",
+      "writing": "另一项更改正在进行中。",
+      "applying": "正在应用... 如果 Aelix 请求批准，请在对话中回应。",
+      "saving": "正在保存..."
+    },
+    "action": {
+      "retry": "重试",
+      "close": "关闭"
+    },
+    "preview": {
+      "source": "来源",
+      "revision": "版本",
+      "tools": "工具",
+      "skills": "技能",
+      "model": "模型",
+      "approval": "审批",
+      "excludedTools": "排除的工具",
+      "allTools": "所有工具",
+      "noTools": "无工具",
+      "allSkills": "所有技能",
+      "noSkills": "无技能",
+      "inheritModel": "当前模型",
+      "truncated": "（已截断）",
+      "failed": "无法加载预览。"
+    },
+    "row": {
+      "saved": "已保存：{{value}}",
+      "applied": "已应用：{{value}}",
+      "live": "实际：{{value}}",
+      "on": "开",
+      "off": "关",
+      "unobserved": "未观测",
+      "decidedBy": {
+        "global": "全局",
+        "project": "项目"
+      },
+      "notLoaded": "未加载",
+      "pendingNext": "下一次请求",
+      "pendingRestart": "等待重启",
+      "problem": "问题：{{code}}",
+      "mismatch": "不一致：{{reason}}"
+    },
+    "lock": {
+      "launch": "被启动选项锁定",
+      "env": "被环境设置锁定",
+      "helper": "在设置中管理",
+      "other": "已锁定（{{reason}}）"
+    },
+    "notice": {
+      "profileApplied": "本对话现在使用配置 {{name}}。",
+      "profileCleared": "本对话不再使用配置。",
+      "toolsSaved": "已为本对话保存 {{count}} 个工具。",
+      "toolsSavedEmpty": "已保存：本对话不使用工具。",
+      "restored": "已恢复所选项目。",
+      "outcomeUnknown": "结果未知。已重新读取当前状态，如有需要请重新选择。",
+      "openFirst": "请在对话打开后使用。",
+      "stale": "对话已重新连接，已重新读取当前状态。",
+      "signIn": "请重新登录后再试。",
+      "updateRequired": "需要更新 Aelix。",
+      "busy": "Aelix 正忙。请在空闲时重试。",
+      "toolLocked": "{{name}} 已锁定，无法在此更改。",
+      "toolUnavailable": "{{name}} 未在本对话中加载。",
+      "profileUnavailable": "配置 {{name}} 已不可用。",
+      "profileRefused": "Aelix 拒绝了此配置。",
+      "writeFailed": "无法保存更改。",
+      "profileFailed": "无法应用配置。",
+      "toolsFailed": "无法保存工具。",
+      "toolsInherited": "本对话现在使用继承的工具。",
+      "toolsSaved_one": "已为本对话保存 {{count}} 个工具。",
+      "toolsSaved_other": "已为本对话保存 {{count}} 个工具。"
+    },
+    "change": {
+      "title": "此配置已更改",
+      "description": "自上次选择以来，其来源或版本已更改。请查看差异并重新选择后使用。",
+      "recorded": "之前",
+      "candidate": "现在",
+      "missing": "不可用",
+      "field": "项目",
+      "before": "之前",
+      "after": "现在",
+      "noCandidate": "已找不到该配置。",
+      "keep": "保留当前环境",
+      "reselect": "选择更改后的配置"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "已拒绝配置更改",
+        "cancelled": "配置更改已取消",
+        "unanswered": "未回应批准请求",
+        "changedAgain": "应用前配置再次更改",
+        "profileUnavailable": "配置已不可用",
+        "guardUnavailable": "当前 Aelix 运行时无法应用经过校验的配置",
+        "invalidRecord": "无法读取已记录的配置",
+        "profileChanged": "未选择更改后的配置",
+        "unknown": "更改结果未知",
+        "other": "更改未应用"
+      },
+      "noResend": "不会重新发送提示，也不会扩大权限。",
+      "original": "原始环境：{{profile}}",
+      "unchanged": "本对话没有任何更改。",
+      "restoreProfile": "恢复配置 {{profile}}",
+      "restoreTools": "恢复本对话的工具：{{tools}}",
+      "toolsWithProfile": "继承的工具会随配置一起恢复。",
+      "profileResetsTools": "恢复配置会将本对话的工具重置为继承。",
+      "restoreFileAndReopen": "原始配置文件已更改。请使用 Aelix CLI 恢复后重新打开本对话。",
+      "unknownOriginal": "原始配置仅记录了名称。请从列表中重新选择。",
+      "restoreSelected": "恢复所选项"
+    },
+    "field": {
+      "source": "来源",
+      "revision": "版本",
+      "description": "描述",
+      "promptMode": "提示方式",
+      "promptPreview": "提示",
+      "promptTruncated": "提示已截断",
+      "omittedPrompt": "提示的省略部分",
+      "provider": "提供方",
+      "model": "模型",
+      "tools": "工具",
+      "skills": "技能",
+      "approvalMode": "审批",
+      "builtinTools": "内置工具",
+      "excludeTools": "排除的工具",
+      "inheritSkills": "继承技能",
+      "extensions": "扩展",
+      "inheritExtensions": "继承扩展",
+      "contextFiles": "上下文文件",
+      "thinking": "思考",
+      "role": "角色",
+      "outputCap": "输出上限",
+      "timeoutMs": "超时（毫秒）",
+      "agents": "智能体"
+    },
+    "value": {
+      "unset": "未设置",
+      "empty": "无",
+      "yes": "是",
+      "no": "否"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "保存的值与 Aelix 报告不一致",
+        "nativeMismatch": "Aelix 报告了差异"
+      },
+      "diagnostic": {
+        "invalidProfile": "无效的配置文件",
+        "envConfig": "由环境配置设定"
+      },
+      "approval": {
+        "inherit": "继承",
+        "ask": "询问",
+        "auto": "自动批准",
+        "deny": "拒绝"
+      },
+      "other": "其他（{{code}}）"
+    }
   }
 }

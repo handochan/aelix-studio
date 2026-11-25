@@ -6,6 +6,7 @@
 
 import { ipcBridge } from '@/common';
 import type { TChatConversation } from '@/common/config/storage';
+import { resolveConversationBackend } from '@/renderer/pages/conversation/utils/conversationAssistantIdentity';
 import { iconColors } from '@/renderer/styles/colors';
 import { Popover } from '@arco-design/web-react';
 import { Lightning } from '@icon-park/react';
@@ -37,8 +38,13 @@ const ConversationSkillsIndicator: React.FC<ConversationSkillsIndicatorProps> = 
 
   const descriptionByName = new Map((skillIndex ?? []).map((s) => [s.name, s.description]));
 
+  // Builtin Aelix opens Settings on this conversation's "This project" scope.
+  const scope =
+    conversation && resolveConversationBackend(conversation) === 'aelix'
+      ? `&conversation=${encodeURIComponent(conversation.id)}`
+      : '';
   const handleSkillClick = (skillName: string) => {
-    navigate(`/settings/skills?highlight=${encodeURIComponent(skillName)}`);
+    navigate(`/settings/skills?highlight=${encodeURIComponent(skillName)}${scope}`);
   };
 
   const content = (

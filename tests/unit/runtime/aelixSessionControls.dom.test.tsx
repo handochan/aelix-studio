@@ -1,0 +1,1155 @@
+/**
+ * @license
+ * Copyright 2025 AionUi (aionui.com)
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import React from 'react';
+import { useTranslation } from 'react-i18next';
+import { MemoryRouter, useLocation } from 'react-router-dom';
+import MobileActionSheet from '@/renderer/components/chat/MobileActionSheet';
+import {
+  AelixSessionDrawer,
+  AelixSessionPills,
+  aelixSheetEntries,
+  useAelixSessionControls,
+} from '@/renderer/pages/conversation/runtime/AelixSessionControls';
+import ProfileChangeCard from '@/renderer/pages/conversation/runtime/AelixSessionControls/ProfileChangeCard';
+import RecoveryCard from '@/renderer/pages/conversation/runtime/AelixSessionControls/RecoveryCard';
+import { restorePlan } from '@/renderer/pages/conversation/runtime/AelixSessionControls/useAelixSessionControls';
+import type { ProfileCatalogView, ResourceFailure, SessionProfiles } from '@/renderer/services/runtime/NativeResources';
+import type { HostTurnState } from '@/renderer/services/runtime/RunningInput/decideSend';
+import fixtures from '@/renderer/services/runtime/NativeResources/studio-7-d16-v1.json';
+import { createInstance } from 'i18next';
+import enConversation from '@/renderer/services/i18n/locales/en-US/conversation.json';
+import ruConversation from '@/renderer/services/i18n/locales/ru-RU/conversation.json';
+
+vi.mock('react-i18next', () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, unknown>) => (options ? `${key} ${JSON.stringify(options)}` : key),
+    i18n: { language: 'en-US' },
+  }),
+}));
+
+vi.mock('@/common/adapter/httpBridge', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@/common/adapter/httpBridge')>()),
+  getBaseUrl: () => '',
+  resolveCoreCsrfToken: () => 'csrf',
+  wsEmitter: () => ({ on: () => () => {}, emit: () => {} }),
+}));
+
+// ---- D16 fixtures ---------------------------------------------------------------------------
+
+type Json = Record<string, unknown>;
+const cases = new Map<string, unknown>();
+function pointer(value: unknown, path: string): unknown {
+  return path
+    .split('/')
+    .slice(1)
+    .reduce<unknown>((node, key) => (Array.isArray(node) ? node[Number(key)] : (node as Json)[key]), value);
+}
+function expand(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(expand);
+  if (!value || typeof value !== 'object') return value;
+  const row = value as Json;
+  if (typeof row.$fixture === 'string') {
+    const [id, path] = row.$fixture.split('#');
+    return structuredClone(pointer(cases.get(id), path));
+  }
+  return Object.fromEntries(Object.entries(row).map(([key, entry]) => [key, expand(entry)]));
+}
+for (const example of fixtures as Json[]) cases.set(String(example.id), expand(example));
+const fixture = <T = Json>(id: string, path = ''): T => structuredClone(pointer(cases.get(id), path)) as T;
+
+type Ref = { name: string; scope: string; revision: string };
+const QUIET = fixture<Ref>('profile-ref', '/vectors/0/ref');
+const QUIET_PROJECT = fixture<Ref>('profile-ref', '/vectors/1/ref');
+const WRITER = fixture<Ref>('profile-ref', '/vectors/4/ref');
+
+const P = '_aelix/session/';
+const LIST = P + 'profiles/list';
+const SHOW = P + 'profiles/show';
+const USE = P + 'profiles/use';
+const SET_TOOLS = P + 'tools/set-active';
+const SELECTIONS = P + 'selections/list';
+const LOOKUP = P + 'requests/lookup';
+
+// ---- Fake host relay ------------------------------------------------------------------------
+
+type Post = { bindingId: string; method: string; payload: Json };
+type Reply = (payload: Json) => Response | Promise<Response>;
+
+const relay = (result: unknown) => Response.json({ success: true, data: { result } });
+const failure = (status: number, code: string) => Response.json({ success: false, code, error: 'x' }, { status });
+
+const state = {
+  activeRef: QUIET as Ref | null,
+  activeAgent: 'quiet' as string | null,
+  toolOverride: null as string[] | null,
+  activeTools: ['read'],
+  /** The ref the runtime currently resolves for the name "quiet". */
+  quiet: QUIET as Ref,
+};
+let discovery: () => Response;
+const replies = new Map<string, Reply>();
+const posts: Post[] = [];
+const fetchMock = vi.fn<(url: string, init: RequestInit) => Promise<Response>>();
+const postsOf = (method: string) => posts.filter((post) => post.method === method);
+/** Profile reads and writes in order, e.g. `show:quiet`, `use:quiet@user`. */
+const profileCalls = () =>
+  posts
+    .filter((post) => post.method === SHOW || post.method === USE)
+    .map((post) =>
+      post.method === SHOW
+        ? `show:${String(post.payload.name)}`
+        : `use:${(post.payload.profile as Ref | null)?.name ?? 'none'}@${(post.payload.profile as Ref | null)?.scope ?? '-'}`
+    );
+
+function writerPreview() {
+  const preview = fixture<Json>('profiles-show', '/result');
+  const profile = preview.profile as Json;
+  return {
+    profile: {
+      ...profile,
+      ref: WRITER,
+      source: 'user:agents/writer.md',
+      description: 'Write notes',
+      promptPreview: 'Write notes.',
+      tools: ['write'],
+    },
+  };
+}
+
+function quietPreview(ref: Ref = state.quiet) {
+  const preview = fixture<Json>('profiles-show', '/result');
+  return { profile: { ...(preview.profile as Json), ref, source: `${ref.scope}:agents/quiet.md` } };
+}
+
+function toolList() {
+  const first = fixture<Json>('selections-list-tool-first', '/result');
+  const next = fixture<Json>('selections-list-tool-next', '/result');
+  return {
+    ...first,
+    items: [...(first.items as Json[]), ...(next.items as Json[])],
+    toolOverride: state.toolOverride,
+    activeTools: state.toolOverride ?? state.activeTools,
+    nextCursor: null,
+  };
+}
+
+function defaults() {
+  replies.clear();
+  replies.set(LIST, () =>
+    relay({
+      profiles: [
+        { ref: state.quiet, description: 'Review only' },
+        { ref: WRITER, description: 'Write notes' },
+      ],
+      activeAgent: state.activeAgent,
+      activeRef: state.activeRef,
+      diagnostics: [],
+      nextCursor: null,
+    })
+  );
+  replies.set(SHOW, ({ name }) => relay(name === 'writer' ? writerPreview() : quietPreview()));
+  replies.set(SELECTIONS, ({ kind }) =>
+    relay(kind === 'tool' ? toolList() : fixture('selections-list-skill', '/result'))
+  );
+  replies.set(USE, ({ profile }) => {
+    const ref = profile as Ref | null;
+    state.activeRef = ref;
+    state.activeAgent = ref?.name ?? null;
+    state.toolOverride = null;
+    return relay({ accepted: true, activeAgent: state.activeAgent, activeRef: ref, toolOverride: null });
+  });
+  replies.set(SET_TOOLS, ({ names }) => {
+    state.toolOverride = [...(names as string[])];
+    return relay({ accepted: true, toolOverride: names, activeTools: names });
+  });
+}
+
+const discovered = () => Response.json(fixture('relay-discovery', '/response/body'));
+
+// ---- Harness --------------------------------------------------------------------------------
+
+const Harness: React.FC<{
+  hostState?: HostTurnState;
+  mobile?: boolean;
+  onProfileApplied?: () => void;
+  conversationId?: string;
+}> = ({ hostState = 'idle', mobile = false, onProfileApplied, conversationId = 'c-17' }) => {
+  const controls = useAelixSessionControls({ conversationId, enabled: true, hostState, onProfileApplied });
+  const { t } = useTranslation();
+  return (
+    <>
+      {mobile ? (
+        <>
+          <MobileActionSheet open onClose={() => {}} entries={aelixSheetEntries(t, controls)} />
+          <AelixSessionDrawer controls={controls} />
+        </>
+      ) : (
+        <AelixSessionPills controls={controls} />
+      )}
+      <LocationProbe />
+    </>
+  );
+};
+
+const LocationProbe = () => {
+  const location = useLocation();
+  return <output data-testid='location'>{location.pathname + location.search}</output>;
+};
+
+const Routed: React.FC<React.ComponentProps<typeof Harness>> = (props) => (
+  <MemoryRouter initialEntries={['/conversation/c-17']}>
+    <Harness {...props} />
+  </MemoryRouter>
+);
+
+async function settle() {
+  for (let round = 0; round < 8; round++) {
+    // oxlint-disable-next-line no-await-in-loop -- flush chained relay reads in order
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+  }
+}
+
+async function openPanel(panel: 'profile' | 'tools') {
+  fireEvent.click(screen.getByTestId(`aelix-${panel}-pill`));
+  await settle();
+  return within(await screen.findByTestId(`aelix-${panel}-popover`));
+}
+
+async function inspect(name: string) {
+  fireEvent.click(within(screen.getByTestId('aelix-profile-list')).getByText(name));
+  await settle();
+  await screen.findByTestId('aelix-profile-preview');
+}
+
+const K = 'conversation.aelixControls';
+
+beforeEach(() => {
+  state.activeRef = QUIET;
+  state.activeAgent = 'quiet';
+  state.toolOverride = null;
+  state.activeTools = ['read'];
+  state.quiet = QUIET;
+  posts.length = 0;
+  discovery = discovered;
+  defaults();
+  fetchMock.mockReset();
+  fetchMock.mockImplementation(async (url, init) => {
+    expect(url).toMatch(/^\/api\/conversations\/[^/]+\/acp-extensions$/);
+    if (init.method === 'GET') return discovery();
+    const post = JSON.parse(String(init.body)) as Post;
+    posts.push(post);
+    const reply = replies.get(post.method);
+    if (!reply) throw new Error('Unexpected relay call ' + post.method);
+    const response = await reply(post.payload);
+    if (post.method === USE) {
+      // After a profile-changed refusal the runtime resolves "quiet" to the reported candidate.
+      const body = (await response.clone().json()) as { data?: { result?: { reason?: string; candidate?: Ref } } };
+      const result = body.data?.result;
+      if (result?.reason === 'profile-changed' && result.candidate) state.quiet = result.candidate;
+    }
+    return response;
+  });
+  vi.stubGlobal('fetch', fetchMock);
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('Aelix conversation controls: attach and availability', () => {
+  it('shows "use after opening" while no live task exists, then re-reads after attach without writing', async () => {
+    discovery = () => failure(409, 'EXT_NO_LIVE_TASK');
+    const view = render(<Routed hostState='unknown' />);
+    await settle();
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent(`${K}.summary.openFirst`);
+    const panel = await openPanel('profile');
+    expect(panel.getByTestId('aelix-controls-detached')).toHaveTextContent(`${K}.status.openFirst`);
+    // Discovery is a read and never creates a first turn.
+    expect(fetchMock.mock.calls.every(([, init]) => init.method === 'GET')).toBe(true);
+
+    discovery = discovered;
+    view.rerender(<Routed hostState='idle' />);
+    await settle();
+
+    expect(await screen.findByTestId('aelix-profile-list')).toBeInTheDocument();
+    expect(postsOf(USE).length + postsOf(SET_TOOLS).length).toBe(0);
+  });
+
+  it('shows an update-required state when the host does not offer the relay', async () => {
+    discovery = () => new Response(null, { status: 404 });
+    render(<Routed />);
+    await settle();
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.summary.updateRequired`);
+    const panel = await openPanel('tools');
+    expect(panel.getByTestId('aelix-controls-update-required')).toBeInTheDocument();
+  });
+
+  it('says the lists could not be read instead of "No profile" or "Checking"', async () => {
+    replies.set(LIST, () => failure(500, 'INTERNAL_ERROR'));
+    replies.set(SELECTIONS, () => failure(500, 'INTERNAL_ERROR'));
+    render(<Routed />);
+    await settle();
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent(`${K}.summary.readFailed`);
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.summary.readFailed`);
+  });
+
+  it('shows selection as unavailable only when the runtime lacks profiles/use', async () => {
+    const requests = fixture<string[]>('relay-discovery', '/response/body/data/requests').filter(
+      (method) => method !== USE
+    );
+    discovery = () => {
+      const body = fixture<Json>('relay-discovery', '/response/body');
+      return Response.json({ ...body, data: { ...(body.data as Json), requests } });
+    };
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+
+    expect(screen.getByTestId('aelix-profile-apply-update-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-apply')).toBeNull();
+    expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
+  });
+
+  it('explains that previews need an update when profiles/show is missing but profiles/use exists', async () => {
+    const requests = fixture<string[]>('relay-discovery', '/response/body/data/requests').filter(
+      (method) => method !== SHOW
+    );
+    discovery = () => {
+      const body = fixture<Json>('relay-discovery', '/response/body');
+      return Response.json({ ...body, data: { ...(body.data as Json), requests } });
+    };
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+
+    expect(screen.getByTestId('aelix-profile-preview-update-required')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-apply')).toBeNull();
+  });
+
+  it('keeps selection available when a runtime refuses one apply as unsupported, without faking success', async () => {
+    state.activeRef = WRITER;
+    state.activeAgent = 'writer';
+    replies.set(USE, () => relay({ accepted: false, reason: 'unsupported' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.updateRequired`);
+    expect(screen.queryByTestId('aelix-profile-apply-update-required')).toBeNull();
+    expect(screen.getByTestId('aelix-profile-current')).toHaveTextContent('writer');
+  });
+});
+
+describe('Aelix conversation controls: profile', () => {
+  it('previews source and tool restriction, applies while idle, and re-reads model, tools and skills', async () => {
+    const applied = vi.fn();
+    render(<Routed onProfileApplied={applied} />);
+    await settle();
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent('quiet');
+    await openPanel('profile');
+    await inspect('writer');
+
+    const shown = screen.getByTestId('aelix-profile-preview');
+    expect(shown).toHaveTextContent('user:agents/writer.md');
+    expect(shown).toHaveTextContent('write');
+
+    const listsBefore = postsOf(SELECTIONS).length;
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([WRITER]);
+    expect(postsOf(SELECTIONS).length).toBeGreaterThanOrEqual(listsBefore + 2);
+    expect(applied).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileApplied`);
+  });
+
+  it('warns that changing the profile resets an explicit tool choice, including none', async () => {
+    state.toolOverride = [];
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    expect(screen.getByTestId('aelix-profile-resets-tools')).toHaveTextContent(`${K}.profile.resetsTools`);
+  });
+
+  it('does not warn about tools when they are inherited', async () => {
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    expect(screen.getByTestId('aelix-profile-list')).toBeInTheDocument();
+    expect(screen.queryByTestId('aelix-profile-resets-tools')).toBeNull();
+  });
+
+  it('keeps apply disabled while Aelix is busy and sends no write', async () => {
+    render(<Routed hostState='busy' />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+
+    expect(screen.getByTestId('aelix-profile-apply')).toBeDisabled();
+    expect(screen.getByTestId('aelix-controls-blocked')).toHaveTextContent(`${K}.status.busy`);
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    expect(postsOf(USE)).toHaveLength(0);
+  });
+
+  it('shows a busy refusal from the runtime without retrying', async () => {
+    replies.set(USE, () => relay({ accepted: false, reason: 'busy' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.busy`);
+    expect(postsOf(USE)).toHaveLength(1);
+  });
+});
+
+describe('Aelix conversation controls: tools', () => {
+  it('saves an explicit empty selection distinctly from inherit', async () => {
+    render(<Routed />);
+    await settle();
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.inherited`);
+    await openPanel('tools');
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeInherited`);
+
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    fireEvent.click(screen.getByTestId('aelix-tools-save'));
+    await settle();
+
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeNone`);
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.none`);
+  });
+
+  it('keeps an unsaved draft when the list is read again and says the list changed', async () => {
+    const view = render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+
+    state.activeTools = ['read', 'write'];
+    view.rerender(<Routed hostState='unknown' />);
+    await settle();
+    view.rerender(<Routed hostState='idle' />);
+    await settle();
+
+    expect(screen.getByTestId('aelix-tools-list-changed')).toHaveTextContent(`${K}.tools.listChanged`);
+    expect(screen.getAllByText(`${K}.tools.discard`)).toHaveLength(1);
+    fireEvent.click(screen.getByTestId('aelix-tools-save'));
+    await settle();
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
+  });
+
+  it('confirms inherited tools with a tools notice, not a profile notice', async () => {
+    state.toolOverride = ['read'];
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET]);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
+  });
+
+  it('previews the active profile before returning to inherited tools', async () => {
+    state.toolOverride = ['read'];
+    // Like the interim runtime: refuse profiles/use for a ref that was not just shown.
+    const shown = new Set<string>();
+    const show = replies.get(SHOW)!;
+    const use = replies.get(USE)!;
+    replies.set(SHOW, (payload) => {
+      shown.add(String(payload.name));
+      return show(payload);
+    });
+    replies.set(USE, (payload) => {
+      const ref = payload.profile as Ref | null;
+      if (ref && !shown.has(ref.name)) return relay({ accepted: false, reason: 'profile-refused' });
+      shown.clear();
+      return use(payload);
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(profileCalls()).toEqual(['show:quiet', 'use:quiet@user']);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsInherited`);
+  });
+
+  it('shows the change card instead of writing when the active profile changed before inheriting', async () => {
+    state.toolOverride = ['read'];
+    state.quiet = fixture<Ref>('profile-ref', '/vectors/2/ref');
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(postsOf(USE)).toHaveLength(0);
+    expect(screen.getByTestId('aelix-profile-change-card')).toBeInTheDocument();
+    expect(screen.getByTestId('aelix-change-reselect')).not.toBeDisabled();
+  });
+
+  it('drops an unsaved draft after a restore from the tools panel succeeds', async () => {
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      state.activeRef = ref;
+      state.toolOverride = null;
+      return failure(502, 'EXT_OUTCOME_UNKNOWN');
+    });
+    replies.set(LOOKUP, () => relay({ status: 'unknown' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+    expect(screen.getByTestId('aelix-recovery-card')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+    fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-tools')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    await settle();
+
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([['read']]);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
+  it('drops an unsaved draft once inherited tools are applied', async () => {
+    state.toolOverride = ['read'];
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeInherited`);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
+  it('drops an unsaved draft after a reselect from the tools panel succeeds', async () => {
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      if (ref.revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      state.activeRef = ref;
+      state.toolOverride = null;
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+    fireEvent.click(screen.getByTestId('aelix-tools-inherit'));
+    await settle();
+    expect(screen.getByTestId('aelix-tools-save')).not.toBeDisabled();
+
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET, QUIET_PROJECT]);
+    expect(screen.getByTestId('aelix-tools-save')).toBeDisabled();
+    expect(within(screen.getByTestId('aelix-tool-read')).getByRole('checkbox')).toBeChecked();
+  });
+
+  it('shows saved, applied and live state with lock reasons and pending rows', async () => {
+    replies.set(SELECTIONS, ({ kind }) => {
+      if (kind !== 'tool') return relay(fixture('selections-list-skill', '/result'));
+      const list = toolList();
+      const [read, write] = list.items as Json[];
+      return relay({
+        ...list,
+        items: [
+          { ...read, live: false, pending: true },
+          { ...write, loaded: false, saved: true, lock: { kind: 'cli', value: false, reason: 'launch-locked' } },
+        ],
+      });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+
+    const read = screen.getByTestId('aelix-tool-state-read');
+    expect(read).toHaveTextContent(`${K}.row.live {"value":"${K}.row.off"}`);
+    expect(read).toHaveTextContent(`${K}.row.pendingNext`);
+    expect(screen.getByTestId('aelix-tool-lock-write')).toHaveTextContent(`${K}.lock.launch`);
+    expect(within(screen.getByTestId('aelix-tool-write')).getByRole('checkbox')).toBeDisabled();
+  });
+});
+
+describe('Aelix conversation controls: decision 2 and recovery', () => {
+  beforeEach(() => {
+    state.activeRef = WRITER;
+    state.activeAgent = 'writer';
+  });
+
+  it('shows what changed and reselects the current candidate once', async () => {
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      if (ref.revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      state.activeRef = ref;
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    const card = screen.getByTestId('aelix-profile-change-card');
+    expect(within(card).getByTestId('aelix-change-candidate')).toHaveTextContent(`${K}.scope.project`);
+    expect(within(card).getByTestId('aelix-change-differences')).toHaveTextContent(`${K}.field.tools`);
+
+    fireEvent.click(within(card).getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET, QUIET_PROJECT]);
+    expect(profileCalls().slice(-3)).toEqual(['use:quiet@user', 'show:quiet', 'use:quiet@project']);
+    expect(screen.queryByTestId('aelix-profile-change-card')).toBeNull();
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileApplied`);
+  });
+
+  it('ends in recovery without a second reselect when the profile changes again', async () => {
+    replies.set(USE, ({ profile }) =>
+      relay(
+        (profile as Ref).revision === QUIET.revision
+          ? fixture('use-stale-preview', '/result')
+          : fixture('use-changed-again', '/result')
+      )
+    );
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET, QUIET_PROJECT]);
+    expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
+    expect(screen.queryByTestId('aelix-profile-change-card')).toBeNull();
+    expect(screen.queryByTestId('aelix-change-reselect')).toBeNull();
+  });
+
+  it('keeps an explicit null original from a second change instead of the previous profile', async () => {
+    replies.set(USE, ({ profile }) => {
+      if ((profile as Ref).revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      const result = fixture<Json>('use-changed-again', '/result');
+      return relay({ ...result, recovery: { action: 'restore-original-and-reopen', original: null } });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    const original = screen.getByTestId('aelix-recovery-original');
+    expect(original).toHaveTextContent(`${K}.profile.none`);
+    expect(original).not.toHaveTextContent('writer');
+  });
+
+  it('does not write when the reselect preview resolves to yet another revision', async () => {
+    const CHANGED = fixture<Ref>('profile-ref', '/vectors/2/ref');
+    replies.set(USE, () => relay(fixture('use-stale-preview', '/result')));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    state.quiet = CHANGED;
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([QUIET]);
+    expect(profileCalls().at(-1)).toBe('show:quiet');
+    expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
+    expect(screen.queryByTestId('aelix-change-reselect')).toBeNull();
+  });
+
+  it('writes nothing when the user keeps the current environment while the reselect preview loads', async () => {
+    replies.set(USE, () => relay(fixture('use-stale-preview', '/result')));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    const late = hold();
+    const show = replies.get(SHOW)!;
+    replies.set(SHOW, async (payload) => {
+      await late.gate;
+      return show(payload);
+    });
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-keep'));
+    late.release();
+    await settle();
+
+    expect(postsOf(USE)).toHaveLength(1);
+    expect(screen.getByTestId('aelix-recovery-card')).toBeInTheDocument();
+  });
+
+  it('starts one preview and one write for a double reselect click', async () => {
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      if (ref.revision === QUIET.revision) return relay(fixture('use-stale-preview', '/result'));
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    const before = profileCalls().length;
+
+    const reselect = screen.getByTestId('aelix-change-reselect');
+    fireEvent.click(reselect);
+    fireEvent.click(reselect);
+    await settle();
+
+    expect(profileCalls().slice(before)).toEqual(['show:quiet', 'use:quiet@project']);
+  });
+
+  it('reports a failed reselect preview without writing', async () => {
+    replies.set(USE, () => relay(fixture('use-stale-preview', '/result')));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    replies.set(SHOW, () => relay({ accepted: false, reason: 'profile-unavailable', name: 'quiet' }));
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    expect(postsOf(USE)).toHaveLength(1);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.profileUnavailable`);
+  });
+
+  it('does not restore a profile or picked tools when the preview no longer matches the saved ref', async () => {
+    state.activeRef = QUIET;
+    state.activeAgent = 'quiet';
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      state.activeRef = ref;
+      state.activeAgent = ref.name;
+      state.toolOverride = null;
+      return failure(502, 'EXT_OUTCOME_UNKNOWN');
+    });
+    replies.set(LOOKUP, () => relay({ status: 'unknown' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    replies.set(SHOW, ({ name }) =>
+      relay(name === 'writer' ? writerPreview() : quietPreview(fixture<Ref>('profile-ref', '/vectors/2/ref')))
+    );
+    fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-profile')).getByRole('checkbox'));
+    fireEvent.click(within(screen.getByTestId('aelix-recovery-pick-tools')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-recovery-restore'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([WRITER]);
+    expect(postsOf(SET_TOOLS)).toHaveLength(0);
+    expect(screen.getByTestId('aelix-recovery-card')).toHaveTextContent(`${K}.recovery.cause.changedAgain`);
+  });
+
+  it('offers recovery after the approval is declined and sends nothing more', async () => {
+    replies.set(USE, ({ profile }) =>
+      relay(
+        (profile as Ref).revision === QUIET.revision
+          ? fixture('use-stale-preview', '/result')
+          : fixture('use-permission-deny', '/result')
+      )
+    );
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+    fireEvent.click(screen.getByTestId('aelix-change-reselect'));
+    await settle();
+
+    const card = screen.getByTestId('aelix-recovery-card');
+    expect(card).toHaveTextContent(`${K}.recovery.cause.declined`);
+    expect(card).toHaveTextContent(`${K}.recovery.noResend`);
+    expect(within(card).getByTestId('aelix-recovery-original')).toHaveTextContent('quiet');
+    expect(postsOf(USE)).toHaveLength(2);
+  });
+
+  it('restores only the items the user picks after an unknown outcome', async () => {
+    state.activeRef = QUIET;
+    state.activeAgent = 'quiet';
+    state.toolOverride = ['read'];
+    replies.set(USE, ({ profile }) => {
+      const ref = profile as Ref;
+      state.activeRef = ref;
+      state.activeAgent = ref.name;
+      state.toolOverride = null;
+      if (ref.name === 'writer') return failure(502, 'EXT_OUTCOME_UNKNOWN');
+      return relay({ accepted: true, activeAgent: ref.name, activeRef: ref, toolOverride: null });
+    });
+    replies.set(LOOKUP, () => relay({ status: 'unknown' }));
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+    fireEvent.click(screen.getByTestId('aelix-profile-apply'));
+    await settle();
+
+    const card = screen.getByTestId('aelix-recovery-card');
+    expect(card).toHaveTextContent(`${K}.recovery.cause.unknown`);
+    expect(within(card).getByTestId('aelix-recovery-pick-tools')).toBeInTheDocument();
+    fireEvent.click(within(within(card).getByTestId('aelix-recovery-pick-profile')).getByRole('checkbox'));
+    expect(card).toHaveTextContent(`${K}.recovery.profileResetsTools`);
+    fireEvent.click(within(card).getByTestId('aelix-recovery-restore'));
+    await settle();
+
+    expect(postsOf(USE).map((post) => post.payload.profile)).toEqual([WRITER, QUIET]);
+    // quiet was never previewed in this binding, so restore inspects it right before writing.
+    const calls = profileCalls();
+    expect(calls.indexOf('show:quiet')).toBe(calls.indexOf('use:quiet@user') - 1);
+    expect(calls.filter((call) => call === 'show:quiet')).toHaveLength(1);
+    expect(postsOf(SET_TOOLS)).toHaveLength(0);
+    await waitFor(() => expect(screen.queryByTestId('aelix-recovery-card')).toBeNull());
+  });
+});
+
+describe('Aelix conversation controls: mobile composer', () => {
+  it('opens the profile panel in a drawer from the action sheet', async () => {
+    render(<Routed mobile />);
+    await settle();
+    expect(screen.queryByTestId('aelix-profile-pill')).toBeNull();
+
+    fireEvent.click(screen.getByText(`${K}.profile.label`));
+    await settle();
+
+    const drawer = await screen.findByTestId('aelix-profile-drawer');
+    expect(within(drawer).getByTestId('aelix-profile-list')).toHaveTextContent('writer');
+  });
+
+  it("opens this conversation's tools in a drawer and saves from it", async () => {
+    render(<Routed mobile />);
+    await settle();
+    fireEvent.click(screen.getByText(`${K}.tools.title`));
+    await settle();
+
+    const drawer = await screen.findByTestId('aelix-tools-drawer');
+    fireEvent.click(within(drawer).getByTestId('aelix-tools-none'));
+    fireEvent.click(within(drawer).getByTestId('aelix-tools-save'));
+    await settle();
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([[]]);
+  });
+});
+
+describe('Aelix conversation controls: legacy name-only recovery', () => {
+  const declined: ResourceFailure = {
+    status: 'recovery-required',
+    reason: 'declined',
+    action: 'restore-original-and-reopen',
+    retryWrite: false,
+    original: null,
+  };
+  const legacy = { failure: declined, baseline: { profile: null, activeAgent: 'quiet', toolOverride: undefined } };
+  const catalog = (activeRef: Ref | null, activeAgent: string | null) =>
+    ({
+      source: 'session',
+      conversationId: 'c-17',
+      bindingId: 'b-21',
+      complete: true,
+      nextCursor: null,
+      activeAgent,
+      activeRef,
+      inspected: null,
+      profiles: [{ ref: QUIET, description: 'Review only' }],
+      diagnostics: [],
+    }) as unknown as ProfileCatalogView<SessionProfiles>;
+
+  it('treats the same name-only profile as unchanged', () => {
+    expect(restorePlan(legacy, catalog(null, 'quiet')).profile).toMatchObject({ differs: false, legacyName: 'quiet' });
+  });
+
+  it('offers the name-only profile as changed when another profile is active, without a restorable ref', () => {
+    expect(restorePlan(legacy, catalog(WRITER, 'writer')).profile).toMatchObject({
+      differs: true,
+      restorable: false,
+      reason: 'unknown',
+      legacyName: 'quiet',
+    });
+  });
+
+  it('labels the original with its recorded name instead of "no profile"', () => {
+    render(
+      <RecoveryCard
+        recovery={legacy}
+        profiles={catalog(WRITER, 'writer')}
+        blocked={null}
+        restoring={false}
+        onRestore={() => {}}
+        onClose={() => {}}
+      />
+    );
+    const original = screen.getByTestId('aelix-recovery-original');
+    expect(original).toHaveTextContent(`${K}.profile.legacy`);
+    expect(original).not.toHaveTextContent(`${K}.profile.none`);
+  });
+});
+
+describe('Aelix conversation controls: labels', () => {
+  it('shows known native codes as labels instead of raw codes', async () => {
+    replies.set(LIST, () =>
+      relay({
+        profiles: [{ ref: QUIET, description: 'Review only' }],
+        activeAgent: 'quiet',
+        activeRef: QUIET,
+        diagnostics: [{ code: 'invalid-profile', key: 'broken', source: null }],
+        nextCursor: null,
+      })
+    );
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('quiet');
+
+    const diagnostics = screen.getByTestId('aelix-profile-diagnostics');
+    expect(diagnostics).toHaveTextContent(`${K}.code.diagnostic.invalidProfile`);
+    expect(diagnostics).not.toHaveTextContent('invalid-profile');
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent(`${K}.code.approval.inherit`);
+  });
+
+  it('labels every native approval mode in the preview', async () => {
+    replies.set(SHOW, ({ name }) => {
+      const reply = (name === 'writer' ? writerPreview() : fixture('profiles-show', '/result')) as Json;
+      return relay({ profile: { ...(reply.profile as Json), approvalMode: 'deny' } });
+    });
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent(`${K}.code.approval.deny`);
+  });
+
+  it('labels approval modes in the change card the same way as the preview', () => {
+    const conflict: ResourceFailure = {
+      status: 'conflict',
+      reason: 'profile-changed',
+      action: 'refresh-and-choose',
+      retryWrite: false,
+      recorded: QUIET as ResourceFailure['recorded'],
+      candidate: QUIET_PROJECT as ResourceFailure['candidate'],
+      differences: [{ field: 'approvalMode', before: 'ask', after: 'auto' }],
+    };
+    render(<ProfileChangeCard conflict={conflict} blocked={null} onReselect={() => {}} onKeepCurrent={() => {}} />);
+    const differences = screen.getByTestId('aelix-change-differences');
+    expect(differences).toHaveTextContent(`${K}.code.approval.ask`);
+    expect(differences).toHaveTextContent(`${K}.code.approval.auto`);
+  });
+
+  it('passes a numeric count so tool totals use plural forms', async () => {
+    state.toolOverride = ['read'];
+    render(<Routed />);
+    await settle();
+    expect(screen.getByTestId('aelix-tools-pill')).toHaveTextContent(`${K}.tools.count {"count":1}`);
+
+    const i18n = createInstance();
+    await i18n.init({
+      lng: 'en-US',
+      resources: {
+        'en-US': { translation: { conversation: enConversation } },
+        'ru-RU': { translation: { conversation: ruConversation } },
+      },
+    });
+    expect(i18n.t(`${K}.tools.count`, { count: 1 })).toBe('1 tool');
+    expect(i18n.t(`${K}.tools.count`, { count: 2 })).toBe('2 tools');
+    expect(i18n.t(`${K}.tools.count`, { count: 5, lng: 'ru-RU' })).toBe('5 инструментов');
+  });
+
+  it('passes a numeric count to the tools mode line and the saved notice', async () => {
+    state.toolOverride = ['read', 'write'];
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    expect(screen.getByTestId('aelix-tools-mode')).toHaveTextContent(`${K}.tools.modeExplicit {"count":2}`);
+
+    fireEvent.click(within(screen.getByTestId('aelix-tool-write')).getByRole('checkbox'));
+    fireEvent.click(screen.getByTestId('aelix-tools-save'));
+    await settle();
+    expect(postsOf(SET_TOOLS).map((post) => post.payload.names)).toEqual([['read']]);
+    expect(screen.getByTestId('aelix-controls-notice')).toHaveTextContent(`${K}.notice.toolsSaved {"count":1}`);
+  });
+
+  it('resolves plural forms for the tools mode line and the saved notice', async () => {
+    const i18n = createInstance();
+    await i18n.init({
+      lng: 'en-US',
+      resources: {
+        'en-US': { translation: { conversation: enConversation } },
+        'ru-RU': { translation: { conversation: ruConversation } },
+      },
+    });
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 1 })).toBe('1 tool chosen for this conversation');
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 3 })).toBe('3 tools chosen for this conversation');
+    expect(i18n.t(`${K}.notice.toolsSaved`, { count: 1 })).toBe('Saved 1 tool for this conversation.');
+    expect(i18n.t(`${K}.notice.toolsSaved`, { count: 2, lng: 'ru-RU' })).toBe(
+      'Для этого диалога сохранено 2 инструмента.'
+    );
+    expect(i18n.t(`${K}.tools.modeExplicit`, { count: 1, lng: 'ru-RU' })).toBe('Для этого диалога выбран 1 инструмент');
+  });
+});
+
+function hold() {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { gate, release };
+}
+
+describe('Aelix conversation controls: stale responses', () => {
+  it('ignores a late re-read preview after the user picked another profile', async () => {
+    const view = render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    await inspect('writer');
+
+    const late = hold();
+    replies.set(SHOW, async ({ name }) => {
+      if (name === 'writer') await late.gate;
+      return relay(name === 'writer' ? writerPreview() : fixture('profiles-show', '/result'));
+    });
+    view.rerender(<Routed hostState='unknown' />);
+    await settle();
+    fireEvent.click(within(screen.getByTestId('aelix-profile-list')).getByText('quiet'));
+    await settle();
+    late.release();
+    await settle();
+
+    expect(screen.getByTestId('aelix-profile-preview')).toHaveTextContent('user:agents/quiet.md');
+    expect(screen.queryByText(`${K}.preview.failed`)).toBeNull();
+  });
+
+  it('drops a late list reply from the previous conversation after switching', async () => {
+    const late = hold();
+    const current = replies.get(LIST)!;
+    let lists = 0;
+    replies.set(LIST, async (payload) => {
+      if (lists++ > 0) return current(payload);
+      await late.gate;
+      return relay({
+        profiles: [{ ref: WRITER, description: 'Write notes' }],
+        activeAgent: 'writer',
+        activeRef: WRITER,
+        diagnostics: [],
+        nextCursor: null,
+      });
+    });
+    const view = render(<Routed conversationId='c-17' />);
+    await settle();
+    view.rerender(<Routed conversationId='c-18' />);
+    await settle();
+    late.release();
+    await settle();
+
+    expect(screen.getByTestId('aelix-profile-pill')).toHaveTextContent('quiet');
+    expect(screen.getByTestId('aelix-profile-pill')).not.toHaveTextContent('writer');
+    expect(fetchMock.mock.calls.some(([url]) => url.includes('/c-18/'))).toBe(true);
+  });
+});
+
+describe('Aelix conversation controls: accessibility', () => {
+  it('marks the pill as a dialog trigger and moves focus into the opened panel', async () => {
+    render(<Routed />);
+    await settle();
+    const pill = screen.getByTestId('aelix-profile-pill');
+    expect(pill).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+
+    await openPanel('profile');
+    const panel = screen.getByTestId('aelix-profile-popover');
+    expect(pill).toHaveAttribute('aria-expanded', 'true');
+    expect(panel).toHaveAttribute('role', 'dialog');
+    expect(panel).toHaveFocus();
+  });
+
+  it('closes the panel with Escape', async () => {
+    render(<Routed />);
+    await settle();
+    await openPanel('profile');
+    fireEvent.keyDown(screen.getByTestId('aelix-profile-popover'), { key: 'Escape', keyCode: 27 });
+    await settle();
+    const pill = screen.getByTestId('aelix-profile-pill');
+    expect(pill).toHaveAttribute('aria-expanded', 'false');
+    expect(pill).toHaveFocus();
+  });
+});
+
+describe('Aelix conversation controls: settings links', () => {
+  // A token id the parser accepts but that must be encoded in a query string.
+  const ODD_ID = 'c 18&x=1#y';
+  const ODD_QUERY = 'conversation=c%2018%26x%3D1%23y';
+
+  it.each(['tools', 'skills'] as const)(
+    'opens %s settings with the conversation id encoded and closes the panel',
+    async (page) => {
+      render(<Routed conversationId={ODD_ID} />);
+      await settle();
+      await openPanel('tools');
+      fireEvent.click(screen.getByTestId(`aelix-settings-${page}`));
+      await settle();
+
+      expect(screen.getByTestId('location').textContent).toBe(`/settings/${page}?${ODD_QUERY}`);
+      expect(screen.getByTestId('aelix-tools-pill')).toHaveAttribute('aria-expanded', 'false');
+    }
+  );
+
+  it('keeps the settings links disabled while the tool draft has unsaved changes', async () => {
+    render(<Routed />);
+    await settle();
+    await openPanel('tools');
+    fireEvent.click(screen.getByTestId('aelix-tools-none'));
+
+    expect(screen.getByTestId('aelix-settings-tools')).toBeDisabled();
+    expect(screen.getByTestId('aelix-settings-dirty')).toHaveTextContent(`${K}.tools.settingsDirty`);
+    fireEvent.click(screen.getByTestId('aelix-settings-tools'));
+    await settle();
+    expect(screen.getByTestId('location').textContent).toBe('/conversation/c-17');
+
+    fireEvent.click(screen.getByTestId('aelix-settings-discard'));
+    expect(screen.getByTestId('aelix-settings-tools')).not.toBeDisabled();
+  });
+});

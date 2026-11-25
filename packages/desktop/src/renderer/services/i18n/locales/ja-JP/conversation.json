@@ -838,5 +838,227 @@
       "body": "他のプロセスがこのセッションを使用していないことを確認できなかったため、送信と下書きボックスを一時停止しています。再確認すると続行します。"
     },
     "paused": "確認が成功するまで、送信と下書きボックスは一時停止したままです。"
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "プロファイル",
+      "title": "プロファイル",
+      "none": "プロファイルなし",
+      "current": "現在: {{profile}}",
+      "currentLegacy": "現在: {{name}}（名前のみ記録）",
+      "active": "使用中",
+      "apply": "プロファイルを適用",
+      "clear": "プロファイルを使わない",
+      "empty": "プロファイルが見つかりません。Aelix CLI で作成してください。",
+      "partial": "プロファイル一覧の一部しか読み取れませんでした。",
+      "diagnostics": "一部のプロファイルを読み取れませんでした: {{codes}}",
+      "legacy": "{{name}}（名前のみ記録）",
+      "resetsTools": "プロファイルを変更すると、この会話のツール選択は継承に戻ります。"
+    },
+    "tools": {
+      "label": "ツール",
+      "title": "この会話のツール",
+      "inherited": "継承",
+      "none": "ツールなし",
+      "count": "ツール {{count}} 個",
+      "modeInherited": "プロファイルと既定値から継承",
+      "modeNone": "この会話ではツールを使わない",
+      "modeExplicit": "この会話で選んだツール {{count}} 個",
+      "effectNext": "変更は次のリクエストから適用されます。",
+      "effectRestart": "変更は Aelix の再起動後に適用されます。",
+      "policyPending": "適用待ちのポリシー変更があります。",
+      "partial": "ツール一覧が不完全なため、まだ保存できません。",
+      "mismatch": "保存された選択が Aelix の報告と異なります。",
+      "empty": "Aelix が報告したツールはありません。",
+      "skills": "使用中のスキル: {{skills}}",
+      "inherit": "継承したツールを使う",
+      "selectNone": "すべて解除",
+      "save": "この会話に保存",
+      "listChanged": "編集中にツール一覧が変わりました。保存前に選択を確認してください。",
+      "discard": "変更を破棄",
+      "count_one": "ツール {{count}} 個",
+      "count_other": "ツール {{count}} 個",
+      "modeExplicit_one": "この会話で選んだツール {{count}} 個",
+      "modeExplicit_other": "この会話で選んだツール {{count}} 個",
+      "projectTools": "設定でプロジェクトのツール既定値",
+      "projectSkills": "設定でプロジェクトのスキル",
+      "settingsDirty": "設定を開く前に、ツールの変更を保存するか破棄してください。"
+    },
+    "scope": {
+      "bundled": "同梱",
+      "user": "ユーザー",
+      "project": "プロジェクト"
+    },
+    "summary": {
+      "checking": "確認中",
+      "openFirst": "会話を開いた後",
+      "updateRequired": "更新が必要",
+      "unavailable": "利用不可",
+      "readFailed": "読み取り失敗"
+    },
+    "status": {
+      "checking": "Aelix の対応機能を確認しています...",
+      "openFirst": "会話を開いた後に使用してください。Aelix が接続されると再確認します。",
+      "updateRequiredTitle": "Aelix の更新が必要です",
+      "updateRequired": "この Aelix ランタイムはまだこの機能に対応していません。使用するには Aelix を更新してください。",
+      "signIn": "この設定を読み取るには再度サインインしてください。",
+      "readFailed": "この設定を読み取れませんでした。",
+      "busy": "Aelix が待機中のときに使用できます。",
+      "notIdle": "会話が開いていて待機中のときに使用できます。",
+      "writing": "別の変更を処理中です。",
+      "applying": "適用しています... Aelix が承認を求めたら会話内で応答してください。",
+      "saving": "保存しています..."
+    },
+    "action": {
+      "retry": "再試行",
+      "close": "閉じる"
+    },
+    "preview": {
+      "source": "出典",
+      "revision": "リビジョン",
+      "tools": "ツール",
+      "skills": "スキル",
+      "model": "モデル",
+      "approval": "承認",
+      "excludedTools": "除外されたツール",
+      "allTools": "すべてのツール",
+      "noTools": "ツールなし",
+      "allSkills": "すべてのスキル",
+      "noSkills": "スキルなし",
+      "inheritModel": "現在のモデル",
+      "truncated": "（省略あり）",
+      "failed": "プレビューを読み込めませんでした。"
+    },
+    "row": {
+      "saved": "保存: {{value}}",
+      "applied": "適用: {{value}}",
+      "live": "実際: {{value}}",
+      "on": "オン",
+      "off": "オフ",
+      "unobserved": "未確認",
+      "decidedBy": {
+        "global": "グローバル",
+        "project": "プロジェクト"
+      },
+      "notLoaded": "未読み込み",
+      "pendingNext": "次のリクエスト",
+      "pendingRestart": "再起動待ち",
+      "problem": "問題: {{code}}",
+      "mismatch": "不一致: {{reason}}"
+    },
+    "lock": {
+      "launch": "起動オプションでロック",
+      "env": "環境設定でロック",
+      "helper": "設定で管理",
+      "other": "ロック中（{{reason}}）"
+    },
+    "notice": {
+      "profileApplied": "この会話でプロファイル {{name}} を使用します。",
+      "profileCleared": "この会話ではプロファイルを使用しなくなりました。",
+      "toolsSaved": "この会話にツールを {{count}} 個保存しました。",
+      "toolsSavedEmpty": "保存しました。この会話ではツールを使いません。",
+      "restored": "選択した項目を復元しました。",
+      "outcomeUnknown": "結果が不明です。現在の状態を再読み込みしたので、必要なら選び直してください。",
+      "openFirst": "会話を開いた後に使用してください。",
+      "stale": "会話が再接続されたため、現在の状態を再読み込みしました。",
+      "signIn": "再度サインインしてからお試しください。",
+      "updateRequired": "Aelix の更新が必要です。",
+      "busy": "Aelix は処理中です。待機中になってから再試行してください。",
+      "toolLocked": "{{name}} はロックされているため、ここでは変更できません。",
+      "toolUnavailable": "{{name}} はこの会話で読み込まれていません。",
+      "profileUnavailable": "プロファイル {{name}} はもう利用できません。",
+      "profileRefused": "Aelix がこのプロファイルを拒否しました。",
+      "writeFailed": "変更を保存できませんでした。",
+      "profileFailed": "プロファイルを適用できませんでした。",
+      "toolsFailed": "ツールを保存できませんでした。",
+      "toolsInherited": "この会話は継承したツールを使うようになりました。",
+      "toolsSaved_one": "この会話にツールを {{count}} 個保存しました。",
+      "toolsSaved_other": "この会話にツールを {{count}} 個保存しました。"
+    },
+    "change": {
+      "title": "このプロファイルは変更されています",
+      "description": "前回選んだ後に出典またはリビジョンが変わりました。差分を確認し、使用するには選び直してください。",
+      "recorded": "以前",
+      "candidate": "現在",
+      "missing": "利用不可",
+      "field": "項目",
+      "before": "以前",
+      "after": "現在",
+      "noCandidate": "プロファイルが見つからなくなりました。",
+      "keep": "現在の環境を維持",
+      "reselect": "変更後のプロファイルを選ぶ"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "プロファイルの変更は拒否されました",
+        "cancelled": "プロファイルの変更はキャンセルされました",
+        "unanswered": "承認に応答がありませんでした",
+        "changedAgain": "適用前にプロファイルが再び変更されました",
+        "profileUnavailable": "プロファイルはもう利用できません",
+        "guardUnavailable": "この Aelix ランタイムは確認済みプロファイルを適用できません",
+        "invalidRecord": "記録されたプロファイルを読み取れませんでした",
+        "profileChanged": "変更後のプロファイルは選ばれませんでした",
+        "unknown": "変更の結果が不明です",
+        "other": "変更は適用されませんでした"
+      },
+      "noResend": "プロンプトは再送されず、権限も広がりません。",
+      "original": "元の環境: {{profile}}",
+      "unchanged": "この会話では何も変更されていません。",
+      "restoreProfile": "プロファイル {{profile}} を復元",
+      "restoreTools": "この会話のツールを復元: {{tools}}",
+      "toolsWithProfile": "継承したツールはプロファイルと一緒に戻ります。",
+      "profileResetsTools": "プロファイルを復元すると、この会話のツールは継承に戻ります。",
+      "restoreFileAndReopen": "元のプロファイルファイルが変更されています。Aelix CLI で復元してから、この会話を開き直してください。",
+      "unknownOriginal": "元のプロファイルは名前のみ記録されています。一覧から選び直してください。",
+      "restoreSelected": "選択した項目を復元"
+    },
+    "field": {
+      "source": "出典",
+      "revision": "リビジョン",
+      "description": "説明",
+      "promptMode": "プロンプト方式",
+      "promptPreview": "プロンプト",
+      "promptTruncated": "プロンプト省略",
+      "omittedPrompt": "プロンプトの省略部分",
+      "provider": "プロバイダー",
+      "model": "モデル",
+      "tools": "ツール",
+      "skills": "スキル",
+      "approvalMode": "承認",
+      "builtinTools": "組み込みツール",
+      "excludeTools": "除外されたツール",
+      "inheritSkills": "スキルを継承",
+      "extensions": "拡張機能",
+      "inheritExtensions": "拡張機能を継承",
+      "contextFiles": "コンテキストファイル",
+      "thinking": "思考",
+      "role": "役割",
+      "outputCap": "出力上限",
+      "timeoutMs": "タイムアウト (ms)",
+      "agents": "エージェント"
+    },
+    "value": {
+      "unset": "未設定",
+      "empty": "なし",
+      "yes": "はい",
+      "no": "いいえ"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "保存値が Aelix の報告と異なる",
+        "nativeMismatch": "Aelix が差分を報告"
+      },
+      "diagnostic": {
+        "invalidProfile": "無効なプロファイルファイル",
+        "envConfig": "環境設定で指定"
+      },
+      "approval": {
+        "inherit": "継承",
+        "ask": "確認する",
+        "auto": "自動承認",
+        "deny": "拒否"
+      },
+      "other": "その他（{{code}}）"
+    }
   }
 }

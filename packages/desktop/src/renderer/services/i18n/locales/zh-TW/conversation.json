@@ -838,5 +838,227 @@
       "body": "Studio 無法確認沒有其他處理程序正在使用此工作階段，因此已暫停傳送和草稿匣。請重新檢查以繼續。"
     },
     "paused": "在檢查成功之前，傳送和草稿匣將保持暫停。"
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "設定檔",
+      "title": "設定檔",
+      "none": "無設定檔",
+      "current": "目前：{{profile}}",
+      "currentLegacy": "目前：{{name}}（僅記錄名稱）",
+      "active": "使用中",
+      "apply": "套用設定檔",
+      "clear": "不使用設定檔",
+      "empty": "找不到設定檔。請使用 Aelix CLI 建立。",
+      "partial": "只讀取到部分設定檔清單。",
+      "diagnostics": "部分設定檔無法讀取：{{codes}}",
+      "legacy": "{{name}}（僅記錄名稱）",
+      "resetsTools": "變更設定檔會將此對話的工具選擇重設為繼承。"
+    },
+    "tools": {
+      "label": "工具",
+      "title": "此對話的工具",
+      "inherited": "繼承",
+      "none": "無工具",
+      "count": "{{count}} 個工具",
+      "modeInherited": "繼承自設定檔與預設值",
+      "modeNone": "此對話不使用工具",
+      "modeExplicit": "此對話選擇了 {{count}} 個工具",
+      "effectNext": "變更將從下一次請求開始生效。",
+      "effectRestart": "變更將在 Aelix 重新啟動後生效。",
+      "policyPending": "有政策變更正在等待套用。",
+      "partial": "工具清單不完整，暫時無法儲存。",
+      "mismatch": "已儲存的選擇與 Aelix 回報的狀態不一致。",
+      "empty": "Aelix 未回報任何工具。",
+      "skills": "使用中的技能：{{skills}}",
+      "inherit": "使用繼承的工具",
+      "selectNone": "全部取消",
+      "save": "儲存到此對話",
+      "listChanged": "編輯期間工具清單已變更。儲存前請檢查你的選擇。",
+      "discard": "捨棄我的變更",
+      "count_one": "{{count}} 個工具",
+      "count_other": "{{count}} 個工具",
+      "modeExplicit_one": "此對話選擇了 {{count}} 個工具",
+      "modeExplicit_other": "此對話選擇了 {{count}} 個工具",
+      "projectTools": "在設定中查看專案工具預設值",
+      "projectSkills": "在設定中查看專案技能",
+      "settingsDirty": "開啟設定前，請先儲存或捨棄工具變更。"
+    },
+    "scope": {
+      "bundled": "內建",
+      "user": "使用者",
+      "project": "專案"
+    },
+    "summary": {
+      "checking": "檢查中",
+      "openFirst": "開啟對話後",
+      "updateRequired": "需要更新",
+      "unavailable": "無法使用",
+      "readFailed": "無法讀取"
+    },
+    "status": {
+      "checking": "正在檢查 Aelix 支援的功能...",
+      "openFirst": "請在對話開啟後使用。Aelix 連線後會再次檢查。",
+      "updateRequiredTitle": "需要更新 Aelix",
+      "updateRequired": "目前的 Aelix 執行環境尚不支援此功能。請更新 Aelix 後使用。",
+      "signIn": "請重新登入以讀取這些設定。",
+      "readFailed": "無法讀取這些設定。",
+      "busy": "Aelix 閒置時可用。",
+      "notIdle": "對話開啟且閒置時可用。",
+      "writing": "另一項變更正在進行中。",
+      "applying": "正在套用... 若 Aelix 要求核准，請在對話中回應。",
+      "saving": "正在儲存..."
+    },
+    "action": {
+      "retry": "重試",
+      "close": "關閉"
+    },
+    "preview": {
+      "source": "來源",
+      "revision": "版本",
+      "tools": "工具",
+      "skills": "技能",
+      "model": "模型",
+      "approval": "核准",
+      "excludedTools": "排除的工具",
+      "allTools": "所有工具",
+      "noTools": "無工具",
+      "allSkills": "所有技能",
+      "noSkills": "無技能",
+      "inheritModel": "目前模型",
+      "truncated": "（已截斷）",
+      "failed": "無法載入預覽。"
+    },
+    "row": {
+      "saved": "已儲存：{{value}}",
+      "applied": "已套用：{{value}}",
+      "live": "實際：{{value}}",
+      "on": "開",
+      "off": "關",
+      "unobserved": "未觀測",
+      "decidedBy": {
+        "global": "全域",
+        "project": "專案"
+      },
+      "notLoaded": "未載入",
+      "pendingNext": "下一次請求",
+      "pendingRestart": "等待重新啟動",
+      "problem": "問題：{{code}}",
+      "mismatch": "不一致：{{reason}}"
+    },
+    "lock": {
+      "launch": "被啟動選項鎖定",
+      "env": "被環境設定鎖定",
+      "helper": "在設定中管理",
+      "other": "已鎖定（{{reason}}）"
+    },
+    "notice": {
+      "profileApplied": "此對話現在使用設定檔 {{name}}。",
+      "profileCleared": "此對話不再使用設定檔。",
+      "toolsSaved": "已為此對話儲存 {{count}} 個工具。",
+      "toolsSavedEmpty": "已儲存：此對話不使用工具。",
+      "restored": "已還原所選項目。",
+      "outcomeUnknown": "結果未知。已重新讀取目前狀態，如有需要請重新選擇。",
+      "openFirst": "請在對話開啟後使用。",
+      "stale": "對話已重新連線，已重新讀取目前狀態。",
+      "signIn": "請重新登入後再試。",
+      "updateRequired": "需要更新 Aelix。",
+      "busy": "Aelix 正忙。請在閒置時重試。",
+      "toolLocked": "{{name}} 已鎖定，無法在此變更。",
+      "toolUnavailable": "{{name}} 未在此對話中載入。",
+      "profileUnavailable": "設定檔 {{name}} 已無法使用。",
+      "profileRefused": "Aelix 拒絕了此設定檔。",
+      "writeFailed": "無法儲存變更。",
+      "profileFailed": "無法套用設定檔。",
+      "toolsFailed": "無法儲存工具。",
+      "toolsInherited": "此對話現在使用繼承的工具。",
+      "toolsSaved_one": "已為此對話儲存 {{count}} 個工具。",
+      "toolsSaved_other": "已為此對話儲存 {{count}} 個工具。"
+    },
+    "change": {
+      "title": "此設定檔已變更",
+      "description": "自上次選擇後，其來源或版本已變更。請檢視差異並重新選擇後使用。",
+      "recorded": "之前",
+      "candidate": "現在",
+      "missing": "無法使用",
+      "field": "項目",
+      "before": "之前",
+      "after": "現在",
+      "noCandidate": "已找不到該設定檔。",
+      "keep": "保留目前環境",
+      "reselect": "選擇變更後的設定檔"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "已拒絕設定檔變更",
+        "cancelled": "設定檔變更已取消",
+        "unanswered": "未回應核准要求",
+        "changedAgain": "套用前設定檔再次變更",
+        "profileUnavailable": "設定檔已無法使用",
+        "guardUnavailable": "目前的 Aelix 執行環境無法套用經過驗證的設定檔",
+        "invalidRecord": "無法讀取已記錄的設定檔",
+        "profileChanged": "未選擇變更後的設定檔",
+        "unknown": "變更結果未知",
+        "other": "變更未套用"
+      },
+      "noResend": "不會重新傳送提示，也不會擴大權限。",
+      "original": "原始環境：{{profile}}",
+      "unchanged": "此對話沒有任何變更。",
+      "restoreProfile": "還原設定檔 {{profile}}",
+      "restoreTools": "還原此對話的工具：{{tools}}",
+      "toolsWithProfile": "繼承的工具會隨設定檔一起還原。",
+      "profileResetsTools": "還原設定檔會將此對話的工具重設為繼承。",
+      "restoreFileAndReopen": "原始設定檔已變更。請使用 Aelix CLI 還原後重新開啟此對話。",
+      "unknownOriginal": "原始設定檔僅記錄了名稱。請從清單中重新選擇。",
+      "restoreSelected": "還原所選項目"
+    },
+    "field": {
+      "source": "來源",
+      "revision": "版本",
+      "description": "描述",
+      "promptMode": "提示方式",
+      "promptPreview": "提示",
+      "promptTruncated": "提示已截斷",
+      "omittedPrompt": "提示的省略部分",
+      "provider": "提供者",
+      "model": "模型",
+      "tools": "工具",
+      "skills": "技能",
+      "approvalMode": "核准",
+      "builtinTools": "內建工具",
+      "excludeTools": "排除的工具",
+      "inheritSkills": "繼承技能",
+      "extensions": "擴充功能",
+      "inheritExtensions": "繼承擴充功能",
+      "contextFiles": "內容檔案",
+      "thinking": "思考",
+      "role": "角色",
+      "outputCap": "輸出上限",
+      "timeoutMs": "逾時（毫秒）",
+      "agents": "代理"
+    },
+    "value": {
+      "unset": "未設定",
+      "empty": "無",
+      "yes": "是",
+      "no": "否"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "儲存的值與 Aelix 回報不一致",
+        "nativeMismatch": "Aelix 回報了差異"
+      },
+      "diagnostic": {
+        "invalidProfile": "無效的設定檔",
+        "envConfig": "由環境設定指定"
+      },
+      "approval": {
+        "inherit": "繼承",
+        "ask": "詢問",
+        "auto": "自動核准",
+        "deny": "拒絕"
+      },
+      "other": "其他（{{code}}）"
+    }
   }
 }

@@ -420,6 +420,25 @@ vi.mock('@/renderer/utils/file/messageFiles', () => ({
 vi.mock('@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage', () => ({
   useAcpInitialMessage: vi.fn(),
 }));
+type AelixOptions = { conversationId: string; enabled: boolean; hostState: string; onProfileApplied?: () => void };
+const { aelixControlsSpy } = vi.hoisted(() => ({ aelixControlsSpy: vi.fn() }));
+vi.mock('@/renderer/pages/conversation/runtime/AelixSessionControls', () => ({
+  useAelixSessionControls: (options: AelixOptions) => {
+    aelixControlsSpy(options);
+    return { enabled: options.enabled };
+  },
+  AelixSessionPills: ({ controls }: { controls: { enabled: boolean } }) =>
+    controls.enabled ? <div data-testid='aelix-session-pills' /> : null,
+  AelixSessionDrawer: () => null,
+  aelixSheetEntries: (_t: unknown, controls: { enabled: boolean }) =>
+    controls.enabled
+      ? [
+          { key: 'aelix-profile', label: 'profile' },
+          { key: 'aelix-tools', label: 'tools' },
+        ]
+      : [],
+}));
+
 vi.mock('@arco-design/web-react', () => ({
   Message: {
     success: vi.fn(),
@@ -2249,6 +2268,70 @@ describe('AcpSendBox', () => {
         isTeamConversation?: boolean;
       };
       expect(props.isTeamConversation).toBe(true);
+    });
+  });
+
+  describe('builtin Aelix profile and tools controls', () => {
+    const lastOptions = () => aelixControlsSpy.mock.calls.at(-1)?.[0] as AelixOptions;
+
+    it('enables Profile and tools next to the permission selector for Aelix only', () => {
+      const view = render(
+        <AcpSendBox conversation_id='conv-aelix' backend='aelix' messageState={makeMessageState()} />
+      );
+      expect(screen.getByTestId('aelix-session-pills')).toBeInTheDocument();
+      expect(lastOptions()).toMatchObject({ conversationId: 'conv-aelix', enabled: true, hostState: 'idle' });
+
+      view.rerender(<AcpSendBox conversation_id='conv-claude' backend='claude' messageState={makeMessageState()} />);
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
+      expect(lastOptions()).toMatchObject({ enabled: false });
+    });
+
+    it('keeps Profile and tools off for an Aelix member of a team', () => {
+      useTeamPermissionMock.mockReturnValue({
+        isTeamMode: true,
+        isLeaderAgent: true,
+        leaderConversationId: 'conv-team',
+        allConversationIds: ['conv-team'],
+        propagateMode: vi.fn(),
+        warmupSession: vi.fn().mockResolvedValue(undefined),
+      });
+      render(<AcpSendBox conversation_id='conv-team' backend='aelix' messageState={makeMessageState()} />);
+
+      expect(lastOptions()).toMatchObject({ enabled: false });
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
+    });
+
+    it('keeps Profile and tools off in a team send box', () => {
+      render(
+        <AcpSendBox
+          conversation_id='conv-team'
+          backend='aelix'
+          messageState={makeMessageState()}
+          teamRuntime={{ loading: false, startedAtMs: null } as unknown as TeamSendBoxRuntime}
+        />
+      );
+
+      expect(lastOptions()).toMatchObject({ enabled: false });
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
+    });
+
+    it('re-reads the model controls after a profile change', () => {
+      const reload = vi.fn().mockResolvedValue(null);
+      useAcpConfigOptionsMock.mockReturnValue({ ...useAcpConfigOptionsMock(), reload });
+      render(<AcpSendBox conversation_id='conv-aelix' backend='aelix' messageState={makeMessageState()} />);
+
+      act(() => lastOptions().onProfileApplied?.());
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
+
+    it('moves Profile and tools into the mobile action sheet', () => {
+      isMobileMock.current = true;
+      render(<AcpSendBox conversation_id='conv-aelix' backend='aelix' messageState={makeMessageState()} />);
+
+      expect(mobileActionSheetEntries.current.map((entry) => entry.key)).toEqual(
+        expect.arrayContaining(['aelix-profile', 'aelix-tools'])
+      );
+      expect(screen.queryByTestId('aelix-session-pills')).toBeNull();
     });
   });
 });

@@ -838,5 +838,227 @@
       "body": "다른 프로세스가 이 세션을 쓰고 있지 않은지 확인하지 못해 보내기와 Draft Box를 멈췄습니다. 다시 확인하면 이어서 진행합니다."
     },
     "paused": "확인에 성공할 때까지 보내기와 Draft Box는 멈춰 있습니다."
+  },
+  "aelixControls": {
+    "profile": {
+      "label": "프로필",
+      "title": "프로필",
+      "none": "프로필 없음",
+      "current": "현재: {{profile}}",
+      "currentLegacy": "현재: {{name}} (이름만 기록됨)",
+      "active": "사용 중",
+      "apply": "프로필 적용",
+      "clear": "프로필 사용 안 함",
+      "empty": "프로필이 없습니다. Aelix CLI로 만드세요.",
+      "partial": "프로필 목록의 일부만 읽었습니다.",
+      "diagnostics": "일부 프로필을 읽지 못했습니다: {{codes}}",
+      "legacy": "{{name}} (이름만 기록됨)",
+      "resetsTools": "프로필을 바꾸면 이 대화의 도구 선택이 상속으로 초기화됩니다."
+    },
+    "tools": {
+      "label": "도구",
+      "title": "이 대화의 도구",
+      "inherited": "상속",
+      "none": "도구 없음",
+      "count": "도구 {{count}}개",
+      "modeInherited": "프로필과 기본값에서 상속",
+      "modeNone": "이 대화에서 도구를 사용하지 않음",
+      "modeExplicit": "이 대화에서 고른 도구 {{count}}개",
+      "effectNext": "변경 사항은 다음 요청부터 적용됩니다.",
+      "effectRestart": "변경 사항은 Aelix를 다시 시작한 뒤 적용됩니다.",
+      "policyPending": "적용을 기다리는 정책 변경이 있습니다.",
+      "partial": "도구 목록이 완전하지 않아 아직 저장할 수 없습니다.",
+      "mismatch": "저장된 선택이 Aelix가 보고한 상태와 다릅니다.",
+      "empty": "Aelix가 보고한 도구가 없습니다.",
+      "skills": "사용 중인 스킬: {{skills}}",
+      "inherit": "상속된 도구 사용",
+      "selectNone": "모두 해제",
+      "save": "이 대화에 저장",
+      "listChanged": "편집하는 동안 도구 목록이 바뀌었습니다. 저장하기 전에 선택을 확인하세요.",
+      "discard": "변경 취소",
+      "count_one": "도구 {{count}}개",
+      "count_other": "도구 {{count}}개",
+      "modeExplicit_one": "이 대화에서 고른 도구 {{count}}개",
+      "modeExplicit_other": "이 대화에서 고른 도구 {{count}}개",
+      "projectTools": "설정에서 프로젝트 도구 기본값",
+      "projectSkills": "설정에서 프로젝트 스킬",
+      "settingsDirty": "설정을 열기 전에 도구 변경 사항을 저장하거나 취소하세요."
+    },
+    "scope": {
+      "bundled": "내장",
+      "user": "사용자",
+      "project": "프로젝트"
+    },
+    "summary": {
+      "checking": "확인 중",
+      "openFirst": "대화를 연 뒤",
+      "updateRequired": "업데이트 필요",
+      "unavailable": "사용 불가",
+      "readFailed": "읽지 못함"
+    },
+    "status": {
+      "checking": "Aelix가 지원하는 기능을 확인하는 중...",
+      "openFirst": "대화를 연 뒤 사용하세요. Aelix가 연결되면 다시 확인합니다.",
+      "updateRequiredTitle": "Aelix 업데이트가 필요합니다",
+      "updateRequired": "현재 Aelix 런타임은 이 기능을 아직 지원하지 않습니다. 사용하려면 Aelix를 업데이트하세요.",
+      "signIn": "이 설정을 읽으려면 다시 로그인하세요.",
+      "readFailed": "이 설정을 읽지 못했습니다.",
+      "busy": "Aelix가 쉬고 있을 때 사용할 수 있습니다.",
+      "notIdle": "대화가 열리고 쉬고 있을 때 사용할 수 있습니다.",
+      "writing": "다른 변경이 진행 중입니다.",
+      "applying": "적용하는 중... Aelix가 승인을 요청하면 대화에서 답하세요.",
+      "saving": "저장하는 중..."
+    },
+    "action": {
+      "retry": "다시 시도",
+      "close": "닫기"
+    },
+    "preview": {
+      "source": "출처",
+      "revision": "리비전",
+      "tools": "도구",
+      "skills": "스킬",
+      "model": "모델",
+      "approval": "승인",
+      "excludedTools": "제외된 도구",
+      "allTools": "모든 도구",
+      "noTools": "도구 없음",
+      "allSkills": "모든 스킬",
+      "noSkills": "스킬 없음",
+      "inheritModel": "현재 모델",
+      "truncated": "(일부 생략)",
+      "failed": "미리보기를 불러오지 못했습니다."
+    },
+    "row": {
+      "saved": "저장: {{value}}",
+      "applied": "적용: {{value}}",
+      "live": "실제: {{value}}",
+      "on": "켜짐",
+      "off": "꺼짐",
+      "unobserved": "확인 안 됨",
+      "decidedBy": {
+        "global": "전역",
+        "project": "프로젝트"
+      },
+      "notLoaded": "로드되지 않음",
+      "pendingNext": "다음 요청",
+      "pendingRestart": "재시작 대기",
+      "problem": "문제: {{code}}",
+      "mismatch": "불일치: {{reason}}"
+    },
+    "lock": {
+      "launch": "실행 옵션으로 잠김",
+      "env": "환경 설정으로 잠김",
+      "helper": "설정에서 관리됨",
+      "other": "잠김 ({{reason}})"
+    },
+    "notice": {
+      "profileApplied": "이 대화에서 {{name}} 프로필을 사용합니다.",
+      "profileCleared": "이 대화에서 더 이상 프로필을 사용하지 않습니다.",
+      "toolsSaved": "이 대화에 도구 {{count}}개를 저장했습니다.",
+      "toolsSavedEmpty": "저장했습니다. 이 대화는 도구를 사용하지 않습니다.",
+      "restored": "선택한 항목을 복원했습니다.",
+      "outcomeUnknown": "결과를 알 수 없습니다. 현재 상태를 다시 읽었으니 필요하면 다시 고르세요.",
+      "openFirst": "대화를 연 뒤 사용하세요.",
+      "stale": "대화가 다시 연결되어 현재 상태를 다시 읽었습니다.",
+      "signIn": "다시 로그인한 뒤 시도하세요.",
+      "updateRequired": "Aelix 업데이트가 필요합니다.",
+      "busy": "Aelix가 작업 중입니다. 쉬고 있을 때 다시 시도하세요.",
+      "toolLocked": "{{name}}은(는) 잠겨 있어 여기서 바꿀 수 없습니다.",
+      "toolUnavailable": "{{name}}은(는) 이 대화에 로드되지 않았습니다.",
+      "profileUnavailable": "{{name}} 프로필을 더 이상 사용할 수 없습니다.",
+      "profileRefused": "Aelix가 이 프로필을 거부했습니다.",
+      "writeFailed": "변경 사항을 저장하지 못했습니다.",
+      "profileFailed": "프로필을 적용하지 못했습니다.",
+      "toolsFailed": "도구를 저장하지 못했습니다.",
+      "toolsInherited": "이 대화는 이제 상속된 도구를 사용합니다.",
+      "toolsSaved_one": "이 대화에 도구 {{count}}개를 저장했습니다.",
+      "toolsSaved_other": "이 대화에 도구 {{count}}개를 저장했습니다."
+    },
+    "change": {
+      "title": "프로필이 바뀌었습니다",
+      "description": "마지막으로 고른 뒤 출처나 리비전이 바뀌었습니다. 차이를 확인하고 다시 골라야 사용할 수 있습니다.",
+      "recorded": "이전",
+      "candidate": "현재",
+      "missing": "사용할 수 없음",
+      "field": "항목",
+      "before": "이전",
+      "after": "현재",
+      "noCandidate": "프로필을 더 이상 찾을 수 없습니다.",
+      "keep": "현재 환경 유지",
+      "reselect": "바뀐 프로필 다시 선택"
+    },
+    "recovery": {
+      "cause": {
+        "declined": "프로필 변경을 거부했습니다",
+        "cancelled": "프로필 변경이 취소되었습니다",
+        "unanswered": "승인 요청에 응답하지 않았습니다",
+        "changedAgain": "적용 전에 프로필이 다시 바뀌었습니다",
+        "profileUnavailable": "프로필을 더 이상 사용할 수 없습니다",
+        "guardUnavailable": "현재 Aelix 런타임은 확인된 프로필을 적용할 수 없습니다",
+        "invalidRecord": "기록된 프로필을 읽지 못했습니다",
+        "profileChanged": "바뀐 프로필을 선택하지 않았습니다",
+        "unknown": "변경 결과를 알 수 없습니다",
+        "other": "변경이 적용되지 않았습니다"
+      },
+      "noResend": "프롬프트를 다시 보내지 않으며 권한도 넓히지 않습니다.",
+      "original": "원래 환경: {{profile}}",
+      "unchanged": "이 대화에서 바뀐 것은 없습니다.",
+      "restoreProfile": "{{profile}} 프로필 복원",
+      "restoreTools": "이 대화의 도구 복원: {{tools}}",
+      "toolsWithProfile": "상속된 도구는 프로필과 함께 돌아옵니다.",
+      "profileResetsTools": "프로필을 복원하면 이 대화의 도구가 상속으로 바뀝니다.",
+      "restoreFileAndReopen": "원래 프로필 파일이 바뀌었습니다. Aelix CLI로 복원한 뒤 이 대화를 다시 여세요.",
+      "unknownOriginal": "원래 프로필이 이름만 기록되어 있습니다. 목록에서 다시 고르세요.",
+      "restoreSelected": "선택 항목 복원"
+    },
+    "field": {
+      "source": "출처",
+      "revision": "리비전",
+      "description": "설명",
+      "promptMode": "프롬프트 방식",
+      "promptPreview": "프롬프트",
+      "promptTruncated": "프롬프트 생략",
+      "omittedPrompt": "생략된 프롬프트 영역",
+      "provider": "제공자",
+      "model": "모델",
+      "tools": "도구",
+      "skills": "스킬",
+      "approvalMode": "승인",
+      "builtinTools": "기본 도구",
+      "excludeTools": "제외된 도구",
+      "inheritSkills": "스킬 상속",
+      "extensions": "확장",
+      "inheritExtensions": "확장 상속",
+      "contextFiles": "컨텍스트 파일",
+      "thinking": "추론",
+      "role": "역할",
+      "outputCap": "출력 한도",
+      "timeoutMs": "제한 시간(ms)",
+      "agents": "에이전트"
+    },
+    "value": {
+      "unset": "설정 안 됨",
+      "empty": "없음",
+      "yes": "예",
+      "no": "아니요"
+    },
+    "code": {
+      "mismatch": {
+        "savedValueDiffers": "저장된 값이 Aelix 보고와 다름",
+        "nativeMismatch": "Aelix가 차이를 보고함"
+      },
+      "diagnostic": {
+        "invalidProfile": "잘못된 프로필 파일",
+        "envConfig": "환경 설정으로 지정됨"
+      },
+      "approval": {
+        "inherit": "상속",
+        "ask": "묻기",
+        "auto": "자동 승인",
+        "deny": "거부"
+      },
+      "other": "기타 ({{code}})"
+    }
   }
 }
