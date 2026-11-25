@@ -105,6 +105,24 @@ export const THEME_TOKENS: readonly ThemeTokenDescriptor[] = [
     scope: 'appearance-scoped',
     description: 'Thinking panel background gradient',
   },
+  {
+    key: '--composer-ring-active',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer border while focused',
+  },
+  {
+    key: '--composer-ring-inactive',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer border while not focused',
+  },
+  {
+    key: '--composer-ambient',
+    group: 'component',
+    scope: 'appearance-scoped',
+    description: 'Composer ambient glow (box-shadow) while focused',
+  },
 
   // Special
   { key: '--fill', group: 'special', scope: 'appearance-scoped', description: 'Generic fill' },

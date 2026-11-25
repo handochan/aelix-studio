@@ -40,6 +40,19 @@ describe('tokensToCss', () => {
     );
   });
 
+  it('honors the composer ring and glow tokens of the default color scheme', () => {
+    const css = tokensToCss({
+      dark: {
+        '--composer-ring-active': '#0e7490',
+        '--composer-ring-inactive': '#383d42',
+        '--composer-ambient': '0px 2px 20px rgba(6, 182, 212, 0.4)',
+      },
+    });
+    expect(css).toBe(
+      ":root[data-theme='dark'] {\n  --composer-ring-active: #0e7490;\n  --composer-ring-inactive: #383d42;\n  --composer-ambient: 0px 2px 20px rgba(6, 182, 212, 0.4);\n}"
+    );
+  });
+
   it('drops keys that are not part of the token contract', () => {
     const css = tokensToCss({
       root: { '--primary': '#0a7ea4', '--not-a-real-token': 'red' },

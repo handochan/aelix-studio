@@ -66,7 +66,7 @@ Grouped as in `tokenContract.ts` (`i` = appearance-invariant, otherwise appearan
 - **Border**: `--border-base` `--border-light` `--border-special`
 - **Semantic**: `--primary` `--success` `--warning` `--danger` `--info`
 - **Brand**: `--brand` `--brand-light` `--brand-hover`
-- **Component**: `--message-user-bg` `--message-tips-bg` `--workspace-btn-bg` `--thought-gradient`
+- **Component**: `--message-user-bg` `--message-tips-bg` `--workspace-btn-bg` `--thought-gradient` `--composer-ring-active` `--composer-ring-inactive` `--composer-ambient`
 - **Special**: `--fill` `--fill-0` `--dialog-fill-0` `--inverse` (i)
 
 Arco Design's own scales (`--color-*`, `--primary-6`, …) are intentionally **not** part of the contract — they are driven by the `arco-theme` attribute, not by user themes.
