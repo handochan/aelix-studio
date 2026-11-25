@@ -29,6 +29,7 @@ export default defineConfig({
           name: 'node',
           environment: 'node',
           include: [
+            'packages/desktop/src/renderer/services/runtime/NativeResources/nativeResources.test.ts',
             'packages/web-host/src/**/*.test.ts',
             'packages/web-host/tests/**/*.test.ts',
             'tests/unit/**/*.test.ts',
