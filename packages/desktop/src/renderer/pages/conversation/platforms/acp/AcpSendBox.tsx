@@ -1,4 +1,9 @@
 import { ipcBridge } from '@/common';
+import {
+  AelixInitialModelUnconfirmed,
+  confirmPendingAelixInitialModel,
+  saveAelixInitialModel,
+} from '@/renderer/services/runtime/aelixInitialModel';
 import type { IConversationMcpStatus } from '@/common/config/storage';
 import { isBackendHttpError } from '@/common/adapter/httpBridge';
 import { chatFileRefKey, uploadFileRef, type ChatFileRef } from '@/common/types/chatFile';
@@ -64,7 +69,7 @@ import { localSelectionItems, mergeFileSelectionItems } from '@/renderer/utils/f
 import { collectChatFileRefs, splitChatFileRefs } from '@/renderer/utils/file/messageFiles';
 import { Button, Message, Tag } from '@arco-design/web-react';
 import { Brain, Lightning, MagicHat, Shield } from '@icon-park/react';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
@@ -153,6 +158,7 @@ const AcpSendBox: React.FC<{
   /** Blocks typing, sending, and the stored first message (e.g. while the session holder is unknown). */
   sendBlocked?: boolean;
   viewConfigPort?: AcpConfigOptionsPort;
+  hasInitialModel?: boolean;
 }> = ({
   conversation_id,
   backend,
@@ -163,6 +169,7 @@ const AcpSendBox: React.FC<{
   teamRuntime,
   sendBlocked = false,
   viewConfigPort,
+  hasInitialModel,
 }) => {
   const {
     aiProcessing,
@@ -373,6 +380,23 @@ const AcpSendBox: React.FC<{
     []
   );
 
+  const firstModelAcceptedRef = useRef<string | null>(null);
+  const keepsInitialModelDraft = hasInitialModel && firstModelAcceptedRef.current !== conversation_id;
+  const loadFreshConfig = viewConfigPort?.loadFresh;
+  const prepareInitialModel = useCallback(async () => {
+    if (!hasInitialModel || firstModelAcceptedRef.current === conversation_id) return false;
+    return confirmPendingAelixInitialModel(
+      conversation_id,
+      loadFreshConfig && (() => loadFreshConfig(conversation_id))
+    );
+  }, [conversation_id, hasInitialModel, loadFreshConfig]);
+  const onInitialModelAccepted = useCallback(() => {
+    firstModelAcceptedRef.current = conversation_id;
+    void saveAelixInitialModel(conversation_id, null).catch(() => {
+      console.error('[AcpSendBox] Failed to retire the first-prompt model');
+    });
+  }, [conversation_id]);
+
   // Check for and send initial message from guid page
   useAcpInitialMessage({
     conversation_id: conversation_id,
@@ -386,6 +410,8 @@ const AcpSendBox: React.FC<{
     beginCompactionSubmission,
     checkAndUpdateTitle,
     addOrUpdateMessage: addOrUpdateMessageRef.current,
+    prepareInitialModel: hasInitialModel ? prepareInitialModel : undefined,
+    onInitialModelAccepted,
   });
 
   const executeCommand = useCallback(
@@ -405,6 +431,7 @@ const AcpSendBox: React.FC<{
           return;
         }
 
+        const confirmedInitialModel = hasInitialModel && (await prepareInitialModel());
         markSendStarted();
         setAiProcessing(true);
         const result = await ipcBridge.acpConversation.sendMessage.invoke({
@@ -416,8 +443,13 @@ const AcpSendBox: React.FC<{
           sessions,
         });
         markSendAccepted(result.turn_id, result.runtime, result.msg_id);
+        if (confirmedInitialModel) onInitialModelAccepted();
         emitter.emit('chat.history.refresh');
       } catch (error: unknown) {
+        if (error instanceof AelixInitialModelUnconfirmed) {
+          Message.error(t('agent.model.switchFailed'));
+          throw error;
+        }
         const errorMsg =
           getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
@@ -504,9 +536,12 @@ Please check your local CLI tool authentication status`,
       beginCompactionSubmission,
       checkAndUpdateTitle,
       conversation_id,
+      hasInitialModel,
       markSendAccepted,
       markSendFailed,
       markSendStarted,
+      onInitialModelAccepted,
+      prepareInitialModel,
       resetState,
       setAiProcessing,
       t,
@@ -601,15 +636,16 @@ Please check your local CLI tool authentication status`,
     }
     if (deferDraftClear && !message.trim()) return false;
 
-    if (!deferDraftClear) {
+    if (!deferDraftClear && !keepsInitialModelDraft) {
       clearFiles();
       setSelectedSessions([]);
       emitter.emit('acp.selected.file.clear');
     }
     try {
       await executeCommand({ input: message, files, sessions: sessions.length > 0 ? sessions : undefined });
-      if (deferDraftClear) removeSubmitted();
+      if (deferDraftClear || keepsInitialModelDraft) removeSubmitted();
     } catch (error) {
+      if (error instanceof AelixInitialModelUnconfirmed) return false;
       if (!deferDraftClear || !classifyConversationBusyError(error)) throw error;
       Message.warning(t('acp.runningInput.ordinaryBusyKept'));
       return false;
@@ -1034,7 +1070,7 @@ Please check your local CLI tool authentication status`,
         allowAttachmentOnlySend={
           runningInputSendable && (uploadFile.length > 0 || atPath.length > 0 || selectedSessions.length > 0)
         }
-        deferDraftClear={deferDraftClear}
+        deferDraftClear={deferDraftClear || keepsInitialModelDraft}
         enableBtw={isSideQuestionSupported({ type: 'acp', backend })}
         supportedExts={allSupportedExts}
         defaultMultiLine={!isMobile}

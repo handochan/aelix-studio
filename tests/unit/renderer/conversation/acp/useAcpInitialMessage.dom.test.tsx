@@ -8,6 +8,7 @@ import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
+import { AelixInitialModelUnconfirmed } from '@/renderer/services/runtime/aelixInitialModel';
 
 const { sendMessageInvokeMock, emitterEmitMock } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
@@ -44,6 +45,30 @@ describe('useAcpInitialMessage', () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.clearAllMocks();
+  });
+
+  it('sends nothing when the first-prompt model check rejects', async () => {
+    sessionStorage.setItem('acp_initial_message_conv-1', JSON.stringify({ input: 'hello', files: [] }));
+    const addOrUpdateMessage = vi.fn();
+    const prepareInitialModel = vi.fn().mockRejectedValue(new AelixInitialModelUnconfirmed());
+    renderHook(() =>
+      useAcpInitialMessage({
+        conversation_id: 'conv-1',
+        backend: 'aelix',
+        prepareInitialModel,
+        setAiProcessing: vi.fn(),
+        resetState: vi.fn(),
+        checkAndUpdateTitle: vi.fn(),
+        addOrUpdateMessage,
+      })
+    );
+    await waitFor(() =>
+      expect(addOrUpdateMessage).toHaveBeenCalledWith(
+        expect.objectContaining({ content: expect.objectContaining({ content: 'agent.model.switchFailed' }) }),
+        true
+      )
+    );
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('suppresses tips and reset when initial ACP send hits active-turn busy', async () => {

@@ -628,6 +628,7 @@ describe('GuidPage', () => {
 
     expect(agentSelectionMock.setSelectedAcpModel).toHaveBeenCalledWith('global.anthropic.claude-opus-4-8', {
       persistPreference: false,
+      explicit: true,
     });
     agentSelectionMock.setSelectedAcpModel.mockClear();
 

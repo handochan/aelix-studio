@@ -46,6 +46,9 @@ const {
   stopInvokeMock,
   getMessagesInvokeMock,
   getConversationOrNullMock,
+  getConversationInvokeMock,
+  updateConversationInvokeMock,
+  setConfigOptionInvokeMock,
 } = vi.hoisted(() => ({
   sendMessageInvokeMock: vi.fn(),
   addOrUpdateMessageMock: vi.fn(),
@@ -91,6 +94,9 @@ const {
   stopInvokeMock: vi.fn().mockResolvedValue(undefined),
   getMessagesInvokeMock: vi.fn(),
   getConversationOrNullMock: vi.fn(),
+  getConversationInvokeMock: vi.fn(),
+  updateConversationInvokeMock: vi.fn(),
+  setConfigOptionInvokeMock: vi.fn(),
 }));
 
 const { runningInputMock, useRunningInputSpy, collectChatFileRefsMock, imagePathsMock, noticesPropsSpy } = vi.hoisted(
@@ -157,8 +163,11 @@ vi.mock('@/common', () => ({
       sendMessage: {
         invoke: sendMessageInvokeMock,
       },
+      setConfigOption: { invoke: setConfigOptionInvokeMock },
     },
     conversation: {
+      get: { invoke: getConversationInvokeMock },
+      update: { invoke: updateConversationInvokeMock },
       stop: {
         invoke: stopInvokeMock,
       },
@@ -287,7 +296,8 @@ vi.mock('@/renderer/hooks/agent/useAcpModelInfo', () => ({
     selectModel: vi.fn(),
   }),
 }));
-vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', () => ({
+vi.mock('@/renderer/hooks/agent/useAcpConfigOptions', async (original) => ({
+  ...(await original<typeof import('@/renderer/hooks/agent/useAcpConfigOptions')>()),
   classifyConfigSetError: () => 'unknown',
   useAcpConfigOptions: useAcpConfigOptionsMock,
 }));
@@ -501,6 +511,89 @@ describe('AcpSendBox', () => {
     await waitFor(() => {
       expect(resetStateMock).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('waits for the chosen model to be observed before dispatching the first prompt to it', async () => {
+    const modelOption = (current: string): AcpConfigOptionDto => ({
+      id: 'runtime-model',
+      category: 'model',
+      type: 'select',
+      current_value: current,
+      options: [{ value: 'provider-a/model' }, { value: 'provider-b/model' }],
+    });
+    getConversationInvokeMock.mockResolvedValue({ extra: { studio_initial_model: 'provider-b/model' } });
+    updateConversationInvokeMock.mockResolvedValue(true);
+    let currentModel = 'provider-a/model';
+    let observe!: () => void;
+    setConfigOptionInvokeMock.mockReturnValue(
+      new Promise((resolve) => {
+        observe = () => {
+          currentModel = 'provider-b/model';
+          resolve({ confirmation: 'observed', config_options: [modelOption(currentModel)] });
+        };
+      })
+    );
+    const receivedBy = vi.fn();
+    sendMessageInvokeMock.mockImplementation(async () => {
+      receivedBy(currentModel);
+      return { turn_id: 'turn-1', runtime: {}, msg_id: 'message-1' };
+    });
+    const load = async () => [modelOption(currentModel)];
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={{ load, loadFresh: load }}
+        messageState={makeMessageState()}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: 'send' }));
+    await waitFor(() =>
+      expect(setConfigOptionInvokeMock).toHaveBeenCalledWith({
+        conversation_id: 'conv-1',
+        option_id: 'runtime-model',
+        value: 'provider-b/model',
+      })
+    );
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    await act(async () => observe());
+    expect(receivedBy).toHaveBeenCalledExactlyOnceWith('provider-b/model');
+    expect(updateConversationInvokeMock).toHaveBeenCalledWith({
+      id: 'conv-1',
+      merge_extra: true,
+      updates: { extra: { studio_initial_model: null } },
+    });
+  });
+
+  it('keeps a manual first prompt unsent when ACP only reports another model', async () => {
+    getConversationInvokeMock.mockResolvedValue({ extra: { studio_initial_model: 'provider-b/model' } });
+    const load = async (): Promise<AcpConfigOptionDto[]> => [
+      {
+        id: 'model',
+        category: 'model',
+        type: 'select',
+        current_value: 'provider-a/model',
+        options: [{ value: 'provider-a/model' }],
+      },
+    ];
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        hasInitialModel
+        viewConfigPort={{ load, loadFresh: load }}
+        messageState={makeMessageState()}
+      />
+    );
+
+    await act(async () => {
+      screen.getByRole('button', { name: 'send' }).click();
+    });
+    expect(Message.error).toHaveBeenCalledWith('agent.model.switchFailed');
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    expect(clearFilesMock).not.toHaveBeenCalled();
   });
 
   it('shows a progress ring with a window size, a hollow ring without one, and nothing without usage', () => {

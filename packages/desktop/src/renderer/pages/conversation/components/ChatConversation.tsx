@@ -11,10 +11,17 @@ import addChatIcon from '@/renderer/assets/icons/add-chat.svg';
 import { CronJobManager } from '@/renderer/pages/cron';
 import { resolveCronJobId } from '@/renderer/pages/cron/cronUtils';
 import {
+  findConfigOption,
+  hasObservedValue,
   classifyConfigSetError,
   type AcpConfigOptionsPort,
   useAcpConfigOptions,
 } from '@/renderer/hooks/agent/useAcpConfigOptions';
+import {
+  loadAelixInitialModel,
+  readAelixInitialModel,
+  saveAelixInitialModel,
+} from '@/renderer/services/runtime/aelixInitialModel';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { usePresetAssistantInfo } from '@/renderer/hooks/agent/usePresetAssistantInfo';
 import { iconColors } from '@/renderer/styles/colors';
@@ -293,13 +300,31 @@ const ChatConversation: React.FC<{
   const usesHolderView = !resolvedHideSendBox && (conversation?.type === 'acp' || conversation?.type === 'antigravity');
   useActiveLease({ type: 'conversation', id: usesHolderView ? undefined : conversation?.id });
   const sessionView = useSessionLockView(usesHolderView ? conversation?.id : undefined);
+  const hasInitialModel = Boolean(readAelixInitialModel(conversation?.extra));
   const viewConfigPort = useMemo<AcpConfigOptionsPort | undefined>(
     () =>
       sessionView && {
         load: async () => (await sessionView.ensure()).config_options,
         loadFresh: async () => (await sessionView.ensure({ fresh: true })).config_options,
+        ...(hasInitialModel && {
+          setConfigOption: async (conversation_id: string, option_id: string, value: string) => {
+            const response = await ipcBridge.acpConversation.setConfigOption.invoke({
+              conversation_id,
+              option_id,
+              value,
+            });
+            if (
+              hasObservedValue(response, option_id, value) &&
+              findConfigOption(response.config_options, 'model', ['model'])?.id === option_id &&
+              (await loadAelixInitialModel(conversation_id))
+            ) {
+              await saveAelixInitialModel(conversation_id, value);
+            }
+            return response;
+          },
+        }),
       },
-    [sessionView]
+    [hasInitialModel, sessionView]
   );
 
   // 使用统一的 Hook 获取预设助手信息（ACP/Codex 会话）
@@ -346,6 +371,7 @@ const ChatConversation: React.FC<{
             hideSendBox={resolvedHideSendBox}
             sessionView={sessionView}
             viewConfigPort={viewConfigPort}
+            hasInitialModel={hasInitialModel}
             emptySlot={emptySlot}
             loadedSkills={(conversation.extra as { skills?: string[] } | undefined)?.skills}
             loadedMcpServers={(conversation.extra as { mcp_servers?: string[] } | undefined)?.mcp_servers}
@@ -370,6 +396,7 @@ const ChatConversation: React.FC<{
     resolvedHideSendBox,
     sessionView,
     viewConfigPort,
+    hasInitialModel,
     acpAssistantId,
   ]);
 

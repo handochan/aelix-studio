@@ -8,6 +8,7 @@ import styles from '../index.module.css';
 import {
   assistantRuntimeKey,
   BUILTIN_AELIX_AGENT_ID,
+  canStartAssistantConversation,
   isBuiltinAelixAssistant,
   type Assistant,
 } from '@/common/types/agent/assistantTypes';
@@ -75,6 +76,7 @@ type AssistantPill = Pick<
   | 'agent_id'
   | 'agent'
   | 'agent_status'
+  | 'enabled'
   | 'name'
   | 'name_i18n'
   | 'source'
@@ -121,6 +123,7 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
         agent_id: missing.id,
         agent: { type: 'acp', source: 'builtin', acp_backend: 'aelix' },
         agent_status: 'missing',
+        enabled: true,
         source: 'generated',
         name: missing.name,
         name_i18n: {},
@@ -272,7 +275,7 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
       runtime: assistantRuntimeKey(assistant),
     });
     const isSelected = selectedId === assistant.id;
-    const unavailable = isBuiltinAelixAssistant(assistant) && assistant.agent_status === 'missing';
+    const unavailable = !canStartAssistantConversation(assistant);
     const name = assistant.name_i18n?.[localeKey] || assistant.name;
     const label = unavailable ? `${name} · ${t('settings.agentManagement.filterUnavailable')}` : name;
 
@@ -284,7 +287,15 @@ const AssistantSelectionArea: React.FC<AssistantSelectionAreaProps> = ({
         data-assistant-backend={assistantRuntimeKey(assistant)}
         data-assistant-selected={isSelected ? 'true' : 'false'}
         disabled={unavailable}
-        title={unavailable ? t('settings.assistantAgentMissing') : undefined}
+        title={
+          unavailable
+            ? t(
+                assistant.agent_status === 'missing'
+                  ? 'settings.assistantAgentMissing'
+                  : 'settings.assistantAgentUnavailable'
+              )
+            : undefined
+        }
         type='text'
         className={`!inline-flex !min-w-0 !h-auto !items-center !gap-6px !rounded-999px !border-none !px-12px !py-8px !text-13px transition-all ${
           fullWidth ? '!w-full !justify-start' : ''

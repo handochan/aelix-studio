@@ -4,8 +4,9 @@ import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import type { NativeAuthCatalog, NativeAuthCommand, NativeAuthOperation } from '@aionui/web-host';
 import { ipcBridge } from '@/common';
-import { isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
+import { canStartAssistantConversation, isBuiltinAelixAssistant } from '@/common/types/agent/assistantTypes';
 import { aelixModelId, NATIVE_AUTH_CATALOG_KEY, requestNativeAuth } from '@/renderer/services/runtime/nativeAuth';
+import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
 import { emitter } from '@/renderer/utils/emitter';
 import { mutate } from 'swr';
 
@@ -144,24 +145,22 @@ export default function NativeProviders({
     try {
       const assistants = await ipcBridge.assistants.list.invoke();
       const assistant = assistants.find(isBuiltinAelixAssistant);
-      if (!assistant || assistant.agent_status === 'missing') {
+      if (!assistant || !canStartAssistantConversation(assistant)) {
         setError('RUNTIME_UNAVAILABLE');
         return;
       }
-      if (!assistant.enabled) {
-        setError('NATIVE_FAILED');
-        return;
-      }
+      const modelId = aelixModelId(provider, model);
       const conversation = await ipcBridge.conversation.create.invoke({
         name: assistant.name,
-        assistant: { id: assistant.id, conversation_overrides: { model: aelixModelId(provider, model) } },
-        extra: {},
+        assistant: { id: assistant.id, conversation_overrides: { model: modelId } },
+        extra: { studio_initial_model: modelId },
       });
       emitter.emit('chat.history.refresh');
+      await confirmAelixInitialModel(conversation.id, modelId);
       onOpenConversation?.();
       void navigate(`/conversation/${conversation.id}`);
-    } catch {
-      setError('CONNECTION_LOST');
+    } catch (error) {
+      setError(error instanceof AelixInitialModelUnconfirmed ? 'MODEL_UNCONFIRMED' : 'CONNECTION_LOST');
     } finally {
       if (mounted.current) setBusy(false);
     }
@@ -174,7 +173,9 @@ export default function NativeProviders({
         ? t('settings.nativeAuth.unavailable')
         : error === 'UNAUTHENTICATED'
           ? t('settings.nativeAuth.unauthenticated')
-          : t('settings.nativeAuth.failed', { code: error });
+          : error === 'MODEL_UNCONFIRMED'
+            ? t('agent.model.switchFailed')
+            : t('settings.nativeAuth.failed', { code: error });
 
   return (
     <section className='flex flex-col gap-12px mb-24px' data-testid='native-provider-settings'>

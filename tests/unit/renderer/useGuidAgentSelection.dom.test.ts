@@ -5,6 +5,8 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
+import { SWRConfig } from 'swr';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Assistant } from '@/common/types/agent/assistantTypes';
 import type { ManagedAgent } from '@/renderer/utils/model/agentTypes';
@@ -20,9 +22,10 @@ import {
 let mockAssistants: Assistant[] = [];
 let mockManagedAgents: ManagedAgent[] = [];
 
-const { configGetMock, configSetMock } = vi.hoisted(() => ({
+const { configGetMock, configSetMock, loadCatalogMock } = vi.hoisted(() => ({
   configGetMock: vi.fn(),
   configSetMock: vi.fn(),
+  loadCatalogMock: vi.fn(),
 }));
 
 vi.mock('@/common/config/configService', () => ({
@@ -42,10 +45,21 @@ vi.mock('@/renderer/hooks/agent/useManagedAgents', () => ({
   useManagedAgentRuntimeCatalog: () => mockManagedAgents,
 }));
 
+vi.mock('@/renderer/services/runtime/nativeAuth', async (original) => ({
+  ...(await original<typeof import('@/renderer/services/runtime/nativeAuth')>()),
+  loadNativeAuthCatalog: loadCatalogMock,
+}));
+
+const builtinAelix = () => ({
+  ...assistantFixture({ id: 'bare:builtin-aelix', runtimeKey: 'aelix', source: 'generated', sortOrder: 0 }),
+  agent_id: 'builtin-aelix',
+});
+
 describe('useGuidAssistantSelection', () => {
   beforeEach(() => {
     configGetMock.mockReturnValue(undefined);
     configSetMock.mockResolvedValue(undefined);
+    loadCatalogMock.mockReset().mockResolvedValue(null);
     mockManagedAgents = [];
     mockAssistants = [
       {
@@ -93,6 +107,62 @@ describe('useGuidAssistantSelection', () => {
         { id: 'claude-sonnet', label: 'claude-sonnet' },
       ],
     });
+  });
+
+  it.each(['missing', 'offline', 'disabled'] as const)(
+    'rejects a %s saved, explicitly requested, or previously selected assistant',
+    async (availability) => {
+      const aelix = builtinAelix();
+      const unavailable: Assistant =
+        availability === 'disabled' ? { ...aelix, enabled: false } : { ...aelix, agent_status: availability };
+      const fallback = mockAssistants[0];
+      mockAssistants = [unavailable, fallback];
+      configGetMock.mockReturnValue(aelix.id);
+      const { result, rerender } = renderHook(({ resetAssistant }) => useGuidAssistantSelection({ resetAssistant }), {
+        initialProps: { resetAssistant: true },
+      });
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+      configSetMock.mockClear();
+      act(() => result.current.setSelectedAssistantId(aelix.id));
+      expect(configSetMock).not.toHaveBeenCalled();
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+
+      mockAssistants = [aelix, fallback];
+      rerender({ resetAssistant: true });
+      act(() => result.current.setSelectedAssistantId(aelix.id));
+      expect(result.current.selectedAssistantId).toBe(aelix.id);
+      mockAssistants = [unavailable, fallback];
+      rerender({ resetAssistant: true });
+      expect(result.current.selectedAssistantId).toBe(fallback.id);
+    }
+  );
+
+  it('uses the helper only until an ACP catalog exists and preserves its extension model', async () => {
+    const aelix = builtinAelix();
+    mockAssistants = [aelix];
+    loadCatalogMock.mockResolvedValue({
+      providers: [{ id: 'fixture', name: 'Fixture', models: [{ id: 'helper', name: 'Helper', available: true }] }],
+    });
+    const { result, rerender } = renderHook(() => useGuidAssistantSelection({ resetAssistant: false }), {
+      wrapper: ({ children }: { children: ReactNode }) =>
+        createElement(SWRConfig, { value: { provider: () => new Map() } }, children),
+    });
+    await waitFor(() =>
+      expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id }) => id)).toEqual(['fixture/helper'])
+    );
+    act(() => result.current.setSelectedAcpModel('fixture/helper', { explicit: true }));
+    mockManagedAgents = [
+      {
+        id: aelix.agent_id,
+        available_models: {
+          current_model_id: 'extension/live',
+          available_models: [{ id: 'extension/live', label: 'Extension model' }],
+        },
+      } as ManagedAgent,
+    ];
+    rerender();
+    expect(result.current.currentAcpCachedModelInfo?.available_models.map(({ id }) => id)).toEqual(['extension/live']);
+    expect(result.current.selectedAcpModel).toBe('fixture/helper');
   });
 
   it('restores the last selected guid assistant before falling back to the aionrs default', async () => {

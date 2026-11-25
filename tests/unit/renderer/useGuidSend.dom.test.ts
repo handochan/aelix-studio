@@ -11,6 +11,8 @@ import { useGuidSend, type GuidSendDeps } from '@/renderer/pages/guid/hooks/useG
 
 const createConversationInvokeMock = vi.fn();
 const swrMutateMock = vi.fn();
+const ensureRuntimeMock = vi.fn();
+const setConfigOptionMock = vi.fn();
 
 vi.mock('@/common', () => ({
   ipcBridge: {
@@ -18,7 +20,9 @@ vi.mock('@/common', () => ({
       create: {
         invoke: (...args: unknown[]) => createConversationInvokeMock(...args),
       },
+      ensureRuntime: { invoke: (...args: unknown[]) => ensureRuntimeMock(...args) },
     },
+    acpConversation: { setConfigOption: { invoke: (...args: unknown[]) => setConfigOptionMock(...args) } },
   },
 }));
 
@@ -53,6 +57,7 @@ const createDeps = (): GuidSendDeps => ({
   setLoading: vi.fn(),
   loading: false,
   selectedAssistantId: 'assistant-1',
+  selectedAssistantAvailable: true,
   selectedAssistantBackend: 'claude',
   selectedMode: 'bypassPermissions',
   selectedAcpModel: 'claude-opus',
@@ -76,12 +81,48 @@ const createDeps = (): GuidSendDeps => ({
 
 describe('useGuidSend', () => {
   beforeEach(() => {
+    sessionStorage.clear();
+    ensureRuntimeMock.mockReset();
+    setConfigOptionMock.mockReset();
     createConversationInvokeMock.mockReset();
     createConversationInvokeMock.mockResolvedValue({ id: 'conv-1' });
     swrMutateMock.mockReset();
     swrMutateMock.mockResolvedValue(undefined);
   });
 
+  it('keeps the draft and blocks conversation creation when the selected assistant becomes ineligible', async () => {
+    const deps = { ...createDeps(), selectedAssistantAvailable: false };
+    const { result } = renderHook(() => useGuidSend(deps));
+    expect(result.current.isButtonDisabled).toBe(true);
+    await act(() => result.current.handleSend());
+    expect(createConversationInvokeMock).not.toHaveBeenCalled();
+    expect(deps.setInput).not.toHaveBeenCalled();
+  });
+
+  it('blocks the queued first prompt when ACP only advertises a fallback model', async () => {
+    const deps = {
+      ...createDeps(),
+      selectedAssistantId: 'bare:builtin-aelix',
+      selectedAssistantBackend: 'aelix',
+      selectedBuiltinAelix: true,
+      selectedAcpModel: 'fixture/chosen',
+    };
+    ensureRuntimeMock.mockResolvedValue({
+      config_options: [
+        {
+          id: 'model',
+          category: 'model',
+          type: 'select',
+          current_value: 'fixture/fallback',
+          options: [{ value: 'fixture/fallback' }],
+        },
+      ],
+    });
+    const { result } = renderHook(() => useGuidSend(deps));
+    await expect(result.current.handleSend()).rejects.toThrow();
+    expect(deps.navigate).not.toHaveBeenCalled();
+    expect(sessionStorage.getItem('acp_initial_message_conv-1')).toBeNull();
+  });
   it('passes selected mode into assistant conversation overrides when creating a preset ACP conversation', async () => {
     const deps = createDeps();
     (deps as any).selectedThoughtLevelValue = 'high';

@@ -257,7 +257,10 @@ const GuidActionRow: React.FC<GuidActionRowProps> = ({
         active: model.id === selectedAcpModel,
       }));
       currentModelLabel =
-        available.find((m) => m.id === selectedAcpModel)?.label || currentAcpCachedModelInfo?.current_model_label || '';
+        available.find((m) => m.id === selectedAcpModel)?.label ||
+        selectedAcpModel ||
+        currentAcpCachedModelInfo?.current_model_label ||
+        '';
       onModelSelect = (key) => setSelectedAcpModel(key);
     }
     if (modelOptions.length > 0) {

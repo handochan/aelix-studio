@@ -5,6 +5,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import NativeProviders from './NativeProviders';
 import type { NativeAuthCatalog } from '@aionui/web-host';
 import english from '@/renderer/services/i18n/locales/en-US/settings.json';
+import agentEnglish from '@/renderer/services/i18n/locales/en-US/agent.json';
 
 const mocks = vi.hoisted(() => ({
   request: vi.fn(),
@@ -13,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   createAgent: vi.fn(),
   assistants: vi.fn(),
   createConversation: vi.fn(),
+  ensureRuntime: vi.fn(),
+  setConfigOption: vi.fn(),
 }));
 vi.mock('@/renderer/services/runtime/nativeAuth', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/renderer/services/runtime/nativeAuth')>()),
@@ -21,14 +24,19 @@ vi.mock('@/renderer/services/runtime/nativeAuth', async (importOriginal) => ({
 vi.mock('react-router-dom', () => ({ useNavigate: () => mocks.navigate }));
 vi.mock('@/common', () => ({
   ipcBridge: {
-    acpConversation: { getManagedAgents: { invoke: mocks.agents }, createCustomAgent: { invoke: mocks.createAgent } },
+    acpConversation: {
+      getManagedAgents: { invoke: mocks.agents },
+      createCustomAgent: { invoke: mocks.createAgent },
+      setConfigOption: { invoke: mocks.setConfigOption },
+    },
     assistants: { list: { invoke: mocks.assistants } },
-    conversation: { create: { invoke: mocks.createConversation } },
+    conversation: { create: { invoke: mocks.createConversation }, ensureRuntime: { invoke: mocks.ensureRuntime } },
   },
 }));
 vi.mock('react-i18next', () => ({
   useTranslation: () => ({
     t: (key: string) => {
+      if (key === 'agent.model.switchFailed') return agentEnglish.model.switchFailed;
       const name = key.replace('settings.nativeAuth.', '') as keyof typeof english.nativeAuth;
       return english.nativeAuth[name] ?? key;
     },
@@ -63,6 +71,13 @@ const catalog: NativeAuthCatalog = {
 };
 
 const configured = { ...catalog, providers: [{ ...catalog.providers[0], configured: true, source: 'stored' }] };
+const modelOption = (current: string) => ({
+  id: 'runtime-model',
+  category: 'model',
+  type: 'select',
+  current_value: current,
+  options: [{ value: 'anthropic/fallback' }, { value: 'anthropic/test-model' }],
+});
 
 describe('native provider settings', () => {
   beforeEach(() => {
@@ -74,6 +89,11 @@ describe('native provider settings', () => {
       { id: 'bare:builtin-aelix', agent_id: 'builtin-aelix', source: 'generated', name: 'Aelix', enabled: true },
     ]);
     mocks.createConversation.mockResolvedValue({ id: 'native-conversation' });
+    mocks.ensureRuntime.mockResolvedValue({ config_options: [modelOption('anthropic/fallback')] });
+    mocks.setConfigOption.mockResolvedValue({
+      confirmation: 'observed',
+      config_options: [modelOption('anthropic/test-model')],
+    });
   });
   afterEach(() => {
     cleanup();
@@ -143,13 +163,30 @@ describe('native provider settings', () => {
     await waitFor(() => expect(start).toBeEnabled());
     fireEvent.click(start);
     await waitFor(() => expect(mocks.navigate).toHaveBeenCalledWith('/conversation/native-conversation'));
+    expect(mocks.setConfigOption).toHaveBeenCalledWith({
+      conversation_id: 'native-conversation',
+      option_id: 'runtime-model',
+      value: 'anthropic/test-model',
+    });
     expect(mocks.createConversation).toHaveBeenCalledWith({
       name: 'Aelix',
       assistant: { id: 'bare:builtin-aelix', conversation_overrides: { model: 'anthropic/test-model' } },
-      extra: {},
+      extra: { studio_initial_model: 'anthropic/test-model' },
     });
     expect(mocks.createAgent).not.toHaveBeenCalled();
     expect(opened).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a localized error and keeps Settings open after an unobserved model change', async () => {
+    mocks.request.mockResolvedValue({ ok: true, data: configured });
+    mocks.setConfigOption.mockResolvedValue({
+      confirmation: 'command_ack',
+      config_options: [modelOption('anthropic/test-model')],
+    });
+    render(<NativeProviders />);
+    fireEvent.click(await screen.findByRole('button', { name: english.nativeAuth.startConversation }));
+    expect(await screen.findByText(agentEnglish.model.switchFailed)).toBeVisible();
+    expect(mocks.navigate).not.toHaveBeenCalled();
   });
 
   it('reports unavailable when only legacy custom Aelix agents exist', async () => {

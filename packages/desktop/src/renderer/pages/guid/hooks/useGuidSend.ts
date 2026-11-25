@@ -16,6 +16,7 @@ import { type TFunction } from 'i18next';
 import type { NavigateFunction } from 'react-router-dom';
 import { mutate as swrMutate } from 'swr';
 import { getConversationCreateErrorMessage } from '@/renderer/pages/conversation/utils/conversationCreateError';
+import { AelixInitialModelUnconfirmed, confirmAelixInitialModel } from '@/renderer/services/runtime/aelixInitialModel';
 
 export type GuidSendDeps = {
   // Input state
@@ -30,6 +31,8 @@ export type GuidSendDeps = {
 
   // Assistant state
   selectedAssistantId: string | null;
+  selectedAssistantAvailable: boolean;
+  selectedBuiltinAelix?: boolean;
   selectedAssistantBackend: string;
   selectedMode: string;
   selectedAcpModel: string | null;
@@ -77,6 +80,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     setLoading,
     loading,
     selectedAssistantId,
+    selectedAssistantAvailable,
+    selectedBuiltinAelix,
     selectedAssistantBackend,
     selectedMode,
     selectedAcpModel,
@@ -100,7 +105,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   const sendingRef = useRef(false);
 
   const handleSend = useCallback(async () => {
-    if (!selectedAssistantId) {
+    if (!selectedAssistantId || !selectedAssistantAvailable) {
       return;
     }
 
@@ -230,6 +235,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       return;
     }
 
+    const initialModel = selectedBuiltinAelix && selectedAcpModel ? selectedAcpModel : undefined;
     try {
       const conversation = await ipcBridge.conversation.create.invoke({
         name: input,
@@ -239,6 +245,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
           conversation_overrides: assistantOverrides,
         },
         extra: {
+          ...(initialModel && { studio_initial_model: initialModel }),
           workspace: finalWorkspace,
           custom_workspace: isCustomWorkspace,
           default_files: files.map(chatFileRefPath),
@@ -250,6 +257,10 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       if (!conversation || !conversation.id) {
         console.error('Failed to create ACP conversation - conversation object is null or missing id');
         return;
+      }
+      if (initialModel) {
+        emitter.emit('chat.history.refresh');
+        await confirmAelixInitialModel(conversation.id, initialModel);
       }
 
       if (isCustomWorkspace) {
@@ -263,7 +274,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
         ]);
       }
 
-      emitter.emit('chat.history.refresh');
+      if (!initialModel) emitter.emit('chat.history.refresh');
 
       // Empty input = "start chat": create the conversation but do not stash an
       // initial message, so the window opens idle on the empty state instead of
@@ -286,6 +297,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
     files,
     dir,
     selectedAssistantId,
+    selectedAssistantAvailable,
+    selectedBuiltinAelix,
     selectedAssistantBackend,
     selectedMode,
     selectedAcpModel,
@@ -304,7 +317,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   ]);
 
   const sendMessageHandler = useCallback(() => {
-    if (loading || sendingRef.current) return;
+    if (loading || !selectedAssistantId || !selectedAssistantAvailable || sendingRef.current) return;
     sendingRef.current = true;
     setLoading(true);
     handleSend()
@@ -319,7 +332,11 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       })
       .catch((error) => {
         console.error('[useGuidSend] Failed to send message');
-        Message.error(getConversationCreateErrorMessage(error, t));
+        Message.error(
+          error instanceof AelixInitialModelUnconfirmed
+            ? t('agent.model.switchFailed')
+            : getConversationCreateErrorMessage(error, t)
+        );
       })
       .finally(() => {
         sendingRef.current = false;
@@ -327,6 +344,8 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
       });
   }, [
     loading,
+    selectedAssistantId,
+    selectedAssistantAvailable,
     handleSend,
     setLoading,
     setInput,
@@ -343,7 +362,7 @@ export const useGuidSend = (deps: GuidSendDeps): GuidSendResult => {
   // Calculate button disabled state. Empty input is allowed once an assistant is
   // picked — that path creates an empty conversation ("start chat") rather than
   // sending a message, so the gate only blocks while loading or with no assistant.
-  const isButtonDisabled = loading || !selectedAssistantId;
+  const isButtonDisabled = loading || !selectedAssistantId || !selectedAssistantAvailable;
 
   return {
     handleSend,

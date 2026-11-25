@@ -80,6 +80,7 @@ const GuidModelSelector: React.FC<GuidModelSelectorProps> = ({
   const acpSelectedLabel = React.useMemo(() => {
     return (
       currentAcpCachedModelInfo?.available_models?.find((m) => m.id === selectedAcpModel)?.label ||
+      selectedAcpModel ||
       currentAcpCachedModelInfo?.current_model_label ||
       currentAcpCachedModelInfo?.current_model_id ||
       ''

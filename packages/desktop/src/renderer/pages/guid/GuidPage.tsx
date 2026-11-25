@@ -9,7 +9,7 @@ import { buildGuidSlashCommands } from '@/common/chat/slash/guidSlashCommands';
 import type { SlashCommandItem } from '@/common/chat/slash/types';
 import type { IMcpServer, TProviderWithModel } from '@/common/config/storage';
 import { resolveLocaleKey } from '@/common/utils';
-import type { AssistantDetail } from '@/common/types/agent/assistantTypes';
+import { isBuiltinAelixAssistant, type AssistantDetail } from '@/common/types/agent/assistantTypes';
 
 import { useInputFocusRing } from '@/renderer/hooks/chat/useInputFocusRing';
 import { appendPromptToDraft } from '@/renderer/hooks/chat/useSendBoxDraft';
@@ -258,6 +258,8 @@ const GuidPage: React.FC = () => {
 
     // Agent state
     selectedAssistantId: agentSelection.selectedAssistantId,
+    selectedAssistantAvailable: agentSelection.selectedAssistantAvailable,
+    selectedBuiltinAelix: isBuiltinAelixAssistant(agentSelection.selectedAssistant),
     selectedAssistantBackend: agentSelection.selectedAssistantBackend,
     selectedMode: agentSelection.selectedMode,
     selectedAcpModel: agentSelection.selectedAcpModel,
@@ -484,7 +486,7 @@ const GuidPage: React.FC = () => {
   const setGuidSelectedAcpModel = useCallback(
     (model: React.SetStateAction<string | null>) => {
       manualModelSelectionAssistantRef.current = selectedAssistantId;
-      agentSelection.setSelectedAcpModel(model, { persistPreference: !hasSelectedAssistant });
+      agentSelection.setSelectedAcpModel(model, { persistPreference: !hasSelectedAssistant, explicit: true });
     },
     [agentSelection, hasSelectedAssistant, selectedAssistantId]
   );

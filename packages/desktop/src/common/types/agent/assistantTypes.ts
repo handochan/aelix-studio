@@ -18,6 +18,11 @@ export function isBuiltinAelixAssistant(assistant?: Pick<Assistant, 'source' | '
   return assistant?.source === 'generated' && assistant.agent_id === BUILTIN_AELIX_AGENT_ID;
 }
 
+/** Whether an assistant can be selected to start a conversation. */
+export function canStartAssistantConversation(assistant: Pick<Assistant, 'enabled' | 'agent_status'>): boolean {
+  return assistant.enabled !== false && assistant.agent_status !== 'missing' && assistant.agent_status !== 'offline';
+}
+
 export type AssistantAgent = {
   type: string;
   source: AssistantAgentSource;

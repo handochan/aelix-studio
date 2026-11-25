@@ -16,6 +16,7 @@ import { getConversationRuntimeWorkspaceErrorMessage } from '../../utils/convers
 import type { ConversationRuntimeSendFailure } from '../../runtime/conversationRuntimeViewStore';
 import { classifyConversationBusyError } from '../conversationBusyError';
 import { buildSendFailureError } from './buildSendFailureError';
+import { AelixInitialModelUnconfirmed } from '@/renderer/services/runtime/aelixInitialModel';
 
 type UseAcpInitialMessageParams = {
   conversation_id: string;
@@ -30,6 +31,8 @@ type UseAcpInitialMessageParams = {
   beginCompactionSubmission?: (input: string) => (() => void) | undefined;
   checkAndUpdateTitle: (conversation_id: string, input: string) => void;
   addOrUpdateMessage: (message: TMessage, prepend?: boolean) => void;
+  prepareInitialModel?: () => Promise<boolean>;
+  onInitialModelAccepted?: () => void;
 };
 
 /**
@@ -48,6 +51,8 @@ export const useAcpInitialMessage = ({
   beginCompactionSubmission,
   checkAndUpdateTitle,
   addOrUpdateMessage,
+  prepareInitialModel,
+  onInitialModelAccepted,
 }: UseAcpInitialMessageParams): void => {
   const { t } = useTranslation();
 
@@ -78,6 +83,7 @@ export const useAcpInitialMessage = ({
               .filter(isChatFileRef)
           : [];
 
+        const confirmedInitialModel = prepareInitialModel && (await prepareInitialModel());
         markSendStarted?.();
         setAiProcessing(true);
 
@@ -88,12 +94,15 @@ export const useAcpInitialMessage = ({
           files,
         });
         markSendAccepted?.(result.turn_id, result.runtime, result.msg_id);
+        if (confirmedInitialModel) onInitialModelAccepted?.();
 
         // Initial message sent successfully
         emitter.emit('chat.history.refresh');
       } catch (error) {
         const errorMessageText =
-          getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
+          error instanceof AelixInitialModelUnconfirmed
+            ? t('agent.model.switchFailed')
+            : getConversationRuntimeWorkspaceErrorMessage(error, t) || parseError(error) || t('common.unknownError');
         const busyError = classifyConversationBusyError(error);
         if (busyError) {
           markSendFailed?.({
@@ -144,6 +153,8 @@ export const useAcpInitialMessage = ({
     markSendAccepted,
     markSendFailed,
     markSendStarted,
+    onInitialModelAccepted,
+    prepareInitialModel,
     resetState,
     setAiProcessing,
     t,
