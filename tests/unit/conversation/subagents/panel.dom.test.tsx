@@ -2,7 +2,7 @@ import React from 'react';
 import { render, screen, within, fireEvent } from '@testing-library/react';
 import { ipcBridge } from '@/common';
 import { describe, expect, it, vi } from 'vitest';
-import type { IMessageAcpToolCall } from '@/common/chat/chatLib';
+import { mergeAcpToolCallContent, type IMessageAcpToolCall } from '@/common/chat/chatLib';
 import SubagentProgressPanel, {
   presentSubagentTool,
 } from '@/renderer/pages/conversation/Messages/acp/SubagentProgress';
@@ -248,18 +248,79 @@ describe('cancelled children report', () => {
     expect(report(container)).toHaveAttribute('data-subagent-report', 'batch');
   });
 
-  it('restores each child report from a reopened history message', () => {
-    const saved = JSON.stringify(cancelled(cancelReports.reports.twoStopped));
-    const first = render(<MessageToolGroupSummary messages={[JSON.parse(saved)]} />);
-    first.unmount();
-    const { container } = render(<MessageToolGroupSummary messages={[JSON.parse(saved)]} />);
+  it('keeps the report through a merged final update and a later metadata-only update', () => {
+    const live = message(stoppedPair, 'merged');
+    live.content.update.status = 'in_progress';
+    live.content.update.content = [];
+    const final = cancelled(cancelReports.reports.twoStopped, 'merged');
+    const late = {
+      session_id: 'parent-session',
+      _meta: { 'aelix/subagents': stoppedPair },
+      update: { sessionUpdate: 'tool_call_update', tool_call_id: 'merged' },
+    } as unknown as IMessageAcpToolCall['content'];
+    const merged = mergeAcpToolCallContent(mergeAcpToolCallContent(live.content, final.content), late);
+    const reopened = JSON.parse(JSON.stringify({ ...live, content: merged }));
+    const { container } = render(<MessageToolGroupSummary messages={[reopened]} />);
     expect(entry(container, 1)).toHaveTextContent('PARTIAL_CHILD_CANCEL_A');
     expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B');
   });
 
+  it('does not repeat a split report in the auto-expanded raw output', () => {
+    const { container } = render(<MessageToolGroupSummary messages={[cancelled(cancelReports.reports.twoStopped)]} />);
+    expect(report(container)).toHaveAttribute('data-subagent-report', 'batch');
+    expect(container.querySelector('.tool-detail-panel')).toBeNull();
+  });
+
+  it('keeps the raw output open as the fallback for a report notice', () => {
+    const { container } = render(<MessageToolGroupSummary messages={[cancelled('Tool call was cut.')]} />);
+    expect(report(container)).toHaveAttribute('data-subagent-report', 'missing');
+    expect(container.querySelector('.tool-detail-panel')).not.toBeNull();
+  });
+
+  it('fetches a compact row only after its call ended, then shows the report instead of missing', async () => {
+    const invoke = vi.mocked(ipcBridge.database.getConversationMessage.invoke).mockClear();
+    const compact = (saved: IMessageAcpToolCall) => ({
+      ...saved,
+      content: { ...saved.content, _compact: { truncated: true } },
+    });
+    const running = message(
+      { version: 1, children: stoppedPair.children.map((child) => ({ ...child, state: 'running' })) },
+      'late',
+      'preview'
+    );
+    running.content.update.status = 'in_progress';
+    const { container, rerender } = render(<MessageToolGroupSummary messages={[compact(running)]} />);
+    const stoppedFrame = compact(message(stoppedPair, 'late', 'preview'));
+    stoppedFrame.content.update.status = 'in_progress';
+    rerender(<MessageToolGroupSummary messages={[stoppedFrame]} />);
+    expect(invoke).not.toHaveBeenCalled();
+    const stale = { ...stoppedFrame, content: { ...stoppedFrame.content, _compact: undefined } };
+    invoke.mockResolvedValueOnce(stale).mockResolvedValueOnce(cancelled(cancelReports.reports.twoStopped, 'late'));
+    const final = cancelled(cancelReports.reports.twoStopped, 'late');
+    rerender(
+      <MessageToolGroupSummary
+        messages={[{ ...final, content: mergeAcpToolCallContent(stoppedFrame.content, final.content) }]}
+      />
+    );
+    await vi.waitFor(() => expect(entry(container, 2)).toHaveTextContent('PARTIAL_CHILD_CANCEL_B'), { timeout: 3000 });
+    expect(container.querySelector('[data-subagent-report="missing"]')).toBeNull();
+  });
+
+  it.each([
+    ['a row without message identifiers', { conversation_id: '' }, null],
+    ['a fetched message without this call', {}, { id: 'other', type: 'text', content: { content: 'x' } }],
+  ])('reports a failed full load for %s', async (_name, patch, fetched) => {
+    const invoke = vi.mocked(ipcBridge.database.getConversationMessage.invoke).mockReset();
+    if (fetched) invoke.mockResolvedValueOnce(fetched);
+    const saved = cancelled(cancelReports.reports.twoStopped.slice(0, 400), 'unloadable');
+    const compact = { ...saved, ...patch, content: { ...saved.content, _compact: { truncated: true } } };
+    const { container } = render(<MessageToolGroupSummary messages={[compact]} />);
+    await vi.waitFor(() => expect(report(container)).toHaveAttribute('data-subagent-report', 'loadFailed'));
+  });
+
   it('loads the full report of a compact reopened message before splitting it', async () => {
     const full = cancelled(cancelReports.reports.twoStopped, 'compact-report');
-    vi.mocked(ipcBridge.database.getConversationMessage.invoke).mockResolvedValueOnce(full);
+    vi.mocked(ipcBridge.database.getConversationMessage.invoke).mockReset().mockResolvedValueOnce(full);
     const preview = cancelled(cancelReports.reports.twoStopped.slice(0, 400) + '\n...[truncated]', 'compact-report');
     const saved = { ...preview, content: { ...preview.content, _compact: { truncated: true } } };
     const { container } = render(<MessageToolGroupSummary messages={[saved]} />);
