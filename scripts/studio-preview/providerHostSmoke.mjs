@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../packages/web-host/src/index.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
+import { observeProviderConversationStart } from './host-release/probes/providerConversationDiagnostics.mjs';
 import { boundedWait, closeElectron, launchWithIdentity, waitForProviderWindow } from './host-release/verification.mjs';
 
 const { httpGet, httpPost } = httpBridge;
@@ -104,6 +105,7 @@ let foreign;
 let webui;
 let sharedDbLink;
 let stage = 'startup';
+let conversationStartRequests;
 const lanFailures = [];
 const trace = (next) => {
   stage = next;
@@ -425,12 +427,20 @@ async function qualifyHost() {
   await native.getByRole('button', { name: strings.refresh, exact: true }).click();
   await expect(native.getByText('http://127.0.0.1:1/v1', { exact: true })).toBeVisible({ timeout: 15000 });
   trace('unreachable_endpoint_conversation');
-  await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
-  await expect(input).toBeVisible({ timeout: 30000 });
-  await input.fill('Verify unreachable endpoint');
-  await page.getByTestId('sendbox-send-btn').click();
-  // The connection error text is peer detail too (see the rejected-key check above).
-  await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
+  const observation = observeProviderConversationStart(page, port);
+  try {
+    await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('Verify unreachable endpoint');
+    await page.getByTestId('sendbox-send-btn').click();
+    // The connection error text is peer detail too (see the rejected-key check above).
+    await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
+  } catch (error) {
+    conversationStartRequests = await observation.failureReceipt().catch(() => undefined);
+    throw error;
+  } finally {
+    observation.dispose();
+  }
 
   // Operator setup uses the authenticated Electron renderer. The WebUI
   // below must obtain its own browser session before accessing native auth.
@@ -662,7 +672,12 @@ try {
 } catch (error) {
   fs.writeFileSync(
     outputFile('ui-failure.json'),
-    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
+    JSON.stringify({
+      stage,
+      errorName: error instanceof Error ? error.name : typeof error,
+      lanFailures,
+      conversationStartRequests,
+    }) + '\n'
   );
   if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
