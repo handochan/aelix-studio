@@ -205,17 +205,18 @@ describe('preview download behavior', () => {
     else Reflect.deleteProperty(URL, 'revokeObjectURL');
   });
 
+  const supportedSystemInfo = () =>
+    Response.json({ success: true, data: { platform: 'darwin', arch: 'arm64', file_content_binary_post: true } });
+
   it(
     'downloads the original bytes for an Explorer-backed Excel tab',
     async () => {
       const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01]);
-      mocks.fetch
-        .mockResolvedValueOnce(Response.json({ data: { file_content_binary_post: true } }))
-        .mockResolvedValueOnce(
-          new Response(bytes, {
-            headers: { 'Content-Type': 'application/octet-stream' },
-          })
-        );
+      mocks.fetch.mockResolvedValueOnce(supportedSystemInfo()).mockResolvedValueOnce(
+        new Response(bytes, {
+          headers: { 'Content-Type': 'application/octet-stream' },
+        })
+      );
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));
@@ -281,7 +282,7 @@ describe('preview download behavior', () => {
   );
 
   it(
-    'shows the existing failure message without starting a download when the backing read fails',
+    'shows the existing failure message when checking Host support fails',
     async () => {
       mocks.fetch.mockRejectedValue(new Error('read failed'));
       const { rerender } = render(<Harness showPanel={false} />);
@@ -291,6 +292,7 @@ describe('preview download behavior', () => {
       fireEvent.click(await screen.findByTitle('preview.downloadFile'));
 
       await waitFor(() => expect(screen.getByText('Failed to download')).toBeInTheDocument());
+      expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/system/info']);
       expect(downloadedBlobs).toHaveLength(0);
       expect(downloadedNames).toHaveLength(0);
     },
@@ -305,7 +307,9 @@ describe('preview download behavior', () => {
         { error: messageError } as unknown as ReturnType<typeof Message.useMessage>[0],
         null,
       ]);
-      mocks.fetch.mockResolvedValue(new Response(null, { status: 404 }));
+      mocks.fetch
+        .mockResolvedValueOnce(supportedSystemInfo())
+        .mockResolvedValueOnce(new Response(null, { status: 404 }));
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));
@@ -372,7 +376,9 @@ describe('preview download behavior', () => {
   it(
     'rejects an empty stream instead of saving a zero-byte file',
     async () => {
-      mocks.fetch.mockResolvedValue(new Response(null, { headers: { 'Content-Type': 'application/octet-stream' } }));
+      mocks.fetch
+        .mockResolvedValueOnce(supportedSystemInfo())
+        .mockResolvedValueOnce(new Response(null, { headers: { 'Content-Type': 'application/octet-stream' } }));
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));

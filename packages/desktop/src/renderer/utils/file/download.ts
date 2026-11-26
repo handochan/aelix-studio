@@ -6,26 +6,43 @@
 
 import { ipcBridge } from '@/common';
 import { getBaseUrl, resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
+import { refreshSession } from '@/common/adapter/sessionRefresh';
 import type { ChatFileRef } from '@/common/types/chatFile';
 import { base64ToBlob, BINARY_MIME_MAP } from './base64';
 import { buildFileStreamUrl } from './fileUrls';
 
 const BINARY_CONTENT_TYPE = 'application/octet-stream';
 
+type SystemInfo = {
+  success?: boolean;
+  data?: { platform?: string; arch?: string; file_content_binary_post?: boolean };
+};
+
 async function supportsBinaryContentPost(baseUrl: string): Promise<boolean> {
+  // Check the running Host on each attempt, including after a session refresh.
+  const requestSystemInfo = () =>
+    fetch(`${baseUrl}/api/system/info`, { cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(2000) });
+
   try {
-    // Query the running Host. A Host replacement at the same origin must not
-    // inherit a cached capability from a different release.
-    const response = await fetch(`${baseUrl}/api/system/info`, {
-      cache: 'no-store',
-      signal: AbortSignal.timeout(2000),
-    });
-    if (!response.ok) return false;
-    const info: { data?: { file_content_binary_post?: boolean } } = await response.json();
-    return info?.data?.file_content_binary_post === true;
+    let response = await requestSystemInfo();
+    if (response.status === 401 && (await refreshSession())) {
+      response = await requestSystemInfo();
+    }
+    const info: SystemInfo | null = response.ok ? await response.json() : null;
+    const data = info?.data;
+    const capability = data?.file_content_binary_post;
+    if (
+      info?.success === true &&
+      typeof data?.platform === 'string' &&
+      typeof data.arch === 'string' &&
+      (capability === undefined || typeof capability === 'boolean')
+    ) {
+      return capability === true;
+    }
   } catch {
-    return false;
+    // Report the same download failure for transport, timeout and JSON errors.
   }
+  throw new Error('File download could not be started');
 }
 
 async function fetchBinaryContent(baseUrl: string, file: ChatFileRef): Promise<Response> {

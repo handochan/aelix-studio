@@ -25,6 +25,7 @@ const SVG_WITH_LITERAL_PERCENT = `data:image/svg+xml,${encodeURIComponent(
 ).replace('%25', '%')}`;
 const REQUEST_FILE = { kind: 'project', pe_id: 'fixture-project', relative_path: PATH_MARKER } as const;
 const ORIGINAL_BYTES = Buffer.from([0, 255, 42]);
+const SYSTEM_INFO = { platform: 'darwin', arch: 'arm64' };
 // Model the old Host's JSON limit without downloading hundreds of MiB in PR CI.
 const LEGACY_JSON_LIMIT = 2;
 
@@ -36,6 +37,8 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
   const logs = join(sandbox, 'logs');
   let lastDownload: { url?: string; method?: string; accept?: string; csrf: unknown; body: unknown } | undefined;
   let downloadResponse: 'denied' | 'stream' | 'legacy' = 'denied';
+  let probeResponse: 'ok' | 302 | 401 | 503 | 'invalid-json' | 'invalid-info' | 'failed-envelope' | 'timeout' = 'ok';
+  let refreshSucceeds = false;
   const bundle = await build({
     entryPoints: ['tests/e2e/preview-privacy/renderer.tsx'],
     bundle: true,
@@ -56,7 +59,33 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
     }
     if (request.url === '/api/system/info') {
       response.setHeader('Content-Type', 'application/json');
-      response.end(JSON.stringify({ data: downloadResponse === 'legacy' ? {} : { file_content_binary_post: true } }));
+      if (typeof probeResponse === 'number') {
+        if (probeResponse === 302) response.setHeader('Location', '/api/system/legacy-info');
+        response.writeHead(probeResponse).end();
+        return;
+      }
+      if (probeResponse === 'timeout') return;
+      if (probeResponse === 'invalid-json') {
+        response.end('{');
+        return;
+      }
+      const data = downloadResponse === 'legacy' ? SYSTEM_INFO : { ...SYSTEM_INFO, file_content_binary_post: true };
+      response.end(
+        JSON.stringify({
+          success: probeResponse !== 'failed-envelope',
+          data: probeResponse === 'invalid-info' ? {} : data,
+        })
+      );
+      return;
+    }
+    if (request.url === '/api/system/legacy-info') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ success: true, data: SYSTEM_INFO }));
+      return;
+    }
+    if (request.url === '/api/auth/refresh' && request.method === 'POST') {
+      if (refreshSucceeds) probeResponse = 'ok';
+      response.writeHead(refreshSucceeds ? 204 : 401).end();
       return;
     }
     if (request.url?.startsWith('/api/fs/stream?') && request.method === 'GET' && downloadResponse === 'legacy') {
@@ -99,7 +128,7 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
         return;
       }
     }
-    response.writeHead(403).end();
+    response.writeHead(probeResponse === 401 && request.url?.startsWith('/api/fs/stream?') ? 401 : 403).end();
   });
 
   let app: Awaited<ReturnType<typeof _electron.launch>> | undefined;
@@ -165,15 +194,46 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
     await expect.poll(() => log.some((entry) => entry.includes(CHARSET_MARKER))).toBe(true);
     log.length = urls.length = failures.length = 0;
 
-    const denied = await page.evaluate(async (file) => {
-      try {
-        await window.previewPrivacy.download(file, 'report.pdf');
-        return 'download succeeded';
-      } catch (error) {
-        return (error as Error).message;
-      }
-    }, REQUEST_FILE);
-    expect(denied).toBe('File download failed (403)');
+    const attemptDownload = () =>
+      page.evaluate(async (file) => {
+        try {
+          await window.previewPrivacy.download(file, 'report.pdf');
+          return 'download succeeded';
+        } catch (error) {
+          return (error as Error).message;
+        }
+      }, REQUEST_FILE);
+    const requestPathsSince = (start: number) =>
+      urls
+        .slice(start)
+        .map((url) => new URL(url).pathname)
+        .filter((path) => path.startsWith('/api/'));
+
+    for (const failure of [401, 503, 302, 'invalid-json', 'invalid-info', 'failed-envelope', 'timeout'] as const) {
+      probeResponse = failure;
+      const before = urls.length;
+      expect(await attemptDownload()).toBe('File download could not be started');
+      expect(requestPathsSince(before)).toEqual(
+        failure === 401 ? ['/api/system/info', '/api/auth/refresh'] : ['/api/system/info']
+      );
+    }
+    await expect
+      .poll(() => log.some((entry) => entry.includes('/api/system/info') && entry.includes('401')))
+      .toBe(true);
+    await expect
+      .poll(() => log.some((entry) => entry.includes('/api/system/info') && entry.includes('503')))
+      .toBe(true);
+
+    probeResponse = 401;
+    refreshSucceeds = true;
+    const beforeRefresh = urls.length;
+    expect(await attemptDownload()).toBe('File download failed (403)');
+    expect(requestPathsSince(beforeRefresh)).toEqual([
+      '/api/system/info',
+      '/api/auth/refresh',
+      '/api/system/info',
+      '/api/fs/content',
+    ]);
     expect(lastDownload).toEqual({
       url: '/api/fs/content',
       method: 'POST',
