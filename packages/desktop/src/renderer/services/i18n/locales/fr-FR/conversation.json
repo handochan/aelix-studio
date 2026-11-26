@@ -143,6 +143,10 @@
       "reduce_context": "Réduisez le contenu du message, les fichiers référencés ou la taille du contexte, puis réessayez.",
       "send_feedback": "Envoyez des commentaires avec des journaux afin que l'équipe puisse enquêter."
     },
+    "actions": {
+      "chooseModel": "Choisir un modèle",
+      "openModelSettings": "Ouvrir les paramètres des modèles"
+    },
     "ownership": {
       "aionui": "Application",
       "user_agent": "Agent",
@@ -363,7 +367,29 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Échec du tour après envoi",
-        "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Ce tour ne sera pas renvoyé automatiquement. Vérifiez l’historique avant tout nouvel envoi."
+        "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Ce tour ne sera pas renvoyé automatiquement. Vérifiez l’historique avant tout nouvel envoi.",
+        "causes": {
+          "providerAuth": {
+            "title": "Le fournisseur a rejeté votre clé API",
+            "body": "Le fournisseur de modèles n’a pas accepté votre clé API ou vos identifiants de compte. Vérifiez-les dans Paramètres → Modèle, puis renvoyez votre message."
+          },
+          "providerRateLimit": {
+            "title": "Le fournisseur limite les requêtes",
+            "body": "La limite de débit ou le quota du fournisseur de modèles est atteint. Patientez un instant, puis renvoyez votre message. Il n’est pas renvoyé automatiquement."
+          },
+          "providerUnavailable": {
+            "title": "Le fournisseur est indisponible",
+            "body": "Le fournisseur de modèles est en panne ou surchargé. Patientez un instant, puis renvoyez votre message. Il n’est pas renvoyé automatiquement."
+          },
+          "providerBadRequest": {
+            "title": "Le fournisseur a rejeté la requête",
+            "body": "Le fournisseur de modèles a jugé la requête invalide, par exemple parce que le modèle sélectionné ne la prend pas en charge. Vérifiez le modèle et le fournisseur dans Paramètres → Modèle, puis renvoyez votre message."
+          },
+          "providerNetwork": {
+            "title": "Impossible de joindre le fournisseur",
+            "body": "Une erreur réseau a interrompu la connexion au fournisseur de modèles. Vérifiez votre réseau ou votre proxy, puis renvoyez votre message. Il n’est pas renvoyé automatiquement."
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "L’agent est occupé",
@@ -376,7 +402,13 @@
         "profileUnavailable": "Profil indisponible : {{profile}}. Restaurez-le ou démarrez une nouvelle session.",
         "extensionOwnedByLaunch": "Cette extension est gérée par la configuration de lancement : {{source}}. Modifiez cette configuration.",
         "runtimeControlRequired": "Cette opération nécessite le contrôle de l’exécution. Utilisez les commandes d’exécution de la session.",
-        "clientActionRequired": "Cette opération nécessite une action du client. Effectuez l’action demandée dans Studio."
+        "clientActionRequired": "Cette opération nécessite une action du client. Effectuez l’action demandée dans Studio.",
+        "modelSelectionRequired": {
+          "title": "Choisissez d’abord un modèle",
+          "body": "Votre message n’a pas été envoyé, car aucun modèle n’est sélectionné. Choisissez un modèle, puis renvoyez votre message.",
+          "noModelsTitle": "Ajoutez d’abord un modèle",
+          "noModelsBody": "Votre message n’a pas été envoyé, car aucun modèle n’est disponible. Ajoutez un modèle dans Paramètres → Modèle, sélectionnez-le, puis renvoyez votre message."
+        }
       }
     }
   },

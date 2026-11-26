@@ -29,6 +29,9 @@ interface EventTypes {
   'acp.selected.file.append': [Array<string | FileOrFolderItem>, string | undefined];
   'acp.selected.file.clear': void;
   'acp.workspace.refresh': void;
+  // Open the model picker of the given conversation (an error card's next action).
+  // It only opens the picker; nothing is sent.
+  'acp.model.selector.open': [string];
   'codex.selected.file': [Array<string | FileOrFolderItem>, string | undefined];
   'codex.selected.file.append': [Array<string | FileOrFolderItem>, string | undefined];
   'codex.selected.file.clear': void;

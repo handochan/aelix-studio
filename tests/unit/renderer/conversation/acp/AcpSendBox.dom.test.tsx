@@ -22,6 +22,7 @@ import {
 } from '@/renderer/services/runtime/aelixInitialModel';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
 import type { ChatFileRef } from '@/common/types/chatFile';
+import { useAddEventListener } from '@/renderer/utils/emitter';
 
 const {
   sendMessageInvokeMock,
@@ -38,6 +39,7 @@ const {
   responseListeners,
   isMobileMock,
   mobileActionSheetEntries,
+  mobileActionSheetOpen,
   sendBoxPropsSpy,
   runtimeViewMock,
   useConversationCommandQueueSpy,
@@ -73,6 +75,7 @@ const {
   mobileActionSheetEntries: {
     current: [] as MobileActionSheetEntry[],
   },
+  mobileActionSheetOpen: { current: false },
   runtimeViewMock: {
     hydrated: true,
     hasBackendRuntime: true,
@@ -289,8 +292,9 @@ vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({
   },
 }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: ({ entries }: { entries?: MobileActionSheetEntry[] }) => {
+  default: ({ entries, open }: { entries?: MobileActionSheetEntry[]; open?: boolean }) => {
     mobileActionSheetEntries.current = entries ?? [];
+    mobileActionSheetOpen.current = Boolean(open);
     return null;
   },
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
@@ -485,6 +489,7 @@ describe('AcpSendBox', () => {
     vi.clearAllMocks();
     isMobileMock.current = false;
     mobileActionSheetEntries.current = [];
+    mobileActionSheetOpen.current = false;
     runtimeViewMock.hydrated = true;
     runtimeViewMock.hasBackendRuntime = true;
     runtimeViewMock.state = 'idle';
@@ -1375,6 +1380,31 @@ describe('AcpSendBox', () => {
       label: 'agentMode.ask',
       active: true,
     });
+  });
+
+  it.each([
+    ['opens', 'conv-1', true],
+    ['leaves closed', 'conv-2', false],
+  ])('%s the mobile sheet when an error card asks for the model picker of %s', (_verb, target, expected) => {
+    isMobileMock.current = true;
+    render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        workspacePath='/tmp/workspace'
+        messageState={makeMessageState()}
+      />
+    );
+    const openPicker = vi
+      .mocked(useAddEventListener)
+      .mock.calls.findLast(([event]) => event === 'acp.model.selector.open')?.[1] as
+      | ((conversationId: string) => void)
+      | undefined;
+
+    act(() => openPicker?.(target));
+
+    expect(mobileActionSheetOpen.current).toBe(expected);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
   });
 
   it('applies runtime thought level from the mobile action sheet without persisting a global preference', async () => {

@@ -956,6 +956,14 @@ Please check your local CLI tool authentication status`,
     },
     [conversation_id, setAtPath]
   );
+  // Mobile hides the header model picker; an error card's "Choose model" opens the sheet that holds it.
+  useAddEventListener(
+    'acp.model.selector.open',
+    (targetConversationId: string) => {
+      if (isMobile && targetConversationId === conversation_id) setIsMobileSheetOpen(true);
+    },
+    [conversation_id, isMobile]
+  );
 
   // Stop conversation handler
   const handleStop = async (): Promise<void> => {

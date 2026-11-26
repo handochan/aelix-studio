@@ -126,6 +126,10 @@
       "reduce_context": "Mesaj içeriğini, başvurulan dosyaları veya bağlam boyutunu azaltıp yeniden deneyin.",
       "send_feedback": "Ekibin inceleyebilmesi için günlüklerle birlikte geri bildirim gönderin."
     },
+    "actions": {
+      "chooseModel": "Model seç",
+      "openModelSettings": "Model ayarlarını aç"
+    },
     "ownership": {
       "aionui": "Uygulama",
       "user_agent": "Ajan",
@@ -346,7 +350,29 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Gönderimden sonra tur başarısız oldu",
-        "body": "Model veya araçlar zaten çalışmış olabilir. Bu tur otomatik olarak yeniden gönderilmez. Yeniden göndermeden önce geçmişi kontrol edin."
+        "body": "Model veya araçlar zaten çalışmış olabilir. Bu tur otomatik olarak yeniden gönderilmez. Yeniden göndermeden önce geçmişi kontrol edin.",
+        "causes": {
+          "providerAuth": {
+            "title": "Sağlayıcı API anahtarınızı reddetti",
+            "body": "Model sağlayıcı API anahtarınızı veya hesap kimlik bilgilerinizi kabul etmedi. Ayarlar → Model bölümünden kontrol edip mesajınızı yeniden gönderin."
+          },
+          "providerRateLimit": {
+            "title": "Sağlayıcı istekleri sınırlıyor",
+            "body": "Model sağlayıcının hız sınırına veya kotasına ulaşıldı. Biraz bekleyip mesajınızı yeniden gönderin. Otomatik olarak yeniden gönderilmez."
+          },
+          "providerUnavailable": {
+            "title": "Sağlayıcı kullanılamıyor",
+            "body": "Model sağlayıcı çalışmıyor veya aşırı yüklü. Biraz bekleyip mesajınızı yeniden gönderin. Otomatik olarak yeniden gönderilmez."
+          },
+          "providerBadRequest": {
+            "title": "Sağlayıcı isteği reddetti",
+            "body": "Model sağlayıcı isteği geçersiz olarak bildirdi; örneğin seçili model bu isteği desteklemiyor olabilir. Ayarlar → Model bölümünden modeli ve sağlayıcıyı kontrol edip mesajınızı yeniden gönderin."
+          },
+          "providerNetwork": {
+            "title": "Sağlayıcıya ulaşılamadı",
+            "body": "Bir ağ hatası model sağlayıcıyla bağlantıyı kesti. Ağınızı veya proxy ayarlarınızı kontrol edip mesajınızı yeniden gönderin. Otomatik olarak yeniden gönderilmez."
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "Ajan meşgul",
@@ -359,7 +385,13 @@
         "profileUnavailable": "Profil kullanılamıyor: {{profile}}. Profili geri yükleyin veya yeni bir oturum başlatın.",
         "extensionOwnedByLaunch": "Bu uzantı başlatma yapılandırmasıyla yönetiliyor: {{source}}. Bu yapılandırmayı değiştirin.",
         "runtimeControlRequired": "Bu işlem çalışma zamanı denetimi gerektiriyor. Oturumun çalışma zamanı denetimlerini kullanın.",
-        "clientActionRequired": "Bu işlem istemci eylemi gerektiriyor. Studio’da istenen eylemi tamamlayın."
+        "clientActionRequired": "Bu işlem istemci eylemi gerektiriyor. Studio’da istenen eylemi tamamlayın.",
+        "modelSelectionRequired": {
+          "title": "Önce bir model seçin",
+          "body": "Model seçilmediği için mesajınız gönderilmedi. Bir model seçip mesajınızı yeniden gönderin.",
+          "noModelsTitle": "Önce bir model ekleyin",
+          "noModelsBody": "Kullanılabilir model olmadığı için mesajınız gönderilmedi. Ayarlar → Model bölümünden bir model ekleyip seçin, ardından mesajınızı yeniden gönderin."
+        }
       }
     }
   },

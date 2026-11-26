@@ -143,6 +143,10 @@
       "reduce_context": "Reduziere den Nachrichteninhalt, referenzierte Dateien oder die Kontextgröße und versuche es nochmal.",
       "send_feedback": "Sende Feedback mit Protokollen, damit das Team das Problem untersuchen kann."
     },
+    "actions": {
+      "chooseModel": "Modell auswählen",
+      "openModelSettings": "Modelleinstellungen öffnen"
+    },
     "ownership": {
       "aionui": "App",
       "user_agent": "Agent",
@@ -363,7 +367,29 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Durchlauf nach dem Senden fehlgeschlagen",
-        "body": "Modell oder Werkzeuge wurden möglicherweise bereits ausgeführt. Dieser Durchlauf wird nicht automatisch erneut gesendet. Prüfen Sie zuvor den Verlauf."
+        "body": "Modell oder Werkzeuge wurden möglicherweise bereits ausgeführt. Dieser Durchlauf wird nicht automatisch erneut gesendet. Prüfen Sie zuvor den Verlauf.",
+        "causes": {
+          "providerAuth": {
+            "title": "Der Anbieter hat Ihren API-Schlüssel abgelehnt",
+            "body": "Der Modellanbieter hat Ihren API-Schlüssel oder Ihre Kontoanmeldedaten nicht akzeptiert. Prüfen Sie diese unter Einstellungen → Modell und senden Sie die Nachricht erneut."
+          },
+          "providerRateLimit": {
+            "title": "Der Anbieter begrenzt Anfragen",
+            "body": "Das Rate Limit oder Kontingent des Modellanbieters ist erreicht. Warten Sie einen Moment und senden Sie die Nachricht erneut. Sie wird nicht automatisch erneut gesendet."
+          },
+          "providerUnavailable": {
+            "title": "Der Anbieter ist nicht verfügbar",
+            "body": "Der Modellanbieter ist ausgefallen oder überlastet. Warten Sie einen Moment und senden Sie die Nachricht erneut. Sie wird nicht automatisch erneut gesendet."
+          },
+          "providerBadRequest": {
+            "title": "Der Anbieter hat die Anfrage abgelehnt",
+            "body": "Der Modellanbieter hat die Anfrage als ungültig gemeldet, etwa weil das ausgewählte Modell sie nicht unterstützt. Prüfen Sie Modell und Anbieter unter Einstellungen → Modell und senden Sie die Nachricht erneut."
+          },
+          "providerNetwork": {
+            "title": "Anbieter nicht erreichbar",
+            "body": "Ein Netzwerkfehler hat die Verbindung zum Modellanbieter unterbrochen. Prüfen Sie Ihr Netzwerk oder Ihren Proxy und senden Sie die Nachricht erneut. Sie wird nicht automatisch erneut gesendet."
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "Agent ist beschäftigt",
@@ -376,7 +402,13 @@
         "profileUnavailable": "Profil nicht verfügbar: {{profile}}. Stellen Sie es wieder her oder starten Sie eine neue Sitzung.",
         "extensionOwnedByLaunch": "Diese Erweiterung wird durch die Startkonfiguration verwaltet: {{source}}. Ändern Sie diese Konfiguration.",
         "runtimeControlRequired": "Dieser Vorgang erfordert Laufzeitsteuerung. Verwenden Sie die Laufzeitsteuerung der Sitzung.",
-        "clientActionRequired": "Dieser Vorgang erfordert eine Client-Aktion. Führen Sie die angeforderte Aktion in Studio aus."
+        "clientActionRequired": "Dieser Vorgang erfordert eine Client-Aktion. Führen Sie die angeforderte Aktion in Studio aus.",
+        "modelSelectionRequired": {
+          "title": "Wählen Sie zuerst ein Modell",
+          "body": "Ihre Nachricht wurde nicht gesendet, weil kein Modell ausgewählt ist. Wählen Sie ein Modell und senden Sie die Nachricht erneut.",
+          "noModelsTitle": "Fügen Sie zuerst ein Modell hinzu",
+          "noModelsBody": "Ihre Nachricht wurde nicht gesendet, weil keine Modelle verfügbar sind. Fügen Sie unter Einstellungen → Modell ein Modell hinzu, wählen Sie es aus und senden Sie die Nachricht erneut."
+        }
       }
     }
   },

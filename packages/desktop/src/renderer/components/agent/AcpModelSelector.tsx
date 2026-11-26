@@ -8,6 +8,7 @@ import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { classifyConfigSetError, type AcpConfigOptionsPort } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
 import { getModelDisplayLabel } from '@/renderer/utils/model/agentLogo';
+import { useAddEventListener } from '@/renderer/utils/emitter';
 import { iconColors } from '@/renderer/styles/colors';
 import { Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
 import { Brain, Down } from '@icon-park/react';
@@ -112,6 +113,18 @@ const AcpModelSelector: React.FC<{
   useEffect(() => {
     onRuntimeReadyChange?.(isRuntimeReady);
   }, [isRuntimeReady, onRuntimeReadyChange]);
+
+  // An error card's "Choose model" opens this picker. It opens only a switchable list, so a
+  // picker that becomes switchable later does not pop open by itself.
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const canOpenPicker = Boolean(model_info) && canSwitch;
+  useAddEventListener(
+    'acp.model.selector.open',
+    (targetConversationId) => {
+      if (canOpenPicker && targetConversationId === conversation_id) setPickerOpen(true);
+    },
+    [canOpenPicker, conversation_id]
+  );
 
   const defaultModelLabel = t('common.defaultModel');
   const rawDisplayLabel =
@@ -221,6 +234,8 @@ const AcpModelSelector: React.FC<{
   return (
     <Dropdown
       trigger='click'
+      popupVisible={pickerOpen}
+      onVisibleChange={setPickerOpen}
       // Mobile: portal the popup to <body> so it escapes the titlebar slot.
       // Desktop: leave default container so click events reach Menu.Item normally.
       {...(isMobileHeaderCompact ? { getPopupContainer: () => document.body } : {})}
