@@ -8,15 +8,15 @@ import { _electron as electron, expect } from '@playwright/test';
 import { isolatedAppEnvironment } from './startup.mjs';
 
 /** Serialized into Electron's main process; never reads session.defaultSession. */
-export function installStartupUpdateProbe({ app, webContents, dialog }) {
+export function installStartupUpdateProbe({ app, session, webContents, dialog }) {
   globalThis.__studioUpdateRequests = [];
   globalThis.__studioUpdateDialogs = 0;
   dialog.showErrorBox = () => {
     globalThis.__studioUpdateDialogs++;
   };
   const seen = new WeakSet();
-  const monitor = (created) => {
-    if (seen.has(created)) return;
+  const monitor = (created, reattach = false) => {
+    if (!reattach && seen.has(created)) return;
     seen.add(created);
     created.webRequest.onBeforeRequest((details, callback) => {
       const url = new URL(details.url);
@@ -26,9 +26,16 @@ export function installStartupUpdateProbe({ app, webContents, dialog }) {
       callback({ cancel: !local });
     });
   };
-  app.on('session-created', monitor);
+  app.on('session-created', (created) => monitor(created));
   app.on('web-contents-created', (_event, contents) => monitor(contents.session));
-  for (const contents of webContents.getAllWebContents()) monitor(contents.session);
+  const attachUpdater = () => {
+    // The app registers its own handler before creating any BrowserWindow.
+    monitor(session.fromPartition('electron-updater', { cache: false }), true);
+  };
+  const existing = webContents.getAllWebContents();
+  for (const contents of existing) monitor(contents.session);
+  if (existing.length > 0) attachUpdater();
+  else app.once('browser-window-created', attachUpdater);
 }
 
 async function main() {

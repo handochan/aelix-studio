@@ -8,13 +8,14 @@ import wordmarkDark from '@renderer/assets/logos/brand/wordmark-dark.svg';
 import wordmarkLight from '@renderer/assets/logos/brand/wordmark-light.svg';
 import { Divider, Typography, Button, Switch, Message } from '@arco-design/web-react';
 import { Github, Right } from '@icon-park/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
 import { useSettingsViewMode } from '../settingsViewContext';
 import { isElectronDesktop, openExternalUrl } from '@/renderer/utils/platform';
 import FeedbackReportModal from './FeedbackReportModal';
 import { ipcBridge } from '@/common';
+import { useOfflineMode } from '@/renderer/hooks/config/useOfflineMode';
 import { getIncludePrerelease, runUpdateCheck } from '@/renderer/components/settings/checkForUpdatesShared';
 import { UPDATE_AVAILABLE_EVENT } from '@/renderer/components/settings/useUpdateNotificationController';
 import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
@@ -42,6 +43,9 @@ const AboutModalContent: React.FC = () => {
   const isPageMode = viewMode === 'page';
   const isElectron = isElectronDesktop();
 
+  const [offline, setOffline] = useOfflineMode(isElectron);
+  const offlineHintId = useId();
+  const [offlineSaving, setOfflineSaving] = useState(false);
   const [autoCheck, setAutoCheck] = useState(true);
   const [autoCheckSaving, setAutoCheckSaving] = useState(false);
   const [includePrerelease, setIncludePrerelease] = useState(false);
@@ -56,6 +60,19 @@ const AboutModalContent: React.FC = () => {
         .then(setAutoCheck)
         .catch(() => {});
   }, [isElectron]);
+
+  const changeOfflineMode = async (enabled: boolean) => {
+    setOfflineSaving(true);
+    try {
+      const saved = await ipcBridge.systemSettings.setOfflineMode.invoke({ enabled });
+      if (saved === false) throw new Error('Offline mode could not be saved');
+      setOffline(enabled);
+    } catch {
+      Message.error(t('settings.offlineModeSaveFailed'));
+    } finally {
+      setOfflineSaving(false);
+    }
+  };
 
   const changeAutoCheck = async (enabled: boolean) => {
     setAutoCheckSaving(true);
@@ -111,7 +128,7 @@ const AboutModalContent: React.FC = () => {
       return;
     }
 
-    if (checking) return;
+    if (offline !== false || offlineSaving || checking) return;
     setChecking(true);
     try {
       const outcome = await runUpdateCheck({
@@ -214,11 +231,36 @@ const AboutModalContent: React.FC = () => {
                     {t('settings.autoUpdateCheckDescription')}
                   </Typography.Text>
                 </div>
+                <div className='flex flex-col gap-8px w-full'>
+                  <div className='flex items-center justify-between gap-8px'>
+                    <Typography.Text>{t('settings.offlineMode')}</Typography.Text>
+                    <Switch
+                      data-testid='studio-offline-mode'
+                      aria-label={t('settings.offlineMode')}
+                      checked={offline === true}
+                      disabled={offline === undefined}
+                      loading={offlineSaving}
+                      onChange={(enabled) => void changeOfflineMode(enabled)}
+                    />
+                  </div>
+                  <Typography.Text className='text-12px text-t-secondary'>
+                    {t('settings.offlineModeDescription')}
+                    {offline && !updateReadyState.ready && (
+                      <>
+                        {' '}
+                        <span id={offlineHintId}>{t('settings.offlineUpdateHint')}</span>
+                      </>
+                    )}
+                  </Typography.Text>
+                </div>
                 <Button
                   type='primary'
                   long
                   loading={checking || updateReadyState.preparing}
-                  disabled={updateReadyState.preparing}
+                  disabled={
+                    updateReadyState.preparing || (!updateReadyState.ready && (offline !== false || offlineSaving))
+                  }
+                  aria-describedby={offline && !updateReadyState.ready ? offlineHintId : undefined}
                   onClick={() => void checkUpdate()}
                 >
                   {updateReadyState.preparing

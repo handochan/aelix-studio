@@ -1704,8 +1704,13 @@
     "failed": "原生操作失敗（{{code}}）。請在重試前重新整理原生狀態。",
     "manualCallback": "貼上授權碼或重新導向 URL。"
   },
+  "offlineMode": "離線模式",
+  "offlineModeDescription": "阻止 Studio 自身的外部請求。模型供應商、MCP 伺服器和代理程式工具仍可連線。",
+  "offlineUpdateHint": "離線模式下無法檢查更新。",
+  "offlineModeSaveFailed": "無法儲存離線模式設定。",
+  "offlineInstallHint": "離線模式已開啟。請匯入 wheel 檔案。",
   "autoUpdateCheck": "啟動時檢查更新",
-  "autoUpdateCheckDescription": "檢查 Aelix Studio Releases 並通知您。離線使用時可關閉。",
+  "autoUpdateCheckDescription": "離線模式關閉時，啟動時會檢查更新。",
   "autoUpdateSaveFailed": "無法儲存更新設定。",
   "aelixNative": {
     "title": "Aelix 全域預設值",

@@ -34,6 +34,10 @@ vi.mock('@/renderer/components/Markdown', () => ({
 
 vi.mock('@/common', () => ({
   ipcBridge: {
+    systemSettings: {
+      getOfflineMode: { invoke: vi.fn().mockResolvedValue(false) },
+      offlineModeChanged: { on: vi.fn(() => vi.fn()) },
+    },
     autoUpdate: {
       check: { invoke: mocks.autoUpdateCheckMock },
       restoreDownloaded: { invoke: mocks.autoUpdateRestoreDownloadedMock },

@@ -16,7 +16,7 @@ import type { UncaughtErrorDiagnostics } from './process/utils/describeUncaughtE
 import { createRendererRecoveryPolicy } from './process/utils/rendererRecovery';
 
 import './process/utils/configureConsoleLog';
-import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerMonitor, session } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, powerMonitor, session, webContents } from 'electron';
 import fixPath from 'fix-path';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -28,7 +28,15 @@ import { assertStartupArchitectureCompatible } from './process/startup/architect
 import { classifyBackendStartupFailure } from './process/startup/backendStartupFailure';
 import { installQuitCleanup } from './process/startup/quitCleanup';
 import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
-import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from './process/utils/initStorage';
+import { ConfigRecovery, ProcessConfig, readAutoCheckPreference, readOfflineMode } from './process/utils/initStorage';
+import {
+  applyStudioRendererNetworkPolicy,
+  isManagedStudioRendererSession,
+  prepareStudioRendererSession,
+  protectStudioResources,
+  setStudioRenderersOffline,
+  STUDIO_UPDATER_PARTITION,
+} from './process/startup/backgroundNetworking';
 import type { BackendStartupFailureInfo } from './common/types/platform/electron';
 import { registerWindowMaximizeListeners, registerNativeAuthWindow } from '@process/bridge';
 import {
@@ -39,7 +47,13 @@ import {
 } from '@process/bridge/themeBridge';
 import { startStudioExtensions } from '@process/services/StudioExtensionsService';
 import { pathToFileURL } from 'node:url';
-import { BackendLifecycleManager, fetchStudioBackend } from '@aionui/web-host';
+import {
+  BackendLifecycleManager,
+  fetchStudioBackend,
+  studioBackendCredential,
+  studioNetworkRelayBlockCode,
+} from '@aionui/web-host';
+import { EXTENSION_SETTINGS_PARTITION_PREFIX } from '@/common/config/constants';
 import { registerDesktopBackendFetcher } from '@/common/adapter/desktopBackendFetch';
 import { getBackendResourcesPath, resolveBinaryPath } from '@process/backend';
 import './process/bridge/feedbackBridge';
@@ -549,7 +563,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   initMainAdapterWithWindow(mainWindow);
   bindMainWindowReferences(mainWindow);
 
-  setupApplicationMenu();
+  setupApplicationMenu(readOfflineMode());
 
   setupZoomForWindow(mainWindow);
   registerWindowMaximizeListeners(mainWindow);
@@ -585,7 +599,7 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
         beforeQuit: async () => {
           await backendManager.stop();
         },
-        readAutoCheck: readAutoCheckPreference,
+        readAutoCheck: async () => !readOfflineMode() && (await readAutoCheckPreference()),
         discontinued: Boolean(process.env.IS_DISCONTINUED_BUILD),
       });
     })
@@ -599,6 +613,15 @@ const createWindow = ({ showOnReady = true }: { showOnReady?: boolean } = {}): v
   const rendererUrls = [pathToFileURL(fallbackFile).href, ...(!app.isPackaged && rendererUrl ? [rendererUrl] : [])];
   registerNativeAuthWindow(mainWindow, rendererUrls);
   registerAnalyticsPreviewWindow(mainWindow.webContents, rendererUrls);
+  mainWindow.webContents.on('will-attach-webview', (event, preferences, params) => {
+    if (!params.partition?.startsWith(EXTENSION_SETTINGS_PARTITION_PREFIX)) return;
+    const extensionSession = session.fromPartition(params.partition);
+    if (!isManagedStudioRendererSession(extensionSession)) {
+      event.preventDefault();
+      return;
+    }
+    preferences.session = extensionSession;
+  });
 
   if (!app.isPackaged && rendererUrl) {
     console.log(`[AionUi] Loading renderer URL: ${rendererUrl}`);
@@ -752,6 +775,13 @@ const handleAppReady = async (): Promise<void> => {
   // and regresses no capability the app already relies on. Runs once, before any
   // window is created.
   await initializeOfflineSpellcheck();
+  await prepareStudioRendererSession(app, session.defaultSession, readOfflineMode, (url) =>
+    Boolean(studioNetworkRelayBlockCode(url.pathname) && studioBackendCredential(url))
+  );
+  if (readOfflineMode()) await setStudioRenderersOffline(app, true, webContents.getAllWebContents);
+  app.on('web-contents-created', (_event, contents) => applyStudioRendererNetworkPolicy(contents));
+  // electron-updater uses this separate Chromium session for its feed and assets.
+  protectStudioResources(session.fromPartition(STUDIO_UPDATER_PARTITION, { cache: false }), readOfflineMode);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {
     callback(true);
   });
@@ -982,6 +1012,7 @@ const handleAppReady = async (): Promise<void> => {
         staticDir: path.join(__dirname, '../renderer'),
         port: resolvedPort,
         allowRemote,
+        readOfflineMode,
         dataDir: getDataPath(),
         logDir: sysDirWebUI.logDir,
         // Expose the same AIONUI_{CACHE,WORK,LOG}_DIR env the desktop IPC path

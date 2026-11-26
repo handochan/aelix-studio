@@ -5,6 +5,7 @@ Run after building Studio: python3 scripts/studio-preview/providerSmoke.py --run
 """
 import argparse
 import asyncio
+import base64
 import contextlib
 import hashlib
 import json
@@ -15,6 +16,7 @@ import sqlite3
 import sys
 import tempfile
 import time
+from urllib.parse import quote
 from uuid import UUID
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -26,6 +28,7 @@ FORK_RESTART = 'SYNTHETIC_HEAD_FORK_RESTART'
 # endpoint must not reach the fixture at all, so any other count is an unrelated failure.
 EXPECTED_ACCEPTED_REQUESTS = 4
 EXPECTED_REJECTED_REQUESTS = 1
+OFFLINE_ACCEPTED_REQUESTS = 1
 
 def phase_timeout(deadline, limit):
     """Bound each phase by both its own limit and the shared deadline."""
@@ -169,10 +172,116 @@ class ProviderFixture:
         await asyncio.gather(*self.handlers, return_exceptions=True)
 
 
+def provider_environment(sandbox, output, endpoint, helper_runtime, binary, *, offline_mode):
+    for name in ('home', 'agent', 'workspace', 'extensions'):
+        (sandbox / name).mkdir()
+    config = sandbox / 'studio/config/aionui-config.txt'
+    config.parent.mkdir(parents=True, exist_ok=True)
+    preferences = {'update.autoCheck': False, 'network.offlineMode': offline_mode}
+    config.write_text(base64.b64encode(quote(json.dumps(preferences), safe='').encode()).decode())
+    # Bound only the synthetic transport failure: native and SDK defaults
+    # can otherwise keep Windows' closed-port probe retrying beyond the UI assertion.
+    settings = sandbox / 'agent/settings.json'
+    settings.write_text(json.dumps({'retry': {'enabled': False, 'provider': {'timeoutMs': 5000, 'maxRetries': 0}}}))
+    # Retain realistic OS env, remove provider routing/auth variables without printing them.
+    env = {k: v for k, v in os.environ.items() if not any(token in k for token in
+           ('API_KEY', 'AUTH_TOKEN', 'ACCESS_TOKEN', 'BASE_URL', 'AELIX_', 'ANTHROPIC_', 'OPENAI_',
+            'AWS_', 'GOOGLE_', 'GEMINI_', 'AZURE_', 'OPENROUTER_', 'PROXY'))}
+    env.update(HOME=str(sandbox / 'home'), AELIX_CODING_AGENT_DIR=str(sandbox / 'agent'),
+               AELIX_ACP_STATE_DIR=str(sandbox / 'acp'),
+               AELIX_SETTINGS_PATH=str(settings),
+               USERPROFILE=str(sandbox / 'home'), CFFIXED_USER_HOME=str(sandbox / 'home'),
+               NO_PROXY='127.0.0.1,localhost',
+               XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
+               APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
+               AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(helper_runtime),
+               PROVIDER_SANDBOX=str(sandbox), PROVIDER_ENDPOINT=endpoint, PROVIDER_OUTPUT=str(output),
+               AIONUI_BACKEND_BIN=str(binary), AIONUI_E2E_TEST='1', AIONUI_DISABLE_DEVTOOLS='1',
+               AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
+               AIONUI_CDP_PORT='0', AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
+               AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
+    return env
+
+
+def scan_provider_logs(sandbox):
+    scanned = 0
+    for file in sandbox.rglob('*'):
+        if file.is_file() and (file.suffix in ('.log', '.jsonl', '.db', '.sqlite', '.sqlite3') or '-wal' in file.name):
+            content = file.read_bytes()
+            if any(secret in content for secret in (b'synthetic-provider-key', b'synthetic-wrong-key')):
+                raise AssertionError('Credential sentinel found in log/transcript/database')
+            scanned += 1
+    return scanned
+
+
+async def run_provider_driver(script, env, timeout, phase):
+    if timeout <= 0:
+        raise TimeoutError(f'Provider capture deadline expired before {phase}')
+    start = time.monotonic()
+    process = await asyncio.create_subprocess_exec(
+        'node', '--import', 'tsx', str(Path(__file__).with_name(script)), cwd=ROOT, env=env,
+        **({'start_new_session': True} if os.name != 'nt' else {}))
+    try:
+        async with asyncio.timeout(timeout):
+            if await process.wait():
+                raise RuntimeError(f'Studio qualification failed: {phase}')
+    finally:
+        print(json.dumps({'wait': phase, 'timeoutSeconds': timeout,
+                          'elapsedSeconds': round(time.monotonic() - start, 3)}), flush=True)
+        if process.returncode is None:
+            if os.name == 'nt':
+                cleanup = await asyncio.create_subprocess_exec('taskkill', '/PID', str(process.pid), '/T', '/F',
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await cleanup.wait()
+            else:
+                os.killpg(process.pid, signal.SIGTERM)
+            try:
+                await asyncio.wait_for(process.wait(), 5)
+            except TimeoutError:
+                if os.name == 'nt':
+                    process.kill()
+                else:
+                    os.killpg(process.pid, signal.SIGKILL)
+                await process.wait()
+
+
+async def qualify_offline_provider(output, helper_runtime, binary, deadline):
+    # The LAN check and this check never share a Studio profile, backend or provider fixture.
+    fixture = ProviderFixture()
+    await fixture.start()
+    receipt = output / 'offline-host.json'
+    try:
+        with provider_sandbox() as sandbox:
+            env = provider_environment(sandbox, output, fixture.endpoint, helper_runtime, binary, offline_mode=True)
+            await run_provider_driver(
+                'providerHostSmoke.mjs', dict(env, PROVIDER_DRIVER_PYTHON=sys.executable,
+                                              STUDIO_PROVIDER_SCENARIO='offline-provider'),
+                phase_timeout(deadline, 120), 'offline-provider-ui')
+            if (fixture.accepted, fixture.rejected) != (OFFLINE_ACCEPTED_REQUESTS, 0):
+                raise AssertionError('Expected one accepted provider reply and zero rejections in offline mode')
+            report = json.loads(receipt.read_text(encoding='utf-8'))
+            if report.get('offlineMode') is not True:
+                raise AssertionError('Missing proof that the accepted provider reply was in offline mode')
+            report.update(status='passed', acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected,
+                          secretLogDatabaseScanFiles=scan_provider_logs(sandbox), secretLogDatabaseMatches=0)
+            receipt.write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+            return report
+    except Exception as error:
+        receipt.write_text(json.dumps({
+            'status': 'failed', 'offlineMode': True, 'errorKind': type(error).__name__,
+            'acceptedRequests': fixture.accepted, 'rejectedRequests': fixture.rejected,
+        }, indent=2) + '\n', encoding='utf-8')
+        raise
+    finally:
+        await fixture.close()
+
+
 async def main(args):
+    include_offline = os.environ.get('STUDIO_PROVIDER_OFFLINE_MODE') == '1'
     output = ROOT / '.local/studio-provider'
     output.mkdir(parents=True, exist_ok=True)
-    (output / 'first-window.json').unlink(missing_ok=True)
+    for name in ('first-window.json', 'offline-first-window.json', 'offline-host.json'):
+        (output / name).unlink(missing_ok=True)
     for name in ('host.json', 'helper.json'):
         (output / name).write_text(json.dumps({'status': 'running'}) + '\n')
     from prepare import verify_prepared
@@ -206,64 +315,34 @@ async def main(args):
     fixture = ProviderFixture()
     await fixture.start()
     with provider_sandbox() as sandbox:
-        for name in ('home', 'agent', 'workspace', 'extensions'):
-            (sandbox / name).mkdir()
-        import base64
-        from urllib.parse import quote
-        config = sandbox / 'studio/config/aionui-config.txt'
-        config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False}), safe='').encode()).decode())
-        # Bound only the synthetic transport failure: native and SDK defaults
-        # can otherwise keep Windows' closed-port probe retrying beyond the UI assertion.
-        settings = sandbox / 'agent/settings.json'
-        settings.write_text(json.dumps({'retry': {'enabled': False, 'provider': {'timeoutMs': 5000, 'maxRetries': 0}}}))
-        # Retain realistic OS env, remove provider routing/auth variables without printing them.
-        env = {k: v for k, v in os.environ.items() if not any(token in k for token in
-               ('API_KEY', 'AUTH_TOKEN', 'ACCESS_TOKEN', 'BASE_URL', 'AELIX_', 'ANTHROPIC_', 'OPENAI_',
-                'AWS_', 'GOOGLE_', 'GEMINI_', 'AZURE_', 'OPENROUTER_', 'PROXY'))}
-        env.update(HOME=str(sandbox / 'home'), AELIX_CODING_AGENT_DIR=str(sandbox / 'agent'),
-                   AELIX_ACP_STATE_DIR=str(sandbox / 'acp'),
-                   AELIX_SETTINGS_PATH=str(settings),
-                   USERPROFILE=str(sandbox / 'home'), NO_PROXY='127.0.0.1,localhost',
-                   XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
-                   APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
-                   AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(helper_runtime),
-                   PROVIDER_SANDBOX=str(sandbox), PROVIDER_ENDPOINT=fixture.endpoint, PROVIDER_OUTPUT=str(output),
-                   AIONUI_BACKEND_BIN=str(binary), AIONUI_E2E_TEST='1', AIONUI_DISABLE_DEVTOOLS='1',
-                   AIONUI_E2E_USER_DATA_DIR=str(sandbox / 'studio'),
-                   AIONUI_CDP_PORT='0', AIONUI_EXTENSIONS_PATH=str(sandbox / 'extensions'),
-                   AIONUI_EXTENSION_STATES_FILE=str(sandbox / 'extension-states.json'))
-        process = await asyncio.create_subprocess_exec('node', '--import', 'tsx',
-            str(Path(__file__).with_name('providerHelperSmoke.mjs')), cwd=ROOT, env=env,
-            **({'start_new_session': True} if os.name != 'nt' else {}))
+        env = provider_environment(sandbox, output, fixture.endpoint, helper_runtime, binary, offline_mode=False)
+        offline_task = None
         try:
-            # Share 450s inside the unchanged 480s per-capture bound; reserve
-            # 30s for attach/drain and the driver setup/receipt work.
+            # Reserve 30s of the 480s capture for attach/drain and receipt work.
             qualification_deadline = time.monotonic() + 450
-            helper_started = time.monotonic()
-            try:
-                # ~31 cold helper launches at the observed ~4.8s each already
-                # exceed 120s. Keep a finite suite hang guard, separate from
-                # each callback's 20s guard and all unchanged assertions.
-                async with asyncio.timeout(phase_timeout(qualification_deadline, 300)):
-                    if await process.wait():
-                        raise RuntimeError('Native helper qualification failed')
-            finally:
-                print(json.dumps({'wait': 'helper-qualification', 'timeoutSeconds': 300,
-                                  'elapsedSeconds': round(time.monotonic() - helper_started, 3)}), flush=True)
-            process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
-                cwd=ROOT, env=dict(env, PROVIDER_DRIVER_PYTHON=sys.executable),
-                **({'start_new_session': True} if os.name != 'nt' else {}))
+            # The short, separately isolated Desktop turn can run alongside the
+            # native helper probes so LAN keeps its existing UI time budget.
+            if include_offline:
+                offline_task = asyncio.create_task(qualify_offline_provider(
+                    output, helper_runtime, binary, qualification_deadline))
+            await run_provider_driver(
+                'providerHelperSmoke.mjs', env, phase_timeout(qualification_deadline, 300), 'helper-qualification')
             host_timeout = provider_host_timeout(qualification_deadline, receipt['target'])
-            print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
-                              'sharedTimeoutSeconds': 450}), flush=True)
-            async with asyncio.timeout(host_timeout):
-                if await process.wait():
-                    raise RuntimeError('Studio Provider UI qualification failed')
+            await run_provider_driver('providerHostSmoke.mjs', dict(
+                env, PROVIDER_DRIVER_PYTHON=sys.executable, STUDIO_PROVIDER_SCENARIO='online-ui'),
+                host_timeout, 'online-provider-ui')
             if (fixture.accepted, fixture.rejected) != (EXPECTED_ACCEPTED_REQUESTS, EXPECTED_REJECTED_REQUESTS):
                 raise AssertionError(f'Expected {EXPECTED_ACCEPTED_REQUESTS} provider replies and '
                                      f'{EXPECTED_REJECTED_REQUESTS} rejected key, got {fixture.accepted} and '
                                      f'{fixture.rejected}')
+            offline_report = None
+            offline_error = None
+            if offline_task:
+                try:
+                    offline_report = await offline_task
+                except Exception as error:
+                    offline_error = error
+                    offline_report = dict(status='failed', offlineMode=True, errorKind=type(error).__name__)
             after = installed_bytes()
             if before != after:
                 raise AssertionError('Installed wheel payload changed')
@@ -273,17 +352,17 @@ async def main(args):
             fixture.verify_fork_context()
             report['checks'] += ['native_head_fork_distinct_stored_acp_bindings',
                                  'native_head_fork_same_acp_and_native_child', 'native_head_fork_model_context']
-            scanned = 0
-            for file in sandbox.rglob('*'):
-                if file.is_file() and (file.suffix in ('.log', '.jsonl', '.db', '.sqlite', '.sqlite3') or '-wal' in file.name):
-                    content = file.read_bytes()
-                    if any(secret in content for secret in (b'synthetic-provider-key', b'synthetic-wrong-key')):
-                        raise AssertionError('Credential sentinel found in log/transcript/database')
-                    scanned += 1
-            report.update(status='passed', acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected,
+            scanned = scan_provider_logs(sandbox)
+            report.update(status='failed' if offline_error else 'passed',
+                          acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected,
                           nativePatches=[], installedPayloadUnchanged=True, installedFiles=len(before),
-                          realProvider=False, realOAuth=False, installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
+                          realProvider=False, realOAuth=False, offlineMode=False,
+                          installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'])
+            if offline_report:
+                report['onlineProvider'] = dict(status='passed', offlineMode=False,
+                                                acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected)
+                report['offlineProvider'] = offline_report
             report.update(helperRuntimeKind='bundled' if helper_manifest else 'prepared',
                           helperRuntimeManifestSha256=(hashlib.sha256((helper_runtime / 'manifest.json').read_bytes()).hexdigest()
                                                        if helper_manifest else None),
@@ -305,22 +384,11 @@ async def main(args):
                         for file in sorted((ROOT / 'out/renderer').rglob('*.js'))}
             report['rendererManifestSha256'] = hashlib.sha256(json.dumps(renderer, sort_keys=True).encode()).hexdigest()
             (output / 'host.json').write_text(json.dumps(report, indent=2) + '\n', encoding='utf-8')
+            if offline_error:
+                raise offline_error
         finally:
-            if process.returncode is None:
-                if os.name == 'nt':
-                    cleanup = await asyncio.create_subprocess_exec('taskkill', '/PID', str(process.pid), '/T', '/F',
-                        stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-                    await cleanup.wait()
-                else:
-                    os.killpg(process.pid, signal.SIGTERM)
-                try:
-                    await asyncio.wait_for(process.wait(), 5)
-                except TimeoutError:
-                    if os.name == 'nt':
-                        process.kill()
-                    else:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    await process.wait()
+            if offline_task:
+                await asyncio.gather(offline_task, return_exceptions=True)
             await fixture.close()
 
 

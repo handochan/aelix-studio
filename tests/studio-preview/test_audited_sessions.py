@@ -1,4 +1,6 @@
 """Installer sessions keep Provider/version traffic under the same strict audit."""
+import asyncio
+import base64
 import errno
 import importlib.util
 import json
@@ -8,7 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 SOURCE = ROOT / 'scripts/studio-preview/packaging/auditedSessions.py'
@@ -168,6 +170,49 @@ class ProviderStageTests(unittest.TestCase):
         spec = importlib.util.spec_from_file_location('provider_stage', source)
         self.provider = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.provider)
+
+    def test_online_and_offline_provider_profiles_have_separate_state_and_saved_modes(self):
+        from urllib.parse import unquote
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            paths = [root / 'lan-online', root / 'desktop-offline']
+            for offline, profile in zip((False, True), paths):
+                profile.mkdir()
+                env = self.provider.provider_environment(
+                    profile, root, 'http://127.0.0.1/v1', root / 'runtime', root / 'host', offline_mode=offline)
+                self.assertEqual(env['HOME'], str(profile / 'home'))
+                self.assertEqual(env['CFFIXED_USER_HOME'], str(profile / 'home'))
+                self.assertEqual(env['AIONUI_E2E_USER_DATA_DIR'], str(profile / 'studio'))
+                config = profile / 'studio/config/aionui-config.txt'
+                preferences = json.loads(unquote(base64.b64decode(config.read_text()).decode()))
+                self.assertIs(preferences['network.offlineMode'], offline)
+                self.assertIs(preferences['update.autoCheck'], False)
+            self.assertNotEqual(paths[0], paths[1])
+
+    def test_offline_receipt_requires_a_provider_reply_independent_of_the_ui_receipt(self):
+        for accepted in (0, 1):
+            with self.subTest(accepted=accepted), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                fixture = self.provider.ProviderFixture()
+                fixture.accepted = accepted
+
+                async def driver(script, env, timeout, phase):
+                    self.assertEqual(env['STUDIO_PROVIDER_SCENARIO'], 'offline-provider')
+                    self.assertEqual(phase, 'offline-provider-ui')
+                    (root / 'offline-host.json').write_text('{"offlineMode": true}')
+
+                arguments = (root, root / 'runtime', root / 'host', self.provider.time.monotonic() + 30)
+                with patch.object(self.provider, 'ProviderFixture', return_value=fixture), patch.object(
+                        self.provider, 'run_provider_driver', new_callable=AsyncMock, side_effect=driver):
+                    if accepted:
+                        result = asyncio.run(self.provider.qualify_offline_provider(*arguments))
+                        self.assertEqual(result['status'], 'passed')
+                    else:
+                        with self.assertRaisesRegex(AssertionError, 'one accepted provider reply'):
+                            asyncio.run(self.provider.qualify_offline_provider(*arguments))
+                        result = json.loads((root / 'offline-host.json').read_text())
+                        self.assertEqual(result['status'], 'failed')
+                    self.assertEqual(result['acceptedRequests'], accepted)
 
     def test_only_darwin_x64_gets_a_larger_provider_budget(self):
         with patch.object(self.provider.time, 'monotonic', return_value=100):

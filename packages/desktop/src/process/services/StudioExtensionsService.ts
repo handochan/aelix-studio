@@ -14,6 +14,7 @@ import {
   type StudioExtensionsReply,
 } from '@aionui/web-host';
 import { createProxyCredentialVault, type SafeStorageLike } from './ProxyCredentialVaultService';
+import { readOfflineMode } from '@process/utils/initStorage';
 
 /** The largest request the channel takes, in UTF-8 bytes; the WebUI route has the same cap. */
 const REQUEST_LIMIT = 60000;
@@ -46,6 +47,7 @@ export function startStudioExtensions(storage?: SafeStorageLike, platform?: Node
   const service = configureStudioExtensions({
     userDataPath: app.getPath('userData'),
     proxyVault: createProxyCredentialVault(storage, platform),
+    service: { onlineInstallEnabled: () => !readOfflineMode() },
     log: (message, error) =>
       console.error(
         `[StudioExtensions] ${message}`,

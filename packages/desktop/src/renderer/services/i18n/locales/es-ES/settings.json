@@ -1702,8 +1702,13 @@
     "failed": "Falló la operación nativa ({{code}}). Actualiza el estado nativo antes de volver a intentarlo.",
     "manualCallback": "Pega el código de autorización o la URL de redirección."
   },
+  "offlineMode": "Modo sin conexión",
+  "offlineModeDescription": "Bloquea las solicitudes externas de Studio. Los proveedores de modelos, servidores MCP y herramientas de agentes pueden seguir conectándose.",
+  "offlineUpdateHint": "La búsqueda de actualizaciones está desactivada en el modo sin conexión.",
+  "offlineModeSaveFailed": "No se pudo guardar el modo sin conexión.",
+  "offlineInstallHint": "El modo sin conexión está activado. Importa un archivo wheel.",
   "autoUpdateCheck": "Buscar actualizaciones al iniciar",
-  "autoUpdateCheckDescription": "Consulta Aelix Studio Releases y le avisa. Desactive para uso sin conexión.",
+  "autoUpdateCheckDescription": "Busca actualizaciones al iniciar si el modo sin conexión está desactivado.",
   "autoUpdateSaveFailed": "No se pudo guardar la preferencia de actualización.",
   "aelixNative": {
     "title": "Valores predeterminados globales de Aelix",

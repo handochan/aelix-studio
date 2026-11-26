@@ -136,6 +136,33 @@ describe('static-server', () => {
     expect(text).toContain('<title>root</title>');
   });
 
+  it('reads the desktop offline policy on each relay request without blocking ordinary backend routes', async () => {
+    let offline = false;
+    const received: string[] = [];
+    const backend = await startMockBackend((req, res) => {
+      received.push(req.url ?? '');
+      res.writeHead(200).end('forwarded');
+    });
+    stopBackend = backend.close;
+    handle = await startStaticServer({ staticDir, backendPort: backend.port, port: 0, readOfflineMode: () => offline });
+    const base = handle.localUrl;
+    const relay = '/api/fs/fetch-remote-image?fixture=1';
+    const update = '/api/system/check-update';
+    const image = () => fetch(base + relay, { method: 'POST', headers: { Origin: base } });
+    expect((await image()).status).toBe(200);
+    offline = true;
+    const blockedImage = await image();
+    expect(blockedImage.status).toBe(503);
+    expect(await blockedImage.json()).toMatchObject({ code: 'REMOTE_IMAGE_DISABLED' });
+    const blockedUpdate = await fetch(base + update);
+    expect(blockedUpdate.status).toBe(503);
+    expect(await blockedUpdate.json()).toMatchObject({ code: 'OFFLINE_MODE' });
+    expect((await fetch(base + '/api/providers')).status).toBe(200);
+    offline = false;
+    expect((await fetch(base + update)).status).toBe(200);
+    expect(received).toEqual([relay, '/api/providers', update]);
+  });
+
   it('runs at the Studio default while upstream occupies 25808, and rejects the upstream browser origin', async () => {
     vi.stubEnv('AELIX_STUDIO_ORIGIN', undefined);
     const upstream = await startMockBackend((_req, res) => res.end('upstream fixture'), 25808);

@@ -1704,8 +1704,13 @@
     "failed": "ネイティブ操作に失敗しました（{{code}}）。再試行前にネイティブ状態を更新してください。",
     "manualCallback": "認証コードまたはリダイレクト URL を貼り付けてください。"
   },
+  "offlineMode": "オフラインモード",
+  "offlineModeDescription": "Studio 自身の外部リクエストをブロックします。モデルプロバイダー、MCP サーバー、エージェントツールは引き続き接続できます。",
+  "offlineUpdateHint": "オフラインモードでは更新を確認できません。",
+  "offlineModeSaveFailed": "オフラインモードの設定を保存できませんでした。",
+  "offlineInstallHint": "オフラインモードが有効です。wheel ファイルをインポートしてください。",
   "autoUpdateCheck": "起動時に更新を確認",
-  "autoUpdateCheckDescription": "Aelix Studio Releases を確認して通知します。オフラインでは無効にしてください。",
+  "autoUpdateCheckDescription": "オフラインモードが無効の場合、起動時に更新を確認します。",
   "autoUpdateSaveFailed": "更新設定を保存できませんでした。",
   "aelixNative": {
     "title": "Aelix のグローバル既定値",

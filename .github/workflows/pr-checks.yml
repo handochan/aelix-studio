@@ -334,7 +334,9 @@ jobs:
           # The Preview builder fixes mac.identity to '-' and uses no signing secrets.
           CSC_FOR_PULL_REQUEST: 'true'
         run: node scripts/studio-preview/packaging/build.mjs --runtime .local/studio-preview
-      - name: Install and verify the actual Provider UI
+      - name: Install and verify the actual Provider UI with offline mode on
+        env:
+          STUDIO_PROVIDER_OFFLINE_MODE: '1'
         run: |
           if [[ "$RUNNER_OS" == Linux ]]; then
             xvfb-run -a python -B scripts/studio-preview/packaging/acceptance.py --runtime .local/studio-preview

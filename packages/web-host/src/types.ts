@@ -37,6 +37,8 @@ export type WebHostOptions = {
   staticDir: string;
   port?: number;
   allowRemote?: boolean;
+  /** Read the owning desktop's current policy at request time. */
+  readOfflineMode?: () => boolean;
   dataDir?: string;
   logDir?: string;
   dirs?: BackendSystemDirs;

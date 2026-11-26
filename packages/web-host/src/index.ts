@@ -3,7 +3,7 @@ import { startStaticServer } from './static-server.js';
 import type { WebHostOptions, WebHostHandle } from './types.js';
 
 export type { AppMetadata, BackendBinaryResolver, WebHostOptions, WebHostHandle } from './types.js';
-export { startStaticServer, stopStaticServer } from './static-server.js';
+export { startStaticServer, stopStaticServer, studioNetworkRelayBlockCode } from './static-server.js';
 export type { StaticServerOptions, StaticServerHandle } from './static-server.js';
 export { NativeAuthService, getNativeAuthService } from './studio-auth/service.js';
 export { NativeResourcesService, getNativeResourcesService } from './studio-auth/resources/service.js';
@@ -113,6 +113,7 @@ export async function startWebHost(opts: WebHostOptions): Promise<WebHostHandle>
       userDataPath: opts.app.userDataPath,
       port: opts.port,
       allowRemote: opts.allowRemote ?? false,
+      readOfflineMode: opts.readOfflineMode,
     });
   } catch (err) {
     // If static-server fails, clean up backend

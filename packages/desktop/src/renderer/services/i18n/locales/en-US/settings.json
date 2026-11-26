@@ -1702,8 +1702,13 @@
     "failed": "Native operation failed ({{code}}). Refresh native status before trying again.",
     "manualCallback": "Paste the authorization code or redirect URL."
   },
+  "offlineMode": "Offline mode",
+  "offlineModeDescription": "Blocks Studio’s own external requests. Model providers, MCP servers, and agent tools can still connect.",
+  "offlineUpdateHint": "Update checks are disabled in offline mode.",
+  "offlineModeSaveFailed": "Could not save offline mode.",
+  "offlineInstallHint": "Offline mode is on. Import a wheel file.",
   "autoUpdateCheck": "Check for updates at startup",
-  "autoUpdateCheckDescription": "Check Aelix Studio Releases and notify you. Turn off for offline use.",
+  "autoUpdateCheckDescription": "Check for updates at startup when offline mode is off.",
   "autoUpdateSaveFailed": "Could not save the update preference.",
   "aelixNative": {
     "title": "Aelix global defaults",

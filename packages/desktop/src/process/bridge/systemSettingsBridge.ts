@@ -13,14 +13,31 @@
  */
 
 import { ipcBridge } from '@/common';
-import { ConfigRecovery, ProcessConfig, readAutoCheckPreference } from '@process/utils/initStorage';
+import { getStudioExtensionService } from '@aionui/web-host';
+import { app, session, webContents } from 'electron';
+import {
+  isManagedStudioRendererSession,
+  prepareStudioRendererSession,
+  setStudioRenderersOffline,
+  STUDIO_UPDATER_PARTITION,
+} from '@process/startup/backgroundNetworking';
+import { EXTENSION_SETTINGS_PARTITION_PREFIX } from '@/common/config/constants';
+import { updateApplicationMenuForOfflineMode } from '@process/utils/appMenu';
+import {
+  ConfigRecovery,
+  ProcessConfig,
+  readAutoCheckPreference,
+  readOfflineMode,
+  saveOfflineMode,
+} from '@process/utils/initStorage';
 import { changeLanguage } from '@process/services/i18n';
 import type { PetSize } from '@process/pet/petTypes';
-import { createOrUpdateTray, destroyTray, setCloseToTrayEnabled } from '@process/utils/tray';
+import { createOrUpdateTray, destroyTray, refreshTrayMenu, setCloseToTrayEnabled } from '@process/utils/tray';
 import { readCloseToTraySetting, writeCloseToTraySetting } from '@process/utils/closeToTraySetting';
 
 type LanguageChangeListener = () => void;
 let _languageChangeListener: LanguageChangeListener | null = null;
+let offlineModeChange = Promise.resolve();
 
 /**
  * 注册语言变更监听器（供主进程 index.ts 使用）
@@ -31,6 +48,71 @@ export function onLanguageChanged(listener: LanguageChangeListener): void {
 }
 
 export function initSystemSettingsBridge(): void {
+  ipcBridge.systemSettings.prepareExtensionSettingsSession.provider(async (request) => {
+    const partition = request?.partition;
+    if (
+      typeof partition !== 'string' ||
+      !partition.startsWith(EXTENSION_SETTINGS_PARTITION_PREFIX) ||
+      partition.length === EXTENSION_SETTINGS_PARTITION_PREFIX.length ||
+      partition.includes('\0')
+    ) {
+      return false;
+    }
+    try {
+      await prepareStudioRendererSession(app, session.fromPartition(partition), readOfflineMode);
+      return true;
+    } catch {
+      return false;
+    }
+  });
+  ipcBridge.systemSettings.getOfflineMode.provider(async () => readOfflineMode());
+  ipcBridge.systemSettings.setOfflineMode.provider(async (request) => {
+    const enabled = request?.enabled;
+    if (typeof enabled !== 'boolean') return false;
+    const change = offlineModeChange.then(async () => {
+      const previous = readOfflineMode();
+      if (enabled) await setStudioRenderersOffline(app, true, webContents.getAllWebContents);
+      try {
+        if (enabled !== previous) await saveOfflineMode(enabled);
+        if (!enabled) await setStudioRenderersOffline(app, false, webContents.getAllWebContents);
+      } catch (error) {
+        if (readOfflineMode() !== previous) await saveOfflineMode(previous).catch(console.error);
+        if (enabled && !previous)
+          await setStudioRenderersOffline(app, false, webContents.getAllWebContents).catch(console.error);
+        throw error;
+      }
+      try {
+        if (enabled) {
+          if (!previous) {
+            for (const contents of webContents.getAllWebContents()) {
+              if (!isManagedStudioRendererSession(contents.session) || contents.isDestroyed()) continue;
+              // Retire embedded documents' peer connections without reloading the main UI.
+              if (contents.getType() === 'webview') contents.reload();
+              else if (contents.getType() === 'window') {
+                for (const frame of contents.mainFrame.frames) frame.reload();
+              }
+            }
+          }
+          await Promise.all([
+            session
+              .fromPartition(STUDIO_UPDATER_PARTITION, { cache: false })
+              .closeAllConnections()
+              .catch(console.error),
+            getStudioExtensionService()?.cancelOnlineOperations(),
+          ]);
+        }
+      } finally {
+        updateApplicationMenuForOfflineMode(readOfflineMode());
+        ipcBridge.systemSettings.offlineModeChanged.emit(readOfflineMode());
+        void refreshTrayMenu().catch(console.error);
+      }
+    });
+    offlineModeChange = change.catch(() => {});
+    return change.then(
+      () => true,
+      () => false
+    );
+  });
   ipcBridge.systemSettings.getAutoUpdateEnabled.provider(readAutoCheckPreference);
   ipcBridge.systemSettings.setAutoUpdateEnabled.provider(async ({ enabled }) => {
     if (typeof enabled !== 'boolean') throw new TypeError('Expected boolean update setting');

@@ -23,7 +23,7 @@ const renderNotificationLayer = (node: React.ReactElement) => {
 
 const UpdateNotificationCard: React.FC = () => {
   const { t, i18n } = useTranslation();
-  const { state, versionLabel, actions } = useUpdateNotificationController();
+  const { state, versionLabel, offline, actions } = useUpdateNotificationController();
   const { openFeedback } = useFeedback();
   const [releaseLogVisible, setReleaseLogVisible] = React.useState(false);
 
@@ -189,7 +189,12 @@ const UpdateNotificationCard: React.FC = () => {
     if (state.status === 'error') {
       return (
         <>
-          <Button size='small' className={ACTION_BTN_CLASS} onClick={() => void actions.checkForUpdates()}>
+          <Button
+            size='small'
+            className={ACTION_BTN_CLASS}
+            disabled={offline !== false}
+            onClick={() => void actions.checkForUpdates()}
+          >
             {t('common.retry')}
           </Button>
           {state.releasePageUrl && (
@@ -203,7 +208,12 @@ const UpdateNotificationCard: React.FC = () => {
     if (state.status === 'installer-last-failure') {
       return (
         <>
-          <Button size='small' className={ACTION_BTN_CLASS} onClick={() => void actions.checkForUpdates()}>
+          <Button
+            size='small'
+            className={ACTION_BTN_CLASS}
+            disabled={offline !== false}
+            onClick={() => void actions.checkForUpdates()}
+          >
             {t('update.installerLastFailure.retryUpdate')}
           </Button>
           {state.installerLastFailure?.logPath && (

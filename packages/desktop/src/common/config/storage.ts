@@ -54,6 +54,7 @@ export interface IConfigStorageRefer {
   'system.closeToTray'?: boolean;
   /** Check Studio Releases at startup unless explicitly disabled. */
   'update.autoCheck'?: boolean;
+  'network.offlineMode'?: boolean;
   // 任务完成时显示系统通知 / Show system notification when task completes
   'system.notificationEnabled'?: boolean;
   // 定时任务完成时显示系统通知 / Show system notification when scheduled task completes

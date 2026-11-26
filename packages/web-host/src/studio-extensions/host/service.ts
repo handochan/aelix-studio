@@ -81,7 +81,12 @@ export const RUNTIME_HINT =
   'Agent Extensions need the distributable Studio runtime bundle for this platform, with manifest.json and ' +
   'native-site; set AELIX_STUDIO_RUNTIME to it. A prepared runtime without manifest.json is not enough';
 
-type Tracked = { owner: string; state: ExtensionOperation; abort: AbortController; done: Promise<void> };
+type StartingChange = { owner: string; abort: AbortController; online: boolean };
+type Tracked = StartingChange & { state: ExtensionOperation; done: Promise<void> };
+
+function usesNetwork(change: MutationRequest): boolean {
+  return change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file');
+}
 
 const TIMEOUTS: FlowContext['timeouts'] = {
   lockMs: 30_000,
@@ -158,7 +163,7 @@ export class ExtensionService {
    * registered before anything awaits, so a window that closes or a WebUI listener that stops
    * in that time still cancels them: they end with CANCELLED before anything is changed.
    */
-  private readonly starting = new Set<{ owner: string; abort: AbortController }>();
+  private readonly starting = new Set<StartingChange>();
   private changing = false;
   constructor(private readonly options: ExtensionServiceOptions) {}
 
@@ -280,7 +285,7 @@ export class ExtensionService {
       const change = parseChange(command);
       if (!change) return fail('INVALID_INPUT');
       const abort = new AbortController();
-      const entry = { owner, abort };
+      const entry = { owner, abort, online: usesNetwork(change) };
       this.starting.add(entry);
       try {
         return await this.start(owner, change, abort);
@@ -294,7 +299,8 @@ export class ExtensionService {
 
   /** The early checks of a change and its start; `abort` is already registered for cancelOwner. */
   private async start(owner: string, change: MutationRequest, abort: AbortController): Promise<ExtensionReply> {
-    if (change.action === 'upgrade' || (change.action === 'install' && change.source.kind !== 'file')) {
+    const online = usesNetwork(change);
+    if (online) {
       if (!this.onlineAllowed()) return fail('ONLINE_INSTALL_DISABLED');
       // An early answer for the screen; the change checks the settings again under the lock.
       const stored = await this.storedSettings();
@@ -304,7 +310,8 @@ export class ExtensionService {
       if (change.action === 'install' && change.proxyCredentials && settings.proxy === null)
         return fail('INVALID_INPUT', ['proxy credentials were sent, but no proxy is set']);
       // The credentials are for this address; the change ends if the settings name another by then.
-      if (change.proxyCredentials && settings.proxy !== null) change.proxyCredentialsFor = settings.proxy;
+      if ('proxyCredentials' in change && change.proxyCredentials && settings.proxy !== null)
+        change.proxyCredentialsFor = settings.proxy;
       // Installs can ask here. Upgrades check the saved source and pin under the lock before asking.
       if (
         change.action === 'install' &&
@@ -333,6 +340,7 @@ export class ExtensionService {
     if (!context) return fail('RUNTIME_UNAVAILABLE', [RUNTIME_HINT]);
     const tracked: Tracked = {
       owner,
+      online,
       state: { operationId: randomUUID(), action: change.action, phase: 'checking' },
       abort,
       done: Promise.resolve(),
@@ -401,6 +409,18 @@ export class ExtensionService {
       }
     } finally {
       this.changing = false;
+    }
+  }
+
+  /** Stop index and Git operations when policy changes, keeping local file operations usable. */
+  async cancelOnlineOperations(): Promise<void> {
+    for (const entry of this.starting) {
+      if (entry.online) entry.abort.abort();
+    }
+    const active = this.operation;
+    if (active?.online && !FINISHED.has(active.state.phase)) {
+      active.abort.abort();
+      await active.done;
     }
   }
 

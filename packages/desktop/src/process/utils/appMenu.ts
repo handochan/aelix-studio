@@ -8,7 +8,14 @@ import { ipcBridge } from '@/common';
 import type { MenuItemConstructorOptions } from 'electron';
 import { Menu, app } from 'electron';
 
-export function setupApplicationMenu(): void {
+const CHECK_FOR_UPDATES = 'studio-check-for-updates';
+
+export function updateApplicationMenuForOfflineMode(offline: boolean): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById(CHECK_FOR_UPDATES);
+  if (item) item.enabled = !offline;
+}
+
+export function setupApplicationMenu(offline: boolean): void {
   const isMac = process.platform === 'darwin';
 
   const template: MenuItemConstructorOptions[] = [];
@@ -64,9 +71,11 @@ export function setupApplicationMenu(): void {
     label: 'Help',
     submenu: [
       {
+        id: CHECK_FOR_UPDATES,
         label: 'Check for Updates...',
-        click: () => {
-          ipcBridge.update.open.emit({ source: 'menu' });
+        enabled: !offline,
+        click: (item) => {
+          if (item.enabled) ipcBridge.update.open.emit({ source: 'menu' });
         },
       },
     ],

@@ -16,10 +16,14 @@ const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
 const driverPython = process.env.PROVIDER_DRIVER_PYTHON;
 assert.ok(sandbox && output && process.env.PROVIDER_ENDPOINT && driverPython);
-const firstWindowReport = { file: path.join(output, 'first-window.json'), waits: [] };
+const offlineProvider = process.env.STUDIO_PROVIDER_SCENARIO === 'offline-provider';
+const outputFile = (name) => path.join(output, offlineProvider ? `offline-${name}` : name);
+const firstWindowReport = { file: outputFile('first-window.json'), waits: [] };
 const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
 const appEnv = { ...process.env };
 delete appEnv.PROVIDER_DRIVER_PYTHON;
+delete appEnv.STUDIO_PROVIDER_OFFLINE_MODE;
+delete appEnv.STUDIO_PROVIDER_SCENARIO;
 if (executablePath) {
   delete appEnv.AELIX_STUDIO_RUNTIME;
   delete appEnv.AIONUI_BACKEND_BIN;
@@ -70,6 +74,18 @@ function readForkIdentity(parentId, childId) {
   assert.equal(result.status, 0, `Could not read the native fork identity: ${result.error ?? result.stderr}`);
   return JSON.parse(result.stdout);
 }
+async function readNativeAuthStrings(page) {
+  const locale = await page.waitForFunction(() => document.documentElement.lang.trim() || false);
+  try {
+    const language = await locale.jsonValue();
+    return JSON.parse(
+      fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
+    ).nativeAuth;
+  } finally {
+    await locale.dispose();
+  }
+}
+
 async function waitForIdle(page, route) {
   await expect
     .poll(
@@ -91,9 +107,9 @@ let stage = 'startup';
 const lanFailures = [];
 const trace = (next) => {
   stage = next;
-  fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
+  fs.writeFileSync(outputFile('ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
-try {
+async function qualifyHost() {
   app = await launch();
   let archive;
   if (executablePath) {
@@ -112,6 +128,20 @@ try {
     process.env.AELIX_STUDIO_RUNTIME = installed;
   }
   page = await waitForProviderWindow(app, 1, firstWindowReport);
+  await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
+    timeout: 60000,
+  });
+  await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
+    timeout: 60000,
+  });
+  if (offlineProvider || process.env.STUDIO_PROVIDER_SCENARIO === 'online-ui') {
+    await page.evaluate(() => {
+      window.location.hash = '/settings/about';
+    });
+    const offlineSwitch = page.getByTestId('studio-offline-mode');
+    await expect(offlineSwitch).toBeEnabled({ timeout: 30000 });
+    await expect(offlineSwitch).toHaveAttribute('aria-checked', String(offlineProvider));
+  }
   if (executablePath) {
     const require = createRequire(import.meta.url);
     const builder = createRequire(require.resolve('electron-builder'));
@@ -148,12 +178,6 @@ try {
     assert.ok(entries.length > 0, 'Installed renderer inventory is empty');
     assert.deepEqual(entries.sort(), compiled.sort(), 'Installed renderer inventory differs from this build');
   }
-  await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
-    timeout: 60000,
-  });
-  await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
-    timeout: 60000,
-  });
   // The extension helper answers the installed app's window over its own channel (Studio #32):
   // the settings without the bundle, the list with the installed bundle and lock holder.
   trace('extension_channel');
@@ -171,10 +195,7 @@ try {
   let native = page.getByTestId('native-provider-settings');
   await expect(native).toBeVisible({ timeout: 30000 });
   await expect(native).toContainText('auth.json', { timeout: 15000 });
-  const language = await page.evaluate(() => document.documentElement.lang);
-  const strings = JSON.parse(
-    fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
-  ).nativeAuth;
+  const strings = await readNativeAuthStrings(page);
   await native.getByText(strings.exclusive, { exact: true }).click();
   await native.getByText(strings.customEndpoint, { exact: true }).click();
   await native.getByLabel(strings.providerId, { exact: true }).fill('fixture');
@@ -183,12 +204,39 @@ try {
   await native.getByRole('button', { name: strings.saveEndpoint, exact: true }).click();
   await expect(native.getByText('fixture-model', { exact: true }).first()).toBeVisible({ timeout: 15000 });
   const keyInput = native.getByLabel(strings.key, { exact: true });
-  await keyInput.fill('synthetic-wrong-key');
+  await keyInput.fill(offlineProvider ? 'synthetic-provider-key' : 'synthetic-wrong-key');
   await native.getByRole('button', { name: strings.saveKey, exact: true }).click();
   await expect(keyInput).toHaveValue('');
   await expect(native.getByRole('button', { name: strings.startConversation, exact: true })).toBeEnabled({
     timeout: 15000,
   });
+  if (offlineProvider) {
+    trace('offline_provider_turn');
+    await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+    const input = page.getByTestId('sendbox-input');
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('SYNTHETIC_OFFLINE_PROVIDER_RESPONSE');
+    await page.getByTestId('sendbox-send-btn').click();
+    await expect(
+      page.getByTestId('message-text-content').filter({ hasText: /^NATIVE_PROVIDER_FIRST_RESPONSE$/ })
+    ).toHaveCount(1, { timeout: 30000 });
+    await page.screenshot({ path: outputFile('first-response.png') });
+    fs.writeFileSync(
+      outputFile('host.json'),
+      JSON.stringify(
+        {
+          status: 'pending_payload_audit',
+          offlineMode: true,
+          installedCompiledBuildMatched: Boolean(executablePath),
+          firstWindowWaits: firstWindowReport.waits,
+          checks: ['offline_mode_on', 'offline_desktop_synthetic_provider_response'],
+        },
+        null,
+        2
+      ) + '\n'
+    );
+    return;
+  }
   const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
   const expectedExtensionState = path.join(fs.realpathSync(userDataPath), 'aelix-runtime');
   const conversationCreation = page.waitForRequest(
@@ -504,10 +552,7 @@ try {
   trace('lan_settings');
   const lanNative = lanPage.getByTestId('native-provider-settings');
   await expect(lanNative).toBeVisible({ timeout: 30000 });
-  const lanLanguage = await lanPage.evaluate(() => document.documentElement.lang);
-  const lanStrings = JSON.parse(
-    fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', lanLanguage, 'settings.json'))
-  ).nativeAuth;
+  const lanStrings = await readNativeAuthStrings(lanPage);
   trace('lan_create_conversation');
   await lanNative.getByRole('button', { name: lanStrings.startConversation, exact: true }).click();
   await expect(lanPage.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });
@@ -537,7 +582,7 @@ try {
   assert.equal(denied.ok, false);
   assert.ok(['FORBIDDEN', 'NO_BRIDGE'].includes(denied.code));
   fs.writeFileSync(
-    path.join(output, 'host.json'),
+    outputFile('host.json'),
     JSON.stringify(
       {
         status: 'pending_payload_audit',
@@ -578,14 +623,18 @@ try {
       2
     ) + '\n'
   );
+}
+
+try {
+  await qualifyHost();
 } catch (error) {
   fs.writeFileSync(
-    path.join(output, 'ui-failure.json'),
+    outputFile('ui-failure.json'),
     JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
   );
   if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
-    await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
+    await page.screenshot({ path: outputFile('failure.png') }).catch(() => {});
     const state = await page
       .evaluate(() => {
         const failure = window.__backendStartupBridge?.getState() ?? window.__backendStartupFailure;
@@ -598,7 +647,7 @@ try {
       })
       .catch(() => ({ unavailable: true }));
     fs.writeFileSync(
-      path.join(output, 'startup-failure.json'),
+      outputFile('startup-failure.json'),
       JSON.stringify({ ...state, markers: [...startupMarkers] }) + '\n'
     );
   }

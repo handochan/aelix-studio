@@ -8,6 +8,7 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { useTranslation } from 'react-i18next';
 import { Left, Right, Refresh, Loading } from '@icon-park/react';
 import { ipcBridge } from '@/common';
+import { EXTENSION_SETTINGS_PARTITION_PREFIX } from '@/common/config/constants';
 import { InternalNavTracker, shouldResetHistoryForUrlProp } from './webviewHistory';
 
 export interface WebviewHostProps {
@@ -93,6 +94,27 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
   const [isLoading, setIsLoading] = useState(true);
   const [zoomFactor, setZoomFactor] = useState(1);
   const [webviewReady, setWebviewReady] = useState(false);
+  const extensionPartition = partition?.startsWith(EXTENSION_SETTINGS_PARTITION_PREFIX) ? partition : undefined;
+  const [preparedPartition, setPreparedPartition] = useState<string>();
+  const canMountGuest = !extensionPartition || extensionPartition === preparedPartition;
+  useEffect(() => {
+    if (!extensionPartition) return;
+    let current = true;
+    void ipcBridge.systemSettings.prepareExtensionSettingsSession
+      .invoke({ partition: extensionPartition })
+      .then((prepared) => {
+        if (!prepared) throw new Error('Extension settings session could not be prepared');
+        if (current) setPreparedPartition(extensionPartition);
+      })
+      .catch(() => {
+        if (!current) return;
+        setIsLoading(false);
+        onDidFailLoad?.(-2, '');
+      });
+    return () => {
+      current = false;
+    };
+  }, [extensionPartition, onDidFailLoad]);
 
   // 最近由本组件内部触发的导航地址集合。
   //
@@ -493,7 +515,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
       webviewEl.removeEventListener('page-title-updated', handlePageTitleUpdated as EventListener);
       webviewEl.removeEventListener('page-favicon-updated', handlePageFaviconUpdated as EventListener);
     };
-  }, [navigateToWithHistory, currentUrl, onDidFinishLoad, onDidFailLoad, isStarOfficeUrl]);
+  }, [canMountGuest, navigateToWithHistory, currentUrl, onDidFinishLoad, onDidFailLoad, isStarOfficeUrl]);
 
   // Resize observer for content area
   useEffect(() => {
@@ -514,7 +536,7 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
     observer.observe(contentEl);
 
     return () => observer.disconnect();
-  }, []);
+  }, [canMountGuest]);
 
   const handleZoomReset = useCallback(() => {
     if (!isStarOffice) return;
@@ -819,16 +841,18 @@ const WebviewHost: React.FC<WebviewHostProps> = ({
         style={{ minHeight: 0 }}
         onWheel={handleOuterWheelZoom}
       >
-        <webview
-          ref={webviewRef as any}
-          src={currentUrl}
-          className='border-0 absolute start-0 top-0'
-          style={{
-            opacity: !showNavBar && isLoading ? 0 : 1,
-            transition: 'opacity 150ms ease-in',
-          }}
-          {...webviewAttrs}
-        />
+        {canMountGuest && (
+          <webview
+            ref={webviewRef as any}
+            src={currentUrl}
+            className='border-0 absolute start-0 top-0'
+            style={{
+              opacity: !showNavBar && isLoading ? 0 : 1,
+              transition: 'opacity 150ms ease-in',
+            }}
+            {...webviewAttrs}
+          />
+        )}
       </div>
     </div>
   );

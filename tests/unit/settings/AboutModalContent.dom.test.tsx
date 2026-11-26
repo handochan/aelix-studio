@@ -10,6 +10,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   quitAndInstallMock: vi.fn(),
+  getOfflineMode: vi.fn(),
+  setOfflineMode: vi.fn(),
   autoUpdateCheckMock: vi.fn(),
   updateCheckMock: vi.fn(),
   messageInfoMock: vi.fn(),
@@ -38,6 +40,9 @@ vi.mock('@arco-design/web-react', async (importOriginal) => {
 vi.mock('@/common', () => ({
   ipcBridge: {
     systemSettings: {
+      getOfflineMode: { invoke: mocks.getOfflineMode },
+      setOfflineMode: { invoke: mocks.setOfflineMode },
+      offlineModeChanged: { on: vi.fn(() => () => {}) },
       getAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(true) },
       setAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(undefined) },
     },
@@ -72,6 +77,8 @@ import { setUpdateReadyState } from '@/renderer/components/settings/updateReadyS
 describe('AboutModalContent update ready state', () => {
   beforeEach(() => {
     vi.stubGlobal('__APP_VERSION__', '2.1.13');
+    mocks.getOfflineMode.mockResolvedValue(false);
+    mocks.setOfflineMode.mockResolvedValue(undefined);
     mocks.quitAndInstallMock.mockResolvedValue(undefined);
     mocks.autoUpdateCheckMock.mockResolvedValue({ success: true });
     mocks.updateCheckMock.mockResolvedValue({
@@ -106,6 +113,21 @@ describe('AboutModalContent update ready state', () => {
       expect(ipcBridge.systemSettings.setAutoUpdateEnabled.invoke).toHaveBeenCalledWith({ enabled: false })
     );
     expect(toggle).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('persists offline mode and disables the manual check with a hint', async () => {
+    render(<AboutModalContent />);
+    const toggle = screen.getByTestId('studio-offline-mode');
+    expect(toggle).toHaveAccessibleName('settings.offlineMode');
+    const check = screen.getByRole('button', { name: 'settings.checkForUpdates' });
+    await waitFor(() => expect(check).toBeEnabled());
+    expect(toggle).toHaveAttribute('aria-checked', 'false');
+    fireEvent.click(toggle);
+    await waitFor(() => expect(mocks.setOfflineMode).toHaveBeenCalledWith({ enabled: true }));
+    expect(await screen.findByText('settings.offlineUpdateHint')).toBeVisible();
+    expect(check).toBeDisabled();
+    fireEvent.click(check);
+    expect(mocks.autoUpdateCheckMock).not.toHaveBeenCalled();
   });
 
   it('replaces check update with ready-to-install when an update package is ready', async () => {
@@ -185,7 +207,9 @@ describe('AboutModalContent update ready state', () => {
     window.addEventListener('aionui-update-available', availableListener);
 
     render(<AboutModalContent />);
-    fireEvent.click(screen.getByRole('button', { name: 'settings.checkForUpdates' }));
+    const check = screen.getByRole('button', { name: 'settings.checkForUpdates' });
+    await waitFor(() => expect(check).toBeEnabled());
+    fireEvent.click(check);
 
     await waitFor(() => {
       expect(availableListener).toHaveBeenCalledTimes(1);
@@ -203,7 +227,9 @@ describe('AboutModalContent update ready state', () => {
     window.addEventListener('aionui-update-available', availableListener);
 
     render(<AboutModalContent />);
-    fireEvent.click(screen.getByRole('button', { name: 'settings.checkForUpdates' }));
+    const check = screen.getByRole('button', { name: 'settings.checkForUpdates' });
+    await waitFor(() => expect(check).toBeEnabled());
+    fireEvent.click(check);
 
     await waitFor(() => {
       expect(mocks.messageInfoMock).toHaveBeenCalledWith('update.alreadyLatest');

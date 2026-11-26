@@ -14,6 +14,7 @@ import {
 import * as path from 'path';
 import { ipcBridge } from '@/common';
 import i18n from '@process/services/i18n';
+import { readOfflineMode } from '@process/utils/initStorage';
 
 let tray: TrayInstance | null = null;
 let closeToTrayEnabled = false;
@@ -219,6 +220,7 @@ const buildTrayContextMenu = async (): Promise<Electron.Menu> => {
   template.push({ type: 'separator' });
   template.push({
     label: i18n.t('common.tray.checkUpdate'),
+    enabled: !readOfflineMode(),
     click: () => {
       showAndFocusMainWindow();
       mainWindowRef?.webContents.send('tray:check-update');

@@ -17,7 +17,7 @@ import type {
   InstallerLastFailureMarker,
 } from '@/common/update/updateTypes';
 import { uuid } from '@/common/utils';
-import { app } from 'electron';
+import { app, net } from 'electron';
 import log from 'electron-log';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -25,6 +25,7 @@ import semver from 'semver';
 import { autoUpdaterService } from '../services/autoUpdaterService';
 import { STUDIO_UPDATE_REPO } from '../services/updateFeed';
 import { consumeInstallerLastFailure } from '../services/installerLastFailure';
+import { readOfflineMode } from '@process/utils/initStorage';
 
 /** Lazily loads i18n to avoid pulling in initStorage chain at module load time */
 let _i18nCache: Promise<typeof import('../services/i18n')> | null = null;
@@ -229,7 +230,7 @@ const fetchWithAllowlistedRedirects = async (rawUrl: string, signal: AbortSignal
   for (let i = 0; i <= MAX_REDIRECTS; i++) {
     await assertAllowedUrl(current, i > 0);
 
-    const res = await fetch(current, {
+    const res = await net.fetch(current, {
       signal,
       redirect: 'manual',
       headers: {
@@ -260,7 +261,7 @@ const fetchGitHubReleases = async (repo: string, timeoutMs = 30000): Promise<Git
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
-    const res = await fetch(url, {
+    const res = await net.fetch(url, {
       headers: {
         Accept: 'application/vnd.github+json',
         'User-Agent': DEFAULT_USER_AGENT,
@@ -533,6 +534,10 @@ export function createAutoUpdateStatusBroadcast(): (
   };
 }
 
+async function requireOnlineUpdates(): Promise<void> {
+  if (readOfflineMode()) throw new Error((await getI18n()).t('settings.offlineUpdateHint'));
+}
+
 export function initUpdateBridge(): void {
   ipcBridge.update.consumeInstallerLastFailure.provider(
     async (): Promise<{ success: boolean; data: InstallerLastFailureMarker | null; msg?: string }> => {
@@ -550,6 +555,7 @@ export function initUpdateBridge(): void {
   ipcBridge.update.check.provider(
     async (params): Promise<{ success: boolean; data?: UpdateCheckResult; msg?: string }> => {
       try {
+        await requireOnlineUpdates();
         const currentVersion = app.getVersion();
         const releases = await fetchGitHubReleases(STUDIO_UPDATE_REPO);
         const latest = releases
@@ -575,6 +581,7 @@ export function initUpdateBridge(): void {
   ipcBridge.update.download.provider(
     async (params: UpdateDownloadRequest): Promise<{ success: boolean; data?: UpdateDownloadResult; msg?: string }> => {
       try {
+        await requireOnlineUpdates();
         if (!params?.url) {
           return { success: false, msg: (await getI18n()).t('update.errors.missingUrl') };
         }
@@ -656,6 +663,7 @@ export function initUpdateBridge(): void {
       msg?: string;
     }> => {
       try {
+        await requireOnlineUpdates();
         // Set prerelease preference before checking
         const includePrerelease = Boolean(params?.includePrerelease);
         autoUpdaterService.setAllowPrerelease(includePrerelease);
@@ -685,6 +693,7 @@ export function initUpdateBridge(): void {
 
   ipcBridge.autoUpdate.download.provider(async (): Promise<{ success: boolean; msg?: string }> => {
     try {
+      await requireOnlineUpdates();
       const result = await autoUpdaterService.downloadUpdate();
       return { success: result.success, msg: result.error };
     } catch (err: unknown) {

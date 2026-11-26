@@ -6,8 +6,9 @@
 
 import { Modal, Message } from '@arco-design/web-react';
 import { useTranslation } from 'react-i18next';
-import React, { useCallback, useEffect, useRef } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import WebviewHost from '@/renderer/components/media/WebviewHost';
+import { ipcBridge } from '@/common';
 import {
   BROWSER_BLANK_URL,
   BROWSER_SESSION_PARTITION,
@@ -18,6 +19,7 @@ import {
 export interface BrowserViewerProps {
   /** 该 tab 当前地址 / Current address of this tab */
   url: string;
+  restoreAddress?: boolean;
   /** 所属 preview tab 的 id / Id of the owning preview tab */
   tabId: string;
   /** 地址变化时回写 tab（用于持久化）/ Persist the new address back onto the tab */
@@ -41,7 +43,14 @@ export interface BrowserViewerProps {
  * the address bar, and writing address/title/favicon back onto the owning tab so
  * the browser can be restored after a restart.
  */
-const BrowserViewer: React.FC<BrowserViewerProps> = ({ url, tabId, onUrlChange, onTitleChange, onFaviconChange }) => {
+const BrowserViewer: React.FC<BrowserViewerProps> = ({
+  url,
+  restoreAddress,
+  tabId,
+  onUrlChange,
+  onTitleChange,
+  onFaviconChange,
+}) => {
   const { t } = useTranslation();
   const intent = useRef(0);
   const granted = useRef(false);
@@ -51,7 +60,29 @@ const BrowserViewer: React.FC<BrowserViewerProps> = ({ url, tabId, onUrlChange, 
       intent.current++;
     };
   }, [url]);
-  const handleUrlChange = useCallback((next: string) => onUrlChange(tabId, next), [tabId, onUrlChange]);
+  const [offline, setOffline] = useState<boolean>();
+  const guardingRestore = restoreAddress === true && url !== BROWSER_BLANK_URL;
+  const waitingForRestore = Boolean(guardingRestore && offline !== false);
+  useEffect(() => {
+    if (!guardingRestore) return;
+    let current = true;
+    void ipcBridge.systemSettings.getOfflineMode
+      .invoke()
+      .then((enabled) => {
+        if (current) setOffline(enabled);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+    };
+  }, [guardingRestore]);
+  const handleUrlChange = useCallback(
+    (next: string) => {
+      if (waitingForRestore && next === BROWSER_BLANK_URL) return;
+      onUrlChange(tabId, next);
+    },
+    [tabId, onUrlChange, waitingForRestore]
+  );
 
   const resolveInput = useCallback(
     (raw: string): string | null => {
@@ -112,7 +143,7 @@ const BrowserViewer: React.FC<BrowserViewerProps> = ({ url, tabId, onUrlChange, 
 
   return (
     <WebviewHost
-      url={url || BROWSER_BLANK_URL}
+      url={waitingForRestore ? BROWSER_BLANK_URL : url || BROWSER_BLANK_URL}
       partition={BROWSER_SESSION_PARTITION}
       showNavBar
       className='bg-bg-1'
