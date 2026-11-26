@@ -74,6 +74,18 @@ function readForkIdentity(parentId, childId) {
   assert.equal(result.status, 0, `Could not read the native fork identity: ${result.error ?? result.stderr}`);
   return JSON.parse(result.stdout);
 }
+async function readNativeAuthStrings(page) {
+  const locale = await page.waitForFunction(() => document.documentElement.lang.trim() || false);
+  try {
+    const language = await locale.jsonValue();
+    return JSON.parse(
+      fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
+    ).nativeAuth;
+  } finally {
+    await locale.dispose();
+  }
+}
+
 async function waitForIdle(page, route) {
   await expect
     .poll(
@@ -116,18 +128,19 @@ async function qualifyHost() {
     process.env.AELIX_STUDIO_RUNTIME = installed;
   }
   page = await waitForProviderWindow(app, 1, firstWindowReport);
+  await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
+    timeout: 60000,
+  });
+  await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
+    timeout: 60000,
+  });
   if (offlineProvider || process.env.STUDIO_PROVIDER_SCENARIO === 'online-ui') {
     await page.evaluate(() => {
       window.location.hash = '/settings/about';
     });
-    const language = await page.evaluate(() => document.documentElement.lang);
-    const settingsText = JSON.parse(
-      fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
-    );
-    await expect(page.getByRole('switch', { name: settingsText.offlineMode, exact: true })).toHaveAttribute(
-      'aria-checked',
-      String(offlineProvider)
-    );
+    const offlineSwitch = page.getByTestId('studio-offline-mode');
+    await expect(offlineSwitch).toBeEnabled({ timeout: 30000 });
+    await expect(offlineSwitch).toHaveAttribute('aria-checked', String(offlineProvider));
   }
   if (executablePath) {
     const require = createRequire(import.meta.url);
@@ -165,12 +178,6 @@ async function qualifyHost() {
     assert.ok(entries.length > 0, 'Installed renderer inventory is empty');
     assert.deepEqual(entries.sort(), compiled.sort(), 'Installed renderer inventory differs from this build');
   }
-  await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
-    timeout: 60000,
-  });
-  await page.waitForFunction(() => (document.querySelector('#root')?.textContent?.length ?? 0) > 100, undefined, {
-    timeout: 60000,
-  });
   // The extension helper answers the installed app's window over its own channel (Studio #32):
   // the settings without the bundle, the list with the installed bundle and lock holder.
   trace('extension_channel');
@@ -188,10 +195,7 @@ async function qualifyHost() {
   let native = page.getByTestId('native-provider-settings');
   await expect(native).toBeVisible({ timeout: 30000 });
   await expect(native).toContainText('auth.json', { timeout: 15000 });
-  const language = await page.evaluate(() => document.documentElement.lang);
-  const strings = JSON.parse(
-    fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
-  ).nativeAuth;
+  const strings = await readNativeAuthStrings(page);
   await native.getByText(strings.exclusive, { exact: true }).click();
   await native.getByText(strings.customEndpoint, { exact: true }).click();
   await native.getByLabel(strings.providerId, { exact: true }).fill('fixture');
@@ -548,10 +552,7 @@ async function qualifyHost() {
   trace('lan_settings');
   const lanNative = lanPage.getByTestId('native-provider-settings');
   await expect(lanNative).toBeVisible({ timeout: 30000 });
-  const lanLanguage = await lanPage.evaluate(() => document.documentElement.lang);
-  const lanStrings = JSON.parse(
-    fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', lanLanguage, 'settings.json'))
-  ).nativeAuth;
+  const lanStrings = await readNativeAuthStrings(lanPage);
   trace('lan_create_conversation');
   await lanNative.getByRole('button', { name: lanStrings.startConversation, exact: true }).click();
   await expect(lanPage.getByTestId('sendbox-input')).toBeVisible({ timeout: 30000 });

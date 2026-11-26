@@ -235,6 +235,7 @@ const AboutModalContent: React.FC = () => {
                   <div className='flex items-center justify-between gap-8px'>
                     <Typography.Text>{t('settings.offlineMode')}</Typography.Text>
                     <Switch
+                      data-testid='studio-offline-mode'
                       aria-label={t('settings.offlineMode')}
                       checked={offline === true}
                       disabled={offline === undefined}

@@ -117,7 +117,8 @@ describe('AboutModalContent update ready state', () => {
 
   it('persists offline mode and disables the manual check with a hint', async () => {
     render(<AboutModalContent />);
-    const toggle = screen.getByRole('switch', { name: 'settings.offlineMode' });
+    const toggle = screen.getByTestId('studio-offline-mode');
+    expect(toggle).toHaveAccessibleName('settings.offlineMode');
     const check = screen.getByRole('button', { name: 'settings.checkForUpdates' });
     await waitFor(() => expect(check).toBeEnabled());
     expect(toggle).toHaveAttribute('aria-checked', 'false');
