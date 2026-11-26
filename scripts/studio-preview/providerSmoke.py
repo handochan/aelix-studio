@@ -170,6 +170,7 @@ class ProviderFixture:
 
 
 async def main(args):
+    offline_mode = os.environ.get('STUDIO_PROVIDER_OFFLINE_MODE') == '1'
     output = ROOT / '.local/studio-provider'
     output.mkdir(parents=True, exist_ok=True)
     (output / 'first-window.json').unlink(missing_ok=True)
@@ -212,7 +213,8 @@ async def main(args):
         from urllib.parse import quote
         config = sandbox / 'studio/config/aionui-config.txt'
         config.parent.mkdir(parents=True, exist_ok=True)
-        config.write_text(base64.b64encode(quote(json.dumps({'update.autoCheck': False}), safe='').encode()).decode())
+        preferences = {'update.autoCheck': False, 'network.offlineMode': offline_mode}
+        config.write_text(base64.b64encode(quote(json.dumps(preferences), safe='').encode()).decode())
         # Bound only the synthetic transport failure: native and SDK defaults
         # can otherwise keep Windows' closed-port probe retrying beyond the UI assertion.
         settings = sandbox / 'agent/settings.json'
@@ -224,7 +226,8 @@ async def main(args):
         env.update(HOME=str(sandbox / 'home'), AELIX_CODING_AGENT_DIR=str(sandbox / 'agent'),
                    AELIX_ACP_STATE_DIR=str(sandbox / 'acp'),
                    AELIX_SETTINGS_PATH=str(settings),
-                   USERPROFILE=str(sandbox / 'home'), NO_PROXY='127.0.0.1,localhost',
+                   USERPROFILE=str(sandbox / 'home'), CFFIXED_USER_HOME=str(sandbox / 'home'),
+                   NO_PROXY='127.0.0.1,localhost',
                    XDG_CONFIG_HOME=str(sandbox / 'home/config'), XDG_CACHE_HOME=str(sandbox / 'home/cache'),
                    APPDATA=str(sandbox / 'home/appdata'), LOCALAPPDATA=str(sandbox / 'home/localappdata'),
                    AELIX_AUTH_PATH=str(sandbox / 'wrong-root/auth.json'), AELIX_STUDIO_RUNTIME=str(helper_runtime),
@@ -252,7 +255,8 @@ async def main(args):
                 print(json.dumps({'wait': 'helper-qualification', 'timeoutSeconds': 300,
                                   'elapsedSeconds': round(time.monotonic() - helper_started, 3)}), flush=True)
             process = await asyncio.create_subprocess_exec('node', '--import', 'tsx', str(Path(__file__).with_name('providerHostSmoke.mjs')),
-                cwd=ROOT, env=dict(env, PROVIDER_DRIVER_PYTHON=sys.executable),
+                cwd=ROOT, env=dict(env, PROVIDER_DRIVER_PYTHON=sys.executable,
+                                   STUDIO_PROVIDER_OFFLINE_MODE='1' if offline_mode else '0'),
                 **({'start_new_session': True} if os.name != 'nt' else {}))
             host_timeout = provider_host_timeout(qualification_deadline, receipt['target'])
             print(json.dumps({'wait': 'provider-host-budget', 'timeoutSeconds': host_timeout,
@@ -282,7 +286,8 @@ async def main(args):
                     scanned += 1
             report.update(status='passed', acceptedRequests=fixture.accepted, rejectedRequests=fixture.rejected,
                           nativePatches=[], installedPayloadUnchanged=True, installedFiles=len(before),
-                          realProvider=False, realOAuth=False, installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
+                          realProvider=False, realOAuth=False, offlineMode=offline_mode,
+                          installer=bool(os.environ.get('PROVIDER_APP_EXECUTABLE')),
                           baselineSha256=receipt['baselineSha256'], aioncoreBinarySha256=receipt['aioncoreBinarySha256'])
             report.update(helperRuntimeKind='bundled' if helper_manifest else 'prepared',
                           helperRuntimeManifestSha256=(hashlib.sha256((helper_runtime / 'manifest.json').read_bytes()).hexdigest()

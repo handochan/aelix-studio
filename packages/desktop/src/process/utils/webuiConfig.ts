@@ -10,7 +10,7 @@ import { app } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { networkInterfaces } from 'os';
-import { getSystemDir } from './initStorage';
+import { getSystemDir, readOfflineMode } from './initStorage';
 import { httpRequest } from '@/common/adapter/httpBridge';
 import { startWebHost, type WebHostHandle } from '@aionui/web-host';
 import { getDataPath } from './utils';
@@ -237,6 +237,7 @@ export async function startDesktopWebUI(opts: { port?: number; allowRemote?: boo
     staticDir: path.join(__dirname, '../renderer'),
     port: preferredPort,
     allowRemote,
+    readOfflineMode,
     // Must align with the desktop IPC path's backend dataDir (src/index.ts), otherwise
     // users see divergent SQLite state between desktop app and bundled WebUI.
     dataDir: getDataPath(),

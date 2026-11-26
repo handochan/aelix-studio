@@ -1703,11 +1703,12 @@
     "manualCallback": "Autorisierungscode oder Weiterleitungs-URL einfügen."
   },
   "offlineMode": "Offlinemodus",
+  "offlineModeDescription": "Blockiert externe Anfragen von Studio. Modellanbieter, MCP-Server und Agentenwerkzeuge können sich weiterhin verbinden.",
   "offlineUpdateHint": "Im Offlinemodus ist die Suche nach Updates deaktiviert.",
   "offlineModeSaveFailed": "Der Offlinemodus konnte nicht gespeichert werden.",
   "offlineInstallHint": "Der Offlinemodus ist aktiv. Importieren Sie eine Wheel-Datei.",
   "autoUpdateCheck": "Beim Start nach Updates suchen",
-  "autoUpdateCheckDescription": "Prüft Aelix Studio Releases und benachrichtigt Sie. Für Offline-Nutzung ausschalten.",
+  "autoUpdateCheckDescription": "Beim Start nach Updates suchen, wenn der Offlinemodus deaktiviert ist.",
   "autoUpdateSaveFailed": "Die Update-Einstellung konnte nicht gespeichert werden.",
   "aelixNative": {
     "title": "Globale Aelix-Standardwerte",

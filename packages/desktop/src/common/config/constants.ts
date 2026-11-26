@@ -32,6 +32,8 @@ import { getStudioWebUIDefaultPort } from '@aionui/web-host/webui-defaults';
  */
 export const BROWSER_SESSION_PARTITION = 'persist:aionui-browser';
 
+export const EXTENSION_SETTINGS_PARTITION_PREFIX = 'persist:ext-settings-';
+
 /**
  * 内置浏览器 MCP 的注册名。
  *

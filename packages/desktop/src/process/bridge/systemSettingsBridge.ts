@@ -15,7 +15,14 @@
 import { ipcBridge } from '@/common';
 import { getStudioExtensionService } from '@aionui/web-host';
 import { app, session, webContents } from 'electron';
-import { setStudioRendererOffline, STUDIO_UPDATER_PARTITION } from '@process/startup/backgroundNetworking';
+import {
+  isManagedStudioRendererSession,
+  prepareStudioRendererSession,
+  setStudioRenderersOffline,
+  STUDIO_UPDATER_PARTITION,
+} from '@process/startup/backgroundNetworking';
+import { EXTENSION_SETTINGS_PARTITION_PREFIX } from '@/common/config/constants';
+import { updateApplicationMenuForOfflineMode } from '@process/utils/appMenu';
 import {
   ConfigRecovery,
   ProcessConfig,
@@ -41,28 +48,49 @@ export function onLanguageChanged(listener: LanguageChangeListener): void {
 }
 
 export function initSystemSettingsBridge(): void {
+  ipcBridge.systemSettings.prepareExtensionSettingsSession.provider(async (request) => {
+    const partition = request?.partition;
+    if (
+      typeof partition !== 'string' ||
+      !partition.startsWith(EXTENSION_SETTINGS_PARTITION_PREFIX) ||
+      partition.length === EXTENSION_SETTINGS_PARTITION_PREFIX.length ||
+      partition.includes('\0')
+    ) {
+      return false;
+    }
+    try {
+      await prepareStudioRendererSession(app, session.fromPartition(partition), readOfflineMode);
+      return true;
+    } catch {
+      return false;
+    }
+  });
   ipcBridge.systemSettings.getOfflineMode.provider(async () => readOfflineMode());
-  ipcBridge.systemSettings.setOfflineMode.provider(async ({ enabled }) => {
-    if (typeof enabled !== 'boolean') throw new TypeError('Expected boolean offline mode setting');
+  ipcBridge.systemSettings.setOfflineMode.provider(async (request) => {
+    const enabled = request?.enabled;
+    if (typeof enabled !== 'boolean') return false;
     const change = offlineModeChange.then(async () => {
       const previous = readOfflineMode();
-      const renderer = session.defaultSession;
-      if (enabled) await setStudioRendererOffline(app, renderer, true);
+      if (enabled) await setStudioRenderersOffline(app, true, webContents.getAllWebContents);
       try {
         if (enabled !== previous) await saveOfflineMode(enabled);
-        if (!enabled) await setStudioRendererOffline(app, renderer, false);
+        if (!enabled) await setStudioRenderersOffline(app, false, webContents.getAllWebContents);
       } catch (error) {
         if (readOfflineMode() !== previous) await saveOfflineMode(previous).catch(console.error);
-        if (enabled && !previous) await setStudioRendererOffline(app, renderer, false).catch(console.error);
+        if (enabled && !previous)
+          await setStudioRenderersOffline(app, false, webContents.getAllWebContents).catch(console.error);
         throw error;
-      }
-      for (const guest of webContents.getAllWebContents()) {
-        if (guest.getType() === 'webview' && guest.session === renderer) {
-          guest.setWebRTCIPHandlingPolicy(enabled ? 'disable_non_proxied_udp' : 'default');
-        }
       }
       try {
         if (enabled) {
+          if (!previous) {
+            for (const guest of webContents.getAllWebContents()) {
+              if (guest.getType() === 'webview' && isManagedStudioRendererSession(guest.session)) {
+                // Destroy the old document's peer connections. The session closes HTTP sockets.
+                guest.reload();
+              }
+            }
+          }
           await Promise.all([
             session
               .fromPartition(STUDIO_UPDATER_PARTITION, { cache: false })
@@ -72,12 +100,16 @@ export function initSystemSettingsBridge(): void {
           ]);
         }
       } finally {
+        updateApplicationMenuForOfflineMode(readOfflineMode());
         ipcBridge.systemSettings.offlineModeChanged.emit(readOfflineMode());
         void refreshTrayMenu().catch(console.error);
       }
     });
     offlineModeChange = change.catch(() => {});
-    return change;
+    return change.then(
+      () => true,
+      () => false
+    );
   });
   ipcBridge.systemSettings.getAutoUpdateEnabled.provider(readAutoCheckPreference);
   ipcBridge.systemSettings.setAutoUpdateEnabled.provider(async ({ enabled }) => {

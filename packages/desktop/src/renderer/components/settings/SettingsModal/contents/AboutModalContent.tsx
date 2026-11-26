@@ -8,13 +8,14 @@ import wordmarkDark from '@renderer/assets/logos/brand/wordmark-dark.svg';
 import wordmarkLight from '@renderer/assets/logos/brand/wordmark-light.svg';
 import { Divider, Typography, Button, Switch, Message } from '@arco-design/web-react';
 import { Github, Right } from '@icon-park/react';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useId, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import classNames from 'classnames';
 import { useSettingsViewMode } from '../settingsViewContext';
 import { isElectronDesktop, openExternalUrl } from '@/renderer/utils/platform';
 import FeedbackReportModal from './FeedbackReportModal';
 import { ipcBridge } from '@/common';
+import { useOfflineMode } from '@/renderer/hooks/config/useOfflineMode';
 import { getIncludePrerelease, runUpdateCheck } from '@/renderer/components/settings/checkForUpdatesShared';
 import { UPDATE_AVAILABLE_EVENT } from '@/renderer/components/settings/useUpdateNotificationController';
 import { IS_DISCONTINUED_BUILD } from '@/renderer/utils/discontinuedBuild';
@@ -42,7 +43,8 @@ const AboutModalContent: React.FC = () => {
   const isPageMode = viewMode === 'page';
   const isElectron = isElectronDesktop();
 
-  const [offline, setOffline] = useState<boolean | undefined>();
+  const [offline, setOffline] = useOfflineMode(isElectron);
+  const offlineHintId = useId();
   const [offlineSaving, setOfflineSaving] = useState(false);
   const [autoCheck, setAutoCheck] = useState(true);
   const [autoCheckSaving, setAutoCheckSaving] = useState(false);
@@ -59,29 +61,11 @@ const AboutModalContent: React.FC = () => {
         .catch(() => {});
   }, [isElectron]);
 
-  useEffect(() => {
-    if (!isElectron) return;
-    let current = true;
-    const remove = ipcBridge.systemSettings.offlineModeChanged.on((enabled) => {
-      current = false;
-      setOffline(enabled);
-    });
-    void ipcBridge.systemSettings.getOfflineMode
-      .invoke()
-      .then((enabled) => {
-        if (current) setOffline(enabled);
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-      remove();
-    };
-  }, [isElectron]);
-
   const changeOfflineMode = async (enabled: boolean) => {
     setOfflineSaving(true);
     try {
-      await ipcBridge.systemSettings.setOfflineMode.invoke({ enabled });
+      const saved = await ipcBridge.systemSettings.setOfflineMode.invoke({ enabled });
+      if (saved === false) throw new Error('Offline mode could not be saved');
       setOffline(enabled);
     } catch {
       Message.error(t('settings.offlineModeSaveFailed'));
@@ -258,11 +242,15 @@ const AboutModalContent: React.FC = () => {
                       onChange={(enabled) => void changeOfflineMode(enabled)}
                     />
                   </div>
-                  {offline && !updateReadyState.ready && (
-                    <Typography.Text className='text-12px text-t-secondary' id='offline-update-hint'>
-                      {t('settings.offlineUpdateHint')}
-                    </Typography.Text>
-                  )}
+                  <Typography.Text className='text-12px text-t-secondary'>
+                    {t('settings.offlineModeDescription')}
+                    {offline && !updateReadyState.ready && (
+                      <>
+                        {' '}
+                        <span id={offlineHintId}>{t('settings.offlineUpdateHint')}</span>
+                      </>
+                    )}
+                  </Typography.Text>
                 </div>
                 <Button
                   type='primary'
@@ -271,7 +259,7 @@ const AboutModalContent: React.FC = () => {
                   disabled={
                     updateReadyState.preparing || (!updateReadyState.ready && (offline !== false || offlineSaving))
                   }
-                  aria-describedby={offline && !updateReadyState.ready ? 'offline-update-hint' : undefined}
+                  aria-describedby={offline && !updateReadyState.ready ? offlineHintId : undefined}
                   onClick={() => void checkUpdate()}
                 >
                   {updateReadyState.preparing

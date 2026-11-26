@@ -18,6 +18,7 @@ const mocks = vi.hoisted(() => ({
   manualProgressHandler: null as ((evt: UpdateDownloadProgressEvent) => void) | null,
   autoStatusHandler: null as ((evt: AutoUpdateStatus) => void) | null,
   updateOpenHandler: null as ((evt: { source?: 'menu' | 'about' | 'tray' }) => void) | null,
+  offlineModeChanged: null as ((offline: boolean) => void) | null,
   autoUpdateCheckMock: vi.fn(),
   autoUpdateRestoreDownloadedMock: vi.fn(),
   autoUpdateDownloadMock: vi.fn(),
@@ -45,8 +46,23 @@ vi.mock('@/renderer/hooks/context/FeedbackContext', () => ({
   useFeedback: () => ({ openFeedback: mocks.openFeedbackMock }),
 }));
 
+vi.mock('@/renderer/utils/platform', () => ({
+  isElectronDesktop: () => true,
+}));
+
 vi.mock('@/common', () => ({
   ipcBridge: {
+    systemSettings: {
+      getOfflineMode: { invoke: vi.fn().mockResolvedValue(false) },
+      offlineModeChanged: {
+        on: (listener: (offline: boolean) => void) => {
+          mocks.offlineModeChanged = listener;
+          return () => {
+            mocks.offlineModeChanged = null;
+          };
+        },
+      },
+    },
     autoUpdate: {
       check: { invoke: mocks.autoUpdateCheckMock },
       restoreDownloaded: { invoke: mocks.autoUpdateRestoreDownloadedMock },
@@ -137,6 +153,28 @@ describe('UpdateNotificationCard', () => {
     cleanup();
     vi.clearAllMocks();
     vi.unstubAllGlobals();
+  });
+
+  it('disables and restores a displayed retry when the offline switch changes', async () => {
+    mocks.autoUpdateCheckMock.mockResolvedValue({ success: false, msg: 'unavailable' });
+    mocks.updateCheckMock.mockResolvedValue({ success: false, msg: 'unavailable' });
+    render(<UpdateNotificationCard />);
+    await act(async () => {
+      mocks.updateOpenHandler?.({ source: 'menu' });
+    });
+    const retry = await screen.findByRole('button', { name: 'common.retry' });
+    await waitFor(() => expect(retry).toBeEnabled());
+    act(() => {
+      mocks.offlineModeChanged?.(true);
+    });
+    expect(retry).toBeDisabled();
+    const calls = mocks.updateCheckMock.mock.calls.length;
+    fireEvent.click(retry);
+    expect(mocks.updateCheckMock).toHaveBeenCalledTimes(calls);
+    act(() => {
+      mocks.offlineModeChanged?.(false);
+    });
+    expect(retry).toBeEnabled();
   });
 
   it('renders a bottom-right notification card for auto-update availability without a dialog', async () => {

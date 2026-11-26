@@ -1,6 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { App, Session } from 'electron';
-import { configureBackgroundNetworking, protectStudioResources } from '@/process/startup/backgroundNetworking';
+import type { App, Session, WebContents } from 'electron';
+import {
+  applyStudioGuestNetworkPolicy,
+  configureBackgroundNetworking,
+  isManagedStudioRendererSession,
+  prepareStudioRendererSession,
+  protectStudioResources,
+  setStudioRenderersOffline,
+} from '@/process/startup/backgroundNetworking';
 
 describe('Chromium background network policy', () => {
   it('configures engine defaults before ready and retains the OS DNS policy after ready', () => {
@@ -43,7 +50,9 @@ describe('Studio offline request policy', () => {
     protectStudioResources(
       { webRequest: { onBeforeRequest } as unknown as Session['webRequest'] },
       () => offline,
-      (url) => url.origin === 'http://127.0.0.1:13400'
+      (url) =>
+        url.origin === 'http://127.0.0.1:13400' &&
+        ['/api/fs/fetch-remote-image', '/api/system/check-update'].includes(url.pathname)
     );
     const inspect = (url: string) => {
       const reply = vi.fn();
@@ -75,4 +84,56 @@ describe('Studio offline request policy', () => {
       ].some(inspect)
     ).toBe(false);
   });
+});
+
+it('prepares a fresh offline settings partition and disconnects existing partitions on the live switch', async () => {
+  const application = { once: vi.fn() } as unknown as Pick<App, 'once'>;
+  const makeSession = () => ({
+    webRequest: { onBeforeRequest: vi.fn() },
+    setProxy: vi.fn().mockResolvedValue(undefined),
+    closeAllConnections: vi.fn().mockResolvedValue(undefined),
+  });
+  const renderer = makeSession();
+  const extension = makeSession();
+  const fresh = makeSession();
+  const detached = makeSession();
+  const session = (fixture: ReturnType<typeof makeSession>) => fixture as unknown as Session;
+  const guest = (fixture: ReturnType<typeof makeSession>) => ({
+    getType: () => 'webview',
+    session: session(fixture),
+    setWebRTCIPHandlingPolicy: vi.fn(),
+  });
+  const existingGuest = guest(extension);
+  const explicitBrowser = guest(detached);
+  const guests = () => [existingGuest, explicitBrowser] as unknown as WebContents[];
+  await prepareStudioRendererSession(application, session(renderer), () => false);
+  await prepareStudioRendererSession(application, session(extension), () => false);
+  expect(extension.setProxy).not.toHaveBeenCalled();
+  try {
+    await setStudioRenderersOffline(application, true, guests);
+    expect(extension.setProxy).toHaveBeenCalledWith({
+      mode: 'fixed_servers',
+      proxyRules: expect.stringMatching(/^socks5:\/\/127\.0\.0\.1:/),
+    });
+    expect(extension.closeAllConnections).toHaveBeenCalledOnce();
+    expect(existingGuest.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('disable_non_proxied_udp');
+    expect(explicitBrowser.setWebRTCIPHandlingPolicy).not.toHaveBeenCalled();
+
+    fresh.setProxy.mockRejectedValueOnce(new Error('proxy failure'));
+    await expect(prepareStudioRendererSession(application, session(fresh), () => true)).rejects.toThrow(
+      'proxy failure'
+    );
+    expect(isManagedStudioRendererSession(session(fresh))).toBe(false);
+    await prepareStudioRendererSession(application, session(fresh), () => true);
+    expect(isManagedStudioRendererSession(session(fresh))).toBe(true);
+    expect(fresh.closeAllConnections).toHaveBeenCalledOnce();
+    const firstGuest = guest(fresh);
+    applyStudioGuestNetworkPolicy(firstGuest as unknown as WebContents);
+    expect(firstGuest.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith('disable_non_proxied_udp');
+  } finally {
+    await setStudioRenderersOffline(application, false, guests);
+    vi.mocked(application.once).mock.calls[0]?.[1]();
+  }
+  expect(extension.setProxy).toHaveBeenLastCalledWith({ mode: 'system' });
+  expect(existingGuest.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('default');
 });

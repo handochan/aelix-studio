@@ -1706,11 +1706,12 @@
     "manualCallback": "Cole o código de autorização ou a URL de redirecionamento."
   },
   "offlineMode": "Modo offline",
+  "offlineModeDescription": "Bloqueia as solicitações externas do Studio. Provedores de modelos, servidores MCP e ferramentas de agentes ainda podem se conectar.",
   "offlineUpdateHint": "A verificação de atualizações está desativada no modo offline.",
   "offlineModeSaveFailed": "Não foi possível salvar o modo offline.",
   "offlineInstallHint": "O modo offline está ativado. Importe um arquivo wheel.",
   "autoUpdateCheck": "Verificar atualizações ao iniciar",
-  "autoUpdateCheckDescription": "Consulta o Aelix Studio Releases e avisa você. Desative para uso offline.",
+  "autoUpdateCheckDescription": "Verifica se há atualizações ao iniciar quando o modo offline está desativado.",
   "autoUpdateSaveFailed": "Não foi possível salvar a preferência de atualização.",
   "aelixNative": {
     "title": "Padrões globais do Aelix",

@@ -3017,6 +3017,7 @@ export type I18nKey =
   | 'settings.officialWebsite'
   | 'settings.offlineInstallHint'
   | 'settings.offlineMode'
+  | 'settings.offlineModeDescription'
   | 'settings.offlineModeSaveFailed'
   | 'settings.offlineUpdateHint'
   | 'settings.oneClickFeedback'

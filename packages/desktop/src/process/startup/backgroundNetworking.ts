@@ -1,4 +1,4 @@
-import type { App, Session } from 'electron';
+import type { App, Session, WebContents } from 'electron';
 import { createServer } from 'node:net';
 import { isExternalStudioResource } from '@/common/utils/urlValidation';
 
@@ -11,7 +11,7 @@ const guarded = new WeakSet<Session['webRequest']>();
 export function protectStudioResources(
   session: Pick<Session, 'webRequest'>,
   offline: () => boolean,
-  isNativeBackend?: (url: URL) => boolean
+  isNetworkRelay?: (url: URL) => boolean
 ): void {
   if (guarded.has(session.webRequest)) return;
   guarded.add(session.webRequest);
@@ -26,10 +26,7 @@ export function protectStudioResources(
       return;
     }
     // These native routes can turn a loopback request into an external one.
-    const nativeRelay =
-      ['/api/fs/fetch-remote-image', '/api/system/check-update'].includes(target.pathname) &&
-      isNativeBackend?.(target) === true;
-    reply({ cancel: nativeRelay || isExternalStudioResource(target) });
+    reply({ cancel: isNetworkRelay?.(target) === true || isExternalStudioResource(target) });
   });
 }
 
@@ -58,7 +55,7 @@ function localDiscardProxy(application: Pick<App, 'once'>): Promise<string> {
 }
 
 /** Backstop renderer preconnects, which can bypass URL request interception. */
-export async function setStudioRendererOffline(
+async function setStudioRendererOffline(
   application: Pick<App, 'once'>,
   rendererSession: Pick<Session, 'setProxy' | 'closeAllConnections'>,
   offline: boolean
@@ -66,7 +63,68 @@ export async function setStudioRendererOffline(
   await rendererSession.setProxy(
     offline ? { mode: 'fixed_servers', proxyRules: await localDiscardProxy(application) } : { mode: 'system' }
   );
-  await rendererSession.closeAllConnections().catch(console.error);
+  // Enable only when every session has disconnected its connections.
+  if (offline) await rendererSession.closeAllConnections();
+  else await rendererSession.closeAllConnections().catch(console.error);
+}
+
+const managedSessions = new Set<Session>();
+let rendererOffline = false;
+let transportChange = Promise.resolve();
+
+function serializeTransport(change: () => Promise<void>): Promise<void> {
+  const pending = transportChange.then(change);
+  transportChange = pending.catch(() => {});
+  return pending;
+}
+
+/** Prepare a managed session before its first guest is allowed to navigate. */
+export function prepareStudioRendererSession(
+  application: Pick<App, 'once'>,
+  session: Session,
+  offline: () => boolean,
+  isNetworkRelay?: (url: URL) => boolean
+): Promise<void> {
+  protectStudioResources(session, offline, isNetworkRelay);
+  return serializeTransport(async () => {
+    if (managedSessions.has(session)) return;
+    if (rendererOffline) await setStudioRendererOffline(application, session, true);
+    managedSessions.add(session);
+  });
+}
+
+export function isManagedStudioRendererSession(session: Session): boolean {
+  return managedSessions.has(session);
+}
+
+/** Called at WebContents creation, before the guest gets its initial URL. */
+export function applyStudioGuestNetworkPolicy(guest: WebContents): void {
+  if (guest.getType() === 'webview' && managedSessions.has(guest.session)) {
+    guest.setWebRTCIPHandlingPolicy(rendererOffline ? 'disable_non_proxied_udp' : 'default');
+  }
+}
+
+/** Switch every app-managed renderer partition together, preserving explicit browser partitions. */
+export function setStudioRenderersOffline(
+  application: Pick<App, 'once'>,
+  offline: boolean,
+  getContents: () => WebContents[]
+): Promise<void> {
+  return serializeTransport(async () => {
+    const sessions = [...managedSessions];
+    const changed = await Promise.allSettled(
+      sessions.map((session) => setStudioRendererOffline(application, session, offline))
+    );
+    const failure = changed.find((result) => result.status === 'rejected');
+    if (failure) {
+      await Promise.allSettled(
+        sessions.map((session) => setStudioRendererOffline(application, session, rendererOffline))
+      );
+      throw failure.reason;
+    }
+    rendererOffline = offline;
+    for (const guest of getContents()) applyStudioGuestNetworkPolicy(guest);
+  });
 }
 
 type BackgroundNetworkApp = Pick<App, 'commandLine' | 'on' | 'configureHostResolver'>;

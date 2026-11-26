@@ -20,6 +20,7 @@ const firstWindowReport = { file: path.join(output, 'first-window.json'), waits:
 const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
 const appEnv = { ...process.env };
 delete appEnv.PROVIDER_DRIVER_PYTHON;
+delete appEnv.STUDIO_PROVIDER_OFFLINE_MODE;
 if (executablePath) {
   delete appEnv.AELIX_STUDIO_RUNTIME;
   delete appEnv.AIONUI_BACKEND_BIN;
@@ -112,6 +113,19 @@ try {
     process.env.AELIX_STUDIO_RUNTIME = installed;
   }
   page = await waitForProviderWindow(app, 1, firstWindowReport);
+  if (process.env.STUDIO_PROVIDER_OFFLINE_MODE === '1') {
+    await page.evaluate(() => {
+      window.location.hash = '/settings/about';
+    });
+    const language = await page.evaluate(() => document.documentElement.lang);
+    const settingsText = JSON.parse(
+      fs.readFileSync(path.join('packages/desktop/src/renderer/services/i18n/locales', language, 'settings.json'))
+    );
+    await expect(page.getByRole('switch', { name: settingsText.offlineMode, exact: true })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
+  }
   if (executablePath) {
     const require = createRequire(import.meta.url);
     const builder = createRequire(require.resolve('electron-builder'));

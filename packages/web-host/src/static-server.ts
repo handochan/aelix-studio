@@ -45,6 +45,8 @@ export type StaticServerOptions = {
   userDataPath?: string;
   port?: number;
   allowRemote?: boolean;
+  /** The owning desktop process supplies its live offline policy. */
+  readOfflineMode?: () => boolean;
 };
 
 export type StaticServerHandle = {
@@ -57,6 +59,12 @@ export type StaticServerHandle = {
 };
 
 const DEFAULT_PORT = getStudioWebUIDefaultPort(true);
+
+export function studioNetworkRelayBlockCode(pathname: string): string | undefined {
+  if (pathname === '/api/fs/fetch-remote-image') return 'REMOTE_IMAGE_DISABLED';
+  if (pathname === '/api/system/check-update') return 'OFFLINE_MODE';
+  return undefined;
+}
 
 // Ranges that are non-internal IPv4 yet never a reachable LAN address, so we
 // must never advertise them as the WebUI access URL even when they are the only
@@ -322,6 +330,11 @@ export async function startStaticServer(opts: StaticServerOptions): Promise<Stat
       // so WebUI browser clients reach the backend without a path-rewrite.
       const pathname = req.url.split('?', 1)[0];
       if (pathname.startsWith('/api/') || ['/login', '/logout', '/qr-login', '/api'].includes(pathname)) {
+        const blockedRelay = opts.readOfflineMode?.() && studioNetworkRelayBlockCode(pathname);
+        if (blockedRelay) {
+          respondStudio(res, 503, { success: false, code: blockedRelay });
+          return;
+        }
         forwardToBackend(req, res, opts.backendPort, isSecureOrigin(req.headers.host), cookieAuthority);
         return;
       }

@@ -1539,8 +1539,11 @@ export const theme = {
 // ---------------------------------------------------------------------------
 
 export const systemSettings = {
+  prepareExtensionSettingsSession: bridge.buildProvider<boolean, { partition: string }>(
+    'system-settings:prepare-extension-settings-session'
+  ),
   getOfflineMode: bridge.buildProvider<boolean, void>('system-settings:get-offline-mode'),
-  setOfflineMode: bridge.buildProvider<void, { enabled: boolean }>('system-settings:set-offline-mode'),
+  setOfflineMode: bridge.buildProvider<boolean, { enabled: boolean }>('system-settings:set-offline-mode'),
   offlineModeChanged: bridge.buildEmitter<boolean>('system-settings:offline-mode-changed'),
   getAutoUpdateEnabled: bridge.buildProvider<boolean, void>('system-settings:get-auto-update-enabled'),
   setAutoUpdateEnabled: bridge.buildProvider<void, { enabled: boolean }>('system-settings:set-auto-update-enabled'),

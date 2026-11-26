@@ -1704,11 +1704,12 @@
     "manualCallback": "粘贴授权码或重定向 URL。"
   },
   "offlineMode": "离线模式",
+  "offlineModeDescription": "阻止 Studio 自身的外部请求。模型提供商、MCP 服务器和智能体工具仍可连接。",
   "offlineUpdateHint": "离线模式下无法检查更新。",
   "offlineModeSaveFailed": "无法保存离线模式设置。",
   "offlineInstallHint": "离线模式已开启。请导入 wheel 文件。",
   "autoUpdateCheck": "启动时检查更新",
-  "autoUpdateCheckDescription": "检查 Aelix Studio Releases 并通知您。离线使用时可关闭。",
+  "autoUpdateCheckDescription": "离线模式关闭时，在启动时检查更新。",
   "autoUpdateSaveFailed": "无法保存更新设置。",
   "aelixNative": {
     "title": "Aelix 全局默认设置",

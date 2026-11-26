@@ -97,6 +97,352 @@ export async function qualifyOfflinePreview(page, root) {
   }
 }
 
+/** Invoke the same desktop RPC used by the extension settings component. */
+async function prepareExtensionGuest(page, partition) {
+  const prepared = await page.evaluate(
+    (partition) =>
+      new Promise((resolve, reject) => {
+        const name = 'system-settings:prepare-extension-settings-session';
+        const id = crypto.randomUUID();
+        const response = 'subscribe.callback-' + name + id;
+        const timer = setTimeout(() => {
+          off();
+          reject(new Error('Extension session preparation timed out'));
+        }, 10000);
+        const off = window.electronAPI.on(({ value }) => {
+          const message = JSON.parse(value);
+          if (message.name !== response) return;
+          clearTimeout(timer);
+          off();
+          resolve(message.data);
+        });
+        void window.electronAPI.emit('subscribe-' + name, { id, data: { partition } });
+      }),
+    partition
+  );
+  assert.equal(prepared, true);
+}
+
+async function openAuditGuest(page, src, partition) {
+  if (partition) await prepareExtensionGuest(page, partition);
+  return page.evaluate(
+    ({ src, partition }) =>
+      new Promise((resolve, reject) => {
+        const guest = document.createElement('webview');
+        if (partition) guest.setAttribute('partition', partition);
+        guest.src = src;
+        guest.style.cssText = 'position:fixed;width:16px;height:16px';
+        const timer = setTimeout(() => {
+          guest.remove();
+          reject(new Error('Audit guest did not reach its local page'));
+        }, 15000);
+        guest.addEventListener(
+          'did-finish-load',
+          () => {
+            clearTimeout(timer);
+            guest.id = 'studio-g12-audit-guest';
+            resolve(guest.getWebContentsId());
+          },
+          { once: true }
+        );
+        document.body.append(guest);
+      }),
+    { src, partition }
+  );
+}
+
+async function guestScript(page, script) {
+  return page.evaluate((code) => document.getElementById('studio-g12-audit-guest').executeJavaScript(code), script);
+}
+
+const EXTERNAL = 'http://192.0.2.5';
+const OFFLINE_PROBE = `
+  <!doctype html>
+  <script>
+    window.results = {};
+    window.addEventListener('message', ({ data, source }) => {
+      if (source === document.getElementById('srcdoc-fixture')?.contentWindow && data === 'studio-g12:blocked') {
+        window.results.srcdoc = 'blocked';
+      }
+    });
+  </script>
+  <link rel="preconnect" href="${EXTERNAL}">
+  <link rel="stylesheet" href="/local.css">
+  <link rel="stylesheet" href="${EXTERNAL}/remote.css" onerror="results.css = 'blocked'">
+  <img id="local" src="/local.svg">
+  <img id="redirect" src="/redirect">
+  <img id="external" src="${EXTERNAL}/image.svg">
+  <iframe id="frame" src="/frame"></iframe>
+  <iframe src="${EXTERNAL}/frame"></iframe>
+  <iframe id="srcdoc-fixture" srcdoc="<img src='${EXTERNAL}/srcdoc.svg' onerror='parent.postMessage(&quot;studio-g12:blocked&quot;, &quot;*&quot;)'>"></iframe>
+  <script src="/local.js"></script>
+  <script src="${EXTERNAL}/report.js" onerror="results.script = 'blocked'"></script>
+`;
+
+function servePreviewFixture(request, response, close) {
+  switch (request.url) {
+    case '/probe':
+      response.writeHead(200, { 'Content-Type': 'text/html' }).end(OFFLINE_PROBE);
+      return;
+    case '/transition':
+      response.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><p>loopback tab</p>');
+      return;
+    case '/frame':
+      response.writeHead(200, { 'Content-Type': 'text/html' }).end('<body>local frame</body>');
+      return;
+    case '/local.js':
+      response.writeHead(200, { 'Content-Type': 'application/javascript' }).end("results.localScript = 'loaded';");
+      return;
+    case '/local.css':
+      response
+        .writeHead(200, { 'Content-Type': 'text/css' })
+        .end(`@import '${EXTERNAL}/stylesheet-import.css'; body { color: rgb(1, 2, 3); }`);
+      return;
+    case '/worker.js':
+      response.writeHead(200, { 'Content-Type': 'application/javascript' }).end(`
+        self.addEventListener('message', (event) => {
+          event.waitUntil(fetch('${EXTERNAL}/worker', { mode: 'no-cors' }).then(
+            () => event.ports[0].postMessage('sent'),
+            () => event.ports[0].postMessage('blocked')
+          ));
+        });
+      `);
+      return;
+    case '/hold':
+      response.once('close', close);
+      response.writeHead(200, { 'Content-Type': 'text/plain' }).write('held open');
+      return;
+    case '/redirect':
+      response.writeHead(302, { Location: EXTERNAL + '/redirect.svg' }).end();
+      return;
+    case '/local.svg':
+      response
+        .writeHead(200, { 'Content-Type': 'image/svg+xml' })
+        .end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
+      return;
+    default:
+      response.writeHead(404).end();
+  }
+}
+
+function verifyGuestTransport(app, id) {
+  return app.evaluate(async ({ webContents }, guestId) => {
+    const guest = webContents.fromId(guestId);
+    return {
+      proxy: await guest.session.resolveProxy('http://192.0.2.5/preconnect'),
+      rtcPolicy: guest.getWebRTCIPHandlingPolicy(),
+    };
+  }, id);
+}
+
+async function requireOfflineTransport(app, guest) {
+  const result = await verifyGuestTransport(app, guest);
+  assert.match(result.proxy, /^SOCKS5 127\.0\.0\.1:\d+$/);
+  assert.equal(result.rtcPolicy, 'disable_non_proxied_udp');
+}
+
+async function checkPreviewRequests(page) {
+  const results = await guestScript(
+    page,
+    `
+    (async () => {
+      const worker = await navigator.serviceWorker.register('/worker.js');
+      const active = (await navigator.serviceWorker.ready).active;
+      const message = new MessageChannel();
+      const result = new Promise((resolve) => { message.port1.onmessage = ({ data }) => resolve(data); });
+      active.postMessage('probe', [message.port2]);
+      try {
+        const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:192.0.2.5:3478' }] });
+        try {
+          peer.createDataChannel('fixture');
+          await peer.setLocalDescription(await peer.createOffer());
+          await new Promise((resolve) => setTimeout(resolve, 500));
+        } finally {
+          peer.close();
+        }
+        return {
+          worker: await Promise.race([result, new Promise((resolve) => setTimeout(() => resolve('timeout'), 8000))]),
+          localImage: document.getElementById('local').naturalWidth,
+          redirect: document.getElementById('redirect').naturalWidth,
+          externalImage: document.getElementById('external').naturalWidth,
+          localFrame: document.getElementById('frame').contentDocument.body.textContent,
+          localCss: getComputedStyle(document.body).color,
+          ...window.results,
+        };
+      } finally {
+        message.port1.close();
+        await worker.unregister();
+      }
+    })()
+  `
+  );
+  assert.deepEqual(results, {
+    worker: 'blocked',
+    localImage: 1,
+    redirect: 0,
+    externalImage: 0,
+    localFrame: 'local frame',
+    localCss: 'rgb(1, 2, 3)',
+    css: 'blocked',
+    script: 'blocked',
+    srcdoc: 'blocked',
+    localScript: 'loaded',
+  });
+  return results;
+}
+
+export async function qualifyOfflineTransport(app, page, toggle) {
+  let closed = false;
+  const server = http.createServer((req, res) =>
+    servePreviewFixture(req, res, () => {
+      closed = true;
+    })
+  );
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  const base = 'http://127.0.0.1:' + server.address().port;
+  const closeGuest = () => page.evaluate(() => document.getElementById('studio-g12-audit-guest')?.remove());
+  try {
+    const defaultGuest = await openAuditGuest(page, base + '/probe');
+    await requireOfflineTransport(app, defaultGuest);
+    const defaultResults = await checkPreviewRequests(page);
+    await closeGuest();
+
+    const extPartition = 'persist:ext-settings-g12-audit';
+    const firstExtensionGuest = await openAuditGuest(page, base + '/probe', extPartition);
+    await requireOfflineTransport(app, firstExtensionGuest);
+    const extensionResults = await checkPreviewRequests(page);
+    await closeGuest();
+
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'false');
+    await assertUpdateMenu(app, true);
+    const transitioningGuest = await openAuditGuest(page, base + '/transition', extPartition);
+    assert.equal((await verifyGuestTransport(app, transitioningGuest)).rtcPolicy, 'default');
+    assert.equal(
+      await guestScript(page, "fetch('/hold').then((res) => { window.heldResponse = res; return res.status; })"),
+      200
+    );
+    assert.equal(closed, false, 'The online connection must remain open until the switch');
+    await toggle.click();
+    await expect(toggle).toHaveAttribute('aria-checked', 'true');
+    await assertUpdateMenu(app, false);
+    await expect.poll(() => closed, { timeout: 10000 }).toBe(true);
+    await requireOfflineTransport(app, transitioningGuest);
+    await closeGuest();
+    const afterSwitch = await openAuditGuest(page, base + '/probe', extPartition);
+    await requireOfflineTransport(app, afterSwitch);
+    await checkPreviewRequests(page);
+    return {
+      default: defaultResults,
+      firstExtension: extensionResults,
+      extensionAfterSwitch: true,
+      connectionClosed: true,
+    };
+  } finally {
+    await closeGuest();
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
+async function assertUpdateMenu(app, enabled) {
+  assert.equal(
+    await app.evaluate(({ Menu }) => Menu.getApplicationMenu().getMenuItemById('studio-check-for-updates').enabled),
+    enabled
+  );
+}
+
+export async function qualifyOfflineExtensions(page, root) {
+  const { writeWheel } = await import('../../packages/web-host/tests/fixtures/extensionWheels.ts');
+  const name = 'studio-g12-offline';
+  const wheel = await writeWheel(path.join(root, 'wheels'), { name });
+  const request = (command) => page.evaluate((input) => window.__studioExtensions.request(input), command);
+  for (const source of [
+    { kind: 'index', name },
+    { kind: 'git', url: 'git+https://192.0.2.5/studio-g12.git' },
+  ]) {
+    const result = await request({ action: 'install', source });
+    assert.equal(result.ok, false);
+    assert.equal(result.code, 'ONLINE_INSTALL_DISABLED');
+  }
+  const settings = await request({ action: 'get_settings' });
+  assert.equal(settings.data?.onlineInstallLocked, true);
+  const installed = await request({ action: 'install', source: { kind: 'file', path: wheel } });
+  assert.equal(installed.ok, true, JSON.stringify(installed));
+  await expect
+    .poll(
+      async () => {
+        const status = await request({ action: 'poll', operationId: installed.data.operationId });
+        assert.equal(status.ok, true, JSON.stringify(status));
+        assert.ok(!['failed', 'cancelled'].includes(status.data.phase), JSON.stringify(status.data));
+        return status.data.phase;
+      },
+      { timeout: 150000 }
+    )
+    .toBe('switched');
+  const listed = await request({ action: 'list' });
+  assert.equal(listed.ok, true, JSON.stringify(listed));
+  assert.ok(listed.data.extensions.some((extension) => extension.name === name));
+  return { fileInstalledAndListed: true, indexRefused: true, gitRefused: true };
+}
+
+export async function qualifyOfflineMcp(page) {
+  const { McpServer } = await import('@modelcontextprotocol/sdk/server/mcp.js');
+  const { StreamableHTTPServerTransport } = await import('@modelcontextprotocol/sdk/server/streamableHttp.js');
+  const server = http.createServer(async (req, res) => {
+    if (req.method !== 'POST') {
+      res.writeHead(405).end();
+      return;
+    }
+    const mcp = new McpServer({ name: 'studio-g12-mcp', version: '1.0.0' });
+    mcp.registerTool('g12_fixture', { description: 'Offline-mode loopback fixture' }, () => ({ content: [] }));
+    const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true });
+    res.once('close', () => {
+      void mcp.close();
+    });
+    try {
+      await mcp.connect(transport);
+      await transport.handleRequest(req, res);
+    } catch {
+      res.writeHead(500).end();
+    }
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const observed = await page.evaluate(
+      async (endpoint) => {
+        const result = await fetch('http://127.0.0.1:' + window.__backendPort + '/api/mcp/test-connection', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: 'studio-g12-mcp',
+            enabled: true,
+            transport: { type: 'http', url: endpoint },
+            created_at: 0,
+            updated_at: 0,
+            original_json: '{}',
+          }),
+        });
+        const envelope = await result.json();
+        return envelope.data ?? envelope;
+      },
+      'http://127.0.0.1:' + server.address().port + '/mcp'
+    );
+    assert.equal(observed.success, true, JSON.stringify(observed));
+    assert.ok(observed.tools?.some((tool) => tool.name === 'g12_fixture'));
+    return { connected: true, toolsListed: true };
+  } finally {
+    server.closeAllConnections();
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 async function main() {
   const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
   const output = process.argv[2];
@@ -155,17 +501,22 @@ async function main() {
     assert.equal(fs.readFileSync(path.join(upstreamProfile, 'sentinel'), 'utf8'), 'upstream');
     assert.ok(fs.readdirSync(paths.logs, { recursive: true }).some((entry) => String(entry).endsWith('.log')));
     report.studioProfile = true;
+    // Stay offline through the scheduled startup check before exercising a live toggle.
+    await page.waitForTimeout(report.observationMs);
     if (offlineMode) {
       await page.evaluate(() => {
         window.location.hash = '/settings/about';
       });
-      await expect(page.getByRole('switch', { name: 'Offline mode' })).toHaveAttribute('aria-checked', 'true');
+      const toggle = page.getByRole('switch', { name: 'Offline mode' });
+      await expect(toggle).toHaveAttribute('aria-checked', 'true');
       await expect(page.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
       await expect(page.getByText('Update checks are disabled in offline mode.')).toBeVisible();
+      await assertUpdateMenu(app, false);
       report.preview = await qualifyOfflinePreview(page, root);
+      report.transport = await qualifyOfflineTransport(app, page, toggle);
+      report.extensions = await qualifyOfflineExtensions(page, root);
+      report.mcp = await qualifyOfflineMcp(page);
     }
-    // Covers the old 3-second update and 30-second startup-log timers.
-    await page.waitForTimeout(report.observationMs);
     report.status = 'passed';
   } catch (error) {
     report.errorKind = error?.name ?? 'Error';

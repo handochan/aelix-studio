@@ -5,6 +5,8 @@
  */
 
 import { ipcBridge } from '@/common';
+import { useOfflineMode } from '@/renderer/hooks/config/useOfflineMode';
+import { isElectronDesktop } from '@/renderer/utils/platform';
 import type { AutoUpdateStatus, UpdateDownloadProgressEvent } from '@/common/update/updateTypes';
 import { uuid } from '@/common/utils';
 import { useCallback, useEffect, useMemo, useReducer, useRef } from 'react';
@@ -66,6 +68,7 @@ const getVersionLabelFromState = (state: UpdateNotificationState): string =>
 
 export const useUpdateNotificationController = () => {
   const { t, i18n } = useTranslation();
+  const [offline] = useOfflineMode(isElectronDesktop());
   const [state, dispatchState] = useReducer(reduceNotificationState, undefined, createInitialState);
   const stateRef = useRef(state);
   const restoreDownloadedPendingRef = useRef(true);
@@ -114,6 +117,7 @@ export const useUpdateNotificationController = () => {
   );
 
   const checkForUpdates = useCallback(async () => {
+    if (offline === true) return;
     dispatch({ type: 'checkStarted' });
 
     const outcome = await runUpdateCheck({
@@ -145,7 +149,7 @@ export const useUpdateNotificationController = () => {
         dispatch({ type: 'checkError', message: outcome.message });
         return;
     }
-  }, [t]);
+  }, [offline, t]);
 
   // Present an already-fetched "available" outcome directly, with no checking
   // flash and no second IPC check. Respects an in-progress/ready download so a
@@ -220,6 +224,7 @@ export const useUpdateNotificationController = () => {
 
   const openUpdateNotification = useCallback(
     (source: UpdateNotificationOpenSource, userInitiated: boolean) => {
+      if (offline === true) return;
       // Discontinued build: every manual entry point (tray / menu / IPC-open)
       // opens the migration card instead of checking. Flag is compile-time, so
       // this branch is stripped from normal builds.
@@ -237,7 +242,7 @@ export const useUpdateNotificationController = () => {
         void checkForUpdates();
       }
     },
-    [checkForUpdates]
+    [checkForUpdates, offline]
   );
 
   useEffect(() => {
@@ -463,6 +468,7 @@ export const useUpdateNotificationController = () => {
   return {
     state,
     versionLabel,
+    offline,
     showManualInstallFallback,
     actions: {
       checkForUpdates,

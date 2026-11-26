@@ -110,9 +110,14 @@ sessions, permission changes, restart and separate 35-second startup observation
 It seeds the exact persisted user setting to disable automatic update checks,
 without an environment guard or endpoint exception. Separate tests require the
 default-on request to Studio Releases and quiet blocked-network behavior.
-An offline-mode startup scenario also exercises the persisted switch, disabled manual
-check and document asset policy in the installed app. Separate checks cover bundled
-MCP startup/tools-list, and a real local Monaco editor/HTML worker.
+The offline-mode scenario checks disabled manual updates, file wheel installation and
+listing, Index and Git refusal, and a configured loopback MCP server's tool list.
+It checks both the default and extension-settings partitions with preconnect, CSS,
+scripts, frames, `srcdoc`, and a service worker. The extension partition is exercised
+both on first entry with the mode on and when the live switch closes an existing
+connection. The installed Provider Preview qualification runs synthetic provider
+turns with offline mode on. Separate checks cover bundled MCP startup and a real local
+Monaco editor and HTML worker.
 
 Local source/engine fixtures are distinct from installed app acceptance and exact-
 head CI. No real provider credentials are used. macOS Monaco fixture evidence
