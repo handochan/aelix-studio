@@ -209,11 +209,13 @@ describe('preview download behavior', () => {
     'downloads the original bytes for an Explorer-backed Excel tab',
     async () => {
       const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01]);
-      mocks.fetch.mockResolvedValue(
-        new Response(bytes, {
-          headers: { 'Content-Type': 'application/octet-stream' },
-        })
-      );
+      mocks.fetch
+        .mockResolvedValueOnce(Response.json({ data: { file_content_binary_post: true } }))
+        .mockResolvedValueOnce(
+          new Response(bytes, {
+            headers: { 'Content-Type': 'application/octet-stream' },
+          })
+        );
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));
@@ -230,7 +232,6 @@ describe('preview download behavior', () => {
           method: 'POST',
           body: JSON.stringify({
             file: { kind: 'project', pe_id: 'peA', relative_path: 'sheets/budget.xlsx' },
-            encoding: 'base64',
           }),
         })
       );
@@ -311,10 +312,7 @@ describe('preview download behavior', () => {
 
       const downloadButton = await screen.findByTitle('preview.downloadFile');
       fireEvent.click(downloadButton);
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(messageError).toHaveBeenCalledWith('Failed to download');
+      await waitFor(() => expect(messageError).toHaveBeenCalledWith('Failed to download'));
       expect(downloadedBlobs).toHaveLength(0);
       expect(downloadedNames).toHaveLength(0);
     },

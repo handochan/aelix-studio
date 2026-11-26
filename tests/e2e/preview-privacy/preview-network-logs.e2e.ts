@@ -19,7 +19,14 @@ const INVALID_IMAGE = `data:image/png;base64,${IMAGE_MARKER}!`;
 const CHARSET_MARKER = 'cHJpdmF0ZS1jaGFyc2V0';
 const INVALID_CHARSET = `data:image/png;charset=bad value;base64,${CHARSET_MARKER}`;
 const SVG = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="2" height="2"/>')}`;
+const SVG_WITH_TITLE = SVG.replace('image/svg+xml,', 'image/svg+xml;title="simple",');
+const SVG_WITH_LITERAL_PERCENT = `data:image/svg+xml,${encodeURIComponent(
+  '<svg xmlns="http://www.w3.org/2000/svg" width="50%" height="2" viewBox="0 0 2 2"/>'
+).replace('%25', '%')}`;
 const REQUEST_FILE = { kind: 'project', pe_id: 'fixture-project', relative_path: PATH_MARKER } as const;
+const ORIGINAL_BYTES = Buffer.from([0, 255, 42]);
+// Model the old Host's JSON limit without downloading hundreds of MiB in PR CI.
+const LEGACY_JSON_LIMIT = 2;
 
 test('preview failures keep file paths and image bytes out of Chromium logs', async () => {
   const sandbox = await mkdtemp(join(tmpdir(), 'studio-preview-privacy-'));
@@ -47,6 +54,20 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
       response.end(bundle.outputFiles[0].text);
       return;
     }
+    if (request.url === '/api/system/info') {
+      response.setHeader('Content-Type', 'application/json');
+      response.end(JSON.stringify({ data: downloadResponse === 'legacy' ? {} : { file_content_binary_post: true } }));
+      return;
+    }
+    if (request.url?.startsWith('/api/fs/stream?') && request.method === 'GET' && downloadResponse === 'legacy') {
+      const ref = new URL(request.url, 'http://127.0.0.1').searchParams;
+      if (ref.get('pe_id') === REQUEST_FILE.pe_id && ref.get('relative_path') === REQUEST_FILE.relative_path) {
+        lastDownload = { url: request.url, method: request.method, csrf: undefined, body: undefined };
+        response.setHeader('Content-Type', 'application/pdf');
+        response.end(ORIGINAL_BYTES);
+        return;
+      }
+    }
     if (request.url === '/api/fs/content' && request.method === 'POST') {
       const chunks: Buffer[] = [];
       for await (const chunk of request) chunks.push(chunk);
@@ -65,12 +86,16 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
       };
       if (downloadResponse === 'stream') {
         response.setHeader('Content-Type', 'application/octet-stream');
-        response.end(Buffer.from([0, 255, 42]));
+        response.end(ORIGINAL_BYTES);
         return;
       }
       if (downloadResponse === 'legacy') {
         response.setHeader('Content-Type', 'application/json');
-        response.end(JSON.stringify({ success: true, data: 'AP8q' }));
+        if (ORIGINAL_BYTES.byteLength > LEGACY_JSON_LIMIT) {
+          response.writeHead(400).end(JSON.stringify({ success: false }));
+          return;
+        }
+        response.end(JSON.stringify({ success: true, data: ORIGINAL_BYTES.toString('base64') }));
         return;
       }
     }
@@ -154,7 +179,7 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
       method: 'POST',
       accept: 'application/octet-stream',
       csrf: 'fixture-csrf',
-      body: { file: REQUEST_FILE, encoding: 'base64' },
+      body: { file: REQUEST_FILE },
     });
     await expect.poll(() => log.some((entry) => entry.includes('/api/fs/content') && entry.includes('403'))).toBe(true);
 
@@ -163,8 +188,11 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
       await expect(page.getByText('Failed to load image')).toBeVisible();
       await expect(page.locator('img')).toHaveCount(0);
     }
-    await page.evaluate((content) => window.previewPrivacy.openImage({ content }), SVG);
-    await expect.poll(() => page.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(2);
+    for (const content of [SVG, SVG_WITH_TITLE, SVG_WITH_LITERAL_PERCENT]) {
+      await page.evaluate((source) => window.previewPrivacy.openImage({ content: source }), content);
+      await expect(page.locator('img')).toHaveAttribute('src', content);
+      await expect.poll(() => page.locator('img').evaluate((image: HTMLImageElement) => image.naturalWidth)).toBe(2);
+    }
     await page.evaluate((fileRef) => window.previewPrivacy.openImage({ fileRef }), REQUEST_FILE);
     await expect(page.getByText('Failed to load image')).toBeVisible();
     await expect(page.locator('img')).toHaveCount(0);
@@ -174,6 +202,7 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
 
     for (const mode of ['stream', 'legacy'] as const) {
       downloadResponse = mode;
+      const before = urls.length;
       const bytes = await page.evaluate(async (file) => {
         const createObjectURL = URL.createObjectURL;
         let download: Promise<ArrayBuffer> | undefined;
@@ -191,7 +220,11 @@ test('preview failures keep file paths and image bytes out of Chromium logs', as
           document.removeEventListener('click', cancelNavigation);
         }
       }, REQUEST_FILE);
-      expect(bytes).toEqual([0, 255, 42]);
+      expect(bytes).toEqual([...ORIGINAL_BYTES]);
+      expect(lastDownload?.method).toBe(mode === 'stream' ? 'POST' : 'GET');
+      expect(urls.slice(before).filter((url) => url.includes('/api/fs/content'))).toHaveLength(
+        mode === 'stream' ? 1 : 0
+      );
     }
   } finally {
     await app?.close();
