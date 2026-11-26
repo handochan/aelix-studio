@@ -143,6 +143,10 @@
       "reduce_context": "Reduce el contenido del mensaje, los archivos referenciados o el tamaño del contexto, luego reintenta.",
       "send_feedback": "Envía comentarios con registros para que el equipo pueda investigar."
     },
+    "actions": {
+      "chooseModel": "Elegir modelo",
+      "openModelSettings": "Abrir ajustes de modelos"
+    },
     "ownership": {
       "aionui": "Aplicación",
       "user_agent": "Agente",
@@ -363,7 +367,30 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "El turno falló después del envío",
-        "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. No se reenviará automáticamente. Revise el historial antes de reenviar."
+        "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. No se reenviará automáticamente. Revise el historial antes de reenviar.",
+        "afterDispatchNote": "Es posible que algunos pasos de este turno ya se hayan ejecutado, así que revisa la conversación antes de volver a enviar.",
+        "causes": {
+          "providerAuth": {
+            "title": "El proveedor rechazó tu clave API",
+            "body": "El proveedor de modelos no aceptó tu clave API ni las credenciales de la cuenta. Revísalas en Ajustes → Modelo y vuelve a enviar el mensaje."
+          },
+          "providerRateLimit": {
+            "title": "El proveedor está limitando las solicitudes",
+            "body": "Se alcanzó el límite de velocidad o la cuota del proveedor de modelos. Espera un momento y vuelve a enviar el mensaje. No se reenvía automáticamente."
+          },
+          "providerUnavailable": {
+            "title": "El proveedor no está disponible",
+            "body": "El proveedor de modelos está caído o sobrecargado. Espera un momento y vuelve a enviar el mensaje. No se reenvía automáticamente."
+          },
+          "providerBadRequest": {
+            "title": "El proveedor rechazó la solicitud",
+            "body": "El proveedor de modelos indicó que la solicitud no es válida, por ejemplo porque el modelo seleccionado no la admite. Revisa el modelo y el proveedor en Ajustes → Modelo y vuelve a enviar el mensaje."
+          },
+          "providerNetwork": {
+            "title": "No se pudo conectar con el proveedor",
+            "body": "Un error de red interrumpió la conexión con el proveedor de modelos. Revisa tu red o proxy y vuelve a enviar el mensaje. No se reenvía automáticamente."
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "El agente está ocupado",
@@ -376,7 +403,13 @@
         "profileUnavailable": "Perfil no disponible: {{profile}}. Restáurelo o inicie una nueva sesión.",
         "extensionOwnedByLaunch": "Esta extensión se controla desde la configuración de inicio: {{source}}. Modifíquela allí.",
         "runtimeControlRequired": "Esta operación requiere control de ejecución. Use los controles de ejecución de la sesión.",
-        "clientActionRequired": "Esta operación requiere una acción del cliente. Complete la acción solicitada en Studio."
+        "clientActionRequired": "Esta operación requiere una acción del cliente. Complete la acción solicitada en Studio.",
+        "modelSelectionRequired": {
+          "title": "Elige un modelo primero",
+          "body": "Tu mensaje no se envió porque no hay ningún modelo seleccionado. Elige un modelo y vuelve a enviar el mensaje.",
+          "noModelsTitle": "Añade un modelo primero",
+          "noModelsBody": "Tu mensaje no se envió porque no hay modelos disponibles. Añade un modelo en Ajustes → Modelo, selecciónalo y vuelve a enviar el mensaje."
+        }
       }
     }
   },

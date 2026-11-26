@@ -7,6 +7,7 @@
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { classifyConfigSetError, type AcpConfigOptionsPort } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { useModelPickerOpener } from '@/renderer/hooks/agent/useModelPickerOpener';
 import { getModelDisplayLabel } from '@/renderer/utils/model/agentLogo';
 import { iconColors } from '@/renderer/styles/colors';
 import { Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
@@ -112,6 +113,22 @@ const AcpModelSelector: React.FC<{
   useEffect(() => {
     onRuntimeReadyChange?.(isRuntimeReady);
   }, [isRuntimeReady, onRuntimeReadyChange]);
+
+  // The picker is open only for the conversation it was opened for and only while its list is
+  // switchable. Once it is not visible the request is dropped, so a picker that leaves the
+  // switchable state (runtime restart, blocked option) or another conversation never pops open
+  // by itself later. An error card's "Choose model" opens it the same way a click does.
+  const [openFor, setOpenFor] = useState<string | null>(null);
+  const canOpenPicker = Boolean(model_info) && canSwitch;
+  const pickerOpen = canOpenPicker && openFor === conversation_id;
+  useEffect(() => {
+    if (!pickerOpen) setOpenFor(null);
+  }, [pickerOpen]);
+  const handlePickerVisibleChange = useCallback(
+    (visible: boolean) => setOpenFor(visible ? conversation_id : null),
+    [conversation_id]
+  );
+  useModelPickerOpener(conversation_id, canOpenPicker ? () => setOpenFor(conversation_id) : undefined);
 
   const defaultModelLabel = t('common.defaultModel');
   const rawDisplayLabel =
@@ -221,6 +238,8 @@ const AcpModelSelector: React.FC<{
   return (
     <Dropdown
       trigger='click'
+      popupVisible={pickerOpen}
+      onVisibleChange={handlePickerVisibleChange}
       // Mobile: portal the popup to <body> so it escapes the titlebar slot.
       // Desktop: leave default container so click events reach Menu.Item normally.
       {...(isMobileHeaderCompact ? { getPopupContainer: () => document.body } : {})}

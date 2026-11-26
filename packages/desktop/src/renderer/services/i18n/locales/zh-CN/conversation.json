@@ -143,6 +143,10 @@
       "reduce_context": "请减少消息内容、引用文件或上下文大小后重试。",
       "send_feedback": "请提交反馈并附带日志，方便团队排查。"
     },
+    "actions": {
+      "chooseModel": "选择模型",
+      "openModelSettings": "打开模型设置"
+    },
     "ownership": {
       "aionui": "应用",
       "user_agent": "Agent",
@@ -363,7 +367,30 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "发送后轮次失败",
-        "body": "模型或工具可能已运行。此轮次不会自动重发。再次发送前请检查历史记录。"
+        "body": "模型或工具可能已运行。此轮次不会自动重发。再次发送前请检查历史记录。",
+        "afterDispatchNote": "此轮次中的部分步骤可能已经运行，再次发送前请先检查对话。",
+        "causes": {
+          "providerAuth": {
+            "title": "模型服务商拒绝了你的 API 密钥",
+            "body": "模型服务商未接受你的 API 密钥或账号凭据。请在“设置 → 模型”中检查后再次发送。"
+          },
+          "providerRateLimit": {
+            "title": "模型服务商正在限流",
+            "body": "已达到模型服务商的速率限制或配额。请稍候再次发送。消息不会自动重发。"
+          },
+          "providerUnavailable": {
+            "title": "模型服务商暂不可用",
+            "body": "模型服务商服务中断或负载过高。请稍候再次发送。消息不会自动重发。"
+          },
+          "providerBadRequest": {
+            "title": "模型服务商拒绝了请求",
+            "body": "模型服务商认为请求无效，例如所选模型不支持该请求。请在“设置 → 模型”中检查模型和服务商后再次发送。"
+          },
+          "providerNetwork": {
+            "title": "无法连接模型服务商",
+            "body": "网络错误中断了与模型服务商的连接。请检查网络或代理后再次发送。消息不会自动重发。"
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "代理正忙",
@@ -376,7 +403,13 @@
         "profileUnavailable": "配置文件不可用：{{profile}}。请恢复配置文件或开始新会话。",
         "extensionOwnedByLaunch": "此扩展由启动配置控制：{{source}}。请在该配置中修改。",
         "runtimeControlRequired": "此操作需要运行时控制。请使用会话运行时控件。",
-        "clientActionRequired": "此操作需要客户端操作。请在 Studio 中完成请求的操作。"
+        "clientActionRequired": "此操作需要客户端操作。请在 Studio 中完成请求的操作。",
+        "modelSelectionRequired": {
+          "title": "请先选择模型",
+          "body": "尚未选择模型，因此消息未发送。请选择模型后再次发送。",
+          "noModelsTitle": "请先添加模型",
+          "noModelsBody": "当前没有可用模型，因此消息未发送。请在“设置 → 模型”中添加模型，选择后再次发送。"
+        }
       }
     }
   },

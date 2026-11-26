@@ -15,6 +15,8 @@ import ButlerDiagnoseButton from '@renderer/components/base/ButlerDiagnoseButton
 import FeedbackButton from '@renderer/components/base/FeedbackButton';
 import CollapsibleContent from '@renderer/components/chat/CollapsibleContent';
 import { iconColors } from '@/renderer/styles/colors';
+import AelixErrorAction from '@renderer/pages/conversation/Messages/acp/AelixErrorAction';
+import { resolveAelixErrorCopy } from '@renderer/pages/conversation/Messages/acp/aelixErrorGuidance';
 
 // One entry per `IMessageTips['type']`. `info` was missing, and the render
 // falls back to `warning`, so every informational tip was drawn with the alarm
@@ -98,12 +100,18 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
 
   if (structuredError) {
     const errorCode = structuredError.code;
+    // Exact builtin Aelix shapes get specific copy and a next action; any other shape keeps the generic card.
+    const aelixCopy = resolveAelixErrorCopy(structuredError, t);
     const ownership = structuredError.ownership;
-    const title = errorCode
-      ? t(`conversation.agentError.codes.${errorCode}.title`, {
-          defaultValue: t('conversation.agentError.fallbackTitle'),
-        })
-      : t('conversation.agentError.fallbackTitle');
+    // Only the label follows the guidance; feedback metadata keeps the reported ownership.
+    const displayOwnership = aelixCopy?.ownership ?? ownership;
+    const title =
+      aelixCopy?.title ??
+      (errorCode
+        ? t(`conversation.agentError.codes.${errorCode}.title`, {
+            defaultValue: t('conversation.agentError.fallbackTitle'),
+          })
+        : t('conversation.agentError.fallbackTitle'));
     const errorData =
       structuredError.data && typeof structuredError.data === 'object' && !Array.isArray(structuredError.data)
         ? (structuredError.data as Record<string, unknown>)
@@ -174,24 +182,27 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
       (action === 'install' || action === 'update' || action === 'remove')
         ? action
         : undefined;
-    const body = studioExtensionAction
-      ? t(`acp.studioExtensionManagement.${studioExtensionAction}`)
-      : errorCode
-        ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
-            workspacePath: structuredError.workspacePath,
-            methods,
-            profile,
-            source,
-            defaultValue: structuredError.message || content,
-          })
-        : structuredError.message || content;
-    const ownershipLabel = ownership
-      ? t(`conversation.agentError.ownership.${ownership}`, {
+    const body =
+      aelixCopy?.body ??
+      (studioExtensionAction
+        ? t(`acp.studioExtensionManagement.${studioExtensionAction}`)
+        : errorCode
+          ? t(`conversation.agentError.codes.${errorCode}.${bodyVariant}`, {
+              workspacePath: structuredError.workspacePath,
+              methods,
+              profile,
+              source,
+              defaultValue: structuredError.message || content,
+            })
+          : structuredError.message || content);
+    const ownershipLabel = displayOwnership
+      ? t(`conversation.agentError.ownership.${displayOwnership}`, {
           defaultValue: t('conversation.agentError.ownership.unknown_upstream'),
         })
       : null;
+    // Guided cards state their own next step; "Needs configuration" would contradict "wait and send again".
     const retryHint =
-      structuredError.retryable === undefined
+      aelixCopy || structuredError.retryable === undefined
         ? null
         : structuredError.retryable
           ? t('conversation.agentError.retryable')
@@ -240,7 +251,7 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
             <div className='flex-1 min-w-0 flex flex-col gap-6px'>
               <div className='flex flex-wrap items-center gap-6px'>
                 {ownershipLabel && (
-                  <Tag size='small' color={ownership ? ownershipColor[ownership] : 'gray'}>
+                  <Tag size='small' color={displayOwnership ? ownershipColor[displayOwnership] : 'gray'}>
                     {ownershipLabel}
                   </Tag>
                 )}
@@ -252,8 +263,16 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
               </div>
               <div className='font-500 text-t-primary [word-break:break-word]'>{title}</div>
               <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{body}</div>
+              {aelixCopy?.note && (
+                <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{aelixCopy.note}</div>
+              )}
               {resolutionHint && (
                 <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{resolutionHint}</div>
+              )}
+              {aelixCopy?.action && (
+                <div className='flex'>
+                  <AelixErrorAction action={aelixCopy.action} conversationId={message.conversation_id} />
+                </div>
               )}
               {detailParts.length > 0 && (
                 <Collapse bordered={false} className='bg-transparent' defaultActiveKey={['technical-details']}>
@@ -271,7 +290,9 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
           </div>
           {shouldShowButler && (
             <div className='flex justify-end'>
-              <ButlerDiagnoseButton errorText={[title, body, ...detailParts].filter(Boolean).join('\n')} />
+              <ButlerDiagnoseButton
+                errorText={[title, body, aelixCopy?.note, ...detailParts].filter(Boolean).join('\n')}
+              />
               {shouldShowFeedback && (
                 <FeedbackButton
                   module='conversation-session'

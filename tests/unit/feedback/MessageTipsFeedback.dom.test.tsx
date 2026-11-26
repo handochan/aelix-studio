@@ -72,6 +72,10 @@ import MessageTips from '@/renderer/pages/conversation/Messages/components/Messa
 import { normalizeDbMessage } from '@/renderer/pages/conversation/Messages/hooks';
 import type { AgentStreamErrorInfo, IMessageTips } from '@/common/chat/chatLib';
 import { composeMessage, transformMessage } from '@/common/chat/chatLib';
+import { BackendHttpError } from '@/common/adapter/httpBridge';
+import { buildSendFailureError } from '@/renderer/pages/conversation/platforms/acp/buildSendFailureError';
+import { useModelPickerOpener } from '@/renderer/hooks/agent/useModelPickerOpener';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const requiredAgentErrorCodes = [
   'USER_AGENT_SESSION_LOCKED',
@@ -870,4 +874,300 @@ describe.each(['live', 'history', 'serialized history'] as const)('MCP warning t
     renderWarning(mcpWarning(content));
     expect(screen.getByText(content)).toBeInTheDocument();
   });
+});
+
+// Host bodies from aelix-studio-host #77 (model refusal) and #82 (provider cause).
+const MODEL_REFUSAL_MESSAGE = 'The Agent cannot perform this operation';
+const TURN_FAILED_MESSAGE = 'The turn failed after the Agent accepted it';
+const modelSelectionData = (availableModels: unknown = 2) => ({
+  kind: 'model_selection_required',
+  configId: 'model',
+  availableModels,
+  retryable: false,
+});
+const modelRefusal = (data: unknown = modelSelectionData(), protocol_code = -32004): AgentStreamErrorInfo => ({
+  message: MODEL_REFUSAL_MESSAGE,
+  protocol_code,
+  data,
+  code: 'USER_AGENT_OPERATION_REFUSED',
+  ownership: 'user_agent',
+  detail: 'ACP request failed',
+  retryable: false,
+  feedback_recommended: false,
+});
+const providerFailureData = (cause: unknown) => ({ kind: 'turn_failed_after_dispatch', retryable: false, cause });
+const providerFailure = (
+  data: unknown = providerFailureData({ kind: 'provider_auth', retryable: false }),
+  protocol_code = -33002
+): AgentStreamErrorInfo => ({
+  message: TURN_FAILED_MESSAGE,
+  protocol_code,
+  data,
+  code: 'USER_AGENT_TURN_FAILED_AFTER_DISPATCH',
+  ownership: 'user_agent',
+  detail: 'ACP request failed',
+  retryable: false,
+  feedback_recommended: false,
+});
+const aelixTip = (error: AgentStreamErrorInfo, content = error.message): IMessageTips =>
+  ({
+    id: 'aelix-tip',
+    type: 'tips',
+    conversation_id: 'conv-1',
+    content: { type: 'error', content, error },
+  }) as IMessageTips;
+
+const LocationProbe = () => <div data-testid='location'>{useLocation().pathname}</div>;
+// Stands in for a model picker that can switch models in the given conversation.
+const PickerProbe: React.FC<{ conversationId: string; open: () => void }> = ({ conversationId, open }) => {
+  useModelPickerOpener(conversationId, open);
+  return null;
+};
+// Includes the i18n provider so a rerender keeps it.
+const guidanceTree = (message: IMessageTips, pickers: Record<string, () => void> = {}) => (
+  <I18nextProvider i18n={i18n}>
+    <MemoryRouter initialEntries={['/conversation/conv-1']}>
+      {Object.entries(pickers).map(([conversationId, open]) => (
+        <PickerProbe key={conversationId} conversationId={conversationId} open={open} />
+      ))}
+      <MessageTips message={message} />
+      <LocationProbe />
+    </MemoryRouter>
+  </I18nextProvider>
+);
+const renderGuidance = (message: IMessageTips, pickers?: Record<string, () => void>) =>
+  renderComponent(guidanceTree(message, pickers));
+
+const refusedCopy = enConversation.agentError.codes.USER_AGENT_OPERATION_REFUSED;
+const turnFailedCopy = enConversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH;
+const actionCopy = enConversation.agentError.actions;
+const guidanceActionName = new RegExp(`^(${actionCopy.chooseModel}|${actionCopy.openModelSettings})$`);
+
+describe('builtin Aelix error guidance', () => {
+  afterEach(cleanup);
+
+  it('asks for a model and offers the conversation model picker', () => {
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-1': vi.fn() });
+    expect(screen.getByText(refusedCopy.modelSelectionRequired.title)).toBeInTheDocument();
+    expect(screen.getByText(refusedCopy.modelSelectionRequired.body)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeEnabled();
+  });
+
+  it('opens only the model picker of this conversation and does not resend or navigate', async () => {
+    const [ownPicker, otherPicker] = [vi.fn(), vi.fn()];
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-1': ownPicker, 'conv-2': otherPicker });
+    await userEvent.click(screen.getByRole('button', { name: actionCopy.chooseModel }));
+    expect([ownPicker.mock.calls.length, otherPicker.mock.calls.length]).toEqual([1, 0]);
+    expect(screen.getByTestId('location')).toHaveTextContent('/conversation/conv-1');
+  });
+
+  it('disables Choose model while no picker of this conversation can switch models', () => {
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-2': vi.fn() });
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeDisabled();
+  });
+
+  it('enables Choose model once the picker of this conversation can switch models', () => {
+    const message = aelixTip(modelRefusal());
+    const { rerender } = renderGuidance(message);
+    rerender(guidanceTree(message, { 'conv-1': vi.fn() }));
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeEnabled();
+  });
+
+  it('points to model settings instead of the picker when no models are available', async () => {
+    renderGuidance(aelixTip(modelRefusal(modelSelectionData(0))));
+    expect(screen.getByText(refusedCopy.modelSelectionRequired.noModelsTitle)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: actionCopy.chooseModel })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: actionCopy.openModelSettings }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings/model');
+  });
+
+  it('offers no picker action when the tip has no conversation to target', () => {
+    const tip = aelixTip(modelRefusal());
+    renderGuidance({ ...tip, conversation_id: '' });
+    expect(screen.getByText(refusedCopy.modelSelectionRequired.title)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: guidanceActionName })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['provider_auth', turnFailedCopy.causes.providerAuth, actionCopy.openModelSettings],
+    ['provider_bad_request', turnFailedCopy.causes.providerBadRequest, actionCopy.openModelSettings],
+    ['provider_rate_limit', turnFailedCopy.causes.providerRateLimit, undefined],
+    ['provider_unavailable', turnFailedCopy.causes.providerUnavailable, undefined],
+    ['provider_network', turnFailedCopy.causes.providerNetwork, undefined],
+  ])('explains %s as a provider problem with the right next step', (kind, copy, action) => {
+    renderGuidance(aelixTip(providerFailure(providerFailureData({ kind, retryable: false }))));
+    expect(screen.getByText(copy.title)).toBeInTheDocument();
+    expect(screen.getByText(copy.body)).toBeInTheDocument();
+    const actionButton = screen.queryByRole('button', { name: guidanceActionName });
+    expect(actionButton?.textContent ?? undefined).toBe(action);
+  });
+
+  it.each(['provider_auth', 'provider_rate_limit', 'provider_unavailable', 'provider_bad_request', 'provider_network'])(
+    'warns for %s that earlier steps of the dispatched turn may already have run',
+    (kind) => {
+      renderGuidance(aelixTip(providerFailure(providerFailureData({ kind, retryable: false }))));
+      expect(screen.getByText(/may already have run/)).toBeInTheDocument();
+    }
+  );
+
+  it('does not add the dispatched-turn warning to the model selection refusal, which never ran', () => {
+    renderGuidance(aelixTip(modelRefusal()));
+    expect(screen.queryByText(/may already have run/)).not.toBeInTheDocument();
+  });
+
+  it('labels provider causes as model provider problems without the "Needs configuration" tag', () => {
+    renderGuidance(aelixTip(providerFailure(providerFailureData({ kind: 'provider_rate_limit', retryable: false }))));
+    expect(screen.getByText(enConversation.agentError.ownership.user_llm_provider)).toBeInTheDocument();
+    expect(screen.queryByText(enConversation.agentError.notRetryable)).not.toBeInTheDocument();
+  });
+
+  it('opens provider settings for a rejected API key without resending', async () => {
+    const picker = vi.fn();
+    renderGuidance(aelixTip(providerFailure()), { 'conv-1': picker });
+    await userEvent.click(screen.getByRole('button', { name: actionCopy.openModelSettings }));
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings/model');
+    expect(picker).not.toHaveBeenCalled();
+  });
+
+  it('keeps the generic dispatch failure text for an unknown cause', () => {
+    renderGuidance(aelixTip(providerFailure(providerFailureData({ kind: 'unknown', retryable: false }))));
+    expect(screen.getByText(turnFailedCopy.title)).toBeInTheDocument();
+    expect(screen.getByText(turnFailedCopy.body)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: guidanceActionName })).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['an extra field', { ...modelSelectionData(), extra: true }],
+    ['a missing field', { kind: 'model_selection_required', configId: 'model', availableModels: 2 }],
+    ['a negative count', modelSelectionData(-1)],
+    ['a fractional count', modelSelectionData(1.5)],
+    ['a string count', modelSelectionData('2')],
+    ['a count above u32', modelSelectionData(2 ** 32)],
+    ['another config id', { ...modelSelectionData(), configId: 'mode' }],
+    ['retryable true', { ...modelSelectionData(), retryable: true }],
+    ['null data', null],
+    ['array data', [modelSelectionData()]],
+  ])('falls back to the generic refusal card for model refusal data with %s', (_case, data) => {
+    renderGuidance(aelixTip(modelRefusal(data)));
+    expect(screen.getByText(refusedCopy.title)).toBeInTheDocument();
+    expect(screen.getByText(refusedCopy.body)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: guidanceActionName })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic refusal card when the model refusal has another protocol code', () => {
+    renderGuidance(aelixTip(modelRefusal(modelSelectionData(), -32000)));
+    expect(screen.getByText(refusedCopy.title)).toBeInTheDocument();
+    expect(screen.queryByText(refusedCopy.modelSelectionRequired.title)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['an unlisted cause', providerFailureData({ kind: 'provider_quota', retryable: false })],
+    ['a retryable cause', providerFailureData({ kind: 'provider_auth', retryable: true })],
+    ['an extra cause field', providerFailureData({ kind: 'provider_auth', retryable: false, message: 'peer' })],
+    ['a non-object cause', providerFailureData('provider_auth')],
+    ['no cause', { kind: 'turn_failed_after_dispatch', retryable: false }],
+    ['a retryable turn', { ...providerFailureData({ kind: 'provider_auth', retryable: false }), retryable: true }],
+    ['another outer kind', { ...providerFailureData({ kind: 'provider_auth', retryable: false }), kind: 'other' }],
+    ['an extra outer field', { ...providerFailureData({ kind: 'provider_auth', retryable: false }), extra: 1 }],
+  ])('falls back to the generic dispatch failure card for provider data with %s', (_case, data) => {
+    renderGuidance(aelixTip(providerFailure(data)));
+    expect(screen.getByText(turnFailedCopy.title)).toBeInTheDocument();
+    expect(screen.getByText(turnFailedCopy.body)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: guidanceActionName })).not.toBeInTheDocument();
+  });
+
+  it('falls back to the generic dispatch failure card when the provider failure has another protocol code', () => {
+    renderGuidance(aelixTip(providerFailure(undefined, -32603)));
+    expect(screen.getByText(turnFailedCopy.title)).toBeInTheDocument();
+    expect(screen.queryByText(turnFailedCopy.causes.providerAuth.title)).not.toBeInTheDocument();
+  });
+
+  it.each([
+    ['model refusal', modelRefusal()],
+    ['provider failure', providerFailure()],
+  ])('never shows peer text for a guided %s', (_case, error) => {
+    const peerText = 'PEER TEXT sk-live-1234';
+    const { container } = renderGuidance(aelixTip({ ...error, message: peerText }, peerText));
+    expect(container.textContent).not.toContain(peerText);
+  });
+});
+
+describe.each(['live stream', 'history row', 'serialized history row', 'HTTP send failure'] as const)(
+  'builtin Aelix guidance from a %s',
+  (source) => {
+    afterEach(cleanup);
+
+    // Each source carries the same host error object in its own envelope.
+    const tipFrom = (error: AgentStreamErrorInfo): IMessageTips => {
+      const metadata = { type: 'tips' as const, conversation_id: 'conv-1', msg_id: 'msg-1' };
+      const tipContent = { content: error.message, type: 'error' as const, error };
+      let message: unknown;
+      if (source === 'live stream') {
+        message = transformMessage({ type: 'error', conversation_id: 'conv-1', msg_id: 'msg-1', data: error });
+      } else if (source === 'HTTP send failure') {
+        const httpError = new BackendHttpError({
+          method: 'POST',
+          path: '/api/conversations/conv-1/messages',
+          status: 502,
+          body: { success: false, code: error.code, error: error.message, details: error },
+        });
+        message = {
+          ...metadata,
+          id: 'send-failure',
+          content: { ...tipContent, error: buildSendFailureError(httpError, error.message) },
+        };
+      } else {
+        message = normalizeDbMessage({
+          ...metadata,
+          id: 'history-tip',
+          content: source === 'history row' ? tipContent : JSON.stringify(tipContent),
+        } as IMessageTips);
+      }
+      if ((message as IMessageTips | undefined)?.type !== 'tips') throw new Error('Expected an error tip');
+      return message as IMessageTips;
+    };
+
+    it('shows the model selection guidance', () => {
+      renderGuidance(tipFrom(modelRefusal()));
+      expect(screen.getByText(refusedCopy.modelSelectionRequired.title)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeInTheDocument();
+    });
+
+    it('shows the provider cause guidance', () => {
+      renderGuidance(tipFrom(providerFailure()));
+      expect(screen.getByText(turnFailedCopy.causes.providerAuth.title)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: actionCopy.openModelSettings })).toBeInTheDocument();
+    });
+  }
+);
+
+const guidanceCopy = (locale: typeof enConversation) => {
+  const codes = locale.agentError.codes;
+  const causes = codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes;
+  return [
+    locale.agentError.actions.chooseModel,
+    locale.agentError.actions.openModelSettings,
+    codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.afterDispatchNote,
+    ...Object.values<string>(codes.USER_AGENT_OPERATION_REFUSED.modelSelectionRequired),
+    ...['providerAuth', 'providerRateLimit', 'providerUnavailable', 'providerBadRequest', 'providerNetwork'].flatMap(
+      (cause) => [causes[cause]?.title, causes[cause]?.body]
+    ),
+  ];
+};
+
+describe('builtin Aelix guidance locale copy', () => {
+  const localeDir = path.join(process.cwd(), 'packages/desktop/src/renderer/services/i18n/locales');
+  const english = guidanceCopy(enConversation);
+
+  it.each(supportedLocaleNames.filter((localeName) => localeName !== 'en-US'))(
+    'translates every guidance string in %s',
+    (localeName) => {
+      const locale = JSON.parse(readFileSync(path.join(localeDir, localeName, 'conversation.json'), 'utf8'));
+      const copy = guidanceCopy(locale);
+      expect(copy).toHaveLength(english.length);
+      expect(copy.filter((text, index) => typeof text !== 'string' || !text.trim() || text === english[index])).toEqual(
+        []
+      );
+    }
+  );
 });

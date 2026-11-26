@@ -11,6 +11,7 @@ import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
 import type { AcpModelInfo } from '@/common/types/platform/acpTypes';
 import type { AcpConfigSetStatus, AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import * as configOptions from '@/renderer/hooks/agent/useAcpConfigOptions';
+import { openModelPicker } from '@/renderer/hooks/agent/useModelPickerOpener';
 
 const { messageSuccessMock, messageErrorMock, useAcpModelInfoMock } = vi.hoisted(() => ({
   messageSuccessMock: vi.fn(),
@@ -163,10 +164,23 @@ vi.mock('@arco-design/web-react', () => {
         {children}
       </button>
     ),
-    Dropdown: ({ children, droplist }: { children?: React.ReactNode; droplist?: React.ReactNode }) => (
-      <div>
+    Dropdown: ({
+      children,
+      droplist,
+      popupVisible,
+      onVisibleChange,
+    }: {
+      children?: React.ReactNode;
+      droplist?: React.ReactNode;
+      popupVisible?: boolean;
+      onVisibleChange?: (visible: boolean) => void;
+    }) => (
+      <div data-testid='model-dropdown' data-popup-visible={String(Boolean(popupVisible))}>
         {children}
         {droplist}
+        <button type='button' onClick={() => onVisibleChange?.(false)}>
+          close dropdown
+        </button>
       </div>
     ),
     Menu,
@@ -534,5 +548,85 @@ describe('AcpModelSelector runtime options', () => {
     await act(async () => {
       resolveTrigger?.();
     });
+  });
+});
+
+describe('AcpModelSelector opened by an error card', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useAcpModelInfoMock.mockReturnValue(makeResult());
+  });
+
+  const openFor = (conversationId: string) => {
+    let opened = false;
+    act(() => {
+      opened = openModelPicker(conversationId);
+    });
+    return opened;
+  };
+
+  it('opens the model picker of the targeted conversation', () => {
+    render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'true');
+  });
+
+  it('offers no picker to open while the model list cannot be switched', () => {
+    useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
+    render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(openFor('conversation-1')).toBe(false);
+  });
+
+  it('stops offering its picker once unmounted', () => {
+    const { unmount } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    unmount();
+    expect(openFor('conversation-1')).toBe(false);
+  });
+
+  it('leaves the picker of another conversation closed', () => {
+    render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-2');
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('closes again through the dropdown after being opened', () => {
+    render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    fireEvent.click(screen.getByText('close dropdown'));
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('stays closed when the open picker becomes unswitchable and then switchable again', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    useAcpModelInfoMock.mockReturnValue(makeResult());
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('does not carry an open picker over to another conversation', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    rerender(<AcpModelSelector conversation_id='conversation-2' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('does not reopen the picker when returning to the conversation it was opened for', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    rerender(<AcpModelSelector conversation_id='conversation-2' backend='aelix' />);
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('does not pop open later when the request arrived before models could be switched', () => {
+    useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    useAcpModelInfoMock.mockReturnValue(makeResult());
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
   });
 });

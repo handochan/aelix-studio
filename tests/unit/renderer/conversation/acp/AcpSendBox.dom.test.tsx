@@ -22,6 +22,7 @@ import {
 } from '@/renderer/services/runtime/aelixInitialModel';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
 import type { ChatFileRef } from '@/common/types/chatFile';
+import { openModelPicker } from '@/renderer/hooks/agent/useModelPickerOpener';
 
 const {
   sendMessageInvokeMock,
@@ -38,6 +39,8 @@ const {
   responseListeners,
   isMobileMock,
   mobileActionSheetEntries,
+  mobileActionSheetOpen,
+  acpModelInfoState,
   sendBoxPropsSpy,
   runtimeViewMock,
   useConversationCommandQueueSpy,
@@ -73,6 +76,8 @@ const {
   mobileActionSheetEntries: {
     current: [] as MobileActionSheetEntry[],
   },
+  mobileActionSheetOpen: { current: false },
+  acpModelInfoState: { canSwitch: false },
   runtimeViewMock: {
     hydrated: true,
     hasBackendRuntime: true,
@@ -289,8 +294,9 @@ vi.mock('@/renderer/components/chat/CommandQueuePanel', () => ({
   },
 }));
 vi.mock('@/renderer/components/chat/MobileActionSheet', () => ({
-  default: ({ entries }: { entries?: MobileActionSheetEntry[] }) => {
+  default: ({ entries, open }: { entries?: MobileActionSheetEntry[]; open?: boolean }) => {
     mobileActionSheetEntries.current = entries ?? [];
+    mobileActionSheetOpen.current = Boolean(open);
     return null;
   },
   useAttachEntry: () => ({ entries: [], hiddenFileInput: null }),
@@ -304,7 +310,7 @@ vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
 vi.mock('@/renderer/hooks/agent/useAcpModelInfo', () => ({
   useAcpModelInfo: () => ({
     model_info: null,
-    canSwitch: false,
+    canSwitch: acpModelInfoState.canSwitch,
     selectModel: vi.fn(),
   }),
 }));
@@ -485,6 +491,8 @@ describe('AcpSendBox', () => {
     vi.clearAllMocks();
     isMobileMock.current = false;
     mobileActionSheetEntries.current = [];
+    mobileActionSheetOpen.current = false;
+    acpModelInfoState.canSwitch = false;
     runtimeViewMock.hydrated = true;
     runtimeViewMock.hasBackendRuntime = true;
     runtimeViewMock.state = 'idle';
@@ -1375,6 +1383,33 @@ describe('AcpSendBox', () => {
       label: 'agentMode.ask',
       active: true,
     });
+  });
+
+  it.each([
+    ['opens the mobile sheet', true, true, 'conv-1', true],
+    ['ignores a request for another conversation', true, true, 'conv-2', false],
+    ['leaves desktop to the header picker', false, true, 'conv-1', false],
+    ['offers nothing while the mobile model list cannot switch', true, false, 'conv-1', false],
+  ])('%s when an error card asks for the model picker', (_case, isMobile, canSwitch, target, expected) => {
+    isMobileMock.current = isMobile;
+    acpModelInfoState.canSwitch = canSwitch;
+    const { unmount } = render(
+      <AcpSendBox
+        conversation_id='conv-1'
+        backend='aelix'
+        workspacePath='/tmp/workspace'
+        messageState={makeMessageState()}
+      />
+    );
+
+    let opened = false;
+    act(() => {
+      opened = openModelPicker(target);
+    });
+
+    expect([opened, mobileActionSheetOpen.current]).toEqual([expected, expected]);
+    expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    unmount();
   });
 
   it('applies runtime thought level from the mobile action sheet without persisting a global preference', async () => {

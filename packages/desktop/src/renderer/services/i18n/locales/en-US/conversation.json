@@ -143,6 +143,10 @@
       "reduce_context": "Reduce the message content, referenced files, or context size, then retry.",
       "send_feedback": "Send feedback with logs so the team can investigate."
     },
+    "actions": {
+      "chooseModel": "Choose model",
+      "openModelSettings": "Open model settings"
+    },
     "ownership": {
       "aionui": "App",
       "user_agent": "Agent",
@@ -363,7 +367,30 @@
       },
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Turn failed after dispatch",
-        "body": "The model or tools may already have run. This turn will not be sent again automatically. Check the history before sending again."
+        "body": "The model or tools may already have run. This turn will not be sent again automatically. Check the history before sending again.",
+        "afterDispatchNote": "Earlier steps of this turn may already have run, so check the conversation before sending again.",
+        "causes": {
+          "providerAuth": {
+            "title": "The provider rejected your API key",
+            "body": "The model provider did not accept your API key or account credentials. Check them in Settings → Model, then send your message again."
+          },
+          "providerRateLimit": {
+            "title": "The provider is limiting requests",
+            "body": "The model provider's rate limit or quota was reached. Wait a moment, then send your message again. It is not resent automatically."
+          },
+          "providerUnavailable": {
+            "title": "The provider is unavailable",
+            "body": "The model provider is down or overloaded. Wait a moment, then send your message again. It is not resent automatically."
+          },
+          "providerBadRequest": {
+            "title": "The provider rejected the request",
+            "body": "The model provider reported the request as invalid, for example because the selected model does not support it. Check the model and provider in Settings → Model, then send your message again."
+          },
+          "providerNetwork": {
+            "title": "Could not reach the provider",
+            "body": "A network error interrupted the connection to the model provider. Check your network or proxy, then send your message again. It is not resent automatically."
+          }
+        }
       },
       "USER_AGENT_BUSY": {
         "title": "Agent is busy",
@@ -376,7 +403,13 @@
         "profileUnavailable": "The profile is unavailable: {{profile}}. Restore the profile or start a new session.",
         "extensionOwnedByLaunch": "This extension is controlled by the launch configuration: {{source}}. Change that configuration to manage it.",
         "runtimeControlRequired": "This operation requires runtime control. Use the session runtime controls.",
-        "clientActionRequired": "This operation requires a client action. Complete the requested action in Studio."
+        "clientActionRequired": "This operation requires a client action. Complete the requested action in Studio.",
+        "modelSelectionRequired": {
+          "title": "Choose a model first",
+          "body": "Your message was not sent because no model is selected. Choose a model, then send your message again.",
+          "noModelsTitle": "Add a model first",
+          "noModelsBody": "Your message was not sent because no models are available. Add a model in Settings → Model, choose it, then send your message again."
+        }
       }
     }
   },
