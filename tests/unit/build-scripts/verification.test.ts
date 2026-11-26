@@ -689,6 +689,33 @@ describe('Electron launch evidence and identity retry', () => {
     }
   });
 
+  it('waits for the Provider window and retries the same archive identity reader', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const identity = { pid: 123, resourcesPath: '/installed/resources', archive: '/installed/resources/app.asar' };
+    const { app, launch, synchronousReads } = inspectorApplication([collected, identity]);
+    const readIdentity = function () {
+      return { archive: 'fixture' };
+    };
+    const firstWindow = vi.fn(async (owner: typeof app, timeout: number) => {
+      expect(owner).toBe(app);
+      expect(timeout).toBeGreaterThan(0);
+      expect(app.evaluate).not.toHaveBeenCalled();
+      await owner.firstWindow({ timeout });
+    });
+
+    await expect(launchWithIdentity(launch, { ...options(), readIdentity, firstWindow })).resolves.toEqual({
+      app,
+      identity,
+    });
+    expect(firstWindow).toHaveBeenCalledOnce();
+    expect(app.evaluate).toHaveBeenCalledWith(readIdentity, expect.any(String));
+    expect(synchronousReads).toMatchObject([
+      { params: { functionDeclaration: readIdentity.toString(), awaitPromise: false } },
+    ]);
+    expect(launch).toHaveBeenCalledOnce();
+    await closeElectron(app);
+  });
+
   it.each(['Promise was collected: path', 'promise was collected', 'Cannot find context with specified id'])(
     'does not retry a different original CDP message (%s)',
     async (message) => {

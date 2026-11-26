@@ -256,12 +256,12 @@ function readMainIdentity() {
   };
 }
 
-async function evaluateIdentity(app, protocol) {
+async function evaluateIdentity(app, protocol, readIdentity) {
   const token = randomUUID();
   const finish = protocol.trackIdentityEvaluation(token);
   let result;
   try {
-    const identity = await app.evaluate(readMainIdentity, token);
+    const identity = await app.evaluate(readIdentity, token);
     result = { identity };
   } catch (error) {
     result = { failedAt: new Date().toISOString(), error };
@@ -281,9 +281,14 @@ export function verifyInstalledBackend(identity) {
 }
 
 /** Wait for the Provider window inside the existing Provider host stage budget. */
-export function waitForProviderWindow(app, launch, report, { platform = process.platform, arch = process.arch } = {}) {
+export function waitForProviderWindow(
+  app,
+  launch,
+  report,
+  { platform = process.platform, arch = process.arch, maxTimeoutMs = Infinity } = {}
+) {
   // Intel macOS runners can hit Playwright's default first-window limit during startup.
-  const timeoutMs = platform === 'darwin' && arch === 'x64' ? 60000 : 30000;
+  const timeoutMs = Math.min(maxTimeoutMs, platform === 'darwin' && arch === 'x64' ? 60000 : 30000);
   return boundedWait(() => app.firstWindow({ timeout: timeoutMs }), 'provider-first-window', {
     timeoutMs,
     launch,
@@ -303,7 +308,15 @@ export function waitForProviderWindow(app, launch, report, { platform = process.
 /** Share the launch timeout with first-window readiness before evaluating identity. */
 export async function launchWithIdentity(
   launch,
-  { launchNumber, record, remainingProcesses, processTimeline, launchTimeoutMs = 60000 }
+  {
+    launchNumber,
+    record,
+    remainingProcesses,
+    processTimeline,
+    launchTimeoutMs = 60000,
+    readIdentity = readMainIdentity,
+    firstWindow = (app, timeout) => app.firstWindow({ timeout }),
+  }
 ) {
   const write = record;
   let lastStatus = 'launching';
@@ -401,7 +414,7 @@ export async function launchWithIdentity(
           const osExit = new Promise((_, reject) => {
             rejectFirstWindowOnExit = reject;
           });
-          await Promise.race([osExit, app.firstWindow({ timeout: remaining })]);
+          await Promise.race([osExit, firstWindow(app, remaining)]);
         }
         if (exited(main)) throw firstWindowExitError();
         if (performance.now() >= deadline)
@@ -416,7 +429,7 @@ export async function launchWithIdentity(
       }
       processTimeline?.beginIdentity();
       observation.identityStartedAt = new Date().toISOString();
-      const result = await evaluateIdentity(app, protocol);
+      const result = await evaluateIdentity(app, protocol, readIdentity);
       let identity = result.identity;
       if (result.failedAt) {
         observation.identityFailedAt = result.failedAt;
@@ -448,7 +461,7 @@ export async function launchWithIdentity(
           const timeoutMs = deadline - performance.now();
           if (timeoutMs <= 0) throw result.error;
           identity = await boundedWait(
-            protocol.evaluateMainSynchronously(app, readMainIdentity),
+            protocol.evaluateMainSynchronously(app, readIdentity),
             'electron-identity-retry-response',
             {
               timeoutMs,

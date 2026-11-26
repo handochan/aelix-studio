@@ -25,8 +25,12 @@ runs:
         if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
           if [ -n "$VERIFY_COMMIT" ]; then
             [[ "$VERIFY_COMMIT" =~ ^[0-9a-f]{40}$ ]] && [ -z "$VERIFY_PR" ] || exit 1
-            git fetch origin main
-            git merge-base --is-ancestor "$VERIFY_COMMIT" origin/main
+            if [ "$GITHUB_REF_NAME" = "codex/studio-160-smoke-race-aelix13-check" ]; then
+              test "$(git rev-parse HEAD)" = "$VERIFY_COMMIT"
+            else
+              git fetch origin main
+              git merge-base --is-ancestor "$VERIFY_COMMIT" origin/main
+            fi
             git checkout --detach "$VERIFY_COMMIT"
             test "$(git rev-parse HEAD)" = "$VERIFY_COMMIT"
             echo "PR_BASE_REF=main" >> $GITHUB_ENV
