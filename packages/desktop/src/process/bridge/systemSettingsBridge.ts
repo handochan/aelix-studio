@@ -84,10 +84,12 @@ export function initSystemSettingsBridge(): void {
       try {
         if (enabled) {
           if (!previous) {
-            for (const guest of webContents.getAllWebContents()) {
-              if (guest.getType() === 'webview' && isManagedStudioRendererSession(guest.session)) {
-                // Destroy the old document's peer connections. The session closes HTTP sockets.
-                guest.reload();
+            for (const contents of webContents.getAllWebContents()) {
+              if (!isManagedStudioRendererSession(contents.session) || contents.isDestroyed()) continue;
+              // Retire embedded documents' peer connections without reloading the main UI.
+              if (contents.getType() === 'webview') contents.reload();
+              else if (contents.getType() === 'window') {
+                for (const frame of contents.mainFrame.frames) frame.reload();
               }
             }
           }

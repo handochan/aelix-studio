@@ -30,7 +30,7 @@ import { installQuitCleanup } from './process/startup/quitCleanup';
 import { shouldRegisterBackendStartup } from './process/startup/singleInstanceGating';
 import { ConfigRecovery, ProcessConfig, readAutoCheckPreference, readOfflineMode } from './process/utils/initStorage';
 import {
-  applyStudioGuestNetworkPolicy,
+  applyStudioRendererNetworkPolicy,
   isManagedStudioRendererSession,
   prepareStudioRendererSession,
   protectStudioResources,
@@ -779,7 +779,7 @@ const handleAppReady = async (): Promise<void> => {
     Boolean(studioNetworkRelayBlockCode(url.pathname) && studioBackendCredential(url))
   );
   if (readOfflineMode()) await setStudioRenderersOffline(app, true, webContents.getAllWebContents);
-  app.on('web-contents-created', (_event, contents) => applyStudioGuestNetworkPolicy(contents));
+  app.on('web-contents-created', (_event, contents) => applyStudioRendererNetworkPolicy(contents));
   // electron-updater uses this separate Chromium session for its feed and assets.
   protectStudioResources(session.fromPartition(STUDIO_UPDATER_PARTITION, { cache: false }), readOfflineMode);
   session.defaultSession.setPermissionRequestHandler((_webContents, _permission, callback) => {

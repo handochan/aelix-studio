@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { App, Session, WebContents } from 'electron';
 import {
-  applyStudioGuestNetworkPolicy,
+  applyStudioRendererNetworkPolicy,
   configureBackgroundNetworking,
   isManagedStudioRendererSession,
   prepareStudioRendererSession,
@@ -98,17 +98,20 @@ it('prepares a fresh offline settings partition and disconnects existing partiti
   const fresh = makeSession();
   const detached = makeSession();
   const session = (fixture: ReturnType<typeof makeSession>) => fixture as unknown as Session;
-  const guest = (fixture: ReturnType<typeof makeSession>) => ({
-    getType: () => 'webview',
+  const contents = (fixture: ReturnType<typeof makeSession>, type = 'webview') => ({
+    getType: () => type,
     session: session(fixture),
     setWebRTCIPHandlingPolicy: vi.fn(),
   });
-  const existingGuest = guest(extension);
-  const explicitBrowser = guest(detached);
-  const guests = () => [existingGuest, explicitBrowser] as unknown as WebContents[];
+  const existingMain = contents(renderer, 'window');
+  const existingGuest = contents(extension);
+  const explicitBrowser = contents(detached);
+  const guests = () => [existingMain, existingGuest, explicitBrowser] as unknown as WebContents[];
   await prepareStudioRendererSession(application, session(renderer), () => false);
   await prepareStudioRendererSession(application, session(extension), () => false);
   expect(extension.setProxy).not.toHaveBeenCalled();
+  applyStudioRendererNetworkPolicy(existingMain as unknown as WebContents);
+  expect(existingMain.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('default');
   try {
     await setStudioRenderersOffline(application, true, guests);
     expect(extension.setProxy).toHaveBeenCalledWith({
@@ -118,6 +121,10 @@ it('prepares a fresh offline settings partition and disconnects existing partiti
     expect(extension.closeAllConnections).toHaveBeenCalledOnce();
     expect(existingGuest.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('disable_non_proxied_udp');
     expect(explicitBrowser.setWebRTCIPHandlingPolicy).not.toHaveBeenCalled();
+    expect(existingMain.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('disable_non_proxied_udp');
+    const freshMain = contents(renderer, 'window');
+    applyStudioRendererNetworkPolicy(freshMain as unknown as WebContents);
+    expect(freshMain.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('disable_non_proxied_udp');
 
     fresh.setProxy.mockRejectedValueOnce(new Error('proxy failure'));
     await expect(prepareStudioRendererSession(application, session(fresh), () => true)).rejects.toThrow(
@@ -127,8 +134,8 @@ it('prepares a fresh offline settings partition and disconnects existing partiti
     await prepareStudioRendererSession(application, session(fresh), () => true);
     expect(isManagedStudioRendererSession(session(fresh))).toBe(true);
     expect(fresh.closeAllConnections).toHaveBeenCalledOnce();
-    const firstGuest = guest(fresh);
-    applyStudioGuestNetworkPolicy(firstGuest as unknown as WebContents);
+    const firstGuest = contents(fresh);
+    applyStudioRendererNetworkPolicy(firstGuest as unknown as WebContents);
     expect(firstGuest.setWebRTCIPHandlingPolicy).toHaveBeenCalledWith('disable_non_proxied_udp');
   } finally {
     await setStudioRenderersOffline(application, false, guests);
@@ -136,4 +143,5 @@ it('prepares a fresh offline settings partition and disconnects existing partiti
   }
   expect(extension.setProxy).toHaveBeenLastCalledWith({ mode: 'system' });
   expect(existingGuest.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('default');
+  expect(existingMain.setWebRTCIPHandlingPolicy).toHaveBeenLastCalledWith('default');
 });

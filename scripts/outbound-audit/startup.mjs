@@ -185,7 +185,10 @@ function servePreviewFixture(request, response, close) {
       response.writeHead(200, { 'Content-Type': 'text/html' }).end(OFFLINE_PROBE);
       return;
     case '/transition':
-      response.writeHead(200, { 'Content-Type': 'text/html' }).end('<!doctype html><p>loopback tab</p>');
+    case '/frame-transition':
+      response
+        .writeHead(200, { 'Content-Type': 'text/html', 'Cache-Control': 'no-store' })
+        .end('<!doctype html><p>loopback tab</p>');
       return;
     case '/frame':
       response.writeHead(200, { 'Content-Type': 'text/html' }).end('<body>local frame</body>');
@@ -225,7 +228,7 @@ function servePreviewFixture(request, response, close) {
   }
 }
 
-function verifyGuestTransport(app, id) {
+function verifyRendererTransport(app, id) {
   return app.evaluate(async ({ webContents }, guestId) => {
     const guest = webContents.fromId(guestId);
     return {
@@ -235,15 +238,14 @@ function verifyGuestTransport(app, id) {
   }, id);
 }
 
-async function requireOfflineTransport(app, guest) {
-  const result = await verifyGuestTransport(app, guest);
+async function requireOfflineTransport(app, contentsId) {
+  const result = await verifyRendererTransport(app, contentsId);
   assert.match(result.proxy, /^SOCKS5 127\.0\.0\.1:\d+$/);
   assert.equal(result.rtcPolicy, 'disable_non_proxied_udp');
 }
 
-async function checkPreviewRequests(page) {
-  const results = await guestScript(
-    page,
+async function checkPreviewRequests(execute) {
+  const results = await execute(
     `
     (async () => {
       const worker = await navigator.serviceWorker.register('/worker.js');
@@ -291,13 +293,56 @@ async function checkPreviewRequests(page) {
   return results;
 }
 
+async function openMainWindowFrame(page, url) {
+  await page.evaluate(
+    (source) =>
+      new Promise((resolve, reject) => {
+        const frame = document.createElement('iframe');
+        frame.id = 'studio-g12-main-frame';
+        frame.name = frame.id;
+        frame.style.cssText = 'position:fixed;width:16px;height:16px';
+        frame.setAttribute('sandbox', 'allow-scripts allow-forms allow-same-origin');
+        frame.src = source;
+        const timeout = setTimeout(() => reject(new Error('Main-window iframe timed out')), 15000);
+        frame.addEventListener(
+          'load',
+          () => {
+            clearTimeout(timeout);
+            resolve();
+          },
+          { once: true }
+        );
+        document.body.appendChild(frame);
+      }),
+    url
+  );
+  const frame = page.frame({ name: 'studio-g12-main-frame' });
+  assert.equal(frame?.url(), url, 'Expected a loopback iframe in the application window');
+  return frame;
+}
+
+function closeMainWindowFrame(page) {
+  return page.evaluate(() => document.getElementById('studio-g12-main-frame')?.remove());
+}
+
+async function checkMainWindowFrame(page, url) {
+  try {
+    const frame = await openMainWindowFrame(page, url);
+    return await checkPreviewRequests((code) => frame.evaluate(code));
+  } finally {
+    await closeMainWindowFrame(page);
+  }
+}
+
 export async function qualifyOfflineTransport(app, page, toggle) {
   let closed = false;
-  const server = http.createServer((req, res) =>
+  let frameLoads = 0;
+  const server = http.createServer((req, res) => {
+    if (req.url === '/frame-transition') frameLoads++;
     servePreviewFixture(req, res, () => {
       closed = true;
-    })
-  );
+    });
+  });
   await new Promise((resolve, reject) => {
     server.once('error', reject);
     server.listen(0, '127.0.0.1', resolve);
@@ -305,22 +350,30 @@ export async function qualifyOfflineTransport(app, page, toggle) {
   const base = 'http://127.0.0.1:' + server.address().port;
   const closeGuest = () => page.evaluate(() => document.getElementById('studio-g12-audit-guest')?.remove());
   try {
+    const main = await app.browserWindow(page);
+    const mainId = await main.evaluate((window) => window.webContents.id);
+    await requireOfflineTransport(app, mainId);
+    const firstMainFrame = await checkMainWindowFrame(page, base + '/probe');
+
     const defaultGuest = await openAuditGuest(page, base + '/probe');
     await requireOfflineTransport(app, defaultGuest);
-    const defaultResults = await checkPreviewRequests(page);
+    const defaultResults = await checkPreviewRequests((code) => guestScript(page, code));
     await closeGuest();
 
     const extPartition = 'persist:ext-settings-g12-audit';
     const firstExtensionGuest = await openAuditGuest(page, base + '/probe', extPartition);
     await requireOfflineTransport(app, firstExtensionGuest);
-    const extensionResults = await checkPreviewRequests(page);
+    const extensionResults = await checkPreviewRequests((code) => guestScript(page, code));
     await closeGuest();
 
     await toggle.click();
     await expect(toggle).toHaveAttribute('aria-checked', 'false');
     await assertUpdateMenu(app, true);
+    assert.equal((await verifyRendererTransport(app, mainId)).rtcPolicy, 'default');
+    await openMainWindowFrame(page, base + '/frame-transition');
+    assert.equal(frameLoads, 1);
     const transitioningGuest = await openAuditGuest(page, base + '/transition', extPartition);
-    assert.equal((await verifyGuestTransport(app, transitioningGuest)).rtcPolicy, 'default');
+    assert.equal((await verifyRendererTransport(app, transitioningGuest)).rtcPolicy, 'default');
     assert.equal(
       await guestScript(page, "fetch('/hold').then((res) => { window.heldResponse = res; return res.status; })"),
       200
@@ -331,17 +384,25 @@ export async function qualifyOfflineTransport(app, page, toggle) {
     await assertUpdateMenu(app, false);
     await expect.poll(() => closed, { timeout: 10000 }).toBe(true);
     await requireOfflineTransport(app, transitioningGuest);
+    await requireOfflineTransport(app, mainId);
+    await expect.poll(() => frameLoads, { timeout: 10000 }).toBe(2);
+    await closeMainWindowFrame(page);
+    const mainFrameAfterSwitch = await checkMainWindowFrame(page, base + '/probe');
     await closeGuest();
     const afterSwitch = await openAuditGuest(page, base + '/probe', extPartition);
     await requireOfflineTransport(app, afterSwitch);
-    await checkPreviewRequests(page);
+    await checkPreviewRequests((code) => guestScript(page, code));
     return {
+      firstMainFrame,
+      mainFrameAfterSwitch,
+      mainFrameReloadedOnSwitch: true,
       default: defaultResults,
       firstExtension: extensionResults,
       extensionAfterSwitch: true,
       connectionClosed: true,
     };
   } finally {
+    await closeMainWindowFrame(page);
     await closeGuest();
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));

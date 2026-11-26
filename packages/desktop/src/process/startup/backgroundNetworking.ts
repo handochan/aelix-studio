@@ -97,10 +97,10 @@ export function isManagedStudioRendererSession(session: Session): boolean {
   return managedSessions.has(session);
 }
 
-/** Called at WebContents creation, before the guest gets its initial URL. */
-export function applyStudioGuestNetworkPolicy(guest: WebContents): void {
-  if (guest.getType() === 'webview' && managedSessions.has(guest.session)) {
-    guest.setWebRTCIPHandlingPolicy(rendererOffline ? 'disable_non_proxied_udp' : 'default');
+/** Set the policy before navigation, including frames embedded in a managed window. */
+export function applyStudioRendererNetworkPolicy(contents: WebContents): void {
+  if (managedSessions.has(contents.session)) {
+    contents.setWebRTCIPHandlingPolicy(rendererOffline ? 'disable_non_proxied_udp' : 'default');
   }
 }
 
@@ -123,7 +123,7 @@ export function setStudioRenderersOffline(
       throw failure.reason;
     }
     rendererOffline = offline;
-    for (const guest of getContents()) applyStudioGuestNetworkPolicy(guest);
+    for (const contents of getContents()) applyStudioRendererNetworkPolicy(contents);
   });
 }
 

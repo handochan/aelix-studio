@@ -112,11 +112,12 @@ without an environment guard or endpoint exception. Separate tests require the
 default-on request to Studio Releases and quiet blocked-network behavior.
 The offline-mode scenario checks disabled manual updates, file wheel installation and
 listing, Index and Git refusal, and a configured loopback MCP server's tool list.
-It checks both the default and extension-settings partitions with preconnect, CSS,
+It checks a main-window iframe and both the default and extension-settings guest partitions with preconnect, CSS,
 scripts, frames, `srcdoc`, and a service worker. The extension partition is exercised
 both on first entry with the mode on and when the live switch closes an existing
-connection. The installed Provider Preview qualification runs synthetic provider
-turns with offline mode on. Separate checks cover bundled MCP startup and a real local
+connection. The installed Provider Preview qualification runs an offline synthetic
+provider turn in a fresh profile and keeps the LAN WebUI regression in its own online
+profile. Separate checks cover bundled MCP startup and a real local
 Monaco editor and HTML worker.
 
 Local source/engine fixtures are distinct from installed app acceptance and exact-

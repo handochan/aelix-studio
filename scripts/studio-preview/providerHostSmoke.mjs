@@ -16,11 +16,14 @@ const sandbox = process.env.PROVIDER_SANDBOX;
 const output = process.env.PROVIDER_OUTPUT;
 const driverPython = process.env.PROVIDER_DRIVER_PYTHON;
 assert.ok(sandbox && output && process.env.PROVIDER_ENDPOINT && driverPython);
-const firstWindowReport = { file: path.join(output, 'first-window.json'), waits: [] };
+const offlineProvider = process.env.STUDIO_PROVIDER_SCENARIO === 'offline-provider';
+const outputFile = (name) => path.join(output, offlineProvider ? `offline-${name}` : name);
+const firstWindowReport = { file: outputFile('first-window.json'), waits: [] };
 const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
 const appEnv = { ...process.env };
 delete appEnv.PROVIDER_DRIVER_PYTHON;
 delete appEnv.STUDIO_PROVIDER_OFFLINE_MODE;
+delete appEnv.STUDIO_PROVIDER_SCENARIO;
 if (executablePath) {
   delete appEnv.AELIX_STUDIO_RUNTIME;
   delete appEnv.AIONUI_BACKEND_BIN;
@@ -92,9 +95,9 @@ let stage = 'startup';
 const lanFailures = [];
 const trace = (next) => {
   stage = next;
-  fs.writeFileSync(path.join(output, 'ui-stage.json'), JSON.stringify({ stage }) + '\n');
+  fs.writeFileSync(outputFile('ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
-try {
+async function qualifyHost() {
   app = await launch();
   let archive;
   if (executablePath) {
@@ -113,7 +116,7 @@ try {
     process.env.AELIX_STUDIO_RUNTIME = installed;
   }
   page = await waitForProviderWindow(app, 1, firstWindowReport);
-  if (process.env.STUDIO_PROVIDER_OFFLINE_MODE === '1') {
+  if (offlineProvider || process.env.STUDIO_PROVIDER_SCENARIO === 'online-ui') {
     await page.evaluate(() => {
       window.location.hash = '/settings/about';
     });
@@ -123,7 +126,7 @@ try {
     );
     await expect(page.getByRole('switch', { name: settingsText.offlineMode, exact: true })).toHaveAttribute(
       'aria-checked',
-      'true'
+      String(offlineProvider)
     );
   }
   if (executablePath) {
@@ -197,12 +200,39 @@ try {
   await native.getByRole('button', { name: strings.saveEndpoint, exact: true }).click();
   await expect(native.getByText('fixture-model', { exact: true }).first()).toBeVisible({ timeout: 15000 });
   const keyInput = native.getByLabel(strings.key, { exact: true });
-  await keyInput.fill('synthetic-wrong-key');
+  await keyInput.fill(offlineProvider ? 'synthetic-provider-key' : 'synthetic-wrong-key');
   await native.getByRole('button', { name: strings.saveKey, exact: true }).click();
   await expect(keyInput).toHaveValue('');
   await expect(native.getByRole('button', { name: strings.startConversation, exact: true })).toBeEnabled({
     timeout: 15000,
   });
+  if (offlineProvider) {
+    trace('offline_provider_turn');
+    await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+    const input = page.getByTestId('sendbox-input');
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('SYNTHETIC_OFFLINE_PROVIDER_RESPONSE');
+    await page.getByTestId('sendbox-send-btn').click();
+    await expect(
+      page.getByTestId('message-text-content').filter({ hasText: /^NATIVE_PROVIDER_FIRST_RESPONSE$/ })
+    ).toHaveCount(1, { timeout: 30000 });
+    await page.screenshot({ path: outputFile('first-response.png') });
+    fs.writeFileSync(
+      outputFile('host.json'),
+      JSON.stringify(
+        {
+          status: 'pending_payload_audit',
+          offlineMode: true,
+          installedCompiledBuildMatched: Boolean(executablePath),
+          firstWindowWaits: firstWindowReport.waits,
+          checks: ['offline_mode_on', 'offline_desktop_synthetic_provider_response'],
+        },
+        null,
+        2
+      ) + '\n'
+    );
+    return;
+  }
   const userDataPath = await app.evaluate(({ app }) => app.getPath('userData'));
   const expectedExtensionState = path.join(fs.realpathSync(userDataPath), 'aelix-runtime');
   const conversationCreation = page.waitForRequest(
@@ -551,7 +581,7 @@ try {
   assert.equal(denied.ok, false);
   assert.ok(['FORBIDDEN', 'NO_BRIDGE'].includes(denied.code));
   fs.writeFileSync(
-    path.join(output, 'host.json'),
+    outputFile('host.json'),
     JSON.stringify(
       {
         status: 'pending_payload_audit',
@@ -592,14 +622,18 @@ try {
       2
     ) + '\n'
   );
+}
+
+try {
+  await qualifyHost();
 } catch (error) {
   fs.writeFileSync(
-    path.join(output, 'ui-failure.json'),
+    outputFile('ui-failure.json'),
     JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
   );
   if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {
-    await page.screenshot({ path: path.join(output, 'failure.png') }).catch(() => {});
+    await page.screenshot({ path: outputFile('failure.png') }).catch(() => {});
     const state = await page
       .evaluate(() => {
         const failure = window.__backendStartupBridge?.getState() ?? window.__backendStartupFailure;
@@ -612,7 +646,7 @@ try {
       })
       .catch(() => ({ unavailable: true }));
     fs.writeFileSync(
-      path.join(output, 'startup-failure.json'),
+      outputFile('startup-failure.json'),
       JSON.stringify({ ...state, markers: [...startupMarkers] }) + '\n'
     );
   }
