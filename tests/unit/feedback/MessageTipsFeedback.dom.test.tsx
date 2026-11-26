@@ -8,7 +8,7 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeAll, beforeEach, afterEach, type MockInstance } from 'vitest';
+import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from 'vitest';
 import { cleanup, render as renderComponent, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { createInstance } from 'i18next';
@@ -74,7 +74,7 @@ import type { AgentStreamErrorInfo, IMessageTips } from '@/common/chat/chatLib';
 import { composeMessage, transformMessage } from '@/common/chat/chatLib';
 import { BackendHttpError } from '@/common/adapter/httpBridge';
 import { buildSendFailureError } from '@/renderer/pages/conversation/platforms/acp/buildSendFailureError';
-import { emitter } from '@/renderer/utils/emitter';
+import { useModelPickerOpener } from '@/renderer/hooks/agent/useModelPickerOpener';
 import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const requiredAgentErrorCodes = [
@@ -918,13 +918,25 @@ const aelixTip = (error: AgentStreamErrorInfo, content = error.message): IMessag
   }) as IMessageTips;
 
 const LocationProbe = () => <div data-testid='location'>{useLocation().pathname}</div>;
-const renderGuidance = (message: IMessageTips) =>
-  render(
+// Stands in for a model picker that can switch models in the given conversation.
+const PickerProbe: React.FC<{ conversationId: string; open: () => void }> = ({ conversationId, open }) => {
+  useModelPickerOpener(conversationId, open);
+  return null;
+};
+// Includes the i18n provider so a rerender keeps it.
+const guidanceTree = (message: IMessageTips, pickers: Record<string, () => void> = {}) => (
+  <I18nextProvider i18n={i18n}>
     <MemoryRouter initialEntries={['/conversation/conv-1']}>
+      {Object.entries(pickers).map(([conversationId, open]) => (
+        <PickerProbe key={conversationId} conversationId={conversationId} open={open} />
+      ))}
       <MessageTips message={message} />
       <LocationProbe />
     </MemoryRouter>
-  );
+  </I18nextProvider>
+);
+const renderGuidance = (message: IMessageTips, pickers?: Record<string, () => void>) =>
+  renderComponent(guidanceTree(message, pickers));
 
 const refusedCopy = enConversation.agentError.codes.USER_AGENT_OPERATION_REFUSED;
 const turnFailedCopy = enConversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH;
@@ -932,27 +944,33 @@ const actionCopy = enConversation.agentError.actions;
 const guidanceActionName = new RegExp(`^(${actionCopy.chooseModel}|${actionCopy.openModelSettings})$`);
 
 describe('builtin Aelix error guidance', () => {
-  let emitSpy: MockInstance<typeof emitter.emit>;
-  beforeEach(() => {
-    emitSpy = vi.spyOn(emitter, 'emit');
-  });
-  afterEach(() => {
-    emitSpy.mockRestore();
-    cleanup();
-  });
+  afterEach(cleanup);
 
   it('asks for a model and offers the conversation model picker', () => {
-    renderGuidance(aelixTip(modelRefusal()));
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-1': vi.fn() });
     expect(screen.getByText(refusedCopy.modelSelectionRequired.title)).toBeInTheDocument();
     expect(screen.getByText(refusedCopy.modelSelectionRequired.body)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeEnabled();
   });
 
   it('opens only the model picker of this conversation and does not resend or navigate', async () => {
-    renderGuidance(aelixTip(modelRefusal()));
+    const [ownPicker, otherPicker] = [vi.fn(), vi.fn()];
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-1': ownPicker, 'conv-2': otherPicker });
     await userEvent.click(screen.getByRole('button', { name: actionCopy.chooseModel }));
-    expect(emitSpy.mock.calls).toEqual([['acp.model.selector.open', 'conv-1']]);
+    expect([ownPicker.mock.calls.length, otherPicker.mock.calls.length]).toEqual([1, 0]);
     expect(screen.getByTestId('location')).toHaveTextContent('/conversation/conv-1');
+  });
+
+  it('disables Choose model while no picker of this conversation can switch models', () => {
+    renderGuidance(aelixTip(modelRefusal()), { 'conv-2': vi.fn() });
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeDisabled();
+  });
+
+  it('enables Choose model once the picker of this conversation can switch models', () => {
+    const message = aelixTip(modelRefusal());
+    const { rerender } = renderGuidance(message);
+    rerender(guidanceTree(message, { 'conv-1': vi.fn() }));
+    expect(screen.getByRole('button', { name: actionCopy.chooseModel })).toBeEnabled();
   });
 
   it('points to model settings instead of the picker when no models are available', async () => {
@@ -1004,10 +1022,11 @@ describe('builtin Aelix error guidance', () => {
   });
 
   it('opens provider settings for a rejected API key without resending', async () => {
-    renderGuidance(aelixTip(providerFailure()));
+    const picker = vi.fn();
+    renderGuidance(aelixTip(providerFailure()), { 'conv-1': picker });
     await userEvent.click(screen.getByRole('button', { name: actionCopy.openModelSettings }));
     expect(screen.getByTestId('location')).toHaveTextContent('/settings/model');
-    expect(emitSpy).not.toHaveBeenCalled();
+    expect(picker).not.toHaveBeenCalled();
   });
 
   it('keeps the generic dispatch failure text for an unknown cause', () => {

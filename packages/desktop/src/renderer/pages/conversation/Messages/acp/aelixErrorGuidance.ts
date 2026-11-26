@@ -26,7 +26,7 @@ export type AelixErrorGuidance =
   | { kind: 'provider_failure'; cause: ProviderCause };
 
 /** The next step offered on the card. Neither action resends the prompt. */
-export type AelixErrorAction = 'choose_model' | 'open_model_settings';
+export type AelixErrorActionKind = 'choose_model' | 'open_model_settings';
 
 export type AelixErrorCopy = {
   title: string;
@@ -35,7 +35,7 @@ export type AelixErrorCopy = {
   ownership: AgentErrorOwnership;
   /** A caveat shown under the body, e.g. that a dispatched turn may already have run. */
   note?: string;
-  action?: AelixErrorAction;
+  action?: AelixErrorActionKind;
 };
 
 const MAX_AVAILABLE_MODELS = 0xffff_ffff;

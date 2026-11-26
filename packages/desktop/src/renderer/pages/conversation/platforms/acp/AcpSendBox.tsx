@@ -25,6 +25,7 @@ import {
   useAcpConfigOptions,
 } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
+import { useModelPickerOpener } from '@/renderer/hooks/agent/useModelPickerOpener';
 import { useAutoTitle } from '@/renderer/hooks/chat/useAutoTitle';
 import { getSendBoxDraftHook, type FileOrFolderItem } from '@/renderer/hooks/chat/useSendBoxDraft';
 import { createSetUploadFile, useSendBoxFiles } from '@/renderer/hooks/chat/useSendBoxFiles';
@@ -957,13 +958,7 @@ Please check your local CLI tool authentication status`,
     [conversation_id, setAtPath]
   );
   // Mobile hides the header model picker; an error card's "Choose model" opens the sheet that holds it.
-  useAddEventListener(
-    'acp.model.selector.open',
-    (targetConversationId: string) => {
-      if (isMobile && targetConversationId === conversation_id) setIsMobileSheetOpen(true);
-    },
-    [conversation_id, isMobile]
-  );
+  useModelPickerOpener(conversation_id, isMobile && canSwitchModel ? () => setIsMobileSheetOpen(true) : undefined);
 
   // Stop conversation handler
   const handleStop = async (): Promise<void> => {

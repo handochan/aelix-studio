@@ -22,7 +22,7 @@ import {
 } from '@/renderer/services/runtime/aelixInitialModel';
 import { useAcpInitialMessage } from '@/renderer/pages/conversation/platforms/acp/useAcpInitialMessage';
 import type { ChatFileRef } from '@/common/types/chatFile';
-import { useAddEventListener } from '@/renderer/utils/emitter';
+import { openModelPicker } from '@/renderer/hooks/agent/useModelPickerOpener';
 
 const {
   sendMessageInvokeMock,
@@ -40,6 +40,7 @@ const {
   isMobileMock,
   mobileActionSheetEntries,
   mobileActionSheetOpen,
+  acpModelInfoState,
   sendBoxPropsSpy,
   runtimeViewMock,
   useConversationCommandQueueSpy,
@@ -76,6 +77,7 @@ const {
     current: [] as MobileActionSheetEntry[],
   },
   mobileActionSheetOpen: { current: false },
+  acpModelInfoState: { canSwitch: false },
   runtimeViewMock: {
     hydrated: true,
     hasBackendRuntime: true,
@@ -308,7 +310,7 @@ vi.mock('@/renderer/components/media/HorizontalFileList', () => ({
 vi.mock('@/renderer/hooks/agent/useAcpModelInfo', () => ({
   useAcpModelInfo: () => ({
     model_info: null,
-    canSwitch: false,
+    canSwitch: acpModelInfoState.canSwitch,
     selectModel: vi.fn(),
   }),
 }));
@@ -490,6 +492,7 @@ describe('AcpSendBox', () => {
     isMobileMock.current = false;
     mobileActionSheetEntries.current = [];
     mobileActionSheetOpen.current = false;
+    acpModelInfoState.canSwitch = false;
     runtimeViewMock.hydrated = true;
     runtimeViewMock.hasBackendRuntime = true;
     runtimeViewMock.state = 'idle';
@@ -1383,11 +1386,14 @@ describe('AcpSendBox', () => {
   });
 
   it.each([
-    ['opens', 'conv-1', true],
-    ['leaves closed', 'conv-2', false],
-  ])('%s the mobile sheet when an error card asks for the model picker of %s', (_verb, target, expected) => {
-    isMobileMock.current = true;
-    render(
+    ['opens the mobile sheet', true, true, 'conv-1', true],
+    ['ignores a request for another conversation', true, true, 'conv-2', false],
+    ['leaves desktop to the header picker', false, true, 'conv-1', false],
+    ['offers nothing while the mobile model list cannot switch', true, false, 'conv-1', false],
+  ])('%s when an error card asks for the model picker', (_case, isMobile, canSwitch, target, expected) => {
+    isMobileMock.current = isMobile;
+    acpModelInfoState.canSwitch = canSwitch;
+    const { unmount } = render(
       <AcpSendBox
         conversation_id='conv-1'
         backend='aelix'
@@ -1395,16 +1401,15 @@ describe('AcpSendBox', () => {
         messageState={makeMessageState()}
       />
     );
-    const openPicker = vi
-      .mocked(useAddEventListener)
-      .mock.calls.findLast(([event]) => event === 'acp.model.selector.open')?.[1] as
-      | ((conversationId: string) => void)
-      | undefined;
 
-    act(() => openPicker?.(target));
+    let opened = false;
+    act(() => {
+      opened = openModelPicker(target);
+    });
 
-    expect(mobileActionSheetOpen.current).toBe(expected);
+    expect([opened, mobileActionSheetOpen.current]).toEqual([expected, expected]);
     expect(sendMessageInvokeMock).not.toHaveBeenCalled();
+    unmount();
   });
 
   it('applies runtime thought level from the mobile action sheet without persisting a global preference', async () => {

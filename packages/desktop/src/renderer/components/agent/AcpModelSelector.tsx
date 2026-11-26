@@ -7,8 +7,8 @@
 import { useAcpModelInfo } from '@/renderer/hooks/agent/useAcpModelInfo';
 import { classifyConfigSetError, type AcpConfigOptionsPort } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import { useLayoutContext } from '@/renderer/hooks/context/LayoutContext';
+import { useModelPickerOpener } from '@/renderer/hooks/agent/useModelPickerOpener';
 import { getModelDisplayLabel } from '@/renderer/utils/model/agentLogo';
-import { useAddEventListener } from '@/renderer/utils/emitter';
 import { iconColors } from '@/renderer/styles/colors';
 import { Dropdown, Menu, Message, Tooltip } from '@arco-design/web-react';
 import { Brain, Down } from '@icon-park/react';
@@ -128,13 +128,7 @@ const AcpModelSelector: React.FC<{
     (visible: boolean) => setOpenFor(visible ? conversation_id : null),
     [conversation_id]
   );
-  useAddEventListener(
-    'acp.model.selector.open',
-    (targetConversationId) => {
-      if (canOpenPicker && targetConversationId === conversation_id) setOpenFor(conversation_id);
-    },
-    [canOpenPicker, conversation_id]
-  );
+  useModelPickerOpener(conversation_id, canOpenPicker ? () => setOpenFor(conversation_id) : undefined);
 
   const defaultModelLabel = t('common.defaultModel');
   const rawDisplayLabel =

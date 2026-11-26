@@ -11,7 +11,7 @@ import AcpModelSelector from '@/renderer/components/agent/AcpModelSelector';
 import type { AcpModelInfo } from '@/common/types/platform/acpTypes';
 import type { AcpConfigSetStatus, AcpDerivedOption } from '@/renderer/hooks/agent/useAcpConfigOptions';
 import * as configOptions from '@/renderer/hooks/agent/useAcpConfigOptions';
-import { emitter } from '@/renderer/utils/emitter';
+import { openModelPicker } from '@/renderer/hooks/agent/useModelPickerOpener';
 
 const { messageSuccessMock, messageErrorMock, useAcpModelInfoMock } = vi.hoisted(() => ({
   messageSuccessMock: vi.fn(),
@@ -557,12 +557,30 @@ describe('AcpModelSelector opened by an error card', () => {
     useAcpModelInfoMock.mockReturnValue(makeResult());
   });
 
-  const openFor = (conversationId: string) => act(() => void emitter.emit('acp.model.selector.open', conversationId));
+  const openFor = (conversationId: string) => {
+    let opened = false;
+    act(() => {
+      opened = openModelPicker(conversationId);
+    });
+    return opened;
+  };
 
   it('opens the model picker of the targeted conversation', () => {
     render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
     openFor('conversation-1');
     expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'true');
+  });
+
+  it('offers no picker to open while the model list cannot be switched', () => {
+    useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
+    render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(openFor('conversation-1')).toBe(false);
+  });
+
+  it('stops offering its picker once unmounted', () => {
+    const { unmount } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    unmount();
+    expect(openFor('conversation-1')).toBe(false);
   });
 
   it('leaves the picker of another conversation closed', () => {
