@@ -114,14 +114,24 @@ const AcpModelSelector: React.FC<{
     onRuntimeReadyChange?.(isRuntimeReady);
   }, [isRuntimeReady, onRuntimeReadyChange]);
 
-  // An error card's "Choose model" opens this picker. It opens only a switchable list, so a
-  // picker that becomes switchable later does not pop open by itself.
-  const [pickerOpen, setPickerOpen] = useState(false);
+  // The picker is open only for the conversation it was opened for and only while its list is
+  // switchable. Once it is not visible the request is dropped, so a picker that leaves the
+  // switchable state (runtime restart, blocked option) or another conversation never pops open
+  // by itself later. An error card's "Choose model" opens it the same way a click does.
+  const [openFor, setOpenFor] = useState<string | null>(null);
   const canOpenPicker = Boolean(model_info) && canSwitch;
+  const pickerOpen = canOpenPicker && openFor === conversation_id;
+  useEffect(() => {
+    if (!pickerOpen) setOpenFor(null);
+  }, [pickerOpen]);
+  const handlePickerVisibleChange = useCallback(
+    (visible: boolean) => setOpenFor(visible ? conversation_id : null),
+    [conversation_id]
+  );
   useAddEventListener(
     'acp.model.selector.open',
     (targetConversationId) => {
-      if (canOpenPicker && targetConversationId === conversation_id) setPickerOpen(true);
+      if (canOpenPicker && targetConversationId === conversation_id) setOpenFor(conversation_id);
     },
     [canOpenPicker, conversation_id]
   );
@@ -235,7 +245,7 @@ const AcpModelSelector: React.FC<{
     <Dropdown
       trigger='click'
       popupVisible={pickerOpen}
-      onVisibleChange={setPickerOpen}
+      onVisibleChange={handlePickerVisibleChange}
       // Mobile: portal the popup to <body> so it escapes the titlebar slot.
       // Desktop: leave default container so click events reach Menu.Item normally.
       {...(isMobileHeaderCompact ? { getPopupContainer: () => document.body } : {})}

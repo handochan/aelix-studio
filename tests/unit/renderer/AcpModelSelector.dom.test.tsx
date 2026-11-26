@@ -578,6 +578,31 @@ describe('AcpModelSelector opened by an error card', () => {
     expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
   });
 
+  it('stays closed when the open picker becomes unswitchable and then switchable again', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    useAcpModelInfoMock.mockReturnValue(makeResult());
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('does not carry an open picker over to another conversation', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    rerender(<AcpModelSelector conversation_id='conversation-2' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
+  it('does not reopen the picker when returning to the conversation it was opened for', () => {
+    const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    openFor('conversation-1');
+    rerender(<AcpModelSelector conversation_id='conversation-2' backend='aelix' />);
+    rerender(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
+    expect(screen.getByTestId('model-dropdown')).toHaveAttribute('data-popup-visible', 'false');
+  });
+
   it('does not pop open later when the request arrived before models could be switched', () => {
     useAcpModelInfoMock.mockReturnValue(makeResult({ canSwitch: false }));
     const { rerender } = render(<AcpModelSelector conversation_id='conversation-1' backend='aelix' />);
