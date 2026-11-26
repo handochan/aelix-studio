@@ -26,7 +26,11 @@ vi.mock('@/common/platform/bridge', () => ({
   },
 }));
 
+const { readOfflineMode } = vi.hoisted(() => ({ readOfflineMode: vi.fn(() => false) }));
+vi.mock('@process/utils/initStorage', () => ({ readOfflineMode }));
+
 vi.mock('electron', () => ({
+  net: { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) },
   app: {
     getVersion: vi.fn(() => '2.1.40'),
     getPath: vi.fn(() => '/test/path'),
@@ -85,6 +89,21 @@ beforeAll(() => {
 afterAll(() => {
   Object.defineProperty(process, 'platform', { value: realPlatform, configurable: true });
   Object.defineProperty(process, 'arch', { value: realArch, configurable: true });
+});
+
+it('refuses direct releases IPC while offline without fetching', async () => {
+  readOfflineMode.mockReturnValueOnce(true);
+  const fetch = vi.fn();
+  vi.stubGlobal('fetch', fetch);
+  try {
+    expect(await (await handler())({ includePrerelease: true })).toEqual({
+      success: false,
+      msg: 'settings.offlineUpdateHint',
+    });
+    expect(fetch).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllGlobals();
+  }
 });
 
 const release = (version = '2.1.45', prerelease = false) => ({

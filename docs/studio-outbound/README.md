@@ -39,6 +39,33 @@ console breadcrumb integration or `beforeBreadcrumb` hook. WebSocket receive
 diagnostics record registered event names and frame lengths. Users can explicitly
 export local diagnostics as described above.
 
+## Desktop offline mode
+
+**Settings → About → Offline mode** is off by default. In online mode, Studio checks
+for updates automatically, HTML previews can load external assets, and Studio's update
+and document requests use Chromium's platform certificate trust. The automatic-update
+preference continues to apply independently.
+
+With offline mode on, Studio suppresses automatic and manual update checks, release-note
+fetches and update downloads. Managed renderer requests for external scripts, stylesheets,
+fonts, icons, images, frames, media, and HTTP(S) or WebSocket connections are blocked.
+Document previews keep local files and loopback assets and cannot opt out. Studio
+also blocks the native Markdown image and update relays and external extension-settings page
+assets. Saved Browser pages are held until explicit navigation in offline mode. Browser
+navigation the user or an agent requests and links opened in the system browser follow
+the user's intent.
+
+Index and Git extension installs and upgrades are blocked. Open **Agent Extensions →
+Install → File** to import a wheel and, when needed, its local dependency folder.
+The switch leaves user-configured model providers, MCP servers, and agent tools enabled,
+including local models. These processes may reach endpoints the user configured.
+
+Beta G12 requires zero app-initiated external attempts with the switch on and a
+successful local extension installation. App-configured CA or proxy support
+([#99](https://github.com/handochan/aelix-studio/issues/99)) and standalone WebUI
+zero-network installation qualification follow Beta.
+[Decision](https://github.com/handochan/aelix-studio/issues/15#issuecomment-7178656457)
+
 ## One blocking audit policy
 
 The app compatibility CLI directly imports main's `outboundAudit.py`; the old
@@ -82,7 +109,9 @@ external/unparsed/classification 0/0/0 during synthetic
 sessions, permission changes, restart and separate 35-second startup observation.
 It seeds the exact persisted user setting to disable automatic update checks,
 without an environment guard or endpoint exception. Separate tests require the
-default-on request to Studio Releases and quiet blocked-network behavior, bundled
+default-on request to Studio Releases and quiet blocked-network behavior.
+An offline-mode startup scenario also exercises the persisted switch, disabled manual
+check and document asset policy in the installed app. Separate checks cover bundled
 MCP startup/tools-list, and a real local Monaco editor/HTML worker.
 
 Local source/engine fixtures are distinct from installed app acceptance and exact-
@@ -91,8 +120,8 @@ is renderer-request/worker evidence, not a syscall-level audit; Windows local
 diagnostic export likewise does not establish whole-app outbound zero. The extension
 helper's proxy, private Git and online-install settings also govern upgrades (their
 screen comes with the extension screen); internal endpoint/CA UI elsewhere, a custom CA for
-extension installs, extension/Analytics offline import and complete five-target
-closed-network customer installation remain broader follow-up obligations.
+extension installs and broader closed-network deployment qualification are tracked
+separately from the Beta offline-mode and file-install checks.
 
 Current-head counts, controls, installer sizes and CI receipts are recorded in
 Issue #15/PR #36 after exact-head verification. Green unit tests alone do not

@@ -134,6 +134,12 @@ jobs:
           PROVIDER_APP_EXECUTABLE: /opt/Aelix Studio/aelix-studio
         run: |
           xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/default-startup.json -- node scripts/outbound-audit/startup.mjs .local/outbound/startup-qualification.json
+      - name: Audit installed Studio with offline mode on
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        env:
+          PROVIDER_APP_EXECUTABLE: /opt/Aelix Studio/aelix-studio
+        run: |
+          xvfb-run -a python -B scripts/outbound-audit/audit.py --report .local/outbound/offline-mode.json -- node scripts/outbound-audit/startup.mjs .local/outbound/offline-mode-qualification.json --offline-mode
       - name: Qualify bundled browser MCP without PATH tools or registry access
         if: ${{ !cancelled() && steps.install.outcome == 'success' }}
         run: |

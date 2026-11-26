@@ -27,7 +27,10 @@ vi.mock('@/common/platform/bridge', () => ({
   },
 }));
 
+vi.mock('@process/utils/initStorage', () => ({ readOfflineMode: () => false }));
+
 vi.mock('electron', () => ({
+  net: { fetch: (...args: Parameters<typeof fetch>) => globalThis.fetch(...args) },
   app: {
     getVersion: vi.fn(() => '1.0.0'),
     getPath: vi.fn(() => '/tmp/aionui-update-dedupe-test'),

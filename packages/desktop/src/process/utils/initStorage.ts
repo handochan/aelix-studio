@@ -63,6 +63,27 @@ const configFile = JsonFileBuilder<ILegacyConfigStorageRefer>(configPath, {
   onReset: (preserved) => ConfigRecovery.mark(preserved),
 });
 
+let committedOfflineMode: boolean | undefined;
+
+/** Read the committed desktop preference before starting an app-managed network operation. */
+export function readOfflineMode(): boolean {
+  return (committedOfflineMode ??= configFile.getSync('network.offlineMode') === true);
+}
+
+/** Save one serialized setting change. Keep the previous policy if the write fails. */
+export async function saveOfflineMode(enabled: boolean): Promise<void> {
+  const previous = readOfflineMode();
+  try {
+    await configFile.set('network.offlineMode', enabled);
+    committedOfflineMode = enabled;
+  } catch (error) {
+    // The JSON store changes its live object before writing. Restore that value
+    // too, so a later, unrelated settings write cannot commit this failed change.
+    await configFile.set('network.offlineMode', previous).catch(() => {});
+    throw error;
+  }
+}
+
 /** Recovery stays offline until the user explicitly saves the update preference. */
 export async function readAutoCheckPreference(): Promise<boolean> {
   return ConfigRecovery.autoCheck(await configFile.get('update.autoCheck'));

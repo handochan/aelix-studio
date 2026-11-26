@@ -1702,6 +1702,10 @@
     "failed": "Nativer Vorgang fehlgeschlagen ({{code}}). Aktualisieren Sie vor einem erneuten Versuch den nativen Status.",
     "manualCallback": "Autorisierungscode oder Weiterleitungs-URL einfügen."
   },
+  "offlineMode": "Offlinemodus",
+  "offlineUpdateHint": "Im Offlinemodus ist die Suche nach Updates deaktiviert.",
+  "offlineModeSaveFailed": "Der Offlinemodus konnte nicht gespeichert werden.",
+  "offlineInstallHint": "Der Offlinemodus ist aktiv. Importieren Sie eine Wheel-Datei.",
   "autoUpdateCheck": "Beim Start nach Updates suchen",
   "autoUpdateCheckDescription": "Prüft Aelix Studio Releases und benachrichtigt Sie. Für Offline-Nutzung ausschalten.",
   "autoUpdateSaveFailed": "Die Update-Einstellung konnte nicht gespeichert werden.",

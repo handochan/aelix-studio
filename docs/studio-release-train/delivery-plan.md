@@ -79,12 +79,21 @@ core가 필요한 blocker와 host-only UI를 나누어 실제 Issue로 더 잘�
 | G09 Aion Team       | P/B: 실제 leader/teammate turn과 tool effects·승인·거부·cancel·status                                                                                                | 생성/attach만 성공, silent agent, 중단 후 잘못된 completed                                                                                       |
 | G10 플랫폼          | darwin-arm64/x64, linux-arm64/x64, win32-x64의 final installer/image 핵심 여정                                                                                       | 빌드만 성공, uninstall 후 사용자 데이터 손실, process orphan                                                                                     |
 | G11 WebUI/mobile    | 인증된 single-operator host, 세션·관리·승인·preview responsive UI                                                                                                    | unauth API/WS, Origin/CSRF, 큰 dialog/가상 키보드/작은 화면                                                                                      |
-| G12 네트워크/배포   | public provider / internal endpoint / outbound denied를 따로 테스트                                                                                                  | cold install에서 package/asset download, telemetry·update fallback, 내부 auth/CA 실패                                                            |
+| G12 오프라인 모드   | B: 오프라인 모드에서 Studio 자체 외부 요청 0건, 로컬 wheel 파일로 확장 설치 성공                                                                                     | 자동·수동 업데이트 또는 문서 자산의 외부 시도, 파일 설치가 외부 다운로드에 의존하거나 실패                                                       |
 | G13 native child    | B 추가: parent/child session·authority·진행·승인·cancel·재접속 terminal state                                                                                        | 실시간 event만 있고 durable snapshot 없음, 다른 child의 승인 오용                                                                                |
 | G14 공유 config     | 공유 mutation을 제공하는 P/B 필수: Windows 포함 두 실제 CLI/Studio 프로세스의 auth/settings/profile 갱신·충돌                                                        | session lock만 사용, lost update, lock 교체, stale cache, crash 중 partial file. 비협조 legacy의 미보장 동시 mutation은 미지원/blocker로 표시    |
 | G15 비명령 입력     | P/B: N01–N11의 stage에 따른 delivery·`!`/`!!`·이미지/첨부/paste 수용                                                                                                 | mode selector만 성공, 수동 명령이 LLM 입력으로 변환, 이미지 누락·large frame                                                                     |
 | G16 rollback        | B 추가: app/runtime과 Studio projection만 호환 복구, 공유 원본은 보존                                                                                                | 업데이트 후 CLI가 만든 이력/설정/credential 변경이 예전 snapshot으로 유실/복원됨                                                                 |
 | G17 공식 홈페이지   | B 필수: 홈페이지에서 Studio 소개→지원 OS 다운로드→설치/첫 실행 안내로 연결되고 공개 Beta와 내용·버전·지원 범위가 일치                                                | 소개가 초안에만 존재, 다운로드 404/잘못된 OS·버전, Preview/Beta 혼동, 미출시 기능 홍보, 시작 문서 누락                                           |
+
+G12의 기본값은 온라인이다. Studio는 업데이트를 자동 확인하고 HTML 외부 자산을
+허용하며 플랫폼의 기본 인증서 신뢰 설정을 사용한다. 설정의 **오프라인 모드**를 켜면
+앱 자체 업데이트·릴리스 조회·외부 미리보기 자산·온라인 확장 설치를 차단한다.
+사용자가 구성한 모델 provider, MCP 서버와 agent tools는 계속 동작하며 로컬 모델도
+사용할 수 있다. App outbound audit에서 모드를 켠 설치 앱의 외부 시도 0건을 확인하고,
+설치 앱에서 기존 파일 설치 경로로 로컬 wheel을 설치한다. 앱 지정 CA·프록시(#99)와
+독립 WebUI 무통신 설치 검증은 Beta 이후 범위다.
+[2026-11-26 사용자 결정](https://github.com/handochan/aelix-studio/issues/15#issuecomment-7178656457)
 
 G14의 안전성은 Preview에서 공유 store mutation을 제공하면 즉시 적용한다. Beta로
 검증을 미뤘다는 이유로 안전하지 않은 동시 갱신을 Preview에 허용하지 않는다.

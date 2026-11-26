@@ -592,6 +592,17 @@ describe.skipIf(process.platform === 'win32')('the extension helper service', ()
     expect((await listing()).current).toBeNull();
   });
 
+  it('cancels an active online install when Studio goes offline', async () => {
+    holdInstaller();
+    const online = await service.request('window:1', {
+      action: 'install',
+      source: { kind: 'index', name: 'demo-one' },
+    });
+    await vi.waitFor(() => expect(spawn.calls.some((call) => call.args.includes('install'))).toBe(true));
+    await service.cancelOnlineOperations();
+    expect(await settle(online)).toMatchObject({ phase: 'cancelled', code: 'CANCELLED' });
+  });
+
   it('does not undo a change that already switched when asked to cancel it', async () => {
     const done = await settle(await service.request('window:1', await installRequest({ name: 'demo-one' })));
     const cancel = await service.request('window:1', { action: 'cancel', operationId: done.operationId });

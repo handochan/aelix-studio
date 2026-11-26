@@ -1702,6 +1702,10 @@
     "failed": "Yerel işlem başarısız ({{code}}). Yeniden denemeden önce yerel durumu yenileyin.",
     "manualCallback": "Yetkilendirme kodunu veya yönlendirme URL’sini yapıştırın."
   },
+  "offlineMode": "Çevrimdışı mod",
+  "offlineUpdateHint": "Çevrimdışı modda güncelleme denetimi devre dışıdır.",
+  "offlineModeSaveFailed": "Çevrimdışı mod ayarı kaydedilemedi.",
+  "offlineInstallHint": "Çevrimdışı mod açık. Bir wheel dosyası içe aktarın.",
   "autoUpdateCheck": "Başlangıçta güncellemeleri denetle",
   "autoUpdateCheckDescription": "Aelix Studio Releases denetlenir ve bildirilir. Çevrimdışı kullanımda kapatın.",
   "autoUpdateSaveFailed": "Güncelleme tercihi kaydedilemedi.",

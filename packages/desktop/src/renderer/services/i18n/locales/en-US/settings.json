@@ -1702,6 +1702,10 @@
     "failed": "Native operation failed ({{code}}). Refresh native status before trying again.",
     "manualCallback": "Paste the authorization code or redirect URL."
   },
+  "offlineMode": "Offline mode",
+  "offlineUpdateHint": "Update checks are disabled in offline mode.",
+  "offlineModeSaveFailed": "Could not save offline mode.",
+  "offlineInstallHint": "Offline mode is on. Import a wheel file.",
   "autoUpdateCheck": "Check for updates at startup",
   "autoUpdateCheckDescription": "Check Aelix Studio Releases and notify you. Turn off for offline use.",
   "autoUpdateSaveFailed": "Could not save the update preference.",

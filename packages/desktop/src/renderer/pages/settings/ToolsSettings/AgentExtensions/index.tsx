@@ -279,6 +279,7 @@ const AgentExtensionsScreen: React.FC<{ owner: string }> = ({ owner }) => {
         visible={install !== undefined}
         preset={install}
         onlineAllowed={onlineAllowed}
+        onlineLocked={state?.onlineInstallLocked ?? false}
         windows={windows}
         proxy={state?.settings.proxy ?? null}
         pickWheel={pickWheel}

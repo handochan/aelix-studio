@@ -39,7 +39,7 @@ const BrowserTabLayer: React.FC<BrowserTabLayerProps> = ({ browserTabs, activeTa
   const handleUrlChange = useCallback(
     (tabId: string, url: string) => {
       // 地址存在 content 里，与其他 tab 类型保持一致 / Address lives in content, like other tab types
-      updateTab(tabId, { content: url });
+      updateTab(tabId, { content: url, metadata: { restoreBrowserAddress: false } });
     },
     [updateTab]
   );
@@ -71,6 +71,7 @@ const BrowserTabLayer: React.FC<BrowserTabLayerProps> = ({ browserTabs, activeTa
           >
             <BrowserViewer
               url={tab.content}
+              restoreAddress={tab.metadata?.restoreBrowserAddress === true}
               tabId={tab.id}
               onUrlChange={handleUrlChange}
               onTitleChange={handleTitleChange}

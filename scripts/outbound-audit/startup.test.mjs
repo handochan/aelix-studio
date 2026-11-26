@@ -50,15 +50,22 @@ test('update measurement follows private and future sessions without creating a 
   const callbacks = [];
   const createSession = () => ({ webRequest: { onBeforeRequest: (handler) => callbacks.push(handler) } });
   const existing = createSession();
+  const updater = createSession();
   const api = {
     app: { on: (name, handler) => handlers.set(name, handler) },
+    session: {
+      fromPartition: (partition) => {
+        assert.equal(partition, 'electron-updater');
+        return updater;
+      },
+    },
     webContents: { getAllWebContents: () => [{ session: existing }] },
     dialog: {},
   };
   installStartupUpdateProbe(api);
   handlers.get('session-created')(createSession());
   handlers.get('web-contents-created')({}, { session: existing });
-  assert.equal(callbacks.length, 2);
+  assert.equal(callbacks.length, 3);
   let decision;
   callbacks[1]({ url: 'https://github.com/handochan/aelix-studio/releases.atom' }, (value) => {
     decision = value;

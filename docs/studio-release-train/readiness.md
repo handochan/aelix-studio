@@ -113,7 +113,7 @@ Issue/PR·CI를 다시 확인한다. 이 준비는 제품 코드·native wheel·
 | [Studio #7 프로필·도구·스킬·확장](https://github.com/handochan/aelix-studio/issues/7)       | W05; Studio #4·ACP #7                       | native loaded/selected/effective, off 실제 반영, writable generation·실패 복구 |
 | [Studio #10 Analytics 콘텐츠·미리보기](https://github.com/handochan/aelix-studio/issues/10) | W06; 기준선·관리 통로                       | 상대 CSS/JS/이미지·다중 페이지·차트/Report·path/origin·mobile                  |
 | [Studio #11 실제 Aion Team](https://github.com/handochan/aelix-studio/issues/11)            | W07; 기준선·관리 통로                       | leader/teammate 실제 turn/tool·승인·거부·취소·재접속, native child와 구분      |
-| [Studio #8 Preview 설치·사용 흐름](https://github.com/handochan/aelix-studio/issues/8)      | W08; 위 기능 결과·W10 provenance            | G01–G12/G14/G15 및 final artifact·OS·WebUI/mobile·폐쇄망 수용                  |
+| [Studio #8 Preview 설치·사용 흐름](https://github.com/handochan/aelix-studio/issues/8)      | W08; 위 기능 결과·W10 provenance            | G01–G12/G14/G15 및 final artifact·OS·WebUI/mobile 및 G12 검증 범위 수용        |
 | [Studio #9 공동 Beta·홈페이지](https://github.com/handochan/aelix-studio/issues/9)          | W09/W11; Preview·공개 beta.3/Analytics Beta | 추가 G13/G16/G17, migration/update/rollback·홈페이지 공개 확인                 |
 
 W00–W11과 G01–G17의 세부 기준은 [delivery-plan.md](delivery-plan.md), 사용자 작업은

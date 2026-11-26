@@ -1,21 +1,24 @@
 import React from 'react';
-import { cleanup, render } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import BrowserViewer from '@/renderer/pages/conversation/Preview/browser/BrowserViewer';
 
-const mocks = vi.hoisted(() => ({ confirm: vi.fn(), info: vi.fn() }));
+const mocks = vi.hoisted(() => ({ confirm: vi.fn(), info: vi.fn(), getOfflineMode: vi.fn() }));
+vi.mock('@/common', () => ({ ipcBridge: { systemSettings: { getOfflineMode: { invoke: mocks.getOfflineMode } } } }));
+
 let resolveInput: (raw: string) => string | null;
 vi.mock('@arco-design/web-react', () => ({ Modal: { confirm: mocks.confirm }, Message: { info: mocks.info } }));
 vi.mock('react-i18next', () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock('@/renderer/components/media/WebviewHost', () => ({
-  default: ({ resolveUrlInput }: { resolveUrlInput: typeof resolveInput }) => {
+  default: ({ resolveUrlInput, url }: { resolveUrlInput: typeof resolveInput; url: string }) => {
     resolveInput = resolveUrlInput;
-    return <div />;
+    return <div data-testid='browser-guest'>{url}</div>;
   },
 }));
 beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
+  mocks.getOfflineMode.mockResolvedValue(false);
 });
 afterEach(cleanup);
 const setup = () => {
@@ -61,5 +64,28 @@ describe('first-use Bing permission', () => {
     resolveInput('https://intranet.example');
     mocks.confirm.mock.calls[0][0].onOk();
     expect(navigate).not.toHaveBeenCalled();
+  });
+});
+
+describe('saved browser addresses', () => {
+  it.each([true, false])('checks policy before trying a saved page (offline mode %s)', async (offline) => {
+    mocks.getOfflineMode.mockResolvedValue(offline);
+    render(
+      <BrowserViewer
+        url='http://127.0.0.1/possibly-redirects'
+        restoreAddress
+        tabId='saved'
+        onUrlChange={vi.fn()}
+        onTitleChange={vi.fn()}
+        onFaviconChange={vi.fn()}
+      />
+    );
+    expect(screen.getByTestId('browser-guest')).toHaveTextContent('about:blank');
+    await waitFor(() =>
+      expect(screen.getByTestId('browser-guest')).toHaveTextContent(
+        offline ? 'about:blank' : 'http://127.0.0.1/possibly-redirects'
+      )
+    );
+    expect(resolveInput('http://127.0.0.1/explicit')).toBe('http://127.0.0.1/explicit');
   });
 });

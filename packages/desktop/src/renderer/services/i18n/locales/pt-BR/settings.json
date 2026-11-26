@@ -1705,6 +1705,10 @@
     "failed": "A operação nativa falhou ({{code}}). Atualize o estado nativo antes de tentar novamente.",
     "manualCallback": "Cole o código de autorização ou a URL de redirecionamento."
   },
+  "offlineMode": "Modo offline",
+  "offlineUpdateHint": "A verificação de atualizações está desativada no modo offline.",
+  "offlineModeSaveFailed": "Não foi possível salvar o modo offline.",
+  "offlineInstallHint": "O modo offline está ativado. Importe um arquivo wheel.",
   "autoUpdateCheck": "Verificar atualizações ao iniciar",
   "autoUpdateCheckDescription": "Consulta o Aelix Studio Releases e avisa você. Desative para uso offline.",
   "autoUpdateSaveFailed": "Não foi possível salvar a preferência de atualização.",

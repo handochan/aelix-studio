@@ -66,6 +66,8 @@ export interface PreviewMetadata {
   targetLine?: number; // 打开文件后定位到的目标行 / Target line to reveal after opening
   targetColumn?: number; // 打开文件后定位到的目标列 / Target column to reveal after opening
   missingFile?: boolean; // 文件不存在或无法读取 / Whether the referenced file is missing or unreadable
+  /** An address revived from storage. Offline mode can keep its guest blank until explicit navigation. */
+  restoreBrowserAddress?: boolean;
   favicon?: string; // 浏览器 tab 的站点图标 URL / Site icon URL for browser tabs
   agentActive?: boolean; // Agent 正在操作该浏览器 tab / Agent is currently driving this browser tab
 }
@@ -414,6 +416,7 @@ const parsePersistedTabs = (value: unknown): PreviewTab[] => {
       .filter((tab) => !tab.metadata?.fileRef || isChatFileRef(tab.metadata.fileRef))
       .map((tab) => ({
         ...tab,
+        ...(tab.content_type === 'browser' && { metadata: { ...tab.metadata, restoreBrowserAddress: true } }),
         originalContent: typeof tab.originalContent === 'string' ? tab.originalContent : tab.content,
         // Restore the unsaved state as it was stored. Forcing `false` here is what
         // made a restored unsaved edit look saved.

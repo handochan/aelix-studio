@@ -97,3 +97,16 @@ export function isOpenAIHost(urlString: string): boolean {
 export function isAnthropicHost(urlString: string): boolean {
   return isOfficialHost(urlString, Object.values(API_HOST_CONFIG.anthropic));
 }
+
+/** Canonical URL parsing recognizes alternate spellings of loopback IPv4 and IPv6. */
+export function isExternalStudioResource(url: URL): boolean {
+  if (url.protocol === 'file:') return url.hostname !== '' && url.hostname !== 'localhost';
+  if (!['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol)) return false;
+  const host = url.hostname;
+  return (
+    host !== 'localhost' &&
+    host !== '[::1]' &&
+    !/^127\.\d+\.\d+\.\d+$/.test(host) &&
+    !/^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]+\]$/.test(host)
+  );
+}

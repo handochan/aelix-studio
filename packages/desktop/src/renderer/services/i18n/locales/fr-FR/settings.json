@@ -1702,6 +1702,10 @@
     "failed": "Échec de l’opération native ({{code}}). Actualisez l’état natif avant de réessayer.",
     "manualCallback": "Collez le code d’autorisation ou l’URL de redirection."
   },
+  "offlineMode": "Mode hors ligne",
+  "offlineUpdateHint": "La recherche de mises à jour est désactivée en mode hors ligne.",
+  "offlineModeSaveFailed": "Impossible d’enregistrer le mode hors ligne.",
+  "offlineInstallHint": "Le mode hors ligne est activé. Importez un fichier wheel.",
   "autoUpdateCheck": "Vérifier les mises à jour au démarrage",
   "autoUpdateCheckDescription": "Consulte Aelix Studio Releases et vous avertit. Désactivez pour une utilisation hors ligne.",
   "autoUpdateSaveFailed": "Impossible d’enregistrer le choix des mises à jour.",

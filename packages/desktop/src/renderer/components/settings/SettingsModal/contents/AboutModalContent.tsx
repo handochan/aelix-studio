@@ -42,6 +42,8 @@ const AboutModalContent: React.FC = () => {
   const isPageMode = viewMode === 'page';
   const isElectron = isElectronDesktop();
 
+  const [offline, setOffline] = useState<boolean | undefined>();
+  const [offlineSaving, setOfflineSaving] = useState(false);
   const [autoCheck, setAutoCheck] = useState(true);
   const [autoCheckSaving, setAutoCheckSaving] = useState(false);
   const [includePrerelease, setIncludePrerelease] = useState(false);
@@ -56,6 +58,37 @@ const AboutModalContent: React.FC = () => {
         .then(setAutoCheck)
         .catch(() => {});
   }, [isElectron]);
+
+  useEffect(() => {
+    if (!isElectron) return;
+    let current = true;
+    const remove = ipcBridge.systemSettings.offlineModeChanged.on((enabled) => {
+      current = false;
+      setOffline(enabled);
+    });
+    void ipcBridge.systemSettings.getOfflineMode
+      .invoke()
+      .then((enabled) => {
+        if (current) setOffline(enabled);
+      })
+      .catch(() => {});
+    return () => {
+      current = false;
+      remove();
+    };
+  }, [isElectron]);
+
+  const changeOfflineMode = async (enabled: boolean) => {
+    setOfflineSaving(true);
+    try {
+      await ipcBridge.systemSettings.setOfflineMode.invoke({ enabled });
+      setOffline(enabled);
+    } catch {
+      Message.error(t('settings.offlineModeSaveFailed'));
+    } finally {
+      setOfflineSaving(false);
+    }
+  };
 
   const changeAutoCheck = async (enabled: boolean) => {
     setAutoCheckSaving(true);
@@ -111,7 +144,7 @@ const AboutModalContent: React.FC = () => {
       return;
     }
 
-    if (checking) return;
+    if (offline !== false || offlineSaving || checking) return;
     setChecking(true);
     try {
       const outcome = await runUpdateCheck({
@@ -214,11 +247,31 @@ const AboutModalContent: React.FC = () => {
                     {t('settings.autoUpdateCheckDescription')}
                   </Typography.Text>
                 </div>
+                <div className='flex flex-col gap-8px w-full'>
+                  <div className='flex items-center justify-between gap-8px'>
+                    <Typography.Text>{t('settings.offlineMode')}</Typography.Text>
+                    <Switch
+                      aria-label={t('settings.offlineMode')}
+                      checked={offline === true}
+                      disabled={offline === undefined}
+                      loading={offlineSaving}
+                      onChange={(enabled) => void changeOfflineMode(enabled)}
+                    />
+                  </div>
+                  {offline && !updateReadyState.ready && (
+                    <Typography.Text className='text-12px text-t-secondary' id='offline-update-hint'>
+                      {t('settings.offlineUpdateHint')}
+                    </Typography.Text>
+                  )}
+                </div>
                 <Button
                   type='primary'
                   long
                   loading={checking || updateReadyState.preparing}
-                  disabled={updateReadyState.preparing}
+                  disabled={
+                    updateReadyState.preparing || (!updateReadyState.ready && (offline !== false || offlineSaving))
+                  }
+                  aria-describedby={offline && !updateReadyState.ready ? 'offline-update-hint' : undefined}
                   onClick={() => void checkUpdate()}
                 >
                   {updateReadyState.preparing

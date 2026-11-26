@@ -23,6 +23,7 @@ type Props = {
   preset?: InstallPreset;
   /** Name and Git installs are allowed (settings and Studio policy). */
   onlineAllowed: boolean;
+  onlineLocked: boolean;
   /**
    * The host is Windows, where Git installs are not offered yet; undefined while that is not
    * known. The Git tab is on only once the host is known not to be Windows.
@@ -44,6 +45,7 @@ const InstallModal: React.FC<Props> = ({
   visible,
   preset,
   onlineAllowed,
+  onlineLocked,
   windows,
   proxy,
   pickWheel,
@@ -76,7 +78,7 @@ const InstallModal: React.FC<Props> = ({
 
   useEffect(() => {
     if (!visible) return;
-    const first: InstallTab = preset?.tab ?? (onlineAllowed ? 'index' : 'file');
+    const first: InstallTab = onlineAllowed ? (preset?.tab ?? 'index') : 'file';
     setTab(first === 'git' && windows !== false ? 'index' : first);
     setName(preset?.name ?? '');
     setVersion('');
@@ -129,7 +131,10 @@ const InstallModal: React.FC<Props> = ({
     />
   );
   const offline = !onlineAllowed && (
-    <Alert type='warning' content={t('settings.agentExtensions.install.onlineDisabled')} />
+    <Alert
+      type='warning'
+      content={t(onlineLocked ? 'settings.offlineInstallHint' : 'settings.agentExtensions.install.onlineDisabled')}
+    />
   );
   const indexField = (
     <Input
@@ -222,7 +227,10 @@ const InstallModal: React.FC<Props> = ({
         </Tabs.TabPane>
         <Tabs.TabPane key='file' title={t('settings.agentExtensions.install.tabs.file')}>
           <div className='flex flex-col gap-12px pt-8px'>
-            <Alert type='info' content={t('settings.agentExtensions.install.fileNotice')} />
+            <Alert
+              type='info'
+              content={t(onlineLocked ? 'settings.offlineInstallHint' : 'settings.agentExtensions.install.fileNotice')}
+            />
             <div className='flex gap-8px'>
               <Input
                 value={wheel}

@@ -5,7 +5,7 @@
  */
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -43,6 +43,8 @@ vi.mock('@/renderer/components/settings/SettingsModal/settingsViewContext', () =
 vi.mock('@/common', () => ({
   ipcBridge: {
     systemSettings: {
+      getOfflineMode: { invoke: vi.fn().mockResolvedValue(false) },
+      offlineModeChanged: { on: vi.fn(() => () => {}) },
       getAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(true) },
       setAutoUpdateEnabled: { invoke: vi.fn().mockResolvedValue(undefined) },
     },
@@ -77,12 +79,14 @@ describe('About panel check-update in discontinued build', () => {
     vi.unstubAllGlobals();
   });
 
-  it('dispatches migration event and skips version detection', () => {
+  it('dispatches migration event and skips version detection', async () => {
     const listener = vi.fn();
     window.addEventListener(OPEN_MIGRATION_DIALOG_EVENT, listener);
 
     render(<AboutModalContent />);
-    fireEvent.click(screen.getByText('settings.checkForUpdates'));
+    const check = screen.getByRole('button', { name: 'settings.checkForUpdates' });
+    await waitFor(() => expect(check).toBeEnabled());
+    fireEvent.click(check);
 
     expect(listener).toHaveBeenCalledTimes(1);
     expect(mocks.runUpdateCheck).not.toHaveBeenCalled();

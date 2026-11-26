@@ -1702,6 +1702,10 @@
     "failed": "عملیات بومی ناموفق بود ({{code}}). پیش از تلاش مجدد، وضعیت بومی را تازه‌سازی کنید.",
     "manualCallback": "کد مجوز یا نشانی هدایت مجدد را جای‌گذاری کنید."
   },
+  "offlineMode": "حالت آفلاین",
+  "offlineUpdateHint": "بررسی به‌روزرسانی‌ها در حالت آفلاین غیرفعال است.",
+  "offlineModeSaveFailed": "ذخیرهٔ تنظیم حالت آفلاین ممکن نبود.",
+  "offlineInstallHint": "حالت آفلاین روشن است. یک فایل wheel وارد کنید.",
   "autoUpdateCheck": "بررسی به‌روزرسانی هنگام شروع",
   "autoUpdateCheckDescription": "Aelix Studio Releases را بررسی و اطلاع‌رسانی می‌کند. برای استفاده آفلاین خاموش کنید.",
   "autoUpdateSaveFailed": "ذخیره تنظیم به‌روزرسانی انجام نشد.",

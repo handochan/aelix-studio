@@ -1,9 +1,10 @@
 /** Audit production defaults without the E2E/CI/update-disable environment guards. */
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { _electron as electron, expect } from '@playwright/test';
 
 export function isolatedAppEnvironment(root, source = process.env) {
@@ -14,6 +15,7 @@ export function isolatedAppEnvironment(root, source = process.env) {
   return {
     ...environment,
     PATH: process.platform === 'win32' ? `${source.SystemRoot}\\System32;${source.SystemRoot}` : '/usr/bin:/bin',
+    CFFIXED_USER_HOME: path.join(root, 'home'),
     HOME: path.join(root, 'home'),
     USERPROFILE: path.join(root, 'home'),
     XDG_CONFIG_HOME: path.join(root, 'config'),
@@ -26,9 +28,79 @@ export function isolatedAppEnvironment(root, source = process.env) {
   };
 }
 
+/** Use the app's normal document guest and verify loopback loading and blocked external assets. */
+export async function qualifyOfflinePreview(page, root) {
+  const requests = [];
+  const server = http.createServer((request, response) => {
+    requests.push(request.url);
+    if (request.url === '/redirect') {
+      response.writeHead(302, { Location: 'http://192.0.2.5/image.svg' }).end();
+      return;
+    }
+    response.writeHead(200, { 'Content-Type': 'image/svg+xml' });
+    response.end('<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"></svg>');
+  });
+  await new Promise((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', resolve);
+  });
+  try {
+    const { port } = server.address();
+    const documentPath = path.join(root, 'offline-preview.html');
+    const localImage = 'http://127.0.0.1:' + port;
+    fs.writeFileSync(
+      documentPath,
+      `<!doctype html><link rel="preconnect" href="http://192.0.2.5">
+      <link rel="stylesheet" href="http://192.0.2.5/report.css">
+      <img id="local" src="${localImage}/local.svg">
+      <img id="redirect" src="${localImage}/redirect">
+      <img id="external" src="http://192.0.2.5/image.svg">
+      <script src="http://192.0.2.5/report.js"></script>`
+    );
+    const widths = await page.evaluate(
+      (src) =>
+        new Promise((resolve, reject) => {
+          const guest = document.createElement('webview');
+          guest.src = src;
+          guest.style.cssText = 'position:fixed;width:16px;height:16px';
+          const timer = setTimeout(() => {
+            guest.remove();
+            reject(new Error('Document guest did not finish'));
+          }, 15000);
+          guest.addEventListener(
+            'did-finish-load',
+            async () => {
+              try {
+                resolve(
+                  await guest.executeJavaScript(
+                    "['local', 'redirect', 'external'].map((id) => document.getElementById(id).naturalWidth)"
+                  )
+                );
+              } catch (error) {
+                reject(error);
+              } finally {
+                clearTimeout(timer);
+                guest.remove();
+              }
+            },
+            { once: true }
+          );
+          document.body.append(guest);
+        }),
+      pathToFileURL(documentPath).href
+    );
+    assert.deepEqual(widths, [1, 0, 0], 'Local image loads and external and redirected images are blocked');
+    assert.deepEqual([...requests].sort(), ['/local.svg', '/redirect']);
+    return { localImage: true, externalImage: false, externalRedirect: false };
+  } finally {
+    await new Promise((resolve) => server.close(resolve));
+  }
+}
+
 async function main() {
   const executablePath = process.env.PROVIDER_APP_EXECUTABLE;
   const output = process.argv[2];
+  const offlineMode = process.argv.includes('--offline-mode');
   assert.ok(executablePath && output, 'Installed app path and report path are required');
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'studio-default-outbound-'));
   const environment = isolatedAppEnvironment(root);
@@ -51,7 +123,11 @@ async function main() {
   fs.mkdirSync(path.dirname(config), { recursive: true });
   fs.writeFileSync(
     config,
-    Buffer.from(encodeURIComponent(JSON.stringify({ 'update.autoCheck': false }))).toString('base64')
+    Buffer.from(
+      encodeURIComponent(
+        JSON.stringify(offlineMode ? { 'network.offlineMode': true, language: 'en-US' } : { 'update.autoCheck': false })
+      )
+    ).toString('base64')
   );
   const report = {
     schema: 'aelix-studio.default-startup/1',
@@ -60,6 +136,7 @@ async function main() {
     ciGuard: false,
     realCredentials: false,
     observationMs: 35000,
+    offlineMode,
   };
   let app;
   try {
@@ -78,6 +155,15 @@ async function main() {
     assert.equal(fs.readFileSync(path.join(upstreamProfile, 'sentinel'), 'utf8'), 'upstream');
     assert.ok(fs.readdirSync(paths.logs, { recursive: true }).some((entry) => String(entry).endsWith('.log')));
     report.studioProfile = true;
+    if (offlineMode) {
+      await page.evaluate(() => {
+        window.location.hash = '/settings/about';
+      });
+      await expect(page.getByRole('switch', { name: 'Offline mode' })).toHaveAttribute('aria-checked', 'true');
+      await expect(page.getByRole('button', { name: 'Check for updates' })).toBeDisabled();
+      await expect(page.getByText('Update checks are disabled in offline mode.')).toBeVisible();
+      report.preview = await qualifyOfflinePreview(page, root);
+    }
     // Covers the old 3-second update and 30-second startup-log timers.
     await page.waitForTimeout(report.observationMs);
     report.status = 'passed';
