@@ -5,9 +5,11 @@
  */
 
 import { ipcBridge } from '@/common';
+import { getBaseUrl, resolveCoreCsrfToken } from '@/common/adapter/httpBridge';
 import type { ChatFileRef } from '@/common/types/chatFile';
-import { buildFileStreamUrl } from './fileUrls';
-import { base64ToBlob, BINARY_MIME_MAP } from './base64';
+import { base64ToBlob, BINARY_MIME_MAP, decodeBase64Blob } from './base64';
+
+const BINARY_CONTENT_TYPE = 'application/octet-stream';
 
 function triggerBlobDownload(blob: Blob, file_name: string): void {
   const url = URL.createObjectURL(blob);
@@ -38,14 +40,28 @@ export async function downloadFileFromPath(file_path: string, file_name: string,
 /**
  * Download a file addressed by its renderer-safe file reference.
  *
- * Fetch the backend's raw byte stream rather than carrying the complete file as
- * base64 inside JSON. This is the same endpoint used by PDF previews and works
- * through both Electron's local backend and WebUI's same-origin reverse proxy.
+ * Send the file identity in the body so Chromium's failed-request URLs never
+ * expose it. Older Hosts answer the same request with their JSON base64 envelope.
  */
 export async function downloadFileFromRef(file: ChatFileRef, file_name: string): Promise<void> {
-  const response = await fetch(buildFileStreamUrl(file));
+  const headers = new Headers({ Accept: BINARY_CONTENT_TYPE, 'Content-Type': 'application/json' });
+  const csrf = resolveCoreCsrfToken();
+  if (csrf) headers.set('x-csrf-token', csrf);
+  const response = await fetch(`${getBaseUrl()}/api/fs/content`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ file, encoding: 'base64' }),
+  });
   if (!response.ok) throw new Error(`File download failed (${response.status})`);
-  const blob = await response.blob();
+  let blob: Blob;
+  if (response.headers.get('Content-Type') === BINARY_CONTENT_TYPE) {
+    blob = await response.blob();
+  } else {
+    const result: { success?: boolean; data?: unknown } = await response.json();
+    if (!result?.success || typeof result.data !== 'string') throw new Error('File data not found');
+    const ext = file_name.split('.').pop()?.toLowerCase() ?? '';
+    blob = decodeBase64Blob(result.data, BINARY_MIME_MAP[ext] ?? BINARY_CONTENT_TYPE);
+  }
   if (blob.size === 0) throw new Error('File data is empty');
   triggerBlobDownload(blob, file_name);
 }

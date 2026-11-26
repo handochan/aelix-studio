@@ -33,8 +33,53 @@ export const BINARY_MIME_MAP: Record<string, string> = {
  */
 export function base64ToBlob(dataUrl: string, mimeType: string): Blob {
   const base64 = dataUrl.split(',')[1] ?? '';
+  return decodeBase64Blob(base64, mimeType);
+}
+
+/** Decode a raw base64 payload into a Blob. */
+export function decodeBase64Blob(base64: string, mimeType: string): Blob {
   const binaryStr = atob(base64);
   const bytes = new Uint8Array(binaryStr.length);
   for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
   return new Blob([bytes], { type: mimeType });
+}
+
+const MIME_TOKEN = /^[\w!#$%&'*+.^`|~-]+$/;
+
+/** Check data URL syntax before passing a preview source to Chromium. */
+export function isValidImageSource(source: string): boolean {
+  try {
+    // URL parsing normalizes the scheme but does not validate the data payload.
+    const url = new URL(source, document.baseURI);
+    if (url.protocol !== 'data:') return true;
+    const data = url.href.slice('data:'.length).split('#', 1)[0];
+    const comma = data.indexOf(',');
+    if (comma < 0 || /%(?![\da-f]{2})/i.test(data)) return false;
+    const payload = data.slice(comma + 1);
+    if (!payload) return false;
+
+    const [mime, ...params] = data
+      .slice(0, comma)
+      .split(';')
+      .map((part) => part.trim());
+    const mediaType = mime.split('/');
+    if (mime && (mediaType.length !== 2 || !mediaType.every((part) => MIME_TOKEN.test(part)))) return false;
+    const base64 = params.at(-1)?.toLowerCase() === 'base64';
+    if (base64) params.pop();
+    // Chromium can reject malformed charset tokens and interpret a misplaced
+    // bare base64 token as an encoding marker.
+    for (const param of params) {
+      const separator = param.indexOf('=');
+      if (separator < 1) return false;
+      if (!MIME_TOKEN.test(param.slice(0, separator)) || !MIME_TOKEN.test(param.slice(separator + 1))) return false;
+    }
+    if (!base64) return true;
+
+    // Match forgiving base64 decoding without allocating a decoded image.
+    const encoded = (payload.includes('%') ? decodeURIComponent(payload) : payload).replace(/[ \t\r\n\f]/g, '');
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+    return encoded.endsWith('=') ? encoded.length % 4 === 0 : encoded.length % 4 !== 1;
+  } catch {
+    return false;
+  }
 }
