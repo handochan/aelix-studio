@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Turn failed after dispatch",
         "body": "The model or tools may already have run. This turn will not be sent again automatically. Check the history before sending again.",
+        "afterDispatchNote": "Earlier steps of this turn may already have run, so check the conversation before sending again.",
         "causes": {
           "providerAuth": {
             "title": "The provider rejected your API key",

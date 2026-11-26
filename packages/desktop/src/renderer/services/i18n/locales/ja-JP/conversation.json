@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "送信後にターンが失敗しました",
         "body": "モデルやツールがすでに実行された可能性があります。自動再送は行いません。再送前に履歴を確認してください。",
+        "afterDispatchNote": "このターンの一部の手順はすでに実行された可能性があります。もう一度送信する前に会話を確認してください。",
         "causes": {
           "providerAuth": {
             "title": "プロバイダーが API キーを拒否しました",

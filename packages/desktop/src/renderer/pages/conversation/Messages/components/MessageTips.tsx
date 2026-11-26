@@ -263,6 +263,9 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
               </div>
               <div className='font-500 text-t-primary [word-break:break-word]'>{title}</div>
               <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{body}</div>
+              {aelixCopy?.note && (
+                <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{aelixCopy.note}</div>
+              )}
               {resolutionHint && (
                 <div className='text-t-secondary whitespace-break-spaces [word-break:break-word]'>{resolutionHint}</div>
               )}
@@ -287,7 +290,9 @@ const MessageTips: React.FC<{ message: IMessageTips }> = ({ message }) => {
           </div>
           {shouldShowButler && (
             <div className='flex justify-end'>
-              <ButlerDiagnoseButton errorText={[title, body, ...detailParts].filter(Boolean).join('\n')} />
+              <ButlerDiagnoseButton
+                errorText={[title, body, aelixCopy?.note, ...detailParts].filter(Boolean).join('\n')}
+              />
               {shouldShowFeedback && (
                 <FeedbackButton
                   module='conversation-session'

@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Échec du tour après envoi",
         "body": "Le modèle ou les outils ont peut-être déjà été exécutés. Ce tour ne sera pas renvoyé automatiquement. Vérifiez l’historique avant tout nouvel envoi.",
+        "afterDispatchNote": "Certaines étapes de ce tour ont peut-être déjà été exécutées : vérifiez la conversation avant de renvoyer.",
         "causes": {
           "providerAuth": {
             "title": "Le fournisseur a rejeté votre clé API",

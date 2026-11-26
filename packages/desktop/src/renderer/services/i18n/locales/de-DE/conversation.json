@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Durchlauf nach dem Senden fehlgeschlagen",
         "body": "Modell oder Werkzeuge wurden möglicherweise bereits ausgeführt. Dieser Durchlauf wird nicht automatisch erneut gesendet. Prüfen Sie zuvor den Verlauf.",
+        "afterDispatchNote": "Frühere Schritte dieses Durchlaufs wurden möglicherweise bereits ausgeführt. Prüfen Sie daher die Unterhaltung, bevor Sie erneut senden.",
         "causes": {
           "providerAuth": {
             "title": "Der Anbieter hat Ihren API-Schlüssel abgelehnt",

@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "傳送後回合失敗",
         "body": "模型或工具可能已執行。此回合不會自動重送。再次傳送前請檢查歷程記錄。",
+        "afterDispatchNote": "此回合中的部分步驟可能已經執行，再次傳送前請先檢查對話。",
         "causes": {
           "providerAuth": {
             "title": "模型服務商拒絕了你的 API 金鑰",

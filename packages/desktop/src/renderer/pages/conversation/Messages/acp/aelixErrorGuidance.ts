@@ -33,6 +33,8 @@ export type AelixErrorCopy = {
   body: string;
   /** Who the user should look at: the provider for provider causes. */
   ownership: AgentErrorOwnership;
+  /** A caveat shown under the body, e.g. that a dispatched turn may already have run. */
+  note?: string;
   action?: AelixErrorAction;
 };
 
@@ -92,20 +94,24 @@ export const parseAelixErrorGuidance = (error: AgentStreamErrorInfo | undefined)
 };
 
 const providerCopy = (cause: ProviderCause, t: TFunction): AelixErrorCopy => {
-  const ownership: AgentErrorOwnership = 'user_llm_provider';
+  // The prompt reached native before the provider failed, so tools may already have run.
+  const shared = {
+    ownership: 'user_llm_provider' as const,
+    note: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.afterDispatchNote'),
+  };
   switch (cause) {
     case 'provider_auth':
       return {
         title: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerAuth.title'),
         body: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerAuth.body'),
-        ownership,
+        ...shared,
         action: 'open_model_settings',
       };
     case 'provider_rate_limit':
       return {
         title: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerRateLimit.title'),
         body: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerRateLimit.body'),
-        ownership,
+        ...shared,
       };
     case 'provider_unavailable':
       return {
@@ -113,20 +119,20 @@ const providerCopy = (cause: ProviderCause, t: TFunction): AelixErrorCopy => {
           'conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerUnavailable.title'
         ),
         body: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerUnavailable.body'),
-        ownership,
+        ...shared,
       };
     case 'provider_bad_request':
       return {
         title: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerBadRequest.title'),
         body: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerBadRequest.body'),
-        ownership,
+        ...shared,
         action: 'open_model_settings',
       };
     case 'provider_network':
       return {
         title: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerNetwork.title'),
         body: t('conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerNetwork.body'),
-        ownership,
+        ...shared,
       };
   }
 };

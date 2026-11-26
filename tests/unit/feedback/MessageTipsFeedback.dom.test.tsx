@@ -984,6 +984,19 @@ describe('builtin Aelix error guidance', () => {
     expect(actionButton?.textContent ?? undefined).toBe(action);
   });
 
+  it.each(['provider_auth', 'provider_rate_limit', 'provider_unavailable', 'provider_bad_request', 'provider_network'])(
+    'warns for %s that earlier steps of the dispatched turn may already have run',
+    (kind) => {
+      renderGuidance(aelixTip(providerFailure(providerFailureData({ kind, retryable: false }))));
+      expect(screen.getByText(/may already have run/)).toBeInTheDocument();
+    }
+  );
+
+  it('does not add the dispatched-turn warning to the model selection refusal, which never ran', () => {
+    renderGuidance(aelixTip(modelRefusal()));
+    expect(screen.queryByText(/may already have run/)).not.toBeInTheDocument();
+  });
+
   it('labels provider causes as model provider problems without the "Needs configuration" tag', () => {
     renderGuidance(aelixTip(providerFailure(providerFailureData({ kind: 'provider_rate_limit', retryable: false }))));
     expect(screen.getByText(enConversation.agentError.ownership.user_llm_provider)).toBeInTheDocument();
@@ -1115,6 +1128,7 @@ const guidanceCopy = (locale: typeof enConversation) => {
   return [
     locale.agentError.actions.chooseModel,
     locale.agentError.actions.openModelSettings,
+    codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.afterDispatchNote,
     ...Object.values<string>(codes.USER_AGENT_OPERATION_REFUSED.modelSelectionRequired),
     ...['providerAuth', 'providerRateLimit', 'providerUnavailable', 'providerBadRequest', 'providerNetwork'].flatMap(
       (cause) => [causes[cause]?.title, causes[cause]?.body]

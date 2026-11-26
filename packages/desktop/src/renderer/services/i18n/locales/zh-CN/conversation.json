@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "发送后轮次失败",
         "body": "模型或工具可能已运行。此轮次不会自动重发。再次发送前请检查历史记录。",
+        "afterDispatchNote": "此轮次中的部分步骤可能已经运行，再次发送前请先检查对话。",
         "causes": {
           "providerAuth": {
             "title": "模型服务商拒绝了你的 API 密钥",

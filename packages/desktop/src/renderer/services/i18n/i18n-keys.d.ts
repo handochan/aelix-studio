@@ -755,6 +755,7 @@ export type I18nKey =
   | 'conversation.agentError.codes.USER_AGENT_SESSION_NOT_FOUND.title'
   | 'conversation.agentError.codes.USER_AGENT_STARTUP_FAILED.body'
   | 'conversation.agentError.codes.USER_AGENT_STARTUP_FAILED.title'
+  | 'conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.afterDispatchNote'
   | 'conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.body'
   | 'conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerAuth.body'
   | 'conversation.agentError.codes.USER_AGENT_TURN_FAILED_AFTER_DISPATCH.causes.providerAuth.title'

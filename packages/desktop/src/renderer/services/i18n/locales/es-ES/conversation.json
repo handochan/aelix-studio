@@ -368,6 +368,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "El turno falló después del envío",
         "body": "Es posible que el modelo o las herramientas ya se hayan ejecutado. No se reenviará automáticamente. Revise el historial antes de reenviar.",
+        "afterDispatchNote": "Es posible que algunos pasos de este turno ya se hayan ejecutado, así que revisa la conversación antes de volver a enviar.",
         "causes": {
           "providerAuth": {
             "title": "El proveedor rechazó tu clave API",

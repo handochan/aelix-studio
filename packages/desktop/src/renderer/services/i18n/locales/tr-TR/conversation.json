@@ -351,6 +351,7 @@
       "USER_AGENT_TURN_FAILED_AFTER_DISPATCH": {
         "title": "Gönderimden sonra tur başarısız oldu",
         "body": "Model veya araçlar zaten çalışmış olabilir. Bu tur otomatik olarak yeniden gönderilmez. Yeniden göndermeden önce geçmişi kontrol edin.",
+        "afterDispatchNote": "Bu turun önceki adımları zaten çalışmış olabilir; yeniden göndermeden önce konuşmayı kontrol edin.",
         "causes": {
           "providerAuth": {
             "title": "Sağlayıcı API anahtarınızı reddetti",
