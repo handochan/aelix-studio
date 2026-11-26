@@ -8,7 +8,8 @@ import { createRequire } from 'node:module';
 import { _electron as electron, expect } from '@playwright/test';
 import { resolveStandaloneStudioUserDataPath, startWebHost } from '../../packages/web-host/src/index.ts';
 import httpBridge from '../../tests/e2e/helpers/httpBridge.ts';
-import { boundedWait, closeElectron, waitForProviderWindow } from './host-release/verification.mjs';
+import { observeProviderConversationStart } from './host-release/probes/providerConversationDiagnostics.mjs';
+import { boundedWait, closeElectron, launchWithIdentity, waitForProviderWindow } from './host-release/verification.mjs';
 
 const { httpGet, httpPost } = httpBridge;
 
@@ -50,12 +51,12 @@ const markerPatterns = [
   ['missing_file', 'ENOENT'],
   ['access_denied', 'EACCES'],
 ];
-async function launch() {
+async function launch(timeout = 60000) {
   const launched = await electron.launch({
     ...(executablePath ? { executablePath, args: [] } : { args: ['.'] }),
     cwd: executablePath ? sandbox : process.cwd(),
     env: appEnv,
-    timeout: 60000,
+    timeout,
   });
   for (const stream of [launched.process().stdout, launched.process().stderr]) {
     stream?.on('data', (chunk) => {
@@ -104,30 +105,60 @@ let foreign;
 let webui;
 let sharedDbLink;
 let stage = 'startup';
+let conversationStartRequests;
 const lanFailures = [];
 const trace = (next) => {
   stage = next;
   fs.writeFileSync(outputFile('ui-stage.json'), JSON.stringify({ stage }) + '\n');
 };
+function readInstalledProviderIdentity(electron) {
+  // The synchronous inspector call uses the same Electron module as its receiver.
+  return {
+    pid: process.pid,
+    resourcesPath: process.resourcesPath,
+    archive: (electron ?? this).app.getAppPath(),
+  };
+}
+
 async function qualifyHost() {
-  app = await launch();
   let archive;
   if (executablePath) {
     const selected = process.env.AELIX_STUDIO_RUNTIME;
     assert.ok(selected, 'Installed smoke requires the selected helper runtime');
-    // Read immutable install identity once, before the renderer starts navigating.
-    const identity = await app.evaluate(({ app }) => ({
-      resourcesPath: process.resourcesPath,
-      archive: app.getAppPath(),
-    }));
-    archive = identity.archive;
-    const installed = path.join(identity.resourcesPath, 'studio-preview');
+    const launched = await launchWithIdentity((remaining) => launch(Math.min(remaining, 60000)), {
+      launchNumber: 1,
+      // Keep the previous launch and first-window allowances, including the Intel Mac window budget.
+      launchTimeoutMs: process.platform === 'darwin' && process.arch === 'x64' ? 120000 : 90000,
+      record({ status, identityStartedAt, identityFailedAt, identifiedAt, identityProtocol, identityRetry }) {
+        if (status !== 'identified' && status !== 'failed') return;
+        fs.writeFileSync(
+          outputFile('identity-evidence.json'),
+          JSON.stringify({
+            status,
+            identityStartedAt,
+            identityFailedAt,
+            identifiedAt,
+            identityProtocol,
+            identityRetry,
+          }) + '\n'
+        );
+      },
+      readIdentity: readInstalledProviderIdentity,
+      async firstWindow(app, maxTimeoutMs) {
+        page = await waitForProviderWindow(app, 1, firstWindowReport, { maxTimeoutMs });
+      },
+    });
+    app = launched.app;
+    archive = launched.identity.archive;
+    const installed = path.join(launched.identity.resourcesPath, 'studio-preview');
     // Keep the source facade's launch identity identical to the actual app;
     // Windows filesystem namespace prefixes must not create a second agent recipe.
     assert.equal(fs.realpathSync.native(selected), fs.realpathSync.native(installed));
     process.env.AELIX_STUDIO_RUNTIME = installed;
+  } else {
+    app = await launch();
+    page = await waitForProviderWindow(app, 1, firstWindowReport);
   }
-  page = await waitForProviderWindow(app, 1, firstWindowReport);
   await page.waitForFunction(() => window.__backendPort > 0 && window.__studioNativeAuth, undefined, {
     timeout: 60000,
   });
@@ -392,13 +423,24 @@ async function qualifyHost() {
     });
   });
   assert.equal(badNetwork.ok, true);
+  trace('unreachable_endpoint_setup');
   await native.getByRole('button', { name: strings.refresh, exact: true }).click();
-  await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
-  await expect(input).toBeVisible({ timeout: 30000 });
-  await input.fill('Verify unreachable endpoint');
-  await page.getByTestId('sendbox-send-btn').click();
-  // The connection error text is peer detail too (see the rejected-key check above).
-  await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
+  await expect(native.getByText('http://127.0.0.1:1/v1', { exact: true })).toBeVisible({ timeout: 15000 });
+  trace('unreachable_endpoint_conversation');
+  const observation = observeProviderConversationStart(page, port);
+  try {
+    await native.getByRole('button', { name: strings.startConversation, exact: true }).click();
+    await expect(input).toBeVisible({ timeout: 30000 });
+    await input.fill('Verify unreachable endpoint');
+    await page.getByTestId('sendbox-send-btn').click();
+    // The connection error text is peer detail too (see the rejected-key check above).
+    await expect(page.getByText(/USER_AGENT_TURN_FAILED_AFTER_DISPATCH/).last()).toBeVisible({ timeout: 30000 });
+  } catch (error) {
+    conversationStartRequests = await observation.failureReceipt().catch(() => undefined);
+    throw error;
+  } finally {
+    observation.dispose();
+  }
 
   // Operator setup uses the authenticated Electron renderer. The WebUI
   // below must obtain its own browser session before accessing native auth.
@@ -630,7 +672,12 @@ try {
 } catch (error) {
   fs.writeFileSync(
     outputFile('ui-failure.json'),
-    JSON.stringify({ stage, errorName: error instanceof Error ? error.name : typeof error, lanFailures }) + '\n'
+    JSON.stringify({
+      stage,
+      errorName: error instanceof Error ? error.name : typeof error,
+      lanFailures,
+      conversationStartRequests,
+    }) + '\n'
   );
   if (lanPage) await lanPage.screenshot({ path: path.join(output, 'failure-lan.png'), timeout: 5000 }).catch(() => {});
   if (page) {

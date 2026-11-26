@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProcessTimeline } from '../../../scripts/studio-preview/host-release/probes/processTimeline.mjs';
+import { observeProviderConversationStart } from '../../../scripts/studio-preview/host-release/probes/providerConversationDiagnostics.mjs';
 import {
   boundedWait,
   closeElectron,
@@ -24,6 +25,128 @@ import {
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+});
+
+describe('Provider conversation-start diagnostics', () => {
+  const makeRequest = (url: string, method = 'POST') => ({ url: () => url, method: () => method });
+  const makeResponse = (request: ReturnType<typeof makeRequest>, status: number, payload: unknown) => ({
+    request: () => request,
+    status: () => status,
+    json: vi.fn().mockResolvedValue(payload),
+  });
+  const origin = 'http://127.0.0.1:13400';
+  const create = origin + '/api/conversations';
+  const ensure = origin + '/api/conversations/private-conversation/runtime/ensure?view_id=private-view';
+
+  it('records fixed route labels and only exact allowlisted error fields', async () => {
+    const page = new EventEmitter();
+    const observer = observeProviderConversationStart(page, 13400);
+    const createRequest = makeRequest(create);
+    const ensureRequest = makeRequest(ensure);
+    const createResponse = makeResponse(createRequest, 201, { data: { secret: 'sensitive conversation value' } });
+    const ensureResponse = makeResponse(ensureRequest, 502, {
+      code: 'BAD_GATEWAY',
+      error: 'failed at /temporary/private-path using secret',
+      details: { kind: 'socket_path_too_long', holder: '/temporary/private-path' },
+    });
+
+    const wrappedResponse = makeResponse(makeRequest(ensure), 504, {
+      code: 'GATEWAY_TIMEOUT',
+      details: { kind: 'unrecognized-private-value', data: { kind: 'session_locked', path: '/private/socket' } },
+    });
+
+    for (const response of [createResponse, ensureResponse, wrappedResponse]) {
+      const request = response.request();
+      page.emit('request', request);
+      page.emit('response', response);
+      page.emit('requestfinished', request);
+    }
+
+    expect(ensureResponse.json).not.toHaveBeenCalled();
+    expect(await observer.failureReceipt()).toEqual([
+      { route: 'conversation_create', status: 201, code: null, detailsKind: null, endedWithoutResponse: false },
+      {
+        route: 'runtime_ensure',
+        status: 502,
+        code: 'BAD_GATEWAY',
+        detailsKind: 'socket_path_too_long',
+        endedWithoutResponse: false,
+      },
+      {
+        route: 'runtime_ensure',
+        status: 504,
+        code: 'GATEWAY_TIMEOUT',
+        detailsKind: 'session_locked',
+        endedWithoutResponse: false,
+      },
+    ]);
+    expect(page.eventNames()).toEqual([]);
+  });
+
+  it('ignores other origins, routes, methods and requests that started before observation', async () => {
+    const page = new EventEmitter();
+    const oldRequest = makeRequest(create);
+    page.emit('request', oldRequest);
+    const observer = observeProviderConversationStart(page, 13400);
+    const unrelated = [
+      makeRequest('http://127.0.0.1:13401/api/conversations'),
+      makeRequest(origin + '/api/conversations/private-id/runtime/restart'),
+      makeRequest(create, 'GET'),
+    ];
+    for (const request of unrelated) page.emit('request', request);
+    for (const request of [oldRequest, ...unrelated]) {
+      page.emit('response', makeResponse(request, 400, { code: 'BAD_REQUEST' }));
+      page.emit('requestfinished', request);
+    }
+    expect(await observer.failureReceipt()).toEqual([]);
+  });
+
+  it('distinguishes failure without a response from a pending request or failure after headers', async () => {
+    const page = new EventEmitter();
+    const observer = observeProviderConversationStart(page, 13400);
+    const failed = makeRequest(create);
+    const pending = makeRequest(ensure);
+    const afterHeaders = makeRequest(ensure);
+    const unfamiliar = makeRequest(ensure);
+
+    for (const request of [failed, pending, afterHeaders, unfamiliar]) page.emit('request', request);
+    page.emit('requestfailed', failed);
+    page.emit('response', makeResponse(afterHeaders, 503, { code: 'BAD_GATEWAY' }));
+    page.emit('requestfailed', afterHeaders);
+    page.emit(
+      'response',
+      makeResponse(unfamiliar, 409, {
+        code: 'PRIVATE_TOKEN',
+        details: { kind: 'socket_path_too_long:secret' },
+      })
+    );
+    page.emit('requestfinished', unfamiliar);
+
+    expect(await observer.failureReceipt()).toEqual([
+      { route: 'conversation_create', status: null, code: null, detailsKind: null, endedWithoutResponse: true },
+      { route: 'runtime_ensure', status: null, code: null, detailsKind: null, endedWithoutResponse: false },
+      { route: 'runtime_ensure', status: 503, code: null, detailsKind: null, endedWithoutResponse: false },
+      { route: 'runtime_ensure', status: 409, code: null, detailsKind: null, endedWithoutResponse: false },
+    ]);
+  });
+
+  it('retains HTTP evidence when the diagnostic body read does not resolve', async () => {
+    vi.useFakeTimers();
+    const page = new EventEmitter();
+    const observer = observeProviderConversationStart(page, 13400);
+    const request = makeRequest(ensure);
+    const response = makeResponse(request, 500, undefined);
+    response.json.mockReturnValue(new Promise(() => {}));
+    page.emit('request', request);
+    page.emit('response', response);
+    page.emit('requestfinished', request);
+
+    const receipt = observer.failureReceipt();
+    await vi.advanceTimersByTimeAsync(1500);
+    await expect(receipt).resolves.toEqual([
+      { route: 'runtime_ensure', status: 500, code: null, detailsKind: null, endedWithoutResponse: false },
+    ]);
+  });
 });
 
 describe('installed profile preservation', () => {
@@ -687,6 +810,33 @@ describe('Electron launch evidence and identity retry', () => {
     } finally {
       await fs.rm(root, { recursive: true, force: true });
     }
+  });
+
+  it('waits for the Provider window and retries the same archive identity reader', async () => {
+    vi.spyOn(console, 'log').mockImplementation(() => {});
+    const identity = { pid: 123, resourcesPath: '/installed/resources', archive: '/installed/resources/app.asar' };
+    const { app, launch, synchronousReads } = inspectorApplication([collected, identity]);
+    const readIdentity = function () {
+      return { archive: 'fixture' };
+    };
+    const firstWindow = vi.fn(async (owner: typeof app, timeout: number) => {
+      expect(owner).toBe(app);
+      expect(timeout).toBeGreaterThan(0);
+      expect(app.evaluate).not.toHaveBeenCalled();
+      await owner.firstWindow({ timeout });
+    });
+
+    await expect(launchWithIdentity(launch, { ...options(), readIdentity, firstWindow })).resolves.toEqual({
+      app,
+      identity,
+    });
+    expect(firstWindow).toHaveBeenCalledOnce();
+    expect(app.evaluate).toHaveBeenCalledWith(readIdentity, expect.any(String));
+    expect(synchronousReads).toMatchObject([
+      { params: { functionDeclaration: readIdentity.toString(), awaitPromise: false } },
+    ]);
+    expect(launch).toHaveBeenCalledOnce();
+    await closeElectron(app);
   });
 
   it.each(['Promise was collected: path', 'promise was collected', 'Cannot find context with specified id'])(
