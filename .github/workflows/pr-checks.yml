@@ -484,6 +484,10 @@ jobs:
       - name: Run extension system tests
         run: bunx vitest run
 
+      - name: Run Electron preview network privacy test
+        if: runner.os == 'macOS'
+        run: bun run test:e2e tests/e2e/preview-privacy/preview-network-logs.e2e.ts --reporter=list --retries=0
+
   # Job 3: Coverage test (Linux only)
   coverage-tests:
     name: Coverage Test

@@ -38,3 +38,39 @@ export function base64ToBlob(dataUrl: string, mimeType: string): Blob {
   for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
   return new Blob([bytes], { type: mimeType });
 }
+
+const MIME_TOKEN = /^[\w!#$%&'*+.^`|~-]+$/;
+
+/** Check data URL syntax before passing a preview source to Chromium. */
+export function isValidImageSource(source: string): boolean {
+  try {
+    // URL parsing normalizes the scheme but does not validate the data payload.
+    const url = new URL(source, document.baseURI);
+    if (url.protocol !== 'data:') return true;
+    const data = url.href.slice('data:'.length).split('#', 1)[0];
+    const comma = data.indexOf(',');
+    if (comma < 0) return false;
+    const payload = data.slice(comma + 1);
+    if (!payload) return false;
+
+    const [mime, ...params] = data
+      .slice(0, comma)
+      .split(';')
+      .map((part) => part.trim());
+    const mediaType = mime.split('/');
+    if (mime && (mediaType.length !== 2 || !mediaType.every((part) => MIME_TOKEN.test(part)))) return false;
+    // Chromium requires charset to be a token but accepts other parameters
+    // with quoted values. Non-base64 payloads may contain a literal '%'.
+    if (params.some((param) => /^charset=/i.test(param) && !MIME_TOKEN.test(param.slice('charset='.length)))) {
+      return false;
+    }
+    if (!params.some((param) => param.toLowerCase() === 'base64')) return true;
+
+    // Match forgiving base64 decoding without allocating a decoded image.
+    const encoded = (payload.includes('%') ? decodeURIComponent(payload) : payload).replace(/[ \t\r\n\f]/g, '');
+    if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+    return encoded.endsWith('=') ? encoded.length % 4 === 0 : encoded.length % 4 !== 1;
+  } catch {
+    return false;
+  }
+}

@@ -5,6 +5,7 @@
  */
 
 import { ipcBridge } from '@/common';
+import { isValidImageSource } from '@/renderer/utils/file/base64';
 import { downloadFileFromPath, downloadFileFromRef, downloadTextContent } from '@/renderer/utils/file/download';
 import { formatFileSize } from '@/renderer/services/FileService';
 import { CONTENT_FREE_TYPES, formatSizeAboveLimit } from '@/renderer/utils/file/previewPayload';
@@ -717,7 +718,7 @@ const PreviewPanel: React.FC = () => {
 
       if (content_type === 'image') {
         // Pure base64 image (no file path on disk)
-        if (!content) {
+        if (!content || !isValidImageSource(content)) {
           messageApi.error(t('messages.downloadFailed', { defaultValue: 'Failed to download' }));
           return;
         }

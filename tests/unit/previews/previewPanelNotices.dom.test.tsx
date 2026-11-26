@@ -205,13 +205,16 @@ describe('preview download behavior', () => {
     else Reflect.deleteProperty(URL, 'revokeObjectURL');
   });
 
+  const supportedSystemInfo = () =>
+    Response.json({ success: true, data: { platform: 'darwin', arch: 'arm64', file_content_binary_post: true } });
+
   it(
     'downloads the original bytes for an Explorer-backed Excel tab',
     async () => {
       const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x01]);
-      mocks.fetch.mockResolvedValue(
+      mocks.fetch.mockResolvedValueOnce(supportedSystemInfo()).mockResolvedValueOnce(
         new Response(bytes, {
-          headers: { 'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' },
+          headers: { 'Content-Type': 'application/octet-stream' },
         })
       );
       const { rerender } = render(<Harness showPanel={false} />);
@@ -225,11 +228,17 @@ describe('preview download behavior', () => {
         expect(downloadedBlobs).toHaveLength(1);
       });
       expect(mocks.fetch).toHaveBeenCalledWith(
-        '/api/fs/stream?kind=project&pe_id=peA&relative_path=sheets%2Fbudget.xlsx'
+        '/api/fs/content',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            file: { kind: 'project', pe_id: 'peA', relative_path: 'sheets/budget.xlsx' },
+          }),
+        })
       );
       expect(downloadedBlobs[0]).toMatchObject({
         size: bytes.byteLength,
-        type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        type: 'application/octet-stream',
       });
       expect(downloadedNames).toEqual(['budget.xlsx']);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:preview-download');
@@ -273,7 +282,7 @@ describe('preview download behavior', () => {
   );
 
   it(
-    'shows the existing failure message without starting a download when the backing read fails',
+    'shows the existing failure message when checking Host support fails',
     async () => {
       mocks.fetch.mockRejectedValue(new Error('read failed'));
       const { rerender } = render(<Harness showPanel={false} />);
@@ -283,6 +292,7 @@ describe('preview download behavior', () => {
       fireEvent.click(await screen.findByTitle('preview.downloadFile'));
 
       await waitFor(() => expect(screen.getByText('Failed to download')).toBeInTheDocument());
+      expect(mocks.fetch.mock.calls.map(([url]) => url)).toEqual(['/api/system/info']);
       expect(downloadedBlobs).toHaveLength(0);
       expect(downloadedNames).toHaveLength(0);
     },
@@ -297,17 +307,16 @@ describe('preview download behavior', () => {
         { error: messageError } as unknown as ReturnType<typeof Message.useMessage>[0],
         null,
       ]);
-      mocks.fetch.mockResolvedValue(new Response(null, { status: 404 }));
+      mocks.fetch
+        .mockResolvedValueOnce(supportedSystemInfo())
+        .mockResolvedValueOnce(new Response(null, { status: 404 }));
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));
 
       const downloadButton = await screen.findByTitle('preview.downloadFile');
       fireEvent.click(downloadButton);
-      await Promise.resolve();
-      await Promise.resolve();
-
-      expect(messageError).toHaveBeenCalledWith('Failed to download');
+      await waitFor(() => expect(messageError).toHaveBeenCalledWith('Failed to download'));
       expect(downloadedBlobs).toHaveLength(0);
       expect(downloadedNames).toHaveLength(0);
     },
@@ -343,9 +352,33 @@ describe('preview download behavior', () => {
   );
 
   it(
+    'refuses to fetch an invalid data URL when downloading an in-memory image',
+    async () => {
+      const { rerender } = render(<Harness showPanel={false} />);
+      act(() => {
+        ctx.openPreview('data:image/png;charset=bad value;base64,aW1hZ2U=', 'image', {
+          title: 'invalid.png',
+          file_name: 'invalid.png',
+          editable: false,
+        });
+      });
+      act(() => rerender(<Harness showPanel />));
+
+      fireEvent.click(await screen.findByTitle('preview.downloadFile'));
+
+      await waitFor(() => expect(screen.getByText('Failed to download')).toBeInTheDocument());
+      expect(mocks.fetch).not.toHaveBeenCalled();
+      expect(downloadedBlobs).toHaveLength(0);
+    },
+    TIMEOUT_MS
+  );
+
+  it(
     'rejects an empty stream instead of saving a zero-byte file',
     async () => {
-      mocks.fetch.mockResolvedValue(new Response());
+      mocks.fetch
+        .mockResolvedValueOnce(supportedSystemInfo())
+        .mockResolvedValueOnce(new Response(null, { headers: { 'Content-Type': 'application/octet-stream' } }));
       const { rerender } = render(<Harness showPanel={false} />);
       openExcelTab();
       act(() => rerender(<Harness showPanel />));
